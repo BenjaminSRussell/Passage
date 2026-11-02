@@ -2,16 +2,17 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/shopspring/decimal"
+	"github.com/google/uuid"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -24,43 +25,39 @@ import (
 const (
 	dutyYearEndRun  = "close.yearend.run"
 	dutyYearEndRead = "close.yearend.read"
-	maxBalances     = 5000
 	yearEndPath     = "/v1/close/year-end-runs"
+	periodLayout    = "2006-01"
+	equityType      = "equity"
 )
 
-var (
-	fiscalYearPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,20}$`)
-	currencyPattern   = regexp.MustCompile(`^[A-Z]{3}$`)
-)
+var fiscalYearPattern = regexp.MustCompile(`^[0-9]{4}$`)
 
 type YearEndStore interface {
+	YearPeriods(ctx context.Context, legalEntityID, ledgerID, year string) ([]domain.Period, error)
 	BeginYearEnd(ctx context.Context, in domain.YearEndRun) (domain.YearEndRun, bool, error)
-	CompleteYearEnd(ctx context.Context, runID, closingJournalID, openingJournalID string) (domain.YearEndRun, error)
+	SetYearEndProposals(ctx context.Context, runID string, proposals domain.YearEnd) (domain.YearEndRun, error)
+	SetYearEndJournal(ctx context.Context, runID, name, journalID string) (domain.YearEndRun, error)
+	CompleteYearEnd(ctx context.Context, runID string) (domain.YearEndRun, error)
 	YearEndRun(ctx context.Context, runID string) (domain.YearEndRun, error)
 }
 
-func (a *API) WithYearEnd(s YearEndStore, l ledgerclient.Ledger) *API {
+type YearEndLedger interface {
+	ledgerclient.Ledger
+	ledgerclient.YearEndSource
+}
+
+func (a *API) WithYearEnd(s YearEndStore, l YearEndLedger) *API {
 	a.yearEnds = s
-	a.postings = l
+	a.yearLedger = l
 	return a
 }
 
-type balanceRequest struct {
-	Account    string          `json:"account"`
-	Class      domain.Class    `json:"class"`
-	Dimensions string          `json:"dimensions"`
-	Amount     decimal.Decimal `json:"amount"`
-}
-
 type yearEndRequest struct {
-	LedgerID         string           `json:"ledgerId"`
-	FiscalYear       string           `json:"fiscalYear"`
-	Currency         string           `json:"currency"`
-	ClosingDate      string           `json:"closingDate"`
-	OpeningDate      string           `json:"openingDate"`
-	RetainedEarnings string           `json:"retainedEarningsAccount"`
-	RetainDimensions bool             `json:"retainDimensions"`
-	Balances         []balanceRequest `json:"balances"`
+	LedgerID         string `json:"ledgerId"`
+	FiscalYear       string `json:"fiscalYear"`
+	RetainedEarnings string `json:"retainedEarningsAccount"`
+	RetainDimensions bool   `json:"retainDimensions"`
+	SupersedesRunID  string `json:"supersedesRunId"`
 }
 
 func (r yearEndRequest) validate(legalEntityID string) error {
@@ -72,24 +69,13 @@ func (r yearEndRequest) validate(legalEntityID string) error {
 		errs["ledgerId"] = "must be a UUID"
 	}
 	if !fiscalYearPattern.MatchString(r.FiscalYear) {
-		errs["fiscalYear"] = "must be 1 to 20 letters, digits, dashes or underscores"
+		errs["fiscalYear"] = "must be a four digit year"
 	}
-	if !currencyPattern.MatchString(r.Currency) {
-		errs["currency"] = "must be an ISO 4217 code"
+	if r.RetainedEarnings == "" || len(r.RetainedEarnings) > 20 {
+		errs["retainedEarningsAccount"] = "is required, at most 20 characters"
 	}
-	for field, value := range map[string]string{"closingDate": r.ClosingDate, "openingDate": r.OpeningDate} {
-		if _, err := time.Parse(dateLayout, value); err != nil {
-			errs[field] = "must be an ISO date (YYYY-MM-DD)"
-		}
-	}
-	if len(r.Balances) > maxBalances {
-		errs["balances"] = "too many balances"
-	}
-	for _, b := range r.Balances {
-		if b.Account == "" {
-			errs["balances"] = "every balance needs an account"
-			break
-		}
+	if r.SupersedesRunID != "" && !ids.Valid(r.SupersedesRunID) {
+		errs["supersedesRunId"] = "must be a UUID"
 	}
 	if len(errs) == 0 {
 		return nil
@@ -105,7 +91,7 @@ func (a *API) runYearEnd(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
 		return
 	}
-	if a.yearEnds == nil || a.postings == nil {
+	if a.yearEnds == nil || a.yearLedger == nil {
 		fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "year-end close is not configured"))
 		return
 	}
@@ -118,35 +104,38 @@ func (a *API) runYearEnd(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	if !a.ledgerBelongsToCaller(w, r, p.LegalEntityID, req.LedgerID) {
-		return
+	ctx := r.Context()
+	info, err := a.yearLedger.Ledger(ctx, p.LegalEntityID, req.LedgerID)
+	if err == nil {
+		err = sameEntity(info.LegalEntityID, p.LegalEntityID)
 	}
-	balances := make([]domain.Balance, len(req.Balances))
-	for i, b := range req.Balances {
-		balances[i] = domain.Balance{Account: b.Account, Class: b.Class, Dimensions: b.Dimensions, Amount: b.Amount}
+	if err == nil {
+		err = a.checkRetainedEarnings(ctx, p.LegalEntityID, info, req.RetainedEarnings)
 	}
-	proposals, err := domain.CloseYear(balances, req.RetainedEarnings, req.RetainDimensions)
+	var plan domain.YearPlan
+	if err == nil {
+		var periods []domain.Period
+		if periods, err = a.yearEnds.YearPeriods(ctx, p.LegalEntityID, req.LedgerID, req.FiscalYear); err == nil {
+			plan, err = domain.PlanYear(req.FiscalYear, periods)
+		}
+	}
 	if err != nil {
-		fail(w, r, err)
+		a.yearEndFailed(w, r, "year-end preconditions failed", err)
 		return
 	}
-	canonical, err := json.Marshal(req)
-	if err != nil {
-		fail(w, r, err)
-		return
-	}
-	run, created, err := a.yearEnds.BeginYearEnd(r.Context(), domain.YearEndRun{
-		LegalEntityID: p.LegalEntityID, LedgerID: req.LedgerID, FiscalYear: req.FiscalYear, Currency: req.Currency,
-		ClosingDate: req.ClosingDate, OpeningDate: req.OpeningDate, Proposals: proposals, CreatedBy: p.UserID,
-		RequestHash: store.HashRequest(http.MethodPost, yearEndPath, canonical),
+	run, created, err := a.yearEnds.BeginYearEnd(ctx, domain.YearEndRun{
+		LegalEntityID: p.LegalEntityID, LedgerID: req.LedgerID, FiscalYear: req.FiscalYear, SupersedesRunID: req.SupersedesRunID,
+		Currency: info.Currency, ClosingDate: plan.ClosingDate.Format(dateLayout), OpeningDate: plan.OpeningDate.Format(dateLayout),
+		RetainedEarnings: req.RetainedEarnings, RetainDimensions: req.RetainDimensions, CreatedBy: p.UserID,
+		RequestHash: store.HashRequest(http.MethodPost, yearEndPath, []byte(fmt.Sprint(req.LedgerID, req.FiscalYear, req.RetainedEarnings, req.RetainDimensions))),
 	})
 	if err != nil {
 		a.yearEndFailed(w, r, "year-end run could not be recorded", err)
 		return
 	}
 	if run.Status != domain.RunCompleted {
-		if run, err = a.postYearEnd(r.Context(), run); err != nil {
-			a.yearEndFailed(w, r, "year-end posting failed", err)
+		if run, err = a.driveYearEnd(ctx, run, info); err != nil {
+			a.yearEndFailed(w, r, "year-end run failed", err)
 			return
 		}
 		a.yearEndRuns.Add(1)
@@ -154,49 +143,180 @@ func (a *API) runYearEnd(w http.ResponseWriter, r *http.Request) {
 	status := http.StatusOK
 	if created {
 		status = http.StatusCreated
-		w.Header().Set("Location", yearEndPath+"/"+run.ID)
 	}
+	w.Header().Set("Location", yearEndPath+"/"+run.ID)
 	httpx.JSON(w, status, run)
 }
 
-func (a *API) postYearEnd(ctx context.Context, run domain.YearEndRun) (domain.YearEndRun, error) {
-	closing, err := a.postEntries(ctx, run, domain.EntryClosing, run.ClosingDate, run.Proposals.Closing)
-	if err != nil {
-		return run, err
+func sameEntity(owner, caller string) error {
+	want, _ := ids.Canonical(caller)
+	if got, _ := ids.Canonical(owner); got != want {
+		return ledgerclient.ErrNotVisible
 	}
-	opening, err := a.postEntries(ctx, run, domain.EntryOpening, run.OpeningDate, run.Proposals.Opening)
-	if err != nil {
-		return run, err
-	}
-	return a.yearEnds.CompleteYearEnd(ctx, run.ID, closing, opening)
+	return nil
 }
 
-func (a *API) postEntries(ctx context.Context, run domain.YearEndRun, kind, date string, entries []domain.Entry) (string, error) {
-	if len(entries) == 0 {
-		return "", nil
+func (a *API) checkRetainedEarnings(ctx context.Context, legalEntityID string, info ledgerclient.Info, account string) error {
+	accounts, err := a.yearLedger.Accounts(ctx, legalEntityID, info.ChartCode)
+	if err != nil {
+		return err
 	}
+	if re, ok := accounts[account]; !ok || re.Type != equityType || !re.Postable {
+		return &domain.Error{Code: domain.CodeValidation, Detail: "retainedEarningsAccount must be a postable equity account of the ledger's chart"}
+	}
+	return nil
+}
+
+func (a *API) driveYearEnd(ctx context.Context, run domain.YearEndRun, info ledgerclient.Info) (domain.YearEndRun, error) {
+	var err error
+	if run.SupersedesRunID != "" {
+		if run, err = a.reversePrior(ctx, run); err != nil {
+			return run, err
+		}
+	}
+	if run.Proposals == nil {
+		proposals, err := a.deriveProposals(ctx, run, info)
+		if err != nil {
+			return run, err
+		}
+		if run, err = a.yearEnds.SetYearEndProposals(ctx, run.ID, proposals); err != nil {
+			return run, err
+		}
+	}
+	for _, step := range []struct {
+		name, date string
+		entries    []domain.Entry
+	}{
+		{domain.JournalClosing, run.ClosingDate, run.Proposals.Closing},
+		{domain.JournalOpening, run.OpeningDate, run.Proposals.Opening},
+	} {
+		if run.Journals[step.name] != "" || len(step.entries) == 0 {
+			continue
+		}
+		id, err := a.yearLedger.Post(ctx, a.yearEndEntry(run, step.name, step.date, step.entries))
+		if err != nil {
+			return run, err
+		}
+		if run, err = a.yearEnds.SetYearEndJournal(ctx, run.ID, step.name, id); err != nil {
+			return run, err
+		}
+	}
+	return a.yearEnds.CompleteYearEnd(ctx, run.ID)
+}
+
+func (a *API) reversePrior(ctx context.Context, run domain.YearEndRun) (domain.YearEndRun, error) {
+	prior, err := a.yearEnds.YearEndRun(ctx, run.SupersedesRunID)
+	if err != nil {
+		return run, err
+	}
+	for _, step := range []struct{ posted, reversed, date string }{
+		{domain.JournalClosing, domain.JournalReverseClosing, prior.ClosingDate},
+		{domain.JournalOpening, domain.JournalReverseOpening, prior.OpeningDate},
+	} {
+		entry := prior.Journals[step.posted]
+		if entry == "" || run.Journals[step.reversed] != "" {
+			continue
+		}
+		key := documentID(run.ID, step.reversed)
+		id, err := a.yearLedger.Reverse(ctx, ledgerclient.Reversal{
+			LegalEntityID: run.LegalEntityID, EntryID: entry, PostingDate: step.date, IdempotencyKey: key,
+			Description: "Year-end re-run " + run.FiscalYear + ": reversal of run " + prior.ID,
+		})
+		if err != nil {
+			return run, err
+		}
+		if run, err = a.yearEnds.SetYearEndJournal(ctx, run.ID, step.reversed, id); err != nil {
+			return run, err
+		}
+	}
+	return run, nil
+}
+
+func (a *API) deriveProposals(ctx context.Context, run domain.YearEndRun, info ledgerclient.Info) (domain.YearEnd, error) {
+	if err := domain.CheckDimensionAttributes(info.DimensionAttributes); err != nil {
+		return domain.YearEnd{}, err
+	}
+	accounts, err := a.yearLedger.Accounts(ctx, run.LegalEntityID, info.ChartCode)
+	if err != nil {
+		return domain.YearEnd{}, err
+	}
+	closing, err := time.Parse(dateLayout, run.ClosingDate)
+	if err != nil {
+		return domain.YearEnd{}, err
+	}
+	query := ledgerclient.TrialBalanceQuery{LegalEntityID: run.LegalEntityID, LedgerID: run.LedgerID, PeriodTo: closing.Format(periodLayout), GroupBy: info.DimensionAttributes}
+	cumulative, err := a.yearLedger.TrialBalance(ctx, query)
+	if err != nil {
+		return domain.YearEnd{}, err
+	}
+	query.PeriodFrom = run.FiscalYear + "-01"
+	thisYear, err := a.yearLedger.TrialBalance(ctx, query)
+	if err != nil {
+		return domain.YearEnd{}, err
+	}
+	var balances []domain.Balance
+	for want, rows := range map[domain.Class][]ledgerclient.BalanceRow{domain.ClassBalanceSheet: cumulative.Rows, domain.ClassProfitLoss: thisYear.Rows} {
+		for _, row := range rows {
+			account, ok := accounts[row.Account]
+			if !ok {
+				return domain.YearEnd{}, &domain.Error{Code: domain.CodeLedgerData, Detail: "account " + row.Account + " is not in the ledger's chart"}
+			}
+			class, err := domain.ClassOf(account.Type)
+			if err != nil {
+				if row.Net.IsZero() {
+					continue
+				}
+				return domain.YearEnd{}, err
+			}
+			if class == want && !row.Net.IsZero() {
+				balances = append(balances, domain.Balance{Account: row.Account, Class: class, Dimensions: domain.DimensionKey(row.Dimensions), Amount: row.Net})
+			}
+		}
+	}
+	proposals, err := domain.CloseYear(balances, run.RetainedEarnings, run.RetainDimensions)
+	var de *domain.Error
+	if errors.As(err, &de) && de.Code == domain.CodeValidation {
+		return domain.YearEnd{}, &domain.Error{Code: domain.CodeLedgerData, Detail: de.Detail}
+	}
+	return proposals, err
+}
+
+func documentID(runID, name string) string {
+	return uuid.NewSHA1(uuid.MustParse(runID), []byte(name)).String()
+}
+
+func (a *API) yearEndEntry(run domain.YearEndRun, name, date string, entries []domain.Entry) ledgerclient.Entry {
 	lines := make([]ledgerclient.Line, len(entries))
 	for i, e := range entries {
-		lines[i] = ledgerclient.Line{Account: e.Account, Credit: e.Amount.IsNegative(), Amount: e.Amount.Abs(), Text: e.Dimensions}
+		lines[i] = ledgerclient.Line{Account: e.Account, Credit: e.Amount.IsNegative(), Amount: e.Amount.Abs(), Dimensions: domain.ParseDimensions(e.Dimensions)}
 	}
-	document := "year-end-" + kind + "-" + run.ID
-	return a.postings.Post(ctx, ledgerclient.Entry{
+	document := documentID(run.ID, name)
+	return ledgerclient.Entry{
 		LegalEntityID: run.LegalEntityID, LedgerID: run.LedgerID, DocumentID: document, PostingDate: date, Currency: run.Currency,
-		IdempotencyKey: document, SourceType: "year_end_" + kind, Lines: lines,
-	})
+		IdempotencyKey: document, SourceType: "year_end_" + name, Lines: lines,
+	}
 }
 
 func (a *API) yearEndFailed(w http.ResponseWriter, r *http.Request, message string, err error) {
+	correlationID := middleware.GetReqID(r.Context())
 	var de *domain.Error
+	var le *ledgerclient.Error
 	switch {
 	case errors.As(err, &de):
-	case ledgerclient.Rejected(err):
-		slog.Warn(message, "err", err, "ledgerCode", ledgerclient.CodeOf(err), "correlationId", middleware.GetReqID(r.Context()))
-		fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeLedgerRejected, "the ledger rejected the year-end entry: "+ledgerclient.CodeOf(err)))
+	case errors.Is(err, ledgerclient.ErrNotVisible):
+		fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the ledger does not belong to the caller's legal entity"))
+		return
+	case ledgerclient.InProgress(err):
+		w.Header().Set("Retry-After", "1")
+		fail(w, r, httpx.NewProblem(http.StatusConflict, domain.CodeBusy, "the ledger is still processing the same posting, retry the same request"))
+		return
+	case errors.As(err, &le) && (ledgerclient.Rejected(err) || le.Status == http.StatusConflict):
+		slog.Warn(message, "err", err, "ledgerCode", le.Code, "correlationId", correlationID)
+		fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeLedgerRejected, "the ledger refused the request: "+le.Code))
 		return
 	default:
 		a.failures.Add(1)
-		slog.Error(message, "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		slog.Error(message, "err", err, "correlationId", correlationID)
 		fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "year-end close is unavailable, retry the same request"))
 		return
 	}
@@ -223,3 +343,5 @@ func (a *API) getYearEnd(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.JSON(w, http.StatusOK, run)
 }
+
+var _ = strconv.Itoa

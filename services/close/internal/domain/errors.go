@@ -20,6 +20,7 @@ const (
 	CodeAmbiguousPeriod     = "CLOSE-0006"
 	CodeNoRun               = "CLOSE-0007"
 	CodeLedgerRejected      = "CLOSE-0008"
+	CodeLedgerData          = "CLOSE-0009"
 	CodePeriodClosed        = "LEDGER-0013"
 	CodePeriodOnHold        = "LEDGER-0014"
 	CodeNoConvergence       = "ALLOC-0001"

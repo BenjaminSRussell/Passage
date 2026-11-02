@@ -45,10 +45,11 @@ var (
 )
 
 type Line struct {
-	Account string
-	Credit  bool
-	Amount  decimal.Decimal
-	Text    string
+	Account    string
+	Credit     bool
+	Amount     decimal.Decimal
+	Text       string
+	Dimensions map[string]string
 }
 
 type Entry struct {
@@ -181,10 +182,11 @@ type amountBody struct {
 }
 
 type lineBody struct {
-	Account     string     `json:"account"`
-	DebitCredit string     `json:"debitCredit"`
-	Amount      amountBody `json:"amount"`
-	Text        string     `json:"text,omitempty"`
+	Account     string            `json:"account"`
+	DebitCredit string            `json:"debitCredit"`
+	Amount      amountBody        `json:"amount"`
+	Text        string            `json:"text,omitempty"`
+	Dimensions  map[string]string `json:"dimensions,omitempty"`
 }
 
 type sourceBody struct {
@@ -305,7 +307,7 @@ func (c *Client) Post(ctx context.Context, e Entry) (string, error) {
 		if l.Credit {
 			side = sideCredit
 		}
-		body.Lines = append(body.Lines, lineBody{Account: l.Account, DebitCredit: side, Text: l.Text,
+		body.Lines = append(body.Lines, lineBody{Account: l.Account, DebitCredit: side, Text: l.Text, Dimensions: l.Dimensions,
 			Amount: amountBody{Currency: e.Currency, Value: l.Amount.StringFixed(money.MinorUnits(e.Currency))}})
 	}
 	raw, err := c.do(ctx, "post", e.IdempotencyKey, http.MethodPost, entriesPath, nil, body, e.IdempotencyKey, e.LegalEntityID, DutyPost)

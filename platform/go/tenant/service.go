@@ -76,7 +76,7 @@ var serviceGrants = map[string]map[string][]string{
 		"party":  {"party.vendor_bank.reveal"},
 	},
 	"close": {
-		"ledger": {"ledger.ledger.lookup", "ledger.account.lookup"},
+		"ledger": {"ledger.ledger.lookup", "ledger.entry.post", "ledger.journal.reverse", "ledger.balance.read", "ledger.account.lookup"},
 	},
 	"production": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read"},
@@ -293,7 +293,7 @@ func (s *ServiceSigner) legalEntityFor(p Principal, explicit string, duties []st
 }
 
 var readDuties = map[string]struct{}{
-	"ledger.balance.read": {}, "ledger.ledger.lookup": {}, "ledger.entry.lookup": {}, "procurement.purchase-order.lookup": {},
+	"ledger.balance.read": {}, "ledger.ledger.lookup": {}, "ledger.account.lookup": {}, "ledger.entry.lookup": {}, "procurement.purchase-order.lookup": {},
 	"inventory.ownership-change.read": {}, "fx.rate.lookup": {},
 }
 
