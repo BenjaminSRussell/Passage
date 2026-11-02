@@ -263,7 +263,12 @@ signs off their own review (HCM-REV-SELF). Every step publishes
 `review.changed` with ids, period and status only. A manager acts on their own
 record and their direct reports; `hr.performance.admin` acts on any worker the
 legal-entity scope allows. Goals and reviews carry the legal entity of the
-worker's employment and follow the caller's scope.
+worker's employment and follow the caller's scope. "Direct report" is read at
+request time (today's reporting line), not as of the review period, so a manager
+who has since moved teams loses access to a past period's review. A review is
+unique per worker and period across legal entities: opening it again from a
+scope that cannot see the existing one is 409 `HCM-REV-STATE`, and naming a
+different `legalEntityId` than the existing review's is 422 `HCM-ENTITY-MISMATCH`.
 
 ## Run
 

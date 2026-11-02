@@ -168,6 +168,14 @@ func idempotencyRace(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && strings.HasSuffix(pgErr.ConstraintName, "idempotency_key_key")
 }
 
+func retryIdempotencyRace(fn func() error) error {
+	err := fn()
+	if idempotencyRace(err) {
+		return fn()
+	}
+	return err
+}
+
 func idempotencyInFlight() error {
 	return problem(http.StatusConflict, CodeIdempotencyInFlight, "a request with this Idempotency-Key is being processed; retry it")
 }

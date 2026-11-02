@@ -1505,7 +1505,7 @@ paths:
     post:
       operationId: createGoal
       summary: Add a goal for a worker (FR-42.11)
-      description: 201 on create; 200 with the stored goal when the Idempotency-Key was already used.
+      description: 201 on create; 200 with the stored goal when the Idempotency-Key was already used. hr.performance.admin is accepted in place of hr.performance.manage.
       x-passage-duty: hr.performance.manage
       parameters:
         - $ref: "#/components/parameters/WorkerId"
@@ -1519,6 +1519,12 @@ paths:
       responses:
         "201":
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Goal"
+        "200":
+          description: Replay of an Idempotency-Key
           content:
             application/json:
               schema:
@@ -1541,7 +1547,7 @@ paths:
     post:
       operationId: updateGoalProgress
       summary: Set a goal's status and progress percent
-      description: Setting the status to ACHIEVED without progressPercent sets 100. Setting the same values again changes nothing.
+      description: Setting the status to ACHIEVED without progressPercent sets 100. Setting the same values again changes nothing. hr.performance.admin is accepted in place of hr.performance.manage.
       x-passage-duty: hr.performance.manage
       parameters:
         - $ref: "#/components/parameters/GoalId"
@@ -1582,6 +1588,7 @@ paths:
     get:
       operationId: listWorkerReviews
       summary: A worker's reviews, latest period first (FR-42.11)
+      description: hr.performance.admin is accepted in place of hr.performance.manage.
       x-passage-duty: hr.performance.manage
       parameters:
         - $ref: "#/components/parameters/WorkerId"
@@ -1601,7 +1608,7 @@ paths:
     post:
       operationId: openReview
       summary: Open the review of a worker for a period, in draft (FR-42.11)
-      description: 201 on create; 200 with the stored review when one exists for the worker and period or the Idempotency-Key was already used.
+      description: 201 on create; 200 with the stored review when one exists for the worker and period or the Idempotency-Key was already used. hr.performance.admin is accepted in place of hr.performance.manage.
       x-passage-duty: hr.performance.manage
       parameters:
         - $ref: "#/components/parameters/WorkerId"
@@ -1619,6 +1626,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Review"
+        "200":
+          description: Replay of an Idempotency-Key, or the existing review
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Review"
         "400":
           $ref: "#/components/responses/ValidationFailed"
         "401":
@@ -1627,6 +1640,12 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
+        "409":
+          description: HCM-REV-STATE (a review for the period exists in another legal entity) or an Idempotency-Key in flight
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "422":
           description: HCM-ENTITY-REQUIRED (several employments and no legalEntityId, or none visible) or HCM-ENTITY-MISMATCH
           content:
@@ -1637,6 +1656,7 @@ paths:
     get:
       operationId: getReview
       summary: One review
+      description: hr.performance.admin is accepted in place of hr.performance.manage.
       x-passage-duty: hr.performance.manage
       parameters:
         - $ref: "#/components/parameters/ReviewId"
@@ -1657,7 +1677,7 @@ paths:
     post:
       operationId: signOffReview
       summary: Manager sign-off, step two: self_submitted to signed_off (FR-42.11)
-      description: A draft review cannot be signed (HCM-REV-STATE). The reviewed worker cannot sign their own review (403 HCM-REV-SELF). Signing again with the same comments and rating changes nothing.
+      description: A draft review cannot be signed (HCM-REV-STATE). The reviewed worker cannot sign their own review (403 HCM-REV-SELF). Signing again with the same comments and rating changes nothing. hr.performance.admin is accepted in place of hr.performance.manage.
       x-passage-duty: hr.performance.manage
       parameters:
         - $ref: "#/components/parameters/ReviewId"

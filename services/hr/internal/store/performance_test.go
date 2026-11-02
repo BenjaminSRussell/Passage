@@ -347,3 +347,52 @@ func TestGoalStateRules(t *testing.T) {
 		t.Fatalf("cancelling again = %+v err %v, want a no-op", again, err)
 	}
 }
+
+func TestReviewAcrossLegalEntityScopes(t *testing.T) {
+	s, all := appStore(t)
+	at(s, day(time.March, 1))
+	le1, le2 := ids.New(), ids.New()
+	w := mustWorker(t, s, all, "Both")
+	mustEmployment(t, s, all, w.ID, le1, "PRIMARY", day(time.January, 1))
+	mustEmployment(t, s, all, w.ID, le2, "CONCURRENT", day(time.January, 1))
+	scoped2 := scopedTo(le2)
+	start, end := day(time.January, 1), day(time.December, 31)
+
+	review, _, err := s.OpenReview(all, w.ID, &le1, start, end, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = s.OpenReview(scoped2, w.ID, &le2, start, end, "")
+	requireCode(t, err, CodeReviewState)
+
+	_, _, err = s.OpenReview(all, w.ID, &le2, start, end, "")
+	requireCode(t, err, CodeEntityMismatch)
+	again, inserted, err := s.OpenReview(all, w.ID, &le1, start, end, "")
+	if err != nil || inserted || again.ID != review.ID {
+		t.Fatalf("reopen in the same entity = %+v inserted %v err %v", again, inserted, err)
+	}
+}
+
+func TestIdempotencyKeyReusedAcrossLegalEntityScopes(t *testing.T) {
+	s, all := appStore(t)
+	at(s, day(time.March, 1))
+	le1, le2 := ids.New(), ids.New()
+	w := mustWorker(t, s, all, "Keys")
+	mustEmployment(t, s, all, w.ID, le1, "PRIMARY", day(time.January, 1))
+	mustEmployment(t, s, all, w.ID, le2, "CONCURRENT", day(time.January, 1))
+	scoped2 := scopedTo(le2)
+
+	if _, _, err := s.CreateGoal(all, Goal{WorkerID: w.ID, Title: "g", LegalEntityID: &le1}, "shared-goal"); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := s.CreateGoal(scoped2, Goal{WorkerID: w.ID, Title: "g", LegalEntityID: &le2}, "shared-goal")
+	requireCode(t, err, CodeIdempotencyReuse)
+
+	start, end := day(time.January, 1), day(time.December, 31)
+	if _, _, err := s.OpenReview(all, w.ID, &le1, start, end, "shared-review"); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = s.OpenReview(scoped2, w.ID, &le2, day(time.January, 1), day(time.June, 30), "shared-review")
+	requireCode(t, err, CodeIdempotencyReuse)
+}

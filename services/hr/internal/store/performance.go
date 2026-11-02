@@ -128,32 +128,35 @@ func (s *Postgres) CreateGoal(ctx context.Context, in Goal, idempotencyKey strin
 	key := idemKey(idempotencyKey)
 	var out Goal
 	inserted := false
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		if key != nil {
-			replay, err := scanGoal(tx.QueryRow(ctx, `select `+goalColumns+` from hr_goal where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key))
-			if err == nil {
-				out = replay
-				return nil
+	err := retryIdempotencyRace(func() error {
+		out, inserted = Goal{}, false
+		return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+			if key != nil {
+				replay, err := scanGoal(tx.QueryRow(ctx, `select `+goalColumns+` from hr_goal where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key))
+				if err == nil {
+					out = replay
+					return nil
+				}
+				if !errors.Is(err, pgx.ErrNoRows) {
+					return err
+				}
 			}
-			if !errors.Is(err, pgx.ErrNoRows) {
+			if err := requireWorker(ctx, tx, p.TenantID, in.WorkerID); err != nil {
 				return err
 			}
-		}
-		if err := requireWorker(ctx, tx, p.TenantID, in.WorkerID); err != nil {
-			return err
-		}
-		entity, err := performanceEntity(ctx, tx, p.TenantID, in.WorkerID, s.now().UTC().Format(absDateLayout), in.LegalEntityID)
-		if err != nil {
-			return err
-		}
-		out, err = scanGoal(tx.QueryRow(ctx, `insert into hr_goal (tenant_id, id, worker_id, legal_entity_id, title, description, due_on, created_by, idempotency_key)
+			entity, err := performanceEntity(ctx, tx, p.TenantID, in.WorkerID, s.now().UTC().Format(absDateLayout), in.LegalEntityID)
+			if err != nil {
+				return err
+			}
+			out, err = scanGoal(tx.QueryRow(ctx, `insert into hr_goal (tenant_id, id, worker_id, legal_entity_id, title, description, due_on, created_by, idempotency_key)
 			values ($1, $2, $3, $4, $5, $6, $7::date, $8, $9) returning `+goalColumns,
-			p.TenantID, ids.New(), in.WorkerID, entity, in.Title, in.Description, in.DueOn, p.UserID, key))
-		inserted = err == nil
-		return err
+				p.TenantID, ids.New(), in.WorkerID, entity, in.Title, in.Description, in.DueOn, p.UserID, key))
+			inserted = err == nil
+			return err
+		})
 	})
 	if idempotencyRace(err) {
-		return Goal{}, false, idempotencyInFlight()
+		return Goal{}, false, idempotencyReuse()
 	}
 	if pgCode(err, rlsViolation) {
 		return Goal{}, false, problem(http.StatusNotFound, CodeWorkerNotFound, "worker not found")
@@ -258,48 +261,59 @@ func (s *Postgres) OpenReview(ctx context.Context, workerID string, legalEntityI
 	key := idemKey(idempotencyKey)
 	var out Review
 	inserted := false
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		if key != nil {
-			replay, err := scanReview(tx.QueryRow(ctx, `select `+reviewColumns+` from hr_review where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key))
-			if err == nil {
-				out = replay
-				return nil
+	err := retryIdempotencyRace(func() error {
+		out, inserted = Review{}, false
+		return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+			if key != nil {
+				replay, err := scanReview(tx.QueryRow(ctx, `select `+reviewColumns+` from hr_review where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key))
+				if err == nil {
+					out = replay
+					return nil
+				}
+				if !errors.Is(err, pgx.ErrNoRows) {
+					return err
+				}
 			}
-			if !errors.Is(err, pgx.ErrNoRows) {
+			if err := requireWorker(ctx, tx, p.TenantID, workerID); err != nil {
 				return err
 			}
-		}
-		if err := requireWorker(ctx, tx, p.TenantID, workerID); err != nil {
-			return err
-		}
-		entity, err := performanceEntity(ctx, tx, p.TenantID, workerID, end.Format(absDateLayout), legalEntityID)
-		if err != nil {
-			return err
-		}
-		out, err = scanReview(tx.QueryRow(ctx, `insert into hr_review (tenant_id, id, worker_id, legal_entity_id, period_start, period_end, created_by, idempotency_key)
+			entity, err := performanceEntity(ctx, tx, p.TenantID, workerID, end.Format(absDateLayout), legalEntityID)
+			if err != nil {
+				return err
+			}
+			out, err = scanReview(tx.QueryRow(ctx, `insert into hr_review (tenant_id, id, worker_id, legal_entity_id, period_start, period_end, created_by, idempotency_key)
 			values ($1, $2, $3, $4, $5::date, $6::date, $7, $8)
 			on conflict (tenant_id, worker_id, period_start, period_end) do nothing returning `+reviewColumns,
-			p.TenantID, ids.New(), workerID, entity, start.Format(absDateLayout), end.Format(absDateLayout), p.UserID, key))
-		if errors.Is(err, pgx.ErrNoRows) {
-			out, err = scanReview(tx.QueryRow(ctx, `select `+reviewColumns+` from hr_review where tenant_id = $1 and worker_id = $2 and period_start = $3::date and period_end = $4::date`,
-				p.TenantID, workerID, start.Format(absDateLayout), end.Format(absDateLayout)))
-			return err
-		}
-		if err != nil {
-			return err
-		}
-		inserted = true
-		return enqueue(ctx, tx, "review", out.ID, hrevents.ReviewChanged, p.TenantID, reviewEvent(out))
+				p.TenantID, ids.New(), workerID, entity, start.Format(absDateLayout), end.Format(absDateLayout), p.UserID, key))
+			if errors.Is(err, pgx.ErrNoRows) {
+				out, err = scanReview(tx.QueryRow(ctx, `select `+reviewColumns+` from hr_review where tenant_id = $1 and worker_id = $2 and period_start = $3::date and period_end = $4::date`,
+					p.TenantID, workerID, start.Format(absDateLayout), end.Format(absDateLayout)))
+				if errors.Is(err, pgx.ErrNoRows) {
+					return problem(http.StatusConflict, CodeReviewState, "a review for this period exists in another legal entity")
+				}
+				return err
+			}
+			if err != nil {
+				return err
+			}
+			inserted = true
+			return enqueue(ctx, tx, "review", out.ID, hrevents.ReviewChanged, p.TenantID, reviewEvent(out))
+		})
 	})
 	if idempotencyRace(err) {
-		return Review{}, false, idempotencyInFlight()
+		return Review{}, false, idempotencyReuse()
 	}
 	if pgCode(err, rlsViolation) {
 		return Review{}, false, problem(http.StatusNotFound, CodeWorkerNotFound, "worker not found")
 	}
-	if err == nil && !inserted && key != nil && (out.WorkerID != workerID || out.PeriodStart != start.Format(absDateLayout) || out.PeriodEnd != end.Format(absDateLayout) ||
-		(legalEntityID != nil && !samePtr(out.LegalEntityID, legalEntityID))) {
-		return Review{}, false, idempotencyReuse()
+	if err == nil && !inserted {
+		entityDiffers := legalEntityID != nil && !samePtr(out.LegalEntityID, legalEntityID)
+		if key != nil && (out.WorkerID != workerID || out.PeriodStart != start.Format(absDateLayout) || out.PeriodEnd != end.Format(absDateLayout) || entityDiffers) {
+			return Review{}, false, idempotencyReuse()
+		}
+		if key == nil && entityDiffers {
+			return Review{}, false, problem(http.StatusUnprocessableEntity, CodeEntityMismatch, "a review for this period exists in a different legal entity")
+		}
 	}
 	return out, inserted, err
 }
