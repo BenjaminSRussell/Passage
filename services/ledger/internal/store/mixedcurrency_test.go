@@ -272,3 +272,12 @@ func TestPostgres_SingleLedgerPostTakesOnlyItsOwnLedgerLines(t *testing.T) {
 		t.Fatalf("own ledger lines: %+v %v", out, err)
 	}
 }
+
+func TestPostgres_MixedCurrencySetResolvesRatesForAnUppercaseSetId(t *testing.T) {
+	e, _ := setupMixedCurrencySet(t)
+	rates := &stubRates{rates: map[string]string{"USDEUR": "0.915"}}
+	out, err := e.store.PostSetEntry(WithRateSource(e.ctx, rates), strings.ToUpper(e.set.ID), vendorInvoice("", "MIX-UPPER", "100.00"))
+	if err != nil || len(out.Entries) != 3 || rates.calls != 1 {
+		t.Fatalf("entries %d, lookups %d, err %v", len(out.Entries), rates.calls, err)
+	}
+}

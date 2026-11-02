@@ -178,8 +178,9 @@ components:
         zero-amount lines without text, is rejected with 422 LEDGER_LINE_EMPTY. The idempotency payload hash orders
         ledgerLines groups by ledger id, so group order does not matter on a retry.
         A member ledger kept in another currency than the leading ledger gets the common lines translated at the
-        spot rate of the posting date (services/fx, rounded to the member's minor units; a rounding residual of a
-        balanced document goes to the largest line of the heavier side, so each ledger still balances alone). A pair
+        spot rate of the posting date (services/fx, rounded to the member's minor units; any difference between the
+        translated net and the rounded net of the source lines goes to the largest line that can take it, so each
+        ledger still balances alone). A pair
         without a rate gives 422 LEDGER_RATE_MISSING (also when FX_URL is not configured; other fx rejections such
         as FX_RATE_DATE_FUTURE are relayed as 422 with the fx code), an fx service that refuses the lookup 502
         LEDGER_FX_MISCONFIGURED and an unreachable one 503 LEDGER_FX_UNAVAILABLE; nothing is written in any case.

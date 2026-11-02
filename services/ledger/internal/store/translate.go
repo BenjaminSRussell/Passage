@@ -70,11 +70,11 @@ func (s *Postgres) resolveRates(ctx context.Context, setID string, date time.Tim
 		leading               bool
 	}
 	var members []member
-	_ = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	if queryErr := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select l.currency::text, l.legal_entity_id::text, l.id = s.leading_ledger_id
 			from ledger_set s join ledger_set_member m on m.tenant_id = s.tenant_id and m.ledger_set_id = s.id
 			join ledger l on l.tenant_id = m.tenant_id and l.id = m.ledger_id
-			where s.tenant_id = $1 and s.id::text = $2`, p.TenantID, setID)
+			where s.tenant_id = $1 and s.id = $2::uuid`, p.TenantID, setID)
 		if err != nil {
 			return err
 		}
@@ -87,7 +87,10 @@ func (s *Postgres) resolveRates(ctx context.Context, setID string, date time.Tim
 			members = append(members, m)
 		}
 		return rows.Err()
-	})
+	}); queryErr != nil || len(members) == 0 {
+		slog.WarnContext(ctx, "exchange rates not resolved before the transaction", "err", queryErr, "correlationId", middleware.GetReqID(ctx))
+		return ctx
+	}
 	document := ""
 	for _, m := range members {
 		if m.leading {
