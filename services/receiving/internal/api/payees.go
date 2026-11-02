@@ -27,6 +27,7 @@ type payeeRequest struct {
 	TaxID         string            `json:"taxId"`
 	Email         string            `json:"email"`
 	BankAccount   *domain.PayeeBank `json:"bankAccount"`
+	SubjectRef    string            `json:"subjectRef"`
 }
 
 type payeeBody struct {
@@ -51,6 +52,10 @@ func validatePayee(req *payeeRequest) map[string]string {
 	req.Name, req.Address, req.TaxID, req.Email = strings.TrimSpace(req.Name), strings.TrimSpace(req.Address), strings.TrimSpace(req.TaxID), strings.TrimSpace(req.Email)
 	checkLength(fields, "name", req.Name, 1, maxPayeeName)
 	checkLength(fields, "address", req.Address, 1, maxPayeeAddress)
+	req.SubjectRef = strings.TrimSpace(req.SubjectRef)
+	if len(req.SubjectRef) > maxSubjectRef {
+		fields["subjectRef"] = "must be at most 200 characters"
+	}
 	if len(req.Country) != 2 || !isUpperAlpha(req.Country) {
 		fields["country"] = "must be a 2-letter upper-case ISO 3166 code"
 	}
@@ -86,7 +91,7 @@ func (a *API) createOneTimePayee(w http.ResponseWriter, r *http.Request) {
 	}
 	in := store.OneTimePayee{
 		ID: ids.New(), LegalEntityID: req.LegalEntityID, Country: req.Country, Name: req.Name, Address: req.Address,
-		TaxID: req.TaxID, Email: req.Email, CreatedBy: p.UserID,
+		TaxID: req.TaxID, Email: req.Email, SubjectRef: req.SubjectRef, CreatedBy: p.UserID,
 	}
 	if req.BankAccount != nil {
 		bank, err := req.BankAccount.Normalize()

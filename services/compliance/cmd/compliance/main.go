@@ -13,6 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/compliance/internal/api"
 	"github.com/BenjaminSRussell/passage/services/compliance/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/compliance/internal/store"
@@ -44,6 +45,9 @@ func newLogger(w io.Writer) *slog.Logger {
 }
 
 func run(ctx context.Context, getenv func(string) string) error {
+	if err := tenant.ConfigureServiceVerifier(getenv); err != nil {
+		return err
+	}
 	databaseURL := getenv("DATABASE_URL")
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")
@@ -57,6 +61,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 		if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 			return fmt.Errorf("migrate: %w", err)
 		}
+	}
+	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
+		return err
 	}
 	cfg, err := config(getenv)
 	if err != nil {

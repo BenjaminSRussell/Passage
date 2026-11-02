@@ -104,6 +104,7 @@ func (a *API) registerCompliance(r chi.Router) {
 	r.With(authz.RequireDuty(DutyPrivacyOfficer)).Post("/v1/privacy/requests/{id}/actions", a.actOnRequest)
 	r.With(authz.RequireDuty(DutyPrivacyOfficer)).Post("/v1/privacy/requests/{id}/erasure-preview", a.previewErasure)
 	r.With(authz.RequireDuty(DutyPrivacyOfficer)).Post("/v1/privacy/retention:purge-check", a.purgeCheck)
+	a.registerHolds(r)
 	r.With(authz.RequireDuty(DutySoDAdmin)).Post("/v1/sod/campaigns:plan", a.planCampaign)
 	r.With(authz.RequireDuty(DutySoDAdmin)).Post("/v1/sod/campaigns:close", a.closeCampaign)
 	r.With(authz.RequireDuty(DutyIncidentManage)).Post("/v1/security/incidents:transition", a.transitionIncident)

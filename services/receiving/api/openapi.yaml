@@ -285,7 +285,7 @@ paths:
     post:
       operationId: createOneTimePayee
       x-passage-duty: VendorInvoicePost
-      description: Records the document-level payee of a vendor invoice for the legal entity's one-time vendor account (FR-18.19). Name, address, tax id, email and bank account are encrypted with platform fieldcrypt (a per-tenant data key derived from the service key in FIELDCRYPT_KEYS_FILE or FIELDCRYPT_KEYS, with tenant and field bound as additional data) before they reach the database; the payee is immutable once stored. The response, error bodies, logs and events carry the payee id, never its data: a validation error names the field and the rule, not the value. The bank account is validated like a vendor bank account (IBAN mod-97 and ISO 13616 per-country length, or ABA checksum, AP-BNK-001). With fieldcrypt keys the Idempotency-Key record stores an HMAC of the request under the tenant's key, not a plain digest of the payee data. Reference the returned id as oneTimePayeeId on POST /v1/receiving/invoices:post. There is no read endpoint; payment (FR-19.23) needs a separate decrypting read. There is no delete or retention endpoint either: erasure of a payee is not built (see NOT-IMPLEMENTED.md).
+      description: Records the document-level payee of a vendor invoice for the legal entity's one-time vendor account (FR-18.19). Name, address, tax id, email and bank account are encrypted with platform fieldcrypt (a per-tenant data key derived from the service key in FIELDCRYPT_KEYS_FILE or FIELDCRYPT_KEYS, with tenant and field bound as additional data) before they reach the database; the payee is immutable once stored. The response, error bodies, logs and events carry the payee id, never its data: a validation error names the field and the rule, not the value. The bank account is validated like a vendor bank account (IBAN mod-97 and ISO 13616 per-country length, or ABA checksum, AP-BNK-001). With fieldcrypt keys the Idempotency-Key record stores an HMAC of the request under the tenant's key, not a plain digest of the payee data. Reference the returned id as oneTimePayeeId on POST /v1/receiving/invoices:post. There is no read endpoint; payment (FR-19.23) needs a separate decrypting read. Erasure is a separate route (POST /v1/receiving/one-time-payees:erase); the optional subjectRef is the opaque data-subject id a compliance erasure command names.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -462,6 +462,50 @@ paths:
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-008' }
         '409': { $ref: '#/components/responses/Problem', description: 'AP-SES-003 the sheet is not PENDING.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/one-time-payees:erase:
+    post:
+      operationId: eraseOneTimePayees
+      x-passage-duty: receiving.payee.erase
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      description: >-
+        Retention and erasure path for one-time payees (BR-48.5, BR-48.6, #335). Pseudonymizes the legal entity's payees
+        (all of them, or those with the given subjectRef) by overwriting the sealed name, address, tax id, email and bank
+        account and setting erased_at; the row stays because posted invoices reference it. A payee is erased only when
+        84 months (7 years, owner decision for AP and payee records) have passed since its last activity, the later of its
+        creation and its latest invoice, and the legal entity's country (LEGAL_ENTITY_COUNTRIES) has no longer statutory floor (an entity in DE or FR, 10 years, and an entity whose country is not configured are
+        skipped and counted as retained until the local rules land, LOC-0502), and when the compliance service reports no active legal hold covering the payee
+        (data class AP_PAYEE, the payee id as recordRef, its subjectRef). A payee inside retention or under a hold is
+        kept and counted; each hold check runs immediately before that payee's own erasure, and a hold check that cannot be answered stops the run (500; payees already erased stay erased and a repeat continues), and with no
+        COMPLIANCE_URL the route answers 503 RCV-HLD-001. A run pages through every payee of the entity by (created_at, id) cursor. The same path runs from the dev.passage.privacy.erasure.requested.v1 consumer. Repeating a run is safe.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [legalEntityId]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                subjectRef: { type: string, maxLength: 200, description: 'Empty runs the retention sweep over every payee of the entity.' }
+      responses:
+        '200':
+          description: What the run did.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [erased, retained, held]
+                properties:
+                  erased: { type: integer }
+                  retained: { type: integer }
+                  held: { type: integer }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001, COM-0002' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500 including a legal hold check that failed.' }
+        '503': { $ref: '#/components/responses/Problem', description: 'RCV-HLD-001 no compliance hold check is configured.' }
   /v1/receiving/invoice-adjustments:post:
     post:
       operationId: postInvoiceAdjustment
@@ -1136,6 +1180,7 @@ components:
         country: { type: string, pattern: '^[A-Z]{2}$' }
         taxId: { type: string, maxLength: 40 }
         email: { type: string, maxLength: 254 }
+        subjectRef: { type: string, maxLength: 200, description: 'Optional opaque data-subject id (not personal data); an erasure command for that subject reaches this payee.' }
         bankAccount:
           type: object
           additionalProperties: false

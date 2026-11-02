@@ -780,6 +780,207 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "503": { $ref: "#/components/responses/Problem" }
+  /v1/privacy/holds:
+    post:
+      operationId: placeLegalHold
+      x-passage-duty: compliance.legal_hold.place
+      description: >-
+        Places a legal hold (FR-48.11) on a subject, a data class, a record or a combination inside one legal
+        entity in the caller's scope. A hold suspends erasure and retention purge for what it covers; every field
+        set on the hold must match, and a hold on a data class also covers a check that names no class. Emits
+        privacy.hold.placed. A repeated Idempotency-Key replays the first answer.
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 200 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [legalEntityId, reason]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                subjectRef: { type: string, maxLength: 200 }
+                dataClass: { $ref: "#/components/schemas/DataClass" }
+                recordRef: { type: string, maxLength: 200 }
+                reason: { type: string, minLength: 10, maxLength: 2000 }
+      responses:
+        "201":
+          description: The hold
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LegalHold" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listLegalHolds
+      x-passage-duty: compliance.legal_hold.read
+      description: Holds newest first, keyset-paginated; filter by state, legal entity, subject and data class.
+      parameters:
+        - { name: state, in: query, schema: { type: string, enum: [ACTIVE, RELEASED] } }
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: subjectRef, in: query, schema: { type: string } }
+        - { name: dataClass, in: query, schema: { $ref: "#/components/schemas/DataClass" } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: A page of holds
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/LegalHold" } }
+                  nextCursor: { type: string }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/privacy/holds:check:
+    get:
+      operationId: checkLegalHolds
+      x-passage-duty: compliance.legal_hold.check
+      description: >-
+        The hold check participants call before they erase or purge (FR-48.11). Answers whether an active hold in
+        the legal entity covers the target: every field set on the hold must equal the target's, and a hold on a
+        data class covers a target that names none. A target without subjectRef is not covered by a subject hold.
+        legalEntityId must be in the caller's scope. Fail closed: a caller that cannot reach this endpoint must
+        not erase.
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: subjectRef, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: dataClass, in: query, schema: { $ref: "#/components/schemas/DataClass" } }
+        - { name: recordRef, in: query, schema: { type: string, maxLength: 200 } }
+      responses:
+        "200":
+          description: The covering holds
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [held, holdIds]
+                properties:
+                  held: { type: boolean }
+                  holdIds: { type: array, items: { type: string, format: uuid } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/privacy/holds/{id}:
+    get:
+      operationId: getLegalHold
+      x-passage-duty: compliance.legal_hold.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The hold
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LegalHold" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/privacy/holds/{id}/release:
+    post:
+      operationId: releaseLegalHold
+      x-passage-duty: compliance.legal_hold.release
+      description: >-
+        Releases an ACTIVE hold with a reason of at least 10 characters (If-Match required; stale is 412
+        PRV-1223, an already released hold PRV-1222). Emits privacy.hold.released. The hold row is kept.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: If-Match, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 10, maxLength: 2000 }
+      responses:
+        "200":
+          description: The released hold
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LegalHold" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/privacy/erasures:
+    post:
+      operationId: requestErasure
+      x-passage-duty: compliance.erasure.request
+      description: >-
+        Fans an erasure out to the participating services (FR-48.10, FR-48.11, AC-48.7). Refused with 422
+        PRV-1201 and no event when an active legal hold covers the subject (and the listed data classes, or every
+        class when none is listed) in the legal entity. Otherwise it stores an append-only command and emits
+        privacy.erasure.requested, which participants act on once retention allows and after they re-check holds.
+        requestId, when given, must be an approved or delivered ERASURE request of the same subject (PRV-1204).
+        A repeated Idempotency-Key replays the first answer.
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 200 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [legalEntityId, subjectRef]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                subjectRef: { type: string, maxLength: 200 }
+                dataClasses: { type: array, maxItems: 5, items: { $ref: "#/components/schemas/DataClass" } }
+                requestId: { type: string, format: uuid }
+      responses:
+        "202":
+          description: The command that was emitted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErasureCommand" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/privacy/retention-policies:
+    get:
+      operationId: listRetentionPolicies
+      x-passage-duty: compliance.retention.read
+      description: >-
+        The default retention per data class (FR-48.11): AP_PAYEE and FINANCIAL_RECORD 84 months after last
+        activity (owner decision), EMPLOYMENT 72 months after termination, CANDIDATE 6 months after rejection,
+        SYSTEM_LOG 12 months. Per-legal-entity overrides (retention.<record_class>) are not stored yet.
+      responses:
+        "200":
+          description: The policies
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/RetentionPolicy" } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
   /v1/privacy/retention:purge-check:
     post:
       operationId: checkRetentionPurge
@@ -1025,6 +1226,43 @@ paths:
         "422": { $ref: "#/components/responses/Problem" }
 components:
   schemas:
+    DataClass: { type: string, enum: [AP_PAYEE, FINANCIAL_RECORD, EMPLOYMENT, CANDIDATE, SYSTEM_LOG] }
+    LegalHold:
+      type: object
+      required: [holdId, legalEntityId, reason, state, placedBy, placedAt, version]
+      properties:
+        holdId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        subjectRef: { type: string }
+        dataClass: { $ref: "#/components/schemas/DataClass" }
+        recordRef: { type: string }
+        reason: { type: string }
+        state: { type: string, enum: [ACTIVE, RELEASED] }
+        placedBy: { type: string }
+        placedAt: { type: string, format: date-time }
+        releasedBy: { type: string }
+        releasedAt: { type: string, format: date-time }
+        releaseReason: { type: string }
+        version: { type: integer, minimum: 1 }
+    ErasureCommand:
+      type: object
+      required: [erasureId, legalEntityId, subjectRef, dataClasses, requestedBy, requestedAt]
+      properties:
+        erasureId: { type: string, format: uuid }
+        requestId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        subjectRef: { type: string }
+        dataClasses: { type: array, items: { $ref: "#/components/schemas/DataClass" } }
+        requestedBy: { type: string }
+        requestedAt: { type: string, format: date-time }
+    RetentionPolicy:
+      type: object
+      required: [dataClass, months, anchor, source]
+      properties:
+        dataClass: { $ref: "#/components/schemas/DataClass" }
+        months: { type: integer }
+        anchor: { type: string, description: 'the event the months count from' }
+        source: { type: string }
     PrivacyRequestType:
       type: string
       enum: [ACCESS, PORTABILITY, ERASURE, RECTIFICATION, RESTRICTION]

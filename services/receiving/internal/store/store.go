@@ -264,6 +264,7 @@ type RegisterFunc func(Receipt, map[domain.SerialKey]struct{}) ([]Line, error)
 type PostFunc func(Receipt) (PostOutcome, error)
 
 type Store interface {
+	PayeeErasureStore
 	Ping(ctx context.Context) error
 	CreateArrival(ctx context.Context, in Receipt) (Receipt, error)
 	DirectReceipt(ctx context.Context, in Receipt, fn RegisterFunc) (Receipt, error)

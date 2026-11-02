@@ -55,6 +55,8 @@ type Ports struct {
 	OwnershipChanges   domain.OwnershipChanges
 	VendorGroups       domain.VendorGroups
 	Extractor          domain.DocumentExtractor
+	LegalHolds         domain.LegalHolds
+	LegalEntityCountry map[string]string
 	AuditSampler       *domain.Sampler
 
 	ResolveMinAge time.Duration
@@ -85,6 +87,9 @@ type API struct {
 	auditReleased   atomic.Int64
 	auditRejected   atomic.Int64
 	payeesCreated   atomic.Int64
+	payeesErased    atomic.Int64
+	payeesRetained  atomic.Int64
+	payeesHeld      atomic.Int64
 	groupMissing    atomic.Int64
 	capturesCreated atomic.Int64
 	capturesReview  atomic.Int64
@@ -149,6 +154,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireAnyDuty(dutySheetMaintain, dutySheetAccept)).Get("/v1/receiving/service-entry-sheets/{id}", a.getServiceSheet)
 	r.With(authz.RequireDuty(dutySheetAccept)).Post("/v1/receiving/service-entry-sheets/{id}:accept", a.idempotent(a.acceptServiceSheet))
 	r.With(authz.RequireDuty(dutySheetAccept)).Post("/v1/receiving/service-entry-sheets/{id}:reject", a.idempotent(a.rejectServiceSheet))
+	r.With(authz.RequireDuty(dutyPayeeErase)).Post("/v1/receiving/one-time-payees:erase", a.idempotent(a.eraseOneTimePayees))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoice-adjustments:post", a.idempotent(a.postInvoiceAdjustment))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/plan-settlements:run", a.idempotent(a.runPlanSettlement))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/consignment-settlements:run", a.idempotent(a.runConsignmentSettlement))
@@ -179,6 +185,9 @@ func (a *API) Metrics() http.Handler {
 		{"receiving_invoices_audit_blocked_total", "Invoices held by the stochastic audit block.", &a.auditBlocked},
 		{"receiving_period_resolve_fallback_total", "Documents posted with the caller-supplied fiscal period because close has no dated period (temporary).", &a.resolveFallback},
 		{"receiving_one_time_payees_created_total", "One-time payees recorded for vendor invoices.", &a.payeesCreated},
+		{"receiving_one_time_payees_erased_total", "One-time payees pseudonymized by an erasure command or a retention sweep.", &a.payeesErased},
+		{"receiving_one_time_payees_retained_total", "One-time payees an erasure run kept because retention has not ended.", &a.payeesRetained},
+		{"receiving_one_time_payees_held_total", "One-time payees an erasure run kept because a legal hold covers them.", &a.payeesHeld},
 		{"receiving_invoices_audit_released_total", "Audit-blocked invoices released by an auditor and posted.", &a.auditReleased},
 		{"receiving_vendor_group_lookups_failed_total", "Invoices posted without vendor_group_id because party was unreachable, refused the lookup or does not know the vendor.", &a.groupMissing},
 		{"receiving_invoice_captures_total", "Vendor invoice documents captured from UBL or OCR.", &a.capturesCreated},
