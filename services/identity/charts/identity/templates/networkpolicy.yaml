@@ -1,3 +1,6 @@
+{{- if and .Values.bundle.enabled (empty .Values.networkPolicy.opaPodLabels) }}
+{{- fail "networkPolicy.opaPodLabels must be set when bundle.enabled: the bundle port is only admitted to labelled OPA pods" }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -10,15 +13,22 @@ spec:
       app.kubernetes.io/name: identity
   policyTypes: [Ingress]
   ingress:
+    {{- if or .Values.networkPolicy.gatewayNamespaces .Values.networkPolicy.allowSameNamespace }}
     - from:
-        - podSelector: {}
         {{- range .Values.networkPolicy.gatewayNamespaces }}
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ . }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $.Values.networkPolicy.gatewayPodLabels | nindent 14 }}
+        {{- end }}
+        {{- if .Values.networkPolicy.allowSameNamespace }}
+        - podSelector: {}
         {{- end }}
       ports:
         - { protocol: TCP, port: 8080 }
+    {{- end }}
     {{- if .Values.bundle.enabled }}
     - from:
         - podSelector:

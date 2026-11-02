@@ -139,24 +139,17 @@ func TestKeycloakRealmMatchesIdentityExpectations(t *testing.T) {
 
 func TestKeycloakRealmRequiresMFAAndHoldsNoSecrets(t *testing.T) {
 	realm := loadRealm(t)
-	secondFactor := map[string]bool{}
 	var bound *realmFlow
 	for i := range realm.AuthenticationFlows {
-		flow := &realm.AuthenticationFlows[i]
-		if flow.Alias == realm.BrowserFlow {
-			bound = flow
-		}
-		for _, exec := range flow.Executions {
-			if exec.Requirement == "ALTERNATIVE" && (exec.Authenticator == "auth-otp-form" || exec.Authenticator == "webauthn-authenticator") {
-				secondFactor[exec.Authenticator] = true
-			}
+		if realm.AuthenticationFlows[i].Alias == realm.BrowserFlow {
+			bound = &realm.AuthenticationFlows[i]
 		}
 	}
 	if bound == nil {
 		t.Fatalf("browserFlow %q is not defined in the export", realm.BrowserFlow)
 	}
-	if len(secondFactor) != 2 {
-		t.Errorf("second-factor flow must offer both OTP and WebAuthn, got %v", secondFactor)
+	if !secondFactorRequired(realm, bound) {
+		t.Error("bound browser flow must require a second-factor subflow offering both OTP and WebAuthn")
 	}
 	if !flowReachesRequired(realm, bound, "auth-username-password-form") {
 		t.Error("bound browser flow never requires the username/password form")
@@ -251,6 +244,32 @@ func flowReachesRequired(realm realmExport, flow *realmFlow, authenticator strin
 	return false
 }
 
+func secondFactorRequired(realm realmExport, flow *realmFlow) bool {
+	for _, exec := range flow.Executions {
+		if exec.FlowAlias == "" {
+			continue
+		}
+		subIndex := slices.IndexFunc(realm.AuthenticationFlows, func(f realmFlow) bool { return f.Alias == exec.FlowAlias })
+		if subIndex < 0 {
+			continue
+		}
+		sub := &realm.AuthenticationFlows[subIndex]
+		offered := map[string]bool{}
+		for _, inner := range sub.Executions {
+			if inner.Requirement == "ALTERNATIVE" {
+				offered[inner.Authenticator] = true
+			}
+		}
+		if exec.Requirement == "REQUIRED" && offered["auth-otp-form"] && offered["webauthn-authenticator"] {
+			return true
+		}
+		if secondFactorRequired(realm, sub) {
+			return true
+		}
+	}
+	return false
+}
+
 type keycloakAdmin struct {
 	t      *testing.T
 	base   string
@@ -331,6 +350,12 @@ func TestKeycloakLoginIsAcceptedByIdentityJWTVerifier(t *testing.T) {
 		"attributes":  map[string][]string{"tenant_id": {loginTenantID}, "duties": {"ap_clerk,approver"}, "tier": {"starter"}},
 		"credentials": []map[string]any{{"type": "password", "value": loginUserSecret, "temporary": false}},
 	}, http.StatusCreated)
+
+	var created []map[string]any
+	if err := json.Unmarshal(admin.do(http.MethodGet, "/admin/realms/"+realmName+"/users?username="+loginUserName+"&exact=true", nil, http.StatusOK), &created); err != nil || len(created) != 1 {
+		t.Fatalf("created user not found: %v %v", err, created)
+	}
+	admin.do(http.MethodPut, "/admin/realms/"+realmName+"/users/"+created[0]["id"].(string), map[string]any{"requiredActions": []string{}}, http.StatusNoContent)
 
 	issuer := base + "/realms/" + realmName
 	accessToken := tokenRequest(t, client, base, realmName, url.Values{

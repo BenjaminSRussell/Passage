@@ -73,13 +73,16 @@ jobs:
     env:
       PASSAGE_TEST_KEYCLOAK_URL: http://localhost:8080
       PASSAGE_TEST_KEYCLOAK_ADMIN: admin
-      PASSAGE_TEST_KEYCLOAK_ADMIN_PASSWORD: ci-admin-Passw0rd-1234
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version: '1.25'
           cache-dependency-path: '**/go.sum'
+      - run: |
+          password="Kc-$(openssl rand -hex 16)"
+          echo "::add-mask::$password"
+          echo "PASSAGE_TEST_KEYCLOAK_ADMIN_PASSWORD=$password" >> "$GITHUB_ENV"
       - run: >-
           docker run -d --name keycloak -p 8080:8080
           -e KC_BOOTSTRAP_ADMIN_USERNAME=$PASSAGE_TEST_KEYCLOAK_ADMIN
@@ -229,6 +232,7 @@ jobs:
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
       - run: helm lint services/platform-health/charts/hello-ledger services/receiving/charts/receiving services/fx/charts/fx services/org/charts/org services/identity/charts/identity
       - run: bash services/receiving/charts/receiving/test-env.sh
+      - run: bash services/identity/charts/identity/test-networkpolicy.sh
 
   deploy-release:
     runs-on: ubuntu-24.04

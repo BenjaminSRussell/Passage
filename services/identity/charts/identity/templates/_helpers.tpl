@@ -12,6 +12,13 @@
     secretKeyRef:
       name: {{ .Values.databaseSecret }}
       key: DATABASE_URL
+{{- if .Values.migrateDatabaseSecret }}
+- name: MIGRATE_DATABASE_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.migrateDatabaseSecret }}
+      key: DATABASE_URL
+{{- end }}
 - name: IDENTITY_DUTY_CATALOGUE_PATH
   value: /etc/passage/authz/data.json
 - name: MIGRATE_ON_START

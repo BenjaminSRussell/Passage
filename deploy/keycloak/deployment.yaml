@@ -21,7 +21,7 @@ spec:
       containers:
         - name: keycloak
           image: quay.io/keycloak/keycloak:26.0.8
-          args: ["start", "--optimized=false", "--import-realm", "--http-enabled=true", "--proxy-headers=xforwarded"]
+          args: ["start", "--import-realm", "--http-enabled=true", "--proxy-headers=xforwarded"]
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -29,7 +29,8 @@ spec:
           env:
             - { name: KC_HTTP_PORT, value: "8080" }
             - { name: KC_HEALTH_ENABLED, value: "true" }
-            - { name: KC_HOSTNAME_STRICT, value: "false" }
+            - { name: KC_HOSTNAME, value: "https://keycloak.passage.example.invalid" }
+            - { name: KC_HOSTNAME_STRICT, value: "true" }
             - { name: KC_DB, value: postgres }
             - name: KC_DB_URL
               valueFrom: { secretKeyRef: { name: keycloak-db, key: url } }

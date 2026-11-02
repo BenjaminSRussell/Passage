@@ -16,6 +16,7 @@ spec:
         image:
           repository: ghcr.io/benjaminsrussell/identity
           digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+        migrateDatabaseSecret: identity-db-owner
         migrateOnStart: true
   destination:
     server: https://kubernetes.default.svc

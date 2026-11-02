@@ -4,6 +4,7 @@ image:
   tag: ""
   pullPolicy: IfNotPresent
 databaseSecret: identity-db
+migrateDatabaseSecret: ""
 migrateOnStart: false
 operatorTenantId: ""
 scim:
@@ -16,9 +17,14 @@ bundle:
   keyId: identity-policy
   port: 8443
 networkPolicy:
-  gatewayNamespaces: []
+  gatewayNamespaces: [envoy-gateway-system]
+  gatewayPodLabels:
+    gateway.envoyproxy.io/owning-gateway-name: passage-api
+    gateway.envoyproxy.io/owning-gateway-namespace: hello-ledger
+  allowSameNamespace: false
   opaNamespaces: []
-  opaPodLabels: {}
+  opaPodLabels:
+    passage.io/opa-sidecar: "true"
 replicaCount: 1
 resources:
   requests: { cpu: 50m, memory: 64Mi }
