@@ -53,12 +53,13 @@ func sameBalance(a, b BalanceSnapshot) bool {
 	return a.TotalOpen.Equal(b.TotalOpen) && a.Overdue.Equal(b.Overdue) && a.DunningLevel == b.DunningLevel && a.RiskScore == b.RiskScore
 }
 
-// RunAgingSnapshot stores the legal entity's worklist as a dated balance per
-// customer and currency (§5.30.16 aging snapshot and risk score, key = (customer,
-// date)) and enqueues customerbalance.changed.v1 for every balance that differs
-// from the latest snapshot on or before asOf. A customer whose last snapshot shows
-// an open balance but who has nothing open any more gets a zero row and one event,
-// so credit never keeps a stale balance. Re-running for the same date updates the
+// RunAgingSnapshot stores the legal entity's net open balance per customer and
+// currency (§5.30.16 aging snapshot and risk score, key = (customer, date)), credits
+// netted against debits as in domain.CustomerBalances, so a customer can be net in
+// credit (a negative balance), and enqueues customerbalance.changed.v1 for every
+// balance that differs from the latest snapshot on or before asOf. A customer whose
+// last snapshot shows a non-zero balance but who has nothing open any more gets a
+// zero row and one event, so credit never keeps a stale balance. Re-running for the same date updates the
 // rows and emits nothing for unchanged balances. The balances are those at the
 // time of the run, aged at asOf; the API refuses a future asOf.
 func (s *Postgres) RunAgingSnapshot(ctx context.Context, legalEntityID string, asOf time.Time) (SnapshotResult, error) {
@@ -78,7 +79,7 @@ func (s *Postgres) RunAgingSnapshot(ctx context.Context, legalEntityID string, a
 			return err
 		}
 		seen := map[[2]string]bool{}
-		for _, r := range domain.Worklist(asOf, items, disputes, broken) {
+		for _, r := range domain.CustomerBalances(asOf, items, disputes, broken) {
 			seen[[2]string{r.CustomerID, r.Currency}] = true
 			changed, err := recordBalance(ctx, tx, p.TenantID, BalanceSnapshot{LegalEntityID: legalEntityID, CustomerID: r.CustomerID,
 				Currency: r.Currency, AsOf: res.AsOf, TotalOpen: r.TotalOpen, Overdue: r.Overdue, OldestItemDays: r.OldestDays,
@@ -149,13 +150,13 @@ func recordBalance(ctx context.Context, tx pgx.Tx, tenantID string, b BalanceSna
 }
 
 // openSnapshotKeys returns the customer and currency of every latest snapshot on or
-// before asOf whose balance is still open.
+// before asOf whose balance is not zero (owed, or net in credit).
 func openSnapshotKeys(ctx context.Context, tx pgx.Tx, legalEntityID, asOf string) ([][2]string, error) {
 	rows, err := tx.Query(ctx, `select customer_id::text, currency from (
 		select distinct on (customer_id, currency) customer_id, currency, total_open
 		from customer_balance_snapshot where legal_entity_id = $1 and as_of <= $2::date
 		order by customer_id, currency, as_of desc) latest
-		where total_open > 0`, legalEntityID, asOf)
+		where total_open <> 0`, legalEntityID, asOf)
 	if err != nil {
 		return nil, err
 	}

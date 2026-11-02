@@ -9,8 +9,8 @@ import (
 
 // StatementCandidate is one document that may appear on a customer statement, with
 // the part of it still open at the statement date. Debits (invoices, fees, interest,
-// re-bills) are positive; unapplied payments are credits and negative. A credit has
-// no due date.
+// re-bills) are positive; unapplied payments and credit-side open items (FR-30.1)
+// are credits and negative. An unapplied payment has no due date.
 type StatementCandidate struct {
 	SourceType     string
 	DocumentNumber string
@@ -33,7 +33,8 @@ type StatementLine struct {
 }
 
 // StatementSection is the statement for one currency: lines, closing balance and
-// an aging footer over the open debits.
+// an aging footer over the open items with a due date (debits, and credit-side
+// open items as negative amounts; unapplied payments and deductions have none).
 type StatementSection struct {
 	Currency       string          `json:"currency"`
 	Lines          []StatementLine `json:"lines"`
@@ -69,7 +70,7 @@ func BuildStatement(asOf time.Time, docs []StatementCandidate) []StatementSectio
 		})
 		sec := StatementSection{Currency: cur, Lines: make([]StatementLine, 0, len(list))}
 		running := decimal.Zero
-		var debits []AgingRow
+		var dated []AgingRow
 		for _, d := range list {
 			running = running.Add(d.OpenAsOf)
 			line := StatementLine{
@@ -83,12 +84,12 @@ func BuildStatement(asOf time.Time, docs []StatementCandidate) []StatementSectio
 			if d.DueDate != nil {
 				due := d.DueDate.Format(statementDateLayout)
 				line.DueDate = &due
-				debits = append(debits, AgingRow{Currency: cur, DueDate: *d.DueDate, OpenAmount: d.OpenAsOf})
+				dated = append(dated, AgingRow{Currency: cur, DueDate: *d.DueDate, OpenAmount: d.OpenAsOf})
 			}
 			sec.Lines = append(sec.Lines, line)
 		}
 		sec.ClosingBalance = running
-		sec.Aging = Age(asOf, debits)
+		sec.Aging = Age(asOf, dated)
 		out = append(out, sec)
 	}
 	return out

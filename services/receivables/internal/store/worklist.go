@@ -12,7 +12,8 @@ import (
 )
 
 // Worklist ranks the legal entity's customers by risk as of asOf (FR-30.6, FR-30.10):
-// one row per customer and currency, riskiest first. Open disputes and broken
+// one row per customer and currency with an open debit, net of the customer's
+// credits, riskiest first. Open disputes and broken
 // promises (promise date plus grace has passed while the item is still open) feed the score.
 func (s *Postgres) Worklist(ctx context.Context, legalEntityID string, asOf time.Time) ([]domain.CustomerRisk, error) {
 	var rows []domain.CustomerRisk
@@ -38,13 +39,15 @@ func (s *Postgres) Worklist(ctx context.Context, legalEntityID string, asOf time
 	return rows, err
 }
 
-// openWorkItems sums open amounts per customer, currency, due date and dunning
-// level in SQL. The roll-up gives the same totals, overdue and weighted days as
-// the item rows would, and keeps the read complete however many items are open.
+// openWorkItems sums open amounts per customer, currency, due date, dunning
+// level and side in SQL. The roll-up gives the same totals, overdue and weighted
+// days as the item rows would, and keeps the read complete however many items are
+// open. Debits and credits (negative open amounts, FR-30.1) are summed apart so
+// the domain sees which customers have a debit to work; it nets the credits.
 func openWorkItems(ctx context.Context, tx pgx.Tx, legalEntityID string) ([]domain.WorkItem, error) {
 	rows, err := tx.Query(ctx, `select customer_id::text, currency, due_date::text, sum(open_amount)::text, dunning_level
-		from open_item where legal_entity_id = $1 and status in `+openStatuses+` and open_amount > 0
-		group by customer_id, currency, due_date, dunning_level
+		from open_item where legal_entity_id = $1 and status in `+openStatuses+` and open_amount <> 0
+		group by customer_id, currency, due_date, dunning_level, open_amount > 0
 		order by customer_id, currency, due_date`, legalEntityID)
 	if err != nil {
 		return nil, err

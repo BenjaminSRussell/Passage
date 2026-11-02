@@ -60,14 +60,21 @@ channels:
     messages:
       customerBalanceChanged:
         $ref: "#/components/messages/CustomerBalanceChanged"
+  openItemEvents:
+    address: passage.receivables.openitem
+    messages:
+      openItemsImported:
+        $ref: "#/components/messages/OpenItemsImported"
 operations:
   publishDisputeOpened:
     action: send
+    summary: Publish dispute.opened.v1
     channel: { $ref: "#/channels/disputeEvents" }
     messages:
       - { $ref: "#/channels/disputeEvents/messages/disputeOpened" }
   publishDisputeResolved:
     action: send
+    summary: Publish dispute.resolved.v1
     channel: { $ref: "#/channels/disputeEvents" }
     messages:
       - { $ref: "#/channels/disputeEvents/messages/disputeResolved" }
@@ -78,11 +85,13 @@ operations:
       - { $ref: "#/channels/dunningLetterEvents/messages/dunningLetterIssued" }
   publishPaymentReceived:
     action: send
+    summary: Publish payment.received.v1
     channel: { $ref: "#/channels/paymentEvents" }
     messages:
       - { $ref: "#/channels/paymentEvents/messages/paymentReceived" }
   publishPaymentApplied:
     action: send
+    summary: Publish payment.applied.v1
     channel: { $ref: "#/channels/paymentEvents" }
     messages:
       - { $ref: "#/channels/paymentEvents/messages/paymentApplied" }
@@ -93,6 +102,7 @@ operations:
       - { $ref: "#/channels/caseEvents/messages/caseOpened" }
   publishCaseClosed:
     action: send
+    summary: Publish case.closed.v1
     channel: { $ref: "#/channels/caseEvents" }
     messages:
       - { $ref: "#/channels/caseEvents/messages/caseClosed" }
@@ -131,25 +141,34 @@ operations:
     channel: { $ref: "#/channels/customerBalanceEvents" }
     messages:
       - { $ref: "#/channels/customerBalanceEvents/messages/customerBalanceChanged" }
+  publishOpenItemsImported:
+    action: send
+    channel: { $ref: "#/channels/openItemEvents" }
+    messages:
+      - { $ref: "#/channels/openItemEvents/messages/openItemsImported" }
 components:
   messages:
     PaymentReceived:
       name: dev.passage.receivables.payment.received.v1
+      summary: A customer payment was recorded (manual entry, lockbox check or camt.053 entry). Unidentified payments carry no customer_id until applied. Consumers are cash application and treasury.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/PaymentReceivedData"
     PaymentApplied:
       name: dev.passage.receivables.payment.applied.v1
+      summary: A payment was applied to open items (settlements, cash discount, write-off, residual on account). Consumers are ledger posting, credit exposure and the portal.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/PaymentAppliedData"
     DisputeOpened:
       name: dev.passage.receivables.dispute.opened.v1
+      summary: A customer dispute was opened on an open item; the item is held out of dunning. Consumers are sales and credit.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/DisputeOpenedData"
     DisputeResolved:
       name: dev.passage.receivables.dispute.resolved.v1
+      summary: A dispute was resolved, rejected or written off and the item was released. Consumers are billing (credit note) and sales.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/DisputeResolvedData"
@@ -167,6 +186,7 @@ components:
         $ref: "#/components/schemas/CaseOpenedData"
     CaseClosed:
       name: dev.passage.receivables.case.closed.v1
+      summary: A collection case was closed with a note; sla_breached says whether the SLA ran out first.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/CaseClosedData"
@@ -216,12 +236,47 @@ components:
       summary: >-
         The aging snapshot job (§5.30.16) found a customer's balance in one currency, its overdue amount, dunning level
         or risk score different from the latest earlier snapshot (the PRD's customer-balance.changed.v1; the kernel's
-        type rule allows no hyphen). A customer whose items all settled gets one event with balance 0. Re-running the
-        job for the same date emits nothing new. Consumers: sales credit, portal.
+        type rule allows no hyphen). The balance is net: credit-side open items (credit notes, unapplied payments,
+        FR-30.1) are netted against the debits, oldest due date first, so a customer can be net in credit (a negative
+        balance). A customer whose items all settled gets one event with balance 0. Re-running the job for the same
+        date emits nothing new. Consumers: sales credit, portal.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/CustomerBalanceChangedData"
+    OpenItemsImported:
+      name: dev.passage.receivables.openitem.imported.v1
+      summary: >-
+        An opening-item import batch (the migration loader at cutover) created or updated open items.
+        One event per batch; unchanged and refused rows are counted, not listed. Amounts are signed: credit-side items
+        (credit notes, unapplied payments) are negative.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/OpenItemsImportedData"
   schemas:
+    OpenItemsImportedData:
+      type: object
+      required: [batch_id, legal_entity_id, import_source, created, updated, unchanged, rejected, items]
+      properties:
+        batch_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        import_source: { type: string, description: the legacy system label }
+        created: { type: integer }
+        updated: { type: integer }
+        unchanged: { type: integer }
+        rejected: { type: integer }
+        items:
+          type: array
+          items:
+            type: object
+            required: [open_item_id, legacy_key, outcome, customer_id, currency, amount, open_amount]
+            properties:
+              open_item_id: { type: string, format: uuid }
+              legacy_key: { type: string }
+              outcome: { type: string, enum: [CREATED, UPDATED] }
+              customer_id: { type: string, format: uuid }
+              currency: { type: string, pattern: "^[A-Z]{3}$" }
+              amount: { type: string, description: "decimal string; negative for a credit-side item" }
+              open_amount: { type: string, description: "decimal string; negative for a credit-side item" }
     CustomerBalanceChangedData:
       type: object
       required: [legal_entity_id, customer_id, currency, as_of, balance, overdue, oldest_item_days, dunning_level, risk_score]
@@ -230,10 +285,10 @@ components:
         customer_id: { type: string, format: uuid }
         currency: { type: string, pattern: "^[A-Z]{3}$" }
         as_of: { type: string, format: date, description: the snapshot's key date }
-        balance: { type: string, description: "decimal string; open debit items in this currency" }
-        overdue: { type: string, description: "decimal string; the part past its due date" }
-        oldest_item_days: { type: integer, minimum: 0, description: days the oldest open item is overdue }
-        dunning_level: { type: integer, minimum: 0, maximum: 4, description: highest level of the open items }
+        balance: { type: string, description: "decimal string; open debits less open credits in this currency, negative when the customer is net in credit" }
+        overdue: { type: string, description: "decimal string; the part of the debits past their due date that the credits do not cover, never negative" }
+        oldest_item_days: { type: integer, minimum: 0, description: days the oldest debit the credits leave open is overdue }
+        dunning_level: { type: integer, minimum: 0, maximum: 4, description: highest level of the debits the credits leave open }
         risk_score: { type: integer, minimum: 0, maximum: 100, description: FR-30.10 score }
     CaseOpenedData:
       type: object

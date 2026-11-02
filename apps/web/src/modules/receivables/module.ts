@@ -11,6 +11,7 @@ import { InterestNotesPage, InterestRunPage } from "./Interest";
 import { LockboxImportPage, LockboxPage } from "./Lockbox";
 import { NewPaymentPage } from "./NewPaymentPage";
 import { OpenItemsPage } from "./OpenItemsPage";
+import { OpeningImportsPage } from "./OpeningImports";
 import { PaymentDetailPage } from "./PaymentDetailPage";
 import { PaymentsPage } from "./PaymentsPage";
 import { BalanceSnapshotsPage, StatementPage } from "./Statements";
@@ -22,10 +23,11 @@ const receivables: PassageModule = {
   id: "receivables",
   title: "Accounts receivable",
   description:
-    "Open items, aging and cash application (manual, lockbox and camt.053 bank statements), collections (worklist, cases, disputes, promises to pay, dunning and interest), the deductions workbench, balance confirmations, down payments and security deposits, customer statements and the nightly balance snapshots.",
+    "Open items (including those the migration loader imports at cutover), aging and cash application (manual, lockbox and camt.053 bank statements), collections (worklist, cases, disputes, promises to pay, dunning and interest), the deductions workbench, balance confirmations, down payments and security deposits, customer statements and the nightly balance snapshots.",
   routes: [
     { path: "/receivables", element: createElement(WorkspacePage), handle: { title: "AR workspace" } },
     { path: "/receivables/open-items", element: createElement(OpenItemsPage), handle: { title: "Open items" } },
+    { path: "/receivables/opening-items", element: createElement(OpeningImportsPage), handle: { title: "Imported opening items" } },
     { path: "/receivables/payments", element: createElement(PaymentsPage), handle: { title: "Payments" } },
     { path: "/receivables/payments/new", element: createElement(NewPaymentPage), handle: { title: "Record payment" } },
     { path: "/receivables/payments/:id", element: createElement(PaymentDetailPage), handle: { title: "Payment" } },
@@ -62,6 +64,7 @@ const receivables: PassageModule = {
   nav: [
     { label: "AR workspace", to: "/receivables", duty: "ARView" },
     { label: "Open items", to: "/receivables/open-items", duty: "ARView" },
+    { label: "Imported opening items", to: "/receivables/opening-items", duty: "ARView" },
     { label: "Payments", to: "/receivables/payments", duty: "ARView" },
     { label: "Record payment", to: "/receivables/payments/new", duty: "ARPaymentPost" },
     { label: "Lockbox imports", to: "/receivables/lockbox", duty: "ARView" },

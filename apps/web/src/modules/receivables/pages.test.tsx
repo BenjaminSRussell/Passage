@@ -105,6 +105,29 @@ describe("Open items", () => {
     await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("customer") === CUST)).toBe(true));
   });
 
+  it("offers dispute, promise and deduction on debits only, not on credit-side items", async () => {
+    const credit: OpenItem = {
+      ...item,
+      id: "0190f0a0-0000-7000-8000-000000000402",
+      sourceType: "CREDIT_NOTE",
+      documentNumber: "CN-30002",
+      amount: "-150.00",
+      openAmount: "-150.00",
+      cashDiscountDate: null,
+      cashDiscountAmount: "0",
+      side: "CREDIT",
+    };
+    server.handler = (url) => (url.pathname.endsWith("/open-items") ? json(200, { items: [{ ...item, side: "DEBIT" }, credit] }) : undefined);
+    renderAt("/receivables/open-items");
+    const table = await findTable({ name: "Open items" });
+    await waitFor(() => expect(table).toHaveTextContent("CN-30002"));
+    expect(within(table).getByRole("link", { name: "Dispute INV-30001" })).toBeInTheDocument();
+    expect(within(table).getByRole("link", { name: "Deduction on INV-30001" })).toBeInTheDocument();
+    expect(within(table).queryByRole("link", { name: "Dispute CN-30002" })).not.toBeInTheDocument();
+    expect(within(table).queryByRole("link", { name: "Promise for CN-30002" })).not.toBeInTheDocument();
+    expect(within(table).queryByRole("link", { name: "Deduction on CN-30002" })).not.toBeInTheDocument();
+  });
+
   it("shows the empty state and the error state", async () => {
     server.handler = () => json(200, { items: [] });
     const first = renderAt("/receivables/open-items");
@@ -221,6 +244,28 @@ describe("Payment detail", () => {
     expect(new Headers(call.init.headers).get("If-Match")).toBe('"1"');
     expect(idempotencyKey(call)).toBeTruthy();
     expect(call.body).toEqual({ settlements: [{ openItemId: ITEM, amount: "980.00", cashDiscount: "20.00", writeOff: "0" }], onAccount: "0.00" });
+  });
+
+  it("offers only debit items as apply targets, never a credit note or unapplied payment", async () => {
+    const credit: OpenItem = {
+      ...item,
+      id: "0190f0a0-0000-7000-8000-000000000403",
+      sourceType: "CREDIT_NOTE",
+      documentNumber: "CN-30003",
+      amount: "-75.00",
+      openAmount: "-75.00",
+      side: "CREDIT",
+    };
+    server.handler = (url) => {
+      if (url.pathname.endsWith(`/payments/${PAY}`)) return json(200, payment);
+      if (url.pathname.endsWith("/open-items")) return json(200, { items: [{ ...item, side: "DEBIT" }, credit] });
+      return undefined;
+    };
+    renderAt(`/receivables/payments/${PAY}`);
+    const table = await findTable({ name: "Open items to settle" });
+    await waitFor(() => expect(table).toHaveTextContent("INV-30001"));
+    expect(table).not.toHaveTextContent("CN-30003");
+    expect(screen.queryByLabelText("Apply for CN-30003")).not.toBeInTheDocument();
   });
 
   it("explains a stale version and blocks a plan above the unapplied amount", async () => {

@@ -64,6 +64,8 @@ func New(s store.Store) *API { return &API{store: s} }
 func (a *API) Register(r chi.Router) {
 	r.Route("/v1/receivables", func(r chi.Router) {
 		r.With(authz.RequireDuty(dutyView)).Get("/open-items", a.listOpenItems)
+		r.With(authz.RequireDuty(dutyOpeningImport)).Post("/open-items:batch", a.importOpeningItems)
+		r.With(authz.RequireDuty(dutyView)).Get("/open-item-imports", a.listOpeningImports)
 		r.With(authz.RequireDuty(dutyView)).Get("/aging", a.aging)
 		r.With(authz.RequireDuty(dutyPayment)).Post("/payments", a.createPayment)
 		r.With(authz.RequireDuty(dutyView)).Get("/payments", a.listPayments)
@@ -406,7 +408,12 @@ func (a *API) listOpenItems(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := a.store.ListOpenItems(r.Context(), store.OpenItemFilter{CustomerID: customer, OpenOnly: status == "open"}, limit)
+	source := q.Get("importSource")
+	if source != "" && !domain.ImportSourceName.MatchString(source) {
+		badQuery(w, r, "importSource", "must name a legacy system, as sent to open-items:batch")
+		return
+	}
+	items, err := a.store.ListOpenItems(r.Context(), store.OpenItemFilter{CustomerID: customer, OpenOnly: status == "open", ImportSource: source}, limit)
 	if err != nil {
 		a.fail("list open items", w, r, err)
 		return

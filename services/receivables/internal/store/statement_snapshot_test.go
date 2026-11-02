@@ -54,7 +54,10 @@ func TestStatement_AsOfDatesDeductionsAndUnappliedCash(t *testing.T) {
 	now := time.Now().UTC()
 	todayText := now.Format(dateLayout)
 	a := seedDoc(t, s, ctx, "INV-S1", custA, "2026-01-05", "2026-02-04", "1000.00", "USD")
-	seedDoc(t, s, ctx, "INV-S2", custA, now.AddDate(0, 0, -1).Format(dateLayout), now.AddDate(0, 0, 30).Format(dateLayout), "500.00", "USD")
+	// INV-S2 is dated two days back, not one: the deduction line below takes its
+	// date from created_at::date in the database session's time zone, which can be
+	// yesterday in UTC terms, and a tie on the date would reorder the lines.
+	seedDoc(t, s, ctx, "INV-S2", custA, now.AddDate(0, 0, -2).Format(dateLayout), now.AddDate(0, 0, 30).Format(dateLayout), "500.00", "USD")
 	seedDoc(t, s, ctx, "INV-S3", custA, "2026-01-10", "2026-02-09", "250.00", "EUR")
 	seedDoc(t, s, ctx, "INV-OTHER", custB, "2026-01-05", "2026-02-04", "999.00", "USD")
 
@@ -102,7 +105,7 @@ func TestStatement_AsOfDatesDeductionsAndUnappliedCash(t *testing.T) {
 		t.Errorf("closing %s, due dates %v / %v; want 800 and no due date on the deduction and the payment",
 			usd.ClosingBalance, usd.Lines[2].DueDate, usd.Lines[3].DueDate)
 	}
-	// The aging footer covers the debits only: INV-S1 is long overdue, INV-S2 is current.
+	// The aging footer covers the dated items only: INV-S1 is long overdue, INV-S2 is current.
 	if len(usd.Aging) != 2 || usd.Aging[0].Bucket != domain.BucketCurrent || !usd.Aging[0].Amount.Equal(amt("500")) ||
 		usd.Aging[1].Bucket != domain.BucketOver180 || !usd.Aging[1].Amount.Equal(amt("100")) {
 		t.Errorf("aging = %+v", usd.Aging)

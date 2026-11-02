@@ -108,7 +108,7 @@ func scanDunnable(row rowScanner) (domain.DunnableItem, error) {
 // loadDunnable reads every open item of a legal entity for dunning and interest.
 func loadDunnable(ctx context.Context, tx pgx.Tx, legalEntityID string) ([]domain.DunnableItem, error) {
 	rows, err := tx.Query(ctx, `select `+dunnableColumns+dunnableFrom+`
-		where oi.legal_entity_id = $1 and oi.status in `+openStatuses+` order by oi.due_date, oi.id`, legalEntityID)
+		where oi.legal_entity_id = $1 and oi.status in `+openStatuses+` and oi.amount > 0 order by oi.due_date, oi.id`, legalEntityID)
 	if err != nil {
 		return nil, err
 	}

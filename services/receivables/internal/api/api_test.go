@@ -31,6 +31,7 @@ type fakeStore struct {
 	seenFiles   map[string]bool
 	statement   statementCall
 	snapshots   store.SnapshotFilter
+	opening     store.OpeningImport
 }
 
 func (f *fakeStore) CreateOpenItem(context.Context, store.OpenItem) (store.OpenItem, error) {
@@ -101,6 +102,27 @@ func (f *fakeStore) ListDunningRuns(context.Context, string, int) ([]store.Dunni
 }
 func (f *fakeStore) ListInterestNotes(context.Context, string, int) ([]store.InterestNote, error) {
 	return []store.InterestNote{}, nil
+}
+func (f *fakeStore) ImportOpeningItems(_ context.Context, in store.OpeningImport) (store.OpeningImportResult, error) {
+	f.opening = in
+	out := store.OpeningImportResult{LegalEntityID: in.LegalEntityID, ImportSource: in.ImportSource, Atomic: in.Atomic, Committed: true, Results: []store.OpeningRowResult{}}
+	for i, it := range in.Items {
+		res := store.OpeningRowResult{Index: i, LegacyKey: it.Row.LegacyKey, Outcome: store.OutcomeCreated}
+		if it.RejectCode != "" {
+			res.Outcome, res.Code, res.Detail = store.OutcomeRejected, it.RejectCode, it.RejectDetail
+			out.Rejected++
+		} else {
+			out.Created++
+		}
+		out.Results = append(out.Results, res)
+	}
+	if in.Atomic && out.Rejected > 0 {
+		out.Committed = false
+	}
+	return out, nil
+}
+func (f *fakeStore) ListOpeningImports(context.Context, int) ([]store.OpeningImportSummary, error) {
+	return []store.OpeningImportSummary{}, nil
 }
 func (f *fakeStore) ListLockboxBatches(context.Context, int) ([]store.LockboxBatch, error) {
 	return []store.LockboxBatch{}, nil

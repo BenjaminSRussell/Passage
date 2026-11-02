@@ -56,18 +56,20 @@ func BucketFor(asOf, due time.Time) Bucket {
 	}
 }
 
-// Age sums open amounts per currency and bucket. Zero buckets are omitted.
+// Age sums open amounts per currency and bucket. Credit-side rows (negative open
+// amounts, FR-30.1) net against the debits of their bucket, and a bucket holding
+// only credits is negative; only buckets that sum to zero are omitted.
 func Age(asOf time.Time, rows []AgingRow) []AgingTotal {
 	sums := map[[2]string]decimal.Decimal{}
 	for _, r := range rows {
-		if !r.OpenAmount.IsPositive() {
-			continue
-		}
 		k := [2]string{r.Currency, string(BucketFor(asOf, r.DueDate))}
 		sums[k] = sums[k].Add(r.OpenAmount)
 	}
 	out := make([]AgingTotal, 0, len(sums))
 	for k, v := range sums {
+		if v.IsZero() {
+			continue
+		}
 		out = append(out, AgingTotal{Currency: k[0], Bucket: Bucket(k[1]), Amount: v})
 	}
 	rank := map[Bucket]int{}

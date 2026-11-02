@@ -55,7 +55,7 @@ func TestStatement_RejectsBadQueriesAndChecksDutyAndScope(t *testing.T) {
 		"/v1/receivables/statements?customer=" + testItem:                       "legalEntityId",
 		"/v1/receivables/statements?legalEntityId=" + testLE:                    "customer",
 		"/v1/receivables/statements?legalEntityId=" + testLE + "&customer=nope": "customer",
-		base + "&asOf=31-03-2027":                                                   "asOf",
+		base + "&asOf=31-03-2027":                                               "asOf",
 	} {
 		rec := do(h, http.MethodGet, path, "", "ARView", nil)
 		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"`+field+`"`) {

@@ -40,6 +40,11 @@ export interface OpenItem {
   dunningBlock: boolean;
   status: string;
   version: number;
+  /** CREDIT items (credit notes, unapplied payments) carry negative amounts. */
+  side?: "DEBIT" | "CREDIT";
+  /** Set when the migration loader's opening-item import created the item. */
+  importSource?: string;
+  legacyKey?: string;
 }
 
 export interface RemittanceLine {
@@ -217,12 +222,34 @@ export async function fetchAging(asOf?: string, signal?: AbortSignal): Promise<A
 export interface OpenItemFilter {
   customer?: string;
   status?: "open" | "all";
+  importSource?: string;
   limit?: number;
 }
 
 /** GET /open-items - ordered by due date. */
 export function listOpenItems(filter: OpenItemFilter = {}, signal?: AbortSignal): Promise<OpenItem[]> {
-  return items<OpenItem>(`/open-items${query({ customer: filter.customer, status: filter.status, limit: filter.limit })}`, signal);
+  return items<OpenItem>(
+    `/open-items${query({ customer: filter.customer, status: filter.status, importSource: filter.importSource, limit: filter.limit })}`,
+    signal,
+  );
+}
+
+/** What one import source loaded into a legal entity, per currency (GET /open-item-imports). */
+export interface OpeningImportSummary {
+  importSource: string;
+  legalEntityId: string;
+  currency: string;
+  itemCount: number;
+  debitCount: number;
+  creditCount: number;
+  debitOpen: string;
+  creditOpen: string;
+  netOpen: string;
+  lastImportedAt?: string;
+}
+
+export function listOpeningImports(signal?: AbortSignal): Promise<OpeningImportSummary[]> {
+  return items<OpeningImportSummary>("/open-item-imports", signal);
 }
 
 export interface PaymentFilter {

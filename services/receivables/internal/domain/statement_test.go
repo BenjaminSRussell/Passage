@@ -40,10 +40,33 @@ func TestBuildStatement_RunningBalanceGroupingAndCredits(t *testing.T) {
 	if usd.ClosingBalance.String() != "950" || got[0].ClosingBalance.String() != "250" {
 		t.Errorf("closing = %s / %s, want 950 USD and 250 EUR", usd.ClosingBalance, got[0].ClosingBalance)
 	}
-	// The aging footer covers debits only: INV-1 is 50 days overdue, INV-2 is current.
+	// The aging footer covers the dated items only (the payment has no due date):
+	// INV-1 is 50 days overdue, INV-2 is current.
 	if len(usd.Aging) != 2 || usd.Aging[0].Bucket != BucketCurrent || usd.Aging[0].Amount.String() != "500" ||
 		usd.Aging[1].Bucket != Bucket31to60 || usd.Aging[1].Amount.String() != "600" {
 		t.Errorf("USD aging = %+v, want CURRENT 500 and 31-60 600", usd.Aging)
+	}
+}
+
+// FR-30.1: a credit-side open item (an imported credit note) carries a due date
+// and ages as a negative amount in its own bucket, netting with the debits there.
+func TestBuildStatement_CreditItemAgesNegative(t *testing.T) {
+	asOf := time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC)
+	d := func(m time.Month, day int) time.Time { return time.Date(2027, m, day, 0, 0, 0, 0, time.UTC) }
+	due := func(t time.Time) *time.Time { return &t }
+	dec := decimal.RequireFromString
+	docs := []StatementCandidate{
+		{SourceType: "INVOICE", DocumentNumber: "INV-1", DocumentDate: d(3, 1), DueDate: due(d(4, 15)), Currency: "USD", Amount: dec("400"), OpenAsOf: dec("400")},
+		{SourceType: "CREDIT_NOTE", DocumentNumber: "CN-1", DocumentDate: d(1, 5), DueDate: due(d(1, 5)), Currency: "USD", Amount: dec("-90"), OpenAsOf: dec("-90")},
+	}
+	got := BuildStatement(asOf, docs)
+	if len(got) != 1 || !got[0].ClosingBalance.Equal(dec("310")) {
+		t.Fatalf("sections = %+v, want one USD section closing at 310", got)
+	}
+	aging := got[0].Aging
+	if len(aging) != 2 || aging[0].Bucket != BucketCurrent || !aging[0].Amount.Equal(dec("400")) ||
+		aging[1].Bucket != Bucket61to90 || !aging[1].Amount.Equal(dec("-90")) {
+		t.Errorf("aging = %+v, want CURRENT 400 and 61-90 -90", aging)
 	}
 }
 

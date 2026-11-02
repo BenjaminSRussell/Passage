@@ -24,6 +24,7 @@ paths:
       parameters:
         - { name: customer, in: query, schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { type: string, enum: [open, all], default: open } }
+        - { name: importSource, in: query, description: Only items loaded by this opening-item import source, schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 500 } }
       responses:
         "200":
@@ -176,6 +177,78 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/open-items:batch:
+    post:
+      operationId: importOpeningItems
+      summary: Load a cutover snapshot of open items from a legacy system (migration loader)
+      description: |
+        Called by the ERP migration loader at cutover (integration handoff H5). One batch carries up to 1000
+        open items of one legal entity from one legacy system (`importSource`). Each row is keyed by
+        (`importSource`, `legacyKey`), so the call is re-runnable: a new key creates the item, a known key
+        whose item is untouched in Passage updates it to the snapshot (open amount, dates, document number;
+        an identical row stores nothing and is reported UNCHANGED), and a known key whose item was settled,
+        partly settled, cleared or deducted in Passage (ever, even if later reversed) is refused with
+        AR-OPENING-SETTLED, because the snapshot no longer describes it; one with an active dispute or a
+        promise to pay that still holds is refused with AR-OPENING-IN-COLLECTION. A known key cannot move to
+        another legal entity, customer, currency, kind or side (AR-OPENING-IDENTITY, also when the key was
+        loaded into a legal entity outside the caller's scope). The legacy open amount may be below the
+        original amount (a partial payment made in the legacy system).
+
+        Amounts are magnitudes; `side` gives the sign. INVOICE is a DEBIT; CREDIT_NOTE and PAYMENT (an
+        unapplied payment) are CREDIT; ADJUSTMENT may be either. Credit-side items are stored with negative
+        amounts, so balances, aging, statements, the worklist and the balance snapshot net them against
+        debits; they are not matched, dunned, or settled against debits yet.
+
+        Results are per row, in request order. With `atomic=false` (default) a refused row never blocks the
+        others and the call answers 200 (201 when every row was created); with `atomic=true` one refused row
+        refuses the batch: 422, nothing stored, every row reported. One `openitem.imported.v1` is written
+        to the outbox in the same transaction when anything was created or updated. The caller must hold the
+        service duty `receivables.import.write` and the legal entity must be inside its scope.
+      x-passage-duty: receivables.import.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OpeningImportRequest" }
+      responses:
+        "200":
+          description: Batch processed; refused rows are listed with their code
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OpeningImportResult" }
+        "201":
+          description: Every row was created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OpeningImportResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422":
+          description: Atomic batch refused; nothing was stored and every row is reported (`committed` false)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OpeningImportResult" }
+  /v1/receivables/open-item-imports:
+    get:
+      operationId: listOpeningImports
+      summary: What each import source loaded, per legal entity and currency
+      description: Totals of the imported items still in Passage, for the reconciliation against the legacy ledger at cutover.
+      x-passage-duty: ARView
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Import totals, most recently loaded first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/OpeningImportSummary" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
   /v1/receivables/lockbox/imports:
     get:
       operationId: listLockboxImports
@@ -1589,8 +1662,8 @@ components:
         customerId: { type: string, format: uuid }
         currency: { type: string, pattern: "^[A-Z]{3}$" }
         asOf: { type: string, format: date }
-        totalOpen: { $ref: "#/components/schemas/Money" }
-        overdue: { $ref: "#/components/schemas/Money" }
+        totalOpen: { allOf: [{ $ref: "#/components/schemas/Money" }], description: "Open debits less open credits (credit notes, unapplied payments); negative when the customer is net in credit." }
+        overdue: { allOf: [{ $ref: "#/components/schemas/Money" }], description: "The overdue debits the credits leave open (credits clear the oldest debits first); never negative." }
         oldestItemDays: { type: integer, minimum: 0 }
         dunningLevel: { type: integer, minimum: 0, maximum: 4 }
         riskScore: { type: integer, minimum: 0, maximum: 100 }
@@ -1661,6 +1734,84 @@ components:
         dunningBlock: { type: boolean }
         status: { type: string }
         version: { type: integer }
+        side: { type: string, enum: [DEBIT, CREDIT], description: "CREDIT items (credit notes, unapplied payments) carry negative amounts" }
+        importSource: { type: string, description: the legacy system that loaded the item }
+        legacyKey: { type: string, description: the item's key in the legacy system }
+    OpeningImportRequest:
+      type: object
+      required: [legalEntityId, importSource, items]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        importSource: { type: string, maxLength: 40, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$", description: "legacy system label, e.g. SAP-PRD" }
+        atomic: { type: boolean, default: false, description: "true stores nothing unless every row is accepted" }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items: { $ref: "#/components/schemas/OpeningItem" }
+    OpeningItem:
+      type: object
+      required: [legacyKey, documentNumber, customerId, kind, side, documentDate, dueDate, currency, originalAmount, openAmount]
+      properties:
+        legacyKey: { type: string, maxLength: 120, description: "the row's key in the legacy system; unique per importSource" }
+        documentNumber: { type: string, maxLength: 60, description: "legacy document number; unique per legal entity" }
+        customerId: { type: string, format: uuid, description: the Passage customer the loader resolved }
+        kind: { type: string, enum: [INVOICE, CREDIT_NOTE, PAYMENT, ADJUSTMENT] }
+        side: { type: string, enum: [DEBIT, CREDIT] }
+        documentDate: { type: string, format: date }
+        dueDate: { type: string, format: date }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        originalAmount: { $ref: "#/components/schemas/Money" }
+        openAmount: { $ref: "#/components/schemas/Money" }
+        cashDiscountDate: { type: [string, "null"], format: date }
+        cashDiscountAmount: { $ref: "#/components/schemas/Money" }
+    OpeningImportResult:
+      type: object
+      required: [batchId, legalEntityId, importSource, atomic, committed, created, updated, unchanged, rejected, results]
+      properties:
+        batchId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        importSource: { type: string }
+        atomic: { type: boolean }
+        committed: { type: boolean }
+        created: { type: integer }
+        updated: { type: integer }
+        unchanged: { type: integer }
+        rejected: { type: integer }
+        results:
+          type: array
+          items:
+            type: object
+            required: [index, legacyKey, outcome]
+            properties:
+              index: { type: integer, description: position in the request }
+              legacyKey: { type: string }
+              outcome: { type: string, enum: [CREATED, UPDATED, UNCHANGED, REJECTED] }
+              openItemId: { type: string, format: uuid }
+              code:
+                type: string
+                description: |
+                  AR-OPENING-INVALID (a field failed validation), AR-OPENING-DUPLICATE-KEY (repeated in the batch),
+                  AR-OPENING-IDENTITY (legal entity, customer, currency, kind or side differ from the loaded item),
+                  AR-OPENING-SETTLED (settled, paid, cleared, deducted or changed in Passage),
+                  AR-OPENING-IN-COLLECTION (an active dispute or a holding promise to pay), AR-OPENING-DOCUMENT-EXISTS
+                  (document number taken by another item in the legal entity) or AR-OPENING-REJECTED (atomic batch
+                  refused elsewhere)
+              detail: { type: string }
+    OpeningImportSummary:
+      type: object
+      required: [importSource, legalEntityId, currency, itemCount, debitCount, creditCount, debitOpen, creditOpen, netOpen]
+      properties:
+        importSource: { type: string }
+        legalEntityId: { type: string, format: uuid }
+        currency: { type: string }
+        itemCount: { type: integer }
+        debitCount: { type: integer }
+        creditCount: { type: integer }
+        debitOpen: { $ref: "#/components/schemas/Money" }
+        creditOpen: { $ref: "#/components/schemas/Money", description: "negative" }
+        netOpen: { $ref: "#/components/schemas/Money" }
+        lastImportedAt: { type: string, format: date-time }
     AgingTotal:
       type: object
       properties:
@@ -1746,12 +1897,12 @@ components:
           items: { $ref: "#/components/schemas/Payment" }
     CustomerRisk:
       type: object
-      description: One customer and currency row of the collections worklist.
+      description: One customer and currency row of the collections worklist, listed when the customer has an open debit in the currency.
       properties:
         customerId: { type: string, format: uuid }
         currency: { type: string, pattern: "^[A-Z]{3}$" }
-        totalOpen: { $ref: "#/components/schemas/Money" }
-        overdue: { $ref: "#/components/schemas/Money" }
+        totalOpen: { allOf: [{ $ref: "#/components/schemas/Money" }], description: "Open debits less open credits; negative when the credits exceed the debits." }
+        overdue: { allOf: [{ $ref: "#/components/schemas/Money" }], description: "The overdue debits the credits leave open (credits clear the oldest debits first)." }
         oldestDays: { type: integer }
         avgDaysLate: { type: integer }
         dunningLevel: { type: integer, minimum: 0, maximum: 4 }

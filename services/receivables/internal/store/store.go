@@ -72,12 +72,20 @@ type OpenItem struct {
 	DunningBlock       bool            `json:"dunningBlock"`
 	Status             string          `json:"status"`
 	Version            int             `json:"version"`
+	// Side is DEBIT for an invoice-like item and CREDIT for a credit note or an
+	// unapplied payment, which carry negative amounts (FR-30.1).
+	Side string `json:"side"`
+	// ImportSource and LegacyKey identify an item loaded by the opening-item
+	// import (the legacy system and the row's key there).
+	ImportSource *string `json:"importSource,omitempty"`
+	LegacyKey    *string `json:"legacyKey,omitempty"`
 }
 
 // OpenItemFilter narrows an open item read.
 type OpenItemFilter struct {
-	CustomerID string
-	OpenOnly   bool
+	CustomerID   string
+	OpenOnly     bool
+	ImportSource string
 }
 
 // PaymentFilter narrows a payment list.
@@ -156,6 +164,8 @@ type Store interface {
 	CalculateInterest(ctx context.Context, req InterestRequest) (InterestResult, error)
 	PostInterest(ctx context.Context, req InterestRequest, idempotencyKey string) (InterestResult, error)
 	ListInterestNotes(ctx context.Context, customerID string, limit int) ([]InterestNote, error)
+	ImportOpeningItems(ctx context.Context, in OpeningImport) (OpeningImportResult, error)
+	ListOpeningImports(ctx context.Context, limit int) ([]OpeningImportSummary, error)
 	ImportLockbox(ctx context.Context, in LockboxImport) (LockboxBatch, error)
 	ListLockboxBatches(ctx context.Context, limit int) ([]LockboxBatch, error)
 	Worklist(ctx context.Context, legalEntityID string, asOf time.Time) ([]domain.CustomerRisk, error)
@@ -202,7 +212,7 @@ func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
 const openItemColumns = `id, legal_entity_id, customer_id, source_type, document_number, document_date::text, due_date::text,
-	currency, amount::text, open_amount::text, cash_discount_date::text, cash_discount_amount::text, dunning_level, dunning_block, status, version`
+	currency, amount::text, open_amount::text, cash_discount_date::text, cash_discount_amount::text, dunning_level, dunning_block, status, version, import_source, legacy_key`
 
 const paymentColumns = `id, legal_entity_id, customer_id, payment_mode, source, source_ref, amount::text, unapplied_amount::text,
 	currency, received_date::text, value_date::text, payer_name, remittance, status, version, payer_account_hash, short_pay_reason`
@@ -213,7 +223,8 @@ func scanOpenItem(row rowScanner) (OpenItem, error) {
 	var o OpenItem
 	var amount, open, discount string
 	if err := row.Scan(&o.ID, &o.LegalEntityID, &o.CustomerID, &o.SourceType, &o.DocumentNumber, &o.DocumentDate, &o.DueDate,
-		&o.Currency, &amount, &open, &o.CashDiscountDate, &discount, &o.DunningLevel, &o.DunningBlock, &o.Status, &o.Version); err != nil {
+		&o.Currency, &amount, &open, &o.CashDiscountDate, &discount, &o.DunningLevel, &o.DunningBlock, &o.Status, &o.Version,
+		&o.ImportSource, &o.LegacyKey); err != nil {
 		return OpenItem{}, err
 	}
 	var err error
@@ -225,6 +236,10 @@ func scanOpenItem(row rowScanner) (OpenItem, error) {
 	}
 	if o.CashDiscountAmount, err = decimal.NewFromString(discount); err != nil {
 		return OpenItem{}, err
+	}
+	o.Side = "DEBIT"
+	if o.Amount.IsNegative() {
+		o.Side = "CREDIT"
 	}
 	return o, nil
 }
@@ -292,7 +307,8 @@ func (s *Postgres) ListOpenItems(ctx context.Context, f OpenItemFilter, limit in
 		rows, err := tx.Query(ctx, `select `+openItemColumns+` from open_item
 			where ($1::text = '' or customer_id::text = $1::text)
 			and (not $2::bool or status in `+openStatuses+`)
-			order by due_date, id limit $3`, f.CustomerID, f.OpenOnly, limit)
+			and ($4::text = '' or import_source = $4::text)
+			order by due_date, id limit $3`, f.CustomerID, f.OpenOnly, limit, f.ImportSource)
 		if err != nil {
 			return err
 		}
@@ -465,6 +481,7 @@ func (s *Postgres) MatchPayment(ctx context.Context, id string) (domain.Result, 
 		}
 		rows, err := tx.Query(ctx, `select `+openItemColumns+` from open_item
 			where legal_entity_id = $1 and currency = $2 and ($3::text = '' or customer_id::text = $3::text) and status in `+openStatuses+`
+			and amount > 0
 			order by (length(document_number) >= $5 and strpos($6::text, upper(document_number)) > 0) desc, due_date, id limit $4`,
 			pay.LegalEntityID, pay.Currency, customer, MatchPoolLimit, domain.MaxRefLength, strings.ToUpper(strings.Join(refs, " ")))
 		if err != nil {
@@ -662,8 +679,21 @@ func appliable(status string) bool {
 	return status == "RECEIVED" || status == "SUGGESTED" || status == "ON_ACCOUNT"
 }
 
-// lockOpenItem reads one open item under a NOWAIT row lock (BR-30.7).
+// lockOpenItem reads one debit-side open item under a NOWAIT row lock (BR-30.7).
+// A credit-side item (credit note, unapplied payment) is refused: settling
+// credits against debits is a later slice (AR-0019).
 func lockOpenItem(ctx context.Context, tx pgx.Tx, id string) (OpenItem, error) {
+	item, err := lockAnyOpenItem(ctx, tx, id)
+	if err != nil {
+		return OpenItem{}, err
+	}
+	if item.Amount.IsNegative() {
+		return OpenItem{}, domainProblem(domain.CodeCreditItem, "open item "+item.DocumentNumber+" is a credit; credits are not settled by this operation")
+	}
+	return item, nil
+}
+
+func lockAnyOpenItem(ctx context.Context, tx pgx.Tx, id string) (OpenItem, error) {
 	item, err := scanOpenItem(tx.QueryRow(ctx, `select `+openItemColumns+` from open_item where id = $1 for update nowait`, id))
 	if err == nil {
 		return item, nil

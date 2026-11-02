@@ -14,7 +14,8 @@ import (
 var CustomerBalanceChanged = events.Type(Context, "customerbalance", "changed", 1)
 
 // CustomerBalanceChangedData is the payload of dev.passage.receivables.customerbalance.changed.v1
-// (customer_id, balance, overdue, oldest_item_days, dunning_level, risk_score).
+// (customer_id, balance, overdue, oldest_item_days, dunning_level, risk_score). The
+// balance is net of credit-side open items and is negative for a customer in credit.
 type CustomerBalanceChangedData struct {
 	LegalEntityID  string          `json:"legal_entity_id"`
 	CustomerID     string          `json:"customer_id"`

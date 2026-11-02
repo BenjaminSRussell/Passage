@@ -24,6 +24,7 @@ describe("receivables module", () => {
     expect(receivables.routes.map((r) => r.path)).toEqual([
       "/receivables",
       "/receivables/open-items",
+      "/receivables/opening-items",
       "/receivables/payments",
       "/receivables/payments/new",
       "/receivables/payments/:id",

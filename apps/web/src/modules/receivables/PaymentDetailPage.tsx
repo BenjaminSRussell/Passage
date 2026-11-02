@@ -90,7 +90,12 @@ export function PaymentDetailPage() {
   const state = useLoad<Loaded>(async (signal) => {
     const payment = await getPayment(id, signal);
     const items = await listOpenItems({ customer: payment.customerId ?? "", status: "open" }, signal);
-    return { payment, items: items.filter((i) => i.currency === payment.currency && i.legalEntityId === payment.legalEntityId) };
+    // A payment applies to debits only: credit-side items (credit notes, unapplied
+    // payments) are refused by the service (AR-CREDIT-ITEM).
+    return {
+      payment,
+      items: items.filter((i) => i.side !== "CREDIT" && i.currency === payment.currency && i.legalEntityId === payment.legalEntityId),
+    };
   }, id);
   const [plan, setPlan] = useState<Plan>({});
   const [match, setMatch] = useState<MatchResult | null>(null);

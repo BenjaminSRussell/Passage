@@ -27,8 +27,10 @@ const columns: DataTableColumn<OpenItem>[] = [
   {
     key: "collections",
     header: "Collections",
+    // Credit-side items (credit notes, unapplied payments) are not disputed,
+    // promised or deducted; the service refuses those moves on them.
     render: (row) =>
-      row.status === "OPEN" || row.status === "PARTIALLY_SETTLED" ? (
+      row.side !== "CREDIT" && (row.status === "OPEN" || row.status === "PARTIALLY_SETTLED") ? (
         <span className={styles.actions}>
           <Link className={buttonClassName("ghost", "sm")} to={`/receivables/disputes/new?${collectionParams(row)}`} aria-label={`Dispute ${row.documentNumber}`}>
             Dispute

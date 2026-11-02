@@ -49,3 +49,30 @@ func TestAge_SumsPerCurrencyAndBucket(t *testing.T) {
 		}
 	}
 }
+
+// FR-30.1: a credit-side item nets against the debits of its bucket, and one
+// with no debit in its bucket ages as a negative total; a bucket the credits
+// clear to zero is omitted.
+func TestAge_CreditsNetAndAgeOnTheirOwn(t *testing.T) {
+	asOf := day("2027-03-31")
+	rows := []AgingRow{
+		{Currency: "USD", DueDate: day("2027-03-20"), OpenAmount: amt("100.00")},
+		{Currency: "USD", DueDate: day("2027-03-10"), OpenAmount: amt("-40.00")},
+		{Currency: "USD", DueDate: day("2026-12-01"), OpenAmount: amt("-25.00")},
+		{Currency: "EUR", DueDate: day("2027-04-10"), OpenAmount: amt("30.00")},
+		{Currency: "EUR", DueDate: day("2027-04-12"), OpenAmount: amt("-30.00")},
+	}
+	got := Age(asOf, rows)
+	want := []AgingTotal{
+		{Currency: "USD", Bucket: Bucket1to30, Amount: amt("60.00")},
+		{Currency: "USD", Bucket: Bucket91to180, Amount: amt("-25.00")},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d totals, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i].Currency != want[i].Currency || got[i].Bucket != want[i].Bucket || !got[i].Amount.Equal(want[i].Amount) {
+			t.Errorf("row %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
