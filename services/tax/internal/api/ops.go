@@ -27,6 +27,7 @@ const (
 	dutySettle             = "tax.settlement.run"
 	dutyRecommit           = "tax.recommit.run"
 	dutySAFT               = "tax.saft.export"
+	dutyLedgerConfig       = "tax.ledgerconfig.manage"
 
 	codeNotConfigured     = "COM-0503"
 	codeLedgerUnavailable = "COM-0502"
@@ -42,7 +43,8 @@ var accountPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,20}$`)
 
 type Store interface {
 	RecordTransactions(ctx context.Context, txns []domain.Txn) (int, error)
-	SettleRun(ctx context.Context, in store.SettleInput, gl domain.GLMovement) (store.Run, error)
+	SetLedgerConfig(ctx context.Context, cfg store.LedgerConfig) error
+	SettleRun(ctx context.Context, period domain.Period, newGL func(store.LedgerConfig) domain.GLMovement) (store.Run, error)
 	Totals(ctx context.Context, period domain.Period) ([]store.Total, error)
 	EnqueueRecommit(ctx context.Context, provider, reason string, request json.RawMessage) (string, error)
 	Recommit(ctx context.Context, limit int, process func(context.Context, store.Recommit) (json.RawMessage, error)) (store.RecommitSummary, error)
@@ -121,22 +123,25 @@ func (a *API) recordTransactions(w http.ResponseWriter, r *http.Request) {
 }
 
 type settleRequest struct {
-	PeriodFrom domain.Date       `json:"period_from"`
-	PeriodTo   domain.Date       `json:"period_to"`
-	LedgerID   string            `json:"ledger_id"`
-	Accounts   map[string]string `json:"accounts"`
+	PeriodFrom domain.Date `json:"period_from"`
+	PeriodTo   domain.Date `json:"period_to"`
 }
 
 func (req settleRequest) validate() error {
-	switch {
-	case req.PeriodFrom.IsZero() || req.PeriodTo.IsZero() || req.PeriodTo.Before(req.PeriodFrom.Time):
+	if req.PeriodFrom.IsZero() || req.PeriodTo.IsZero() || req.PeriodTo.Before(req.PeriodFrom.Time) {
 		return invalid("period_from", "period_from and period_to are required and period_to may not precede period_from")
-	case !ids.Valid(req.LedgerID):
+	}
+	return nil
+}
+
+func validateLedgerConfig(cfg store.LedgerConfig) error {
+	if !ids.Valid(cfg.LedgerID) {
 		return invalid("ledger_id", "ledger_id must be a UUID")
-	case len(req.Accounts) == 0:
+	}
+	if len(cfg.Accounts) == 0 {
 		return invalid("accounts", "accounts must map every settled code|direction to its GL tax account")
 	}
-	for key, account := range req.Accounts {
+	for key, account := range cfg.Accounts {
 		code, direction, found := strings.Cut(key, "|")
 		if !found || code == "" || !validDirection(direction) {
 			return invalid("accounts", "account key %q must be code|direction", key)
@@ -146,6 +151,26 @@ func (req settleRequest) validate() error {
 		}
 	}
 	return nil
+}
+
+func (a *API) setLedgerConfig(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) || !a.storeReady(w, r) {
+		return
+	}
+	var cfg store.LedgerConfig
+	if err := httpx.Decode(r, &cfg); err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	if err := validateLedgerConfig(cfg); err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	if err := a.store.SetLedgerConfig(r.Context(), cfg); err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, cfg)
 }
 
 func (a *API) settle(w http.ResponseWriter, r *http.Request) {
@@ -166,8 +191,10 @@ func (a *API) settle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, _ := tenant.FromContext(r.Context())
-	gl := ledger.GL{Client: a.ledger, LegalEntityID: p.LegalEntityID, LedgerID: req.LedgerID, Accounts: req.Accounts}
-	run, err := a.store.SettleRun(r.Context(), store.SettleInput{Period: domain.Period{From: req.PeriodFrom, To: req.PeriodTo}, Accounts: req.Accounts}, gl)
+	newGL := func(cfg store.LedgerConfig) domain.GLMovement {
+		return ledger.GL{Client: a.ledger, LegalEntityID: p.LegalEntityID, LedgerID: cfg.LedgerID, Accounts: cfg.Accounts}
+	}
+	run, err := a.store.SettleRun(r.Context(), domain.Period{From: req.PeriodFrom, To: req.PeriodTo}, newGL)
 	if err != nil {
 		a.reject(w, r, err)
 		return

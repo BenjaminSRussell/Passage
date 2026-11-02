@@ -92,9 +92,9 @@ func Settle(ctx context.Context, txns []Txn, period Period, priorVersion int, gl
 		if b := buckets[k]; b != nil {
 			recorded = b.all
 		}
-		if diff := recorded.Sub(movements[k]); !diff.IsZero() {
+		if !recorded.Equal(movements[k]) {
 			return Settlement{}, &Error{Code: CodeSettlementMismatch, Field: k, Detail: fmt.Sprintf(
-				"Settlement %s differs from GL tax account movement %s by %s for %s.", recorded, movements[k], diff, k)}
+				"The recorded tax for %s does not match the general ledger tax account movement.", k)}
 		}
 	}
 	for _, k := range sortedKeys(keys) {

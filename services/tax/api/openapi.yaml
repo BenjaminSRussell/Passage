@@ -100,7 +100,8 @@ paths:
         the movement of its GL tax account read from the ledger (output tax is the credit movement, input
         tax the debit movement). The period must cover whole calendar months. Any difference is TAX-0008
         and nothing is settled. Open transactions are then marked with the new run (a delta run when
-        earlier runs exist). No open transaction is TAX-0009. A ledger that cannot be read is 502.
+        earlier runs exist). No open transaction is TAX-0009. A ledger that cannot be read is 502. The ledger and account map come from the legal entity's stored
+        configuration (PUT /v1/tax/ledger-config); none stored is 422 COM-0503.
       requestBody:
         required: true
         content:
@@ -118,6 +119,29 @@ paths:
         "422": { $ref: "#/components/responses/Problem" }
         "502": { $ref: "#/components/responses/Problem" }
         "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/ledger-config:
+    put:
+      operationId: setTaxLedgerConfig
+      x-passage-duty: tax.ledgerconfig.manage
+      summary: Set the ledger and GL tax accounts a legal entity settles against
+      description: >-
+        Stores the ledger and the code|direction to GL account map for the request's single legal entity.
+        Settlement reads only this stored configuration, never the settlement request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LedgerConfig" }
+      responses:
+        "200":
+          description: The stored configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LedgerConfig" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
   /v1/tax/recommit:run:
     post:
       operationId: runTaxRecommit
@@ -126,7 +150,8 @@ paths:
       description: >-
         Takes the oldest pending queue entries of the request's legal entity, calculates each on its
         provider again and marks it done when the provider answers. A provider that is still down leaves the
-        entry pending with an attempt counted. Call it from the scheduler.
+        entry pending with an attempt counted; after 5 attempts the entry is marked failed and no longer
+        taken, and entries with fewer attempts are taken first. Call it from the scheduler.
       parameters:
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
       responses:
@@ -357,10 +382,14 @@ components:
               amount: { $ref: "#/components/schemas/Decimal" }
     SettleRequest:
       type: object
-      required: [period_from, period_to, ledger_id, accounts]
+      required: [period_from, period_to]
       properties:
         period_from: { $ref: "#/components/schemas/Date" }
         period_to: { $ref: "#/components/schemas/Date" }
+    LedgerConfig:
+      type: object
+      required: [ledger_id, accounts]
+      properties:
         ledger_id: { type: string, format: uuid }
         accounts:
           type: object
@@ -368,9 +397,10 @@ components:
           additionalProperties: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$' }
     SettlementRun:
       type: object
-      required: [id, version, period_from, period_to, output_tax_total, input_tax_total, net_amount, transaction_ids, lines]
+      required: [id, ledger_id, version, period_from, period_to, output_tax_total, input_tax_total, net_amount, transaction_ids, lines]
       properties:
         id: { type: string, format: uuid }
+        ledger_id: { type: string, format: uuid }
         version: { type: integer, minimum: 1 }
         period_from: { $ref: "#/components/schemas/Date" }
         period_to: { $ref: "#/components/schemas/Date" }

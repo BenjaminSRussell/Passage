@@ -34,8 +34,12 @@ var (
 	outputKey = domain.MovementKey("VAT19", domain.DirOutput)
 	inputKey  = domain.MovementKey("VAT19", domain.DirInput)
 	january   = domain.Period{From: domain.Day("2026-01-01"), To: domain.Day("2026-01-31")}
-	accounts  = map[string]string{outputKey: "2200", inputKey: "1400"}
+	config    = store.LedgerConfig{LedgerID: "7c1f6a52-0000-4000-8000-000000000001", Accounts: map[string]string{outputKey: "2200", inputKey: "1400"}}
 )
+
+func gl(m glMovements) func(store.LedgerConfig) domain.GLMovement {
+	return func(store.LedgerConfig) domain.GLMovement { return m }
+}
 
 func setup(t *testing.T) (*store.Store, *pgxpool.Pool, context.Context) {
 	t.Helper()
@@ -46,7 +50,12 @@ func setup(t *testing.T) (*store.Store, *pgxpool.Pool, context.Context) {
 	ctx := testkit.Ctx(ids.New(), "tax.settlement.run")
 	p, _ := tenant.FromContext(ctx)
 	p.LegalEntityID = ids.New()
-	return store.New(app), admin, tenant.With(ctx, p)
+	ctx = tenant.With(ctx, p)
+	s := store.New(app)
+	if err := s.SetLedgerConfig(ctx, config); err != nil {
+		t.Fatal(err)
+	}
+	return s, admin, ctx
 }
 
 func txn(date, code, direction, amount string) domain.Txn {
@@ -70,11 +79,16 @@ func TestSettleRun_ReconcilesMarksAndDeltas(t *testing.T) {
 	if n, err := s.RecordTransactions(ctx, first[:1]); err != nil || n != 0 {
 		t.Fatalf("re-recording a transaction inserted %d rows (%v)", n, err)
 	}
-	in := store.SettleInput{Period: january, Accounts: accounts}
 
-	run, err := s.SettleRun(ctx, in, glMovements{outputKey: "150.50", inputKey: "30.25"})
+	run, err := s.SettleRun(ctx, january, gl(glMovements{outputKey: "150.50", inputKey: "30.25"}))
 	if err != nil {
 		t.Fatal(err)
+	}
+	var persistedLedger string
+	var persistedAccounts map[string]string
+	if err := admin.QueryRow(context.Background(), `select ledger_id::text, accounts from tax_settlement_run where id = $1`, run.ID).Scan(&persistedLedger, &persistedAccounts); err != nil ||
+		persistedLedger != config.LedgerID || persistedAccounts[outputKey] != "2200" || run.LedgerID != config.LedgerID {
+		t.Fatalf("run did not keep its config: %q %v (%v)", persistedLedger, persistedAccounts, err)
 	}
 	if run.Version != 1 || run.NetAmount.String() != "120.25" || len(run.TransactionIDs) != 3 {
 		t.Fatalf("unexpected run %+v", run)
@@ -84,14 +98,14 @@ func TestSettleRun_ReconcilesMarksAndDeltas(t *testing.T) {
 		t.Fatalf("marked %d transactions (%v), want 3", marked, err)
 	}
 
-	if _, err := s.SettleRun(ctx, in, glMovements{outputKey: "150.50", inputKey: "30.25"}); settlementCode(err) != domain.CodeNothingToSettle {
+	if _, err := s.SettleRun(ctx, january, gl(glMovements{outputKey: "150.50", inputKey: "30.25"})); settlementCode(err) != domain.CodeNothingToSettle {
 		t.Fatalf("repeat run: %v, want %s", err, domain.CodeNothingToSettle)
 	}
 
 	if _, err := s.RecordTransactions(ctx, []domain.Txn{txn("2026-01-28", "VAT19", domain.DirOutput, "7.00")}); err != nil {
 		t.Fatal(err)
 	}
-	delta, err := s.SettleRun(ctx, in, glMovements{outputKey: "157.50", inputKey: "30.25"})
+	delta, err := s.SettleRun(ctx, january, gl(glMovements{outputKey: "157.50", inputKey: "30.25"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +119,7 @@ func TestSettleRun_MismatchRollsBackAndLeavesTransactionsOpen(t *testing.T) {
 	if _, err := s.RecordTransactions(ctx, []domain.Txn{txn("2026-01-10", "VAT19", domain.DirOutput, "100.00")}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := s.SettleRun(ctx, store.SettleInput{Period: january, Accounts: accounts}, glMovements{outputKey: "100.01"})
+	_, err := s.SettleRun(ctx, january, gl(glMovements{outputKey: "100.01"}))
 	if settlementCode(err) != domain.CodeSettlementMismatch {
 		t.Fatalf("got %v, want %s", err, domain.CodeSettlementMismatch)
 	}
@@ -116,18 +130,71 @@ func TestSettleRun_MismatchRollsBackAndLeavesTransactionsOpen(t *testing.T) {
 	}
 }
 
-func TestSettleRun_RefusesUnmappedCodeAndMissingEntity(t *testing.T) {
+func TestSettleRun_RefusesUnmappedCodeMissingConfigAndMissingEntity(t *testing.T) {
 	s, _, ctx := setup(t)
-	if _, err := s.RecordTransactions(ctx, []domain.Txn{txn("2026-01-10", "VAT19", domain.DirOutput, "1.00")}); err != nil {
+	if _, err := s.RecordTransactions(ctx, []domain.Txn{txn("2026-01-10", "VAT19", domain.DirOutput, "1.00"), txn("2026-01-10", "VAT7", domain.DirOutput, "1.00")}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SettleRun(ctx, store.SettleInput{Period: january, Accounts: map[string]string{}}, glMovements{}); settlementCode(err) != domain.CodeValidation {
+	if _, err := s.SettleRun(ctx, january, gl(glMovements{})); settlementCode(err) != domain.CodeValidation {
 		t.Fatalf("unmapped code: %v, want %s", err, domain.CodeValidation)
 	}
 	p, _ := tenant.FromContext(ctx)
+	p.LegalEntityID = ids.New()
+	if _, err := s.SettleRun(tenant.With(ctx, p), january, gl(glMovements{})); !errors.Is(err, store.ErrNoLedgerConfig) {
+		t.Fatalf("entity without config: %v", err)
+	}
 	p.LegalEntityID = ""
-	if _, err := s.SettleRun(tenant.With(ctx, p), store.SettleInput{Period: january, Accounts: accounts}, glMovements{}); !errors.Is(err, store.ErrNoLegalEntity) {
+	if _, err := s.SettleRun(tenant.With(ctx, p), january, gl(glMovements{})); !errors.Is(err, store.ErrNoLegalEntity) {
 		t.Fatalf("no legal entity: %v", err)
+	}
+}
+
+func TestRecordTransactions_IdsAreScopedToTheLegalEntity(t *testing.T) {
+	s, admin, ctx := setup(t)
+	shared := txn("2026-01-10", "VAT19", domain.DirOutput, "10.00")
+	if n, err := s.RecordTransactions(ctx, []domain.Txn{shared}); err != nil || n != 1 {
+		t.Fatalf("first entity: %d %v", n, err)
+	}
+
+	p, _ := tenant.FromContext(ctx)
+	firstEntity := p.LegalEntityID
+	p.LegalEntityID = ids.New()
+	otherCtx := tenant.With(ctx, p)
+	if n, err := s.RecordTransactions(otherCtx, []domain.Txn{shared}); err != nil || n != 1 {
+		t.Fatalf("a second legal entity could not record the same id: %d %v", n, err)
+	}
+	var rows int
+	_ = admin.QueryRow(context.Background(), `select count(*) from tax_transaction where id = $1`, shared.ID).Scan(&rows)
+	if rows != 2 {
+		t.Fatalf("%d rows for the shared id, want one per legal entity", rows)
+	}
+
+	if n, err := s.RecordTransactions(ctx, []domain.Txn{shared}); err != nil || n != 0 {
+		t.Fatalf("identical replay: %d %v", n, err)
+	}
+	changed := shared
+	changed.Amount = domain.D("99.00")
+	if _, err := s.RecordTransactions(ctx, []domain.Txn{changed}); settlementCode(err) != domain.CodeValidation {
+		t.Fatalf("replay with different content: %v, want %s", err, domain.CodeValidation)
+	}
+	var amount string
+	_ = admin.QueryRow(context.Background(), `select amount::text from tax_transaction where id = $1 and legal_entity_id = $2`, shared.ID, firstEntity).Scan(&amount)
+	if amount != "10.000000" {
+		t.Fatalf("first entity's row is %s after the rejected replay", amount)
+	}
+}
+
+func TestSetLedgerConfig_ReplacesPerLegalEntity(t *testing.T) {
+	s, admin, ctx := setup(t)
+	replacement := store.LedgerConfig{LedgerID: config.LedgerID, Accounts: map[string]string{outputKey: "2300"}}
+	if err := s.SetLedgerConfig(ctx, replacement); err != nil {
+		t.Fatal(err)
+	}
+	var rows int
+	var account string
+	_ = admin.QueryRow(context.Background(), `select count(*), min(accounts->>$1) from tax_ledger_config`, outputKey).Scan(&rows, &account)
+	if rows != 1 || account != "2300" {
+		t.Fatalf("rows %d account %q", rows, account)
 	}
 }
 
@@ -167,6 +234,52 @@ func TestRecommit_QueuesWithEventAndDrains(t *testing.T) {
 	}
 }
 
+func TestRecommit_AStuckEntryIsAbandonedAndNeverBlocksNewerOnes(t *testing.T) {
+	s, admin, ctx := setup(t)
+	stuck, err := s.EnqueueRecommit(ctx, "avalara", "down", json.RawMessage(`{"n":0}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	failStuck := func(_ context.Context, item store.Recommit) (json.RawMessage, error) {
+		if item.ID == stuck {
+			return nil, errors.New("always failing")
+		}
+		return json.RawMessage(`{"ok":true}`), nil
+	}
+	for range store.MaxRecommitAttempts {
+		if _, err := s.Recommit(ctx, 1, failStuck); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var status string
+	_ = admin.QueryRow(context.Background(), `select status from tax_recommit_queue where id = $1`, stuck).Scan(&status)
+	if status != "failed" {
+		t.Fatalf("stuck entry status %q after %d attempts, want failed", status, store.MaxRecommitAttempts)
+	}
+	sum, err := s.Recommit(ctx, 10, failStuck)
+	if err != nil || sum.Processed != 0 {
+		t.Fatalf("abandoned entry was taken again: %+v %v", sum, err)
+	}
+
+	retried, _ := s.EnqueueRecommit(ctx, "avalara", "down", json.RawMessage(`{"n":1}`))
+	if _, err := s.Recommit(ctx, 1, func(context.Context, store.Recommit) (json.RawMessage, error) {
+		return nil, errors.New("fails once")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fresh, _ := s.EnqueueRecommit(ctx, "avalara", "down", json.RawMessage(`{"n":2}`))
+	var taken []string
+	if _, err := s.Recommit(ctx, 1, func(_ context.Context, item store.Recommit) (json.RawMessage, error) {
+		taken = append(taken, item.ID)
+		return json.RawMessage(`{}`), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(taken) != 1 || taken[0] != fresh {
+		t.Fatalf("batch of one took %v, want the fresh entry %s ahead of the already-failed %s", taken, fresh, retried)
+	}
+}
+
 func TestTotals_SumPerCodeAndDirection(t *testing.T) {
 	s, _, ctx := setup(t)
 	_, err := s.RecordTransactions(ctx, []domain.Txn{txn("2026-01-10", "VAT19", domain.DirOutput, "10.10"), txn("2026-01-11", "VAT19", domain.DirOutput, "5.05"), txn("2026-02-01", "VAT19", domain.DirOutput, "99")})
@@ -189,7 +302,7 @@ func TestAppRole_CrossTenantRLS(t *testing.T) {
 		testkit.OutboxCase(),
 		{
 			Table:  "tax_settlement_run",
-			Insert: `insert into tax_settlement_run (tenant_id, id, legal_entity_id, period_from, period_to, version, output_tax_total, input_tax_total, net_amount, lines) values ($1, $2, $3, '2026-01-01', '2026-01-31', 1, 0, 0, 0, '[]')`,
+			Insert: `insert into tax_settlement_run (tenant_id, id, legal_entity_id, period_from, period_to, version, output_tax_total, input_tax_total, net_amount, lines, ledger_id, accounts) values ($1, $2, $3, '2026-01-01', '2026-01-31', 1, 0, 0, 0, '[]', $2, '{}')`,
 			Args: func(tenantID, entityID string) []any {
 				return []any{tenantID, ids.New(), entityID}
 			},
@@ -199,6 +312,14 @@ func TestAppRole_CrossTenantRLS(t *testing.T) {
 		{
 			Table:  "tax_transaction",
 			Insert: `insert into tax_transaction (tenant_id, id, legal_entity_id, code, direction, tax_date, amount) values ($1, $2, $3, 'VAT19', 'output', '2026-01-10', 1)`,
+			Args: func(tenantID, entityID string) []any {
+				return []any{tenantID, ids.New(), entityID}
+			},
+			LegalEntity: true,
+		},
+		{
+			Table:  "tax_ledger_config",
+			Insert: `insert into tax_ledger_config (tenant_id, legal_entity_id, ledger_id, accounts) values ($1, $3, $2, '{}')`,
 			Args: func(tenantID, entityID string) []any {
 				return []any{tenantID, ids.New(), entityID}
 			},

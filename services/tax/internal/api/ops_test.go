@@ -32,6 +32,7 @@ type fakeStore struct {
 	processErr []error
 	totals     []store.Total
 	recorded   []domain.Txn
+	config     *store.LedgerConfig
 }
 
 func (f *fakeStore) RecordTransactions(_ context.Context, txns []domain.Txn) (int, error) {
@@ -39,7 +40,12 @@ func (f *fakeStore) RecordTransactions(_ context.Context, txns []domain.Txn) (in
 	return len(txns), nil
 }
 
-func (f *fakeStore) SettleRun(context.Context, store.SettleInput, domain.GLMovement) (store.Run, error) {
+func (f *fakeStore) SetLedgerConfig(_ context.Context, cfg store.LedgerConfig) error {
+	f.config = &cfg
+	return nil
+}
+
+func (f *fakeStore) SettleRun(context.Context, domain.Period, func(store.LedgerConfig) domain.GLMovement) (store.Run, error) {
 	return store.Run{}, nil
 }
 
@@ -184,7 +190,7 @@ func TestRecordTransactionsValidation(t *testing.T) {
 }
 
 func TestSettleRequestValidationAndUnconfiguredDependencies(t *testing.T) {
-	valid := `{"period_from":"2026-01-01","period_to":"2026-01-31","ledger_id":"` + ids.New() + `","accounts":{"VAT19|output":"2200"}}`
+	valid := `{"period_from":"2026-01-01","period_to":"2026-01-31"}`
 	tests := []struct {
 		name   string
 		body   string
@@ -193,10 +199,8 @@ func TestSettleRequestValidationAndUnconfiguredDependencies(t *testing.T) {
 	}{
 		{"ledger not configured", valid, nil, http.StatusServiceUnavailable},
 		{"inverted period", strings.Replace(valid, "2026-01-31", "2025-12-31", 1), ledgerclient.NewFake(), http.StatusBadRequest},
-		{"bad ledger id", strings.Replace(valid, `"ledger_id":"`, `"ledger_id":"x`, 1), ledgerclient.NewFake(), http.StatusBadRequest},
-		{"no accounts", `{"period_from":"2026-01-01","period_to":"2026-01-31","ledger_id":"` + ids.New() + `","accounts":{}}`, ledgerclient.NewFake(), http.StatusBadRequest},
-		{"account key without direction", strings.Replace(valid, "VAT19|output", "VAT19", 1), ledgerclient.NewFake(), http.StatusBadRequest},
-		{"account number injection", strings.Replace(valid, `"2200"`, `"22 00;"`, 1), ledgerclient.NewFake(), http.StatusBadRequest},
+		{"request-supplied ledger id", `{"period_from":"2026-01-01","period_to":"2026-01-31","ledger_id":"` + ids.New() + `"}`, ledgerclient.NewFake(), http.StatusBadRequest},
+		{"request-supplied accounts", `{"period_from":"2026-01-01","period_to":"2026-01-31","accounts":{"VAT19|output":"2200"}}`, ledgerclient.NewFake(), http.StatusBadRequest},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -212,6 +216,38 @@ func TestSettleRequestValidationAndUnconfiguredDependencies(t *testing.T) {
 			t.Fatalf("got %d", rec.Code)
 		}
 	})
+}
+
+func TestLedgerConfigValidationAndStorage(t *testing.T) {
+	valid := `{"ledger_id":"` + ids.New() + `","accounts":{"VAT19|output":"2200"}}`
+	tests := []struct {
+		name string
+		body string
+		want int
+	}{
+		{"valid", valid, http.StatusOK},
+		{"bad ledger id", strings.Replace(valid, `"ledger_id":"`, `"ledger_id":"x`, 1), http.StatusBadRequest},
+		{"no accounts", `{"ledger_id":"` + ids.New() + `","accounts":{}}`, http.StatusBadRequest},
+		{"account key without direction", strings.Replace(valid, "VAT19|output", "VAT19", 1), http.StatusBadRequest},
+		{"account number injection", strings.Replace(valid, `"2200"`, `"22 00;"`, 1), http.StatusBadRequest},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := &fakeStore{}
+			r, _ := routerWith(fs, nil, nil)
+			rec := do(r, http.MethodPut, "/v1/tax/ledger-config", tc.body, testkit.TenantID(1), "tax.ledgerconfig.manage")
+			if rec.Code != tc.want {
+				t.Fatalf("got %d %s, want %d", rec.Code, rec.Body.String(), tc.want)
+			}
+			if stored := fs.config != nil; stored != (tc.want == http.StatusOK) {
+				t.Fatalf("config stored %v for status %d", stored, tc.want)
+			}
+		})
+	}
+	r, _ := routerWith(&fakeStore{}, nil, nil)
+	if rec := do(r, http.MethodPut, "/v1/tax/ledger-config", valid, testkit.TenantID(1), "tax.settlement.run"); rec.Code != http.StatusForbidden {
+		t.Fatalf("settlement duty reached the ledger config: %d", rec.Code)
+	}
 }
 
 func TestSAFTExport(t *testing.T) {
@@ -250,11 +286,13 @@ func TestSettleThroughTheRouterReconcilesToTheLedger(t *testing.T) {
 		}
 	}
 	r, _ := routerWith(store.New(app), nil, fake)
-	call := func(path, body string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	var callMethod func(method, path, body string) *httptest.ResponseRecorder
+	call := func(path, body string) *httptest.ResponseRecorder { return callMethod(http.MethodPost, path, body) }
+	callMethod = func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		req.Header.Set(tenant.HeaderTenant, testkit.TenantID(7))
 		req.Header.Set(tenant.HeaderLegalEntity, entity)
-		req.Header.Set(tenant.HeaderDuties, "tax.transaction.record,tax.settlement.run")
+		req.Header.Set(tenant.HeaderDuties, "tax.transaction.record,tax.settlement.run,tax.ledgerconfig.manage")
 		rec := httptest.NewRecorder()
 		r.ServeHTTP(rec, req)
 		return rec
@@ -265,7 +303,15 @@ func TestSettleThroughTheRouterReconcilesToTheLedger(t *testing.T) {
 	if rec := call("/v1/tax/transactions", record); rec.Code != http.StatusCreated {
 		t.Fatalf("record: %d %s", rec.Code, rec.Body.String())
 	}
-	settle := `{"period_from":"2026-01-01","period_to":"2026-01-31","ledger_id":"` + ledgerID + `","accounts":{"VAT19|output":"2200","VAT19|input":"1400"}}`
+	settle := `{"period_from":"2026-01-01","period_to":"2026-01-31"}`
+
+	if rec := call("/v1/tax/settlements:run", settle); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "COM-0503") {
+		t.Fatalf("settle without stored config: %d %s", rec.Code, rec.Body.String())
+	}
+	config := `{"ledger_id":"` + ledgerID + `","accounts":{"VAT19|output":"2200","VAT19|input":"1400"}}`
+	if rec := callMethod(http.MethodPut, "/v1/tax/ledger-config", config); rec.Code != http.StatusOK {
+		t.Fatalf("config: %d %s", rec.Code, rec.Body.String())
+	}
 
 	rec := call("/v1/tax/settlements:run", settle)
 	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"net_amount":"14"`) {
@@ -281,5 +327,7 @@ func TestSettleThroughTheRouterReconcilesToTheLedger(t *testing.T) {
 	}
 	if rec := call("/v1/tax/settlements:run", settle); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "TAX-0008") {
 		t.Fatalf("one cent off the GL: %d %s", rec.Code, rec.Body.String())
+	} else if strings.Contains(rec.Body.String(), "19.0") {
+		t.Fatalf("mismatch response leaks GL amounts: %s", rec.Body.String())
 	}
 }

@@ -92,6 +92,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyWithholding)).Post("/v1/tax/withholding/calculate", a.withholding)
 	r.With(authz.RequireDuty(dutyRecordTransactions)).Post("/v1/tax/transactions", a.recordTransactions)
 	r.With(authz.RequireDuty(dutySettle)).Post("/v1/tax/settlements:run", a.settle)
+	r.With(authz.RequireDuty(dutyLedgerConfig)).Put("/v1/tax/ledger-config", a.setLedgerConfig)
 	r.With(authz.RequireDuty(dutyRecommit)).Post("/v1/tax/recommit:run", a.recommit)
 	r.With(authz.RequireDuty(dutySAFT)).Get("/v1/tax/saft", a.saft)
 }
@@ -182,6 +183,8 @@ func (a *API) reject(w http.ResponseWriter, r *http.Request, err error) {
 		err = httpx.NewProblem(http.StatusBadGateway, codeLedgerUnavailable, "the general ledger could not be read")
 	case errors.Is(err, store.ErrNoLegalEntity):
 		err = httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "this operation needs a single legal entity in the request scope")
+	case errors.Is(err, store.ErrNoLedgerConfig):
+		err = httpx.NewProblem(http.StatusUnprocessableEntity, codeNotConfigured, "no ledger configuration is set for this legal entity")
 	}
 	fail(w, r, err)
 }

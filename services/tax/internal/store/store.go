@@ -25,9 +25,15 @@ const (
 	MaxRecommitBatch = 50
 	statusPending    = "pending"
 	statusDone       = "done"
+	statusFailed     = "failed"
+
+	MaxRecommitAttempts = 5
 )
 
-var ErrNoLegalEntity = errors.New("tax: the request carries no legal entity")
+var (
+	ErrNoLegalEntity  = errors.New("tax: the request carries no legal entity")
+	ErrNoLedgerConfig = errors.New("tax: no ledger configuration for this legal entity")
+)
 
 type Store struct{ pool *pgxpool.Pool }
 
@@ -60,51 +66,104 @@ func (s *Store) RecordTransactions(ctx context.Context, txns []domain.Txn) (int,
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		for _, t := range txns {
 			tag, err := tx.Exec(ctx, `insert into tax_transaction (tenant_id, id, legal_entity_id, code, direction, tax_date, amount)
-				values ($1, $2, $3, $4, $5, $6, $7) on conflict (tenant_id, id) do nothing`,
+				values ($1, $2, $3, $4, $5, $6, $7) on conflict (tenant_id, legal_entity_id, id) do nothing`,
 				p.TenantID, t.ID, p.LegalEntityID, t.Code, t.Direction, t.TaxDate.Time, t.Amount.Decimal)
 			if err != nil {
 				return fmt.Errorf("record tax transaction %s: %w", t.ID, err)
 			}
-			inserted += int(tag.RowsAffected())
+			if tag.RowsAffected() == 1 {
+				inserted++
+				continue
+			}
+			var identical bool
+			if err := tx.QueryRow(ctx, `select exists (select 1 from tax_transaction where tenant_id = $1 and legal_entity_id = $2 and id = $3
+				and code = $4 and direction = $5 and tax_date = $6 and amount = $7)`,
+				p.TenantID, p.LegalEntityID, t.ID, t.Code, t.Direction, t.TaxDate.Time, t.Amount.Decimal).Scan(&identical); err != nil {
+				return fmt.Errorf("compare tax transaction %s: %w", t.ID, err)
+			}
+			if !identical {
+				return &domain.Error{Code: domain.CodeValidation, Field: "transactions", Detail: fmt.Sprintf("transaction %s was already recorded with different content", t.ID)}
+			}
 		}
 		return nil
 	})
 	return inserted, err
 }
 
-type SettleInput struct {
-	Period   domain.Period
-	Accounts map[string]string
+type LedgerConfig struct {
+	LedgerID string            `json:"ledger_id"`
+	Accounts map[string]string `json:"accounts"`
+}
+
+func (s *Store) SetLedgerConfig(ctx context.Context, cfg LedgerConfig) error {
+	p, err := scope(ctx)
+	if err != nil {
+		return err
+	}
+	accounts, err := json.Marshal(cfg.Accounts)
+	if err != nil {
+		return err
+	}
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `insert into tax_ledger_config (tenant_id, legal_entity_id, ledger_id, accounts)
+			values ($1, $2, $3, $4) on conflict (tenant_id, legal_entity_id) do update set ledger_id = excluded.ledger_id, accounts = excluded.accounts, updated_at = now()`,
+			p.TenantID, p.LegalEntityID, cfg.LedgerID, accounts); err != nil {
+			return fmt.Errorf("save ledger config: %w", err)
+		}
+		return nil
+	})
+}
+
+func loadLedgerConfig(ctx context.Context, tx pgx.Tx, p tenant.Principal) (LedgerConfig, error) {
+	var cfg LedgerConfig
+	var raw []byte
+	err := tx.QueryRow(ctx, `select ledger_id::text, accounts from tax_ledger_config where tenant_id = $1 and legal_entity_id = $2`,
+		p.TenantID, p.LegalEntityID).Scan(&cfg.LedgerID, &raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return cfg, ErrNoLedgerConfig
+	}
+	if err != nil {
+		return cfg, fmt.Errorf("read ledger config: %w", err)
+	}
+	if err := json.Unmarshal(raw, &cfg.Accounts); err != nil {
+		return cfg, fmt.Errorf("decode ledger config: %w", err)
+	}
+	return cfg, nil
 }
 
 type Run struct {
-	ID string `json:"id"`
+	ID       string `json:"id"`
+	LedgerID string `json:"ledger_id"`
 	domain.Settlement
 }
 
-func (s *Store) SettleRun(ctx context.Context, in SettleInput, gl domain.GLMovement) (Run, error) {
+func (s *Store) SettleRun(ctx context.Context, period domain.Period, newGL func(LedgerConfig) domain.GLMovement) (Run, error) {
 	p, err := scope(ctx)
 	if err != nil {
 		return Run{}, err
 	}
 	var out Run
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		txns, err := lockTransactions(ctx, tx, p, in.Period)
+		cfg, err := loadLedgerConfig(ctx, tx, p)
+		if err != nil {
+			return err
+		}
+		txns, err := lockTransactions(ctx, tx, p, period)
 		if err != nil {
 			return err
 		}
 		for _, t := range txns {
-			if key := domain.MovementKey(t.Code, t.Direction); in.Accounts[key] == "" {
-				return &domain.Error{Code: domain.CodeValidation, Field: "accounts", Detail: fmt.Sprintf("accounts has no GL account for %s", key)}
+			if key := domain.MovementKey(t.Code, t.Direction); cfg.Accounts[key] == "" {
+				return &domain.Error{Code: domain.CodeValidation, Field: "accounts", Detail: fmt.Sprintf("the ledger configuration has no GL account for %s", key)}
 			}
 		}
 		var prior int
 		if err := tx.QueryRow(ctx, `select coalesce(max(version), 0) from tax_settlement_run
 			where tenant_id = $1 and legal_entity_id = $2 and period_from = $3 and period_to = $4`,
-			p.TenantID, p.LegalEntityID, in.Period.From.Time, in.Period.To.Time).Scan(&prior); err != nil {
+			p.TenantID, p.LegalEntityID, period.From.Time, period.To.Time).Scan(&prior); err != nil {
 			return fmt.Errorf("read settlement version: %w", err)
 		}
-		settlement, err := domain.Settle(ctx, txns, in.Period, prior, gl)
+		settlement, err := domain.Settle(ctx, txns, period, prior, newGL(cfg))
 		if err != nil {
 			return err
 		}
@@ -115,15 +174,19 @@ func (s *Store) SettleRun(ctx context.Context, in SettleInput, gl domain.GLMovem
 		if err != nil {
 			return err
 		}
-		out = Run{ID: ids.New(), Settlement: settlement}
-		if _, err := tx.Exec(ctx, `insert into tax_settlement_run (tenant_id, id, legal_entity_id, period_from, period_to, version, output_tax_total, input_tax_total, net_amount, lines)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-			p.TenantID, out.ID, p.LegalEntityID, in.Period.From.Time, in.Period.To.Time, settlement.Version,
-			settlement.OutputTotal.Decimal, settlement.InputTotal.Decimal, settlement.NetAmount.Decimal, lines); err != nil {
+		accounts, err := json.Marshal(cfg.Accounts)
+		if err != nil {
+			return err
+		}
+		out = Run{ID: ids.New(), LedgerID: cfg.LedgerID, Settlement: settlement}
+		if _, err := tx.Exec(ctx, `insert into tax_settlement_run (tenant_id, id, legal_entity_id, period_from, period_to, version, output_tax_total, input_tax_total, net_amount, lines, ledger_id, accounts)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+			p.TenantID, out.ID, p.LegalEntityID, period.From.Time, period.To.Time, settlement.Version,
+			settlement.OutputTotal.Decimal, settlement.InputTotal.Decimal, settlement.NetAmount.Decimal, lines, cfg.LedgerID, accounts); err != nil {
 			return fmt.Errorf("insert settlement run: %w", err)
 		}
-		if _, err := tx.Exec(ctx, `update tax_transaction set settlement_run_id = $3 where tenant_id = $1 and id = any($2::uuid[])`,
-			p.TenantID, settlement.TransactionIDs, out.ID); err != nil {
+		if _, err := tx.Exec(ctx, `update tax_transaction set settlement_run_id = $3 where tenant_id = $1 and legal_entity_id = $4 and id = any($2::uuid[])`,
+			p.TenantID, settlement.TransactionIDs, out.ID, p.LegalEntityID); err != nil {
 			return fmt.Errorf("mark transactions settled: %w", err)
 		}
 		return nil
@@ -235,8 +298,9 @@ func (s *Store) Recommit(ctx context.Context, limit int, process func(context.Co
 			sum.Processed++
 			if perr != nil {
 				sum.Failed++
-				if _, err := tx.Exec(ctx, `update tax_recommit_queue set attempts = attempts + 1, last_error = $3 where tenant_id = $1 and id = $2`,
-					p.TenantID, item.ID, truncate(perr.Error(), maxReasonLength)); err != nil {
+				if _, err := tx.Exec(ctx, `update tax_recommit_queue set attempts = attempts + 1, last_error = $3,
+						status = case when attempts + 1 >= $4 then $5 else status end where tenant_id = $1 and id = $2`,
+					p.TenantID, item.ID, truncate(perr.Error(), maxReasonLength), MaxRecommitAttempts, statusFailed); err != nil {
 					return fmt.Errorf("record recommit failure: %w", err)
 				}
 				continue
@@ -254,7 +318,7 @@ func (s *Store) Recommit(ctx context.Context, limit int, process func(context.Co
 
 func lockPending(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit int) ([]Recommit, error) {
 	rows, err := tx.Query(ctx, `select id, provider, request, attempts from tax_recommit_queue
-		where tenant_id = $1 and legal_entity_id = $2 and status = $3 order by created_at, id limit $4 for update skip locked`,
+		where tenant_id = $1 and legal_entity_id = $2 and status = $3 order by attempts, created_at, id limit $4 for update skip locked`,
 		p.TenantID, p.LegalEntityID, statusPending, limit)
 	if err != nil {
 		return nil, fmt.Errorf("lock recommit queue: %w", err)
