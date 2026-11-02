@@ -1167,6 +1167,7 @@ test_receiving_payee_erase_reaches_only_the_erase_route if {
 	not allowed("receiving.payee.erase", "POST", "/v1/receiving/one-time-payees")
 	not allowed("receiving.payee.erase", "GET", "/v1/receiving/one-time-payees:erase")
 	not allowed("VendorInvoicePost", "POST", "/v1/receiving/one-time-payees:erase")
+}
 
 test_treasury_reconciliation_write_reaches_only_its_post_routes if {
 	allowed("treasury.reconciliation.write", "POST", "/v1/treasury/reconciliation-rules")
