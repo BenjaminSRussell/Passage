@@ -7,6 +7,7 @@ import {
   SHORT_PICK_ACTIONS,
   type Problem,
   type ShortPickAction,
+  DEFAULT_SHORT_PICK_ACTION,
   type WarehouseSetting,
 } from "./api/client";
 import { dash, formatDateTime, UUID } from "./format";
@@ -26,7 +27,7 @@ const columns: DataTableColumn<WarehouseSetting>[] = [
   {
     key: "shortPickAction",
     header: "Short pick action",
-    render: (row) => <Badge tone={row.shortPickAction === "KEEP_OPEN" ? "neutral" : "info"}>{ACTION_LABELS[row.shortPickAction]}</Badge>,
+    render: (row) => <Badge tone={row.shortPickAction === "REMAINDER_BACKORDER" ? "neutral" : "info"}>{ACTION_LABELS[row.shortPickAction]}</Badge>,
   },
   { key: "updatedAt", header: "Changed", render: (row) => (row.updatedAt ? formatDateTime(row.updatedAt) : dash) },
 ];
@@ -36,7 +37,7 @@ export function WarehouseSettingsPage() {
   const state = useLoad((signal) => listWarehouseSettings(signal), "warehouse-settings");
   const [warehouseId, setWarehouseId] = useState("");
   const [legalEntityId, setLegalEntityId] = useState("");
-  const [action, setAction] = useState<ShortPickAction>("KEEP_OPEN");
+  const [action, setAction] = useState<ShortPickAction>(DEFAULT_SHORT_PICK_ACTION);
   const [version, setVersion] = useState(0);
   const [error, setError] = useState<string | undefined>();
   const [legalEntityError, setLegalEntityError] = useState<string | undefined>();

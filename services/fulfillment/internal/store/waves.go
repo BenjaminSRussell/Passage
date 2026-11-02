@@ -24,6 +24,7 @@ import (
 type WorkbenchStore interface {
 	RemainderStore
 	LegalEntitySettingStore
+	DropShipStore
 	CancelShipment(ctx context.Context, id string, version int, idem Idem) (Shipment, error)
 	CloseRemainder(ctx context.Context, id string, version int, idem Idem) (Shipment, error)
 	UnpackContainer(ctx context.Context, id string, version int, containerID string, idem Idem) (Shipment, error)

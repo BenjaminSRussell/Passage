@@ -32,6 +32,7 @@ func releasedTracked(t *testing.T, s *store.Postgres, ctx context.Context, qtys 
 	if !res.Shipments[0].Lines[0].TrackingRequired {
 		t.Fatal("trackingRequired was not stored")
 	}
+	keepOpen(t, s, ctx, wh, le)
 	return res.Shipments[0]
 }
 

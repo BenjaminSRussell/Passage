@@ -145,6 +145,12 @@ func TestWarehouseSim1k_ZeroInventoryMismatch(t *testing.T) {
 		if err != nil || len(res.Skipped) != 0 {
 			t.Fatalf("RunRelease %s: %d skipped, %v", wh, len(res.Skipped), err)
 		}
+		// The simulation re-picks short remainders, so the warehouse keeps them open.
+		if cur, err := s.GetWarehouseSetting(ctx, wh); err != nil || cur.LegalEntityID == nil {
+			t.Fatalf("warehouse %s setting: %+v, %v", wh, cur, err)
+		} else {
+			keepOpen(t, s, ctx, wh, *cur.LegalEntityID)
+		}
 		shipments = append(shipments, res.Shipments...)
 	}
 	if len(shipments) != simOrders {

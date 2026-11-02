@@ -59,10 +59,34 @@ type fixture struct {
 	shipment               store.Shipment
 }
 
-// released releases one order with the given line quantities and returns its shipment.
+// keepOpen saves KEEP_OPEN for a warehouse: most tests re-pick the remainder of
+// a partly shipped shipment, which is no longer the default (REMAINDER_BACKORDER).
+func keepOpen(t *testing.T, s *store.Postgres, ctx context.Context, warehouse, legalEntity string) {
+	t.Helper()
+	if _, err := s.SaveWarehouseSetting(ctx, warehouse, legalEntity, 0, domain.ActionKeepOpen, idem("keep-open")); err != nil {
+		t.Fatalf("save KEEP_OPEN: %v", err)
+	}
+}
+
+// released releases one order with the given line quantities and returns its
+// shipment; the warehouse is set to KEEP_OPEN.
 func released(t *testing.T, s *store.Postgres, ctx context.Context, qtys ...int64) fixture {
 	t.Helper()
-	f := fixture{legalEntity: ids.New(), warehouse: ids.New()}
+	f := releasedDefault(t, s, ctx, qtys...)
+	keepOpen(t, s, ctx, f.warehouse, f.legalEntity)
+	return f
+}
+
+// releasedDefault is released for a warehouse with no saved setting.
+func releasedDefault(t *testing.T, s *store.Postgres, ctx context.Context, qtys ...int64) fixture {
+	t.Helper()
+	return releasedIn(t, s, ctx, ids.New(), ids.New(), qtys...)
+}
+
+// releasedIn releases one order of legalEntity in warehouse.
+func releasedIn(t *testing.T, s *store.Postgres, ctx context.Context, warehouse, legalEntity string, qtys ...int64) fixture {
+	t.Helper()
+	f := fixture{legalEntity: legalEntity, warehouse: warehouse}
 	order, customer := ids.New(), ids.New()
 	var lines []domain.ReleaseLine
 	for _, q := range qtys {

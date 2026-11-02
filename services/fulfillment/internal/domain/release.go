@@ -59,6 +59,9 @@ const (
 	// SkipAlreadyReleased marks a line that is already on a shipment that is
 	// not cancelled; the store applies it, because only it can see shipments.
 	SkipAlreadyReleased = "already_released"
+	// SkipDropShip marks a line with an active (not cancelled) drop-ship: the
+	// vendor ships it, so it is not picked from stock (FR-28.7).
+	SkipDropShip = "drop_ship"
 )
 
 // Release applies the release rules to candidate lines. Held lines, lines

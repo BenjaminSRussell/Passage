@@ -112,7 +112,7 @@ describe("backorder remainder on the shipment detail (FR-28.8)", () => {
 });
 
 const settings: WarehouseSetting[] = [
-  { warehouseId: WH, legalEntityId: ID, shortPickAction: "KEEP_OPEN", version: 0, updatedAt: null },
+  { warehouseId: WH, legalEntityId: ID, shortPickAction: "KEEP_OPEN", version: 1, updatedAt: "2026-10-26T08:00:00Z" },
   { warehouseId: WH2, legalEntityId: LE2, shortPickAction: "REMAINDER_BACKORDER", version: 2, updatedAt: "2026-10-27T08:00:00Z" },
 ];
 
@@ -162,7 +162,7 @@ describe("warehouse settings page (FR-28.8)", () => {
     expect(await screen.findByText(/belongs to another legal entity/)).toBeInTheDocument();
     const put = calls("PUT", typed)[0];
     expect(header(put, "If-Match")).toBe('"0"');
-    expect(put.body).toEqual({ shortPickAction: "KEEP_OPEN", legalEntityId: LE2 });
+    expect(put.body).toEqual({ shortPickAction: "REMAINDER_BACKORDER", legalEntityId: LE2 });
   });
 
   it("checks the warehouse id and shows a stale version", async () => {

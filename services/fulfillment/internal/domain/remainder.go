@@ -13,7 +13,7 @@ type ShortPickAction string
 // Short pick actions.
 const (
 	// ActionKeepOpen leaves the shipment PARTIALLY_SHIPPED; its remainder is
-	// re-picked on the same shipment. It is the default.
+	// re-picked on the same shipment. It is not the default.
 	ActionKeepOpen ShortPickAction = "KEEP_OPEN"
 	// ActionCancelRemainder closes the remainder (the shipment becomes SHIPPED).
 	ActionCancelRemainder ShortPickAction = "CANCEL_REMAINDER"
@@ -22,6 +22,10 @@ const (
 	// warehouse.
 	ActionBackorder ShortPickAction = "REMAINDER_BACKORDER"
 )
+
+// DefaultShortPickAction applies to a warehouse with no saved setting: the
+// PRD parameter default (section 5.28.13), REMAINDER_BACKORDER.
+const DefaultShortPickAction = ActionBackorder
 
 // ParseShortPickAction validates a short pick action code.
 func ParseShortPickAction(code string) (ShortPickAction, error) {

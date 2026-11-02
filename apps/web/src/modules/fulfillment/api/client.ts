@@ -95,7 +95,9 @@ export interface Shipment extends Omit<ShipmentSummary, "lineCount"> {
 
 /** FR-28.8: what happens to the open remainder once a slip has shipped part of a shipment. */
 export type ShortPickAction = "KEEP_OPEN" | "CANCEL_REMAINDER" | "REMAINDER_BACKORDER";
-export const SHORT_PICK_ACTIONS: ShortPickAction[] = ["KEEP_OPEN", "CANCEL_REMAINDER", "REMAINDER_BACKORDER"];
+export const SHORT_PICK_ACTIONS: ShortPickAction[] = ["REMAINDER_BACKORDER", "CANCEL_REMAINDER", "KEEP_OPEN"];
+/** The PRD default (section 5.28.13), used for a warehouse with no saved setting. */
+export const DEFAULT_SHORT_PICK_ACTION: ShortPickAction = "REMAINDER_BACKORDER";
 
 export interface WarehouseSetting {
   warehouseId: string;
@@ -356,7 +358,7 @@ export interface ReleaseInput {
 
 export interface ReleaseSkip {
   orderLineId: string;
-  reason: "held" | "beyond_horizon" | "atp_short" | "non_positive_qty" | "already_released";
+  reason: "held" | "beyond_horizon" | "atp_short" | "non_positive_qty" | "already_released" | "drop_ship";
 }
 
 export interface ReleaseResult {
@@ -846,4 +848,70 @@ export async function returnableAging(
     throw new FulfillmentApiError(0, "COM-0001", "The response has no items", {});
   }
   return body;
+}
+
+export type DropShipStatus = "OPEN" | "CONFIRMED" | "CANCELLED";
+export const DROP_SHIP_STATUSES: DropShipStatus[] = ["OPEN", "CONFIRMED", "CANCELLED"];
+
+/** A sales order line fulfilled by a vendor, linked to its purchase order line (FR-28.7). */
+export interface DropShip {
+  id: string;
+  dropShipNumber: string;
+  status: DropShipStatus;
+  legalEntityId: string;
+  orderId: string;
+  orderLineId: string;
+  customerId: string;
+  productId: string;
+  unit: string;
+  /** Decimal strings. */
+  qty: string;
+  vendorId: string;
+  purchaseOrderId: string;
+  purchaseOrderLineId: string;
+  unitCost: string;
+  currency: string;
+  vendorShipmentRef: string | null;
+  shippedOn: string | null;
+  postingDate: string | null;
+  /** Dr 5000 / Cr 2110 once CONFIRMED; empty before. */
+  journal: JournalEntry[];
+  version: number;
+  createdAt: string;
+}
+
+export interface DropShipInput {
+  legalEntityId: string;
+  orderId: string;
+  orderLineId: string;
+  customerId: string;
+  productId: string;
+  unit: string;
+  qty: string;
+  vendorId: string;
+  purchaseOrderId: string;
+  purchaseOrderLineId: string;
+  unitCost: string;
+  currency: string;
+}
+
+export function listDropShips(filter: { status?: DropShipStatus | ""; orderId?: string; vendorId?: string; limit?: number } = {}, signal?: AbortSignal): Promise<DropShip[]> {
+  return items<DropShip>(`/drop-ships${query({ limit: 200, ...filter })}`, signal);
+}
+
+export function getDropShip(id: string, signal?: AbortSignal): Promise<DropShip> {
+  return send<DropShip>(`/drop-ships/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createDropShip(input: DropShipInput, key: string): Promise<DropShip> {
+  return command<DropShip>("/drop-ships", input, key);
+}
+
+/** The vendor's ship confirmation: books Dr 5000 / Cr 2110 at the PO cost (AC-28.5); final. Needs PurchaseOrderConfirm. */
+export function confirmDropShip(id: string, version: number, input: { shippedOn: string; vendorShipmentRef?: string; postingDate?: string }, key: string): Promise<DropShip> {
+  return command<DropShip>(`/drop-ships/${encodeURIComponent(id)}:confirm`, input, key, version);
+}
+
+export function cancelDropShip(id: string, version: number, key: string): Promise<DropShip> {
+  return command<DropShip>(`/drop-ships/${encodeURIComponent(id)}:cancel`, undefined, key, version);
 }

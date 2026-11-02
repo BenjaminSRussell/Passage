@@ -14,7 +14,7 @@ import (
 )
 
 func (f *fakeStore) ListWarehouseSettings(context.Context) ([]store.WarehouseSetting, error) {
-	return []store.WarehouseSetting{{WarehouseID: ids.New(), ShortPickAction: domain.ActionKeepOpen}}, nil
+	return []store.WarehouseSetting{{WarehouseID: ids.New(), ShortPickAction: domain.DefaultShortPickAction}}, nil
 }
 
 func (f *fakeStore) GetWarehouseSetting(_ context.Context, id string) (store.WarehouseSetting, error) {
@@ -80,7 +80,7 @@ func TestWarehouseSetting_ReadSaveValidateAndDuty(t *testing.T) {
 	h := newServer(t, &fakeStore{})
 	wh := ids.New()
 	path := "/v1/fulfillment/warehouse-settings/" + wh
-	if rec := do(t, h, http.MethodGet, "/v1/fulfillment/warehouse-settings", "", nil); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "KEEP_OPEN") {
+	if rec := do(t, h, http.MethodGet, "/v1/fulfillment/warehouse-settings", "", nil); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "REMAINDER_BACKORDER") {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
 	}
 	if rec := do(t, h, http.MethodGet, path, "", nil); rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"2"` || !strings.Contains(rec.Body.String(), "REMAINDER_BACKORDER") {

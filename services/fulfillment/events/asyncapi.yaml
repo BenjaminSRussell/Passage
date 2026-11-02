@@ -51,6 +51,21 @@ channels:
     messages:
       legalEntitySettingChanged:
         $ref: "#/components/messages/LegalEntitySettingChanged"
+  dropShipCreated:
+    address: passage.fulfillment.dropship
+    messages:
+      dropShipCreated:
+        $ref: "#/components/messages/DropShipCreated"
+  dropShipConfirmed:
+    address: passage.fulfillment.dropship
+    messages:
+      dropShipConfirmed:
+        $ref: "#/components/messages/DropShipConfirmed"
+  dropShipCancelled:
+    address: passage.fulfillment.dropship
+    messages:
+      dropShipCancelled:
+        $ref: "#/components/messages/DropShipCancelled"
   pickTracked:
     address: passage.fulfillment.pick
     messages:
@@ -137,6 +152,21 @@ operations:
     channel: { $ref: "#/channels/legalEntitySettingChanged" }
     messages:
       - $ref: "#/channels/legalEntitySettingChanged/messages/legalEntitySettingChanged"
+  publishDropShipCreated:
+    action: send
+    channel: { $ref: "#/channels/dropShipCreated" }
+    messages:
+      - $ref: "#/channels/dropShipCreated/messages/dropShipCreated"
+  publishDropShipConfirmed:
+    action: send
+    channel: { $ref: "#/channels/dropShipConfirmed" }
+    messages:
+      - $ref: "#/channels/dropShipConfirmed/messages/dropShipConfirmed"
+  publishDropShipCancelled:
+    action: send
+    channel: { $ref: "#/channels/dropShipCancelled" }
+    messages:
+      - $ref: "#/channels/dropShipCancelled/messages/dropShipCancelled"
   publishPickTracked:
     action: send
     channel: { $ref: "#/channels/pickTracked" }
@@ -379,6 +409,34 @@ components:
           previous_cogs_at_shipment: { type: boolean }
           previous_asn_enabled: { type: boolean }
           version: { type: integer, minimum: 1 }
+    DropShipCreated:
+      name: dev.passage.fulfillment.dropship.created.v1
+      title: Drop-ship created
+      summary: >
+        A drop-ship was created for an order line against a purchase order line (FR-28.7). Purchasing
+        may watch it to expect the vendor's shipment; nothing is booked yet.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/DropShipPayload"
+    DropShipConfirmed:
+      name: dev.passage.fulfillment.dropship.confirmed.v1
+      title: Drop-ship confirmed by the vendor
+      summary: >
+        The vendor shipped the drop-ship line (AC-28.5). The journal is Dr 5000 / Cr 2110 at the
+        purchase order cost for the ledger to post with Idempotency-Key = drop_ship_id; there is no
+        inventory transaction. The confirmation is final. No packingslip.posted is published for a
+        drop-ship line, so this event is how sales (wave 27) learns that order_line_id shipped qty
+        (it marks the line shipped) and how billing (wave 29) learns it can invoice it.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/DropShipPayload"
+    DropShipCancelled:
+      name: dev.passage.fulfillment.dropship.cancelled.v1
+      title: Drop-ship cancelled
+      summary: An OPEN drop-ship was cancelled before the vendor confirmed; nothing was booked.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/DropShipPayload"
     PickTracked:
       name: dev.passage.fulfillment.pick.tracked.v1
       title: Pick tracking captured
@@ -578,6 +636,32 @@ components:
           description: { type: string }
           event_time: { type: string, format: date-time }
   schemas:
+    DropShipPayload:
+      type: object
+      required: [drop_ship_id, drop_ship_number, status, legal_entity_id, order_id, order_line_id, customer_id, product_id, unit, qty, vendor_id, purchase_order_id, purchase_order_line_id, unit_cost, currency, journal]
+      properties:
+        drop_ship_id: { type: string, format: uuid }
+        drop_ship_number: { type: string, example: "DS-0000001" }
+        status: { type: string, enum: [OPEN, CONFIRMED, CANCELLED] }
+        legal_entity_id: { type: string, format: uuid }
+        order_id: { type: string, format: uuid }
+        order_line_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        product_id: { type: string, format: uuid }
+        unit: { type: string }
+        qty: { type: string }
+        vendor_id: { type: string, format: uuid }
+        purchase_order_id: { type: string, format: uuid }
+        purchase_order_line_id: { type: string, format: uuid }
+        unit_cost: { type: string }
+        currency: { type: string }
+        vendor_shipment_ref: { type: string }
+        shipped_on: { type: string, format: date }
+        posting_date: { type: string, format: date }
+        journal:
+          type: array
+          description: Empty unless CONFIRMED.
+          items: { $ref: "#/components/schemas/JournalEntry" }
     SlipLine:
       type: object
       required: [order_line_id, qty, cost_amount, cost_snapshot_id]

@@ -46,6 +46,11 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    DropShipId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     LegalEntityId:
       name: legalEntityId
       in: path
@@ -154,8 +159,8 @@ components:
       enum: [KEEP_OPEN, CANCEL_REMAINDER, REMAINDER_BACKORDER]
       description: >
         What happens to the open remainder once a slip has shipped part of a shipment
-        (FR-28.8): KEEP_OPEN re-picks it on the shipment (default), CANCEL_REMAINDER
-        closes it, REMAINDER_BACKORDER moves it to a new backorder shipment.
+        (FR-28.8): KEEP_OPEN re-picks it on the shipment, CANCEL_REMAINDER
+        closes it, REMAINDER_BACKORDER (default) moves it to a new backorder shipment.
     WarehouseSetting:
       type: object
       required: [warehouseId, legalEntityId, shortPickAction, version]
@@ -174,6 +179,38 @@ components:
         asnEnabled: { type: boolean, description: "A post that does not name asnEnabled publishes the advance ship notice." }
         version: { type: integer, minimum: 0, description: "0 when no setting is saved (both flags false)." }
         updatedAt: { type: [string, "null"], format: date-time }
+    DropShip:
+      type: object
+      required: [id, dropShipNumber, status, legalEntityId, orderId, orderLineId, customerId, productId, unit, qty, vendorId, purchaseOrderId, purchaseOrderLineId, unitCost, currency, journal, version]
+      description: >
+        A sales order line fulfilled by a vendor straight to the customer, linked to its purchase
+        order line (FR-28.7). OPEN until the vendor confirms; CONFIRMED books the journal; CANCELLED
+        books nothing.
+      properties:
+        id: { type: string, format: uuid }
+        dropShipNumber: { type: string, description: "DS- number, gap-free per legal entity." }
+        status: { type: string, enum: [OPEN, CONFIRMED, CANCELLED] }
+        legalEntityId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        orderLineId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        unit: { type: string }
+        qty: { type: string, description: "Decimal string." }
+        vendorId: { type: string, format: uuid }
+        purchaseOrderId: { type: string, format: uuid }
+        purchaseOrderLineId: { type: string, format: uuid }
+        unitCost: { type: string, description: "Purchase order cost per unit, decimal string." }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        vendorShipmentRef: { type: [string, "null"], description: "The vendor's shipment or tracking reference, from the confirmation." }
+        shippedOn: { type: [string, "null"], format: date }
+        postingDate: { type: [string, "null"], format: date, description: "The day the cost was booked; null until confirmed." }
+        journal:
+          type: array
+          description: "Dr 5000 / Cr 2110 at the purchase order cost once CONFIRMED (debits positive, credits negative); empty before."
+          items: { type: object, required: [account, amount, currency, orderLineId], properties: { account: { type: string }, amount: { type: string }, currency: { type: string }, orderLineId: { type: string, format: uuid } } }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
     ShipmentLine:
       type: object
       properties:
@@ -465,7 +502,7 @@ paths:
                       type: object
                       properties:
                         orderLineId: { type: string, format: uuid }
-                        reason: { type: string, enum: [held, beyond_horizon, atp_short, non_positive_qty, already_released] }
+                        reason: { type: string, enum: [held, beyond_horizon, atp_short, non_positive_qty, already_released, drop_ship] }
         "400": { description: "FUL-0050 validation (also a repeated orderLineId, or lines of one order with different customers, legal entities or carriers), FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { description: "idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
@@ -1352,8 +1389,8 @@ paths:
       summary: Short pick action per warehouse (FR-28.8)
       description: >
         Every warehouse the caller sees shipments or a saved setting for (both are
-        scoped by legal entity). A warehouse without a saved setting reads KEEP_OPEN
-        at version 0.
+        scoped by legal entity). A warehouse without a saved setting reads REMAINDER_BACKORDER
+        (the default) at version 0.
       x-passage-duty: WarehouseView
       responses:
         "200":
@@ -1387,8 +1424,8 @@ paths:
       operationId: saveWarehouseSetting
       summary: Set the short pick action of a warehouse (FR-28.8)
       description: >
-        KEEP_OPEN leaves a partially shipped shipment open for a re-pick (default).
-        CANCEL_REMAINDER closes the open remainder and REMAINDER_BACKORDER moves it to a new
+        KEEP_OPEN leaves a partially shipped shipment open for a re-pick.
+        CANCEL_REMAINDER closes the open remainder and REMAINDER_BACKORDER (default) moves it to a new
         shipment, both as soon as a packing slip leaves a remainder open; a shipment
         that cannot close (a line is packed and waiting to ship) is left as it is.
         The response of the post names the action taken. If-Match carries the version
@@ -1985,3 +2022,149 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: "FUL-0020 shipment, FUL-0054 container not on the shipment", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: "FUL-0007 the stored SSCC failed its check digit", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/drop-ships:
+    post:
+      operationId: createDropShip
+      summary: Create a drop-ship for an order line (FR-28.7)
+      description: >
+        Records that a vendor ships an order line straight to the customer, against a purchase
+        order line (wave 17) at the purchase order cost. The drop-ship is OPEN and books nothing.
+        An order line has at most one active drop-ship (FUL-0061) and ships either from stock or
+        from the vendor: a line on a warehouse shipment that is not cancelled is refused (FUL-0062),
+        and a release run skips a line with an active drop-ship (drop_ship). Publishes dropship.created.
+      x-passage-duty: WarehouseRelease
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [legalEntityId, orderId, orderLineId, customerId, productId, unit, qty, vendorId, purchaseOrderId, purchaseOrderLineId, unitCost, currency]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                orderId: { type: string, format: uuid }
+                orderLineId: { type: string, format: uuid }
+                customerId: { type: string, format: uuid }
+                productId: { type: string, format: uuid }
+                unit: { type: string, pattern: "^[A-Za-z0-9]{1,8}$" }
+                qty: { type: string, description: "Positive decimal with at most 6 decimals." }
+                vendorId: { type: string, format: uuid }
+                purchaseOrderId: { type: string, format: uuid }
+                purchaseOrderLineId: { type: string, format: uuid }
+                unitCost: { type: string, description: "Purchase order cost per unit, a positive decimal with at most 6 decimals." }
+                currency: { type: string, pattern: "^[A-Z]{3}$" }
+      responses:
+        "201":
+          description: The OPEN drop-ship; ETag carries its version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DropShip" }
+        "400": { description: "FUL-0050 validation, FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { description: "FUL-0061 the order line already has an active drop-ship; FUL-0062 the order line is on a warehouse shipment", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0058 legal entity outside your scope, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+    get:
+      operationId: listDropShips
+      summary: List drop-ships
+      description: Drop-ships newest first, filtered by status, order and vendor; scoped by legal entity.
+      x-passage-duty: WarehouseView
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, CONFIRMED, CANCELLED] } }
+        - { name: orderId, in: query, schema: { type: string, format: uuid } }
+        - { name: vendorId, in: query, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Drop-ships, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/DropShip" } }
+        "400": { description: "FUL-0050 invalid filter", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/fulfillment/drop-ships/{id}:
+    get:
+      operationId: getDropShip
+      summary: Read one drop-ship
+      x-passage-duty: WarehouseView
+      parameters:
+        - { $ref: "#/components/parameters/DropShipId" }
+      responses:
+        "200":
+          description: The drop-ship with its journal; ETag carries its version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DropShip" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0060 drop-ship not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/drop-ships/{id}:confirm:
+    post:
+      operationId: confirmDropShip
+      summary: Record the vendor's ship confirmation (FR-28.7, AC-28.5)
+      description: >
+        The vendor shipped the line. The drop-ship becomes CONFIRMED and books Dr 5000 cost of goods
+        sold / Cr 2110 goods received not invoiced at the purchase order cost, with no inventory
+        transaction (BR-28.1). The cost is booked on postingDate, else on shippedOn. Publishes
+        dropship.confirmed with the journal. Only an OPEN drop-ship can be confirmed (FUL-0001).
+        The confirmation is final: a CONFIRMED drop-ship cannot be cancelled. Section 5.28.5 names
+        the purchasing confirmation duty (PurchasingConfirm), seeded as PurchaseOrderConfirm.
+      x-passage-duty: PurchaseOrderConfirm
+      parameters:
+        - { $ref: "#/components/parameters/DropShipId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [shippedOn]
+              properties:
+                shippedOn: { type: string, format: date, description: "The day the vendor shipped; not in the future." }
+                vendorShipmentRef: { type: string, maxLength: 64, description: "The vendor's shipment or tracking reference." }
+                postingDate: { type: string, format: date, description: "The day the cost is booked; defaults to shippedOn." }
+      responses:
+        "200":
+          description: The CONFIRMED drop-ship with its journal; ETag carries the new version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DropShip" }
+        "400": { description: "FUL-0050 validation, FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0060 drop-ship not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: "conflict_version", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 the drop-ship is not OPEN, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: "precondition_required", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/drop-ships/{id}:cancel:
+    post:
+      operationId: cancelDropShip
+      summary: Cancel an OPEN drop-ship (FR-28.7)
+      description: >
+        Cancels a drop-ship the vendor has not confirmed; nothing was booked, and the order line can
+        be drop-shipped again. A CONFIRMED drop-ship is booked and cannot be cancelled (FUL-0001). Publishes
+        dropship.cancelled.
+      x-passage-duty: WarehouseRelease
+      parameters:
+        - { $ref: "#/components/parameters/DropShipId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      responses:
+        "200":
+          description: The CANCELLED drop-ship; ETag carries the new version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DropShip" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0060 drop-ship not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: "conflict_version", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 the drop-ship is not OPEN, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: "precondition_required", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }

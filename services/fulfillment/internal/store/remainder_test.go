@@ -33,11 +33,11 @@ func shipPart(t *testing.T, s *store.Postgres, ctx context.Context, f fixture) s
 func TestWarehouseSetting_DefaultSaveVersionAndIsolation(t *testing.T) {
 	s, admin := setup(t)
 	ctx := ctxFor(1, "")
-	f := released(t, s, ctx, 10)
+	f := releasedDefault(t, s, ctx, 10)
 
 	list, err := s.ListWarehouseSettings(ctx)
-	if err != nil || len(list) != 1 || list[0].WarehouseID != f.warehouse || list[0].LegalEntityID == nil || *list[0].LegalEntityID != f.legalEntity || list[0].ShortPickAction != domain.ActionKeepOpen || list[0].Version != 0 {
-		t.Fatalf("list = %+v, %v; want the shipment's warehouse at KEEP_OPEN version 0", list, err)
+	if err != nil || len(list) != 1 || list[0].WarehouseID != f.warehouse || list[0].LegalEntityID == nil || *list[0].LegalEntityID != f.legalEntity || list[0].ShortPickAction != domain.DefaultShortPickAction || list[0].Version != 0 {
+		t.Fatalf("list = %+v, %v; want the shipment's warehouse at REMAINDER_BACKORDER version 0", list, err)
 	}
 	if other, err := s.ListWarehouseSettings(ctxFor(2, "")); err != nil || len(other) != 0 {
 		t.Fatalf("other tenant list = %+v, %v", other, err)
@@ -69,7 +69,7 @@ func TestWarehouseSetting_DefaultSaveVersionAndIsolation(t *testing.T) {
 	if got, err := s.GetWarehouseSetting(ctx, f.warehouse); err != nil || got.ShortPickAction != domain.ActionCancelRemainder || got.Version != 2 {
 		t.Fatalf("get = %+v, %v", got, err)
 	}
-	if got, err := s.GetWarehouseSetting(ctxFor(2, ""), f.warehouse); err != nil || got.Version != 0 || got.ShortPickAction != domain.ActionKeepOpen {
+	if got, err := s.GetWarehouseSetting(ctxFor(2, ""), f.warehouse); err != nil || got.Version != 0 || got.ShortPickAction != domain.DefaultShortPickAction {
 		t.Fatalf("other tenant get = %+v, %v; want the default", got, err)
 	}
 	// The other tenant saves its own row for the same warehouse id.
@@ -86,7 +86,7 @@ func TestWarehouseSetting_DefaultSaveVersionAndIsolation(t *testing.T) {
 func TestWarehouseSetting_LegalEntityScope(t *testing.T) {
 	s, _ := setup(t)
 	ctx := ctxFor(1, "")
-	f := released(t, s, ctx, 10, 5)
+	f := releasedDefault(t, s, ctx, 10, 5)
 	other := ids.New()
 
 	if _, err := s.SaveWarehouseSetting(ctx, f.warehouse, other, 0, domain.ActionCancelRemainder, idem("wrong")); problemCode(err) != store.CodeWarehouseLegalEntity {
@@ -105,7 +105,7 @@ func TestWarehouseSetting_LegalEntityScope(t *testing.T) {
 	if list, err := s.ListWarehouseSettings(scoped); err != nil || len(list) != 0 {
 		t.Fatalf("other legal entity list = %+v, %v", list, err)
 	}
-	if got, err := s.GetWarehouseSetting(scoped, f.warehouse); err != nil || got.Version != 0 || got.LegalEntityID != nil || got.ShortPickAction != domain.ActionKeepOpen {
+	if got, err := s.GetWarehouseSetting(scoped, f.warehouse); err != nil || got.Version != 0 || got.LegalEntityID != nil || got.ShortPickAction != domain.DefaultShortPickAction {
 		t.Fatalf("other legal entity get = %+v, %v", got, err)
 	}
 	if _, err := s.SaveWarehouseSetting(scoped, f.warehouse, other, 0, domain.ActionKeepOpen, idem("sneak")); problemCode(err) != store.CodeWarehouseLegalEntity {
@@ -224,7 +224,7 @@ func TestPostPackingSlip_AppliesTheShortPickAction(t *testing.T) {
 		t.Fatalf("KEEP_OPEN status = %s, want PARTIALLY_SHIPPED", sh.Status)
 	}
 
-	cancel := released(t, s, ctx, 10, 5)
+	cancel := releasedDefault(t, s, ctx, 10, 5)
 	if _, err := s.SaveWarehouseSetting(ctx, cancel.warehouse, cancel.legalEntity, 0, domain.ActionCancelRemainder, idem("c")); err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestPostPackingSlip_AppliesTheShortPickAction(t *testing.T) {
 		t.Fatalf("CANCEL_REMAINDER shipment = %+v", sh)
 	}
 
-	back := released(t, s, ctx, 10, 5)
+	back := releasedDefault(t, s, ctx, 10, 5)
 	if _, err := s.SaveWarehouseSetting(ctx, back.warehouse, back.legalEntity, 0, domain.ActionBackorder, idem("b")); err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +253,7 @@ func TestPostPackingSlip_AppliesTheShortPickAction(t *testing.T) {
 	}
 
 	// A fully shipped post triggers nothing, whatever the setting.
-	full := released(t, s, ctx, 3)
+	full := releasedDefault(t, s, ctx, 3)
 	if _, err := s.SaveWarehouseSetting(ctx, full.warehouse, full.legalEntity, 0, domain.ActionBackorder, idem("f")); err != nil {
 		t.Fatal(err)
 	}
@@ -264,5 +264,48 @@ func TestPostPackingSlip_AppliesTheShortPickAction(t *testing.T) {
 	}
 	if n := countEvents(t, admin, fulevents.ShipmentClosed); n != 2 {
 		t.Fatalf("shipment.closed events = %d, want 2 (cancel and backorder)", n)
+	}
+}
+
+// A warehouse with no saved setting backorders the remainder (the PRD default):
+// the post names REMAINDER_BACKORDER and the quantity moves to a new shipment.
+func TestPostPackingSlip_UnsavedWarehouseBackordersTheRemainder(t *testing.T) {
+	s, _ := setup(t)
+	ctx := ctxFor(1, "")
+	f := releasedDefault(t, s, ctx, 10, 5)
+	if got, err := s.GetWarehouseSetting(ctx, f.warehouse); err != nil || got.Version != 0 || got.ShortPickAction != domain.ActionBackorder {
+		t.Fatalf("unsaved setting = %+v, %v", got, err)
+	}
+	slip := shipPart(t, s, ctx, f)
+	if slip.RemainderAction != "REMAINDER_BACKORDER" || slip.BackorderShipmentID == "" {
+		t.Fatalf("slip = %+v, want the remainder backordered", slip)
+	}
+	sh := getShipment(t, s, ctx, f.shipment.ID)
+	nb := getShipment(t, s, ctx, slip.BackorderShipmentID)
+	if sh.Status != domain.StatusShipped || nb.Status != domain.StatusReleased || nb.BackorderOfID == nil || *nb.BackorderOfID != sh.ID {
+		t.Fatalf("original %+v backorder %+v", sh, nb)
+	}
+}
+
+// The default applies to every shipment of an unsaved warehouse, also when its
+// other shipments belong to another legal entity; a setting saved for one legal
+// entity applies to its shipments only and leaves the others' remainder open.
+func TestPostPackingSlip_DefaultAppliesWhateverTheOtherShipmentsLegalEntity(t *testing.T) {
+	s, _ := setup(t)
+	ctx := ctxFor(1, "")
+	first := releasedDefault(t, s, ctx, 3)
+	second := releasedIn(t, s, ctx, first.warehouse, ids.New(), 10, 5)
+	if slip := shipPart(t, s, ctx, second); slip.RemainderAction != "REMAINDER_BACKORDER" || slip.BackorderShipmentID == "" {
+		t.Fatalf("unsaved warehouse, second legal entity: slip = %+v, want the remainder backordered", slip)
+	}
+	saved := releasedDefault(t, s, ctx, 3)
+	keepOpen(t, s, ctx, saved.warehouse, saved.legalEntity)
+	foreign := releasedIn(t, s, ctx, saved.warehouse, ids.New(), 10, 5)
+	if slip := shipPart(t, s, ctx, foreign); slip.RemainderAction != "" {
+		t.Fatalf("setting saved for another legal entity: slip = %+v, want no action", slip)
+	}
+	own := releasedIn(t, s, ctx, saved.warehouse, saved.legalEntity, 10, 5)
+	if slip := shipPart(t, s, ctx, own); slip.RemainderAction != "" || getShipment(t, s, ctx, own.shipment.ID).Status != domain.StatusPartiallyShipped {
+		t.Fatalf("saved KEEP_OPEN: slip = %+v, want the remainder kept open", slip)
 	}
 }

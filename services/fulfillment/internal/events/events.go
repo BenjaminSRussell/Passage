@@ -28,6 +28,10 @@ var (
 
 	WarehouseSettingChanged   = events.Type(Context, "warehousesetting", "changed", 1)
 	LegalEntitySettingChanged = events.Type(Context, "legalentitysetting", "changed", 1)
+
+	DropShipCreated   = events.Type(Context, "dropship", "created", 1)
+	DropShipConfirmed = events.Type(Context, "dropship", "confirmed", 1)
+	DropShipCancelled = events.Type(Context, "dropship", "cancelled", 1)
 )
 
 // All lists every event type this service publishes, for the registry check.
@@ -35,6 +39,7 @@ func All() []string {
 	return []string{
 		ShipmentReleased, PickConfirmed, PackingSlipPosted, PackingSlipCancelled,
 		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, ContainerNested, ContainerUnnested, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked, WarehouseSettingChanged, LegalEntitySettingChanged,
+		DropShipCreated, DropShipConfirmed, DropShipCancelled,
 	}
 }
 
@@ -324,4 +329,29 @@ type PackingSlipCancelledData struct {
 	Journal       []JournalEntry   `json:"journal"`
 	PackagingFees []PackagingFee   `json:"packaging_fees"`
 	Returnables   []ReturnableMove `json:"returnables"`
+}
+
+// DropShipData is published when a drop-ship is created (FR-28.7), confirmed
+// by the vendor or cancelled. The confirmed event carries the journal (Dr 5000
+// / Cr 2110 at the purchase order cost) for the ledger; no inventory moves.
+type DropShipData struct {
+	DropShipID        string         `json:"drop_ship_id"`
+	DropShipNumber    string         `json:"drop_ship_number"`
+	Status            string         `json:"status"`
+	LegalEntityID     string         `json:"legal_entity_id"`
+	OrderID           string         `json:"order_id"`
+	OrderLineID       string         `json:"order_line_id"`
+	CustomerID        string         `json:"customer_id"`
+	ProductID         string         `json:"product_id"`
+	Unit              string         `json:"unit"`
+	Qty               string         `json:"qty"`
+	VendorID          string         `json:"vendor_id"`
+	PurchaseOrderID   string         `json:"purchase_order_id"`
+	PurchaseOrderLine string         `json:"purchase_order_line_id"`
+	UnitCost          string         `json:"unit_cost"`
+	Currency          string         `json:"currency"`
+	VendorShipmentRef string         `json:"vendor_shipment_ref,omitempty"`
+	ShippedOn         string         `json:"shipped_on,omitempty"`
+	PostingDate       string         `json:"posting_date,omitempty"`
+	Journal           []JournalEntry `json:"journal"`
 }

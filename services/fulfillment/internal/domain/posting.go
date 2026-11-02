@@ -51,7 +51,7 @@ type JournalLine struct {
 // post time. Stocked lines post Dr 1405 / Cr 1400 at cost (physical posting,
 // the default), or Dr 5000 / Cr 1400 when cogsAtShipment is set (PGI-style).
 // Drop-ship and non-stocked lines post nothing here; drop-ship COGS is posted
-// when the vendor confirms (wave 28 later slice). Each line rounds once.
+// when the vendor confirms (DropShipPosting). Each line rounds once.
 func PackingSlipPosting(lines []PostingLine, cogsAtShipment bool, currency string) ([]JournalLine, error) {
 	var out []JournalLine
 	for _, l := range lines {

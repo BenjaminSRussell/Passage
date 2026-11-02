@@ -480,6 +480,7 @@ func bumpShipment(ctx context.Context, tx pgx.Tx, tenantID string, sh *Shipment,
 // RunRelease creates one shipment per release group. Runs for one warehouse are
 // serialised, and a line already on a shipment that is not cancelled is
 // skipped as already_released, so a repeated run never releases a line twice.
+// A line with an active drop-ship is skipped as drop_ship: the vendor ships it.
 func (s *Postgres) RunRelease(ctx context.Context, warehouseID string, groups []domain.ReleaseGroup, idem Idem) (ReleaseResult, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out ReleaseResult
@@ -488,7 +489,7 @@ func (s *Postgres) RunRelease(ctx context.Context, warehouseID string, groups []
 			if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1 || '/release/' || $2, 0))`, p.TenantID, warehouseID); err != nil {
 				return ReleaseResult{}, err
 			}
-			released, err := releasedLines(ctx, tx, groups)
+			taken, err := takenLines(ctx, tx, groups)
 			if err != nil {
 				return ReleaseResult{}, err
 			}
@@ -497,8 +498,8 @@ func (s *Postgres) RunRelease(ctx context.Context, warehouseID string, groups []
 				open := g
 				open.Lines = nil
 				for _, l := range g.Lines {
-					if released[l.OrderLineID] {
-						result.Skipped = append(result.Skipped, domain.Skip{OrderLineID: l.OrderLineID, Reason: domain.SkipAlreadyReleased})
+					if reason, ok := taken[l.OrderLineID]; ok {
+						result.Skipped = append(result.Skipped, domain.Skip{OrderLineID: l.OrderLineID, Reason: reason})
 						continue
 					}
 					open.Lines = append(open.Lines, l)
@@ -520,32 +521,37 @@ func (s *Postgres) RunRelease(ctx context.Context, warehouseID string, groups []
 	return out, err
 }
 
-// releasedLines returns the order lines of groups that already sit on a
-// shipment that is not cancelled.
-func releasedLines(ctx context.Context, tx pgx.Tx, groups []domain.ReleaseGroup) (map[string]bool, error) {
+// takenLines returns the order lines of groups that already sit on a shipment
+// that is not cancelled (already_released) or have an active drop-ship
+// (drop_ship), with the skip reason.
+func takenLines(ctx context.Context, tx pgx.Tx, groups []domain.ReleaseGroup) (map[string]string, error) {
 	var lineIDs []string
 	for _, g := range groups {
 		for _, l := range g.Lines {
 			lineIDs = append(lineIDs, l.OrderLineID)
 		}
 	}
-	out := map[string]bool{}
+	out := map[string]string{}
 	if len(lineIDs) == 0 {
 		return out, nil
 	}
-	rows, err := tx.Query(ctx, `select distinct sl.order_line_id::text from shipment_line sl
+	rows, err := tx.Query(ctx, `select sl.order_line_id::text, 'already_released' from shipment_line sl
 		join shipment s on s.tenant_id = sl.tenant_id and s.id = sl.shipment_id
-		where sl.order_line_id = any($1::uuid[]) and s.status <> 'CANCELLED'`, lineIDs)
+		where sl.order_line_id = any($1::uuid[]) and s.status <> 'CANCELLED'
+		union all
+		select order_line_id::text, 'drop_ship' from drop_ship where order_line_id = any($1::uuid[]) and status <> 'CANCELLED'`, lineIDs)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var id, reason string
+		if err := rows.Scan(&id, &reason); err != nil {
 			return nil, err
 		}
-		out[id] = true
+		if _, seen := out[id]; !seen || reason == domain.SkipAlreadyReleased {
+			out[id] = reason
+		}
 	}
 	return out, rows.Err()
 }

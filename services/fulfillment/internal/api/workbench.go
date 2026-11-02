@@ -53,6 +53,7 @@ func (a *API) routesWorkbench(r chi.Router) {
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/shipments/{id}/containers/{cid}/label", a.containerLabel)
 	a.routesRemainder(r)
 	a.routesLegalEntitySetting(r)
+	a.routesDropShip(r)
 }
 
 // ---- DTOs ----------------------------------------------------------------------

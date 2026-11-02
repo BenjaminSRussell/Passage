@@ -29,7 +29,7 @@ type RemainderStore interface {
 }
 
 // WarehouseSetting is the short pick action of one warehouse. A warehouse
-// without a saved setting reads KEEP_OPEN at version 0. A warehouse belongs to
+// without a saved setting reads REMAINDER_BACKORDER (the default) at version 0. A warehouse belongs to
 // one legal entity: LegalEntityID is the saved one, else the one of its
 // shipments, and nil when neither is known.
 type WarehouseSetting struct {
@@ -49,11 +49,11 @@ type BackorderResult struct {
 
 // ListWarehouseSettings lists every warehouse the caller sees shipments or a
 // saved setting for (both legal-entity scoped), with its short pick action
-// (KEEP_OPEN when none is saved).
+// (REMAINDER_BACKORDER when none is saved).
 func (s *Postgres) ListWarehouseSettings(ctx context.Context) ([]WarehouseSetting, error) {
 	out := []WarehouseSetting{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select w.warehouse_id, coalesce(ws.legal_entity_id, w.legal_entity_id), coalesce(ws.short_pick_action, 'KEEP_OPEN'), coalesce(ws.version, 0), ws.updated_at
+		rows, err := tx.Query(ctx, `select w.warehouse_id, coalesce(ws.legal_entity_id, w.legal_entity_id), coalesce(ws.short_pick_action, 'REMAINDER_BACKORDER'), coalesce(ws.version, 0), ws.updated_at
 			from (select warehouse_id, min(legal_entity_id::text)::uuid as legal_entity_id
 				from (select warehouse_id, legal_entity_id from shipment union select warehouse_id, legal_entity_id from warehouse_setting) u
 				group by warehouse_id) w
@@ -80,7 +80,7 @@ func (s *Postgres) ListWarehouseSettings(ctx context.Context) ([]WarehouseSettin
 // loadWarehouseSetting reads the saved setting of a warehouse, or the default
 // (version 0) with the legal entity of its shipments when none is saved.
 func loadWarehouseSetting(ctx context.Context, tx pgx.Tx, warehouseID string, lock bool) (WarehouseSetting, error) {
-	w := WarehouseSetting{WarehouseID: warehouseID, ShortPickAction: domain.ActionKeepOpen}
+	w := WarehouseSetting{WarehouseID: warehouseID, ShortPickAction: domain.DefaultShortPickAction}
 	q := `select legal_entity_id, short_pick_action, version, updated_at from warehouse_setting where warehouse_id = $1`
 	if lock {
 		q += ` for update`
@@ -211,7 +211,9 @@ func applyShortPickAction(ctx context.Context, tx pgx.Tx, tenantID string, sh *S
 		return "", nil, err
 	}
 	// A setting saved for another legal entity does not apply to this shipment.
-	if w.ShortPickAction == domain.ActionKeepOpen || w.LegalEntityID == nil || *w.LegalEntityID != sh.LegalEntityID {
+	// An unsaved warehouse (version 0) takes the default for every shipment,
+	// whatever legal entity its other shipments belong to.
+	if w.ShortPickAction == domain.ActionKeepOpen || (w.Version > 0 && (w.LegalEntityID == nil || *w.LegalEntityID != sh.LegalEntityID)) {
 		return "", nil, nil
 	}
 	// Leave a shipment that cannot close (a line is packed and waiting) alone;

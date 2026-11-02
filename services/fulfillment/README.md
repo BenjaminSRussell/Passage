@@ -123,7 +123,7 @@ and `npx tsc --noEmit` in `apps/web`.
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | `/v1/fulfillment/releases:run` | WarehouseRelease | Idempotency-Key. Creates shipments per (order, warehouse, ship date); a line already on an open shipment is skipped as `already_released`; runs per warehouse are serialised |
+| POST | `/v1/fulfillment/releases:run` | WarehouseRelease | Idempotency-Key. Creates shipments per (order, warehouse, ship date); a line already on an open shipment is skipped as `already_released`, a line with an active drop-ship as `drop_ship`; runs per warehouse are serialised |
 | GET | `/v1/fulfillment/shipments` | WarehouseView | Delivery monitor; filters `status`, `warehouseId`, `orderId`, `limit` (1 to 500, default 100) |
 | GET | `/v1/fulfillment/shipments/{id}` | WarehouseView | ETag carries the version |
 | POST | `/v1/fulfillment/shipments/{id}:confirm-pick` | WarehousePick | Idempotency-Key, If-Match |
@@ -202,15 +202,15 @@ the ASN gives each carton its `parent_sscc`.
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| GET | `/v1/fulfillment/warehouse-settings` | WarehouseView | The short pick action (FR-28.8) of every warehouse the caller sees shipments or a saved setting for, with its `legalEntityId`; KEEP_OPEN at version 0 when none is saved |
+| GET | `/v1/fulfillment/warehouse-settings` | WarehouseView | The short pick action (FR-28.8) of every warehouse the caller sees shipments or a saved setting for, with its `legalEntityId`; REMAINDER_BACKORDER (the default) at version 0 when none is saved |
 | GET | `/v1/fulfillment/warehouse-settings/{warehouseId}` | WarehouseView | One warehouse; ETag carries the version (0 when none is saved) |
 | PUT | `/v1/fulfillment/warehouse-settings/{warehouseId}` | WarehouseRelease | Idempotency-Key, If-Match (0 when none is saved); body `shortPickAction` (KEEP_OPEN, CANCEL_REMAINDER, REMAINDER_BACKORDER) and `legalEntityId`; FUL-0057 when the warehouse belongs to another legal entity; `warehousesetting.changed` |
 | POST | `/v1/fulfillment/shipments/{id}:backorder-remainder` | WarehouseRelease | Idempotency-Key, If-Match; optional `plannedShipDate`; the rules of `:close-remainder`, and the closed quantity moves to a new RELEASED shipment (`backorderOfId`); `shipment.closed` with `backorder_shipment_id`, then `shipment.released` with `backorder_of` |
 
 The setting is per warehouse and scoped by its legal entity. When a packing slip
 posts and leaves the shipment PARTIALLY_SHIPPED, the action runs in the same
-transaction: KEEP_OPEN (default) leaves the remainder for a re-pick,
-CANCEL_REMAINDER closes it, REMAINDER_BACKORDER moves it to a backorder shipment;
+transaction: KEEP_OPEN leaves the remainder for a re-pick,
+CANCEL_REMAINDER closes it, REMAINDER_BACKORDER (default, the PRD's) moves it to a backorder shipment;
 the post response names it (`remainderAction`, `backorderShipmentId`).
 
 ## Endpoints (slice 14)
@@ -237,6 +237,19 @@ are serialised by an advisory lock, so the second replays the first.
 
 Responses are JSON. Errors are RFC 9457 problem details (`application/problem+json`)
 with a stable `code`.
+
+## Endpoints (slice 15)
+
+| Method | Path | Duty | Notes |
+|---|---|---|---|
+| POST | `/v1/fulfillment/drop-ships` | WarehouseRelease | Idempotency-Key; links an order line to its purchase order line at the PO cost (`unitCost` positive, `currency`); one active drop-ship per order line (FUL-0061); a line on a warehouse shipment that is not cancelled is refused (FUL-0062); `dropship.created` |
+| GET | `/v1/fulfillment/drop-ships` | WarehouseView | Newest first; filters `status` (OPEN, CONFIRMED, CANCELLED), `orderId`, `vendorId`, `limit` |
+| GET | `/v1/fulfillment/drop-ships/{id}` | WarehouseView | One drop-ship with its journal; ETag carries the version |
+| POST | `/v1/fulfillment/drop-ships/{id}:confirm` | PurchaseOrderConfirm | Idempotency-Key, If-Match; body `shippedOn`, optional `vendorShipmentRef`, `postingDate`; books Dr 5000 / Cr 2110 at the PO cost with no inventory transaction; `dropship.confirmed` carries the journal; final |
+| POST | `/v1/fulfillment/drop-ships/{id}:cancel` | WarehouseRelease | Idempotency-Key, If-Match; only an OPEN drop-ship (a CONFIRMED one is refused with FUL-0001); `dropship.cancelled` |
+
+The `short_pick_action` default is REMAINDER_BACKORDER (migration 0016); KEEP_OPEN and
+CANCEL_REMAINDER stay allowed.
 
 ## Error codes
 
@@ -277,6 +290,9 @@ Codes raised in this slice:
 | `FUL-0057` | Warehouse setting saved under a legal entity the warehouse does not belong to (its saved setting or its shipments name another one, or it is outside the caller's scope) (422) |
 | `FUL-0058` | Legal entity setting saved for a legal entity outside the caller's legal-entity scope (422) |
 | `FUL-0059` | Packing slip post names a `cogsAtShipment` that contradicts the legal entity's `cogs_at_shipment` policy (422) |
+| `FUL-0060` | Drop-ship not found (404) |
+| `FUL-0061` | The order line already has an active drop-ship (409) |
+| `FUL-0062` | The order line is on a warehouse shipment that is not cancelled, so it cannot be drop-shipped (409) |
 | `COM-0001` | Malformed JSON body (kernel code) |
 | `precondition_required` | `If-Match` (shipment version) missing (428) |
 | `conflict_version` | `If-Match` does not match the current version (412) |
