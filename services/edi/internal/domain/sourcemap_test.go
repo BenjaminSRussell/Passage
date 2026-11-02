@@ -135,9 +135,31 @@ func TestInvoiceFromBilling_DiscountBecomesAllowanceAndChargeStaysSeparate(t *te
 func TestInvoiceFromBilling_CreditNote(t *testing.T) {
 	src := sourceInvoice()
 	src.Type = "CREDIT_NOTE"
-	inv, err := InvoiceFromBilling(tradeProfile(), src, sourceOrder())
-	if err != nil || !inv.CreditNote {
-		t.Fatalf("%v %+v", err, inv.CreditNote)
+	src.Lines[0].OrderID, src.Lines[1].OrderID = "", ""
+	if _, err := InvoiceFromBilling(tradeProfile(), src, sourceOrder()); !errors.Is(err, ErrOutbound) {
+		t.Fatalf("credit note must be refused with ErrOutbound, got %v", err)
+	}
+}
+
+func TestASNFromShipment_PalletsAreWeighedOnceAndCartonsArePacks(t *testing.T) {
+	sh := sourceShipment()
+	p1, p2 := "pallet-1", "pallet-2"
+	sh.Containers = []SourceContainer{
+		{SSCC: sscc("00345678900001"), Status: "SHIPPED", GrossKg: dec("250")},
+		{SSCC: sscc("00345678900002"), Status: "SHIPPED", GrossKg: dec("100")},
+		{SSCC: sscc("00345678900011"), Status: "SHIPPED", GrossKg: dec("100"), ParentContainerID: &p1, Lines: []SourceContainerLine{{ShipmentLineID: "sl-1", Qty: dec("10")}}},
+		{SSCC: sscc("00345678900012"), Status: "SHIPPED", GrossKg: dec("90"), ParentContainerID: &p1, Lines: []SourceContainerLine{{ShipmentLineID: "sl-2", Qty: dec("4")}}},
+		{SSCC: sscc("00345678900021"), Status: "SHIPPED", GrossKg: dec("80"), ParentContainerID: &p2, Lines: []SourceContainerLine{{ShipmentLineID: "sl-1", Qty: dec("5")}}},
+	}
+	asn, err := ASNFromShipment(tradeProfile(), sh, sourceOrder())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(asn.Orders[0].Packs); got != 3 {
+		t.Fatalf("packs = %d, want the 3 cartons", got)
+	}
+	if !asn.GrossWeight.Equal(dec("350")) {
+		t.Fatalf("gross = %s, want 350 (pallets only)", asn.GrossWeight)
 	}
 }
 

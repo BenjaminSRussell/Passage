@@ -233,8 +233,8 @@ Configuration: `DATABASE_URL` (required), `HTTP_ADDR` (default `:8080`),
 and `EDI_ISA_ID` (our ISA06/GS02 identity on outbound documents, default ZZ/PASSAGE),
 `PASSAGE_SERVICE_NAME=edi` with `PASSAGE_SERVICE_SIGNING_KEY` or `_FILE` (and `PASSAGE_SERVICE_KEY_ID`),
 `EDI_FULFILLMENT_URL`, `EDI_BILLING_URL`, `EDI_SALES_URL` (without a signing key the from-source
-or any source URL is unset the from-source route answers 503), `EDI_ALLOW_BODY_OUTBOUND` (default off;
-`charts/edi/values-dev.yaml` and `values-stage.yaml` turn it on so the integration screen and the 855 keep working).
+or any source URL is unset the from-source route answers 503), `EDI_ALLOW_BODY_OUTBOUND` (off in the binary; the chart
+sets `allowBodyOutbound: true` so the integration screen and the 855 keep working).
 The fulfillment, billing and sales charts verify edi's token from `serviceIdentity.publicKeys`
 (`edi=<base64 public key>`); until it is set they refuse every edi call.
 

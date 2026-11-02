@@ -73,10 +73,11 @@ type SourceContainerLine struct {
 }
 
 type SourceContainer struct {
-	SSCC    string                `json:"sscc"`
-	Status  string                `json:"status"`
-	GrossKg decimal.Decimal       `json:"grossKg"`
-	Lines   []SourceContainerLine `json:"lines"`
+	SSCC              string                `json:"sscc"`
+	Status            string                `json:"status"`
+	GrossKg           decimal.Decimal       `json:"grossKg"`
+	ParentContainerID *string               `json:"parentContainerId"`
+	Lines             []SourceContainerLine `json:"lines"`
 }
 
 type SourceShipment struct {
@@ -166,6 +167,18 @@ func orderFor(p TradeProfile, o SourceOrder, orderID string) error {
 	return nil
 }
 
+func InvoiceOrderID(inv SourceInvoice) (string, error) {
+	switch {
+	case len(inv.Lines) == 0:
+		return "", outboundf("invoice %s has no lines", inv.Number)
+	case inv.Type == "CREDIT_NOTE":
+		return "", outboundf("invoice %s is a credit note; credit notes carry no sales order, so no 810 is generated from them", inv.Number)
+	case inv.Lines[0].OrderID == "":
+		return "", outboundf("invoice %s has no sales order on its lines (free-text invoice); an 810 needs the customer PO", inv.Number)
+	}
+	return inv.Lines[0].OrderID, nil
+}
+
 func compactDate(t time.Time) string { return t.UTC().Format("20060102") }
 
 // ASNFromShipment builds the canonical ASN from a shipped fulfillment shipment
@@ -199,6 +212,12 @@ func ASNFromShipment(p TradeProfile, sh SourceShipment, o SourceOrder) (ASN, err
 		if c.Status != "SHIPPED" {
 			continue
 		}
+		if c.ParentContainerID == nil || *c.ParentContainerID == "" {
+			gross = gross.Add(c.GrossKg)
+		}
+		if len(c.Lines) == 0 {
+			continue
+		}
 		pack := ASNPack{SSCC: c.SSCC}
 		for _, cl := range c.Lines {
 			sl, ok := shipLines[cl.ShipmentLineID]
@@ -209,7 +228,6 @@ func ASNFromShipment(p TradeProfile, sh SourceShipment, o SourceOrder) (ASN, err
 			pack.Items = append(pack.Items, ASNItem{LineNo: strconv.Itoa(po.LineNo), Quantity: cl.Qty, UOM: sl.Unit,
 				ItemRefs: []ItemRef{{Qualifier: "VP", Value: sl.ProductID}}})
 		}
-		gross = gross.Add(c.GrossKg)
 		packs = append(packs, pack)
 	}
 	if len(packs) == 0 {
@@ -240,12 +258,9 @@ func InvoiceFromBilling(p TradeProfile, inv SourceInvoice, o SourceOrder) (Invoi
 	default:
 		return Invoice{}, fmt.Errorf("%w: invoice %s is %s, not posted", ErrSourceNotReady, inv.Number, inv.Status)
 	}
-	if len(inv.Lines) == 0 {
-		return Invoice{}, outboundf("invoice %s has no lines", inv.Number)
-	}
-	orderID := inv.Lines[0].OrderID
-	if orderID == "" {
-		return Invoice{}, outboundf("invoice %s has no sales order on its lines (credit note or free-text); an 810 needs the customer PO", inv.Number)
+	orderID, err := InvoiceOrderID(inv)
+	if err != nil {
+		return Invoice{}, err
 	}
 	if err := orderFor(p, o, orderID); err != nil {
 		return Invoice{}, err

@@ -132,15 +132,12 @@ func (a *API) sourceDocument(ctx context.Context, req sourceRequest, p domain.Tr
 		if inv, err = a.Sources.Invoice(ctx, p.LegalEntityID, req.SourceID); err != nil {
 			return nil, err
 		}
-		if len(inv.Lines) == 0 {
-			return nil, domain.ErrSourceNotReady
-		}
-		if inv.Lines[0].OrderID == "" {
-			_, err = domain.InvoiceFromBilling(p, inv, domain.SourceOrder{})
+		var orderID string
+		if orderID, err = domain.InvoiceOrderID(inv); err != nil {
 			return nil, err
 		}
 		var o domain.SourceOrder
-		if o, err = a.Sources.Order(ctx, p.LegalEntityID, inv.Lines[0].OrderID); err != nil {
+		if o, err = a.Sources.Order(ctx, p.LegalEntityID, orderID); err != nil {
 			return nil, err
 		}
 		doc, err = domain.InvoiceFromBilling(p, inv, o)

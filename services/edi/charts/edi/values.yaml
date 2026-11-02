@@ -12,5 +12,5 @@ serviceMonitor: { enabled: false, interval: 30s }
 # Outbound 856 and 810 are read from their owning services under a signed service grant.
 serviceIdentity: { signingKeySecret: "", keyId: "" }
 sources: { fulfillmentUrl: "", billingUrl: "", salesUrl: "" }
-# Serves POST /partners/{id}/outbound with the document in the request body. Dev and test only.
-allowBodyOutbound: false
+# Serves POST /partners/{id}/outbound with the document in the request body (the web Send EDI document screen and 855).
+allowBodyOutbound: true
