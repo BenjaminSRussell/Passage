@@ -221,7 +221,9 @@
       {"resource": "/v1/hub/subscriptions", "methods": ["POST"]},
       {"resource": "/v1/hub/subscriptions/*", "methods": ["PATCH", "DELETE"]},
       {"resource": "/v1/hub/subscriptions/*:resume", "methods": ["POST"]},
-      {"resource": "/v1/hub/subscriptions/*:replay", "methods": ["POST"]}
+      {"resource": "/v1/hub/subscriptions/*:replay", "methods": ["POST"]},
+      {"resource": "/v1/hub/subscriptions/*:test", "methods": ["POST"]},
+      {"resource": "/v1/hub/deliveries/*:replay", "methods": ["POST"]}
     ]},
     "hub.delivery.read": {"permissions": [
       {"resource": "/v1/hub/subscriptions", "methods": ["GET"]},
@@ -549,7 +551,8 @@
       {"resource": "/v1/party/parties", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*", "methods": ["PATCH"]},
       {"resource": "/v1/party/customers/*/credit-limit", "methods": ["POST"]},
-      {"resource": "/v1/party/parties/*/vendor", "methods": ["POST"]}
+      {"resource": "/v1/party/parties/*/vendor", "methods": ["POST"]},
+      {"resource": "/v1/party/parties/*/customer", "methods": ["POST"]}
     ]},
     "party.import.write": {"service_only": true, "permissions": [
       {"resource": "/v1/party/parties", "methods": ["POST"]},
@@ -2666,6 +2669,9 @@
     },
     "hr": {
       "numbering": ["numbering.sequence.allocate"]
+    },
+    "product": {
+      "org": ["org.read"]
     },
     "migration": {
       "party": ["party.import.write"],

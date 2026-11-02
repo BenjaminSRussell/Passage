@@ -941,3 +941,33 @@ test_product_write_can_patch_products if {
 	not allowed("product.write", "PATCH", "/v1/product/released-products/r1")
 	not allowed("product.write", "DELETE", "/v1/product/products/p1")
 }
+
+test_product_org_grant_reaches_only_org_read_routes if {
+	data.service_grants.product.org == ["org.read"]
+	allowed("org.read", "GET", "/v1/org/sites/s-1")
+	allowed("org.read", "GET", "/v1/org/warehouses/w-1")
+	not allowed("org.read", "POST", "/v1/org/sites")
+	not allowed("org.read", "PUT", "/v1/org/sites/s-1")
+	not allowed("org.read", "DELETE", "/v1/org/warehouses/w-1")
+	not allowed("org.read", "POST", "/v1/org/warehouses")
+	not allowed("org.read", "POST", "/v1/ledger/journal-entries")
+	not allowed("org.read", "GET", "/v1/product/items")
+}
+
+test_party_write_reaches_customer_create_only_by_post if {
+	allowed("party.write", "POST", "/v1/party/parties/p-1/customer")
+	not allowed("party.write", "GET", "/v1/party/parties/p-1/customer")
+	not allowed("party.write", "PUT", "/v1/party/parties/p-1/customer")
+	not allowed("party.write", "DELETE", "/v1/party/parties/p-1/customer")
+	not allowed("party.read", "POST", "/v1/party/parties/p-1/customer")
+}
+
+test_hub_subscription_write_reaches_test_send_and_delivery_replay if {
+	allowed("hub.subscription.write", "POST", "/v1/hub/subscriptions/s-1:test")
+	allowed("hub.subscription.write", "POST", "/v1/hub/deliveries/d-1:replay")
+	not allowed("hub.subscription.write", "GET", "/v1/hub/subscriptions/s-1:test")
+	not allowed("hub.subscription.write", "GET", "/v1/hub/deliveries/d-1:replay")
+	not allowed("hub.subscription.write", "DELETE", "/v1/hub/deliveries/d-1")
+	not allowed("hub.delivery.read", "POST", "/v1/hub/subscriptions/s-1:test")
+	not allowed("hub.delivery.read", "POST", "/v1/hub/deliveries/d-1:replay")
+}

@@ -107,6 +107,9 @@ var serviceGrants = map[string]map[string][]string{
 	"hr": {
 		"numbering": {"numbering.sequence.allocate"},
 	},
+	"product": {
+		"org": {"org.read"},
+	},
 	"migration": {
 		"party":   {"party.import.write"},
 		"product": {"product.import.write"},
