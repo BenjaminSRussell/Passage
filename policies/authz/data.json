@@ -2506,14 +2506,17 @@
       {"resource": "/v1/sales/supplementary-items:evaluate", "methods": ["POST"]},
       {"resource": "/v1/sales/agreements/*/versions", "methods": ["GET"]},
       {"resource": "/v1/sales/alternative-item-rules", "methods": ["GET"]},
-      {"resource": "/v1/sales/alternative-items:evaluate", "methods": ["POST"]}
+      {"resource": "/v1/sales/alternative-items:evaluate", "methods": ["POST"]},
+      {"resource": "/v1/sales/intake-errors", "methods": ["GET"]},
+      {"resource": "/v1/sales/intake-errors/*", "methods": ["GET"]}
     ]},
     "sales.order.write": {"permissions": [
       {"resource": "/v1/sales/orders", "methods": ["POST"]},
       {"resource": "/v1/sales/orders/*", "methods": ["PATCH"]},
       {"resource": "/v1/sales/orders/*/lines/*:promise", "methods": ["POST"]},
       {"resource": "/v1/sales/product-proposals:respond", "methods": ["POST"]},
-      {"resource": "/v1/sales/change-requests/*:withdraw", "methods": ["POST"]}
+      {"resource": "/v1/sales/change-requests/*:withdraw", "methods": ["POST"]},
+      {"resource": "/v1/sales/intake-errors/*:resolve", "methods": ["POST"]}
     ]},
     "sales.parameter.maintain": {"permissions": [{"resource": "/v1/sales/parameters", "methods": ["PUT"]}]},
     "sales.quotation.maintain": {"permissions": [
