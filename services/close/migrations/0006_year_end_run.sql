@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS year_end_run (
   retained_earnings_account text NOT NULL,
   retain_dimensions boolean NOT NULL DEFAULT false,
   proposals jsonb,
+  dispatched boolean NOT NULL DEFAULT false,
   journals jsonb NOT NULL DEFAULT '{}',
   created_by text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),

@@ -34,7 +34,8 @@ var fiscalYearPattern = regexp.MustCompile(`^[0-9]{4}$`)
 type YearEndStore interface {
 	YearPeriods(ctx context.Context, legalEntityID, ledgerID, year string) ([]domain.Period, error)
 	BeginYearEnd(ctx context.Context, in domain.YearEndRun) (domain.YearEndRun, bool, error)
-	SetYearEndProposals(ctx context.Context, runID string, proposals domain.YearEnd) (domain.YearEndRun, error)
+	CompletedYearEnd(ctx context.Context, legalEntityID, ledgerID, year, requestHash, supersedesRunID string) (domain.YearEndRun, bool, error)
+	DispatchYearEnd(ctx context.Context, runID string, proposals *domain.YearEnd) (domain.YearEndRun, error)
 	SetYearEndJournal(ctx context.Context, runID, name, journalID string) (domain.YearEndRun, error)
 	AbandonYearEnd(ctx context.Context, runID string) (domain.YearEndRun, error)
 	CompleteYearEnd(ctx context.Context, runID string) (domain.YearEndRun, error)
@@ -105,6 +106,16 @@ func (a *API) runYearEnd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	requestHash := store.HashRequest(http.MethodPost, yearEndPath, []byte(fmt.Sprint(req.LedgerID, req.FiscalYear, req.RetainedEarnings, req.RetainDimensions)))
+	done, found, err := a.yearEnds.CompletedYearEnd(ctx, p.LegalEntityID, req.LedgerID, req.FiscalYear, requestHash, req.SupersedesRunID)
+	if err != nil {
+		a.yearEndFailed(w, r, "year-end run could not be read", err)
+		return
+	}
+	if found {
+		respondRun(w, http.StatusOK, done)
+		return
+	}
 	info, err := a.yearLedger.Ledger(ctx, p.LegalEntityID, req.LedgerID)
 	if err == nil {
 		err = sameEntity(info.LegalEntityID, p.LegalEntityID)
@@ -131,15 +142,16 @@ func (a *API) runYearEnd(w http.ResponseWriter, r *http.Request) {
 		LegalEntityID: p.LegalEntityID, LedgerID: req.LedgerID, FiscalYear: req.FiscalYear, SupersedesRunID: req.SupersedesRunID,
 		Currency: info.Currency, ClosingDate: plan.ClosingDate.Format(dateLayout), OpeningDate: plan.OpeningDate.Format(dateLayout),
 		RetainedEarnings: req.RetainedEarnings, RetainDimensions: req.RetainDimensions, CreatedBy: p.UserID,
-		RequestHash: store.HashRequest(http.MethodPost, yearEndPath, []byte(fmt.Sprint(req.LedgerID, req.FiscalYear, req.RetainedEarnings, req.RetainDimensions))),
+		RequestHash: requestHash,
 	})
 	if err != nil {
 		a.yearEndFailed(w, r, "year-end run could not be recorded", err)
 		return
 	}
 	if run.Status != domain.RunCompleted {
+		dispatchedBefore := run.Dispatched
 		if run, err = a.driveYearEnd(ctx, run, info, accounts); err != nil {
-			a.abandonUnrecoverable(ctx, run, err)
+			a.abandonRefused(ctx, run, dispatchedBefore, err)
 			a.yearEndFailed(w, r, "year-end run failed", err)
 			return
 		}
@@ -149,6 +161,10 @@ func (a *API) runYearEnd(w http.ResponseWriter, r *http.Request) {
 	if created {
 		status = http.StatusCreated
 	}
+	respondRun(w, status, run)
+}
+
+func respondRun(w http.ResponseWriter, status int, run domain.YearEndRun) {
 	w.Header().Set("Location", yearEndPath+"/"+run.ID)
 	httpx.JSON(w, status, run)
 }
@@ -177,37 +193,47 @@ func (a *API) driveYearEnd(ctx context.Context, run domain.YearEndRun, info ledg
 		run = reversed
 	}
 	if run.Journals[domain.JournalClosing] == "" {
-		proposals, err := a.deriveProposals(ctx, run, info, accounts)
-		if err != nil {
-			return run, err
+		if run.Proposals == nil {
+			proposals, err := a.deriveProposals(ctx, run, info, accounts)
+			if err != nil {
+				return run, err
+			}
+			if run, err = a.yearEnds.DispatchYearEnd(ctx, run.ID, &proposals); err != nil {
+				return run, err
+			}
 		}
-		stored, err := a.yearEnds.SetYearEndProposals(ctx, run.ID, proposals)
-		if err != nil {
-			return run, err
-		}
-		run = stored
 		if len(run.Proposals.Closing) > 0 {
 			id, err := a.yearLedger.Post(ctx, yearEndEntry(run, run.Proposals.Closing))
 			if err != nil {
 				return run, err
 			}
-			posted, err := a.yearEnds.SetYearEndJournal(ctx, run.ID, domain.JournalClosing, id)
-			if err != nil {
+			if run, err = a.yearEnds.SetYearEndJournal(ctx, run.ID, domain.JournalClosing, id); err != nil {
 				return run, err
 			}
-			run = posted
 		}
 	}
 	return a.yearEnds.CompleteYearEnd(ctx, run.ID)
 }
 
-func (a *API) abandonUnrecoverable(ctx context.Context, run domain.YearEndRun, err error) {
-	if run.ID == "" || len(run.Journals) > 0 || !unrecoverable(err) {
+func (a *API) abandonRefused(ctx context.Context, run domain.YearEndRun, dispatchedBefore bool, err error) {
+	if run.ID == "" || dispatchedBefore || len(run.Journals) > 0 || !definiteRefusal(err) {
 		return
 	}
 	if _, abandonErr := a.yearEnds.AbandonYearEnd(ctx, run.ID); abandonErr != nil {
 		slog.ErrorContext(ctx, "year-end run could not be abandoned", "err", abandonErr, "runId", run.ID, "correlationId", middleware.GetReqID(ctx))
 	}
+}
+
+func definiteRefusal(err error) bool {
+	var de *domain.Error
+	var le *ledgerclient.Error
+	switch {
+	case errors.As(err, &de):
+		return true
+	case errors.As(err, &le):
+		return le.Status == http.StatusBadRequest || le.Status == http.StatusNotFound || le.Status == http.StatusUnprocessableEntity
+	}
+	return false
 }
 
 func unrecoverable(err error) bool {
@@ -232,6 +258,11 @@ func (a *API) reversePrior(ctx context.Context, run domain.YearEndRun) (domain.Y
 	entry := prior.Journals[domain.JournalClosing]
 	if entry == "" || run.Journals[domain.JournalReverseClosing] != "" {
 		return run, nil
+	}
+	if !run.Dispatched {
+		if run, err = a.yearEnds.DispatchYearEnd(ctx, run.ID, nil); err != nil {
+			return run, err
+		}
 	}
 	id, err := a.yearLedger.Reverse(ctx, ledgerclient.Reversal{
 		LegalEntityID: run.LegalEntityID, EntryID: entry, PostingDate: prior.ClosingDate, PostClosed: true,

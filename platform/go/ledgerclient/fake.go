@@ -25,6 +25,7 @@ type Fake struct {
 	byKey    map[string]int
 	reversed map[string]string
 	postErr  error
+	lostErr  error
 	ledgers  map[string]string
 	closedTo string
 }
@@ -44,6 +45,13 @@ func (f *Fake) FailPosts(err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.postErr = err
+}
+
+// LoseAnswers makes every Post that the ledger accepts return err instead of the entry id until it is called with nil.
+func (f *Fake) LoseAnswers(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lostErr = err
 }
 
 // RefuseClosedThrough makes Post and Reverse refuse, with LEDGER_PERIOD_CLOSED, any entry dated on or before date (YYYY-MM-DD)
@@ -77,7 +85,11 @@ func (f *Fake) Post(_ context.Context, e Entry) (string, error) {
 	if f.refusesClosed(e.PostingDate, e.PostClosed) {
 		return "", &Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: CodePeriodClosed}
 	}
-	return f.store("post", e, "")
+	id, err := f.store("post", e, "")
+	if err == nil && f.lostErr != nil {
+		return "", f.lostErr
+	}
+	return id, err
 }
 
 func (f *Fake) store(op string, e Entry, reversalOf string) (string, error) {

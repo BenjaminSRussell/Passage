@@ -41,6 +41,7 @@ const (
 var (
 	ErrUnsigned    = errors.New("ledger: posting needs a service signing key; the end user's headers are never forwarded for a journal")
 	ErrNoPrincipal = errors.New("ledger: no principal in context")
+	ErrNoDuty      = errors.New("ledger: a request must name the duties it is signed with; an empty list would sign the whole grant")
 	ErrUnbalanced  = errors.New("ledger: entry lines do not balance")
 	ErrEmptyEntry  = errors.New("ledger: entry needs at least two lines with positive amounts, an account and a currency")
 )
@@ -238,6 +239,9 @@ type balancesBody struct {
 }
 
 func (c *Client) do(ctx context.Context, op, subject, method, path string, query url.Values, payload any, key, legalEntity string, duties ...string) ([]byte, error) {
+	if len(duties) == 0 {
+		return nil, ErrNoDuty
+	}
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
 		return nil, ErrNoPrincipal

@@ -189,6 +189,7 @@ func span(id, start, end string, rows ...domain.Row) domain.Period {
 
 func TestPlanYear(t *testing.T) {
 	closed := domain.Row{Module: domain.ModuleAP, Status: domain.StatusClosed}
+	sealed := domain.Row{Module: domain.ModuleAll, Status: domain.StatusClosed}
 	held := domain.Row{Module: domain.ModuleGL, Status: domain.StatusOnHold}
 	permanent := domain.Row{Module: domain.ModuleAll, Status: domain.StatusPermanentlyClosed}
 	tests := []struct {
@@ -198,16 +199,18 @@ func TestPlanYear(t *testing.T) {
 		opening string
 		code    string
 	}{
-		{"periods in any order close on the year end", []domain.Period{span("h2", "2026-07-01", "2026-12-31", closed, held), span("h1", "2026-01-01", "2026-06-30", closed)}, "2026-12-31", "2027-01-01", ""},
-		{"one period covering the year", []domain.Period{span("fy", "2026-01-01", "2026-12-31", closed)}, "2026-12-31", "2027-01-01", ""},
-		{"earlier periods may be permanently closed", []domain.Period{span("h1", "2026-01-01", "2026-06-30", permanent), span("h2", "2026-07-01", "2026-12-31", closed)}, "2026-12-31", "2027-01-01", ""},
+		{"periods in any order close on the year end", []domain.Period{span("h2", "2026-07-01", "2026-12-31", closed, held, sealed), span("h1", "2026-01-01", "2026-06-30", closed)}, "2026-12-31", "2027-01-01", ""},
+		{"one period covering the year", []domain.Period{span("fy", "2026-01-01", "2026-12-31", closed, sealed)}, "2026-12-31", "2027-01-01", ""},
+		{"earlier periods may be permanently closed", []domain.Period{span("h1", "2026-01-01", "2026-06-30", permanent), span("h2", "2026-07-01", "2026-12-31", closed, sealed)}, "2026-12-31", "2027-01-01", ""},
+		{"all-modules row on hold seals the last period", []domain.Period{span("fy", "2026-01-01", "2026-12-31", closed, domain.Row{Module: domain.ModuleAll, Status: domain.StatusOnHold})}, "2026-12-31", "2027-01-01", ""},
+		{"last period without an all-modules row", []domain.Period{span("fy", "2026-01-01", "2026-12-31", closed)}, "", "", domain.CodeInvalidTransition},
 		{"no periods", nil, "", "", domain.CodeNoPeriod},
 		{"gap between periods", []domain.Period{span("a", "2026-01-01", "2026-06-30", closed), span("b", "2026-08-01", "2026-12-31", closed)}, "", "", domain.CodeNoPeriod},
 		{"missing december", []domain.Period{span("a", "2026-01-01", "2026-11-30", closed)}, "", "", domain.CodeNoPeriod},
 		{"missing january", []domain.Period{span("a", "2026-02-01", "2026-12-31", closed)}, "", "", domain.CodeNoPeriod},
 		{"overlapping periods", []domain.Period{span("a", "2026-01-01", "2026-07-15", closed), span("b", "2026-07-01", "2026-12-31", closed)}, "", "", domain.CodeAmbiguousPeriod},
-		{"open module", []domain.Period{span("p", "2026-01-01", "2026-12-31", closed, domain.Row{Module: domain.ModuleAR, Status: domain.StatusOpen})}, "", "", domain.CodeInvalidTransition},
-		{"non gl module on hold", []domain.Period{span("p", "2026-01-01", "2026-12-31", domain.Row{Module: domain.ModuleAP, Status: domain.StatusOnHold})}, "", "", domain.CodeInvalidTransition},
+		{"open module", []domain.Period{span("p", "2026-01-01", "2026-12-31", closed, sealed, domain.Row{Module: domain.ModuleAR, Status: domain.StatusOpen})}, "", "", domain.CodeInvalidTransition},
+		{"non gl module on hold", []domain.Period{span("p", "2026-01-01", "2026-12-31", sealed, domain.Row{Module: domain.ModuleAP, Status: domain.StatusOnHold})}, "", "", domain.CodeInvalidTransition},
 		{"last period permanently closed cannot take the closing entry", []domain.Period{span("p", "2026-01-01", "2026-12-31", permanent)}, "", "", domain.CodeInvalidTransition},
 	}
 	for _, tc := range tests {

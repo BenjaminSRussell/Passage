@@ -19,14 +19,14 @@ import (
 
 const (
 	eventSource   = "close"
-	yearEndColumn = `id::text, legal_entity_id::text, ledger_id::text, fiscal_year, sequence, coalesce(supersedes_run_id::text, ''), status, currency, closing_date::text, opening_date::text, retained_earnings_account, retain_dimensions, proposals, journals, created_by, request_hash`
+	yearEndColumn = `id::text, legal_entity_id::text, ledger_id::text, fiscal_year, sequence, coalesce(supersedes_run_id::text, ''), status, currency, closing_date::text, opening_date::text, retained_earnings_account, retain_dimensions, proposals, journals, dispatched, created_by, request_hash`
 )
 
 func scanRun(row pgx.Row) (domain.YearEndRun, error) {
 	var run domain.YearEndRun
 	var proposals, journals []byte
 	err := row.Scan(&run.ID, &run.LegalEntityID, &run.LedgerID, &run.FiscalYear, &run.Sequence, &run.SupersedesRunID, &run.Status, &run.Currency,
-		&run.ClosingDate, &run.OpeningDate, &run.RetainedEarnings, &run.RetainDimensions, &proposals, &journals, &run.CreatedBy, &run.RequestHash)
+		&run.ClosingDate, &run.OpeningDate, &run.RetainedEarnings, &run.RetainDimensions, &proposals, &journals, &run.Dispatched, &run.CreatedBy, &run.RequestHash)
 	if err != nil {
 		return run, err
 	}
@@ -127,12 +127,32 @@ func (s *Postgres) BeginYearEnd(ctx context.Context, in domain.YearEndRun) (doma
 	return run, created, nil
 }
 
-func (s *Postgres) SetYearEndProposals(ctx context.Context, runID string, proposals domain.YearEnd) (domain.YearEndRun, error) {
-	encoded, err := json.Marshal(proposals)
-	if err != nil {
-		return domain.YearEndRun{}, fmt.Errorf("encode year-end proposals: %w", err)
+func (s *Postgres) DispatchYearEnd(ctx context.Context, runID string, proposals *domain.YearEnd) (domain.YearEndRun, error) {
+	var encoded []byte
+	if proposals != nil {
+		var err error
+		if encoded, err = json.Marshal(proposals); err != nil {
+			return domain.YearEndRun{}, fmt.Errorf("encode year-end proposals: %w", err)
+		}
 	}
-	return s.updateRun(ctx, runID, `update year_end_run set proposals = $2 where id = $1 and status = 'pending' and journals->'closing' is null`, encoded)
+	return s.updateRun(ctx, runID, `update year_end_run set dispatched = true, proposals = coalesce(proposals, $2::jsonb) where id = $1 and status = 'pending'`, encoded)
+}
+
+func (s *Postgres) CompletedYearEnd(ctx context.Context, legalEntityID, ledgerID, year, requestHash, supersedesRunID string) (domain.YearEndRun, bool, error) {
+	var run domain.YearEndRun
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		run, err = scanRun(tx.QueryRow(ctx, `select `+yearEndColumn+` from year_end_run where legal_entity_id = $1 and ledger_id = $2 and fiscal_year = $3 and status <> 'abandoned' order by sequence desc limit 1`,
+			legalEntityID, ledgerID, year))
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.YearEndRun{}, false, nil
+	}
+	if err != nil {
+		return domain.YearEndRun{}, false, fmt.Errorf("read completed year-end run: %w", err)
+	}
+	return run, run.Status == domain.RunCompleted && run.RequestHash == requestHash && run.SupersedesRunID == supersedesRunID, nil
 }
 
 func (s *Postgres) AbandonYearEnd(ctx context.Context, runID string) (domain.YearEndRun, error) {

@@ -32,6 +32,7 @@ type YearEndRun struct {
 	RetainDimensions bool              `json:"retainDimensions"`
 	Proposals        *YearEnd          `json:"proposals,omitempty"`
 	Journals         map[string]string `json:"journals"`
+	Dispatched       bool              `json:"-"`
 	CreatedBy        string            `json:"createdBy"`
 	RequestHash      string            `json:"-"`
 }
@@ -67,12 +68,18 @@ func PlanYear(year string, periods []Period) (YearPlan, error) {
 	}
 	for i, p := range sorted {
 		final := i == len(sorted)-1
+		sealed := false
 		for _, r := range p.Rows {
 			closed := r.Status == StatusClosed || (r.Status == StatusPermanentlyClosed && !final)
-			if closed || (r.Module == ModuleGL && r.Status == StatusOnHold) {
+			held := (r.Module == ModuleGL || r.Module == ModuleAll) && r.Status == StatusOnHold
+			sealed = sealed || (r.Module == ModuleAll && (r.Status == StatusClosed || r.Status == StatusOnHold))
+			if closed || held {
 				continue
 			}
 			return YearPlan{}, fail(CodeInvalidTransition, "period "+p.FiscalPeriodID+" module "+string(r.Module)+" is "+string(r.Status)+"; every module must be closed, except general ledger which may be on hold, and the last period of the year cannot be permanently closed because the closing entry posts into it")
+		}
+		if final && !sealed {
+			return YearPlan{}, fail(CodeInvalidTransition, "period "+p.FiscalPeriodID+" must have its all-modules row closed or on hold before the closing entry posts into it")
 		}
 	}
 	closing := sorted[len(sorted)-1].End

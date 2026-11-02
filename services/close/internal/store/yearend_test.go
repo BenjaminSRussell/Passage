@@ -36,7 +36,7 @@ func outboxRows(t *testing.T, admin *pgxpool.Pool) int {
 func finish(t *testing.T, s *store.Postgres, runID string) domain.YearEndRun {
 	t.Helper()
 	proposals := domain.YearEnd{Closing: []domain.Entry{{Kind: domain.EntryClosing, Account: "4000", Amount: decimal.NewFromInt(5)}}}
-	if _, err := s.SetYearEndProposals(principal(1), runID, proposals); err != nil {
+	if _, err := s.DispatchYearEnd(principal(1), runID, &proposals); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.SetYearEndJournal(principal(1), runID, domain.JournalClosing, ids.New()); err != nil {
@@ -80,34 +80,46 @@ func TestYearEnd_RunIsStoredIdempotentlyAndCompletionQueuesOneEvent(t *testing.T
 	}
 }
 
-func TestYearEnd_ProposalsAreReplacedUntilTheClosingEntryPostsThenFrozen(t *testing.T) {
+func TestYearEnd_ProposalsFreezeAtFirstDispatchAndCompletedRepeatIsFoundByRequest(t *testing.T) {
 	_, app := migrated(t)
 	s := store.New(app)
 	run, _, err := s.BeginYearEnd(principal(1), yearEndInput("h1"))
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || run.Dispatched {
+		t.Fatalf("a new run has dispatched nothing: %+v %v", run, err)
 	}
-	proposing := func(amount int64) domain.YearEnd {
-		return domain.YearEnd{Closing: []domain.Entry{{Kind: domain.EntryClosing, Account: "4000", Amount: decimal.NewFromInt(amount)}}}
+	proposing := func(amount int64) *domain.YearEnd {
+		return &domain.YearEnd{Closing: []domain.Entry{{Kind: domain.EntryClosing, Account: "4000", Amount: decimal.NewFromInt(amount)}}}
+	}
+	marked, err := s.DispatchYearEnd(principal(1), run.ID, nil)
+	if err != nil || !marked.Dispatched || marked.Proposals != nil {
+		t.Fatalf("marking before a reversal stores no proposals: %+v %v", marked, err)
 	}
 	for _, amount := range []int64{5, 9} {
-		if _, err := s.SetYearEndProposals(principal(1), run.ID, proposing(amount)); err != nil {
+		if _, err := s.DispatchYearEnd(principal(1), run.ID, proposing(amount)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	got, err := s.YearEndRun(principal(1), run.ID)
-	if err != nil || !got.Proposals.Closing[0].Amount.Equal(decimal.NewFromInt(9)) {
-		t.Fatalf("proposals must follow the latest derivation while nothing has posted: %+v %v", got, err)
+	if err != nil || !got.Dispatched || !got.Proposals.Closing[0].Amount.Equal(decimal.NewFromInt(5)) {
+		t.Fatalf("the first proposals are frozen: %+v %v", got, err)
+	}
+	if _, found, err := s.CompletedYearEnd(principal(1), entityID, ledgerID, "2026", "h1", ""); err != nil || found {
+		t.Fatalf("a pending run is not a completed repeat: %v %v", found, err)
 	}
 	if _, err := s.SetYearEndJournal(principal(1), run.ID, domain.JournalClosing, ids.New()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetYearEndProposals(principal(1), run.ID, proposing(70)); err != nil {
+	if _, err := s.CompleteYearEnd(principal(1), run.ID); err != nil {
 		t.Fatal(err)
 	}
-	got, err = s.YearEndRun(principal(1), run.ID)
-	if err != nil || !got.Proposals.Closing[0].Amount.Equal(decimal.NewFromInt(9)) || len(got.Journals) != 1 {
-		t.Fatalf("proposals must freeze once the closing entry posted: %+v %v", got, err)
+	for hash, want := range map[string]bool{"h1": true, "other": false} {
+		done, found, err := s.CompletedYearEnd(principal(1), entityID, ledgerID, "2026", hash, "")
+		if err != nil || found != want || done.ID != run.ID {
+			t.Fatalf("hash %s: found=%v want=%v run=%+v err=%v", hash, found, want, done, err)
+		}
+	}
+	if _, found, err := s.CompletedYearEnd(principal(1), entityID, ledgerID, "2027", "h1", ""); err != nil || found {
+		t.Fatalf("another year has no run: %v %v", found, err)
 	}
 }
 
