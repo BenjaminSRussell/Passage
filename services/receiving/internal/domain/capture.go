@@ -29,7 +29,31 @@ const (
 	MaxCaptureLines     = 500
 	maxCaptureNumberLen = 64
 	maxCaptureTextLen   = 200
+	maxCaptureTaxIDLen  = 40
+	maxDecimalText      = 40
+	maxDecimalExp       = 12
+	minDecimalExp       = -18
 )
+
+var decimalMagnitude = decimal.New(1, 12)
+
+func decimalInBounds(d decimal.Decimal) bool {
+	return d.Exponent() <= maxDecimalExp && d.Exponent() >= minDecimalExp && d.Abs().LessThanOrEqual(decimalMagnitude)
+}
+
+func boundedDecimal(text string) (decimal.Decimal, error) {
+	if len(text) > maxDecimalText {
+		return decimal.Zero, errors.New("number is too long")
+	}
+	d, err := decimal.NewFromString(text)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	if !decimalInBounds(d) {
+		return decimal.Zero, errors.New("number is out of range")
+	}
+	return d, nil
+}
 
 var (
 	MinCaptureConfidence = decimal.RequireFromString("0.80")
@@ -74,7 +98,18 @@ func (e ExtractedInvoice) Validate() error {
 	invalid := func(format string, a ...any) error {
 		return &Error{Code: CodeInvalidCapture, Detail: fmt.Sprintf(format, a...)}
 	}
+	numbers := []decimal.Decimal{e.Total, e.Confidence}
+	for _, l := range e.Lines {
+		numbers = append(numbers, l.Qty, l.UnitPrice, l.Amount)
+	}
+	for _, n := range numbers {
+		if !decimalInBounds(n) {
+			return invalid("a number is out of range (at most 12 integer digits, exponent -18 to 12)")
+		}
+	}
 	switch {
+	case len(e.VendorTaxID) > maxCaptureTaxIDLen:
+		return invalid("vendor tax id is at most %d characters", maxCaptureTaxIDLen)
 	case e.InvoiceNumber == "" || len(e.InvoiceNumber) > maxCaptureNumberLen:
 		return invalid("invoice number is required and at most %d characters", maxCaptureNumberLen)
 	case e.InvoiceDate.IsZero():
@@ -148,7 +183,7 @@ func ParseUBL(content []byte) (ExtractedInvoice, error) {
 		return ExtractedInvoice{}, &Error{Code: CodeInvalidCapture, Detail: "IssueDate must be YYYY-MM-DD"}
 	}
 	total := firstNonBlank(doc.Net, doc.LineSum, doc.Payable)
-	if out.Total, err = decimal.NewFromString(total); err != nil {
+	if out.Total, err = boundedDecimal(total); err != nil {
 		return ExtractedInvoice{}, &Error{Code: CodeInvalidCapture, Detail: "the document has no usable monetary total"}
 	}
 	for i, l := range doc.Lines {
@@ -158,7 +193,7 @@ func ParseUBL(content []byte) (ExtractedInvoice, error) {
 			text string
 		}{{&line.Qty, l.Quantity.Value}, {&line.Amount, l.Amount}, {&line.UnitPrice, l.Price}}
 		for _, a := range amounts {
-			if *a.into, err = decimal.NewFromString(strings.TrimSpace(a.text)); err != nil {
+			if *a.into, err = boundedDecimal(strings.TrimSpace(a.text)); err != nil {
 				return ExtractedInvoice{}, &Error{Code: CodeInvalidCapture, Detail: fmt.Sprintf("invoice line %d has an unreadable quantity, amount or price", i+1)}
 			}
 		}

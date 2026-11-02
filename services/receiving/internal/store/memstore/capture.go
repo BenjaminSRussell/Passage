@@ -43,3 +43,15 @@ func (s *Store) GetCapture(ctx context.Context, id string) (out store.Capture, e
 	})
 	return out, err
 }
+
+func (s *Store) FindCapture(ctx context.Context, legalEntityID, digest string) (out store.Capture, found bool, err error) {
+	err = s.with(ctx, func(t *tenantData) error {
+		for _, c := range t.captures {
+			if c.LegalEntityID == legalEntityID && c.DocumentSHA256 == digest {
+				out, found = cloneCapture(c), true
+			}
+		}
+		return nil
+	})
+	return out, found, err
+}

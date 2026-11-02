@@ -143,3 +143,32 @@ func TestInvoiceCapture_RefusesBadRequestsAndForeignScope(t *testing.T) {
 		t.Errorf("unknown id: %d", got)
 	}
 }
+
+func TestInvoiceCapture_OutOfRangeNumbersAreRefusedOnBothPaths(t *testing.T) {
+	for _, exp := range []string{"1e999999999", "1e-999999999", "1e50000000"} {
+		doc := strings.Replace(ublDocument, "<TaxExclusiveAmount>25.00</TaxExclusiveAmount>", "<TaxExclusiveAmount>"+exp+"</TaxExclusiveAmount>", 1)
+		rg := newCaptureRig(nil)
+		rec := rg.call(http.MethodPost, capturesPath, captureRequest("UBL", "", doc), duty("VendorInvoicePost", rg.key()))
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), domain.CodeInvalidCapture) {
+			t.Errorf("UBL %s: %d %s", exp, rec.Code, rec.Body)
+		}
+		big, _ := decimal.NewFromString(exp)
+		bad := scannedInvoice("0.9")
+		bad.Total = big
+		ocr := newCaptureRig(&domain.FakeExtractor{Result: bad})
+		rec = ocr.call(http.MethodPost, capturesPath, captureRequest("OCR", "image/png", "png"), duty("VendorInvoicePost", ocr.key()))
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), domain.CodeInvalidCapture) {
+			t.Errorf("OCR %s: %d %s", exp, rec.Code, rec.Body)
+		}
+	}
+}
+
+func TestInvoiceCapture_RepeatedDocumentSkipsTheExtractor(t *testing.T) {
+	ex := &domain.FakeExtractor{Result: scannedInvoice("0.9")}
+	rg := newCaptureRig(ex)
+	decode[captureJSON](t, rg.call(http.MethodPost, capturesPath, captureRequest("OCR", "image/png", "png"), duty("VendorInvoicePost", rg.key())), http.StatusCreated)
+	decode[captureJSON](t, rg.call(http.MethodPost, capturesPath, captureRequest("OCR", "image/png", "png"), duty("VendorInvoicePost", rg.key())), http.StatusOK)
+	if ex.Calls != 1 {
+		t.Fatalf("extractor ran %d times", ex.Calls)
+	}
+}

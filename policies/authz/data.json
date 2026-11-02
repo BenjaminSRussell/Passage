@@ -510,6 +510,7 @@
       {"resource": "/v1/receiving/service-entry-sheets/*", "methods": ["GET"]}
     ]},
     "ServiceEntryAccept": {"permissions": [
+      {"resource": "/v1/receiving/service-entry-sheets/*", "methods": ["GET"]},
       {"resource": "/v1/receiving/service-entry-sheets/*:accept", "methods": ["POST"]},
       {"resource": "/v1/receiving/service-entry-sheets/*:reject", "methods": ["POST"]}
     ]},

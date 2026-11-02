@@ -342,6 +342,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001 no authenticated user.' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '413': { $ref: '#/components/responses/Problem', description: 'COM-0413 the body is over 4 MiB.' }
         '422': { $ref: '#/components/responses/Problem', description: 'RCV-CAP-001 the document is not a valid invoice; RCV-CAP-002 the extractor could not read it; COM-0409.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
         '503': { $ref: '#/components/responses/Problem', description: 'COM-0503 no OCR extractor is configured.' }
@@ -397,7 +398,7 @@ paths:
   /v1/receiving/service-entry-sheets/{id}:
     get:
       operationId: getServiceEntrySheet
-      x-passage-duty: ServiceEntryMaintain
+      x-passage-duty: ServiceEntryMaintain or ServiceEntryAccept
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:

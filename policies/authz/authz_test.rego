@@ -137,6 +137,7 @@ segregation_grants := [
 	["APInquire", "GET", "/v1/receiving/invoice-captures/c1"],
 	["ServiceEntryMaintain", "POST", "/v1/receiving/service-entry-sheets"],
 	["ServiceEntryMaintain", "GET", "/v1/receiving/service-entry-sheets/s1"],
+	["ServiceEntryAccept", "GET", "/v1/receiving/service-entry-sheets/s1"],
 	["ServiceEntryAccept", "POST", "/v1/receiving/service-entry-sheets/s1:accept"],
 	["ServiceEntryAccept", "POST", "/v1/receiving/service-entry-sheets/s1:reject"],
 	["InvoiceAuditRelease", "POST", "/v1/receiving/invoices/i1:release-audit-block"],

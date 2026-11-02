@@ -87,3 +87,20 @@ func (s *Postgres) GetCapture(ctx context.Context, id string) (Capture, error) {
 	}
 	return out, err
 }
+
+func (s *Postgres) FindCapture(ctx context.Context, legalEntityID, digest string) (Capture, bool, error) {
+	tenantID, err := tenantOf(ctx)
+	if err != nil {
+		return Capture{}, false, err
+	}
+	var out Capture
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		out, err = scanCapture(tx.QueryRow(ctx, `SELECT `+captureColumns+` FROM receiving_invoice_capture WHERE tenant_id = $1 AND legal_entity_id = $2 AND document_sha256 = $3`, tenantID, legalEntityID, digest))
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Capture{}, false, nil
+	}
+	return out, err == nil, err
+}

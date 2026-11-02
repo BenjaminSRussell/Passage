@@ -2,6 +2,7 @@ package domain_test
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -112,5 +113,39 @@ func TestExtractedInvoice_ValidateRefusesUnusableDocuments(t *testing.T) {
 		if err := bad.Validate(); err == nil {
 			t.Errorf("%s accepted", name)
 		}
+	}
+}
+
+func TestBoundedNumbers(t *testing.T) {
+	for _, exp := range []string{"1e999999999", "1e-999999999", "1e13", "1e-19", "9999999999999"} {
+		doc := strings.Replace(ublInvoice, `currencyID="EUR">125.00</cbc:TaxExclusiveAmount>`, `currencyID="EUR">`+exp+`</cbc:TaxExclusiveAmount>`, 1)
+		if _, err := domain.ParseUBL([]byte(doc)); err == nil {
+			t.Errorf("UBL total %s accepted", exp)
+		}
+		big, _ := decimal.NewFromString(exp)
+		good, _ := domain.ParseUBL([]byte(ublInvoice))
+		for name, mutate := range map[string]func(*domain.ExtractedInvoice){
+			"total":      func(e *domain.ExtractedInvoice) { e.Total = big },
+			"confidence": func(e *domain.ExtractedInvoice) { e.Confidence = big },
+			"qty":        func(e *domain.ExtractedInvoice) { e.Lines[0].Qty = big },
+			"price":      func(e *domain.ExtractedInvoice) { e.Lines[0].UnitPrice = big },
+			"amount":     func(e *domain.ExtractedInvoice) { e.Lines[0].Amount = big },
+		} {
+			bad := good
+			bad.Lines = slices.Clone(good.Lines)
+			mutate(&bad)
+			if err := bad.Validate(); err == nil {
+				t.Errorf("%s %s accepted", name, exp)
+			}
+		}
+	}
+	long := strings.Repeat("1", 41)
+	if _, err := domain.ParseUBL([]byte(strings.Replace(ublInvoice, `currencyID="EUR">125.00</cbc:TaxExclusiveAmount>`, `currencyID="EUR">`+long+`</cbc:TaxExclusiveAmount>`, 1))); err == nil {
+		t.Error("overlong number accepted")
+	}
+	good, _ := domain.ParseUBL([]byte(ublInvoice))
+	good.VendorTaxID = strings.Repeat("x", 41)
+	if good.Validate() == nil {
+		t.Error("overlong tax id accepted")
 	}
 }

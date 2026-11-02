@@ -40,7 +40,8 @@ Store tests run only when `PASSAGE_TEST_DATABASE_URL` is set, against a role wit
 | `GET /v1/receiving/grir` | `APInquire` |
 | `GET /v1/receiving/pending-postings`, `POST /v1/receiving/pending-postings/{key}/resolve` | `ReceivingAdmin` |
 | `GET /v1/receiving/invoice-captures/{id}` | `APInquire` |
-| `POST /v1/receiving/service-entry-sheets`, `GET /v1/receiving/service-entry-sheets/{id}` | `ServiceEntryMaintain` |
+| `POST /v1/receiving/service-entry-sheets` | `ServiceEntryMaintain` |
+| `GET /v1/receiving/service-entry-sheets/{id}` | `ServiceEntryMaintain` or `ServiceEntryAccept` |
 | `POST /v1/receiving/service-entry-sheets/{id}:accept`, `:reject` | `ServiceEntryAccept` |
 | `POST /v1/receiving/invoice-captures`, `POST /v1/receiving/invoices:post`, `POST /v1/receiving/invoice-adjustments:post`, `POST /v1/receiving/plan-settlements:run`, `POST /v1/receiving/consignment-settlements:run`, `POST /v1/receiving/ers-settlements:run` | `VendorInvoicePost` |
 | `POST /v1/receiving/invoices/{id}:release-audit-block`, `POST /v1/receiving/invoices/{id}:reject-audit-block` | `InvoiceAuditRelease` |

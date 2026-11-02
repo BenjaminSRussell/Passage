@@ -8,6 +8,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
@@ -73,10 +74,39 @@ func TestServiceSheet_CapDecisionSegregationAndIsolation(t *testing.T) {
 		"a delete":                `delete from ` + sheetTable,
 		"an update of the lines":  `update ` + sheetTable + ` set lines = '[]'`,
 		"an update of the total":  `update ` + sheetTable + ` set total = 0`,
+		"a return to PENDING":     `update ` + sheetTable + ` set status = 'PENDING', decided_by = null`,
 		"an update of the author": `update ` + sheetTable + ` set created_by = 'bob'`,
 	} {
 		if err := db.run(db.one, sql); err == nil {
 			t.Errorf("passage_app must not run %s", name)
 		}
+	}
+}
+
+func TestServiceSheet_ConcurrentCreatesCannotExceedTheCap(t *testing.T) {
+	db := seedInvoice(t)
+	st := store.New(db.pool)
+	ctx := tenant.With(context.Background(), db.one)
+	limits := map[int]decimal.Decimal{1: decimal.NewFromInt(100)}
+	const attempts = 12
+	results := make(chan error, attempts)
+	for i := 0; i < attempts; i++ {
+		go func() {
+			_, err := st.CreateSheet(ctx, sampleSheet(ids.New(), db.one.LegalEntityID, "20"), limits)
+			results <- err
+		}()
+	}
+	created := 0
+	for i := 0; i < attempts; i++ {
+		var de *domain.Error
+		switch err := <-results; {
+		case err == nil:
+			created++
+		case !errors.As(err, &de) || de.Code != domain.CodeSheetOverLine:
+			t.Fatalf("unexpected error %v", err)
+		}
+	}
+	if created != 5 {
+		t.Fatalf("%d sheets of 20 fit a line of 100, want 5", created)
 	}
 }

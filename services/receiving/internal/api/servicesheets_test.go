@@ -105,6 +105,11 @@ func TestServiceSheet_CreateAcceptEmitsOneDecisionEvent(t *testing.T) {
 	if len(evts) != 1 || evts[0].Type != "dev.passage.receiving.serviceentrysheet.decided.v1" {
 		t.Fatalf("events %+v", evts)
 	}
+	assertDocumented(t, evts[0])
+	byDecider := rg.call(http.MethodGet, sheetsPath+"/"+created.ID, "", duty("ServiceEntryAccept", "", "X-Passage-User", "bob"))
+	if got := decode[sheetJSON](t, byDecider, http.StatusOK); got.ID != created.ID {
+		t.Fatalf("decider read %+v", got)
+	}
 	if r := rg.decideSheet(created.ID, "reject", "carol", `{"reason":"too late"}`); r.code != http.StatusConflict || !strings.Contains(r.body, "AP-SES-003") {
 		t.Fatalf("a decided sheet was decided again: %d %s", r.code, r.body)
 	}

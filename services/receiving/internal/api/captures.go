@@ -85,7 +85,7 @@ func (a *API) createInvoiceCapture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req captureRequest
-	if err := httpx.Decode(r, &req); err != nil {
+	if err := httpx.DecodeLimit(r, &req, maxBodyBytes); err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
@@ -108,6 +108,17 @@ func (a *API) createInvoiceCapture(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	digest := sha256.Sum256(req.Content)
+	hexDigest := hex.EncodeToString(digest[:])
+	known, found, err := a.store.FindCapture(r.Context(), req.LegalEntityID, hexDigest)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if found {
+		httpx.JSON(w, http.StatusOK, toCaptureBody(known))
+		return
+	}
 	extracted, err := a.extract(r, req)
 	if err == nil {
 		err = extracted.Validate()
@@ -121,9 +132,8 @@ func (a *API) createInvoiceCapture(w http.ResponseWriter, r *http.Request) {
 	if len(reasons) > 0 {
 		status = domain.CaptureNeedsReview
 	}
-	digest := sha256.Sum256(req.Content)
 	saved, created, err := a.store.CreateCapture(r.Context(), store.Capture{
-		ID: ids.New(), LegalEntityID: req.LegalEntityID, Source: req.Format, Status: status, DocumentSHA256: hex.EncodeToString(digest[:]),
+		ID: ids.New(), LegalEntityID: req.LegalEntityID, Source: req.Format, Status: status, DocumentSHA256: hexDigest,
 		Reasons: reasons, CreatedBy: p.UserID, Invoice: extracted,
 	})
 	if err != nil {

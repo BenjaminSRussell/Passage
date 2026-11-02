@@ -66,7 +66,7 @@ func CheckSheetDecision(s ServiceSheet, by string) error {
 	switch {
 	case s.Status != domain.SheetPending:
 		return &domain.Error{Code: domain.CodeSheetNotPending, Detail: fmt.Sprintf("service entry sheet %s is already %s", s.ID, s.Status)}
-	case strings.EqualFold(s.CreatedBy, by):
+	case sameActor(s.CreatedBy, by):
 		return &domain.Error{Code: domain.CodeSheetSelfAccept, Detail: "the user who entered the sheet cannot decide it"}
 	}
 	return nil

@@ -32,5 +32,21 @@ BEGIN
 END
 $$;
 
+CREATE OR REPLACE FUNCTION receiving_service_sheet_status_guard() RETURNS trigger AS $fn$
+BEGIN
+  IF OLD.status <> 'PENDING' THEN
+    RAISE EXCEPTION 'service entry sheet in status % cannot be updated', OLD.status USING ERRCODE = 'check_violation';
+  END IF;
+  IF NEW.status = 'PENDING' THEN
+    RAISE EXCEPTION 'service entry sheet cannot return to PENDING' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END
+$fn$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS receiving_service_sheet_status_guard ON receiving_service_entry_sheet;
+CREATE TRIGGER receiving_service_sheet_status_guard BEFORE UPDATE ON receiving_service_entry_sheet
+  FOR EACH ROW EXECUTE FUNCTION receiving_service_sheet_status_guard();
+
 GRANT SELECT, INSERT ON receiving_service_entry_sheet TO passage_app;
 GRANT UPDATE (status, decided_by, decided_at, reject_reason) ON receiving_service_entry_sheet TO passage_app;

@@ -278,6 +278,7 @@ type Store interface {
 	GetSheet(ctx context.Context, id string) (ServiceSheet, error)
 	DecideSheet(ctx context.Context, id, by string, accept bool, reason string, fn SheetDecisionFunc) (ServiceSheet, error)
 	GetCapture(ctx context.Context, id string) (Capture, error)
+	FindCapture(ctx context.Context, legalEntityID, digest string) (Capture, bool, error)
 	PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) (Invoice, error)
 	ReleaseInvoice(ctx context.Context, id, legalEntityID, by string, fn ReleaseFunc) (Invoice, error)
 	RejectInvoice(ctx context.Context, id, legalEntityID, by, reason string, fn RejectFunc) (Invoice, error)
