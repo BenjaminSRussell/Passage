@@ -44,6 +44,10 @@ const (
 	ActionIncrease = "increase"
 	// ActionRedZone is the PLAN-0010 message: a DDMRP buffer is in its red zone (FR-22.16).
 	ActionRedZone = "red-zone"
+	// ActionSalesOnTop is the PLAN-0015 information message: a sales line under
+	// assemble-to-order-final found less forecast to consume than its quantity,
+	// so the excess is planned on top of the forecast left (BR-22.13, FR-22.19).
+	ActionSalesOnTop = "sales-on-top"
 
 	PrioritySales     = 1
 	PriorityForecast  = 2
@@ -67,6 +71,10 @@ type Requirement struct {
 	Date     int
 	Qty      decimal.Decimal
 	Priority int
+	// Gross marks a forecast planned gross (mts-gross, FR-22.19): it is netted
+	// against expected receipts and planned supply but not against on-hand, so
+	// the plan covers the forecast whatever stock there is.
+	Gross bool
 }
 
 // BOMLine is one component of an item; Qty is per unit of the parent.
@@ -110,6 +118,10 @@ type Item struct {
 	MaxOrderQty, StandardQty decimal.Decimal
 	Demand, Receipts         []Requirement
 	Components               []BOMLine
+	// SalesOnTop lists the sales lines (Date a day index, Qty the excess) that
+	// an assemble-to-order-final strategy could not consume from the forecast;
+	// the run raises one PLAN-0015 message for each. They do not change netting.
+	SalesOnTop []Requirement
 }
 
 // leadTotal is the lead time plus the reorder margin (FR-22.5).
@@ -170,6 +182,7 @@ type layer struct {
 	date         int
 	priority     int
 	qty          decimal.Decimal
+	gross        bool // not netted against on-hand (Requirement.Gross)
 }
 
 type runState struct {
@@ -405,7 +418,7 @@ func (rs *runState) plan(item *Item) error {
 		L.releasePending(t)
 		for di < len(demands) && demands[di].Date <= t {
 			d := demands[di]
-			L.addDemand(layer{ref: d.Ref, refType: d.RefType, date: d.Date, priority: d.Priority, qty: d.Qty})
+			L.addDemand(layer{ref: d.Ref, refType: d.RefType, date: d.Date, priority: d.Priority, qty: d.Qty, gross: d.Gross})
 			di++
 		}
 		if err := L.check(t, demands[di:], receipts[ri:]); err != nil {
@@ -413,6 +426,9 @@ func (rs *runState) plan(item *Item) error {
 		}
 	}
 	L.finish(receipts)
+	for _, o := range item.SalesOnTop {
+		rs.res.Messages = append(rs.res.Messages, Message{Action: ActionSalesOnTop, ItemID: item.ID, DemandRef: o.Ref, SuggestedDate: o.Date, Qty: o.Qty})
+	}
 	rs.res.Pegging = append(rs.res.Pegging, L.pegs...)
 	return nil
 }
@@ -479,16 +495,21 @@ func (L *ledger) cover(s layer) layer {
 	return s
 }
 
-// addDemand consumes the oldest available supply first, the rest is unmet.
+// addDemand consumes the oldest available supply first, the rest is unmet. A
+// gross demand (Requirement.Gross) leaves the on-hand layer alone.
 func (L *ledger) addDemand(d layer) {
-	for len(L.avail) > 0 && d.qty.IsPositive() {
-		a := &L.avail[0]
+	for i := 0; i < len(L.avail) && d.qty.IsPositive(); {
+		a := &L.avail[i]
+		if d.gross && a.refType == RefOnHand {
+			i++
+			continue
+		}
 		take := decimal.Min(a.qty, d.qty)
 		L.peg(a.ref, d, take)
 		a.qty = a.qty.Sub(take)
 		d.qty = d.qty.Sub(take)
 		if !a.qty.IsPositive() {
-			L.avail = L.avail[1:]
+			L.avail = slices.Delete(L.avail, i, i+1)
 		}
 	}
 	if d.qty.IsPositive() {

@@ -257,3 +257,24 @@ func TestListPlannedOrdersAndMessages_SortByPriority(t *testing.T) {
 		}
 	}
 }
+
+// TestRunPlan_StoresSalesOnTopMessage: the PLAN-0015 message of an item whose
+// sale could not consume forecast is stored and read back by its action
+// (migration 0021 admits the action).
+func TestRunPlan_StoresSalesOnTopMessage(t *testing.T) {
+	st, _, _ := setup(t)
+	ctx := testkit.Ctx(testkit.TenantID(1), "planning.run", "planning.read")
+	item := ids.New()
+	res, err := domain.Run(0, []domain.Item{{ID: item, Coverage: domain.CoverageRequirement, OrderType: domain.OrderPurchase, LeadTimeDays: 2,
+		SalesOnTop: []domain.Requirement{{Ref: "SO-1", RefType: domain.RefSales, Date: 4, Qty: decimal.NewFromInt(30)}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.RunPlan(ctx, runRequest(res, "run-top", "in-top")); err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := st.ListMessages(ctx, "MAIN", domain.ActionSalesOnTop, "", 10)
+	if err != nil || len(msgs) != 1 || msgs[0].ItemID != item || msgs[0].DemandRef != "SO-1" || !decimal.RequireFromString(msgs[0].Qty).Equal(decimal.NewFromInt(30)) {
+		t.Fatalf("sales-on-top messages = %+v, %v", msgs, err)
+	}
+}

@@ -20,7 +20,9 @@ func withStoredCoverage(items []itemDTO, stored map[string]store.RunCoverage) ma
 		it := &items[i]
 		if c, ok := stored[it.ItemID]; ok {
 			if it.Coverage.Code == "" {
+				strategy := it.Coverage.Strategy
 				it.Coverage = storedCoverageDTO(c)
+				it.Coverage.Strategy = strategy
 			}
 			if it.OrderType == "" {
 				it.OrderType = c.PlannedOrderType

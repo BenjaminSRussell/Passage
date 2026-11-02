@@ -20,7 +20,10 @@ type NetRow struct {
 	PAB               decimal.Decimal
 	// Net is the day's own shortfall before planned receipts:
 	// max(0, GR − max(PAB(t−1), 0) − SR). A shortage of an earlier day that
-	// stayed uncovered is not counted again.
+	// stayed uncovered is not counted again. A gross demand (mts-gross
+	// forecast, Requirement.Gross) is not covered by the on-hand the item
+	// opened with, as in the netting, so the on-hand left over by the other
+	// demand does not count against it.
 	Net decimal.Decimal
 }
 
@@ -48,7 +51,7 @@ func (rs *runState) netView(items []*Item) []NetRow {
 // before today: what is past due counts at today. PAB(t) = PAB(t−1) + SR(t) +
 // PR(t) − GR(t), opening at on-hand.
 func (rs *runState) netRows(it *Item, orders []PlannedOrder) []NetRow {
-	type bucket struct{ gross, sr, pr decimal.Decimal }
+	type bucket struct{ gross, grossOnly, sr, pr decimal.Decimal }
 	days := map[int]*bucket{}
 	at := func(day int) *bucket {
 		b, ok := days[day]
@@ -61,6 +64,9 @@ func (rs *runState) netRows(it *Item, orders []PlannedOrder) []NetRow {
 	for _, d := range it.Demand {
 		b := at(rs.demandDate(d.Date))
 		b.gross = b.gross.Add(d.Qty)
+		if d.Gross {
+			b.grossOnly = b.grossOnly.Add(d.Qty)
+		}
 	}
 	if it.SafetyStock.IsPositive() {
 		b := at(rs.safetyDate(it))
@@ -83,11 +89,18 @@ func (rs *runState) netRows(it *Item, orders []PlannedOrder) []NetRow {
 	}
 	sort.Ints(sorted)
 	rows := make([]NetRow, 0, len(sorted))
-	pab := it.OnHand
+	// PAB is split into the opening on-hand not yet used (oh), which only
+	// net demand draws on, and the rest; without gross demand this is
+	// max(0, GR − max(PAB(t−1), 0) − SR) exactly.
+	oh, rest := it.OnHand, decimal.Zero
 	for _, day := range sorted {
 		b := days[day]
-		net := decimal.Max(decimal.Zero, b.gross.Sub(decimal.Max(pab, decimal.Zero)).Sub(b.sr))
-		pab = pab.Add(b.sr).Add(b.pr).Sub(b.gross)
+		fromOnHand := decimal.Min(oh, b.gross.Sub(b.grossOnly))
+		oh = oh.Sub(fromOnHand)
+		open := b.gross.Sub(fromOnHand)
+		net := decimal.Max(decimal.Zero, open.Sub(decimal.Max(rest, decimal.Zero)).Sub(b.sr))
+		rest = rest.Add(b.sr).Add(b.pr).Sub(open)
+		pab := oh.Add(rest)
 		rows = append(rows, NetRow{ItemID: it.ID, Day: day, Gross: b.gross, ScheduledReceipts: b.sr, PlannedReceipts: b.pr, PAB: pab, Net: net})
 	}
 	return rows

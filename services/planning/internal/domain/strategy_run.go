@@ -31,10 +31,21 @@ type ForecastCellDemand struct {
 // Cells come back in input order with their quantity replaced; cells left at
 // zero are dropped. A strategy with an invalid window is ErrInvalidStrategy.
 func PlanForecast(st StrategySpec, cells []ForecastCellDemand, sales []Requirement) ([]Requirement, error) {
+	demand, _, err := PlanForecastNotes(st, cells, sales)
+	return demand, err
+}
+
+// PlanForecastNotes is PlanForecast that also returns, for
+// assemble-to-order-final, the sales lines whose quantity found no forecast to
+// consume (Date and Qty of the excess, in the order of the sales given): the
+// run raises the PLAN-0015 message for each. Under mts-gross the forecast
+// demand is marked Gross, so the run does not net it against on-hand.
+func PlanForecastNotes(st StrategySpec, cells []ForecastCellDemand, sales []Requirement) ([]Requirement, []Requirement, error) {
 	qtys := make([]decimal.Decimal, len(cells))
+	var onTop []Requirement
 	switch st.Code {
 	case StrategyMTO:
-		return nil, nil
+		return nil, nil, nil
 	case StrategyMTSGross:
 		for i, c := range cells {
 			qtys[i] = c.Qty
@@ -50,9 +61,14 @@ func PlanForecast(st StrategySpec, cells []ForecastCellDemand, sales []Requireme
 		}
 		res, err := ConsumeForecast(st.ConsumptionMode, st.BackwardDays, st.ForwardDays, buckets, lines)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		copy(qtys, res.Forecast)
+		for i, c := range res.Sales {
+			if c.Unconsumed.IsPositive() {
+				onTop = append(onTop, Requirement{Ref: sales[i].Ref, RefType: RefSales, Date: sales[i].Date, Qty: c.Unconsumed})
+			}
+		}
 	default:
 		for i, c := range cells {
 			qtys[i] = c.ReducedQty
@@ -64,7 +80,7 @@ func PlanForecast(st StrategySpec, cells []ForecastCellDemand, sales []Requireme
 			continue
 		}
 		// Dated at the period start, as the reduced forecast always was.
-		out = append(out, Requirement{Ref: c.Ref, RefType: RefForecast, Date: c.StartDay, Qty: qtys[i], Priority: PriorityForecast})
+		out = append(out, Requirement{Ref: c.Ref, RefType: RefForecast, Date: c.StartDay, Qty: qtys[i], Priority: PriorityForecast, Gross: st.Code == StrategyMTSGross})
 	}
-	return slices.Clip(out), nil
+	return slices.Clip(out), onTop, nil
 }

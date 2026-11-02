@@ -344,7 +344,7 @@ paths:
           schema: {type: string}
         - name: action
           in: query
-          schema: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone]}
+          schema: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top]}
         - name: sort
           in: query
           description: 'priority: messages about planned orders that replenish a DDMRP buffer first, lowest planning priority (net-flow position over top of green) first, then the rest in action, supply, demand order (FR-22.16). Without sort only the messages about buffer orders of items whose site-scope item coverage is priorityBased lead by priority; the rest are in action, supply, demand order'
@@ -1024,9 +1024,13 @@ paths:
         with 200 and Idempotent-Replayed: true; another body under the key is
         422. A plan run reads the setup of the strategy on an item's
         site-scope item coverage when it nets the forecast model: mto plans no
-        forecast, mts-gross the forecast as entered, assemble-to-order-final
-        the forecast left after the item's sales lines consumed it inside the
-        window, and the other strategies the reduced forecast.
+        forecast, mts-gross the forecast as entered and not netted against
+        on-hand, assemble-to-order-final the forecast left after the item's
+        sales lines consumed it inside the window (a sale that finds no forecast
+        raises the PLAN-0015 sales-on-top message), and the other strategies
+        the reduced forecast. A scenario's added sales consume forecast the same
+        way. A strategy sent on an item's coverage block in a run wins over the
+        stored coverage.
       x-passage-duty: planning.setup.maintain
       parameters:
         - name: Idempotency-Key
@@ -2085,6 +2089,7 @@ components:
             firmingFenceDays: {type: integer, minimum: 0, maximum: 3650, description: 'BR-22.4 firming time fence. With autoFirm, planned orders whose order date falls inside it are firmed by the run (grouping vendor-date, one plannedorder.firmed.v1 each). 0 firms nothing.'}
             autoFirm: {type: boolean, default: false, description: Needs firmingFenceDays of at least 1}
             safetyStockPolicy: {type: string, enum: [today, first-issue], description: 'BR-22.5 safety-stock policy. Left out, the run takes the policy of the stored coverage group, else today.'}
+            strategy: {type: string, enum: [mts-net, mts-gross, mto, assemble-to-order-final, plan-without-final-assembly, subassembly], description: 'Planning strategy of the item (FR-22.19), with the windows of its stored setup or the PRD defaults. Left out, the run takes the strategy of the stored site-scope item coverage, and mts-net when the item has none. Only a run with a forecastModel applies it.'}
         onHand: {type: string, description: Decimal string}
         safetyStock: {type: string, description: Decimal string}
         orderType: {type: string, enum: [purchase, production, transfer], description: Required unless the item has a stored site-scope item coverage}
@@ -2134,6 +2139,7 @@ components:
         addedDemand:
           type: array
           maxItems: 500
+          description: 'Sales lines the scenario adds (ref SC:<code>:<n>). No factor scales them; under assemble-to-order-final they consume the forecast as already scaled by the factor, like the scaled sales do (BR-22.13).'
           items:
             type: object
             required: [itemId, date, qty]
@@ -2353,11 +2359,11 @@ components:
     Message:
       type: object
       properties:
-        action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone]}
+        action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top]}
         itemId: {type: string, format: uuid}
         supplyRef: {type: string, description: Planned order number or receipt ref; empty for a shortage}
         demandRef: {type: string, description: Demand the message is about; empty when none}
-        suggestedDate: {type: string, format: date, description: 'delay: expected date; postpone/advance: suggested receipt date; shortage: demand date; cancel/decrease/increase: receipt date; red-zone: delivery date of the buffer replenishment order'}
+        suggestedDate: {type: string, format: date, description: 'delay: expected date; postpone/advance: suggested receipt date; shortage: demand date; cancel/decrease/increase: receipt date; red-zone: delivery date of the buffer replenishment order; sales-on-top: date of the sales line (PLAN-0015, qty is the excess over the forecast it could consume, demandRef the sales line)'}
         delayDays: {type: integer}
         qty: {type: string}
         planningPriority: {type: string, nullable: true, description: 'Planning priority of the planned order the message is about when it replenishes a DDMRP buffer (FR-22.16); null otherwise'}

@@ -219,6 +219,17 @@ describe("DDMRP buffer orders (FR-22.16, AC-22.12)", () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url.includes("sort=priority"))).toBe(true));
   });
 
+  it("lists a PLAN-0015 sales-on-top message with its excess and filters by it", async () => {
+    const top: Message = { action: "sales-on-top", itemId: buffered.itemId, supplyRef: "", demandRef: "SO-1", suggestedDate: "2026-11-20", delayDays: 0, qty: "30", planningPriority: null, bufferZone: null };
+    const fetchMock = stubApi(["/messages", () => json({ items: [top] })]);
+    renderAt("/planning/messages");
+    const table = await findTable({ name: "Messages" });
+    await waitFor(() => expect(within(table).getByText("Sales on top")).toBeInTheDocument());
+    expect(within(table).getByText("SO-1")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Action"), { target: { value: "sales-on-top" } });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url.includes("action=sales-on-top"))).toBe(true));
+  });
+
   it("shows the buffer priority on the order page", async () => {
     stubApi(["/pegging", () => json({ ...pegging, orderId: buffered.id, number: buffered.number })], ["/planned-orders/", () => json(buffered)]);
     renderAt(`/planning/planned-orders/${buffered.id}`);

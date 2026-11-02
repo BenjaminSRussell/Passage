@@ -273,3 +273,81 @@ func TestRun_MakeToOrderDropsAndGrossKeepsForecast(t *testing.T) {
 		t.Fatalf("mts-net pegged demand %v; want the reduced 70", got)
 	}
 }
+
+// onHandRunBody is atoRunBody for an item with 150 on hand.
+var onHandRunBody = strings.Replace(atoRunBody, `"onHand":"0"`, `"onHand":"150"`, 1)
+
+func totalOrdered(req store.RunRequest) decimal.Decimal {
+	total := decimal.Zero
+	for _, o := range req.Result.Orders {
+		total = total.Add(o.Qty)
+	}
+	return total
+}
+
+// mts-gross plans the forecast whatever is on hand: forecast 100 and a sale of
+// 40 with 150 on hand plan 100 under mts-gross (the sale takes on-hand), and
+// nothing under mts-net, which nets the forecast against the stock too.
+func TestRun_GrossForecastIgnoresOnHand(t *testing.T) {
+	models := map[string]store.ForecastModel{"BASE": {Code: "BASE"}}
+	st := &fakeStore{models: models, demand: novemberForecast(),
+		runStrategies: map[string]domain.StrategySpec{fgID: domain.DefaultStrategy(domain.StrategyMTSGross)}}
+	_, req := runVersion(t, st, onHandRunBody, "run-gross-stock")
+	if got := totalOrdered(req); !got.Equal(decimal.RequireFromString("100")) {
+		t.Fatalf("mts-gross ordered %s; want the whole forecast of 100", got)
+	}
+	st = &fakeStore{models: models, demand: novemberForecast()}
+	_, req = runVersion(t, st, onHandRunBody, "run-net-stock")
+	if len(req.Result.Orders) != 0 {
+		t.Fatalf("mts-net orders = %+v; want none, on-hand covers 140", req.Result.Orders)
+	}
+}
+
+// A sale larger than the forecast it can consume raises PLAN-0015 for the rest.
+func TestRun_AssembleToOrderRaisesSalesOnTop(t *testing.T) {
+	st := &fakeStore{models: map[string]store.ForecastModel{"BASE": {Code: "BASE"}}, demand: novemberForecast(),
+		runStrategies: map[string]domain.StrategySpec{fgID: domain.DefaultStrategy(domain.StrategyATOFinal)}}
+	body := strings.Replace(atoRunBody, `"qty":"40"`, `"qty":"130"`, 1)
+	_, req := runVersion(t, st, body, "run-ato-on-top")
+	var on []domain.Message
+	for _, m := range req.Result.Messages {
+		if m.Action == domain.ActionSalesOnTop {
+			on = append(on, m)
+		}
+	}
+	if len(on) != 1 || on[0].DemandRef != "SO-1" || !on[0].Qty.Equal(decimal.RequireFromString("30")) || on[0].ItemID != fgID {
+		t.Fatalf("messages = %+v; want one sales-on-top for SO-1 of 30", req.Result.Messages)
+	}
+	// Forecast 100 is used up; the sale of 130 is the whole demand.
+	if got := totalOrdered(req); !got.Equal(decimal.RequireFromString("130")) {
+		t.Fatalf("ordered %s; want 130", got)
+	}
+	// A sale the forecast covers raises nothing.
+	_, req = runVersion(t, st, atoRunBody, "run-ato-covered")
+	for _, m := range req.Result.Messages {
+		if m.Action == domain.ActionSalesOnTop {
+			t.Fatalf("unexpected %+v", m)
+		}
+	}
+}
+
+// A strategy sent on the coverage block wins and works for an item with no
+// stored coverage; an unknown code is a 400.
+func TestRun_InlineStrategyOnCoverage(t *testing.T) {
+	st := &fakeStore{models: map[string]store.ForecastModel{"BASE": {Code: "BASE"}}, demand: novemberForecast()}
+	body := strings.Replace(atoRunBody, `"marginDays":0}`, `"marginDays":0,"strategy":"assemble-to-order-final"}`, 1)
+	_, req := runVersion(t, st, body, "run-inline-ato")
+	if got := demandByType(req); !got[domain.RefForecast].Equal(decimal.RequireFromString("60")) {
+		t.Fatalf("pegged demand %v; want forecast 60 under the inline strategy", got)
+	}
+	// Inline wins over the stored coverage's strategy (here mto).
+	st.runStrategies = map[string]domain.StrategySpec{fgID: domain.DefaultStrategy(domain.StrategyMTO)}
+	_, req = runVersion(t, st, body, "run-inline-wins")
+	if got := demandByType(req); !got[domain.RefForecast].Equal(decimal.RequireFromString("60")) {
+		t.Fatalf("pegged demand %v; want the inline strategy to win", got)
+	}
+	bad := strings.Replace(atoRunBody, `"marginDays":0}`, `"marginDays":0,"strategy":"nope"}`, 1)
+	if rec := do(t, st, http.MethodPost, "/v1/planning/plans/MAIN:run", bad, "planning.run", true, "run-bad"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("unknown strategy: %d %s", rec.Code, rec.Body.String())
+	}
+}

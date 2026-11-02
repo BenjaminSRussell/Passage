@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -261,6 +262,10 @@ type coverageDTO struct {
 	// SafetyStockPolicy is today (default) or first-issue (BR-22.5): the day
 	// the item's safety stock is a demand.
 	SafetyStockPolicy string `json:"safetyStockPolicy"`
+	// Strategy is the planning strategy code of the item (FR-22.19). Left out,
+	// a run takes the strategy of the item's stored site-scope coverage, and
+	// mts-net when the item has none; sent, it wins over the stored one.
+	Strategy string `json:"strategy,omitempty"`
 }
 
 type lotDTO struct {
@@ -335,6 +340,9 @@ func (req runRequest) validate() map[string]string {
 		}
 		if c.SafetyStockPolicy != "" && c.SafetyStockPolicy != domain.SafetyToday && c.SafetyStockPolicy != domain.SafetyFirstIssue {
 			fields[prefix+".coverage.safetyStockPolicy"] = "must be today or first-issue"
+		}
+		if c.Strategy != "" && !domain.ValidStrategy(c.Strategy) {
+			fields[prefix+".coverage.strategy"] = "must be mts-net, mts-gross, mto, assemble-to-order-final, plan-without-final-assembly or subassembly"
 		}
 		if c.AutoFirm && c.FirmingFenceDays < 1 {
 			fields[prefix+".coverage.autoFirm"] = "needs a firmingFenceDays of at least 1"
@@ -421,8 +429,12 @@ func toRequirements(in []requirementDTO, asOf time.Time) ([]domain.Requirement, 
 // which the caller applies with domain.ApplyBuffers as the last change to the
 // items (after a scenario's overrides) and with domain.AddBufferResults on the
 // final result. On failure it has written the problem response and returns
-// false. An operational run and a simulation (FR-22.15) take the same snapshot.
-func (a *API) buildSnapshot(w http.ResponseWriter, r *http.Request, code string, req runRequest) (time.Time, []domain.Item, []domain.RunBuffer, bool) {
+// false. An operational run and a simulation (FR-22.15) take the same snapshot;
+// for a simulation sc is the scenario, applied (domain.ApplyScenario) before
+// the forecast is planned and with the model's cells scaled by the item's
+// factor, so under assemble-to-order-final the scenario's added sales lines
+// consume the scaled forecast like the scaled sales do (BR-22.13, BR-22.14).
+func (a *API) buildSnapshot(w http.ResponseWriter, r *http.Request, code string, req runRequest, sc *domain.ScenarioSpec) (time.Time, []domain.Item, []domain.RunBuffer, bool) {
 	planEntity, err := a.store.PlanLegalEntity(r.Context(), code, req.LegalEntityID)
 	if err != nil {
 		httpx.Fail(w, r, err)
@@ -443,6 +455,14 @@ func (a *API) buildSnapshot(w http.ResponseWriter, r *http.Request, code string,
 		validationFailed(w, r, map[string]string{"items": err.Error()})
 		return time.Time{}, nil, nil, false
 	}
+	var factor func(string) decimal.Decimal
+	if sc != nil {
+		if items, err = domain.ApplyScenario(items, asOf, *sc); err != nil {
+			validationFailed(w, r, map[string]string{"scenario": strings.TrimPrefix(err.Error(), domain.ErrInvalidItem.Error()+": ")})
+			return time.Time{}, nil, nil, false
+		}
+		factor = sc.Factors()
+	}
 	if req.ForecastModel != "" {
 		lines, err := a.store.ForecastDemand(r.Context(), req.ForecastModel, req.SiteID, asOf)
 		if err != nil {
@@ -458,7 +478,11 @@ func (a *API) buildSnapshot(w http.ResponseWriter, r *http.Request, code string,
 			httpx.Fail(w, r, err)
 			return time.Time{}, nil, nil, false
 		}
-		if err := addForecastDemand(items, req.ForecastModel, asOf, lines, strategies); err != nil {
+		if strategies, err = a.inlineStrategies(r.Context(), req.Items, strategies); err != nil {
+			httpx.Fail(w, r, err)
+			return time.Time{}, nil, nil, false
+		}
+		if err := addForecastDemand(items, req.ForecastModel, asOf, lines, strategies, factor); err != nil {
 			httpx.Fail(w, r, runProblem(err))
 			return time.Time{}, nil, nil, false
 		}
@@ -509,7 +533,7 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 		PlanCode string     `json:"planCode"`
 		Request  runRequest `json:"request"`
 	}{code, req})
-	asOf, items, buffers, ok := a.buildSnapshot(w, r, code, req)
+	asOf, items, buffers, ok := a.buildSnapshot(w, r, code, req, nil)
 	if !ok {
 		return
 	}
@@ -550,14 +574,47 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, v)
 }
 
+// inlineStrategies lays the strategy sent on an item's coverage block over the
+// strategies read from stored coverage, with the stored setup of that strategy
+// (or its PRD defaults), so an item with no stored coverage can carry one.
+func (a *API) inlineStrategies(ctx context.Context, items []itemDTO, strategies map[string]domain.StrategySpec) (map[string]domain.StrategySpec, error) {
+	if strategies == nil {
+		strategies = map[string]domain.StrategySpec{}
+	}
+	var setup map[string]domain.StrategySpec
+	for _, it := range items {
+		if it.Coverage.Strategy == "" {
+			continue
+		}
+		if setup == nil {
+			stored, err := a.store.ListStrategies(ctx)
+			if err != nil {
+				return nil, err
+			}
+			setup = make(map[string]domain.StrategySpec, len(stored))
+			for _, st := range stored {
+				setup[st.Spec.Code] = st.Spec
+			}
+		}
+		spec, ok := setup[it.Coverage.Strategy]
+		if !ok {
+			spec = domain.DefaultStrategy(it.Coverage.Strategy)
+		}
+		strategies[it.ItemID] = spec
+	}
+	return strategies, nil
+}
+
 // addForecastDemand appends the forecast cells of the model to the demand of
 // their items as forecast requirements at the period start (FR-22.8, BR-22.3).
 // The planning strategy on the item's coverage (FR-22.19) decides the quantity:
 // the reduced forecast (mts-net, the default), the forecast as entered
 // (mts-gross), none (mto) or the forecast left after the item's sales lines
 // consumed it (assemble-to-order-final, BR-22.13); see domain.PlanForecast.
-// Cells of items outside the snapshot are not planned.
-func addForecastDemand(items []domain.Item, model string, asOf time.Time, lines []store.ForecastDemandLine, strategies map[string]domain.StrategySpec) error {
+// Cells of items outside the snapshot are not planned. A simulation passes the
+// scenario's factor of each item (nil: 1), which scales a cell's forecast and
+// reduced forecast before the strategy plans them.
+func addForecastDemand(items []domain.Item, model string, asOf time.Time, lines []store.ForecastDemandLine, strategies map[string]domain.StrategySpec, factor func(string) decimal.Decimal) error {
 	index := make(map[string]*domain.Item, len(items))
 	for i := range items {
 		index[items[i].ID] = &items[i]
@@ -572,9 +629,14 @@ func addForecastDemand(items []domain.Item, model string, asOf time.Time, lines 
 			order = append(order, l.ItemID)
 		}
 		start := l.PeriodStart.Format(dateLayout)
+		qty, reduced := l.Qty, l.ReducedQty
+		if factor != nil {
+			f := factor(l.ItemID)
+			qty, reduced = qty.Mul(f), reduced.Mul(f)
+		}
 		cells[l.ItemID] = append(cells[l.ItemID], domain.ForecastCellDemand{
 			Ref: "FC:" + model + ":" + start, StartDay: int(l.PeriodStart.Sub(asOf) / (24 * time.Hour)),
-			EndDay: int(l.PeriodEnd.Sub(asOf) / (24 * time.Hour)), Qty: l.Qty, ReducedQty: l.ReducedQty,
+			EndDay: int(l.PeriodEnd.Sub(asOf) / (24 * time.Hour)), Qty: qty, ReducedQty: reduced,
 		})
 	}
 	for _, id := range order {
@@ -589,11 +651,12 @@ func addForecastDemand(items []domain.Item, model string, asOf time.Time, lines 
 				sales = append(sales, d)
 			}
 		}
-		demand, err := domain.PlanForecast(st, cells[id], sales)
+		demand, onTop, err := domain.PlanForecastNotes(st, cells[id], sales)
 		if err != nil {
 			return err
 		}
 		it.Demand = append(it.Demand, demand...)
+		it.SalesOnTop = append(it.SalesOnTop, onTop...)
 	}
 	return nil
 }
@@ -818,9 +881,9 @@ func (a *API) listMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch action {
-	case "", domain.ActionDelay, domain.ActionPostpone, domain.ActionAdvance, domain.ActionShortage, domain.ActionCancel, domain.ActionDecrease, domain.ActionIncrease, domain.ActionRedZone:
+	case "", domain.ActionDelay, domain.ActionPostpone, domain.ActionAdvance, domain.ActionShortage, domain.ActionCancel, domain.ActionDecrease, domain.ActionIncrease, domain.ActionRedZone, domain.ActionSalesOnTop:
 	default:
-		validationFailed(w, r, map[string]string{"action": "must be delay, postpone, advance, shortage, cancel, decrease, increase or red-zone"})
+		validationFailed(w, r, map[string]string{"action": "must be delay, postpone, advance, shortage, cancel, decrease, increase, red-zone or sales-on-top"})
 		return
 	}
 	limit, ok := limitParam(w, r)

@@ -44,7 +44,7 @@ export const PAGE_LIMIT = 500;
 const dash = "—";
 
 const ORDER_STATUSES = ["unprocessed", "approved", "firmed"] as const;
-const MESSAGE_ACTIONS = ["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone"] as const;
+const MESSAGE_ACTIONS = ["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone", "sales-on-top"] as const;
 
 const orderTypeLabel: Record<PlannedOrder["orderType"], string> = {
   purchase: "Purchase",
@@ -61,6 +61,7 @@ const actionTone: Record<Message["action"], BadgeTone> = {
   decrease: "warning",
   increase: "warning",
   "red-zone": "danger",
+  "sales-on-top": "info",
 };
 
 /** The DDMRP buffer priority and zone of an order that replenishes a buffer (FR-22.16). */

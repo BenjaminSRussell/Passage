@@ -156,3 +156,81 @@ func TestPlanForecast_WindowEdgesAreInclusive(t *testing.T) {
 		})
 	}
 }
+
+func TestPlanForecastNotes_ReportsSalesTheForecastCouldNotConsume(t *testing.T) {
+	cells := []ForecastCellDemand{fcCell("F1", 0, 29, "100", "100")}
+	sales := []Requirement{
+		{Ref: "SO-1", RefType: RefSales, Date: 5, Qty: dec("70")},
+		{Ref: "SO-2", RefType: RefSales, Date: 10, Qty: dec("50")},
+		{Ref: "SO-3", RefType: RefSales, Date: 12, Qty: dec("0.5")},
+	}
+	demand, onTop, err := PlanForecastNotes(DefaultStrategy(StrategyATOFinal), cells, sales)
+	if err != nil || len(demand) != 0 {
+		t.Fatalf("demand = %v, %v; want the forecast used up", quantities(demand), err)
+	}
+	// SO-1 takes 70, SO-2 takes the last 30 and has 20 left, SO-3 has all of 0.5 left.
+	if len(onTop) != 2 || onTop[0].Ref != "SO-2" || !onTop[0].Qty.Equal(dec("20")) || onTop[0].Date != 10 || onTop[1].Ref != "SO-3" || !onTop[1].Qty.Equal(dec("0.5")) {
+		t.Fatalf("onTop = %+v; want SO-2 of 20 and SO-3 of 0.5", onTop)
+	}
+	for _, code := range []string{StrategyMTSNet, StrategyMTSGross, StrategyMTO} {
+		if _, onTop, _ := PlanForecastNotes(DefaultStrategy(code), cells, sales); len(onTop) != 0 {
+			t.Errorf("%s reports sales on top: %+v", code, onTop)
+		}
+	}
+}
+
+func TestPlanForecast_GrossDemandIsMarkedGross(t *testing.T) {
+	cells := []ForecastCellDemand{fcCell("F1", 0, 29, "100", "60")}
+	for code, want := range map[string]bool{StrategyMTSGross: true, StrategyMTSNet: false, StrategyATOFinal: false} {
+		got, err := PlanForecast(DefaultStrategy(code), cells, nil)
+		if err != nil || len(got) != 1 || got[0].Gross != want {
+			t.Errorf("%s: %+v, %v; want Gross %v", code, got, err, want)
+		}
+	}
+}
+
+// A gross demand leaves the on-hand layer to the other demand: 50 on hand,
+// a gross forecast of 30 and a sale of 40 order 30 (the sale takes the stock).
+func TestRun_GrossDemandIsNotNettedAgainstOnHand(t *testing.T) {
+	it := Item{ID: "G1", Coverage: CoverageRequirement, OrderType: OrderPurchase, LeadTimeDays: 2, OnHand: d("50"),
+		Demand: []Requirement{
+			{Ref: "SO-1", RefType: RefSales, Date: 10, Qty: d("40"), Priority: PrioritySales},
+			{Ref: "FC-1", RefType: RefForecast, Date: 10, Qty: d("30"), Priority: PriorityForecast, Gross: true},
+		}}
+	res, err := Run(0, []Item{it})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Orders) != 1 || !res.Orders[0].Qty.Equal(d("30")) {
+		t.Fatalf("orders = %+v; want one of 30", res.Orders)
+	}
+	// The net view counts the on-hand once: the sale takes 40 of it, the gross
+	// forecast's 30 is the net requirement, and PAB closes at 50 − 40 − 30 + 30.
+	if len(res.Net) != 1 {
+		t.Fatalf("net rows = %+v; want day 10", res.Net)
+	}
+	if row := res.Net[0]; row.Day != 10 || !row.Net.Equal(d("30")) || !row.PAB.Equal(d("10")) {
+		t.Fatalf("day 10 row = %+v; want net 30 and PAB 10", row)
+	}
+	// Net, the 50 on hand cover the sale of 40 and 10 of the forecast, so 20 is short.
+	it.Demand[1].Gross = false
+	res, err = Run(0, []Item{it})
+	if err != nil || len(res.Orders) != 1 || !res.Orders[0].Qty.Equal(d("20")) {
+		t.Fatalf("net orders = %+v, %v; want one of 20", res.Orders, err)
+	}
+	if row := res.Net[0]; !row.Net.Equal(d("20")) || !row.PAB.Equal(d("0")) {
+		t.Fatalf("net day 10 row = %+v; want net 20 and PAB 0", row)
+	}
+}
+
+func TestRun_SalesOnTopRaisesTheInformationMessage(t *testing.T) {
+	it := Item{ID: "G1", Coverage: CoverageRequirement, OrderType: OrderPurchase, LeadTimeDays: 2,
+		SalesOnTop: []Requirement{{Ref: "SO-1", RefType: RefSales, Date: 9, Qty: d("12")}}}
+	res, err := Run(0, []Item{it})
+	if err != nil || len(res.Messages) != 1 {
+		t.Fatalf("messages = %+v, %v", res.Messages, err)
+	}
+	if m := res.Messages[0]; m.Action != ActionSalesOnTop || m.ItemID != "G1" || m.DemandRef != "SO-1" || m.SuggestedDate != 9 || !m.Qty.Equal(d("12")) {
+		t.Fatalf("message = %+v", m)
+	}
+}

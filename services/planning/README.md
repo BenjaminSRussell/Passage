@@ -336,7 +336,9 @@ NOT-IMPLEMENTED.md):
   ties by priority then id; `split` water-fills to equal ratings, dropping
   shares below `minSplitQty` but never the last source. Quota-0 sources are a
   fallback when all others are blocked; none usable is 422 `PLAN-0009`.
-- Forecast consumption (FR-22.19, BR-22.13) for assemble-to-order-final.
+- Forecast consumption (FR-22.19, BR-22.13) for assemble-to-order-final; in a run the
+  sales that find no forecast raise the `sales-on-top` message (PLAN-0015), and
+  `mts-gross` forecast is not netted against on-hand.
 - Supply schedule and inventory forecast (FR-22.21, FR-22.22): day, week or
   30-day month buckets; value is closing on-hand × unit cost as platform
   `money`, rounded to the currency's minor unit.
@@ -480,7 +482,9 @@ entities would let each entity hold an arrangement for it.
 A scenario belongs to a plan that has run at least once and to that plan's legal entity.
 Its demand factor (overall, or per item) scales independent demand only: sales lines and
 forecast; safety-stock and transfer-issue lines keep their quantity and dependent demand
-follows from the explosion. `POST /v1/planning/scenarios/{code}:run` applies a stored
+follows from the explosion. Added sales lines are never scaled; the forecast model's cells
+are scaled before the item's strategy plans them, so under `assemble-to-order-final` added
+lines consume the scaled forecast (BR-22.13). `POST /v1/planning/scenarios/{code}:run` applies a stored
 scenario to the plan-run snapshot and stores a `simulation` version of the scenario's plan. It never becomes current, never
 auto-firms, publishes only `scenario.simulated.v1` (no `plan.completed.v1`, `message.raised.v1`
 or `plannedorder.firmed.v1`), and its planned orders are 409 `PLAN-0003` on firm, change and

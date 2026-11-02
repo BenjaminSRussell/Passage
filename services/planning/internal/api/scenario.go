@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -252,13 +251,9 @@ func (a *API) runScenario(w http.ResponseWriter, r *http.Request) {
 		Scenario scenarioDTO `json:"scenario"`
 		Request  runRequest  `json:"request"`
 	}{scenarioDTOOf(sc), req})
-	asOf, items, buffers, ok := a.buildSnapshot(w, r, sc.Spec.PlanCode, req)
+	// The snapshot applies the scenario (BR-22.14) before the forecast is planned.
+	asOf, items, buffers, ok := a.buildSnapshot(w, r, sc.Spec.PlanCode, req, &sc.Spec)
 	if !ok {
-		return
-	}
-	items, err = domain.ApplyScenario(items, asOf, sc.Spec)
-	if err != nil {
-		validationFailed(w, r, map[string]string{"scenario": strings.TrimPrefix(err.Error(), domain.ErrInvalidItem.Error()+": ")})
 		return
 	}
 	started := a.now()

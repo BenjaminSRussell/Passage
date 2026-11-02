@@ -135,6 +135,21 @@ func (s ScenarioSpec) Validate() map[string]string {
 	return errs
 }
 
+// Factors returns the demand factor of an item under the scenario: its own
+// item factor, else the scenario's demand factor (BR-22.14).
+func (s ScenarioSpec) Factors() func(itemID string) decimal.Decimal {
+	itemFactor := make(map[string]decimal.Decimal, len(s.ItemFactors))
+	for _, f := range s.ItemFactors {
+		itemFactor[f.ItemID] = f.Factor
+	}
+	return func(itemID string) decimal.Decimal {
+		if f, ok := itemFactor[itemID]; ok {
+			return f
+		}
+		return s.DemandFactor
+	}
+}
+
 // ApplyScenario returns the items as a simulation sees them (BR-22.14): the
 // independent demand of each item (sales lines and forecast) multiplied by its
 // factor (the item's own factor, else the scenario's); dependent, transfer and
@@ -144,11 +159,14 @@ func (s ScenarioSpec) Validate() map[string]string {
 // a simulation never firms. The input slice and its items are not changed.
 // An added line dated before asOf is due today; one more than 3650 days out is
 // an error. A line or override for an item outside the snapshot is ignored.
+//
+// A run applies the scenario before the forecast model is planned, scaling
+// the model's cells by Factors itself, so that under assemble-to-order-final
+// the added lines (which no factor scales) consume the scaled forecast like
+// the scaled sales do (BR-22.13): factor 2, forecast 100 and an added sale of
+// 40 plan 160 + 40, never 120 + 40.
 func ApplyScenario(items []Item, asOf time.Time, s ScenarioSpec) ([]Item, error) {
-	itemFactor := map[string]decimal.Decimal{}
-	for _, f := range s.ItemFactors {
-		itemFactor[f.ItemID] = f.Factor
-	}
+	factorOf := s.Factors()
 	lead := map[string]int{}
 	for _, l := range s.LeadTimeOverrides {
 		lead[l.ItemID] = l.LeadTimeDays
@@ -157,10 +175,7 @@ func ApplyScenario(items []Item, asOf time.Time, s ScenarioSpec) ([]Item, error)
 	index := make(map[string]int, len(items))
 	for i, it := range items {
 		index[it.ID] = i
-		factor := s.DemandFactor
-		if f, ok := itemFactor[it.ID]; ok {
-			factor = f
-		}
+		factor := factorOf(it.ID)
 		demand := make([]Requirement, 0, len(it.Demand))
 		for _, d := range it.Demand {
 			if (d.RefType == RefSales || d.RefType == RefForecast) && !factor.Equal(decimal.NewFromInt(1)) {

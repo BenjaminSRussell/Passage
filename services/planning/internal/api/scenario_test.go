@@ -187,3 +187,73 @@ func TestScenarioRun_InactiveScenarioIsRefused(t *testing.T) {
 		t.Fatalf("inactive: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// A scenario's added sales consume the forecast of an assemble-to-order-final
+// item like its other sales (BR-22.13): forecast 100 plus an added sale of 40
+// plans 60 + 40 = 100, not 140, and the added line is not scaled by the factor.
+func TestScenarioRun_AddedSalesConsumeAssembleToOrderForecast(t *testing.T) {
+	st := &fakeStore{models: map[string]store.ForecastModel{"BASE": {Code: "BASE"}}, demand: novemberForecast(),
+		runStrategies: map[string]domain.StrategySpec{fgID: domain.DefaultStrategy(domain.StrategyATOFinal)}}
+	sc := `{"code":"ADD40","planCode":"MAIN","name":"Added sale","demandFactor":"1","addedDemand":[{"itemId":"` + fgID + `","date":"2026-11-20","qty":"40"}]}`
+	if rec := do(t, st, http.MethodPost, scenarioPath, sc, dutySim, true, ""); rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	body := strings.Replace(atoRunBody, `"demand":[{"ref":"SO-1","refType":"sales-line","date":"2026-11-20","qty":"40"}]`, `"demand":[]`, 1)
+	if rec := do(t, st, http.MethodPost, scenarioPath+"/ADD40:run", body, dutySim, true, "s1"); rec.Code != http.StatusCreated {
+		t.Fatalf("run: %d %s", rec.Code, rec.Body.String())
+	}
+	total := decimal.Zero
+	for _, o := range st.lastSim.Result.Orders {
+		total = total.Add(o.Qty)
+	}
+	if !total.Equal(decimal.NewFromInt(100)) {
+		t.Errorf("simulated order qty = %s, want 100 (forecast 60 + added sale 40)", total)
+	}
+}
+
+// With a factor the added lines consume the scaled forecast (BR-22.13 with
+// BR-22.14): factor 2 makes the forecast 200 and the real sale of 40 80, an
+// added sale of 40 (never scaled) takes 40 more, so 80 + 40 + 80 = 200 is
+// planned, not the 2 × 60 + 40 of consuming before scaling. An added sale of
+// 230 finds 120 of forecast left after the real sale, so PLAN-0015 reports 110
+// for it, unscaled.
+func TestScenarioRun_FactorScalesForecastBeforeAddedSalesConsumeIt(t *testing.T) {
+	cases := []struct {
+		added, wantTotal, wantOnTop string
+	}{
+		{"40", "200", ""},
+		{"230", "310", "110"},
+	}
+	for _, c := range cases {
+		t.Run(c.added, func(t *testing.T) {
+			st := &fakeStore{models: map[string]store.ForecastModel{"BASE": {Code: "BASE"}}, demand: novemberForecast(),
+				runStrategies: map[string]domain.StrategySpec{fgID: domain.DefaultStrategy(domain.StrategyATOFinal)}}
+			sc := `{"code":"X2","planCode":"MAIN","name":"Doubled","demandFactor":"2","addedDemand":[{"itemId":"` + fgID + `","date":"2026-11-21","qty":"` + c.added + `"}]}`
+			if rec := do(t, st, http.MethodPost, scenarioPath, sc, dutySim, true, ""); rec.Code != http.StatusCreated {
+				t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+			}
+			if rec := do(t, st, http.MethodPost, scenarioPath+"/X2:run", atoRunBody, dutySim, true, "s-"+c.added); rec.Code != http.StatusCreated {
+				t.Fatalf("run: %d %s", rec.Code, rec.Body.String())
+			}
+			total := decimal.Zero
+			for _, o := range st.lastSim.Result.Orders {
+				total = total.Add(o.Qty)
+			}
+			if !total.Equal(decimal.RequireFromString(c.wantTotal)) {
+				t.Errorf("simulated order qty = %s, want %s", total, c.wantTotal)
+			}
+			var onTop []domain.Message
+			for _, m := range st.lastSim.Result.Messages {
+				if m.Action == domain.ActionSalesOnTop {
+					onTop = append(onTop, m)
+				}
+			}
+			switch {
+			case c.wantOnTop == "" && len(onTop) != 0:
+				t.Errorf("unexpected sales-on-top %+v", onTop)
+			case c.wantOnTop != "" && (len(onTop) != 1 || onTop[0].DemandRef != "SC:X2:1" || !onTop[0].Qty.Equal(decimal.RequireFromString(c.wantOnTop))):
+				t.Errorf("sales-on-top = %+v; want one for SC:X2:1 of %s", onTop, c.wantOnTop)
+			}
+		})
+	}
+}
