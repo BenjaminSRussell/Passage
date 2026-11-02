@@ -16,7 +16,7 @@ type fakeGL struct {
 	err       error
 }
 
-func (f fakeGL) Movements(time.Time, time.Time) (map[string]decimal.Decimal, error) {
+func (f fakeGL) Movements(context.Context, time.Time, time.Time) (map[string]decimal.Decimal, error) {
 	out := map[string]decimal.Decimal{}
 	for k, v := range f.movements {
 		out[k] = decimal.RequireFromString(v)
@@ -47,7 +47,7 @@ func TestSettle_ReconcilesToGL(t *testing.T) {
 		txn("t4", "VAT19", domain.DirInput, "2026-01-12", "30.25", ""),
 	}
 	gl := fakeGL{movements: map[string]string{domain.MovementKey("VAT19", domain.DirOutput): "140.50", domain.MovementKey("VAT19", domain.DirInput): "30.25"}}
-	s, err := domain.Settle(txns, january, 0, gl)
+	s, err := domain.Settle(context.Background(), txns, january, 0, gl)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestSettle_MismatchBlocks(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			poster := &recordingPoster{}
-			s, err := domain.Settle(tc.txns, january, 0, tc.gl)
+			s, err := domain.Settle(context.Background(), tc.txns, january, 0, tc.gl)
 			if err == nil {
 				_ = domain.PostSettlement(context.Background(), poster, "s1", s)
 			}
@@ -95,7 +95,7 @@ func TestSettle_ExcludesTransactionsOutsideThePeriod(t *testing.T) {
 		txn("t3", "VAT19", domain.DirOutput, "2025-12-31", "98.00", ""),
 	}
 	gl := fakeGL{movements: map[string]string{domain.MovementKey("VAT19", domain.DirOutput): "10.00"}}
-	s, err := domain.Settle(txns, january, 0, gl)
+	s, err := domain.Settle(context.Background(), txns, january, 0, gl)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestSettle_DeltaRerun(t *testing.T) {
 		txn("t2", "VAT19", domain.DirOutput, "2026-01-28", "7.00", ""),
 	}
 	gl := fakeGL{movements: map[string]string{domain.MovementKey("VAT19", domain.DirOutput): "107.00"}}
-	s, err := domain.Settle(txns, january, 1, gl)
+	s, err := domain.Settle(context.Background(), txns, january, 1, gl)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestSettle_DeltaRerun(t *testing.T) {
 
 func TestSettle_EmptyIsZeroAndNeverPosts(t *testing.T) {
 	poster := &recordingPoster{}
-	s, err := domain.Settle(nil, january, 3, fakeGL{})
+	s, err := domain.Settle(context.Background(), nil, january, 3, fakeGL{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestSettle_EmptyIsZeroAndNeverPosts(t *testing.T) {
 
 func TestSettle_GLFailureSurfaces(t *testing.T) {
 	boom := errors.New("gl down")
-	if _, err := domain.Settle(nil, january, 0, fakeGL{err: boom}); !errors.Is(err, boom) {
+	if _, err := domain.Settle(context.Background(), nil, january, 0, fakeGL{err: boom}); !errors.Is(err, boom) {
 		t.Fatalf("got %v, want wrapped %v", err, boom)
 	}
 }

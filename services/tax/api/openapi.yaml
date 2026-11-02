@@ -1,47 +1,395 @@
 openapi: 3.0.3
 info:
   title: Passage Tax
-  version: 0.1.0
+  version: 0.2.0
+  description: >-
+    Tax determination, calculation, withholding, provider failover, settlement reconciliation to the
+    general ledger and a SAF-T tax extract. Amounts are decimal strings with at most 6 decimal places,
+    dates are YYYY-MM-DD. Errors are RFC 7807 problem+json with code, serviceCode and traceId.
 paths:
+  /healthz:
+    get:
+      operationId: liveness
+      x-passage-duty: public
+      responses:
+        "200": { description: The process is up }
+  /readyz:
+    get:
+      operationId: readiness
+      x-passage-duty: public
+      responses:
+        "200": { description: The database answers a ping }
+        "503": { description: The database is unreachable }
   /v1/tax/calculate:
     post:
       operationId: calculateTax
       x-passage-duty: Calculate tax
+      summary: Stateless tax calculation of one document
+      description: >-
+        With a provider name the call goes to that provider and falls back to the internal engine on a
+        timeout or 5xx (warning TAX-0007, fallback true). The document is then queued for recommit and
+        dev.passage.tax.provider.fallback.v1 is published when the tax store is configured.
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
+            schema: { $ref: "#/components/schemas/CalculateRequest" }
       responses:
         "200":
           description: Calculation result with per-line taxes and determination trace
-        "400":
-          description: Validation problem (COM-0001)
-        "401":
-          description: Missing or malformed tenant (AUTH-0001)
-        "403":
-          description: Caller lacks the Calculate tax duty
-        "422":
-          description: Tax rule problem (TAX-0001 to TAX-0008)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CalculateResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
   /v1/tax/withholding/calculate:
     post:
       operationId: calculateWithholding
       x-passage-duty: Calculate withholding tax
+      summary: Stateless withholding tax calculation
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
+            schema: { $ref: "#/components/schemas/WithholdingRequest" }
       responses:
         "200":
           description: Taxable base, withholding amount and net payable with determination trace
-        "400":
-          description: Validation problem (COM-0001)
-        "401":
-          description: Missing or malformed tenant (AUTH-0001)
-        "403":
-          description: Caller lacks the Calculate withholding tax duty
-        "422":
-          description: Withholding rule problem (TAX-0001, TAX-0002, TAX-0003)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WithholdingResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/tax/transactions:
+    post:
+      operationId: recordTaxTransactions
+      x-passage-duty: tax.transaction.record
+      summary: Record posted tax amounts of the request's legal entity
+      description: Idempotent per transaction id; a transaction already recorded is counted as a duplicate and left unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TransactionsRequest" }
+      responses:
+        "201":
+          description: Recorded and duplicate counts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recorded, duplicates]
+                properties:
+                  recorded: { type: integer }
+                  duplicates: { type: integer }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/settlements:run:
+    post:
+      operationId: runTaxSettlement
+      x-passage-duty: tax.settlement.run
+      summary: Settle the open tax transactions of a period after reconciling to the GL tax accounts to the cent
+      description: >-
+        Every recorded transaction of the period, settled or not, is compared per code and direction with
+        the movement of its GL tax account read from the ledger (output tax is the credit movement, input
+        tax the debit movement). The period must cover whole calendar months. Any difference is TAX-0008
+        and nothing is settled. Open transactions are then marked with the new run (a delta run when
+        earlier runs exist). No open transaction is TAX-0009. A ledger that cannot be read is 502.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SettleRequest" }
+      responses:
+        "201":
+          description: The settlement run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SettlementRun" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "502": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/recommit:run:
+    post:
+      operationId: runTaxRecommit
+      x-passage-duty: tax.recommit.run
+      summary: Re-calculate queued fallback documents on their external provider
+      description: >-
+        Takes the oldest pending queue entries of the request's legal entity, calculates each on its
+        provider again and marks it done when the provider answers. A provider that is still down leaves the
+        entry pending with an attempt counted. Call it from the scheduler.
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        "200":
+          description: Counts of the batch
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecommitSummary" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/saft:
+    get:
+      operationId: exportSaft
+      x-passage-duty: tax.saft.export
+      summary: SAF-T tax extract of a period
+      description: >-
+        XML in the OECD SAF-T 2.00 namespace with the header and a tax table of per-code period totals.
+        General ledger entries, customers and suppliers are not exported yet.
+      parameters:
+        - { name: period_from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: period_to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: company_name, in: query, required: true, schema: { type: string, maxLength: 200 } }
+        - { name: registration_number, in: query, required: true, schema: { type: string, maxLength: 200 } }
+        - { name: country, in: query, required: true, schema: { type: string, pattern: '^[A-Z]{2}$' } }
+        - { name: currency, in: query, required: true, schema: { type: string, pattern: '^[A-Z]{3}$' } }
+      responses:
+        "200":
+          description: The SAF-T document
+          content:
+            application/xml:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+components:
+  responses:
+    Problem:
+      description: RFC 7807 problem (COM-0001, COM-0500, COM-0502, COM-0503, AUTH-0001, AUTH-0003, TAX-0001 to TAX-0009)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, code, serviceCode]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        serviceCode: { type: string }
+        traceId: { type: string }
+        errors: { type: object, additionalProperties: { type: string } }
+    Decimal: { type: string, pattern: '^-?[0-9]+(\.[0-9]{1,6})?$' }
+    Date: { type: string, format: date }
+    Rate:
+      type: object
+      properties:
+        valid_from: { $ref: "#/components/schemas/Date" }
+        valid_to: { $ref: "#/components/schemas/Date" }
+        from_amount: { $ref: "#/components/schemas/Decimal" }
+        to_amount: { $ref: "#/components/schemas/Decimal" }
+        rate_pct: { $ref: "#/components/schemas/Decimal" }
+        min_tax: { $ref: "#/components/schemas/Decimal" }
+        max_tax: { $ref: "#/components/schemas/Decimal" }
+    CalculateRequest:
+      type: object
+      required: [currency, direction, document_date, lines]
+      properties:
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        direction: { type: string, enum: [output, input] }
+        document_date: { $ref: "#/components/schemas/Date" }
+        tax_date: { $ref: "#/components/schemas/Date" }
+        ship_from_country: { type: string }
+        provider: { type: string, description: External provider name; empty uses the internal engine. }
+        party:
+          type: object
+          properties:
+            tax_group: { type: string }
+            tax_id: { type: string }
+            country: { type: string }
+            certificate: { type: string }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            required: [line_ref, amount]
+            properties:
+              line_ref: { type: string, maxLength: 64 }
+              amount: { $ref: "#/components/schemas/Decimal" }
+              item_tax_group: { type: string }
+              price_includes_tax: { type: boolean }
+        config:
+          type: object
+          properties:
+            default_rounding: { type: string, enum: [per_line, per_document] }
+            groups: { type: object, additionalProperties: { type: array, items: { type: string } } }
+            item_groups: { type: object, additionalProperties: { type: array, items: { type: string } } }
+            codes:
+              type: array
+              items:
+                type: object
+                required: [code]
+                properties:
+                  code: { type: string }
+                  jurisdiction: { type: string }
+                  mechanism: { type: string, enum: [standard, reverse_charge, use_tax] }
+                  calc_basis: { type: string, enum: [line, document] }
+                  rounding: { type: string, enum: [per_line, per_document] }
+                  compound_sequence: { type: integer, minimum: 0 }
+                  recoverable_pct: { $ref: "#/components/schemas/Decimal" }
+                  rates: { type: array, items: { $ref: "#/components/schemas/Rate" } }
+            exemptions:
+              type: array
+              items:
+                type: object
+                properties:
+                  number: { type: string }
+                  codes: { type: array, items: { type: string } }
+                  valid_from: { $ref: "#/components/schemas/Date" }
+                  valid_to: { $ref: "#/components/schemas/Date" }
+    CalculateResult:
+      type: object
+      required: [engine, fallback, lines, document_taxes_by_code, warnings, determination_trace]
+      properties:
+        engine: { type: string }
+        fallback: { type: boolean }
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              line_ref: { type: string }
+              base: { $ref: "#/components/schemas/Decimal" }
+              taxes:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    code: { type: string }
+                    jurisdiction: { type: string }
+                    rate_pct: { $ref: "#/components/schemas/Decimal" }
+                    tax_amount: { $ref: "#/components/schemas/Decimal" }
+                    recoverable: { $ref: "#/components/schemas/Decimal" }
+                    nonrecoverable: { $ref: "#/components/schemas/Decimal" }
+                    direction: { type: string }
+        document_taxes_by_code:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              direction: { type: string }
+              base: { $ref: "#/components/schemas/Decimal" }
+              tax_amount: { $ref: "#/components/schemas/Decimal" }
+        warnings:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              detail: { type: string }
+        determination_trace: { type: array, items: { type: string } }
+    WithholdingRequest:
+      type: object
+      required: [currency, party_type, payment_date, code, gross_amount, codes]
+      properties:
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        party_type: { type: string, enum: [vendor, customer] }
+        payment_date: { $ref: "#/components/schemas/Date" }
+        code: { type: string }
+        gross_amount: { $ref: "#/components/schemas/Decimal" }
+        paid_to_date: { $ref: "#/components/schemas/Decimal" }
+        codes:
+          type: array
+          items:
+            type: object
+            required: [code]
+            properties:
+              code: { type: string }
+              jurisdiction: { type: string }
+              income_type: { type: string }
+              rates:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    valid_from: { $ref: "#/components/schemas/Date" }
+                    valid_to: { $ref: "#/components/schemas/Date" }
+                    rate_pct: { $ref: "#/components/schemas/Decimal" }
+                    threshold: { $ref: "#/components/schemas/Decimal" }
+    WithholdingResult:
+      type: object
+      properties:
+        code: { type: string }
+        jurisdiction: { type: string }
+        income_type: { type: string }
+        party_type: { type: string }
+        rate_pct: { $ref: "#/components/schemas/Decimal" }
+        gross_amount: { $ref: "#/components/schemas/Decimal" }
+        taxable_base: { $ref: "#/components/schemas/Decimal" }
+        withholding_amount: { $ref: "#/components/schemas/Decimal" }
+        net_payable: { $ref: "#/components/schemas/Decimal" }
+        determination_trace: { type: array, items: { type: string } }
+    TransactionsRequest:
+      type: object
+      required: [transactions]
+      properties:
+        transactions:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            required: [id, code, direction, tax_date, amount]
+            properties:
+              id: { type: string, format: uuid }
+              code: { type: string, maxLength: 64 }
+              direction: { type: string, enum: [output, input, use] }
+              tax_date: { $ref: "#/components/schemas/Date" }
+              amount: { $ref: "#/components/schemas/Decimal" }
+    SettleRequest:
+      type: object
+      required: [period_from, period_to, ledger_id, accounts]
+      properties:
+        period_from: { $ref: "#/components/schemas/Date" }
+        period_to: { $ref: "#/components/schemas/Date" }
+        ledger_id: { type: string, format: uuid }
+        accounts:
+          type: object
+          description: GL tax account per "code|direction" key, for example "VAT19|output".
+          additionalProperties: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$' }
+    SettlementRun:
+      type: object
+      required: [id, version, period_from, period_to, output_tax_total, input_tax_total, net_amount, transaction_ids, lines]
+      properties:
+        id: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
+        period_from: { $ref: "#/components/schemas/Date" }
+        period_to: { $ref: "#/components/schemas/Date" }
+        output_tax_total: { $ref: "#/components/schemas/Decimal" }
+        input_tax_total: { $ref: "#/components/schemas/Decimal" }
+        net_amount: { $ref: "#/components/schemas/Decimal" }
+        transaction_ids: { type: array, items: { type: string, format: uuid } }
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              direction: { type: string }
+              amount: { $ref: "#/components/schemas/Decimal" }
+    RecommitSummary:
+      type: object
+      required: [processed, completed, failed]
+      properties:
+        processed: { type: integer }
+        completed: { type: integer }
+        failed: { type: integer }

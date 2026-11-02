@@ -21,7 +21,7 @@ type Txn struct {
 type Period struct{ From, To Date }
 
 type GLMovement interface {
-	Movements(from, to time.Time) (map[string]decimal.Decimal, error)
+	Movements(ctx context.Context, from, to time.Time) (map[string]decimal.Decimal, error)
 }
 
 type Poster interface {
@@ -56,7 +56,7 @@ type bucket struct {
 	hasOpen         bool
 }
 
-func Settle(txns []Txn, period Period, priorVersion int, gl GLMovement) (Settlement, error) {
+func Settle(ctx context.Context, txns []Txn, period Period, priorVersion int, gl GLMovement) (Settlement, error) {
 	buckets := map[string]*bucket{}
 	out := Settlement{Version: priorVersion, PeriodFrom: period.From, PeriodTo: period.To, TransactionIDs: []string{}, Lines: []CodeSettlement{}}
 	for _, t := range txns {
@@ -76,7 +76,7 @@ func Settle(txns []Txn, period Period, priorVersion int, gl GLMovement) (Settlem
 			out.TransactionIDs = append(out.TransactionIDs, t.ID)
 		}
 	}
-	movements, err := gl.Movements(period.From.Time, period.To.Time)
+	movements, err := gl.Movements(ctx, period.From.Time, period.To.Time)
 	if err != nil {
 		return Settlement{}, fmt.Errorf("read GL tax movement: %w", err)
 	}

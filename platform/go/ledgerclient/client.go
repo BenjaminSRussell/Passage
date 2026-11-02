@@ -72,6 +72,7 @@ type BalanceQuery struct {
 	LegalEntityID string
 	LedgerID      string
 	Account       string
+	PeriodFrom    string
 	PeriodTo      string
 }
 
@@ -322,6 +323,9 @@ func (c *Client) Reverse(ctx context.Context, r Reversal) (string, error) {
 
 func (c *Client) Balance(ctx context.Context, q BalanceQuery) (Balance, error) {
 	query := url.Values{"ledger": {q.LedgerID}, "account_from": {q.Account}, "account_to": {q.Account}}
+	if q.PeriodFrom != "" {
+		query.Set("period_from", q.PeriodFrom)
+	}
 	if q.PeriodTo != "" {
 		query.Set("period_to", q.PeriodTo)
 	}

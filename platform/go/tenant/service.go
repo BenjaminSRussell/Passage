@@ -65,6 +65,9 @@ var serviceGrants = map[string]map[string][]string{
 		"inventory":  {"inventory.ownership-change.read"},
 		"party":      {"party.read"},
 	},
+	"tax": {
+		"ledger": {"ledger.balance.read"},
+	},
 	"payables": {
 		"ledger": {"ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"},
 		"fx":     {"fx.rate.lookup"},

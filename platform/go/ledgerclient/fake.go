@@ -120,7 +120,8 @@ func (f *Fake) Balance(_ context.Context, q BalanceQuery) (Balance, error) {
 	defer f.mu.Unlock()
 	out := Balance{}
 	for _, s := range f.entries {
-		if s.LedgerID != q.LedgerID || (q.PeriodTo != "" && s.PostingDate[:min(len(s.PostingDate), len(q.PeriodTo))] > q.PeriodTo) {
+		period := s.PostingDate[:min(len(s.PostingDate), len("2006-01"))]
+		if s.LedgerID != q.LedgerID || (q.PeriodTo != "" && period > q.PeriodTo) || (q.PeriodFrom != "" && period < q.PeriodFrom) {
 			continue
 		}
 		for _, l := range s.Lines {

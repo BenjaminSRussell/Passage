@@ -1044,3 +1044,17 @@ test_hub_subscription_write_reaches_test_send_and_delivery_replay if {
 	not allowed("hub.delivery.read", "POST", "/v1/hub/subscriptions/s-1:test")
 	not allowed("hub.delivery.read", "POST", "/v1/hub/deliveries/d-1:replay")
 }
+
+test_tax_duties_reach_only_their_routes if {
+	allowed("tax.transaction.record", "POST", "/v1/tax/transactions")
+	allowed("tax.settlement.run", "POST", "/v1/tax/settlements:run")
+	allowed("tax.recommit.run", "POST", "/v1/tax/recommit:run")
+	allowed("tax.saft.export", "GET", "/v1/tax/saft")
+	not allowed("tax.saft.export", "POST", "/v1/tax/saft")
+	not allowed("tax.settlement.run", "POST", "/v1/tax/transactions")
+	not allowed("tax.transaction.record", "POST", "/v1/tax/settlements:run")
+	not allowed("tax.recommit.run", "POST", "/v1/tax/settlements:run")
+	not allowed("Calculate tax", "POST", "/v1/tax/settlements:run")
+	data.service_grants.tax.ledger == ["ledger.balance.read"]
+	not allowed("ledger.balance.read", "POST", "/v1/ledger/journal-entries")
+}

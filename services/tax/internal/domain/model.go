@@ -18,6 +18,7 @@ const (
 	CodeReverseChargeIneligible = "TAX-0006"
 	CodeProviderFallback        = "TAX-0007"
 	CodeSettlementMismatch      = "TAX-0008"
+	CodeNothingToSettle         = "TAX-0009"
 	CodeValidation              = "COM-0001"
 
 	MechStandard      = "standard"
