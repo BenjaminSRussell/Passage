@@ -16,6 +16,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/close/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/close/internal/ledger"
@@ -40,11 +41,14 @@ type LedgerLookup interface {
 }
 
 type API struct {
-	store      Store
-	ledgers    LedgerLookup
-	checks     atomic.Int64
-	rejections atomic.Int64
-	failures   atomic.Int64
+	store       Store
+	ledgers     LedgerLookup
+	checks      atomic.Int64
+	rejections  atomic.Int64
+	failures    atomic.Int64
+	yearEnds    YearEndStore
+	postings    ledgerclient.Ledger
+	yearEndRuns atomic.Int64
 }
 
 type checkRequest struct {
@@ -87,6 +91,9 @@ var problemSlugs = map[string]string{
 	domain.CodeInvalidTransition: "period_conflict",
 	domain.CodeNoPeriod:          "period_not_found",
 	domain.CodeAmbiguousPeriod:   "period_ambiguous",
+	domain.CodeNoRun:             "year_end_run_not_found",
+	domain.CodeLedgerRejected:    "ledger_rejected",
+	domain.CodeIdempotencyReuse:  "idempotency_key_reuse",
 	"COM-0001":                   "validation_failed",
 	"AUTH-0001":                  "forbidden_tenant",
 }
@@ -98,6 +105,8 @@ var problemStatuses = map[string]int{
 	domain.CodeInvalidTransition: http.StatusConflict,
 	domain.CodeNoPeriod:          http.StatusNotFound,
 	domain.CodeAmbiguousPeriod:   http.StatusConflict,
+	domain.CodeNoRun:             http.StatusNotFound,
+	domain.CodeIdempotencyReuse:  http.StatusConflict,
 }
 
 func New(store Store) *API { return &API{store: store} }
@@ -112,6 +121,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyPeriodCheck)).Post("/v1/close/period-statuses:check", a.check)
 	r.With(authz.RequireDuty(dutyPeriodCheck)).Get("/v1/close/periods:resolve", a.resolve)
 	r.With(authz.RequireDuty(dutyMaintain)).Put("/v1/close/periods/{fiscalPeriodId}", a.register)
+	r.With(authz.RequireDuty(dutyYearEndRun)).Post(yearEndPath, a.runYearEnd)
+	r.With(authz.RequireDuty(dutyYearEndRead)).Get(yearEndPath+"/{runId}", a.getYearEnd)
 }
 
 func (a *API) ready(w http.ResponseWriter, r *http.Request) {
@@ -356,5 +367,6 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# TYPE close_period_checks_total counter\nclose_period_checks_total %d\n", a.checks.Load())
 		fmt.Fprintf(w, "# TYPE close_period_rejections_total counter\nclose_period_rejections_total %d\n", a.rejections.Load())
 		fmt.Fprintf(w, "# TYPE close_period_check_failures_total counter\nclose_period_check_failures_total %d\n", a.failures.Load())
+		fmt.Fprintf(w, "# TYPE close_year_end_runs_completed_total counter\nclose_year_end_runs_completed_total %d\n", a.yearEndRuns.Load())
 	})
 }

@@ -23,16 +23,48 @@ type Balance struct {
 }
 
 type Entry struct {
-	Kind       string
-	Account    string
-	Dimensions string
-	Amount     decimal.Decimal
+	Kind       string          `json:"kind"`
+	Account    string          `json:"account"`
+	Dimensions string          `json:"dimensions"`
+	Amount     decimal.Decimal `json:"amount"`
 }
 
 type YearEnd struct {
-	Closing []Entry
-	Opening []Entry
+	Closing []Entry `json:"closing"`
+	Opening []Entry `json:"opening"`
 }
+
+const (
+	RunPending   = "pending"
+	RunCompleted = "completed"
+)
+
+type YearEndRun struct {
+	ID               string  `json:"id"`
+	LegalEntityID    string  `json:"legalEntityId"`
+	LedgerID         string  `json:"ledgerId"`
+	FiscalYear       string  `json:"fiscalYear"`
+	Status           string  `json:"status"`
+	Currency         string  `json:"currency"`
+	ClosingDate      string  `json:"closingDate"`
+	OpeningDate      string  `json:"openingDate"`
+	Proposals        YearEnd `json:"proposals"`
+	ClosingJournalID string  `json:"closingJournalId,omitempty"`
+	OpeningJournalID string  `json:"openingJournalId,omitempty"`
+	CreatedBy        string  `json:"createdBy"`
+	RequestHash      string  `json:"-"`
+}
+
+type YearEndCompleted struct {
+	RunID            string `json:"runId"`
+	LegalEntityID    string `json:"legalEntityId"`
+	LedgerID         string `json:"ledgerId"`
+	FiscalYear       string `json:"fiscalYear"`
+	ClosingJournalID string `json:"closingJournalId,omitempty"`
+	OpeningJournalID string `json:"openingJournalId,omitempty"`
+}
+
+const EventYearEndCompleted = "dev.passage.close.yearend.completed.v1"
 
 type key struct{ account, dimensions string }
 

@@ -193,6 +193,8 @@
       {"resource": "/v1/close/periods:resolve", "methods": ["GET"]}
     ]},
     "period.maintain": {"permissions": [{"resource": "/v1/close/periods/*", "methods": ["PUT"]}]},
+    "close.yearend.run": {"permissions": [{"resource": "/v1/close/year-end-runs", "methods": ["POST"]}]},
+    "close.yearend.read": {"permissions": [{"resource": "/v1/close/year-end-runs/*", "methods": ["GET"]}]},
     "reporting.statement.view": {"permissions": [
       {"resource": "/v1/reporting/definitions", "methods": ["GET"]},
       {"resource": "/v1/reporting/definitions/*", "methods": ["GET"]},
@@ -2778,7 +2780,7 @@
       "compliance": ["compliance.legal_hold.check"]
     },
     "close": {
-      "ledger": ["ledger.ledger.lookup", "ledger.account.lookup"]
+      "ledger": ["ledger.ledger.lookup", "ledger.account.lookup", "ledger.entry.post"]
     },
     "production": {
       "ledger": ["ledger.entry.post", "ledger.balance.read"]

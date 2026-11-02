@@ -26,11 +26,13 @@ Store tests need `PASSAGE_TEST_DATABASE_URL` and `PASSAGE_TEST_APP_DATABASE_URL`
 
 `domain.Decide(rows, module, group)` implements BR-14.1. The module row wins, else the `all` row, else the period is never opened. `open` allows. `on_hold` allows only the row's allowed group (LEDGER-0014). Everything else, including never opened, rejects (LEDGER-0013). `domain.ModuleForSource` maps `source.system` to a module; `manual` posts to `gl`; unknown or omitted systems are rejected if any module row is closed.
 
-The ledger (wave 11) enforces the rule inside its posting transaction by reading the rows with `store.PeriodRows` (`select ... for share`) and calling `Decide`, or by calling `POST /v1/close/period-statuses:check`. Reversal, migration and batch posts keep their original source system and use the same decision. `TestPostingPaths_ClosedRejected` is the closed-period contract test over every path.
+The ledger (wave 11) enforces the rule inside its posting transaction by reading the rows with `store.PeriodRows` (`select ... for share`) and calling `Decide`, or by calling `POST /v1/close/period-statuses:check`. Reversal, migration and batch posts keep their original source system and use the same decision. `TestPostingPaths_ClosedRejected` is the closed-period contract test over every path, and `period_contract_test.go` runs the same rule through the real HTTP routes for every source system the posting services send.
 
 ## API
 
 `POST /v1/close/period-statuses:check` and `GET /v1/close/periods:resolve?ledgerId=&postingDate=&sourceSystem=` (duty `period.check` for both; the resolver needs the caller's single legal entity and returns the fiscal period id, its dates and the module status, or 404 `CLOSE-0005` / 409 `CLOSE-0006`), `PUT /v1/close/periods/{fiscalPeriodId}` (duty `period.maintain`) registers a period's dates and opens the `all` module, only when the ledger service (`GET /v1/ledger/ledgers/{id}` with a signed `ledger.ledger.lookup` service token, `LEDGER_URL` plus the service signing key) says the ledger belongs to the caller's legal entity (403 otherwise, 503 when the ledger is unreachable or unconfigured); same dates replay with 200, moved or overlapping dates are 409 `CLOSE-0001`. `GET /healthz`, `GET /readyz` (database ping, 503 when down), `GET /metrics` on the admin port. Contract: `api/openapi.yaml`. The AsyncAPI file declares `dev.passage.close.period.statuschanged.v1` (the PRD spells the verb `status-changed`, which the kernel `events.ValidType` pattern rejects); nothing publishes it yet.
+
+Year-end close: `POST /v1/close/year-end-runs` (duty `close.yearend.run`) takes the year-end trial balance, computes the closing and opening proposals with `domain.CloseYear`, stores the run in `year_end_run` (natural key ledger plus `fiscalYear`), posts both entries through the shared `ledgerclient` with a signed `ledger.entry.post` service token (source system `close`, document and idempotency key derived from the run id), marks the run `completed` with the two journal ids and writes `dev.passage.close.yearend.completed.v1` to the outbox in that same transaction. Repeating the request returns the stored run (200) and finishes an unfinished one without posting twice; a different body for the same ledger and year is 409 `COM-0409`; a ledger refusal is 422 `CLOSE-0008`; an unreachable ledger is 503 and the same request is safe to retry. `GET /v1/close/year-end-runs/{runId}` (duty `close.yearend.read`) returns the run. Both need `LEDGER_URL` and the service signing key, else 503.
 
 ## Error codes
 
@@ -60,4 +62,4 @@ Engines return proposals; nothing here posts to the ledger.
 
 ## Metrics
 
-`close_period_checks_total`, `close_period_rejections_total`, `close_period_check_failures_total` (stdlib atomics rendered as text).
+`close_period_checks_total`, `close_period_rejections_total`, `close_period_check_failures_total`, `close_year_end_runs_completed_total` (stdlib atomics rendered as text).

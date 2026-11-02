@@ -592,6 +592,10 @@ test_service_grants_allow_only_their_declared_routes if {
 	allowed("ledger.ledger.write", "PATCH", "/v1/ledger/ledgers/l-1")
 	not allowed("ledger.ledger.write", "DELETE", "/v1/ledger/ledgers/l-1")
 	not allowed("period.check", "PUT", "/v1/close/periods/p-1")
+	allowed("close.yearend.run", "POST", "/v1/close/year-end-runs")
+	not allowed("close.yearend.run", "GET", "/v1/close/year-end-runs/r-1")
+	allowed("close.yearend.read", "GET", "/v1/close/year-end-runs/r-1")
+	not allowed("close.yearend.read", "POST", "/v1/close/year-end-runs")
 	every duty in data.service_grants.receiving.ledger {
 		not allowed(duty, "POST", "/v1/ledger/ledgers")
 		not allowed(duty, "PUT", "/v1/ledger/charts/c1/accounts/1000")

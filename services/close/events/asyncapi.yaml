@@ -2,13 +2,18 @@ asyncapi: 3.0.0
 info:
   title: close
   version: 0.1.0
-  description: Declared channel only. No publisher ships in this slice; the outbox publisher arrives with the state-changing period endpoints.
+  description: The year-end close writes dev.passage.close.yearend.completed.v1 to the outbox; the period status-changed publisher arrives with the state-changing period endpoints.
 channels:
   passage.close.period:
     address: passage.close.period
     messages:
       statusChanged:
         $ref: '#/components/messages/statusChanged'
+  passage.close.yearend:
+    address: passage.close.yearend
+    messages:
+      yearEndCompleted:
+        $ref: '#/components/messages/yearEndCompleted'
 operations:
   onStatusChanged:
     action: send
@@ -16,8 +21,28 @@ operations:
       $ref: '#/channels/passage.close.period'
     messages:
       - $ref: '#/channels/passage.close.period/messages/statusChanged'
+  onYearEndCompleted:
+    action: send
+    channel:
+      $ref: '#/channels/passage.close.yearend'
+    messages:
+      - $ref: '#/channels/passage.close.yearend/messages/yearEndCompleted'
 components:
   messages:
+    yearEndCompleted:
+      name: yearEndCompleted
+      title: Year-end close completed
+      payload:
+        type: object
+        required: [runId, legalEntityId, ledgerId, fiscalYear]
+        properties:
+          runId: { type: string, format: uuid }
+          legalEntityId: { type: string, format: uuid }
+          ledgerId: { type: string, format: uuid }
+          fiscalYear: { type: string }
+          closingJournalId: { type: string }
+          openingJournalId: { type: string }
+      x-passage-type: dev.passage.close.yearend.completed.v1
     statusChanged:
       name: statusChanged
       title: Period status changed
