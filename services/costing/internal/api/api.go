@@ -551,6 +551,22 @@ type ppvResponse struct {
 	Recorded         bool   `json:"recorded"`
 }
 
+// standardMatches refuses (422) a recorded receipt whose standard cost or currency is not the one the stored ACTIVE item cost
+// carries on the financial date: the voucher books inventory at that standard, so it never comes from the caller.
+func (a *API) standardMatches(w http.ResponseWriter, r *http.Request, row store.CostTransaction, std decimal.Decimal, currency string) bool {
+	cur, err := a.store.CurrentCost(r.Context(), row.ProductID, row.SiteID, row.FinancialDate)
+	if err != nil {
+		a.fail(w, r, "ppv standard cost", err)
+		return false
+	}
+	stored, err := decimal.NewFromString(cur.UnitCost)
+	if err != nil || !stored.Equal(std) || cur.Currency != currency {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodePPVStandard, "standardUnitCost and currency must equal the stored standard cost in force on financialDate"))
+		return false
+	}
+	return true
+}
+
 // postPPV calculates the purchase price variance for a STANDARD item at receipt
 // (PO price against standard) or at invoice (invoice price against PO price).
 // A positive amount is a debit. With legalEntityId, productId, siteId,
@@ -578,10 +594,10 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 	}
 	qty := parseDecimal(fields, "qty", req.Qty, false)
 	po := parseDecimal(fields, "poUnitPrice", req.PoUnitPrice, true)
-	var amount, grir decimal.Decimal
+	var amount, std decimal.Decimal
 	scale := money.MinorUnits(req.Currency)
 	if req.Kind == "RECEIPT" {
-		std := parseDecimal(fields, "standardUnitCost", req.StandardUnitCost, true)
+		std = parseDecimal(fields, "standardUnitCost", req.StandardUnitCost, true)
 		if len(fields) == 0 {
 			if err := domain.CheckPPVInputs(qty, po, std); err != nil {
 				a.fail(w, r, "ppv", err)
@@ -589,7 +605,6 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		amount = domain.ReceiptPPV(qty, po, std, scale)
-		grir = qty.Mul(std).RoundBank(scale).Add(amount)
 	} else {
 		inv := parseDecimal(fields, "invoiceUnitPrice", req.InvoiceUnitPrice, true)
 		if len(fields) == 0 {
@@ -599,8 +614,8 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		amount = domain.InvoicePPV(qty, inv, po, scale)
-		grir = qty.Mul(inv).RoundBank(scale).Sub(amount)
 	}
+	grir := qty.Mul(po).RoundBank(scale)
 	persist := req.SourceLineID != "" || req.LegalEntityID != "" || req.ProductID != "" || req.SiteID != "" || req.FinancialDate != ""
 	var row store.CostTransaction
 	if persist {
@@ -632,6 +647,9 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 	if persist {
 		if p, _ := tenant.FromContext(r.Context()); !tenant.InLegalEntityScope(p, row.LegalEntityID) {
 			httpx.Fail(w, r, outOfScope())
+			return
+		}
+		if req.Kind == "RECEIPT" && !a.standardMatches(w, r, row, std, req.Currency) {
 			return
 		}
 		inserted, err := a.store.RecordCostTransactions(r.Context(), []store.CostTransaction{row})

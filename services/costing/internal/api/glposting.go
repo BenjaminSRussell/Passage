@@ -19,6 +19,8 @@ const (
 	dutyGLPost              = "costing.gl.post"
 	dutyCloseRun            = "costing.close.run"
 	CodeGLUnavailable       = "CST-GL-003"
+	CodeGLRefused           = "CST-GL-007"
+	CodePPVStandard         = "CST-PPV-001"
 )
 
 var accountPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$`)
@@ -40,7 +42,7 @@ func (a *API) glReady(w http.ResponseWriter, r *http.Request) bool {
 func (a *API) failGL(w http.ResponseWriter, r *http.Request, op string, err error) {
 	var le *ledgerclient.Error
 	if errors.As(err, &le) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadGateway, CodeGLUnavailable, "the general ledger refused the request ("+le.Code+")"))
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadGateway, CodeGLRefused, "the general ledger refused the request ("+le.Code+")"))
 		return
 	}
 	a.fail(w, r, op, err)
@@ -188,7 +190,9 @@ func (a *API) runClose(w http.ResponseWriter, r *http.Request) {
 		a.failGL(w, r, "inventory close", err)
 		return
 	}
-	a.closesCompleted.Add(1)
+	if !c.Replayed {
+		a.closesCompleted.Add(1)
+	}
 	httpx.JSON(w, http.StatusOK, c)
 }
 

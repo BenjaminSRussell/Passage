@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"testing"
@@ -178,5 +179,29 @@ func TestPostgres_ARefusedVoucherIsDerivedAgainFromTheCurrentProfile(t *testing.
 	res, err = f.s.PostCostVouchers(f.ctx, f.ledger, GLPostRequest{LegalEntityID: f.le})
 	if err != nil || len(res.Booked) != 1 || netOf(f, "1410").String() != "1000" || !netOf(f, "1400").IsZero() {
 		t.Fatalf("result %+v err %v net 1410 %s, want the voucher rebuilt on the new inventory account", res, err, netOf(f, "1410"))
+	}
+}
+
+func TestPostgres_AVoucherParkedAfterLostAnswersIsResentUnderItsOwnKeyNotBookedTwice(t *testing.T) {
+	f := newGLFixture(t, 29)
+	f.record(t, f.ppvRow("ppv:RECEIPT:"+f.le+":GR-1:1", "100", "50.00", "1050.00", "2026-03-05"))
+	f.ledger.LoseAnswers(errors.New("timeout"))
+	for attempt := 1; attempt <= MaxVoucherAttempts; attempt++ {
+		f.dueNow(t)
+		if res, err := f.s.PostCostVouchers(f.ctx, f.ledger, GLPostRequest{LegalEntityID: f.le}); err != nil || len(res.Failed) != 1 {
+			t.Fatalf("attempt %d: %+v err %v, want one failure", attempt, res, err)
+		}
+	}
+	if len(f.ledger.Entries()) != 1 {
+		t.Fatalf("ledger holds %d entries, want the one the lost answers hid", len(f.ledger.Entries()))
+	}
+	f.ledger.LoseAnswers(nil)
+	if _, err := f.s.SavePostingProfile(f.ctx, PostingProfile{LegalEntityID: f.le, GLLedgerID: f.glID, InventoryAccount: "1410", GRIRAccount: "2100",
+		APAccount: "2000", PPVAccount: "5100", AdjustmentAccount: "5000"}, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := f.s.PostCostVouchers(f.ctx, f.ledger, GLPostRequest{LegalEntityID: f.le})
+	if err != nil || len(res.Booked) != 1 || len(f.ledger.Entries()) != 1 || !netOf(f, "1410").IsZero() || netOf(f, "1400").String() != "1000" {
+		t.Fatalf("result %+v err %v entries %d, want the same entry confirmed and nothing booked twice", res, err, len(f.ledger.Entries()))
 	}
 }

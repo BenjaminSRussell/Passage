@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -17,6 +18,8 @@ type slice7 struct {
 	glRuns    []store.GLPostRequest
 	closed    []store.CloseRequest
 	tieOutFor string
+	closeErr  error
+	replayed  bool
 }
 
 func (f *slice7) GetPostingProfile(context.Context, string) (store.PostingProfile, error) {
@@ -35,7 +38,10 @@ func (f *slice7) PostCostVouchers(_ context.Context, _ ledgerclient.Ledger, in s
 
 func (f *slice7) RunClose(_ context.Context, _ ledgerclient.Ledger, in store.CloseRequest, _ string) (store.Close, error) {
 	f.closed = append(f.closed, in)
-	return store.Close{ID: ids.New(), LegalEntityID: in.LegalEntityID, PeriodEnd: in.PeriodEnd, Status: "COMPLETED"}, nil
+	if f.closeErr != nil {
+		return store.Close{}, f.closeErr
+	}
+	return store.Close{ID: ids.New(), LegalEntityID: in.LegalEntityID, PeriodEnd: in.PeriodEnd, Status: "COMPLETED", Replayed: f.replayed}, nil
 }
 
 func (f *slice7) ListCloses(context.Context, string) ([]store.Close, error) { return nil, nil }
@@ -131,5 +137,26 @@ func TestLedgerTieOut_ReportsParkedVouchers(t *testing.T) {
 	}
 	if rec := call(h, http.MethodGet, "/v1/costing/value-report:ledger-tie-out?legalEntityId="+testLE, "", glDuties, nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("missing asOf status %d, want 400", rec.Code)
+	}
+}
+
+func TestRunClose_CountsOnlyNewlyCompletedClosesAndKeepsRefusalCodesApart(t *testing.T) {
+	fs := &fakeStore{versions: map[string]store.CostingVersion{}}
+	a := New(fs).WithLedger(ledgerclient.NewFake())
+	r := httpx.NewRouter()
+	a.Register(r)
+	body := `{"legalEntityId":"` + testLE + `","periodEnd":"2026-03-31"}`
+	call(r, http.MethodPost, "/v1/costing/closes", body, glDuties, nil)
+	fs.replayed = true
+	call(r, http.MethodPost, "/v1/costing/closes", body, glDuties, nil)
+	metrics := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(metrics.Body.String(), "costing_closes_completed_total 1\n") {
+		t.Errorf("metrics %s, want one completed close counted (the replay is not one)", metrics.Body.String())
+	}
+	fs.closeErr = &ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: "LEDGER_ACCOUNT_UNKNOWN"}
+	rec := call(r, http.MethodPost, "/v1/costing/closes", body, glDuties, nil)
+	if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), CodeGLRefused) || strings.Contains(rec.Body.String(), CodeGLUnavailable) {
+		t.Errorf("ledger refusal status %d: %s, want 502 %s", rec.Code, rec.Body.String(), CodeGLRefused)
 	}
 }

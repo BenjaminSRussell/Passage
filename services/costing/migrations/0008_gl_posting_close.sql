@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS costing_posting_profile (
 -- an entry the ledger may already hold. A failure counts an attempt and delays the next one with
 -- backoff (next_attempt_at); after five attempts, or at once for an entry that cannot balance, the
 -- voucher is PARKED with its reason code until the posting profile is saved again. rebuild marks a
--- voucher the ledger refused for good: the next attempt derives its lines again under a new key. source_key is ctxn:<cost transaction id> or close:<close id>.
+-- voucher the ledger refused for good or that cannot balance: the next attempt derives its lines again
+-- under a new key; any other parked voucher is resent under its own key. source_key is ctxn:<cost transaction id> or close:<close id>.
 CREATE TABLE IF NOT EXISTS costing_gl_voucher (
   tenant_id uuid NOT NULL,
   id uuid NOT NULL,
@@ -91,14 +92,13 @@ BEGIN
   END LOOP;
 END $$;
 
--- The profile and a close are updated in place; a voucher the ledger rejected for good is deleted
--- so the next run derives it again from the current profile.
+-- The profile, a close and a voucher are updated in place; nothing is deleted.
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
     EXECUTE format('GRANT USAGE ON SCHEMA %I TO passage_app', current_schema());
     EXECUTE 'GRANT SELECT, INSERT, UPDATE ON costing_posting_profile, inventory_close TO passage_app';
-    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON costing_gl_voucher TO passage_app';
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE ON costing_gl_voucher TO passage_app';
   END IF;
 END
 $$;

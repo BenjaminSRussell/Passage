@@ -27,6 +27,12 @@ func (f glFixture) bookProvisionalStock(t *testing.T, inventory, offset string) 
 	}
 }
 
+func postEntry(f glFixture, doc, date, account, amount string) error {
+	_, err := f.ledger.Post(f.ctx, ledgerclient.Entry{LegalEntityID: f.le, LedgerID: f.glID, DocumentID: doc, PostingDate: date, Currency: "EUR", IdempotencyKey: doc,
+		Lines: []ledgerclient.Line{{Account: account, Amount: mustDecimal(amount)}, {Account: "2100", Credit: true, Amount: mustDecimal(amount)}}})
+	return err
+}
+
 func TestPostgres_CloseSettlesTheIssueLocksThePeriodPostsTheAdjustmentAndTiesToTheLedger(t *testing.T) {
 	f := newGLFixture(t, 26)
 	product, site := ids.New(), ids.New()
@@ -51,6 +57,20 @@ func TestPostgres_CloseSettlesTheIssueLocksThePeriodPostsTheAdjustmentAndTiesToT
 	replay, err := f.s.RunClose(f.ctx, f.ledger, CloseRequest{LegalEntityID: f.le, PeriodEnd: "2026-01-31"}, "tester")
 	if err != nil || replay.ID != c.ID || len(f.ledger.Entries()) != 3 {
 		t.Errorf("replay %+v err %v entries %d, want the same close and no new entry", replay, err, len(f.ledger.Entries()))
+	}
+	if _, err := f.s.RecordCostTransactions(f.ctx, []CostTransaction{costRow("F1", f.le, product, site, domain.KindFinancial, "10", "100.00", "2026-02-10")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := postEntry(f, "FEB", "2026-02-10", "1400", "100.00"); err != nil {
+		t.Fatal(err)
+	}
+	if rec, err := f.s.ReconcileInventory(f.ctx, f.ledger, f.le, "2026-01-31"); err != nil || !rec.Ties || rec.Ledger.String() != "600" {
+		t.Errorf("January tie-out with February postings %+v err %v, want 600.00 tied", rec, err)
+	}
+	for _, asOf := range []string{"2026-01-15", "2026-02-27", "2026-01-31x"} {
+		if _, err := f.s.ReconcileInventory(f.ctx, f.ledger, f.le, asOf); problemCode(err) != CodeTieOutPeriod || problemStatus(err) != http.StatusUnprocessableEntity {
+			t.Errorf("asOf %s: %v, want 422 %s", asOf, err, CodeTieOutPeriod)
+		}
 	}
 	late := costRow("R3", f.le, product, site, domain.KindFinancial, "10", "100.00", "2026-01-30")
 	if _, err := f.s.RecordCostTransactions(f.ctx, []CostTransaction{late}); problemCode(err) != CodePeriodLocked {

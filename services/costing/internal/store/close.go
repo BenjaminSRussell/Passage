@@ -26,6 +26,7 @@ const (
 	CodePeriodLocked   = "CST-CLS-001"
 	CodeCloseOrder     = "CST-CLS-002"
 	CodeCloseEmpty     = "CST-CLS-003"
+	CodeTieOutPeriod   = "CST-GL-008"
 	closeProductsBatch = 200
 	closeStatusRunning = "RUNNING"
 	closeStatusDone    = "COMPLETED"
@@ -48,6 +49,7 @@ type Close struct {
 	CreatedBy       string     `json:"createdBy,omitempty"`
 	StartedAt       time.Time  `json:"startedAt"`
 	CompletedAt     *time.Time `json:"completedAt,omitempty"`
+	Replayed        bool       `json:"-"`
 }
 
 type CloseRequest struct {
@@ -334,8 +336,12 @@ func (s *Postgres) RunClose(ctx context.Context, ledger ledgerclient.Ledger, in 
 		return Close{}, err
 	}
 	c, err := s.startClose(ctx, in, actor)
-	if err != nil || c.Status == closeStatusDone {
+	if err != nil {
 		return c, err
+	}
+	if c.Status == closeStatusDone {
+		c.Replayed = true
+		return c, nil
 	}
 	groups := 0
 	if domain.Method(c.Method) != domain.Standard {
@@ -391,8 +397,8 @@ func (s *Postgres) ListCloses(ctx context.Context, legalEntityID string) ([]Clos
 }
 
 // InventoryReconciliation ties the inventory value report of a legal entity to the general ledger. Ledger is the net balance of the profile's
-// inventory account through the period of AsOf; BookedByCosting is the net the confirmed vouchers of this service booked on it (shown, not
-// compared with the account, which other sources also move). Unposted counts PPV cost transactions without a confirmed voucher and Parked the
+// inventory account through the calendar month ending on AsOf, which must be a month end; BookedByCosting is the net the confirmed vouchers of this service booked on it (shown, not
+// compared with the account, which other sources also move). Unposted counts PPV cost transactions with no confirmed or parked voucher and Parked the
 // vouchers parked after failing, with their reason codes in ParkedReasons; the inventory ties only when the difference is zero and both are zero.
 type InventoryReconciliation struct {
 	LegalEntityID   string
@@ -409,8 +415,16 @@ type InventoryReconciliation struct {
 	Ties            bool
 }
 
+func monthEnd(date string) bool {
+	d, err := time.Parse(time.DateOnly, date)
+	return err == nil && d.AddDate(0, 0, 1).Day() == 1
+}
+
 func (s *Postgres) ReconcileInventory(ctx context.Context, ledger ledgerclient.Ledger, legalEntityID, asOf string) (InventoryReconciliation, error) {
 	t, _ := tenant.FromContext(ctx)
+	if !monthEnd(asOf) {
+		return InventoryReconciliation{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeTieOutPeriod, "asOf must be the last day of a month: the ledger balance is read by calendar month")
+	}
 	profile, err := s.GetPostingProfile(ctx, legalEntityID)
 	if err != nil {
 		return InventoryReconciliation{}, err
@@ -456,7 +470,7 @@ func (s *Postgres) ReconcileInventory(ctx context.Context, ledger ledgerclient.L
 		}
 		if err := tx.QueryRow(ctx, `select count(*) from cost_transaction ct where ct.tenant_id = $1 and ct.legal_entity_id = $2 and ct.valuation_ledger_id is null
 				and ct.kind = 'PPV' and ct.gr_ir_amount is not null and ct.gr_ir_amount <> 0 and ct.financial_date <= $3::date
-				and not exists (select 1 from costing_gl_voucher v where v.tenant_id = ct.tenant_id and v.source_key = 'ctxn:' || ct.id::text and v.status = 'POSTED')`,
+				and not exists (select 1 from costing_gl_voucher v where v.tenant_id = ct.tenant_id and v.source_key = 'ctxn:' || ct.id::text and v.status in ('POSTED', 'PARKED'))`,
 			t.TenantID, legalEntityID, asOf).Scan(&out.Unposted); err != nil {
 			return err
 		}

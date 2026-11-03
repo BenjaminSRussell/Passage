@@ -96,7 +96,7 @@ func (s *Postgres) SavePostingProfile(ctx context.Context, in PostingProfile, ac
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `update costing_gl_voucher set status = 'PENDING', attempt_count = 0, next_attempt_at = now(), parked_reason = null, rebuild = true
+		_, err = tx.Exec(ctx, `update costing_gl_voucher set status = 'PENDING', attempt_count = 0, next_attempt_at = now(), parked_reason = null
 			where tenant_id = $1 and legal_entity_id = $2 and status = 'PARKED'`, t.TenantID, in.LegalEntityID)
 		return err
 	})
@@ -187,7 +187,9 @@ func CheckLedgerOwner(ctx context.Context, ledger ledgerclient.Ledger, legalEnti
 
 // postVoucher books v once: a voucher the ledger already confirmed returns its entry id, a pending one is resent unchanged, and a
 // failure counts an attempt with backoff. A refusal other than a closed period marks the voucher to be derived again from the
-// current profile; one that cannot balance, or the fifth failure, parks it.
+// current profile; one that cannot balance, or the fifth failure, parks it. Saving the profile retries parked vouchers: those marked for
+// rebuild are derived again, the others (timeouts, a ledger answer that never came) are resent under the same key, because the ledger may
+// already hold them.
 func (s *Postgres) postVoucher(ctx context.Context, ledger ledgerclient.Ledger, v voucher) (string, error) {
 	stored, status, entryID, err := s.stageVoucher(ctx, v)
 	if err != nil {
@@ -200,7 +202,7 @@ func (s *Postgres) postVoucher(ctx context.Context, ledger ledgerclient.Ledger, 
 		return "", httpx.NewProblem(http.StatusConflict, CodeVoucherParked, "the voucher is parked; save the posting profile to retry it")
 	}
 	if err := stored.entry().Validate(); err != nil {
-		if rerr := s.recordVoucherFailure(ctx, v.sourceKey, CodeUnbalanced, false, true); rerr != nil {
+		if rerr := s.recordVoucherFailure(ctx, v.sourceKey, CodeUnbalanced, true, true); rerr != nil {
 			slog.ErrorContext(ctx, "costing voucher failure not recorded", "sourceKey", v.sourceKey, "err", rerr, "correlationId", middleware.GetReqID(ctx))
 		}
 		return "", err
