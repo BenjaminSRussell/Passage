@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strconv"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -67,6 +68,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
 		return err
 	}
+	if err := configureIdempotencyTTL(getenv); err != nil {
+		return err
+	}
 	a := api.New(store.New(pool))
 	gate, err := periodGate(getenv)
 	if err != nil {
@@ -92,6 +96,18 @@ func run(ctx context.Context, getenv func(string) string) error {
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
 	return <-errs
+}
+
+func configureIdempotencyTTL(getenv func(string) string) error {
+	raw := getenv("LEDGER_IDEMPOTENCY_TTL_DAYS")
+	if raw == "" {
+		return nil
+	}
+	days, err := strconv.Atoi(raw)
+	if err != nil {
+		return fmt.Errorf("LEDGER_IDEMPOTENCY_TTL_DAYS must be an integer, got %q", raw)
+	}
+	return store.SetIdempotencyTTLDays(days)
 }
 
 func periodGate(getenv func(string) string) (store.PeriodGate, error) {

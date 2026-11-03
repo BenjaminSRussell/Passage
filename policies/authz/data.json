@@ -854,7 +854,8 @@
       {"resource": "/v1/product-costing/rolls", "methods": ["POST"]},
       {"resource": "/v1/product-costing/sales-order-estimates", "methods": ["POST"]},
       {"resource": "/v1/product-costing/sales-order-estimates:freeze", "methods": ["POST"]},
-      {"resource": "/v1/product-costing/sales-order-estimates:refresh", "methods": ["POST"]}
+      {"resource": "/v1/product-costing/sales-order-estimates:refresh", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/versions/*/roll", "methods": ["POST"]}
     ]},
     "CostingMaintain": {"permissions": [
       {"resource": "/v1/product-costing/cost-components", "methods": ["POST"]},
@@ -2878,7 +2879,8 @@
     },
     "productcost": {
       "ledger": ["ledger.entry.post", "ledger.journal.reverse"],
-      "inventory": ["inventory.read"]
+      "inventory": ["inventory.read"],
+      "engineering": ["engineering.read"]
     },
     "eam": {
       "ledger": ["ledger.entry.post", "ledger.balance.read"]

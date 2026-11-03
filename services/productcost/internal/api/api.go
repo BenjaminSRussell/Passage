@@ -25,6 +25,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/productcost/internal/engineering"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/inventory"
 )
 
@@ -61,12 +62,13 @@ type Config struct {
 
 // API serves the costing routes and counts what it computes for /metrics.
 type API struct {
-	pinger Pinger
-	cfg    Config
-	store  Store
-	onHand inventory.Reader
-	ledger ledgerclient.Ledger
-	now    func() time.Time
+	pinger      Pinger
+	cfg         Config
+	store       Store
+	onHand      inventory.Reader
+	ledger      ledgerclient.Ledger
+	engineering engineering.Reader
+	now         func() time.Time
 
 	activations            atomic.Int64
 	activationPostFailures atomic.Int64
@@ -134,6 +136,7 @@ func (a *API) routes() []route {
 		{http.MethodGet, "/v1/product-costing/versions/{id}", dutyView, a.getVersion},
 		{http.MethodPost, "/v1/product-costing/versions/{id}/transition", dutyMaintain, a.transitionStoredVersion},
 		{http.MethodPost, "/v1/product-costing/versions/{id}/activate", dutyActivate, a.activateStoredVersion},
+		{http.MethodPost, "/v1/product-costing/versions/{id}/roll", dutyCalculate, a.rollStoredVersion},
 		{http.MethodGet, "/v1/product-costing/posting-accounts/{legalEntityId}", dutyView, a.getPostingAccounts},
 		{http.MethodPut, "/v1/product-costing/posting-accounts/{legalEntityId}", dutyMaintain, a.putPostingAccounts},
 	}

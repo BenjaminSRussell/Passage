@@ -29,6 +29,7 @@ serviceMonitor:
 closeUrl: ""
 fxUrl: ""
 periodCheck: ""
+idempotencyTtlDays: 400
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""
