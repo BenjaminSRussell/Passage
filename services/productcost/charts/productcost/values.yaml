@@ -10,6 +10,7 @@ costing:
   maxLevels: 20
   rollWorkers: 4
 ledgerUrl: ""
+ledgerIdempotencyTtlDays: 400
 inventoryUrl: ""
 serviceIdentity:
   signingKeySecret: ""

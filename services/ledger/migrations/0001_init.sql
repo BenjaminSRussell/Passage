@@ -14,7 +14,7 @@ CREATE POLICY outbox_tenant_access ON outbox AS PERMISSIVE
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
 
 -- Idempotency-Key records, scoped to tenant x legal entity (FR-11.5, BR-11.6).
--- Only 2xx responses are stored. Retention is 400 days (LEDGER_IDEMPOTENCY_TTL_DAYS).
+-- Only 2xx responses are stored. Retention is LEDGER_IDEMPOTENCY_TTL_DAYS (default and minimum 400); the store sets expires_at.
 CREATE TABLE IF NOT EXISTS idempotency_keys (
   tenant_id uuid NOT NULL,
   legal_entity_id uuid NOT NULL,

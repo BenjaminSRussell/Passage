@@ -38,6 +38,7 @@ type fakeStore struct {
 	preview         *store.ActivationInput
 	positions       []inventory.Position
 	versionType     string
+	roll            *store.RollInput
 }
 
 func (f *fakeStore) ListComponents(context.Context) ([]store.Component, error) {
@@ -115,6 +116,12 @@ func (f *fakeStore) ActivationPositions(context.Context, string) ([]inventory.Po
 	return f.positions, f.err
 }
 
+func (f *fakeStore) StoreRoll(_ context.Context, in store.RollInput) (store.RollResult, bool, error) {
+	f.calls++
+	f.roll = &in
+	return store.RollResult{VersionID: in.VersionID, SiteID: in.SiteID, ItemCount: in.Run.ItemCount, StoredCount: in.Run.ItemCount - in.Run.ErrorCount, ErrorCount: in.Run.ErrorCount}, f.replayed, f.err
+}
+
 func (f *fakeStore) GetPostingAccounts(context.Context, string) (store.PostingAccounts, error) {
 	f.calls++
 	return f.accounts, f.accountsErr
@@ -189,6 +196,7 @@ func TestStoredRoutes_WithoutStoreAnswer503(t *testing.T) {
 		{http.MethodGet, "/v1/product-costing/versions/" + someID, "", view, "", ""},
 		{http.MethodPost, "/v1/product-costing/versions/" + someID + "/transition", `{"action":"block","version":1}`, maintain, "", ""},
 		{http.MethodPost, "/v1/product-costing/versions/" + someID + "/activate", `{"version":1}`, activate, "", ""},
+		{http.MethodPost, "/v1/product-costing/versions/" + someID + "/roll", `{}`, "CostingCalculate", "k", ""},
 	} {
 		rec := c.do(h)
 		if code, _ := problemCode(t, rec); rec.Code != http.StatusServiceUnavailable || code != codeStoreUnavailable {

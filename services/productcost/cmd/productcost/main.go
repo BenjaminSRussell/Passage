@@ -68,12 +68,28 @@ func config(getenv func(string) string) (api.Config, error) {
 	return cfg, nil
 }
 
+func ledgerIdempotencyTTLDays(getenv func(string) string) (int, error) {
+	raw := getenv("PRODUCTCOST_LEDGER_IDEMPOTENCY_TTL_DAYS")
+	if raw == "" {
+		return domain.MinLedgerIdempotencyTTLDays, nil
+	}
+	days, err := strconv.Atoi(raw)
+	if err != nil || days < domain.MinLedgerIdempotencyTTLDays {
+		return 0, fmt.Errorf("PRODUCTCOST_LEDGER_IDEMPOTENCY_TTL_DAYS must be an integer of at least %d, got %q", domain.MinLedgerIdempotencyTTLDays, raw)
+	}
+	return days, nil
+}
+
 func run(ctx context.Context, getenv func(string) string) error {
 	databaseURL := getenv("DATABASE_URL")
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")
 	}
 	cfg, err := config(getenv)
+	if err != nil {
+		return err
+	}
+	ttlDays, err := ledgerIdempotencyTTLDays(getenv)
 	if err != nil {
 		return err
 	}
@@ -87,7 +103,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(pool, cfg).WithStore(store.New(pool))
+	a := api.New(pool, cfg).WithStore(store.New(pool).WithLedgerIdempotencyTTLDays(ttlDays))
 	onHand, err := inventory.FromEnv(getenv)
 	if err != nil {
 		return fmt.Errorf("inventory client: %w", err)

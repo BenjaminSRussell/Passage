@@ -14,6 +14,11 @@ const (
 	CodeActivationTooBig  = "CST-0728"
 
 	CodeNotStandardRevaluation = "CST-0727"
+	CodeLedgerReplayExpired    = "CST-0730"
+	CodeVersionNotRollable     = "CST-0709"
+
+	MinLedgerIdempotencyTTLDays  = 400
+	LedgerReplaySafetyMarginDays = 30
 )
 
 // RollLockKey names the advisory lock a running roll of a version holds and an

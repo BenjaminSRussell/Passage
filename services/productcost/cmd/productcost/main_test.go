@@ -19,6 +19,20 @@ func TestConfig_DefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestLedgerIdempotencyTTLDays_DefaultsToFourHundredAndRejectsLess(t *testing.T) {
+	if got, err := ledgerIdempotencyTTLDays(env(nil)); err != nil || got != 400 {
+		t.Fatalf("default: %d %v", got, err)
+	}
+	if got, err := ledgerIdempotencyTTLDays(env(map[string]string{"PRODUCTCOST_LEDGER_IDEMPOTENCY_TTL_DAYS": "500"})); err != nil || got != 500 {
+		t.Fatalf("500: %d %v", got, err)
+	}
+	for _, bad := range []string{"399", "x", "-1"} {
+		if _, err := ledgerIdempotencyTTLDays(env(map[string]string{"PRODUCTCOST_LEDGER_IDEMPOTENCY_TTL_DAYS": bad})); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
 func TestConfig_RejectsOutOfRange(t *testing.T) {
 	for _, bad := range []map[string]string{
 		{"COSTING_MAX_LEVELS": "41"},

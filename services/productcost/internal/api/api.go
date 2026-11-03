@@ -134,6 +134,7 @@ func (a *API) routes() []route {
 		{http.MethodGet, "/v1/product-costing/versions/{id}", dutyView, a.getVersion},
 		{http.MethodPost, "/v1/product-costing/versions/{id}/transition", dutyMaintain, a.transitionStoredVersion},
 		{http.MethodPost, "/v1/product-costing/versions/{id}/activate", dutyActivate, a.activateStoredVersion},
+		{http.MethodPost, "/v1/product-costing/versions/{id}/roll", dutyCalculate, a.rollStoredVersion},
 		{http.MethodGet, "/v1/product-costing/posting-accounts/{legalEntityId}", dutyView, a.getPostingAccounts},
 		{http.MethodPut, "/v1/product-costing/posting-accounts/{legalEntityId}", dutyMaintain, a.putPostingAccounts},
 	}

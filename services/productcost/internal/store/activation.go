@@ -203,7 +203,7 @@ func (s *Postgres) ActivateVersion(ctx context.Context, in ActivationInput) (Act
 			replayed = done
 			return err
 		}
-		if prepared, err = prepareActivation(ctx, tx, p, in); err != nil || prepared.post {
+		if prepared, err = prepareActivation(ctx, tx, p, in, s.replayWindowDays()); err != nil || prepared.post {
 			return err
 		}
 		done = true
@@ -232,7 +232,7 @@ func (s *Postgres) ActivateVersion(ctx context.Context, in ActivationInput) (Act
 	return out, replayed, err
 }
 
-func prepareActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in ActivationInput) (preparedActivation, error) {
+func prepareActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in ActivationInput, replayWindowDays int) (preparedActivation, error) {
 	var out preparedActivation
 	cur, err := lockVersion(ctx, tx, p.TenantID, in)
 	if err != nil {
@@ -256,8 +256,14 @@ func prepareActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ac
 	out.cur = cur
 	key := attemptKey(cur.ID, in)
 	var raw []byte
-	err = tx.QueryRow(ctx, `select payload, attempted_ambiguous from standard_cost_activation_attempt where tenant_id = $1 and attempt_key = $2`, p.TenantID, key).Scan(&raw, &out.ambiguous)
+	var expired bool
+	err = tx.QueryRow(ctx, `select payload, attempted_ambiguous, created_at <= now() - make_interval(days => $3) from standard_cost_activation_attempt where tenant_id = $1 and attempt_key = $2`,
+		p.TenantID, key, replayWindowDays).Scan(&raw, &out.ambiguous, &expired)
 	if err == nil {
+		if expired {
+			return out, &domain.CodedError{Code: domain.CodeLedgerReplayExpired, Detail: "the pending journal for version " + cur.Code + " is older than " + strconv.Itoa(replayWindowDays) +
+				" days; the ledger may no longer recognise its idempotency key, so resending could post it twice. Check the ledger for the entry and resolve it by hand"}
+		}
 		out.post = true
 		return out, json.Unmarshal(raw, &out.pending)
 	}
@@ -360,15 +366,24 @@ func finalizeActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in A
 // refusal the ledger decides after its replay check (decidedAfterReplay).
 func (s *Postgres) recordFailedAttempt(ctx context.Context, in ActivationInput, prepared preparedActivation, cause error) {
 	definite := definiteRefusal(cause)
-	statement := `update standard_cost_activation_attempt set attempted_ambiguous = true where tenant_id = $1 and attempt_key = $2`
-	switch {
-	case definite && (!prepared.ambiguous || decidedAfterReplay(cause)):
-		statement = `delete from standard_cost_activation_attempt where tenant_id = $1 and attempt_key = $2`
-	case prepared.ambiguous:
-		return
-	}
 	err := s.tenantTx(ctx, func(tx pgx.Tx, p tenant.Principal) error {
-		_, err := tx.Exec(ctx, statement, p.TenantID, attemptKey(prepared.cur.ID, in))
+		key := attemptKey(prepared.cur.ID, in)
+		withinWindow := true
+		err := tx.QueryRow(ctx, `select created_at > now() - make_interval(days => $3) from standard_cost_activation_attempt where tenant_id = $1 and attempt_key = $2`,
+			p.TenantID, key, s.replayWindowDays()).Scan(&withinWindow)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		statement := `update standard_cost_activation_attempt set attempted_ambiguous = true where tenant_id = $1 and attempt_key = $2`
+		switch {
+		case !withinWindow:
+			slog.ErrorContext(ctx, "pending activation attempt is past the ledger replay window and stays for manual review", "versionId", prepared.cur.ID, "attemptKey", key)
+		case definite && (!prepared.ambiguous || decidedAfterReplay(cause, withinWindow)):
+			statement = `delete from standard_cost_activation_attempt where tenant_id = $1 and attempt_key = $2`
+		case prepared.ambiguous:
+			return nil
+		}
+		_, err = tx.Exec(ctx, statement, p.TenantID, key)
 		return err
 	})
 	if err != nil {
@@ -398,10 +413,12 @@ func definiteRefusal(err error) bool {
 // (LEDGER_PERIOD_CLOSED), unknown or blocked account, unbalanced entry, derivation
 // and validation rules, a reversal already reversed, cleared open items, a
 // realignment entry, reversal date and reason rules. A 400, 401, 403, 404 or
-// 429 is not proof, so it leaves an ambiguous attempt in place.
-func decidedAfterReplay(err error) bool {
+// 429 is not proof, so it leaves an ambiguous attempt in place. The proof holds
+// only while the ledger still keeps the idempotency key, so an attempt older than
+// the replay window (the ledger's retention less a safety margin) proves nothing.
+func decidedAfterReplay(err error, withinReplayWindow bool) bool {
 	var le *ledgerclient.Error
-	return errors.As(err, &le) && le.Status == http.StatusUnprocessableEntity
+	return withinReplayWindow && errors.As(err, &le) && le.Status == http.StatusUnprocessableEntity
 }
 
 func activationID(tenantID string, cur Version, in ActivationInput) string {

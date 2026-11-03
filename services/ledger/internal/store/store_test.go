@@ -91,6 +91,46 @@ func vendorInvoice(ledgerID, key, amount string) PostInput {
 	}
 }
 
+func TestPostgres_IdempotencyKeyExpiryFollowsTheConfiguredTTL(t *testing.T) {
+	t.Cleanup(func() { _ = SetIdempotencyTTLDays(MinIdempotencyTTLDays) })
+	e, _ := setup(t)
+	expiryDays := func(key string) int {
+		var days int
+		err := e.admin.QueryRow(context.Background(), `select round(extract(epoch from expires_at - created_at) / 86400)::int from idempotency_keys where key = $1`, key).Scan(&days)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return days
+	}
+	if _, err := e.store.PostEntry(e.ctx, vendorInvoice(e.ledger.ID, "TTL-DEFAULT", "10.00")); err != nil {
+		t.Fatal(err)
+	}
+	if got := expiryDays("TTL-DEFAULT"); got != 400 {
+		t.Fatalf("default retention %d days, want 400", got)
+	}
+	if err := SetIdempotencyTTLDays(500); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.store.PostEntry(e.ctx, vendorInvoice(e.ledger.ID, "TTL-500", "10.00")); err != nil {
+		t.Fatal(err)
+	}
+	if got := expiryDays("TTL-500"); got != 500 {
+		t.Fatalf("configured retention %d days, want 500", got)
+	}
+}
+
+func TestSetIdempotencyTTLDays_RejectsLessThanFourHundred(t *testing.T) {
+	t.Cleanup(func() { _ = SetIdempotencyTTLDays(MinIdempotencyTTLDays) })
+	for _, days := range []int{399, 0, -1} {
+		if err := SetIdempotencyTTLDays(days); err == nil {
+			t.Fatalf("%d days accepted", days)
+		}
+	}
+	if err := SetIdempotencyTTLDays(400); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPostgres_PostIsIdempotentAndBalances(t *testing.T) {
 	e, _ := setup(t)
 	in := vendorInvoice(e.ledger.ID, "INV-1", "1250.00")

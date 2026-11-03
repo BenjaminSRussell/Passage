@@ -359,7 +359,8 @@ helm lint charts/productcost
 ```
 
 Configuration (12-factor): `COSTING_MAX_LEVELS` (default 20, 1-40),
-`COSTING_ROLL_WORKERS` (default 4, 1-32), plus the platform variables
+`COSTING_ROLL_WORKERS` (default 4, 1-32), `PRODUCTCOST_LEDGER_IDEMPOTENCY_TTL_DAYS`
+(default 400, at least 400; must equal the ledger's `LEDGER_IDEMPOTENCY_TTL_DAYS`), plus the platform variables
 `PASSAGE_ENV`, `HTTP_ADDR`, `ADMIN_ADDR`, `DATABASE_URL`.
 
 ## Dependencies

@@ -408,6 +408,95 @@ func TestActivation_AnAmbiguousAttemptIsClearedByAPeriodClosedRefusalAndTheLegal
 	}
 }
 
+func (f activationFixture) ageAttempts(t *testing.T, days int) {
+	t.Helper()
+	if _, err := f.admin.Exec(context.Background(), `update standard_cost_activation_attempt set created_at = now() - make_interval(days => $1)`, days); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f activationFixture) leaveAmbiguousAttempt(t *testing.T, ledger *ledgerclient.Fake) {
+	t.Helper()
+	ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusBadGateway})
+	if _, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act")); err == nil {
+		t.Fatal("the post should have failed")
+	}
+	ledger.FailPosts(nil)
+}
+
+func TestActivation_AnAttemptPastTheLedgerReplayWindowIsNotResentAndNeedsManualReview(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ledger := ledgerclient.NewFake()
+	f.leaveAmbiguousAttempt(t, ledger)
+	f.ageAttempts(t, 371)
+	_, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act"))
+	if codeOf(err) != domain.CodeLedgerReplayExpired {
+		t.Fatalf("a 371-day-old attempt against a 400-day ledger key: %v", err)
+	}
+	if n, amb := pendingAttempts(t, f.admin); n != 1 || !amb || len(ledger.Entries()) != 0 || activationRows(t, f.admin, f.newVer.ID) != 0 {
+		t.Fatalf("attempts %d ambiguous %v entries %d: the refusal must keep the attempt and send nothing", n, amb, len(ledger.Entries()))
+	}
+	v3 := f.otherVersion(t, "STD-V3", "4.00")
+	if _, _, err := f.s.ActivateVersion(as(1, ""), f.activateOther(ledger, v3, "k-v3")); codeOf(err) != domain.CodeActivationPending {
+		t.Fatalf("the legal entity must stay blocked until the review: %v", err)
+	}
+}
+
+func TestActivation_AnAttemptInsideTheReplayWindowIsStillResent(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ledger := ledgerclient.NewFake()
+	f.leaveAmbiguousAttempt(t, ledger)
+	f.ageAttempts(t, 369)
+	if res, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act")); err != nil || res.Version.Status != domain.VersionActive || len(ledger.Entries()) != 1 {
+		t.Fatalf("a 369-day-old attempt: %+v %v", res, err)
+	}
+}
+
+func TestActivation_ALongerLedgerRetentionWidensTheReplayWindow(t *testing.T) {
+	f := newActivationFixture(t, true)
+	f.s.WithLedgerIdempotencyTTLDays(500)
+	ledger := ledgerclient.NewFake()
+	f.leaveAmbiguousAttempt(t, ledger)
+	f.ageAttempts(t, 371)
+	if res, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act")); err != nil || res.Version.Status != domain.VersionActive {
+		t.Fatalf("a 371-day-old attempt against 500-day retention: %+v %v", res, err)
+	}
+	f = newActivationFixture(t, true)
+	f.s.WithLedgerIdempotencyTTLDays(500)
+	f.leaveAmbiguousAttempt(t, ledger)
+	f.ageAttempts(t, 471)
+	if _, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act")); codeOf(err) != domain.CodeLedgerReplayExpired {
+		t.Fatalf("a 471-day-old attempt against 500-day retention: %v", err)
+	}
+}
+
+type ageThenRefuse struct {
+	ledgerclient.Ledger
+	f      activationFixture
+	t      *testing.T
+	status int
+}
+
+func (a ageThenRefuse) Post(context.Context, ledgerclient.Entry) (string, error) {
+	a.f.ageAttempts(a.t, 380)
+	return "", &ledgerclient.Error{Op: "post", Status: a.status, Code: ledgerclient.CodePeriodClosed}
+}
+
+func TestActivation_ARefusalDoesNotClearAnAttemptThatAgedPastTheReplayWindow(t *testing.T) {
+	for _, status := range []int{http.StatusUnprocessableEntity, http.StatusBadRequest} {
+		f := newActivationFixture(t, true)
+		ledger := ledgerclient.NewFake()
+		_, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ageThenRefuse{Ledger: ledger, f: f, t: t, status: status}, "k-act"))
+		var refused *LedgerRefusal
+		if !errors.As(err, &refused) {
+			t.Fatalf("status %d: %v", status, err)
+		}
+		if n, amb := pendingAttempts(t, f.admin); n != 1 || !amb {
+			t.Fatalf("status %d: attempts %d ambiguous %v, want the aged attempt kept for review", status, n, amb)
+		}
+	}
+}
+
 func TestActivation_ANonStandardVersionWithPositionsIsRefusedByTheStore(t *testing.T) {
 	f := newActivationFixture(t, true)
 	if _, err := f.admin.Exec(context.Background(), `update costing_version set type = 'Planned' where id = $1`, f.newVer.ID); err != nil {

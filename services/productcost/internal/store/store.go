@@ -97,11 +97,23 @@ type VersionPage struct {
 
 // Postgres is the costing repository.
 type Postgres struct {
-	pool *pgxpool.Pool
+	pool                 *pgxpool.Pool
+	ledgerIdempotencyTTL int
 }
 
 // New wraps a pool. The pool connects as the application role (no BYPASSRLS).
-func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
+func New(pool *pgxpool.Pool) *Postgres {
+	return &Postgres{pool: pool, ledgerIdempotencyTTL: domain.MinLedgerIdempotencyTTLDays}
+}
+
+func (s *Postgres) WithLedgerIdempotencyTTLDays(days int) *Postgres {
+	s.ledgerIdempotencyTTL = days
+	return s
+}
+
+func (s *Postgres) replayWindowDays() int {
+	return s.ledgerIdempotencyTTL - domain.LedgerReplaySafetyMarginDays
+}
 
 // Ping checks the database is reachable (readiness).
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }

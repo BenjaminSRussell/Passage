@@ -48,6 +48,7 @@ spec:
               value: {{ .Values.costing.rollWorkers | quote }}
             - name: PASSAGE_SERVICE_NAME
               value: productcost
+            - { name: PRODUCTCOST_LEDGER_IDEMPOTENCY_TTL_DAYS, value: {{ .Values.ledgerIdempotencyTtlDays | quote }} }
 {{- if .Values.ledgerUrl }}
             - { name: LEDGER_URL, value: {{ .Values.ledgerUrl | quote }} }
 {{- end }}
