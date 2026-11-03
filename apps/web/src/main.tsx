@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { DeviceHost } from "./modules/mobile-flows/DeviceHost";
 import { loadModules } from "./modules/registry";
 import { Shell } from "./shell/Shell";
 import { HomePage } from "./shell/pages/HomePage";
@@ -11,6 +12,10 @@ import "./shell/theme.css";
 
 const modules = loadModules();
 const router = createBrowserRouter([
+  {
+    path: "/device",
+    element: <DeviceHost />,
+  },
   {
     path: "/",
     element: <Shell modules={modules} />,

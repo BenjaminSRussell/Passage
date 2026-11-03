@@ -67,4 +67,28 @@ describe("mobile-flows module", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("publishes a valid graph so devices pick up the version without an app release", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/flows") && init?.method === "POST") {
+        return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), flowId: "flow-1", version: 2, status: "DRAFT" }), { status: 200 });
+      }
+      if (url.includes(":publish")) {
+        return new Response(JSON.stringify({ code: "RECEIVE_PUTAWAY", flowId: "flow-1", version: 2, status: "PUBLISHED", entryStepId: "scan_lp", steps: [] }), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(createElement(MemoryRouter, null, mobileFlows.routes[0].element));
+      fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+      expect(await screen.findByRole("status")).toHaveTextContent("Published RECEIVE_PUTAWAY version 2");
+      const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+      expect(urls.some((u) => u.endsWith("/flows"))).toBe(true);
+      expect(urls.some((u) => u.includes("/flows/flow-1:publish"))).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
