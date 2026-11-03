@@ -719,7 +719,7 @@ export interface CurrentJob {
   jobId: string;
   bundleId: string | null;
   startedAt: string;
-  /** When production finished the job's operation while this start stays open (a bundled start); absent on a start the kiosk just made. */
+  /** When production finished the job's operation while this start stays open (a start dated before the finish but stored after it); absent on a start the kiosk just made. */
   productionFinishedAt?: string | null;
 }
 

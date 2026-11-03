@@ -76,8 +76,11 @@ channels:
       finished operation stops new online job starts on its jobs (SF-0157) and flags offline ones
       (`job-finished-conflict`) and refuses quantity feedback on them (SF-0161) until it is reopened.
       A finish newer than the stored status also closes, in the same transaction, every open
-      job-start on its jobs that is not part of a bundle, with a job-stop flagged
-      `production-finished` published as `registration.posted`. The consumer keeps the latest status per order
+      job-start on its jobs with a job-stop flagged `production-finished` published as
+      `registration.posted`; a bundle with an open member on those jobs is closed whole, its time
+      from its earliest start to the finish split again over all its members (BR-25.1). A start that
+      began after the finish but was stored before the event arrived is closed at 0.00 h and its stop
+      also carries `job-finished-conflict`. The consumer keeps the latest status per order
       and operation, ordered by `orderVersion` and then `occurredAt`, and refuses (dead-letters) an
       event whose CloudEvents `source` is not `production`.
     messages:
@@ -802,7 +805,9 @@ components:
             `auto-stop-capped` past 24 hours) on a closed job-stop the server
             wrote when the worker started another job (FR-25.3); `production-finished`
             on a closed job-stop the server wrote when production finished the job's
-            operation while the start was open. Empty otherwise.
+            operation while the start (or a start of its bundle) was open, with
+            `job-finished-conflict` too when the start began after the finish.
+            Empty otherwise.
     RegistrationCorrectedData:
       type: object
       required: [registrationId, workerId, kind, jobId, oldStartedAt, oldStoppedAt, newStartedAt, newStoppedAt, hours, reason, correctedBy]

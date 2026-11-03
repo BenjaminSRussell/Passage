@@ -35,7 +35,7 @@ When production finishes an operation, the consumer also closes every worker's o
 operation in the same transaction: a `job-stop` from the start to the finish (zero hours for a start after the
 finish, 24 hours at most and then also `auto-stop-capped`), flagged `production-finished`, with `registration.posted`.
 These are job (labour) hours for the job-card journal; pay is calculated from clock punches and does not change.
-Starts of a bundle stay open, and so does a start dated before the finish but stored after it; both show
+Starts of a bundle stay open (slice 19 closes them), and so does a start dated before the finish but stored after it; both show
 `productionFinishedAt` on the kiosk session's `openJobs` and on `GET clocked-in`, where the supervisor's page marks
 them. A kiosk `job-stop` that arrives later for the same start supersedes the server's (`registration.corrected`, the
 server's stop becomes 0.00 h), so the hours are not counted twice; production's reopen does not reopen the closed start.
@@ -44,6 +44,17 @@ takes the same locks exclusively on the operation's jobs (migration `0018` index
 starts, so a start or stop sent while the finish is applied is either seen by it or sees it. `POST jobs/{id}:feedback`
 on a job whose operation production finished is SF-0161 until production reopens it; a resend of stored feedback is
 still a duplicate.
+
+## Slice 19: production finish closes bundles
+
+Production's finish also closes a bundle with an open member on the finished operation, whole, in the same
+transaction: every member gets a `production-finished` job-stop and the bundle's time from its earliest start to the
+finish is split again over all its members by BR-25.1 (good quantity on the starts, equal when none), so members on
+other operations keep their share up to the finish and are started again by the worker. The finish takes the bundle
+advisory locks (as a batch closing a bundle does) before the job locks. The worker's own stop of the bundle sent after
+the finish (an offline replay) is not SF-0113: it is stored and the server's bundle stops are corrected to zero length
+(`registration.corrected`), so the bundle's hours count once. A start that began after the finish but was stored
+before the event arrived is closed at 0.00 h and its stop also carries `job-finished-conflict` for supervisor review.
 
 ## Slice 15: supervisor reopen of a finished job (FR-25.3)
 

@@ -326,24 +326,70 @@ func supersedeAutoStop(ctx context.Context, tx pgx.Tx, tenantID string, in Regis
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	zero := decimal.Zero
 	reason := fmt.Sprintf("Superseded by the worker's own job-stop %s, replayed after the automatic stop.", in.ID)
 	for _, a := range found {
-		if _, err := tx.Exec(ctx, `update time_registration set stopped_at = started_at, hours = 0 where tenant_id = $1 and id = $2`,
-			tenantID, a.id); err != nil {
+		if err := cancelServerStop(ctx, tx, tenantID, in.WorkerID, *in.JobID, a.id, a.start, a.stop, a.oldHours, reason); err != nil {
 			return err
 		}
-		newStop := a.start
-		if _, err := tx.Exec(ctx, `insert into registration_correction (tenant_id, id, registration_id, worker_id, reason,
-				old_started_at, old_stopped_at, old_hours, new_started_at, new_stopped_at, new_hours, corrected_by)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $6, $6, 0, $9)`,
-			tenantID, ids.New(), a.id, in.WorkerID, reason, a.start, a.stop, a.oldHours, autoStopSupersededBy); err != nil {
+	}
+	return nil
+}
+
+// cancelServerStop corrects a server-written job-stop to zero length (stoppedAt = startedAt,
+// 0.00 h) with a registration_correction row by autoStopSupersededBy and registration.corrected,
+// because the worker's own stop for the same work arrived after it.
+func cancelServerStop(ctx context.Context, tx pgx.Tx, tenantID, workerID, jobID, id string, start time.Time, stop *time.Time, oldHours *string, reason string) error {
+	if _, err := tx.Exec(ctx, `update time_registration set stopped_at = started_at, hours = 0 where tenant_id = $1 and id = $2`,
+		tenantID, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `insert into registration_correction (tenant_id, id, registration_id, worker_id, reason,
+			old_started_at, old_stopped_at, old_hours, new_started_at, new_stopped_at, new_hours, corrected_by)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $6, $6, 0, $9)`,
+		tenantID, ids.New(), id, workerID, reason, start, stop, oldHours, autoStopSupersededBy); err != nil {
+		return err
+	}
+	zero, newStop := decimal.Zero, start
+	return enqueue(ctx, tx, "registration", id, sfevents.RegistrationCorrected, tenantID, sfevents.RegistrationCorrectedData{
+		RegistrationID: id, WorkerID: workerID, Kind: KindJobStop, JobID: &jobID, OldStartedAt: start, OldStoppedAt: stop,
+		NewStartedAt: start, NewStoppedAt: &newStop, Hours: &zero, Reason: reason, CorrectedBy: autoStopSupersededBy,
+	})
+}
+
+// supersedeProductionBundleStops cancels (cancelServerStop) the job-stops production's finish wrote
+// for a bundle (flag production-finished) that no supervisor corrected, because the kiosk's own
+// stops of the bundle, stored in this batch, close the same work (BR-25.1, BR-25.7): the bundle's
+// hours are the kiosk's split only. The bundle lock (guardBundles) is held.
+func supersedeProductionBundleStops(ctx context.Context, tx pgx.Tx, tenantID, bundleID, by string) error {
+	rows, err := tx.Query(ctx, `select a.id::text, a.worker_id::text, a.job_id::text, a.started_at, a.stopped_at, a.hours::text from time_registration a
+		where a.tenant_id = $1 and a.bundle_id = $2 and a.kind = 'job-stop' and $3 = any(a.flags)
+		  and not exists (select 1 from registration_correction c where c.tenant_id = a.tenant_id and c.registration_id = a.id)
+		order by a.id for update`, tenantID, bundleID, domain.FlagProductionFinished)
+	if err != nil {
+		return err
+	}
+	type serverStop struct {
+		id, worker, job string
+		start           time.Time
+		stop            *time.Time
+		oldHours        *string
+	}
+	var found []serverStop
+	for rows.Next() {
+		var a serverStop
+		if err := rows.Scan(&a.id, &a.worker, &a.job, &a.start, &a.stop, &a.oldHours); err != nil {
+			rows.Close()
 			return err
 		}
-		if err := enqueue(ctx, tx, "registration", a.id, sfevents.RegistrationCorrected, tenantID, sfevents.RegistrationCorrectedData{
-			RegistrationID: a.id, WorkerID: in.WorkerID, Kind: KindJobStop, JobID: in.JobID, OldStartedAt: a.start, OldStoppedAt: a.stop,
-			NewStartedAt: a.start, NewStoppedAt: &newStop, Hours: &zero, Reason: reason, CorrectedBy: autoStopSupersededBy,
-		}); err != nil {
+		found = append(found, a)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	reason := fmt.Sprintf("Superseded by the worker's own stop of bundle %s (batch item %s), replayed after production finished the operation.", bundleID, by)
+	for _, a := range found {
+		if err := cancelServerStop(ctx, tx, tenantID, a.worker, a.job, a.id, a.start, a.stop, a.oldHours, reason); err != nil {
 			return err
 		}
 	}
@@ -397,10 +443,10 @@ func insertAutoStop(ctx context.Context, tx pgx.Tx, tenantID, workerID string, m
 }
 
 // insertServerStop writes a server job-stop with its first flag and note; a capped unit adds
-// auto-stop-capped and the capped note.
-func insertServerStop(ctx context.Context, tx pgx.Tx, tenantID, workerID string, m domain.OpenStart, unit domain.StopUnit, hours decimal.Decimal, flag, note string) (AutoStop, error) {
+// auto-stop-capped and the capped note; extra flags come after the first.
+func insertServerStop(ctx context.Context, tx pgx.Tx, tenantID, workerID string, m domain.OpenStart, unit domain.StopUnit, hours decimal.Decimal, flag, note string, extra ...string) (AutoStop, error) {
 	stop := AutoStop{RegistrationID: ids.New(), JobID: m.JobID, StartedAt: m.StartedAt, StoppedAt: unit.StoppedAt, Hours: hours,
-		Flags: []string{flag}}
+		Flags: append([]string{flag}, extra...)}
 	if unit.Capped {
 		stop.Flags = append(stop.Flags, domain.FlagAutoStopCapped)
 		note = autoStopCapped

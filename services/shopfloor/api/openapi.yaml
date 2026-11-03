@@ -184,7 +184,12 @@ paths:
         the interval's hours are split across them by good quantity (equal split
         when no good quantity is reported), in 0.01 h shares that sum to the
         rounded total. Every closed job of a bundle must arrive in one batch; a
-        later batch adding closed jobs to the same bundle is SF-0113.
+        later batch adding closed jobs to the same bundle is SF-0113. The stops
+        production's finish wrote for a bundle (`production-finished`) do not
+        count as another batch: the worker's own stops of the bundle sent after
+        the finish are accepted and the server's stops are corrected to zero
+        length (`registration.corrected`, correctedBy `system:offline-replay`),
+        unless a supervisor already corrected one.
 
         Clock skew (BR-25.7): when the batch carries `deviceSentAt`, the server
         measures its clock minus the device clock. An offset above 5 minutes is
@@ -219,7 +224,10 @@ paths:
         work already done) it is accepted, flagged `job-finished-conflict` and
         warned SF-0004, like a job the shop floor finished while the kiosk was
         offline. A start before the finish, a resend of an item already stored
-        (duplicate) and every `job-stop` pass.
+        (duplicate) and every `job-stop` pass. The finish itself closes the
+        open starts on the operation's jobs with server `job-stop`s flagged
+        `production-finished`; a bundle holding one is closed whole and its time
+        split again (BR-25.1).
       requestBody:
         required: true
         content:
@@ -3370,7 +3378,7 @@ components:
           items:
             type: string
             enum: [job-finished-conflict, auto-stopped, auto-stop-capped, production-finished, auto-clock-out]
-          description: Review flags (BR-25.7, FR-25.3); `auto-clock-out` marks a clock-out the auto clock-out sweep wrote, `production-finished` a job-stop the server wrote when production finished the job's operation.
+          description: Review flags (BR-25.7, FR-25.3); `auto-clock-out` marks a clock-out the auto clock-out sweep wrote, `production-finished` a job-stop the server wrote when production finished the job's operation (or that of another job of its bundle), with `job-finished-conflict` too when the start began after the finish.
     WorkerDay:
       type: object
       required: [workerId, workerName, workDate, hours, flags, status, timeZone, calculatedAt, approvedBy, approvedAt, revision, revisedBy, revisedAt, payLines]
@@ -4149,7 +4157,7 @@ components:
         productionFinishedAt:
           type: [string, "null"]
           format: date-time
-          description: When production (w21) finished the job's operation while this start is still open, null otherwise. Production's finish closes open starts itself except the starts of a bundle (and a start stored after it), so a supervisor or the worker stops these.
+          description: When production (w21) finished the job's operation while this start is still open, null otherwise. Production's finish closes the open starts on the operation (and their bundles) itself; a start dated before the finish but stored after it stays open, so a supervisor or the worker stops it.
     JobCheck:
       type: object
       required: [code, name, kind, mandatory]

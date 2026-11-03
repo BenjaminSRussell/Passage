@@ -150,22 +150,22 @@ func apply(open []OpenStart, incoming OpenStart) []OpenStart {
 	return out
 }
 
-// FR-25.3: production's finish stops each open start at the finish, a start after the finish at its
-// own start (no hours), a start open for more than 24 hours at 24 hours (capped); a bundled start
-// is left open.
+// FR-25.3: production's finish stops each open start of the operation at the finish, a start after the
+// finish at its own start (no hours), a start open for more than 24 hours at 24 hours (capped); a bundle
+// with a member on the operation closes whole, a start on another operation stays open.
 func TestPlanProductionStop(t *testing.T) {
 	finish := shift.Add(4 * time.Hour)
 	open := []OpenStart{
 		startAt("a", "J1", "", 0),
 		startAt("late", "J1", "", 5*60),
 		startAt("b", "J1", "B1", 60),
+		startAt("b2", "J2", "B1", 60),
+		startAt("c", "J2", "B2", 30),
+		startAt("other", "J2", "", 30),
 		{RegistrationID: "old", JobID: "J1", StartedAt: finish.Add(-30 * time.Hour)},
 	}
-	stops, bundled := PlanProductionStop(open, finish)
-	if len(bundled) != 1 || bundled[0].RegistrationID != "b" {
-		t.Fatalf("bundled = %+v", bundled)
-	}
-	if len(stops) != 3 {
+	stops := PlanProductionStop(open, finish, map[string]bool{"J1": true})
+	if len(stops) != 4 {
 		t.Fatalf("stops = %+v", stops)
 	}
 	want := map[string]struct {
@@ -174,15 +174,35 @@ func TestPlanProductionStop(t *testing.T) {
 	}{
 		"a":    {finish, false},
 		"late": {open[1].StartedAt, false},
-		"old":  {open[3].StartedAt.Add(MaxJobHours), true},
+		"b":    {finish, false},
+		"old":  {open[6].StartedAt.Add(MaxJobHours), true},
 	}
 	for _, u := range stops {
-		w := want[u.Members[0].RegistrationID]
-		if !u.StoppedAt.Equal(w.stop) || u.Capped != w.capped {
+		w, ok := want[u.Members[0].RegistrationID]
+		if !ok || !u.StoppedAt.Equal(w.stop) || u.Capped != w.capped {
 			t.Fatalf("stop of %s = %v capped %v, want %v capped %v", u.Members[0].RegistrationID, u.StoppedAt, u.Capped, w.stop, w.capped)
+		}
+		if u.Members[0].RegistrationID == "b" && len(u.Members) != 2 {
+			t.Fatalf("bundle unit = %+v, want both members", u.Members)
 		}
 	}
 	if !stops[0].StartedAt().Before(stops[1].StartedAt()) {
 		t.Fatalf("not in start order: %+v", stops)
+	}
+}
+
+// FR-25.3, BR-25.1: a bundle holding a start after the finish (stored before the finish arrived) is
+// closed at that start, so no member's stop precedes its own start; a bundle with no member on the
+// finished operation is not closed.
+func TestPlanProductionStop_BundleWithLateMember(t *testing.T) {
+	finish := shift.Add(2 * time.Hour)
+	open := []OpenStart{startAt("x", "J1", "B1", 60), startAt("y", "J2", "B1", 3*60), startAt("z", "J3", "B2", 0)}
+	stops := PlanProductionStop(open, finish, map[string]bool{"J2": true})
+	if len(stops) != 1 || stops[0].BundleID != "B1" || len(stops[0].Members) != 2 || !stops[0].StoppedAt.Equal(open[1].StartedAt) {
+		t.Fatalf("stops = %+v", stops)
+	}
+	hours, err := stops[0].Hours()
+	if err != nil || !hours[0].Add(hours[1]).Equal(decimal.NewFromInt(2)) {
+		t.Fatalf("bundle hours = %v, %v; want 2 in total", hours, err)
 	}
 }

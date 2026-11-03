@@ -154,6 +154,7 @@ func TestProductionFinish_ClosesOpenStartsAndRefusesFeedback(t *testing.T) {
 	late := jobStart(ben, job.ID, finishedAt.Add(30*time.Minute), nil)
 	register(t, s, ctx, late)
 	register(t, s, ctx, jobStart(cy, job.ID, day(9, 0), &bundle))
+	register(t, s, ctx, jobStart(cy, other.ID, day(9, 0), &bundle))
 	register(t, s, ctx, jobStart(dee, other.ID, day(9, 0), nil))
 	fb := ids.New()
 	if _, err := s.RecordFeedback(ctx, job.ID, FeedbackInput{ID: fb, GoodQty: decimal.NewFromInt(3), RecordedBy: "op"}); err != nil {
@@ -196,19 +197,24 @@ func TestProductionFinish_ClosesOpenStartsAndRefusesFeedback(t *testing.T) {
 		!a[0].StartedAt.Equal(day(8, 0)) || a[0].StoppedAt == nil || !a[0].StoppedAt.Equal(finishedAt) {
 		t.Fatalf("Ana's stop = %+v", a)
 	}
-	if b := stopsOf(ben); len(b) != 1 || b[0].Hours == nil || !b[0].Hours.IsZero() || !b[0].StoppedAt.Equal(late.StartedAt) {
+	if b := stopsOf(ben); len(b) != 1 || b[0].Hours == nil || !b[0].Hours.IsZero() || !b[0].StoppedAt.Equal(late.StartedAt) ||
+		!slices.Equal(b[0].Flags, []string{domain.FlagProductionFinished, domain.ConflictJobFinished}) {
 		t.Fatalf("Ben's start after the finish = %+v", b)
 	}
-	if c := stopsOf(cy); len(c) != 0 {
-		t.Fatalf("a bundled start was closed: %+v", c)
+	// Cy's bundle holds a job of the finished operation: the whole bundle closes at the finish and its
+	// three hours are split again over both members (1.50 h each), flagged production-finished.
+	c := stopsOf(cy)
+	if len(c) != 2 {
+		t.Fatalf("Cy's bundle stops = %+v", c)
 	}
-	// The bundled start stays open, marked with production's finish for the worker and the supervisor.
-	sess, err := s.BadgeLogin(ctx, "C-76")
-	if err != nil {
-		t.Fatal(err)
+	for _, r := range c {
+		if r.Hours == nil || r.Hours.String() != "1.5" || r.BundleID == nil || *r.BundleID != bundle || !r.StoppedAt.Equal(finishedAt) ||
+			!slices.Equal(r.Flags, []string{domain.FlagProductionFinished}) {
+			t.Fatalf("Cy's bundle stop = %+v", r)
+		}
 	}
-	if len(sess.OpenJobs) != 1 || sess.OpenJobs[0].ProductionFinishedAt == nil || !sess.OpenJobs[0].ProductionFinishedAt.Equal(finishedAt) {
-		t.Fatalf("Cy's open bundled job = %+v, want productionFinishedAt %v", sess.OpenJobs, finishedAt)
+	if sess, err := s.BadgeLogin(ctx, "C-76"); err != nil || len(sess.OpenJobs) != 0 {
+		t.Fatalf("Cy's open jobs after the bundle closed = %+v, %v", sess.OpenJobs, err)
 	}
 	if sess, err := s.BadgeLogin(ctx, "D-76"); err != nil || len(sess.OpenJobs) != 1 || sess.OpenJobs[0].ProductionFinishedAt != nil {
 		t.Fatalf("Dee's open job on another operation = %+v, %v", sess.OpenJobs, err)
@@ -216,17 +222,16 @@ func TestProductionFinish_ClosesOpenStartsAndRefusesFeedback(t *testing.T) {
 	if d := stopsOf(dee); len(d) != 0 {
 		t.Fatalf("a start on another operation was closed: %+v", d)
 	}
-	if got := countEvents(t, admin, tenantID, "dev.passage.shopfloor.registration.posted.v1") - before; got != 2 {
-		t.Fatalf("registration.posted after the finish = %d, want 2", got)
+	if got := countEvents(t, admin, tenantID, "dev.passage.shopfloor.registration.posted.v1") - before; got != 4 {
+		t.Fatalf("registration.posted after the finish = %d, want 4", got)
 	}
 	register(t, s, ctx, Registration{ID: ids.New(), WorkerID: cy, Kind: "clock-in", StartedAt: day(7, 0)})
 	board, err := s.ClockedIn(ctx, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(board) != 1 || board[0].WorkerID != cy || len(board[0].Jobs) != 1 || board[0].Jobs[0].ProductionFinishedAt == nil ||
-		!board[0].Jobs[0].ProductionFinishedAt.Equal(finishedAt) {
-		t.Fatalf("clocked-in board = %+v, want Cy's bundled job marked finished by production", board)
+	if len(board) != 1 || board[0].WorkerID != cy || len(board[0].Jobs) != 0 {
+		t.Fatalf("clocked-in board = %+v, want Cy clocked in with no open job", board)
 	}
 
 	// The kiosk's own stop for Ana's start, sent later, wins: the server's stop becomes zero length.
@@ -241,6 +246,44 @@ func TestProductionFinish_ClosesOpenStartsAndRefusesFeedback(t *testing.T) {
 	}
 	if !hours.Equal(decimal.NewFromInt(2)) {
 		t.Fatalf("Ana's hours after her own stop = %s, want 2 (the server's stop superseded)", hours)
+	}
+
+	// Cy stopped the bundle at 10:00 on a kiosk that was offline when the finish arrived: the replay
+	// is accepted (not SF-0113), the server's bundle stops become 0.00 h with registration.corrected,
+	// so the bundle counts the kiosk's hour once; a replay of the batch is a duplicate, and another
+	// batch closing the bundle again is still SF-0113.
+	half := decimal.RequireFromString("0.5")
+	bundleStop := func(job string) Registration {
+		return Registration{ID: ids.New(), WorkerID: cy, Kind: KindJobStop, JobID: &job, BundleID: &bundle, StartedAt: day(9, 0),
+			StoppedAt: &end, Hours: &half, Offline: true}
+	}
+	upper := strings.ToUpper(bundle)
+	replay := []Registration{bundleStop(job.ID), bundleStop(other.ID)}
+	for i := range replay {
+		replay[i].BundleID = &upper // the kiosk's case of the bundle id does not matter
+	}
+	corrected := countEvents(t, admin, tenantID, "dev.passage.shopfloor.registration.corrected.v1")
+	if res := register(t, s, ctx, replay...); res[0].Status != StatusAccepted || res[1].Status != StatusAccepted {
+		t.Fatalf("offline bundle stop after the finish = %+v", res)
+	}
+	if got := countEvents(t, admin, tenantID, "dev.passage.shopfloor.registration.corrected.v1") - corrected; got != 2 {
+		t.Fatalf("registration.corrected for the superseded bundle stops = %d, want 2", got)
+	}
+	sum := decimal.Zero
+	for _, r := range stopsOf(cy) {
+		sum = sum.Add(*r.Hours)
+		if slices.Contains(r.Flags, domain.FlagProductionFinished) && (!r.Hours.IsZero() || !r.StoppedAt.Equal(r.StartedAt)) {
+			t.Fatalf("server bundle stop not superseded: %+v", r)
+		}
+	}
+	if !sum.Equal(decimal.NewFromInt(1)) {
+		t.Fatalf("Cy's bundle hours after the kiosk's stop = %s, want 1", sum)
+	}
+	if res := register(t, s, ctx, replay...); res[0].Status != StatusDuplicate || res[1].Status != StatusDuplicate {
+		t.Fatalf("replay of the bundle stop = %+v", res)
+	}
+	if _, err := s.CreateRegistrations(ctx, []Registration{bundleStop(job.ID), bundleStop(other.ID)}); problemCode(err) != domain.CodeBundleInvalid {
+		t.Fatalf("a second batch closing the bundle = %v, want %s", err, domain.CodeBundleInvalid)
 	}
 
 	// Feedback: refused while production's finish stands, a stored resend is a duplicate.
@@ -378,5 +421,33 @@ func TestProductionFinish_SerializesWithKioskBatches(t *testing.T) {
 	wait(done)
 	if sum, stops := hoursOf(ben); !sum.Equal(decimal.NewFromInt(4)) || stops != 1 {
 		t.Fatalf("Ben's job hours = %s over %d stops, want 4 from the server's stop at the finish", sum, stops)
+	}
+
+	// The finish holds a bundle with a member on the operation: the kiosk's stop of the bundle waits,
+	// then supersedes the server's bundle stops, so the bundle counts the kiosk's 2 hours once.
+	orderC := ids.New()
+	jobC, jobD := mkJob(orderC), mkJob(ids.New())
+	cy := mustWorker(t, s, ctx, "C-77", nil).ID
+	bundle := ids.New()
+	register(t, s, ctx, jobStart(cy, jobC, day(8, 0), &bundle), jobStart(cy, jobD, day(8, 0), &bundle))
+	consumer = begin()
+	if err := finish(consumer, orderC, 3); err != nil {
+		t.Fatal(err)
+	}
+	one := decimal.NewFromInt(1)
+	go func() {
+		_, err := s.CreateRegistrations(ctx, []Registration{
+			{ID: ids.New(), WorkerID: cy, Kind: KindJobStop, JobID: &jobC, BundleID: &bundle, StartedAt: day(8, 0), StoppedAt: &end, Hours: &one},
+			{ID: ids.New(), WorkerID: cy, Kind: KindJobStop, JobID: &jobD, BundleID: &bundle, StartedAt: day(8, 0), StoppedAt: &end, Hours: &one},
+		})
+		done <- err
+	}()
+	blocked(done)
+	if err := consumer.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wait(done)
+	if sum, stops := hoursOf(cy); !sum.Equal(two) || stops != 4 {
+		t.Fatalf("Cy's bundle hours = %s over %d stops, want 2 (the kiosk's; the server's two superseded to 0)", sum, stops)
 	}
 }
