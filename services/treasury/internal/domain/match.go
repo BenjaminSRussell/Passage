@@ -88,6 +88,7 @@ var (
 type prepared struct {
 	Facts
 	id        string
+	idx       int
 	day       int
 	hasDay    bool
 	reference string
@@ -343,16 +344,20 @@ func withinWindow(a, b string, window int) bool {
 
 type matchIndex struct {
 	items    []*prepared
+	byID     map[string]*prepared
+	byRef    map[string][]*prepared
 	refCount map[string]int
 }
 
 func newMatchIndex(cands map[string]Facts) *matchIndex {
-	ix := &matchIndex{refCount: map[string]int{}}
+	ix := &matchIndex{refCount: map[string]int{}, byID: make(map[string]*prepared, len(cands)), byRef: map[string][]*prepared{}}
 	for id, f := range cands {
 		p := prepare(id, f)
 		ix.items = append(ix.items, p)
+		ix.byID[id] = p
 		if p.reference != "" {
 			ix.refCount[p.reference]++
+			ix.byRef[p.reference] = append(ix.byRef[p.reference], p)
 		}
 	}
 	sort.Slice(ix.items, func(i, j int) bool {
@@ -361,35 +366,51 @@ func newMatchIndex(cands map[string]Facts) *matchIndex {
 		}
 		return ix.items[i].id < ix.items[j].id
 	})
+	for i, p := range ix.items {
+		p.idx = i
+	}
 	return ix
 }
 
-func (ix *matchIndex) near(line *prepared, rules []Rule) ([]*prepared, bool) {
-	tolerance, window := decimal.Zero, 0
-	for _, r := range rules {
-		if r.Tolerance.Amount.GreaterThan(tolerance) {
-			tolerance = r.Tolerance.Amount
-		}
-		window = max(window, r.Tolerance.DateWindowDays)
-	}
-	low, high := line.Amount.Sub(tolerance), line.Amount.Add(tolerance)
-	start := sort.Search(len(ix.items), func(i int) bool { return ix.items[i].Amount.Cmp(low) >= 0 })
+func (ix *matchIndex) near(line *prepared, r Rule) ([]*prepared, bool) {
 	var out []*prepared
+	if r.Strict {
+		out = append(out, ix.byRef[line.reference]...)
+		if line.alt != line.reference {
+			out = append(out, ix.byRef[line.alt]...)
+		}
+		return out, len(out) < len(ix.items)
+	}
+	low, high := line.Amount.Sub(r.Tolerance.Amount), line.Amount.Add(r.Tolerance.Amount)
+	start := sort.Search(len(ix.items), func(i int) bool { return ix.items[i].Amount.Cmp(low) >= 0 })
 	for _, c := range ix.items[start:] {
 		if c.Amount.Cmp(high) > 0 {
 			break
 		}
-		if inWindow(line, c, window) || sharesReference(line, c) {
+		if r.Weights.Date == 0 || inWindow(line, c, r.Tolerance.DateWindowDays) {
 			out = append(out, c)
 		}
 	}
 	return out, len(out) < len(ix.items)
 }
 
-func excludedBound(w Weights) int { return w.Reference + w.Counterparty + max(w.Amount, w.Date) }
+func excludedBound(r Rule) int {
+	if r.Strict {
+		return 0
+	}
+	w := r.Weights
+	if w.Date == 0 {
+		return w.Reference + w.Counterparty
+	}
+	return w.Reference + w.Counterparty + max(w.Amount, w.Date)
+}
 
-func sharesReference(line, cand *prepared) bool {
-	return cand.reference != "" && !placeholderReference(cand.reference) && (cand.reference == line.reference || cand.reference == line.alt)
+func unchangedByExcluded(d Decision, bound int, t Thresholds) bool {
+	if d.Best == nil {
+		return bound < t.Suggest
+	}
+	best := d.Best.Score
+	return bound < best && (d.Status != StatusMatched || bound <= best-t.TieMargin)
 }
 
 // MatchLine ranks the candidates under each rule in order. The first rule that
@@ -397,40 +418,46 @@ func sharesReference(line, cand *prepared) bool {
 // the earlier rule on equal scores. Candidates are keyed by ID.
 func MatchLine(line Facts, cands map[string]Facts, rules []Rule, t Thresholds) Decision {
 	ix := newMatchIndex(cands)
-	return ix.matchLine(prepare("", line), ix.items, false, rules, t)
+	return ix.matchLine(prepare("", line), rules, t, false)
 }
 
-func (ix *matchIndex) matchLine(line *prepared, cands []*prepared, excluded bool, rules []Rule, t Thresholds) Decision {
+// matchLine with prefilter scores each rule against its own near items and
+// rescores that rule against every item when the items left out could still
+// change its decision, so the result equals a full scan.
+func (ix *matchIndex) matchLine(line *prepared, rules []Rule, t Thresholds, prefilter bool) Decision {
+	all := ix.items
 	best := Decision{Status: StatusUnmatched}
 	needRef, needSim := false, false
 	for _, r := range rules {
 		needRef = needRef || r.Weights.Reference > 0
 		needSim = needSim || r.Weights.Counterparty > 0
 	}
-	pairs := make([]pair, len(cands))
-	for i, c := range cands {
-		pairs[i] = newPair(line, c, needRef, needSim)
+	pairs := make([]pair, len(all))
+	known := make([]bool, len(all))
+	pairOf := func(c *prepared) pair {
+		if !known[c.idx] {
+			pairs[c.idx], known[c.idx] = newPair(line, c, needRef, needSim), true
+		}
+		return pairs[c.idx]
 	}
-	byID := make(map[string]*prepared, len(cands))
-	for _, c := range cands {
-		byID[c.id] = c
-	}
-	scored := make([]Candidate, len(pairs))
+	decided := map[ruleShape]Decision{}
 	for _, r := range rules {
-		for i, p := range pairs {
-			score := p.score(r.Tolerance, r.Weights)
-			if r.Strict && !strictEligible(line, p.cand, r.Tolerance) {
-				score = 0
+		key := ruleShape{r.Weights, r.Tolerance.Amount.String(), r.Tolerance.DateWindowDays, r.Strict}
+		d, seen := decided[key]
+		if !seen {
+			cands, excluded := all, false
+			if prefilter {
+				cands, excluded = ix.near(line, r)
 			}
-			scored[i] = Candidate{ID: p.cand.id, Score: score}
+			d = ix.decide(line, cands, r, t, pairOf)
+			if excluded && !unchangedByExcluded(d, excludedBound(r), t) {
+				d = ix.decide(line, all, r, t, pairOf)
+			}
+			decided[key] = d
 		}
-		d := Decide(scored, t)
 		d.Rule = r.Name
-		if d.Status == StatusMatched && excluded && excludedBound(r.Weights) > d.Best.Score-t.TieMargin {
-			d.Status = StatusSuggested
-		}
 		if d.Status == StatusMatched {
-			winner := byID[d.Best.ID]
+			winner := ix.byID[d.Best.ID]
 			if (r.Strict && ix.refCount[winner.reference] > 1) || (!r.Strict && contradictsReference(line, winner)) {
 				d.Status = StatusSuggested
 			}
@@ -443,6 +470,26 @@ func (ix *matchIndex) matchLine(line *prepared, cands []*prepared, excluded bool
 		}
 	}
 	return best
+}
+
+type ruleShape struct {
+	weights   Weights
+	tolerance string
+	window    int
+	strict    bool
+}
+
+func (ix *matchIndex) decide(line *prepared, cands []*prepared, r Rule, t Thresholds, pairOf func(*prepared) pair) Decision {
+	scored := make([]Candidate, len(cands))
+	for i, c := range cands {
+		p := pairOf(c)
+		score := p.score(r.Tolerance, r.Weights)
+		if r.Strict && !strictEligible(line, c, r.Tolerance) {
+			score = 0
+		}
+		scored[i] = Candidate{ID: c.id, Score: score}
+	}
+	return Decide(scored, t)
 }
 
 func usableReference(n string) bool {

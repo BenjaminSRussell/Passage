@@ -818,7 +818,7 @@ func (s *Postgres) Unmatch(ctx context.Context, id string, version int, reason s
 			return versionMismatch()
 		}
 		if status != "matched" {
-			return unprocessable(CodeMatchState, "the match is already unmatched")
+			return httpx.NewProblem(http.StatusConflict, CodeMatchState, "the match is already unmatched")
 		}
 		if _, err := tx.Exec(ctx, `update reconciliation_match set status = 'unmatched', unmatch_reason = $3, unmatched_by = $4, version = version + 1, updated_at = now()
 			where tenant_id = $1 and id = $2`, p.TenantID, id, reason, createdBy(p)); err != nil {

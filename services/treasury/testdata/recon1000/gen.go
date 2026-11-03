@@ -171,10 +171,7 @@ func main() {
 	b.Reset()
 	b.WriteString("{1:F01BANKDEFFAXXX0000000000}{2:O9400000000000BANKDEFFAXXX00000000000000000000N}{4:\n:20:REC1000MT\n:25:DE89370400440532013000\n:28C:00001/001\n:60F:C261001EUR1000,00\n")
 	for i, l := range mt {
-		bank := ""
-		if l.ref != "" {
-			bank = fmt.Sprintf("//BR%06d", i)
-		}
+		bank := fmt.Sprintf("//BR%06d", i)
 		fmt.Fprintf(&b, ":61:%s%02d%02dC%sNTRFNONREF%s\n:86:166?00GUTSCHRIFT?20%s?32%s\n", yymmdd(l.day), 10, l.day, swift(l.cents), bank, l.ref, l.cp)
 	}
 	fmt.Fprintf(&b, ":62F:C261031EUR%s\n-}\n", swift(100000+sum(mt)))

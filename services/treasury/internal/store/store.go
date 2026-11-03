@@ -418,9 +418,9 @@ func (s *Postgres) importStatement(ctx context.Context, in StatementImport) (Imp
 		batch := &pgx.Batch{}
 		for _, l := range in.Parsed.Lines {
 			batch.Queue(`insert into bank_statement_line (tenant_id, statement_id, legal_entity_id, bank_account_id, line_no, booking_date, value_date, amount, currency,
-				btc_code, end_to_end_ref, reference, counterparty_name, raw_fragment) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+				btc_code, end_to_end_ref, reference, bank_reference, counterparty_name, raw_fragment) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 				p.TenantID, st.ID, legalEntityID, in.BankAccountID, l.LineNo, l.BookingDate, l.ValueDate, l.Amount.String(), l.Currency,
-				l.BTCCode, l.EndToEndRef, l.Reference, l.CounterpartyName, l.RawFragment)
+				l.BTCCode, l.EndToEndRef, l.Reference, l.BankReference, l.CounterpartyName, l.RawFragment)
 		}
 		br := tx.SendBatch(ctx, batch)
 		for range in.Parsed.Lines {

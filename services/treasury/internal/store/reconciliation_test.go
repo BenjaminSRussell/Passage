@@ -6,7 +6,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/domain"
 )
@@ -251,8 +254,10 @@ func TestManualMatch_BalanceReasonDoubleMatchAndUnmatch(t *testing.T) {
 	if lineStatuses(t, f)[4] != "unmatched" {
 		t.Fatal("line 4 must be unmatched again")
 	}
-	if _, err := f.s.Unmatch(f.ctx, m.ID, un.Version, "twice"); problemCode(t, err) != CodeMatchState {
-		t.Fatalf("second unmatch: %v", err)
+	_, err = f.s.Unmatch(f.ctx, m.ID, un.Version, "twice")
+	var twice *httpx.Problem
+	if problemCode(t, err) != CodeMatchState || !errors.As(err, &twice) || twice.Status != http.StatusConflict {
+		t.Fatalf("second unmatch: %v; want 409 %s", err, CodeMatchState)
 	}
 	if n := count(t, admin, `select count(*) from outbox where type = 'dev.passage.treasury.reconciliation.unmatched.v1'`); n != 1 {
 		t.Fatalf("%d unmatched events; want 1", n)

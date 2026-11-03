@@ -3,6 +3,8 @@
 -- many items (N:1 batch receipts) or one item to many lines. A line and an item are in at most one
 -- active match; an unmatch keeps the row (active = false) as history.
 
+alter table bank_statement_line add column bank_reference text not null default '';
+
 create table reconciliation_rule (
   tenant_id uuid not null,
   id uuid not null,

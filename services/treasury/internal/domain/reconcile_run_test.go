@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"sort"
 	"strings"
 	"testing"
@@ -314,17 +315,103 @@ func TestMatchLine_PayerRuleDoesNotAutoMatchAContradictingReference(t *testing.T
 	}
 }
 
-func TestReconcileStatement_ExcludedCandidateWithinTieMarginBlocksAutoMatch(t *testing.T) {
+type ruleDecision struct {
+	status Status
+	rule   string
+	item   string
+}
+
+func fullDecision(line Facts, items []Item, rules []Rule) ruleDecision {
+	open := map[string]Facts{}
+	for _, it := range items {
+		open[it.ID] = it.Facts
+	}
+	ordered := append([]Rule(nil), rules...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].Priority != ordered[j].Priority {
+			return ordered[i].Priority < ordered[j].Priority
+		}
+		return ordered[i].Name < ordered[j].Name
+	})
+	d := MatchLine(line, open, ordered, DefaultThresholds)
+	if d.Best == nil {
+		return ruleDecision{status: d.Status}
+	}
+	got := ruleDecision{status: d.Status, item: d.Best.ID}
+	if d.Status == StatusMatched {
+		got.rule = d.Rule
+	}
+	return got
+}
+
+func reconciledDecision(t *testing.T, line Facts, items []Item, rules []Rule) ruleDecision {
+	t.Helper()
+	out := reconcile(t, []RecLine{{No: 1, Facts: line}}, items, rules, DefaultThresholds)
+	switch {
+	case len(out.Matches) == 1:
+		return ruleDecision{status: StatusMatched, rule: out.Matches[0].Rule, item: out.Matches[0].ItemIDs[0]}
+	case len(out.Suggestions) == 1:
+		return ruleDecision{status: StatusSuggested, item: out.Suggestions[0].ItemID}
+	}
+	return ruleDecision{status: StatusUnmatched}
+}
+
+func TestReconcileStatement_ExcludedCandidateDoesNotDemoteALeaderOfAnEarlierRule(t *testing.T) {
 	noDate := []Rule{{Name: "no-date", Priority: 1, Weights: Weights{Amount: 50, Reference: 25, Counterparty: 25}, Tolerance: tol}}
 	leader := Item{ID: "tx-1", Facts: facts("120.00", "2026-10-22", "INV-2026-0001", "Acme Trading Ltd")}
-	line := []RecLine{{1, leader.Facts}}
-	out := reconcile(t, line, []Item{leader}, noDate, DefaultThresholds)
-	if len(out.Matches) != 1 {
-		t.Fatalf("lone leader: %+v; want an auto-match", out)
-	}
 	outside := Item{ID: "tx-2", Facts: facts("120.00", "2026-09-01", "OTHER-REF-77", "Acme Trading Ltd")}
-	out = reconcile(t, line, []Item{leader, outside}, noDate, DefaultThresholds)
-	if len(out.Matches) != 0 || len(out.Suggestions) != 1 || out.Suggestions[0].ItemID != "tx-1" {
-		t.Fatalf("outcome = %+v; a candidate outside the window that could score within the tie margin must leave the line suggested", out)
+	got := reconciledDecision(t, leader.Facts, []Item{leader, outside}, noDate)
+	if want := fullDecision(leader.Facts, []Item{leader, outside}, noDate); got != want || got.status != StatusMatched || got.item != "tx-1" {
+		t.Fatalf("decision = %+v; want the full-scan decision %+v (tx-1 matched)", got, want)
+	}
+}
+
+func TestReconcileStatement_ReviewerProbeEqualsFullScan(t *testing.T) {
+	rules := []Rule{
+		{Name: "refcp", Priority: 1, Weights: Weights{Amount: 40, Date: 0, Reference: 30, Counterparty: 30}, Tolerance: Tolerance{Amount: decimal.RequireFromString("1.00"), DateWindowDays: 3}},
+		{Name: "datecp", Priority: 2, Weights: Weights{Amount: 40, Date: 30, Reference: 0, Counterparty: 30}, Tolerance: Tolerance{Amount: decimal.RequireFromString("1.00"), DateWindowDays: 3}},
+	}
+	line := facts("100.00", "2026-10-10", "INV-AAAA1111", "Acme Corp")
+	items := []Item{
+		{ID: "X", Facts: facts("100.00", "2026-10-15", "INV-AAAA1111", "Acme Corp")},
+		{ID: "Y", Facts: facts("100.00", "2026-10-10", "", "Acme Corp")},
+		{ID: "Z", Facts: facts("5000.00", "2026-10-10", "", "Other")},
+	}
+	got, want := reconciledDecision(t, line, items, rules), fullDecision(line, items, rules)
+	if got != want {
+		t.Fatalf("decision = %+v; full scan gives %+v", got, want)
+	}
+}
+
+func TestReconcileStatement_RandomStatementsEqualFullScanDecisions(t *testing.T) {
+	rng := rand.New(rand.NewSource(36))
+	w := func(a, d, r, c int) Weights { return Weights{Amount: a, Date: d, Reference: r, Counterparty: c} }
+	wide := Tolerance{Amount: decimal.RequireFromString("1.00"), DateWindowDays: 3}
+	chains := [][]Rule{
+		{{Name: "refcp", Priority: 1, Weights: w(40, 0, 30, 30), Tolerance: wide}, {Name: "datecp", Priority: 2, Weights: w(40, 30, 0, 30), Tolerance: wide}},
+		{{Name: "balanced", Priority: 1, Weights: DefaultWeights, Tolerance: tol}, {Name: "reference", Priority: 2, Weights: ReferenceWeights, Tolerance: tol, Strict: true}},
+		{{Name: "nodate", Priority: 1, Weights: w(50, 0, 25, 25), Tolerance: tol}, {Name: "balanced", Priority: 2, Weights: DefaultWeights, Tolerance: wide}, {Name: "payer", Priority: 3, Weights: w(40, 20, 0, 40), Tolerance: Tolerance{DateWindowDays: 5}}},
+		{{Name: "strict", Priority: 1, Weights: ReferenceWeights, Tolerance: wide, Strict: true}, {Name: "refcp", Priority: 2, Weights: w(30, 0, 40, 30), Tolerance: tol}},
+	}
+	amounts := []string{"100.00", "100.40", "99.60", "100.80", "250.00", "5000.00"}
+	refs := []string{"", "NOTPROVIDED", "INV-AAAA1111", "INV-AAAA1112", "INV-BBBB2222", "PAY INV-AAAA1111 THX"}
+	names := []string{"Acme Corp", "Acme Corporation", "Beta Ltd", "Gamma Holdings", ""}
+	randomFacts := func() Facts {
+		return facts(amounts[rng.Intn(len(amounts))], fmt.Sprintf("2026-10-%02d", 4+rng.Intn(14)), refs[rng.Intn(len(refs))], names[rng.Intn(len(names))])
+	}
+	for n := 0; n < 600; n++ {
+		items := make([]Item, 1+rng.Intn(25))
+		for i := range items {
+			items[i] = Item{ID: fmt.Sprintf("it-%02d", i), Facts: randomFacts()}
+		}
+		line := randomFacts()
+		if rng.Intn(3) == 0 {
+			line.AltReference = refs[rng.Intn(len(refs))]
+		}
+		rules := chains[n%len(chains)]
+		got, want := reconciledDecision(t, line, items, rules), fullDecision(line, items, rules)
+		if got != want {
+			t.Fatalf("statement %d chain %d: decision = %+v; full scan gives %+v\nline %+v\nitems %+v", n, n%len(chains), got, want, line, items)
+		}
 	}
 }

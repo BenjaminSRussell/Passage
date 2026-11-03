@@ -341,3 +341,38 @@ func TestUnmatch_RejectsABlankReasonAfterTrimming(t *testing.T) {
 		t.Fatalf("blank reason: status %d", rec.Code)
 	}
 }
+
+func TestReconciliation_CanonicalisesEntityAndItemIDsBeforeUse(t *testing.T) {
+	h, fs := newTestServer(t)
+	upper := strings.ToUpper(testLE)
+	rule := ruleBody()
+	rule["legalEntityId"] = upper
+	if rec := call(h, http.MethodPost, "/v1/treasury/reconciliation-rules", jsonBody(t, rule), "application/json", map[string]string{idempotencyKey: "k"}); rec.Code != http.StatusCreated || fs.lastRule.LegalEntityID != testLE {
+		t.Fatalf("rule: status %d entity %q body %s", rec.Code, fs.lastRule.LegalEntityID, rec.Body)
+	}
+	run := runBody()
+	run["legalEntityId"] = upper
+	run["items"].([]map[string]any)[0]["id"] = " INV-1 "
+	if rec := call(h, http.MethodPost, "/v1/treasury/reconciliation-runs", jsonBody(t, run), "application/json", map[string]string{idempotencyKey: "r"}); rec.Code != http.StatusCreated {
+		t.Fatalf("run: status %d body %s", rec.Code, rec.Body)
+	}
+	if fs.lastRun.LegalEntityID != testLE || fs.lastRun.Items[0].ID != "inv-1" {
+		t.Fatalf("run = %+v; want lower-case entity and item id", fs.lastRun)
+	}
+	dup := runBody()
+	dup["items"] = []map[string]any{
+		{"type": "ar", "id": "INV-1", "currency": "EUR", "amount": "1.00", "valueDate": "2026-10-22"},
+		{"type": "ar", "id": "inv-1", "currency": "EUR", "amount": "1.00", "valueDate": "2026-10-22"},
+	}
+	if rec := call(h, http.MethodPost, "/v1/treasury/reconciliation-runs", jsonBody(t, dup), "application/json", map[string]string{idempotencyKey: "r2"}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("items differing only in case: status %d; want 400", rec.Code)
+	}
+	match := map[string]any{"statementId": testStatement, "legalEntityId": upper, "lineNos": []int{3}, "reason": "x",
+		"items": []map[string]any{{"type": "ar", "id": "INV-1", "currency": "EUR", "amount": "7.00"}}}
+	if rec := call(h, http.MethodPost, "/v1/treasury/reconciliation-matches", jsonBody(t, match), "application/json", map[string]string{idempotencyKey: "m"}); rec.Code != http.StatusCreated {
+		t.Fatalf("match: status %d body %s", rec.Code, rec.Body)
+	}
+	if fs.lastMatch.LegalEntityID != testLE || fs.lastMatch.Items[0].ID != "inv-1" {
+		t.Fatalf("match = %+v; want lower-case entity and item id", fs.lastMatch)
+	}
+}

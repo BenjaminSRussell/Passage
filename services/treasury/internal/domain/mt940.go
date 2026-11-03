@@ -219,15 +219,15 @@ func (st *Statement) mt940Entry(f mt940Field) (Line, error) {
 		customer = ""
 	}
 	return Line{
-		LineNo:      len(st.Lines) + 1,
-		BookingDate: booking,
-		ValueDate:   value,
-		Amount:      amt,
-		Currency:    st.Currency,
-		BTCCode:     "MT940/" + m[6] + m[7],
-		EndToEndRef: customer,
-		Reference:   strings.TrimSpace(bank),
-		RawFragment: ":61:" + f.value,
+		LineNo:        len(st.Lines) + 1,
+		BookingDate:   booking,
+		ValueDate:     value,
+		Amount:        amt,
+		Currency:      st.Currency,
+		BTCCode:       "MT940/" + m[6] + m[7],
+		EndToEndRef:   customer,
+		BankReference: strings.TrimSpace(bank),
+		RawFragment:   ":61:" + f.value,
 	}, nil
 }
 
@@ -253,8 +253,8 @@ func entryDate(valueYYMMDD, mmdd string) (string, error) {
 
 // applyMT940Info reads a :86: block. Structured blocks (German ?nn subfields)
 // give the reference from ?20-?29 and the counterparty from ?32/?33; an
-// unstructured block is the reference as a whole. Either replaces the bank
-// reference of :61:, because the remittance text is what matching reads.
+// unstructured block is the reference as a whole. The remittance text is
+// what matching reads; the :61: bank reference is kept apart.
 func applyMT940Info(l *Line, v string) {
 	l.RawFragment += "\n:86:" + v
 	idx := mt940SubRe.FindAllStringSubmatchIndex(strings.ReplaceAll(v, "\n", ""), -1)

@@ -877,7 +877,7 @@ paths:
     post:
       operationId: unmatchReconciliationMatch
       summary: Dissolve a match with a reason; its lines return to unmatched and its items are free again
-      description: TRS-0485 when the match is already unmatched. The match row stays as history and records `unmatchedBy`.
+      description: 409 TRS-0485 when the match is already unmatched. The match row stays as history and records `unmatchedBy`.
       x-passage-duty: treasury.reconciliation.write
       parameters:
         - $ref: "#/components/parameters/Id"
@@ -903,6 +903,7 @@ paths:
         "400": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
         "428": {$ref: "#/components/responses/Problem"}

@@ -61,11 +61,16 @@ func (a *API) createReconRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields := map[string]string{}
-	if !ids.Valid(req.LegalEntityID) {
+	var legalEntityOK bool
+	if req.LegalEntityID, legalEntityOK = ids.Canonical(req.LegalEntityID); !legalEntityOK {
 		fields["legalEntityId"] = "must be a UUID"
 	}
-	if req.BankAccountID != nil && !ids.Valid(*req.BankAccountID) {
-		fields["bankAccountId"] = "must be a UUID"
+	if req.BankAccountID != nil {
+		if account, ok := ids.Canonical(*req.BankAccountID); ok {
+			req.BankAccountID = &account
+		} else {
+			fields["bankAccountId"] = "must be a UUID"
+		}
 	}
 	tolerance, err := decimal.NewFromString(strings.TrimSpace(req.AmountTolerance))
 	if err != nil || !tolerance.LessThan(maxAmount) {
@@ -100,11 +105,14 @@ func (a *API) listReconRules(w http.ResponseWriter, r *http.Request) {
 	}
 	le, account := r.URL.Query().Get("legalEntityId"), r.URL.Query().Get("bankAccountId")
 	fields := map[string]string{}
-	if !ids.Valid(le) {
+	var ok bool
+	if le, ok = ids.Canonical(le); !ok {
 		fields["legalEntityId"] = "required UUID query parameter"
 	}
-	if account != "" && !ids.Valid(account) {
-		fields["bankAccountId"] = "must be a UUID"
+	if account != "" {
+		if account, ok = ids.Canonical(account); !ok {
+			fields["bankAccountId"] = "must be a UUID"
+		}
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
@@ -184,7 +192,8 @@ func (a *API) runReconciliation(w http.ResponseWriter, r *http.Request) {
 	if !ids.Valid(req.StatementID) {
 		fields["statementId"] = "must be a UUID"
 	}
-	if !ids.Valid(req.LegalEntityID) {
+	var legalEntityOK bool
+	if req.LegalEntityID, legalEntityOK = ids.Canonical(req.LegalEntityID); !legalEntityOK {
 		fields["legalEntityId"] = "must be the UUID of the legal entity the items belong to"
 	}
 	if req.AfterLineNo < 0 {
@@ -197,6 +206,8 @@ func (a *API) runReconciliation(w http.ResponseWriter, r *http.Request) {
 	for i, it := range req.Items {
 		at := "items[" + strconv.Itoa(i) + "]"
 		req.Items[i].Amount = strings.TrimSpace(it.Amount)
+		req.Items[i].ID = strings.ToLower(strings.TrimSpace(it.ID))
+		it.ID = req.Items[i].ID
 		amount, err := decimal.NewFromString(req.Items[i].Amount)
 		switch {
 		case !validItemID(it.Type, it.ID):
@@ -253,7 +264,8 @@ func (a *API) createManualMatch(w http.ResponseWriter, r *http.Request) {
 	if !ids.Valid(req.StatementID) {
 		fields["statementId"] = "must be a UUID"
 	}
-	if !ids.Valid(req.LegalEntityID) {
+	var legalEntityOK bool
+	if req.LegalEntityID, legalEntityOK = ids.Canonical(req.LegalEntityID); !legalEntityOK {
 		fields["legalEntityId"] = "must be the UUID of the legal entity the items belong to"
 	}
 	if n := len(req.LineNos); n < 1 || n > maxMatchParts {
@@ -273,6 +285,8 @@ func (a *API) createManualMatch(w http.ResponseWriter, r *http.Request) {
 	for i, it := range req.Items {
 		at := "items[" + strconv.Itoa(i) + "]"
 		req.Items[i].Amount = strings.TrimSpace(it.Amount)
+		req.Items[i].ID = strings.ToLower(strings.TrimSpace(it.ID))
+		it.ID = req.Items[i].ID
 		amount, err := decimal.NewFromString(req.Items[i].Amount)
 		switch {
 		case !validItemID(it.Type, it.ID):

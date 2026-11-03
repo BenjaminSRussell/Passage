@@ -96,7 +96,7 @@ matches are stored and published, N:1 batch receipts match when the items sharin
 batch reference add up exactly, an item wanted by two matches is released from both, and other
 lines with a candidate become `suggested`. `POST /reconciliation-matches` matches lines to
 items by hand (reason required, must balance), `:unmatch` dissolves a match with a reason and records who did it.
-A run and a manual match carry the `legalEntityId` of the statement (TRS-0488 when it differs, 403 outside the caller's scope).
+A run and a manual match carry the `legalEntityId` of the statement (TRS-0488 when it differs, 403 outside the caller's scope); entity and item ids are lower-cased on the way in, so letter case never changes a scope check, an item match or the rule cap. A bank statement's MT940 `:61:` bank reference (after `//`) is stored apart as `bank_reference` and is never read as a payer reference.
 A run considers one page of open lines after `afterLineNo`; `remainingLines` and `nextAfterLineNo` drive the next call.
 `GET /reconciliation-matches` pages with `limit` (max 500) and `offset`, and returns `nextOffset` for a full page.
 A placeholder end-to-end id (NOTPROVIDED, NONREF) is ignored and the remittance reference is scored instead.
@@ -156,7 +156,7 @@ Problems use `type` `https://passage.dev/problems/<code>` and carry `code` and
 | `TRS-0482` | 409 | a rule with this name exists for the legal entity |
 | `TRS-0483` | 404 | reconciliation rule not found |
 | `TRS-0484` | 404 | reconciliation match not found |
-| `TRS-0485` | 422 | the match is already unmatched |
+| `TRS-0485` | 409 | the match is already unmatched |
 | `TRS-0486` | 422 | a line is not on the statement, or a line or item is not in the statement currency |
 | `TRS-0487` | 409 | the reconciliation rule is already inactive |
 | `TRS-0488` | 422 | the items or the request belong to a different legal entity than the statement |

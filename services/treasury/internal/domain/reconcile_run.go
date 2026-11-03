@@ -84,8 +84,7 @@ func ReconcileStatement(ctx context.Context, lines []RecLine, items []Item, rule
 			return Outcome{}, err
 		}
 		line := prepare("", l.Facts)
-		near, excluded := index.near(line, ordered)
-		d := index.matchLine(line, near, excluded, ordered, t)
+		d := index.matchLine(line, ordered, t, true)
 		decisions[l.No] = d
 		if d.Status == StatusMatched {
 			claims[d.Best.ID]++
