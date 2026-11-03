@@ -4,6 +4,8 @@ Data migration framework for Passage (wave 10): the declarative mapping DSL, the
 
 Test: `go vet ./... && go test ./...` (`-short` skips the full-size 50k/20k/100k/10k load). Database tests need `PASSAGE_TEST_DATABASE_URL`, and the RLS test also `PASSAGE_TEST_APP_DATABASE_URL`.
 
+Wave 10 AC1 (issue #10): `make ac1-load` starts Postgres in Docker if `DATABASE_URL` / `PASSAGE_TEST_DATABASE_URL` is unset, loads 50k customers, 20k vendors, 100k items and 10k BOMs through the pipeline with the cross-reference in Postgres, and writes `internal/ac1load/testdata/ac1-reconciliation.{json,md}`. The load must finish in under 30 minutes with 100% reconciliation (row counts, hash total, sampled field compare) and a zero-change re-run. `TestPostgres_AC1FullSizeLoadMeetsTimeBudgetAndReconciles` guards that when the database URL is set; `TestCommittedReport_FullSizeReconciledUnderBudget` checks the committed report. The target is the in-process `MemLoader` — owning-service batch APIs are a later slice.
+
 ## API
 
 | Route | Duty | Result |

@@ -19,7 +19,8 @@ const lockKey = 0x6d6967726174 // "migrat"
 // released). The caller then applies the migrations on admin.
 func Fresh(t *testing.T, admin *pgxpool.Pool) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	// AC1's full-size load holds this lock for the run (budget 30 minutes); other packages wait here.
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Minute)
 	defer cancel()
 	conn, err := admin.Acquire(ctx)
 	if err != nil {

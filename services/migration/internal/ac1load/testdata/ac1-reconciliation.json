@@ -1,0 +1,156 @@
+{
+  "criterion": "AC1",
+  "issue": 10,
+  "budget": "30m0s",
+  "elapsed": "12.458680717s",
+  "elapsedMs": 12458,
+  "ok": true,
+  "volumes": {
+    "customers": 50000,
+    "vendors": 20000,
+    "items": 100000,
+    "boms": 10000
+  },
+  "entities": [
+    {
+      "entity": "customer",
+      "elapsed": "3.336143156s",
+      "elapsedMs": 3336,
+      "extracted": 50000,
+      "created": 50000,
+      "updated": 0,
+      "unchanged": 0,
+      "rejected": 0,
+      "status": "succeeded",
+      "reconciliation": {
+        "source": 50000,
+        "target": 50000,
+        "checks": [
+          {
+            "name": "row_count",
+            "ok": true,
+            "detail": "source 50000 target 50000"
+          },
+          {
+            "name": "hash_total",
+            "ok": true,
+            "detail": "order-independent SHA-256 over key and content hash"
+          },
+          {
+            "name": "sample_compare",
+            "ok": true,
+            "detail": "0 sampled keys differ"
+          }
+        ]
+      },
+      "rerunCreated": 0,
+      "rerunUpdated": 0,
+      "rerunUnchanged": 50000
+    },
+    {
+      "entity": "vendor",
+      "elapsed": "1.105919901s",
+      "elapsedMs": 1105,
+      "extracted": 20000,
+      "created": 20000,
+      "updated": 0,
+      "unchanged": 0,
+      "rejected": 0,
+      "status": "succeeded",
+      "reconciliation": {
+        "source": 20000,
+        "target": 20000,
+        "checks": [
+          {
+            "name": "row_count",
+            "ok": true,
+            "detail": "source 20000 target 20000"
+          },
+          {
+            "name": "hash_total",
+            "ok": true,
+            "detail": "order-independent SHA-256 over key and content hash"
+          },
+          {
+            "name": "sample_compare",
+            "ok": true,
+            "detail": "0 sampled keys differ"
+          }
+        ]
+      },
+      "rerunCreated": 0,
+      "rerunUpdated": 0,
+      "rerunUnchanged": 20000
+    },
+    {
+      "entity": "item",
+      "elapsed": "5.530187898s",
+      "elapsedMs": 5530,
+      "extracted": 100000,
+      "created": 100000,
+      "updated": 0,
+      "unchanged": 0,
+      "rejected": 0,
+      "status": "succeeded",
+      "reconciliation": {
+        "source": 100000,
+        "target": 100000,
+        "checks": [
+          {
+            "name": "row_count",
+            "ok": true,
+            "detail": "source 100000 target 100000"
+          },
+          {
+            "name": "hash_total",
+            "ok": true,
+            "detail": "order-independent SHA-256 over key and content hash"
+          },
+          {
+            "name": "sample_compare",
+            "ok": true,
+            "detail": "0 sampled keys differ"
+          }
+        ]
+      },
+      "rerunCreated": 0,
+      "rerunUpdated": 0,
+      "rerunUnchanged": 100000
+    },
+    {
+      "entity": "bom",
+      "elapsed": "594.280903ms",
+      "elapsedMs": 594,
+      "extracted": 10000,
+      "created": 10000,
+      "updated": 0,
+      "unchanged": 0,
+      "rejected": 0,
+      "status": "succeeded",
+      "reconciliation": {
+        "source": 10000,
+        "target": 10000,
+        "checks": [
+          {
+            "name": "row_count",
+            "ok": true,
+            "detail": "source 10000 target 10000"
+          },
+          {
+            "name": "hash_total",
+            "ok": true,
+            "detail": "order-independent SHA-256 over key and content hash"
+          },
+          {
+            "name": "sample_compare",
+            "ok": true,
+            "detail": "0 sampled keys differ"
+          }
+        ]
+      },
+      "rerunCreated": 0,
+      "rerunUpdated": 0,
+      "rerunUnchanged": 10000
+    }
+  ]
+}
