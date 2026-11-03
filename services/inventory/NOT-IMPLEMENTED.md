@@ -309,8 +309,8 @@ confirm: the loser gets 412 or 404. A draft is
 never announced: creating, editing and deleting it write no event; confirming it writes `transfer.changed` with status CREATED (the first
 time the order is seen) and deleting a CREATED order writes `transfer.changed` with the new status `DELETED` and every line, so consumers
 drop it (the AsyncAPI status enum and `TransferData` gain `DELETED`, `deliveryTerms` and `modeOfDelivery`). `transfer.changed` is a full
-snapshot upserted by order id: creating a CREATED order publishes nothing (unchanged since slice 3), so a consumer can first see an order on
-an edit, a confirm or a `DELETED`, which it ignores when it never knew the order. The list filter and the
+snapshot upserted by order id: creating a CREATED order published nothing until slice 23 (it now publishes `transfer.changed` with status CREATED), so a consumer
+may first have seen an order on an edit, a confirm or a `DELETED`, which it ignores when it never knew the order. The list filter and the
 line inquiry accept DRAFT; a draft is never late and not counted in the workspace tile (which keeps its five statuses). Migration 0023 adds
 `DRAFT` to the status check and the two nullable code columns (1 to 20 characters) with NOT VALID checks under a 5 s `lock_timeout`
 (catalog-only, no scan under ACCESS EXCLUSIVE; 0024 validates them, as 0020 / 0021 do), DELETE on `transfer_order` (the lines already had
@@ -324,12 +324,42 @@ codes) and `TestDeleteTransferDraftCreatedAndShipped` (stale and foreign delete,
 409 on a retried create for a deleted draft and a deleted CREATED order, the deletion records, INV-TRF-006 in transit and cancelled) and
 `TestDeleteTransferRacesShip` (a delete and a ship at the same version: one wins, never both); domain and API tests cover the rules, the duties and If-Match. Web: Save as draft
 and the two code fields on the new order form; on the order page a Draft notice with Confirm order, the edit card for drafts, and Delete
-order behind a confirmation dialog for DRAFT and CREATED orders; the list filters by Draft. Handoff (authz seed, #313): `POST
-/v1/inventory/transfer-orders/*:confirm` and `DELETE /v1/inventory/transfer-orders/*` need route rows under `inventory.transfer.write` in
-`policies/authz/data.json` (outside this wave's paths); no new duty. Not built: reopening a deleted order, keeping the deleted order's
+order behind a confirmation dialog for DRAFT and CREATED orders; the list filters by Draft. Policy bundle (#313): done, `:confirm` and `DELETE` on transfer orders are seeded under `inventory.transfer.write`. Not built: reopening a deleted order, keeping the deleted order's
 content (only its number, key, status, user and time are kept), a read API over deleted orders, a check of the two codes against a delivery
 terms / mode of delivery master (they are free codes; sales keeps its own delivery terms list), and a DRAFT status for journals or other
 documents. The OpenAPI and AsyncAPI documents have no FAIL lines on the documentation gates.
+
+PSG-1623 (wave 16 slice 23) books the supply and demand pair of a transfer order (FR-16.15, BR-16.13) and announces every order from
+its start. A direct create of a CREATED order now writes `transfer.changed` (status CREATED, every line) through the outbox in the
+same transaction, as confirming a draft does; a replayed create writes nothing, a DRAFT still nothing until confirmed. While an order
+is CREATED, SHIPPED or PARTIALLY_RECEIVED each open line holds ON_ORDER at the shipping dimension set (ordered less shipped; demand,
+lowering `availOrdered` there) and ORDERED at the receiving dimension set (ordered less received, receiving site included; supply,
+raising `availOrdered`). Create, confirm, edit (quantity changes move both legs, a removed line releases its pair, an added line books
+one, a new receiving site moves the ORDERED leg), ship (releases the shipped quantity before the stock moves, so shipping all the
+available stock is not refused for counting it twice), receive (releases the received quantity; closing a line short expects nothing
+more), cancel and delete keep the pair in step in the same transaction, emitting `onhand.changed` with `deltaBucket` ON_ORDER or
+ORDERED per moved row. Migration 0025 adds `transfer_supply` (tenant and legal-entity RLS; SELECT, INSERT, DELETE for `passage_app`):
+one row per line with the quantities booked and both dimension-set hashes, rewritten by every sync; the rebuild-and-compare reads it
+(sources `S` and `D`) the way it reads reservations and holds, so a drifted bucket is found and repaired. Store tests:
+`TestTransferBooksOnOrderAndOrderedAcrossItsLife`, `TestTransferSupplyFollowsShipAndReceive`, `TestRebuildRepairsDriftedTransferSupply`;
+domain tests for the open quantities. Review fixes: a ship or receive now takes every projection row lock in one ascending pass
+(the supply rows together with the rows its stock moves will lock; before, the ON_ORDER release locked the shipping row ahead of a
+lower-keyed transit row and could deadlock with any posting that locks in key order, `TestTransferShipLocksSupplyAndMoveRowsInOneOrder`
+reproduces the 40P01 on the earlier code), and the supply's `onhand.changed` events are written after the stock moves so each carries
+the row's final availability (a receipt no longer announces the intermediate `availOrdered` between releasing ORDERED and the stock
+arriving, `TestTransferSupplyEventsCarryFinalAvailability`); decimal quantities through partial ship, partial receipt and a short
+close return both buckets to exactly zero (`TestTransferSupplyDecimalPartialsReturnToZero`); 0025 runs under a 5 s `lock_timeout`
+and indexes `transfer_supply` by product and each dimension-set hash for the per-row rebuild repair. Readers never see a
+release without its stock move: both are in one transaction. Consumers: no other service reads `availOrdered` or `onhand.changed`
+yet (sales ATP is stateless on caller-supplied buckets, planning computes its own supply); in inventory the ON_ORDER demand lowers
+`availOrdered`, which the FR-16.4 financial-negative check reads, so where financial negative is forbidden an issue at the shipping
+warehouse (including another order's ship) is refused with INV-NEG-002 once open transfer demand exceeds the stock. Known items:
+orders already CREATED, SHIPPED or PARTIALLY_RECEIVED when 0025 is applied carry no booking until their next change (that change books
+their open quantity in full; the dimension-set hash is computed in Go, so 0025 does not backfill); booking the pair does not apply the negative-stock policy (a transfer order is a
+plan; the ship still does); the pair is booked as projection quantity without `inventory_transaction` rows, so the transaction inquiry
+does not list it and `transactions:apply` is not involved; reservations against the expected receipt (RESERVED_ORDERED) are the
+separate item below. No new duty, no new route, no front-end change (the on-hand inquiry already shows `availOrdered`). The OpenAPI and
+AsyncAPI documents have no FAIL lines on the documentation gates.
 
 Every other item in the ticket and PRD 3.16 is listed here.
 
@@ -380,7 +410,6 @@ Every other item in the ticket and PRD 3.16 is listed here.
 | 5 | Inventory status values and transitions | partial (slice 2) | BLOCKED and QUARANTINE are restricted: left out of available stock in the on-hand inquiry (`blocked` column), of reservations and of FEFO candidates. Other values remain free dimension values; the status transition matrix is not built. |
 | 6 | Transfer orders, in-transit warehouse, ship / receive, under/over-delivery, close-short | built (slice 3) | `POST` / `GET /transfer-orders`, `GET /transfer-orders/{id}`, `:ship`, `:receive`, `:cancel`. Two-step through a transit warehouse (`useTransit`, default) or one-step to the destination; optional receiving site (`toSiteId`). Each movement is a valued SOLD / PURCHASED pair (origin `TRANSFER_LINE`, reference = order id): the receipt carries the issue's running-average cost (BR-16.3), both legs are on the inventory account, so there is no GL entry (AC-16.11). Rows are locked in ascending order across all lines (BR-16.4); the shipping warehouse follows the negative policy, the transit warehouse never goes negative. Close-short within `underdeliveryPct` leaves the shortfall in transit (flagged in the inquiry); receipts beyond `overdeliveryPct` are `INV-TRF-002`; an allowed over-delivery is issued from the shipping warehouse. Cancel only before shipment (`INV-TRF-003`). Store tests: `TestTransferThroughTransitWithShortClose` (AC-16.11), `TestOneStepTransferAndOverDelivery`, `TestTransferShipRespectsAvailability`, `TestTransferIdempotencyCancelAndScope`. |
 | 6 | Transfer legs at DEDUCTED / RECEIVED (physical) status | by design until the status command exists | PRD FR-16.15 names a DEDUCTED issue and a RECEIVED receipt. Without `transactions:apply` and a financial update, physical-only legs would leave the value at the shipping warehouse (its running average and posted value wrong, the receiving warehouse valued at zero). Legs post at SOLD / PURCHASED like AX's financially updated transfer shipment; the cost-equality and no-GL rules hold. Revisit with wave 20 costing. |
-| 6 | ON_ORDER / ORDERED supply and demand pair at creation, and its cancellation | later slice of PSG-16 | The status commands exist (slice 6), but transfer orders do not register an ON_ORDER / ORDERED pair at creation yet; planning (wave 22) reads it. Creation posts nothing yet. When the pair is built, confirming a DRAFT (slice 22) must register it, deleting a CREATED order (slice 22) must cancel it, and the CREATED-order edit (slice 21) must adjust it in the same transaction: a quantity change moves both legs, a removed line cancels its pair, an added line registers one, and a receiving-site change moves the ORDERED receipt to the new site. |
 | 6 | Transit warehouse from warehouse master data (`transit_warehouse_id` per shipping warehouse, type TRANSIT), legal-entity `transfer_use_transit`, product tolerance defaults | handoff — wave 6 / wave 8 master data | The request carries `useTransit`, the transit warehouse and the per-line tolerances (default 0). |
 | 6 | "The transit dimension never carries reservations" (BR-16.13) | handoff — wave 6 (warehouse type TRANSIT) | Policy reservations do not know which warehouses are transit warehouses until the warehouse type is readable; do not reserve from transit warehouse codes. |
 | 6 | `transfer.release.v1` picking release event, batch ship / receive job, transfer number from the wave 5 sequence, shipping (`TRS-`) and receiving (`TRR-`) documents, four-eyes (`transfer_four_eyes`) | later slice of PSG-16 / handoff — waves 5, 15, 31 | Numbers are `TO-` plus 12 hex digits of the order id. Documents follow the wave 15 templates; segregation of duties belongs to the OPA bundle. |

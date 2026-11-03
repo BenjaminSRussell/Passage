@@ -652,8 +652,8 @@ func TestEditTransferChangesLinesAndEmitsEvent(t *testing.T) {
 	}
 	var n int
 	if err := admin.QueryRow(context.Background(), `select count(*) from outbox where type = 'dev.passage.inventory.transfer.changed.v1'
-		and aggregate_id = $1`, o.ID).Scan(&n); err != nil || n != 3 {
-		t.Fatalf("transfer.changed events %d (%v), want 3", n, err)
+		and aggregate_id = $1`, o.ID).Scan(&n); err != nil || n != 4 {
+		t.Fatalf("transfer.changed events %d (%v), want 4 (the create and three edits)", n, err)
 	}
 	// The event carries the changed header: receiving site and planned receipt date.
 	if err := admin.QueryRow(context.Background(), `select count(*) from outbox where type = 'dev.passage.inventory.transfer.changed.v1'
@@ -673,7 +673,7 @@ func TestEditTransferChangesLinesAndEmitsEvent(t *testing.T) {
 		t.Fatalf("edit cancelled: %v, want %s", err, domain.CodeTransferState)
 	}
 	if err := admin.QueryRow(context.Background(), `select count(*) from outbox where type = 'dev.passage.inventory.transfer.changed.v1'
-		and aggregate_id = $1`, o2.ID).Scan(&n); err != nil || n != 1 {
-		t.Fatalf("cancel events %d (%v), want 1", n, err)
+		and aggregate_id = $1`, o2.ID).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("cancel events %d (%v), want 2 (the create and the cancel)", n, err)
 	}
 }

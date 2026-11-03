@@ -52,7 +52,8 @@ func projectionKey(legalEntity, product string, hash []byte) string {
 // rebuildSource reads, in one statement and therefore one snapshot, the stored
 // projection rows ('O') and what the ledger implies for them: transaction sums
 // per status ('T') and active reservation and hold sums ('R' and 'H', which move the
-// reserved_physical and held_physical buckets without a transaction). legal entity, product and
+// reserved_physical and held_physical buckets without a transaction) and the open
+// transfer order supply ('S' on_order at the shipping set, 'D' ordered at the receiving set). legal entity, product and
 // hash narrow it to one row when set (repair under the row lock).
 const rebuildSource = `
 select 'O', o.legal_entity_id::text, o.product_id::text, o.dimension_set_hash, '', coalesce(o.currency::text, ''),
@@ -79,7 +80,19 @@ select 'H', h.legal_entity_id::text, h.product_id::text, h.dimension_set_hash, '
 from inventory_hold h
 where h.tenant_id = $1 and h.state = 'ACTIVE'
   and ($2 = '' or (h.legal_entity_id::text = $2 and h.product_id::text = $3 and h.dimension_set_hash = $4))
-group by h.legal_entity_id, h.product_id, h.dimension_set_hash`
+group by h.legal_entity_id, h.product_id, h.dimension_set_hash
+union all
+select 'S', s.legal_entity_id::text, s.product_id::text, s.source_hash, '', '',
+  sum(s.on_order_qty)::text, '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'
+from transfer_supply s
+where s.tenant_id = $1 and ($2 = '' or (s.legal_entity_id::text = $2 and s.product_id::text = $3 and s.source_hash = $4))
+group by s.legal_entity_id, s.product_id, s.source_hash
+union all
+select 'D', s.legal_entity_id::text, s.product_id::text, s.dest_hash, '', '',
+  sum(s.ordered_qty)::text, '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'
+from transfer_supply s
+where s.tenant_id = $1 and ($2 = '' or (s.legal_entity_id::text = $2 and s.product_id::text = $3 and s.dest_hash = $4))
+group by s.legal_entity_id, s.product_id, s.dest_hash`
 
 // readProjection returns the stored and the rebuilt projection, keyed by
 // projectionKey. A transaction status sum is applied through OnHand.Post, the
@@ -122,6 +135,10 @@ func readProjection(ctx context.Context, tx pgx.Tx, tenantID, legalEntity, produ
 			if p.currency == "" {
 				p.currency = currency
 			}
+		case "S":
+			p.oh.OnOrder = p.oh.OnOrder.Add(decimal.RequireFromString(b[0]))
+		case "D":
+			p.oh.Ordered = p.oh.Ordered.Add(decimal.RequireFromString(b[0]))
 		case "H":
 			p.oh.HeldPhysical = p.oh.HeldPhysical.Add(decimal.RequireFromString(b[0]))
 		default: // "R"

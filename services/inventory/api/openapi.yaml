@@ -1154,7 +1154,7 @@ paths:
   /v1/inventory/transfer-orders:
     post:
       operationId: createTransferOrder
-      summary: Create a transfer order (CREATED, or DRAFT); nothing is posted until it ships (FR-16.15)
+      summary: Create a transfer order (CREATED, or DRAFT); no stock moves until it ships (FR-16.15)
       description: |
         useTransit (default true) routes the order through transitWarehouseId, which is then
         required (INV-TRF-001); false makes a one-step transfer. Lines follow the journal line rules
@@ -1163,7 +1163,13 @@ paths:
         other than fromWarehouseId is rejected. toSiteId sets the receiving site when it differs
         from the lines' site. deliveryTerms and modeOfDelivery are free codes of at most 20
         characters kept on the header. With draft true the order is a DRAFT working copy that no
-        event announces; confirm it with :confirm, or edit or delete it first. A repeated
+        event announces and that books nothing; confirm it with :confirm, or edit or delete it
+        first. A CREATED order publishes transfer.changed (status CREATED) and books its supply
+        and demand pair: the open quantity of every line is ON_ORDER at the shipping warehouse
+        (lowering availOrdered there) and ORDERED at the receiving warehouse (raising it), until
+        the line ships and is received; edit, confirm, ship, receive, cancel and delete keep the
+        pair in step in the same transaction. No negative-stock check applies to the booking.
+        A repeated
         Idempotency-Key with the same body returns the stored order (200, Idempotent-Replayed:
         true); with a different body it is idempotency_key_reuse (422). The key of a deleted order
         stays taken: a create retried with it is idempotency_key_reuse (409) naming the deleted
@@ -1335,7 +1341,10 @@ paths:
         receiving warehouse (one-step, which also receives the shipped quantity and closes each fully shipped line) in one transaction:
         a SOLD issue valued at the source's running average and a PURCHASED receipt carrying the
         same value (BR-16.3), so there is no GL entry. Every on-hand row is locked in ascending order
-        first. The shipping warehouse follows the negative-stock policy (INV-NEG-001). shipDate
+        first. The shipping warehouse follows the negative-stock policy (INV-NEG-001); the shipped
+        quantity's own ON_ORDER demand is released before the check, while other open transfer
+        demand there still counts towards availOrdered (INV-NEG-002 where financial negative is
+        forbidden). shipDate
         (default today) is the date of this shipment's transactions and event; the order's shipDate is
         its first (earliest) shipment, so a later partial shipment does not restart the late-receipt
         clock of quantity already in transit. Emits

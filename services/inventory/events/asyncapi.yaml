@@ -352,10 +352,13 @@ components:
         shippedQty, receivedQty are the line totals (zero for an order edited before shipment);
         shipDate is the planned ship date and receiptDate is null. transfer.changed is a full
         snapshot of the order: consumers upsert it by transferOrderId, and an order can be first
-        seen on it (creating a CREATED order publishes nothing). A DRAFT order is never announced;
-        confirming it publishes transfer.changed with status CREATED. Status DELETED means the
-        order no longer exists: drop it if known, ignore it otherwise (a CREATED order deleted
-        before any edit was never announced).
+        seen on it. Creating a CREATED order publishes transfer.changed with status CREATED, so
+        consumers see every order from its start. A DRAFT order is never announced; confirming it
+        publishes transfer.changed with status CREATED. Status DELETED means the order no longer
+        exists: drop it if known, ignore it otherwise. While an order is CREATED, SHIPPED or
+        PARTIALLY_RECEIVED it holds supply and demand in the projection (each move is also an
+        onhand.changed with deltaBucket ON_ORDER at the shipping dimension set for what has not
+        shipped, and ORDERED at the receiving dimension set for what has not been received).
       properties:
         transferOrderId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
@@ -417,7 +420,7 @@ components:
         availPhysical: { type: string }
         availOrdered: { type: string }
         physicalInvent: { type: string }
-        deltaBucket: { type: string, enum: [POSTED, ON_ORDER, RESERVED_ORDERED, RESERVED_PHYSICAL, HELD_PHYSICAL, PICKED, DEDUCTED, ORDERED, ARRIVED, REGISTERED, RECEIVED], description: 'Projection bucket the change moved: POSTED for journals, blocking and transfer legs, RESERVED_PHYSICAL for reservations, HELD_PHYSICAL for holds, RECEIVED for vendor-owned consignment receipts, DEDUCTED for the vendor-owned leg of an ownership change; for a registration or status move (transactions:apply, named backward commands) the bucket of the status reached, POSTED for SOLD / PURCHASED' }
+        deltaBucket: { type: string, enum: [POSTED, ON_ORDER, RESERVED_ORDERED, RESERVED_PHYSICAL, HELD_PHYSICAL, PICKED, DEDUCTED, ORDERED, ARRIVED, REGISTERED, RECEIVED], description: 'Projection bucket the change moved: POSTED for journals, blocking and transfer legs, ON_ORDER and ORDERED for the demand and expected receipt a transfer order holds, RESERVED_PHYSICAL for reservations, HELD_PHYSICAL for holds, RECEIVED for vendor-owned consignment receipts, DEDUCTED for the vendor-owned leg of an ownership change; for a registration or status move (transactions:apply, named backward commands) the bucket of the status reached, POSTED for SOLD / PURCHASED' }
         deltaQty: { type: string, description: Net signed quantity change of that bucket }
     JournalPostedData:
       type: object

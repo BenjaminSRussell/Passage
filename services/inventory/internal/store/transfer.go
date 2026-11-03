@@ -51,8 +51,8 @@ type InTransitRow struct {
 // CreateTransfer stores a CREATED transfer order, or a DRAFT one when o.Status is
 // DRAFT (a draft posts and announces nothing until it is confirmed). A repeated Idempotency-Key
 // returns the stored order with replayed=true, or idempotency_key_reuse when the
-// body differs (422) or the order made under the key was deleted (409). Creating an order posts nothing; the supply and demand pair
-// (ON_ORDER / ORDERED) for planning is a later slice.
+// body differs (422) or the order made under the key was deleted (409). Creating a CREATED order books
+// its ON_ORDER / ORDERED pair and writes transfer.changed; it posts no stock movement.
 func (s *Postgres) CreateTransfer(ctx context.Context, key string, o domain.TransferOrder) (domain.TransferOrder, bool, error) {
 	if err := domain.ValidateNewTransfer(o, s.rules.MaxScale); err != nil {
 		return domain.TransferOrder{}, false, domainProblem(err)
@@ -125,7 +125,16 @@ func (s *Postgres) CreateTransfer(ctx context.Context, key string, o domain.Tran
 			}
 		}
 		out, err = loadTransfer(ctx, tx, id, false)
-		return err
+		if err != nil {
+			return err
+		}
+		if out.Status != domain.TransferCreated {
+			return nil // a draft books and announces nothing until it is confirmed
+		}
+		if err := syncTransferSupply(ctx, tx, tp.TenantID, out); err != nil {
+			return err
+		}
+		return enqueue(ctx, tx, "transfer", id, invevents.TransferChanged, tp.TenantID, transferData(out, orderedQty(out), time.Time{}))
 	})
 	return out, replayed, err
 }
@@ -273,7 +282,17 @@ func (s *Postgres) ShipTransfer(ctx context.Context, id string, version int, shi
 			moves = append(moves, stockMove{product: l.ProductID, unit: l.Unit, from: o.SourceDims(l), to: to, qty: qty, neg: neg})
 		}
 		doc := document{legalEntityID: o.LegalEntityID, date: shipDate, sourceType: sourceTransferLine, referenceID: o.ID}
+		// Release the shipped quantity's demand first: the negative check on the
+		// shipping row must not count it twice (as ON_ORDER and as the issue).
+		// The booking locks every row of the moves too, in one ascending pass.
+		supply, err := bookTransferSupply(ctx, tx, tp.TenantID, next, moves)
+		if err != nil {
+			return err
+		}
 		if err := moveStockBatch(ctx, tx, tp.TenantID, doc, moves); err != nil {
+			return err
+		}
+		if err := announceTransferSupply(ctx, tx, tp.TenantID, o.LegalEntityID, supply); err != nil {
 			return err
 		}
 		if err := saveTransfer(ctx, tx, tp.TenantID, next); err != nil {
@@ -342,7 +361,17 @@ func (s *Postgres) ReceiveTransfer(ctx context.Context, id string, version int, 
 			o.ReceiptDate = receiptDate
 		}
 		doc := document{legalEntityID: o.LegalEntityID, date: receiptDate, sourceType: sourceTransferLine, referenceID: o.ID}
+		// As on a ship: book (an over-delivery from the shipping warehouse releases
+		// its demand before the issue) and lock every row in one pass, move, then
+		// announce the supply rows with their final availability.
+		supply, err := bookTransferSupply(ctx, tx, tp.TenantID, o, moves)
+		if err != nil {
+			return err
+		}
 		if err := moveStockBatch(ctx, tx, tp.TenantID, doc, moves); err != nil {
+			return err
+		}
+		if err := announceTransferSupply(ctx, tx, tp.TenantID, o.LegalEntityID, supply); err != nil {
 			return err
 		}
 		if err := saveTransfer(ctx, tx, tp.TenantID, o); err != nil {
@@ -370,6 +399,9 @@ func (s *Postgres) CancelTransfer(ctx context.Context, id string, version int) (
 			return domainProblem(err)
 		}
 		o.Status = domain.TransferCancelled
+		if err := syncTransferSupply(ctx, tx, tp.TenantID, o); err != nil {
+			return err
+		}
 		if err := saveTransfer(ctx, tx, tp.TenantID, o); err != nil {
 			return err
 		}
@@ -454,6 +486,9 @@ func (s *Postgres) EditTransfer(ctx context.Context, id string, version int, e d
 		if o.Status == domain.TransferDraft {
 			return nil
 		}
+		if err := syncTransferSupply(ctx, tx, tp.TenantID, out); err != nil {
+			return err
+		}
 		return enqueue(ctx, tx, "transfer", id, invevents.TransferChanged, tp.TenantID, transferData(out, orderedQty(out), time.Time{}))
 	})
 	return out, err
@@ -474,6 +509,9 @@ func (s *Postgres) ConfirmTransfer(ctx context.Context, id string, version int) 
 			return domainProblem(err)
 		}
 		o.Status = domain.TransferCreated
+		if err := syncTransferSupply(ctx, tx, tp.TenantID, o); err != nil {
+			return err
+		}
 		if err := saveTransfer(ctx, tx, tp.TenantID, o); err != nil {
 			return err
 		}
@@ -519,6 +557,9 @@ func (s *Postgres) DeleteTransfer(ctx context.Context, id string, version int) e
 			return nil
 		}
 		o.Status = domain.TransferDeleted
+		if err := syncTransferSupply(ctx, tx, tp.TenantID, o); err != nil {
+			return err
+		}
 		return enqueue(ctx, tx, "transfer", id, invevents.TransferChanged, tp.TenantID, transferData(o, orderedQty(o), time.Time{}))
 	})
 }
@@ -578,7 +619,9 @@ type stockMove struct {
 // running average and the matching receipt carries the same value (BR-16.3),
 // so physical stock and value summed over the product are unchanged and there
 // is no GL effect. The negative policy is checked on each source row after all
-// deltas.
+// deltas. A transfer ship or receive has already locked these rows, with its
+// supply rows, in one ascending pass (bookTransferSupply); locking them again
+// here only re-reads them.
 func moveStockBatch(ctx context.Context, tx pgx.Tx, tenantID string, doc document, moves []stockMove) error {
 	rows := map[string]*row{}
 	policy := map[string]domain.NegativePolicy{}
