@@ -23,6 +23,18 @@ const (
 	AndonAfter = 10 * time.Minute
 	// AndonClearAfter is how long the condition must stay clear before an alert closes.
 	AndonClearAfter = 5 * time.Minute
+	// ScrapRatePercent is the scrap share of a bucket's pieces above which an andon is raised
+	// (FR-25.11 "scrap rate > 5% in a bucket").
+	ScrapRatePercent = 5
+	// ScrapMinCount is the fewest pieces a bucket must hold before its scrap rate counts: one
+	// reject in the first ten pieces is not a trend. The PRD names no minimum (requirements question).
+	ScrapMinCount = 10
+
+	// Andon kinds (BR-25.10: one open alert per resource and kind).
+	AndonDowntime    = "downtime"
+	AndonScrapRate   = "scrap-rate"
+	AndonQualityFail = "quality-fail"
+
 	// MaxEventAge bounds how old an edge event may be and still be accepted (BR-25.4).
 	MaxEventAge = 7 * 24 * time.Hour
 )
@@ -135,4 +147,14 @@ func AndonDue(start, now time.Time) bool {
 // since the downtime ended (BR-25.10).
 func AndonCleared(ended, now time.Time) bool {
 	return now.Sub(ended) >= AndonClearAfter
+}
+
+// ScrapRateExceeded reports whether a bucket of total pieces with good of them good has a scrap
+// share above ScrapRatePercent (FR-25.11). Integer arithmetic, so 5.00 % exactly does not raise.
+// Buckets under ScrapMinCount pieces never do.
+func ScrapRateExceeded(total, good int64) bool {
+	if total < ScrapMinCount || good < 0 || good > total {
+		return false
+	}
+	return (total-good)*100 > total*ScrapRatePercent
 }

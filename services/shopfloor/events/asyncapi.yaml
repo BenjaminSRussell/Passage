@@ -436,8 +436,8 @@ components:
     AndonRaised:
       name: dev.passage.shopfloor.andon.raised.v1
       contentType: application/cloudevents+json
-      summary: Published when a machine downtime stays open past the andon threshold (10 minutes) and an alert is raised
-      description: Published when a machine downtime stays open past the andon threshold (10 minutes) and an alert is raised.
+      summary: Published when an andon alert is raised for a downtime, a scrap rate or a quality fail
+      description: Published once when an andon alert opens (BR-25.10, one open alert per resource and kind). Kind `downtime` is a downtime open past the andon threshold (10 minutes), raised at machine ingest or by the andon sweep; `scrap-rate` is more than 5 % scrap in the latest completed OEE bucket, raised by the sweep; `quality-fail` is a failed quality check in a job feedback posting, and carries `jobId`.
       payload:
         $ref: "#/components/schemas/AndonRaisedData"
     ProcessMessageReceived:
@@ -746,7 +746,7 @@ components:
           format: uuid
         kind:
           type: string
-          enum: [downtime]
+          enum: [downtime, scrap-rate, quality-fail]
         severity:
           type: string
           enum: [info, warning, error]

@@ -56,6 +56,22 @@ the finish (an offline replay) is not SF-0113: it is stored and the server's bun
 (`registration.corrected`), so the bundle's hours count once. A start that began after the finish but was stored
 before the event arrived is closed at 0.00 h and its stop also carries `job-finished-conflict` for supervisor review.
 
+## Slice 20: andon sweep, scrap rate and quality fail alerts (FR-25.11)
+
+`POST /v1/shopfloor/andon:sweep` (duty `shopfloor.oee.rollup`, the scheduler identity that runs the OEE rollup; no
+person role holds it) is the scheduled andon job. It raises the downtime alert for every downtime open more than 10
+minutes (a machine that fell silent while DOWN never ingests again), clears downtime alerts 5 minutes after the downtime
+ended, and reads the latest completed `oee_bucket` of each machine's resource: more than 5 % scrap in at least 10 pieces
+raises a `scrap-rate` alert; a later bucket at or under 5 % that ended 5 minutes ago clears it. It locks the machine rows
+it raises for and skips a machine whose events are being ingested (that ingest raises the alert itself).
+A feedback posting with a failed check raises a `quality-fail` alert naming the job; a later posting that leaves the job
+without a failed result clears it, and `POST andon/{id}:clear` (duty `shopfloor.check.override`, the supervisor's
+authority over a failed check; reason, `Idempotency-Key`) clears it by hand. One open alert per resource and kind
+(BR-25.10), so a failure another job on the resource records while the alert is open is folded into it; when that alert
+clears (either way) such a failure raises a new alert for its job. Each raise publishes `andon.raised` (kind and `jobId`).
+Migration 0019 widens `andon_alert.kind` and adds `job_id`, `detail` (cut to 500 characters), `cleared_by` and
+`clear_reason`. The sweep is idempotent and takes no key; the scheduler that calls it is a handoff.
+
 ## Slice 15: supervisor reopen of a finished job (FR-25.3)
 
 A finished job takes no feedback (SF-0122) and leaves the dispatch list. `POST jobs/{id}:reopen` (duty
@@ -630,6 +646,8 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0159` | 422 | The downtime reason is inactive |
 | `SF-0160` | 422 | The category sent when coding a downtime is not the reason's category |
 | `SF-0161` | 422 | Quantity feedback on a job whose operation production finished; reopen the operation in production |
+| `SF-0162` | 404 | No open andon alert has that id (unknown, or already cleared) |
+| `SF-0163` | 422 | Only a quality-fail alert is cleared by hand; a downtime or scrap-rate alert clears itself after 5 minutes |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Warnings on an accepted registration (`items[].warnings`, the request succeeds):

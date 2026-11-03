@@ -95,6 +95,8 @@ func (a *API) registerFloor(r chi.Router) {
 	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/downtimes", a.listDowntimes)
 	r.With(authz.RequireDuty(DutyRegister)).Post("/v1/shopfloor/downtimes/{id}:code", a.codeDowntime)
 	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/andon", a.listAndon)
+	r.With(authz.RequireDuty(DutyOEERollup)).Post("/v1/shopfloor/andon:sweep", a.sweepAndon)
+	r.With(authz.RequireDuty(DutyCheckOverride)).Post("/v1/shopfloor/andon/{id}:clear", a.clearAndon)
 	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/oee", a.oee)
 	r.With(authz.RequireDuty(DutyOEERollup)).Post("/v1/shopfloor/oee:rollup", a.rollupOEE)
 	r.With(authz.RequireDuty(DutyExport)).Post("/v1/shopfloor/pay:export", a.exportPay)

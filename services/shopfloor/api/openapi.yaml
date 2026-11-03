@@ -804,6 +804,85 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
+  /v1/shopfloor/andon:sweep:
+    post:
+      operationId: sweepAndon
+      summary: Andon sweep job - raise and clear alerts without machine events (FR-25.11)
+      description: |
+        The scheduled andon job. The platform scheduler calls it per tenant (every minute is
+        enough) with the service identity that runs the OEE rollup (duty `shopfloor.oee.rollup`,
+        which no person role holds).
+        Raising and clearing a downtime alert otherwise happen only when the machine sends events,
+        so a machine that went DOWN and then fell silent would never raise one. The sweep, in one
+        transaction, raises a downtime alert for every downtime open for more than 10 minutes,
+        clears the downtime alerts whose downtime ended at least 5 minutes ago, and reads the
+        latest completed stored OEE bucket of each resource: more than 5 % scrap in a bucket of at
+        least 10 pieces raises a `scrap-rate` alert, and the alert clears once the latest completed
+        bucket is back at or under 5 % and ended at least 5 minutes ago (BR-25.10). Alerts raised
+        publish `dev.passage.shopfloor.andon.raised.v1`. Repeating the call changes nothing, so it
+        takes no Idempotency-Key and no body. Scrap rate needs the OEE rollup (`oee:rollup`) to have stored the buckets.
+      x-passage-duty: shopfloor.oee.rollup
+      responses:
+        "200":
+          description: What the sweep raised and cleared.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AndonSweepResult"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/andon/{id}:clear:
+    post:
+      operationId: clearAndon
+      summary: Clear a quality-fail andon alert with a reason (FR-25.11)
+      description: |
+        A shop floor supervisor (duty `shopfloor.check.override`, the authority to override a
+        failed check with a reason) acknowledges a quality-fail alert (raised when a feedback
+        posting records a failed check) and clears it with a reason; the user and reason are kept
+        on the alert. A failed check another job on the resource recorded while this alert was
+        open raises a new alert for that job in the same transaction. An
+        alert that is unknown or already cleared is SF-0162 (404). A downtime or scrap-rate alert is
+        not cleared by hand, because the machine's own data clears it once the condition has been
+        clear for 5 minutes: SF-0163 (422). A later feedback posting that leaves no failed check on
+        the alert's job clears it too.
+      x-passage-duty: shopfloor.check.override
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AndonClear"
+      responses:
+        "200":
+          description: The alert as it was before it was cleared.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Andon"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
   /v1/shopfloor/oee:
     get:
       operationId: getOee
@@ -3943,7 +4022,7 @@ components:
           description: Omit to keep the current category (or take the reason's, when the tenant maintains downtime reasons).
     Andon:
       type: object
-      required: [id, resourceId, siteId, kind, severity, downtimeId, startedAt]
+      required: [id, resourceId, siteId, kind, severity, downtimeId, jobId, detail, startedAt]
       properties:
         id:
           type: string
@@ -3956,16 +4035,46 @@ components:
           format: uuid
         kind:
           type: string
-          enum: [downtime]
+          enum: [downtime, scrap-rate, quality-fail]
+          description: One open alert per resource and kind (BR-25.10).
         severity:
           type: string
           enum: [info, warning, error]
         downtimeId:
           type: [string, "null"]
           format: uuid
+        jobId:
+          type: [string, "null"]
+          format: uuid
+          description: The job whose failed check raised a quality-fail alert.
+        detail:
+          type: [string, "null"]
+          description: One line on what raised a scrap-rate or quality-fail alert.
         startedAt:
           type: string
           format: date-time
+    AndonClear:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    AndonSweepResult:
+      type: object
+      required: [downtimeRaised, scrapRateRaised, cleared]
+      properties:
+        downtimeRaised:
+          type: integer
+          description: Downtime alerts raised for downtimes open over 10 minutes.
+        scrapRateRaised:
+          type: integer
+          description: Scrap-rate alerts raised from the latest completed OEE buckets.
+        cleared:
+          type: integer
+          description: Downtime and scrap-rate alerts whose condition had been clear for 5 minutes.
     OeeBucket:
       type: object
       required: [resourceId, bucketStart, plannedMinutes, runMinutes, downMinutes, totalCount, goodCount,

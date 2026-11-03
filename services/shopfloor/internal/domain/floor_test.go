@@ -185,3 +185,26 @@ func equalSeqs(a, b []int64) bool {
 	}
 	return true
 }
+
+// FR-25.11: scrap above 5 % of a bucket's pieces raises an andon; exactly 5 % and buckets of
+// fewer than ten pieces do not.
+func TestScrapRateExceeded(t *testing.T) {
+	for _, tt := range []struct {
+		total, good int64
+		want        bool
+	}{
+		{100, 94, true},
+		{100, 95, false},
+		{100, 100, false},
+		{20, 18, true},
+		{20, 19, false},
+		{10, 9, true},
+		{9, 0, false},
+		{0, 0, false},
+		{10, 11, false},
+	} {
+		if got := ScrapRateExceeded(tt.total, tt.good); got != tt.want {
+			t.Errorf("ScrapRateExceeded(%d, %d) = %v, want %v", tt.total, tt.good, got, tt.want)
+		}
+	}
+}
