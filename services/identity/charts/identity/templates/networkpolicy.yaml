@@ -1,0 +1,47 @@
+{{- if and .Values.bundle.enabled (empty .Values.networkPolicy.opaPodLabels) }}
+{{- fail "networkPolicy.opaPodLabels must be set when bundle.enabled: the bundle port is only admitted to labelled OPA pods" }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: identity
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: identity
+  policyTypes: [Ingress]
+  ingress:
+    {{- if or .Values.networkPolicy.gatewayNamespaces .Values.networkPolicy.allowSameNamespace }}
+    - from:
+        {{- range .Values.networkPolicy.gatewayNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $.Values.networkPolicy.gatewayPodLabels | nindent 14 }}
+        {{- end }}
+        {{- if .Values.networkPolicy.allowSameNamespace }}
+        - podSelector: {}
+        {{- end }}
+      ports:
+        - { protocol: TCP, port: 8080 }
+    {{- end }}
+    {{- if .Values.bundle.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.opaPodLabels | nindent 14 }}
+        {{- range .Values.networkPolicy.opaNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $.Values.networkPolicy.opaPodLabels | nindent 14 }}
+        {{- end }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.bundle.port }} }
+    {{- end }}

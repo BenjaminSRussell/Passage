@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: identity
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/BenjaminSRussell/Passage.git
+    targetRevision: main
+    path: services/identity/charts/identity
+    helm:
+      valuesObject:
+        image:
+          repository: ghcr.io/benjaminsrussell/identity
+          digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+        migrateDatabaseSecret: identity-db-owner
+        migrateOnStart: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: hello-ledger
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

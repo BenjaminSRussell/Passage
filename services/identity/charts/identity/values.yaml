@@ -1,0 +1,31 @@
+image:
+  repository: ghcr.io/benjaminsrussell/identity
+  digest: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+databaseSecret: identity-db
+migrateDatabaseSecret: ""
+migrateOnStart: false
+operatorTenantId: ""
+scim:
+  issuerBase: ""
+  audience: passage-api
+  opaUrl: ""
+bundle:
+  enabled: false
+  secret: identity-bundle
+  keyId: identity-policy
+  port: 8443
+networkPolicy:
+  gatewayNamespaces: [envoy-gateway-system]
+  gatewayPodLabels:
+    gateway.envoyproxy.io/owning-gateway-name: passage-api
+    gateway.envoyproxy.io/owning-gateway-namespace: hello-ledger
+  allowSameNamespace: false
+  opaNamespaces: []
+  opaPodLabels:
+    passage.io/opa-sidecar: "true"
+replicaCount: 1
+resources:
+  requests: { cpu: 50m, memory: 64Mi }
+  limits: { cpu: 250m, memory: 128Mi }

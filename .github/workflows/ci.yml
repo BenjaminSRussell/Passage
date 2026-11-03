@@ -67,6 +67,41 @@ jobs:
       - run: make test-go
       - run: node --test data/cube/cube.test.js
 
+  keycloak:
+    if: inputs.go
+    runs-on: ubuntu-24.04
+    env:
+      PASSAGE_TEST_KEYCLOAK_URL: http://localhost:8080
+      PASSAGE_TEST_KEYCLOAK_ADMIN: admin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.25'
+          cache-dependency-path: '**/go.sum'
+      - run: |
+          password="Kc-$(openssl rand -hex 16)"
+          echo "::add-mask::$password"
+          echo "PASSAGE_TEST_KEYCLOAK_ADMIN_PASSWORD=$password" >> "$GITHUB_ENV"
+      - run: >-
+          docker run -d --name keycloak -p 8080:8080
+          -e KC_BOOTSTRAP_ADMIN_USERNAME="$PASSAGE_TEST_KEYCLOAK_ADMIN"
+          -e KC_BOOTSTRAP_ADMIN_PASSWORD="$PASSAGE_TEST_KEYCLOAK_ADMIN_PASSWORD"
+          -e KC_HOSTNAME_STRICT=false
+          -v "$PWD/deploy/keycloak/realm-passage.json:/opt/keycloak/data/import/realm-passage.json:ro"
+          quay.io/keycloak/keycloak:26.0.8 start-dev --import-realm
+      - run: |
+          for _ in $(seq 1 60); do
+            curl -fsS http://localhost:8080/realms/passage/.well-known/openid-configuration >/dev/null && exit 0
+            sleep 3
+          done
+          docker logs keycloak
+          exit 1
+      - run: go test -count=1 -run 'Keycloak' -v ./...
+        working-directory: services/identity
+      - if: failure()
+        run: docker logs keycloak
+
   lint:
     if: inputs.go
     name: lint (${{ matrix.module }})
@@ -195,8 +230,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
-      - run: helm lint services/platform-health/charts/hello-ledger services/receiving/charts/receiving services/fx/charts/fx services/org/charts/org
+      - run: helm lint services/platform-health/charts/hello-ledger services/receiving/charts/receiving services/fx/charts/fx services/org/charts/org services/identity/charts/identity
       - run: bash services/receiving/charts/receiving/test-env.sh
+      - run: bash services/identity/charts/identity/test-networkpolicy.sh
 
   deploy-release:
     runs-on: ubuntu-24.04
