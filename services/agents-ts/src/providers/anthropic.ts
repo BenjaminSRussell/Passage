@@ -1,7 +1,7 @@
 import { assertNoPii } from "../domain/redaction.js";
 import type { ModelProvider, ModelResponse, ModelUsage } from "../runtime/engine.js";
 import { postJson } from "./http.js";
-import { isRecord, PROPOSE_TOOL_NAME, providerRejected, proposeTool, toModelResponse } from "./wire.js";
+import { isRecord, PROPOSE_TOOL_NAME, providerRejected, proposeTool, toModelResponse, outputLimit } from "./wire.js";
 
 export interface AnthropicConfig {
   apiKey: string;
@@ -26,7 +26,7 @@ export function createAnthropicProvider(cfg: AnthropicConfig): ModelProvider {
         { "x-api-key": cfg.apiKey, "anthropic-version": "2023-06-01" },
         {
           model: cfg.model,
-          max_tokens: cfg.maxTokens ?? 1024,
+          max_tokens: outputLimit(cfg.maxTokens, req.maxOutputTokens),
           system: req.system,
           messages: [{ role: "user", content: req.user }],
           tools: [{ name: tool.name, description: tool.description, input_schema: tool.inputSchema }],

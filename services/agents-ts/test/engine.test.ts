@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { runAgent } from "../src/runtime/engine.js";
-import { APPROVER, codingDescriptor, FakeApprovals, FakeTools, INVOKER, makeDeps, makeRequest, postDescriptor, proposal, REAL_IBAN, ScriptedProvider, usd } from "./fakes.js";
+import { APPROVER, codingDescriptor, FakeApprovals, FakeTools, INVOKER, makeDeps, makeRequest, memoryBudgets, postDescriptor, proposal, REAL_IBAN, ScriptedProvider, usd } from "./fakes.js";
 
 const CODING = "passage.ap.invoice.propose_coding";
 const tools = () => new FakeTools({ "passage.ap.invoice.post": postDescriptor, [CODING]: codingDescriptor });
@@ -159,12 +159,11 @@ describe("runAgent start rejections and limits", () => {
   });
 
   it("rejects a start when the monthly budget is exhausted (AC-47.7)", async () => {
-    await expect(
-      runAgent(
-        makeDeps({ provider: new ScriptedProvider([]), tools: tools(), approvals: new FakeApprovals({ decision: "APPROVED", approverUserId: APPROVER }) }),
-        makeRequest({ budget: { limitIn: 100, limitOut: 100, usedIn: 100, usedOut: 0, softPct: 80 } }),
-      ),
-    ).rejects.toThrow("AGT-0202");
+    const deps = {
+      ...makeDeps({ provider: new ScriptedProvider([]), tools: tools(), approvals: new FakeApprovals({ decision: "APPROVED", approverUserId: APPROVER }) }),
+      budgets: memoryBudgets({ limitIn: 100, limitOut: 100, usedIn: 100, usedOut: 0, softPct: 80 }),
+    };
+    await expect(runAgent(deps, makeRequest())).rejects.toThrow("AGT-0202");
   });
 
   it("rejects a start without a passing eval for the version (AGT-0204)", async () => {
@@ -201,10 +200,11 @@ describe("runAgent start rejections and limits", () => {
   it("runs past the per-run token cap end FAILED with AGT-0202, and the spent tokens still count", async () => {
     const big = { ...proposal(0.8), usage: { tokensIn: 300_000, tokensOut: 150_000 } };
     const t = tools();
-    const result = await runAgent(
-      makeDeps({ provider: new ScriptedProvider([big]), tools: t, approvals: new FakeApprovals({ decision: "APPROVED", approverUserId: APPROVER }) }),
-      makeRequest({ budget: { limitIn: 1_000_000, limitOut: 1_000_000, usedIn: 500_000, usedOut: 0, softPct: 80 } }),
-    );
+    const deps = {
+      ...makeDeps({ provider: new ScriptedProvider([big]), tools: t, approvals: new FakeApprovals({ decision: "APPROVED", approverUserId: APPROVER }) }),
+      budgets: memoryBudgets({ limitIn: 1_000_000, limitOut: 1_000_000, usedIn: 500_000, usedOut: 0, softPct: 80 }),
+    };
+    const result = await runAgent(deps, makeRequest());
     expect(result).toMatchObject({ status: "FAILED", code: "AGT-0202", tokensIn: 300_000 });
     expect(result.budgetState).toBe("SOFT");
     expect(t.calls).toHaveLength(0);
@@ -246,10 +246,11 @@ describe("runAgent start rejections and limits", () => {
 
   it("marks estimated usage when the provider reports none (BR-47.4) and reports budget state", async () => {
     const noUsage = { text: "Proposed [IBAN-1]." , proposal: { ...proposal(0.8).proposal! } };
-    const result = await runAgent(
-      makeDeps({ provider: new ScriptedProvider([noUsage]), tools: tools(), approvals: new FakeApprovals({ decision: "REJECTED", approverUserId: APPROVER }) }),
-      makeRequest({ budget: { limitIn: 50_000_000, limitOut: 10_000_000, usedIn: 42_000_000, usedOut: 0, softPct: 80 } }),
-    );
+    const deps = {
+      ...makeDeps({ provider: new ScriptedProvider([noUsage]), tools: tools(), approvals: new FakeApprovals({ decision: "REJECTED", approverUserId: APPROVER }) }),
+      budgets: memoryBudgets({ limitIn: 50_000_000, limitOut: 10_000_000, usedIn: 42_000_000, usedOut: 0, softPct: 80 }),
+    };
+    const result = await runAgent(deps, makeRequest());
     expect(result.estimated).toBe(true);
     expect(result.tokensIn).toBeGreaterThan(0);
     expect(result.budgetState).toBe("SOFT");
