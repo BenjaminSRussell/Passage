@@ -1971,7 +1971,8 @@
       {"resource": "/v1/integration/sync-status/*/absent", "methods": ["GET"]},
       {"resource": "/v1/integration/lookup-tables", "methods": ["GET"]},
       {"resource": "/v1/integration/lookup-tables/*", "methods": ["GET"]},
-      {"resource": "/v1/integration/lookup-tables/*/versions", "methods": ["GET"]}
+      {"resource": "/v1/integration/lookup-tables/*/versions", "methods": ["GET"]},
+      {"resource": "/v1/integration/lookup-tables/*/entries.csv", "methods": ["GET"]}
     ]},
     "migration.connection.write": {"permissions": [
       {"resource": "/v1/integration/connection-profiles", "methods": ["POST"]},
@@ -1991,7 +1992,8 @@
       {"resource": "/v1/integration/projects/*", "methods": ["PATCH"]},
       {"resource": "/v1/integration/projects/*/key-rewrite-rules", "methods": ["PUT"]},
       {"resource": "/v1/integration/lookup-tables", "methods": ["POST"]},
-      {"resource": "/v1/integration/lookup-tables/*", "methods": ["PATCH"]}
+      {"resource": "/v1/integration/lookup-tables/*", "methods": ["PATCH"]},
+      {"resource": "/v1/integration/lookup-tables/*:import", "methods": ["POST"]}
     ]},
     "notify.read": {"permissions": [{"resource": "/v1/notify/messages", "methods": ["GET"]}]},
     "notify.send": {"permissions": [{"resource": "/v1/notify/messages", "methods": ["POST"]}]},
