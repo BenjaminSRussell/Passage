@@ -127,6 +127,9 @@ func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders", a.listOrders)
 	r.With(authz.RequireDuty(DutyWrite)).Post("/v1/production/orders", a.createOrder)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/planned-intake", a.listIntake)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/planned-intake/{id}", a.getIntake)
+	r.With(authz.RequireDuty(DutyWrite)).Post("/v1/production/planned-intake/{id}", a.intakeCommand)
 	r.With(authz.RequireDuty(DutyCreateFromSales)).Post("/v1/production/sales-line-orders", a.createFromSalesLine)
 	r.With(authz.RequireDuty(DutyRelease)).Post("/v1/production/orders:bulk-status", a.bulkStatus)
 	r.With(authz.RequireDuty(DutyRelease)).Post("/v1/production/orders:merge", a.merge)
@@ -273,6 +276,12 @@ func (a *API) create(w http.ResponseWriter, r *http.Request, fromSalesLine bool)
 		httpx.Fail(w, r, err)
 		return
 	}
+	a.createWith(w, r, p, req, fromSalesLine, nil)
+}
+
+// createWith validates and creates the order of req. An intake row makes it the conversion of a firmed
+// planned order (FR-22.10): the order takes the planned order's target id and the row is marked converted.
+func (a *API) createWith(w http.ResponseWriter, r *http.Request, p tenant.Principal, req createRequest, fromSalesLine bool, intake *store.PlannedIntake) {
 	if req.LegalEntityID == "" {
 		req.LegalEntityID = p.LegalEntityID
 	}
@@ -343,6 +352,7 @@ func (a *API) create(w http.ResponseWriter, r *http.Request, fromSalesLine bool)
 		Currency: req.Currency, Quantity: req.Quantity, DeliveryDate: req.DeliveryDate, OriginType: req.OriginType, OriginID: req.OriginID, ConfigurationID: req.ConfigurationID,
 		ReworkReference: req.ReworkReference, Lines: lines, Operations: ops, CoProducts: coProducts, EstimateOnCreate: a.cfg.EstimateOnCreate,
 		TraceID: middleware.GetReqID(r.Context()), IdempotencyKey: key, RequestHash: hashOf(req),
+		ID: intakeOrderID(intake), PlannedIntakeID: intakeRowID(intake),
 	})
 	if err != nil {
 		a.fail(w, r, "create production order", err)

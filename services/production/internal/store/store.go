@@ -155,6 +155,11 @@ type NewOrder struct {
 	OriginType      string
 	OriginID        *string
 	ConfigurationID *string
+	// ID is the id the order takes; empty draws a new one. A planned-order conversion sets it to the
+	// planned order's target id (FR-22.10).
+	ID string
+	// PlannedIntakeID is the intake row this order converts; the row is marked converted in the same transaction.
+	PlannedIntakeID string
 	// ReworkReference names the original of a rework order (OriginType Rework), or is nil.
 	ReworkReference *domain.ReworkRef
 	Lines           []domain.OrderLine
@@ -207,6 +212,9 @@ type Transition struct {
 type Store interface {
 	Ping(ctx context.Context) error
 	CreateOrder(ctx context.Context, in NewOrder) (Order, bool, error)
+	GetPlannedIntake(ctx context.Context, id string) (PlannedIntake, error)
+	ListPlannedIntake(ctx context.Context, f IntakeFilter) (IntakePage, error)
+	DismissPlannedIntake(ctx context.Context, in IntakeDismiss) (PlannedIntake, error)
 	GetOrder(ctx context.Context, id string) (Order, error)
 	ListOrders(ctx context.Context, f ListFilter) (OrderPage, error)
 	StatusLog(ctx context.Context, orderID string) ([]StatusLogEntry, error)
@@ -330,9 +338,19 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 		if err != nil {
 			return err
 		}
+		if in.PlannedIntakeID != "" {
+			if err := lockOpenIntake(ctx, tx, p.TenantID, in.PlannedIntakeID); err != nil {
+				return err
+			}
+		}
 		id, err := insertOrder(ctx, tx, p.TenantID, p.UserID, in)
 		if err != nil {
 			return err
+		}
+		if in.PlannedIntakeID != "" {
+			if err := convertIntake(ctx, tx, p.TenantID, p.UserID, in.PlannedIntakeID, id); err != nil {
+				return err
+			}
 		}
 		if prm.EstimateOnCreate {
 			if err := estimateOnCreate(ctx, tx, p.TenantID, p.UserID, id, in); err != nil {
@@ -433,7 +451,10 @@ func insertOrder(ctx context.Context, tx pgx.Tx, tenantID, actor string, in NewO
 		t := string(ref.Type)
 		refType, refID = &t, &ref.ID
 	}
-	id := ids.New()
+	id := in.ID
+	if id == "" {
+		id = ids.New()
+	}
 	number := fmt.Sprintf("PO-%06d", seq)
 	if _, err := tx.Exec(ctx, `insert into production_order (tenant_id, id, legal_entity_id, order_number, product_id, site_id, warehouse_id, currency,
 		quantity, delivery_date, origin_type, origin_id, idempotency_key, request_hash, item_group, rework_reference_type, rework_reference_id, configuration_id)

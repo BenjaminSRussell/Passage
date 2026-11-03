@@ -80,6 +80,7 @@ type fakeStore struct {
 	snapPage    store.CostSnapshotPage
 	// order change management (FR-21.16)
 	ocm    ocmFake
+	intake intakeFake
 	params paramsFake
 
 	finite        []store.FiniteDates
@@ -95,6 +96,9 @@ func (f *fakeStore) CreateOrder(_ context.Context, in store.NewOrder) (store.Ord
 			return store.Order{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeIdempotencyReuse, "reused")
 		}
 		return f.order, false, nil
+	}
+	if row, ok := f.intake.rows[in.PlannedIntakeID]; ok && row.Status != store.IntakeOpen {
+		return store.Order{}, false, httpx.NewProblem(http.StatusConflict, store.CodeIntakeNotOpen, "the planned order is already "+row.Status)
 	}
 	f.created = append(f.created, in)
 	if f.replayHash == nil {

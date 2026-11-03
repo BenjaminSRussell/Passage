@@ -27,7 +27,15 @@ const (
 
 func main() {
 	slog.SetDefault(newLogger(os.Stdout))
-	if err := run(context.Background(), os.Getenv); err != nil {
+	runner := run
+	if len(os.Args) > 1 {
+		if os.Args[1] != "consume" {
+			slog.Error("production stopped", "err", fmt.Errorf("unknown command %q (use no argument to serve or \"consume\" to run the planned order consumer)", os.Args[1]))
+			os.Exit(1)
+		}
+		runner = consume
+	}
+	if err := runner(context.Background(), os.Getenv); err != nil {
 		slog.Error("production stopped", "err", err)
 		os.Exit(1)
 	}
@@ -140,4 +148,19 @@ func addr(getenv func(string) string, key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// consume runs the planned order consumer (FR-22.10): it follows planning's plannedorder.firmed.v1 into
+// the production intake. It does not migrate and serves no API; its admin port has health and metrics.
+func consume(ctx context.Context, getenv func(string) string) error {
+	databaseURL := getenv("DATABASE_URL")
+	if databaseURL == "" {
+		return errors.New("DATABASE_URL is required")
+	}
+	pool, err := dbx.Connect(ctx, databaseURL)
+	if err != nil {
+		return fmt.Errorf("connect database: %w", err)
+	}
+	defer pool.Close()
+	return runConsumer(ctx, getenv, store.New(pool), pool)
 }

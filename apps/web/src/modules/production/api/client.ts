@@ -1555,6 +1555,81 @@ export function dismissOrderChange(id: string, version: number, note: string): P
   });
 }
 
+export type IntakeStatus = "open" | "converted" | "dismissed";
+
+export const INTAKE_STATUSES: IntakeStatus[] = ["open", "converted", "dismissed"];
+
+/** A firmed production planned order waiting to become a production order (FR-22.10). */
+export interface PlannedIntake {
+  id: string;
+  /** The planned order's legal entity, which the converted order takes; null while planning's event does not carry it. */
+  legalEntityId: string | null;
+  plannedOrderId: string;
+  planVersionId: string;
+  batchId: string;
+  /** The id the production order takes when the row is converted. */
+  targetId: string;
+  productId: string;
+  siteId: string;
+  /** The warehouse of a warehouse planning scope (FR-22.18); null for the site scope. */
+  warehouseId: string | null;
+  quantity: string;
+  orderDate: string;
+  deliveryDate: string;
+  quotaArrangementId: string | null;
+  quotaSourceId: string | null;
+  status: IntakeStatus;
+  orderId: string | null;
+  dismissReason: string | null;
+  version: number;
+  receivedAt: string;
+  updatedAt: string;
+}
+
+export interface IntakePage {
+  items: PlannedIntake[];
+  nextCursor?: string;
+}
+
+export interface IntakeQuery {
+  status?: IntakeStatus | "";
+  siteId?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+/** The firmed planned orders waiting for a production order, newest first. */
+export async function listPlannedIntake({ limit = 50, ...filter }: IntakeQuery = {}, signal?: AbortSignal): Promise<IntakePage> {
+  const params = query({ ...filter, limit });
+  const body = await requestAt<Partial<IntakePage>>(`${root}/planned-intake?${params}`, { signal });
+  return { items: Array.isArray(body.items) ? body.items : [], nextCursor: body.nextCursor };
+}
+
+export function getPlannedIntake(id: string, signal?: AbortSignal): Promise<PlannedIntake> {
+  return requestAt<PlannedIntake>(`${root}/planned-intake/${encodeURIComponent(id)}`, { signal });
+}
+
+/**
+ * Creates the production order of an open row: the order takes the planned order's product, site,
+ * quantity, delivery date and warehouse; the body supplies the BOM and route. A retry with the same
+ * key replays the first order.
+ */
+export function convertPlannedIntake(id: string, input: CreateOrderInput, idempotencyKey: string): Promise<ProductionOrder> {
+  return requestAt<ProductionOrder>(`${root}/planned-intake/${encodeURIComponent(id)}:convert`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(input),
+  });
+}
+
+export function dismissPlannedIntake(id: string, version: number, reason: string): Promise<PlannedIntake> {
+  return requestAt<PlannedIntake>(`${root}/planned-intake/${encodeURIComponent(id)}:dismiss`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "If-Match": `"${version}"` },
+    body: JSON.stringify({ reason }),
+  });
+}
+
 /** Merge takes orders before Started, where nothing is posted yet (FR-21.15). */
 export function canMerge(status: ProductionStatus): boolean {
   return status === "Created" || status === "Estimated" || status === "Scheduled" || status === "Released";

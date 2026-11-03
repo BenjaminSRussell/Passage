@@ -2,6 +2,7 @@ import type { BadgeTone } from "../../shell/ui";
 import type {
   BulkCommand,
   ChangeStatus,
+  IntakeStatus,
   CoProductType,
   OCMMode,
   SplitAllocation,
@@ -329,3 +330,7 @@ export const directionLabel: Record<ScheduleDirection, string> = {
 
 /** A schedule instant as the UTC date and minute it falls on, for tables. */
 export const instant = (value: string): string => (value ? `${value.slice(0, 10)} ${value.slice(11, 16)}Z` : dash);
+
+export const intakeStatusLabel: Record<IntakeStatus, string> = { open: "Waiting", converted: "Converted", dismissed: "Dismissed" };
+
+export const intakeStatusTone: Record<IntakeStatus, BadgeTone> = { open: "warning", converted: "success", dismissed: "neutral" };

@@ -20,3 +20,17 @@ serviceIdentity:
   signingKeySecret: ""
   keyId: ""
   publicKeys: ""
+
+# The planned order consumer (slice 25). It exits at start until service:production-planning is
+# seeded in the service principal table.
+consumer:
+  enabled: false
+  replicaCount: 1
+  kafka:
+    brokers: ""
+    group: production-planning
+    username: production-consumer
+    secret: ""
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 256Mi }

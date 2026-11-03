@@ -582,3 +582,20 @@ Slice 23:
   type `rework-capitalized`) instead of posting a `rework` variance (one ended without output still
   posts it); `order.settled` carries `reworkCapitalized` for inventory and costing to add to the
   receipts' value (handoff). The parameters page has the setting.
+
+Slice 25:
+
+- The planned order intake (FR-22.10, FR-22.18). `production consume` (chart value `consumer.enabled`)
+  follows planning's `plannedorder.firmed.v1`, stores each production planned order in
+  `production_planned_intake` (migration 0024, tenant and legal-entity RLS, select/insert/update
+  grants) with its warehouse and legal entity (when the event names one; planning's does not yet, and
+  such rows are visible to all-entity callers only), and ignores purchase and transfer orders. It runs as service principal
+  `production-planning` (seeded) and refuses to start if that principal is missing from the service
+  principal table.
+- `GET /v1/production/planned-intake` (status, site, keyset paging) and `GET …/{id}`;
+  `POST …/{id}:convert` creates the production order under the planned order's `target_id` with the
+  row's legal entity, product, site, quantity, delivery date and warehouse, originType `PlannedOrder`,
+  and takes the BOM, route and currency from the body; the row is marked converted in the same
+  transaction, and a retry with the same Idempotency-Key replays the order. `:dismiss` sets a row aside with a reason under If-Match.
+- The web module has the Planned orders list, the detail with dismiss, and the convert form (the
+  create form with the planned order's fields locked).

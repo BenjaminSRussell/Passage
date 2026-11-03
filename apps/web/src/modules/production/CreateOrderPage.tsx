@@ -2,12 +2,14 @@ import { useRef, useState, type FormEvent } from "react";
 import { Alert, Button, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
 import {
   REWORK,
+  convertPlannedIntake,
   createOrder,
   describeProblem,
   newIdempotencyKey,
   type CoProductType,
   type CreateOrderInput,
   type Flushing,
+  type PlannedIntake,
   type Problem,
   type ProductionOrder,
   type ReworkRefType,
@@ -278,11 +280,27 @@ export interface CreateProductionOrderPageProps {
   onCancel?(): void;
   /** Prefilled values, for example a rework order started from its original order. */
   initial?: Partial<OrderValues>;
+  /**
+   * The firmed planned order this form converts (FR-22.10). Product, quantity, delivery date, site and
+   * the planned warehouse come from the row and are read-only; the BOM and route are entered as usual.
+   */
+  intake?: PlannedIntake;
+}
+
+/** The form values a planned order fixes. */
+export function intakeValues(row: PlannedIntake): Partial<OrderValues> {
+  return {
+    productId: row.productId,
+    siteId: row.siteId,
+    warehouseId: row.warehouseId ?? "",
+    quantity: row.quantity,
+    deliveryDate: row.deliveryDate,
+  };
 }
 
 /** Create a production order (FR-21.1): header, BOM lines and route; the service explodes and plans them. */
-export function CreateProductionOrderPage({ onCreated, onCancel, initial }: CreateProductionOrderPageProps) {
-  const [values, setValues] = useState<OrderValues>(() => ({ ...initialValues(), ...initial }));
+export function CreateProductionOrderPage({ onCreated, onCancel, initial, intake }: CreateProductionOrderPageProps) {
+  const [values, setValues] = useState<OrderValues>(() => ({ ...initialValues(), ...initial, ...(intake ? intakeValues(intake) : {}) }));
   const [errors, setErrors] = useState<OrderErrors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -310,7 +328,7 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial }: Crea
     }
     setBusy(true);
     try {
-      const order = await createOrder(toInput(values), key.current);
+      const order = intake ? await convertPlannedIntake(intake.id, toInput(values), key.current) : await createOrder(toInput(values), key.current);
       key.current = newIdempotencyKey();
       onCreated?.(order);
     } catch (error) {
@@ -327,10 +345,10 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial }: Crea
     }
   };
 
-  const text = (id: string, label: string, value: string, onChange: (v: string) => void, extra: { optional?: boolean; hint?: string; inputMode?: "decimal" | "numeric"; type?: string } = {}) => (
+  const text = (id: string, label: string, value: string, onChange: (v: string) => void, extra: { optional?: boolean; hint?: string; inputMode?: "decimal" | "numeric"; type?: string; readOnly?: boolean } = {}) => (
     <FormField id={id} label={label} error={errors[id.replace(/^po-/, "").replace(/-/g, ".")]} optional={extra.optional} hint={extra.hint}>
       {(control) => (
-        <Input {...control} type={extra.type} inputMode={extra.inputMode} value={value} onChange={(event) => onChange(event.target.value)} />
+        <Input {...control} type={extra.type} inputMode={extra.inputMode} readOnly={extra.readOnly} value={value} onChange={(event) => onChange(event.target.value)} />
       )}
     </FormField>
   );
@@ -338,9 +356,11 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial }: Crea
   return (
     <div className={styles.stack}>
       <PageHeader
-        title={values.rework ? "New rework order" : "New production order"}
+        title={intake ? "Convert planned order" : values.rework ? "New rework order" : "New production order"}
         description={
-          values.rework
+          intake
+            ? "The planned order fixes the product, quantity, site, delivery date and warehouse. Enter the BOM lines and the route; the order is created under the planned order's id."
+            : values.rework
             ? "A rework order brings finished units back through rework operations. Add the product itself as a component to issue the units at their cost; the rework cost settles as a rework variance."
             : "Enter the product, quantity, the BOM lines and the route. Passage explodes phantoms, applies scrap and rounding, and numbers the order."
         }
@@ -363,6 +383,7 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial }: Crea
         ) : null}
       </Alert>
       <form className={styles.form} onSubmit={submit} noValidate aria-label="New production order">
+        {intake ? null : (
         <Card title="Order type">
           <div className={styles.fields}>
             <FormField id="po-kind" label="Order type">
@@ -397,15 +418,19 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial }: Crea
           </div>
           {values.rework ? <p className={styles.hint}>Creating a rework order needs the Create rework orders duty.</p> : null}
         </Card>
+        )}
 
         <Card title="Order">
           <div className={styles.fields}>
-            {text("po-productId", "Product", values.productId, (v) => set({ productId: v }), { hint: "Released product id (wave 8)." })}
-            {text("po-quantity", "Quantity", values.quantity, (v) => set({ quantity: v }), { inputMode: "decimal" })}
+            {text("po-productId", "Product", values.productId, (v) => set({ productId: v }), { hint: "Released product id (wave 8).", readOnly: !!intake })}
+            {text("po-quantity", "Quantity", values.quantity, (v) => set({ quantity: v }), { inputMode: "decimal", readOnly: !!intake })}
             {text("po-currency", "Currency", values.currency, (v) => set({ currency: v.toUpperCase() }))}
-            {text("po-deliveryDate", "Delivery date", values.deliveryDate, (v) => set({ deliveryDate: v }), { optional: true, type: "date" })}
-            {text("po-siteId", "Site", values.siteId, (v) => set({ siteId: v }))}
-            {text("po-warehouseId", "Warehouse", values.warehouseId, (v) => set({ warehouseId: v }))}
+            {text("po-deliveryDate", "Delivery date", values.deliveryDate, (v) => set({ deliveryDate: v }), { optional: true, type: "date", readOnly: !!intake })}
+            {text("po-siteId", "Site", values.siteId, (v) => set({ siteId: v }), { readOnly: !!intake })}
+            {text("po-warehouseId", "Warehouse", values.warehouseId, (v) => set({ warehouseId: v }), {
+              readOnly: !!intake?.warehouseId,
+              hint: intake?.warehouseId ? "The warehouse planning firmed the order for." : undefined,
+            })}
             {text("po-itemGroup", "Item group", values.itemGroup, (v) => set({ itemGroup: v }), { optional: true, hint: "Selects the posting profile with the site." })}
           </div>
         </Card>

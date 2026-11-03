@@ -65,6 +65,9 @@ func servedOperations(t *testing.T) map[string]bool {
 		if route == "/v1/production/order-changes/{id}" && method == http.MethodPost {
 			route = "/v1/production/order-changes/{id}:{command}"
 		}
+		if route == "/v1/production/planned-intake/{id}" && method == http.MethodPost {
+			route = "/v1/production/planned-intake/{id}:{command}"
+		}
 		if route == "/v1/production/orders/{id}/operations/{operCommand}" {
 			route = "/v1/production/orders/{id}/operations/{operNumber}:{command}"
 		}
@@ -81,7 +84,7 @@ func TestOpenAPIMatchesTheRouter(t *testing.T) {
 	}
 	declared := declaredOperations(string(raw))
 	served := servedOperations(t)
-	if len(served) != 51 {
+	if len(served) != 54 {
 		t.Fatalf("router walk found %d operations: %v", len(served), served)
 	}
 	var problems []string

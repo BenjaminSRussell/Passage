@@ -39,6 +39,9 @@ describe("production module", () => {
       "/production/journals",
       "/production/kpi",
       "/production/cost-snapshots",
+      "/production/planned-intake",
+      "/production/planned-intake/:intakeId",
+      "/production/planned-intake/:intakeId/convert",
       "/production/order-changes",
       "/production/order-changes/:changeId",
       "/production/ocm-profiles",
@@ -47,6 +50,7 @@ describe("production module", () => {
     expect(production.nav).toEqual([
       { label: "Production orders", to: "/production", duty: "production.order.read" },
       { label: "New production order", to: "/production/new", duty: "production.order.write" },
+      { label: "Planned orders", to: "/production/planned-intake", duty: "production.order.read" },
       { label: "As-built and where-used", to: "/production/as-built", duty: "production.order.read" },
       { label: "WIP balance", to: "/production/wip-balances", duty: "production.cost.read" },
       { label: "Production variances", to: "/production/variances", duty: "production.cost.read" },

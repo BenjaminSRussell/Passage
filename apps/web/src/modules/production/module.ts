@@ -1,10 +1,12 @@
 import { createElement } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import type { PassageModule } from "../registry";
-import type { ProductionOrder } from "./api/client";
+import { getPlannedIntake, describeProblem, type PlannedIntake, type ProductionOrder, type Problem } from "./api/client";
 import { AsBuiltInquiryPage } from "./AsBuiltInquiryPage";
 import { CostSnapshotsPage } from "./CostSnapshotsPage";
 import { CreateProductionOrderPage, type OrderValues } from "./CreateOrderPage";
+import { Alert, Button, Skeleton } from "../../shell/ui";
 import { HousekeepingPage } from "./HousekeepingPage";
 import { JobsPage } from "./JobsPage";
 import { JournalInquiryPage } from "./JournalInquiryPage";
@@ -14,6 +16,8 @@ import { ParametersPage } from "./ParametersPage";
 import { OperationsOverviewPage } from "./OperationsOverviewPage";
 import { OrderChangeDetailPage } from "./OrderChangeDetailPage";
 import { OrderChangesPage } from "./OrderChangesPage";
+import { PlannedIntakeDetailPage } from "./PlannedIntakeDetailPage";
+import { PlannedIntakePage } from "./PlannedIntakePage";
 import { ProductionOrderDetail } from "./OrderDetailPage";
 import { ProductionOrdersPage } from "./OrdersPage";
 import { PostingProfilesPage } from "./PostingProfilesPage";
@@ -114,6 +118,57 @@ function ChangesRoute() {
   return createElement(OrderChangesPage, { onOpenChange: (change) => navigate(`${list}/order-changes/${encodeURIComponent(change.id)}`) });
 }
 
+function IntakeRoute() {
+  const navigate = useNavigate();
+  return createElement(PlannedIntakePage, { onOpen: (row) => navigate(`${list}/planned-intake/${encodeURIComponent(row.id)}`) });
+}
+
+function IntakeDetailRoute() {
+  const { intakeId = "" } = useParams();
+  const navigate = useNavigate();
+  return createElement(PlannedIntakeDetailPage, {
+    key: intakeId,
+    intakeId,
+    onBack: () => navigate(`${list}/planned-intake`),
+    onConvert: (row) => navigate(`${list}/planned-intake/${encodeURIComponent(row.id)}/convert`),
+    onOpenOrder: (orderId) => navigate(open(orderId)),
+  });
+}
+
+/** The create form for the planned order in the URL; it loads the row first so the form opens with its facts. */
+function IntakeConvertRoute() {
+  const { intakeId = "" } = useParams();
+  const navigate = useNavigate();
+  const [row, setRow] = useState<PlannedIntake | null>(null);
+  const [error, setError] = useState<Problem | null>(null);
+  const back = () => navigate(`${list}/planned-intake/${encodeURIComponent(intakeId)}`);
+  useEffect(() => {
+    const controller = new AbortController();
+    getPlannedIntake(intakeId, controller.signal).then(setRow, (failed) => !controller.signal.aborted && setError(describeProblem(failed)));
+    return () => controller.abort();
+  }, [intakeId]);
+  if (error) {
+    return createElement(
+      "div",
+      null,
+      createElement(Alert, { tone: "danger", title: "The planned order is not available", live: "alert" }, `${error.message} (${error.code})`),
+      createElement(Button, { onClick: () => navigate(`${list}/planned-intake`) }, "Back to planned orders"),
+    );
+  }
+  if (!row) {
+    return createElement(Skeleton, { height: "tile" });
+  }
+  if (row.status !== "open") {
+    return createElement(
+      "div",
+      null,
+      createElement(Alert, { tone: "info", title: "Already handled", live: "status" }, `This planned order is ${row.status}.`),
+      createElement(Button, { onClick: back }, "Back to the planned order"),
+    );
+  }
+  return createElement(CreateProductionOrderPage, { intake: row, onCreated: (order) => navigate(open(order.id)), onCancel: back });
+}
+
 function ChangeDetailRoute() {
   const { changeId = "" } = useParams();
   const navigate = useNavigate();
@@ -129,7 +184,7 @@ const production: PassageModule = {
   id: "production",
   title: "Production",
   description:
-    "Production orders: create, estimate, schedule (dated jobs with infinite capacity), release, start, post picking lists, route cards and reports as finished, end with settlement; bulk status updates, split and merge, order-specific BOM and route edits; WIP balance and variance reports; subcontract operations with their vendor PO requests; the operations overview, the scheduled jobs and the production journals across orders; the order KPIs (on-time %, cycle days, scrap %, overdue orders) and the daily order cost snapshots; order changes from engineering changes with preview, change cost, apply and dismiss; order housekeeping (cancel stale orders, end fully reported orders); rework orders, as-built genealogy, production parameters and posting profiles.",
+    "Production orders: create (also from the firmed planned orders of planning), estimate, schedule (dated jobs with infinite capacity), release, start, post picking lists, route cards and reports as finished, end with settlement; bulk status updates, split and merge, order-specific BOM and route edits; WIP balance and variance reports; subcontract operations with their vendor PO requests; the operations overview, the scheduled jobs and the production journals across orders; the order KPIs (on-time %, cycle days, scrap %, overdue orders) and the daily order cost snapshots; order changes from engineering changes with preview, change cost, apply and dismiss; order housekeeping (cancel stale orders, end fully reported orders); rework orders, as-built genealogy, production parameters and posting profiles.",
   routes: [
     { path: list, element: createElement(OrdersRoute) },
     { path: `${list}/new`, element: createElement(CreateRoute), handle: { title: "New production order" } },
@@ -145,6 +200,9 @@ const production: PassageModule = {
     { path: `${list}/journals`, element: createElement(JournalsRoute), handle: { title: "Production journals" } },
     { path: `${list}/kpi`, element: createElement(KpiPage), handle: { title: "Production KPIs" } },
     { path: `${list}/cost-snapshots`, element: createElement(CostSnapshotsRoute), handle: { title: "Order cost snapshots" } },
+    { path: `${list}/planned-intake`, element: createElement(IntakeRoute), handle: { title: "Planned orders" } },
+    { path: `${list}/planned-intake/:intakeId`, element: createElement(IntakeDetailRoute), handle: { title: "Planned order" } },
+    { path: `${list}/planned-intake/:intakeId/convert`, element: createElement(IntakeConvertRoute), handle: { title: "Convert planned order" } },
     { path: `${list}/order-changes`, element: createElement(ChangesRoute), handle: { title: "Order changes" } },
     { path: `${list}/order-changes/:changeId`, element: createElement(ChangeDetailRoute), handle: { title: "Order change" } },
     { path: `${list}/ocm-profiles`, element: createElement(OcmProfilesPage), handle: { title: "Order change profiles" } },
@@ -153,6 +211,7 @@ const production: PassageModule = {
   nav: [
     { label: "Production orders", to: list, duty: "production.order.read" },
     { label: "New production order", to: `${list}/new`, duty: "production.order.write" },
+    { label: "Planned orders", to: `${list}/planned-intake`, duty: "production.order.read" },
     { label: "As-built and where-used", to: `${list}/as-built`, duty: "production.order.read" },
     { label: "WIP balance", to: `${list}/wip-balances`, duty: "production.cost.read" },
     { label: "Production variances", to: `${list}/variances`, duty: "production.cost.read" },

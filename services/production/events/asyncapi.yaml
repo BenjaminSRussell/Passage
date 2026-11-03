@@ -96,7 +96,24 @@ channels:
     messages:
       saved:
         $ref: '#/components/messages/parametersSaved'
+  passage.planning.plannedorder:
+    address: passage.planning.plannedorder
+    description: |
+      Planning's firmed planned orders (w22, FR-22.10), consumed by the `production-planning` consumer.
+      A planned order of order_type production is stored in the planned order intake with its
+      warehouse_id (FR-22.18); a planner converts it into the production order whose id is target_id.
+      Purchase and transfer planned orders are ignored. Events whose CloudEvents `source` is not
+      `planning` are dead-lettered. The row keeps the planned order's legal entity from
+      legal_entity_id, or from the CloudEvents `legalentityid` extension; planning's event carries
+      neither yet (handoff), and a row without one is visible to all-entity callers only.
+    messages:
+      firmed:
+        $ref: '#/components/messages/plannedOrderFirmed'
 operations:
+  receivePlannedOrderFirmed:
+    action: receive
+    channel: { $ref: '#/channels/passage.planning.plannedorder' }
+    messages: [{ $ref: '#/channels/passage.planning.plannedorder/messages/firmed' }]
   onOrderCreated:
     action: send
     channel: { $ref: '#/channels/passage.production.order' }
@@ -175,6 +192,29 @@ operations:
     messages: [{ $ref: '#/channels/passage.production.costsnapshot/messages/taken' }]
 components:
   messages:
+    plannedOrderFirmed:
+      name: firmed
+      title: A planned order was firmed (received from planning)
+      description: 'Consumed, not published: planning''s dev.passage.planning.plannedorder.firmed.v1. Only the fields production reads are listed; the others are planning''s.'
+      payload:
+        type: object
+        required: [planned_order_id, plan_version_id, batch_id, order_type, target_id, item_id, site_id, qty, order_date, delivery_date]
+        properties:
+          legal_entity_id: { type: string, format: uuid, description: "Not in planning's event yet (handoff); read when present. The converted order takes it." }
+          planned_order_id: { type: string, format: uuid }
+          plan_version_id: { type: string, format: uuid }
+          batch_id: { type: string, format: uuid }
+          order_type: { type: string, enum: [purchase, production, transfer], description: Only production is stored. }
+          target_id: { type: string, format: uuid, description: The id the production order takes. }
+          item_id: { type: string, format: uuid }
+          warehouse_id: { type: [string, 'null'], format: uuid, description: The warehouse planning scope; null for the site scope. }
+          site_id: { type: string, format: uuid }
+          qty: { type: string, description: Decimal string in the inventory unit. }
+          order_date: { type: string, format: date }
+          delivery_date: { type: string, format: date }
+          quota_arrangement_id: { type: [string, 'null'], format: uuid }
+          quota_source_id: { type: [string, 'null'], format: uuid }
+      x-passage-type: dev.passage.planning.plannedorder.firmed.v1
     orderCreated:
       name: created
       title: Production order created
