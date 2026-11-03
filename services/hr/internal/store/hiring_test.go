@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -168,15 +169,19 @@ func TestPurgeErasesWithdrawnConsentAndExpiredCandidates(t *testing.T) {
 	if _, err := f.s.MoveCandidate(f.ctx, rejected.ID, "REJECTED"); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := f.s.PurgeCandidates(f.ctx); err != nil || n != 1 {
-		t.Fatalf("purge without a policy erased %d err %v, want only the withdrawn consent", n, err)
+	holds := &fakeHolds{}
+	if res, err := f.s.PurgeCandidates(f.ctx, holds); err != nil || res.Erased != 1 {
+		t.Fatalf("purge without a policy erased %+v err %v, want only the withdrawn consent", res, err)
 	}
 	if _, err := f.s.SetRetentionPolicy(f.ctx, ClassCandidate, 6); err != nil {
 		t.Fatal(err)
 	}
 	f.setNow(day(time.February, 1).AddDate(0, 7, 0))
-	if n, err := f.s.PurgeCandidates(f.ctx); err != nil || n != 1 {
-		t.Fatalf("purge past retention erased %d err %v, want the rejected candidate", n, err)
+	if res, err := f.s.PurgeCandidates(f.ctx, holds); err != nil || res.Erased != 1 {
+		t.Fatalf("purge past retention erased %+v err %v, want the rejected candidate", res, err)
+	}
+	if len(holds.asked) != 2 || holds.asked[0].legalEntityID != f.entity {
+		t.Fatalf("hold checks = %+v, want one per due candidate in its legal entity", holds.asked)
 	}
 	gone, _ := f.s.GetCandidate(f.ctx, withdrawn.ID)
 	if !gone.Erased || gone.FullName != nil || gone.Email != nil {
@@ -188,6 +193,55 @@ func TestPurgeErasesWithdrawnConsentAndExpiredCandidates(t *testing.T) {
 	}
 	_, err = f.s.MoveCandidate(f.ctx, withdrawn.ID, "OFFER")
 	requireCode(t, err, CodeCandidateErased)
+}
+
+type fakeHolds struct {
+	held  map[string][]string
+	err   error
+	asked []struct{ legalEntityID, candidateID string }
+}
+
+func (h *fakeHolds) CoveringCandidate(_ context.Context, legalEntityID, candidateID string) ([]string, error) {
+	h.asked = append(h.asked, struct{ legalEntityID, candidateID string }{legalEntityID, candidateID})
+	return h.held[candidateID], h.err
+}
+
+func TestPurgeSkipsHeldCandidatesAndStopsOnAnUnansweredCheck(t *testing.T) {
+	f := newPersonnel(t)
+	req := f.openRequisition(t, "REQ-1", 2)
+	held := f.candidateAtOffer(t, req, "Held")
+	free := f.candidateAtOffer(t, req, "Free")
+	for _, c := range []Candidate{held, free} {
+		consents, err := f.s.ListConsents(f.ctx, "CANDIDATE", c.ID)
+		if err != nil || len(consents) != 1 {
+			t.Fatalf("consents = %+v err %v", consents, err)
+		}
+		if _, err := f.s.WithdrawConsent(f.ctx, consents[0].ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.s.PurgeCandidates(f.ctx, nil); !errors.Is(err, ErrNoCandidateHolds) {
+		t.Fatalf("purge without a hold check: %v", err)
+	}
+	down := &fakeHolds{err: errors.New("compliance down")}
+	if _, err := f.s.PurgeCandidates(f.ctx, down); err == nil {
+		t.Fatal("an unanswered hold check must stop the purge")
+	}
+	for _, id := range []string{held.ID, free.ID} {
+		if c, _ := f.s.GetCandidate(f.ctx, id); c.Erased {
+			t.Fatalf("candidate %s erased although the hold check failed", id)
+		}
+	}
+	res, err := f.s.PurgeCandidates(f.ctx, &fakeHolds{held: map[string][]string{held.ID: {"hold-1"}}})
+	if err != nil || res.Erased != 1 || len(res.Held) != 1 || res.Held[0].CandidateID != held.ID || res.Held[0].HoldIDs[0] != "hold-1" {
+		t.Fatalf("purge = %+v err %v, want the free candidate erased and the held one reported", res, err)
+	}
+	if c, _ := f.s.GetCandidate(f.ctx, held.ID); c.Erased || c.FullName == nil {
+		t.Fatalf("a held candidate was erased: %+v", c)
+	}
+	if c, _ := f.s.GetCandidate(f.ctx, free.ID); !c.Erased {
+		t.Fatal("the candidate without a hold was not erased")
+	}
 }
 
 func allScope() context.Context {

@@ -2921,7 +2921,8 @@
       "inventory": ["inventory.hold.apply"]
     },
     "hr": {
-      "numbering": ["numbering.sequence.allocate"]
+      "numbering": ["numbering.sequence.allocate"],
+      "compliance": ["compliance.legal_hold.check"]
     },
     "product": {
       "org": ["org.read"]

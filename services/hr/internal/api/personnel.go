@@ -35,7 +35,7 @@ var (
 
 type personnelCounters struct {
 	jobs, compPlans, actionsSubmitted, actionsApplied, actionsFailed atomic.Int64
-	requisitions, candidates, offers, hires, purged                  atomic.Int64
+	requisitions, candidates, offers, hires, purged, purgeHeld       atomic.Int64
 	cycles, cycleApplies                                             atomic.Int64
 }
 
@@ -50,6 +50,7 @@ func (c *personnelCounters) write(counter func(name, help string, v int64)) {
 	counter("hr_offers_created_total", "Offers created; idempotent replays are not counted.", c.offers.Load())
 	counter("hr_offer_hires_total", "Offers converted to a hire action.", c.hires.Load())
 	counter("hr_candidates_erased_total", "Candidates whose personal data was erased by the retention purge.", c.purged.Load())
+	counter("hr_candidates_purge_held_total", "Candidates the retention purge skipped because a legal hold covers them.", c.purgeHeld.Load())
 	counter("hr_compensation_cycles_created_total", "Compensation cycles created; idempotent replays are not counted.", c.cycles.Load())
 	counter("hr_compensation_cycles_applied_total", "Compensation cycles applied.", c.cycleApplies.Load())
 }
