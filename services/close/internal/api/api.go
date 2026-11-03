@@ -39,6 +39,12 @@ type LedgerLookup interface {
 	LegalEntity(ctx context.Context, legalEntityID, ledgerID string) (string, error)
 }
 
+type Config struct {
+	ReopenDays int
+	Approvers  int
+	LockWait   time.Duration
+}
+
 type API struct {
 	store       Store
 	ledgers     LedgerLookup
@@ -48,6 +54,13 @@ type API struct {
 	yearEnds    YearEndStore
 	yearLedger  YearEndLedger
 	yearEndRuns atomic.Int64
+	cfg         Config
+	periods     PeriodStore
+	checklists  ChecklistStore
+	allocs      AllocationStore
+	accruals    AccrualStore
+	regroups    RegroupingStore
+	openItems   OpenItemSource
 }
 
 type checkRequest struct {
@@ -93,20 +106,26 @@ var problemSlugs = map[string]string{
 	domain.CodeNoRun:             "year_end_run_not_found",
 	domain.CodeLedgerRejected:    "ledger_rejected",
 	domain.CodeIdempotencyReuse:  "idempotency_key_reuse",
+	domain.CodeRegroupingExists:  "regrouping_exists",
 	"COM-0001":                   "validation_failed",
 	"AUTH-0001":                  "forbidden_tenant",
 }
 
 var problemStatuses = map[string]int{
-	domain.CodeValidation:        http.StatusBadRequest,
-	domain.CodePeriodClosed:      http.StatusUnprocessableEntity,
-	domain.CodePeriodOnHold:      http.StatusForbidden,
-	domain.CodeInvalidTransition: http.StatusConflict,
-	domain.CodeNoPeriod:          http.StatusNotFound,
-	domain.CodeAmbiguousPeriod:   http.StatusConflict,
-	domain.CodeNoRun:             http.StatusNotFound,
-	domain.CodeLedgerRejected:    http.StatusUnprocessableEntity,
-	domain.CodeIdempotencyReuse:  http.StatusConflict,
+	domain.CodeValidation:          http.StatusBadRequest,
+	domain.CodePeriodClosed:        http.StatusUnprocessableEntity,
+	domain.CodePeriodOnHold:        http.StatusForbidden,
+	domain.CodeInvalidTransition:   http.StatusConflict,
+	domain.CodeBusy:                http.StatusConflict,
+	domain.CodeBlockedByDependency: http.StatusConflict,
+	domain.CodeNoPeriod:            http.StatusNotFound,
+	domain.CodeAmbiguousPeriod:     http.StatusConflict,
+	domain.CodeNoRun:               http.StatusNotFound,
+	domain.CodeLedgerRejected:      http.StatusUnprocessableEntity,
+	domain.CodeIdempotencyReuse:    http.StatusConflict,
+	domain.CodeRegroupingExists:    http.StatusConflict,
+	domain.CodeZeroBasis:           http.StatusUnprocessableEntity,
+	domain.CodeNoConvergence:       http.StatusUnprocessableEntity,
 }
 
 func New(store Store) *API { return &API{store: store} }
@@ -116,11 +135,44 @@ func (a *API) WithLedgers(l LedgerLookup) *API {
 	return a
 }
 
+func (a *API) WithConfig(cfg Config) *API { a.cfg = cfg; return a }
+
+func (a *API) WithSliceB(p PeriodStore, c ChecklistStore, al AllocationStore, ac AccrualStore, rg RegroupingStore, items OpenItemSource) *API {
+	a.periods, a.checklists, a.allocs, a.accruals, a.regroups, a.openItems = p, c, al, ac, rg, items
+	return a
+}
+
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyPeriodCheck)).Post("/v1/close/period-statuses:check", a.check)
 	r.With(authz.RequireDuty(dutyPeriodCheck)).Get("/v1/close/periods:resolve", a.resolve)
 	r.With(authz.RequireDuty(dutyMaintain)).Put("/v1/close/periods/{fiscalPeriodId}", a.register)
+	r.With(authz.RequireDuty(dutyMaintain)).Get("/v1/close/periods", a.listPeriods)
+	r.With(authz.RequireDuty(dutyMaintain)).Patch("/v1/close/periods/{fiscalPeriodId}/modules/{module}", a.transition)
+	r.With(authz.RequireDuty(dutyReopen)).Post("/v1/close/periods/{fiscalPeriodId}/modules/{module}:request-reopen", a.requestReopen)
+	r.With(authz.RequireDuty(dutyReopen)).Post("/v1/close/reopen-requests/{requestId}:approve", a.approveReopen)
+	r.With(authz.RequireDuty(dutyReopen)).Post("/v1/close/reopen-requests/{requestId}:reject", a.rejectReopen)
+	r.With(authz.RequireDuty(dutyChecklistWrite)).Put("/v1/close/templates/{templateId}", a.putTemplate)
+	r.With(authz.RequireDuty(dutyChecklistRead)).Get("/v1/close/templates/{templateId}", a.getTemplate)
+	r.With(authz.RequireDuty(dutyChecklistWrite)).Post("/v1/close/runs", a.createRun)
+	r.With(authz.RequireDuty(dutyChecklistRead)).Get("/v1/close/runs/{runId}/tasks", a.board)
+	r.With(authz.RequireDuty(dutyChecklistWrite)).Post("/v1/close/tasks/{taskId}:start", a.startTask)
+	r.With(authz.RequireDuty(dutyChecklistWrite)).Post("/v1/close/tasks/{taskId}:complete", a.completeTask)
+	r.With(authz.RequireDuty(dutyChecklistWrite)).Post("/v1/close/tasks/{taskId}:skip", a.skipTask)
+	r.With(authz.RequireDuty(dutyChecklistWrite)).Post("/v1/close/tasks/{taskId}:reassign", a.reassignTask)
+	r.With(authz.RequireDuty(dutyAllocWrite)).Put("/v1/close/allocation-rules/{ruleId}", a.putAllocRule)
+	r.With(authz.RequireDuty(dutyAllocWrite)).Get("/v1/close/allocation-rules/{ruleId}", a.getAllocRule)
+	r.With(authz.RequireDuty(dutyAllocRun)).Post("/v1/close/allocation-runs", a.runAllocation)
+	r.With(authz.RequireDuty(dutyAllocRun)).Post("/v1/close/allocation-runs/{runId}:post", a.postAllocation)
+	r.With(authz.RequireDuty(dutyAllocRun)).Post("/v1/close/allocation-runs/{runId}:reverse", a.reverseAllocation)
+	r.With(authz.RequireDuty(dutyAccrualWrite)).Put("/v1/close/accrual-schemes/{code}", a.putAccrual)
+	r.With(authz.RequireDuty(dutyAccrualWrite)).Get("/v1/close/accrual-schemes/{code}", a.getAccrual)
+	r.With(authz.RequireDuty(dutyAccrualRun)).Post("/v1/close/accrual-schemes/{code}:apply", a.applyAccrual)
+	r.With(authz.RequireDuty(dutyRegroupWrite)).Put("/v1/close/regrouping-rules/{code}", a.putRegroup)
+	r.With(authz.RequireDuty(dutyRegroupWrite)).Get("/v1/close/regrouping-rules/{code}", a.getRegroup)
+	r.With(authz.RequireDuty(dutyRegroupRun)).Post("/v1/close/regroupings", a.runRegroup)
+	r.With(authz.RequireDuty(dutyRegroupRun)).Post("/v1/close/regroupings/{runId}:post", a.postRegroup)
+	r.With(authz.RequireDuty(dutyRegroupRun)).Post("/v1/close/regroupings/{runId}:reverse", a.reverseRegroup)
 	r.With(authz.RequireDuty(dutyYearEndRun)).Post(yearEndPath, a.runYearEnd)
 	r.With(authz.RequireDuty(dutyYearEndRead)).Get(yearEndPath+"/{runId}", a.getYearEnd)
 }

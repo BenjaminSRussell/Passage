@@ -120,7 +120,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	st := store.New(pool)
-	a := api.New(st)
+	a := api.New(st).WithConfig(api.Config{
+		ReopenDays: cfg.reopenDefaultDays,
+		Approvers:  cfg.reopenApprovers,
+		LockWait:   time.Duration(cfg.lockWaitMS) * time.Millisecond,
+	}).WithSliceB(st, st, st, st, st, nil)
 	if url := getenv("LEDGER_URL"); url != "" {
 		signer, err := tenant.ServiceSignerFromEnv(getenv)
 		if err != nil {
@@ -143,5 +147,26 @@ func run(ctx context.Context, getenv func(string) string) error {
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
+	go sweepReopened(ctx, a, cfg.reopenSweepEvery)
 	return <-errs
+}
+
+func sweepReopened(ctx context.Context, a *api.API, every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			n, err := a.ExpireReopened(ctx)
+			if err != nil {
+				slog.Error("reopen expiry sweep failed", "err", err)
+				continue
+			}
+			if n > 0 {
+				slog.Info("reopen expiry sweep closed periods", "count", n)
+			}
+		}
+	}
 }

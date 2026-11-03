@@ -204,7 +204,50 @@
       {"resource": "/v1/close/period-statuses:check", "methods": ["POST"]},
       {"resource": "/v1/close/periods:resolve", "methods": ["GET"]}
     ]},
-    "period.maintain": {"permissions": [{"resource": "/v1/close/periods/*", "methods": ["PUT"]}]},
+    "period.maintain": {"permissions": [
+      {"resource": "/v1/close/periods", "methods": ["GET"]},
+      {"resource": "/v1/close/periods/*", "methods": ["PUT"]},
+      {"resource": "/v1/close/periods/*/modules/*", "methods": ["PATCH"]}
+    ]},
+    "period.reopen": {"permissions": [
+      {"resource": "/v1/close/periods/*/modules/*:request-reopen", "methods": ["POST"]},
+      {"resource": "/v1/close/reopen-requests/*:approve", "methods": ["POST"]},
+      {"resource": "/v1/close/reopen-requests/*:reject", "methods": ["POST"]}
+    ]},
+    "close.checklist.write": {"permissions": [
+      {"resource": "/v1/close/templates/*", "methods": ["PUT"]},
+      {"resource": "/v1/close/runs", "methods": ["POST"]},
+      {"resource": "/v1/close/tasks/*:start", "methods": ["POST"]},
+      {"resource": "/v1/close/tasks/*:complete", "methods": ["POST"]},
+      {"resource": "/v1/close/tasks/*:skip", "methods": ["POST"]},
+      {"resource": "/v1/close/tasks/*:reassign", "methods": ["POST"]}
+    ]},
+    "close.checklist.read": {"permissions": [
+      {"resource": "/v1/close/templates/*", "methods": ["GET"]},
+      {"resource": "/v1/close/runs/*/tasks", "methods": ["GET"]}
+    ]},
+    "close.allocation.write": {"permissions": [
+      {"resource": "/v1/close/allocation-rules/*", "methods": ["GET", "PUT"]}
+    ]},
+    "close.allocation.run": {"permissions": [
+      {"resource": "/v1/close/allocation-runs", "methods": ["POST"]},
+      {"resource": "/v1/close/allocation-runs/*:post", "methods": ["POST"]},
+      {"resource": "/v1/close/allocation-runs/*:reverse", "methods": ["POST"]}
+    ]},
+    "close.accrual.write": {"permissions": [
+      {"resource": "/v1/close/accrual-schemes/*", "methods": ["GET", "PUT"]}
+    ]},
+    "close.accrual.run": {"permissions": [
+      {"resource": "/v1/close/accrual-schemes/*:apply", "methods": ["POST"]}
+    ]},
+    "close.regrouping.write": {"permissions": [
+      {"resource": "/v1/close/regrouping-rules/*", "methods": ["GET", "PUT"]}
+    ]},
+    "close.regrouping.run": {"permissions": [
+      {"resource": "/v1/close/regroupings", "methods": ["POST"]},
+      {"resource": "/v1/close/regroupings/*:post", "methods": ["POST"]},
+      {"resource": "/v1/close/regroupings/*:reverse", "methods": ["POST"]}
+    ]},
     "close.yearend.run": {"permissions": [{"resource": "/v1/close/year-end-runs", "methods": ["POST"]}]},
     "close.yearend.read": {"permissions": [{"resource": "/v1/close/year-end-runs/*", "methods": ["GET"]}]},
     "reporting.statement.view": {"permissions": [

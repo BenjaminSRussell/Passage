@@ -129,6 +129,382 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
+  /v1/close/periods:
+    get:
+      operationId: listPeriods
+      x-passage-duty: period.maintain
+      description: Lists period-status rows of the caller's legal entity for one ledger.
+      parameters:
+        - { name: ledgerId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Period matrix. }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/close/periods/{fiscalPeriodId}/modules/{module}:
+    patch:
+      operationId: transitionPeriod
+      x-passage-duty: period.maintain
+      description: Transitions a module of a registered period (open, on_hold, closed, permanently_closed). Closed periods change only through the reopen workflow.
+      parameters:
+        - { name: fiscalPeriodId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: module, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ledgerId, status]
+              properties:
+                ledgerId: { type: string, format: uuid }
+                status: { type: string, enum: [open, on_hold, closed, permanently_closed] }
+                allowedGroupId: { type: string }
+                reason: { type: string }
+      responses:
+        '200': { description: Updated period row. }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/close/periods/{fiscalPeriodId}/modules/{module}:request-reopen:
+    post:
+      operationId: requestReopen
+      x-passage-duty: period.reopen
+      description: Starts dual-approval reopen of a closed period. Requires Idempotency-Key.
+      parameters:
+        - { name: fiscalPeriodId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: module, in: path, required: true, schema: { type: string } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ledgerId, reason]
+              properties:
+                ledgerId: { type: string, format: uuid }
+                reason: { type: string, minLength: 10 }
+                expiresDays: { type: integer, minimum: 1, maximum: 30 }
+      responses:
+        '201': { description: Reopen request created. }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/close/reopen-requests/{requestId}:approve:
+    post:
+      operationId: approveReopen
+      x-passage-duty: period.reopen
+      description: Records one distinct approver. The requester cannot approve. Two approvals open the period until expiry.
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Approval recorded, and the period opened when the last required approval lands. }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/close/reopen-requests/{requestId}:reject:
+    post:
+      operationId: rejectReopen
+      x-passage-duty: period.reopen
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Request rejected. }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/close/templates/{templateId}:
+    put:
+      operationId: putCloseTemplate
+      x-passage-duty: close.checklist.write
+      parameters:
+        - { name: templateId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [name, tasks] }
+      responses:
+        '200': { description: Template stored. }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: getCloseTemplate
+      x-passage-duty: close.checklist.read
+      parameters:
+        - { name: templateId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Template. }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/close/runs:
+    post:
+      operationId: createCloseRun
+      x-passage-duty: close.checklist.write
+      description: Instantiates a template across legal entities. Requires Idempotency-Key.
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [templateId, fiscalPeriodId, legalEntityIds]
+              properties:
+                templateId: { type: string, format: uuid }
+                fiscalPeriodId: { type: string, format: uuid }
+                legalEntityIds: { type: array, items: { type: string, format: uuid } }
+      responses:
+        '201': { description: Close run created. }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/close/runs/{runId}/tasks:
+    get:
+      operationId: listCloseTasks
+      x-passage-duty: close.checklist.read
+      parameters:
+        - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: entity, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string } }
+      responses:
+        '200': { description: Checklist board. }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/close/tasks/{taskId}:start:
+    post:
+      operationId: startCloseTask
+      x-passage-duty: close.checklist.write
+      parameters:
+        - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Task started. }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/close/tasks/{taskId}:complete:
+    post:
+      operationId: completeCloseTask
+      x-passage-duty: close.checklist.write
+      parameters:
+        - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Task completed. }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/close/tasks/{taskId}:skip:
+    post:
+      operationId: skipCloseTask
+      x-passage-duty: close.checklist.write
+      parameters:
+        - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [reason], properties: { reason: { type: string } } }
+      responses:
+        '200': { description: Task skipped. }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/close/tasks/{taskId}:reassign:
+    post:
+      operationId: reassignCloseTask
+      x-passage-duty: close.checklist.write
+      parameters:
+        - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [assigneeUserId], properties: { assigneeUserId: { type: string } } }
+      responses:
+        '200': { description: Task reassigned. }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/close/allocation-rules/{ruleId}:
+    put:
+      operationId: putAllocationRule
+      x-passage-duty: close.allocation.write
+      parameters:
+        - { name: ruleId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Rule stored. }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: getAllocationRule
+      x-passage-duty: close.allocation.write
+      parameters:
+        - { name: ruleId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Rule. }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/close/allocation-runs:
+    post:
+      operationId: runAllocation
+      x-passage-duty: close.allocation.run
+      description: Proposes an allocation from the ledger trial balance and optionally posts it through ledgerclient without PostClosed. Requires Idempotency-Key.
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      responses:
+        '201': { description: Allocation run. }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/close/allocation-runs/{runId}:post:
+    post:
+      operationId: postAllocation
+      x-passage-duty: close.allocation.run
+      parameters:
+        - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Posted run. }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/close/allocation-runs/{runId}:reverse:
+    post:
+      operationId: reverseAllocation
+      x-passage-duty: close.allocation.run
+      parameters:
+        - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Reversed run. }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/close/accrual-schemes/{code}:
+    put:
+      operationId: putAccrualScheme
+      x-passage-duty: close.accrual.write
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Scheme stored. }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: getAccrualScheme
+      x-passage-duty: close.accrual.write
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+        - { name: ledgerId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Scheme. }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/close/accrual-schemes/{code}:apply:
+    post:
+      operationId: applyAccrual
+      x-passage-duty: close.accrual.run
+      description: Spreads an amount across occurrences and posts each through ledgerclient without PostClosed. Auto-reverse posts the reversing entry on the next occurrence date. Requires Idempotency-Key. Recurring journals stay in the ledger service.
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      responses:
+        '201': { description: Accrual run posted. }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/close/regrouping-rules/{code}:
+    put:
+      operationId: putRegroupingRule
+      x-passage-duty: close.regrouping.write
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Rule stored. }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: getRegroupingRule
+      x-passage-duty: close.regrouping.write
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+        - { name: ledgerId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Rule. }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/close/regroupings:
+    post:
+      operationId: runRegrouping
+      x-passage-duty: close.regrouping.run
+      description: Proposes balance-sheet regrouping and optionally posts through ledgerclient without PostClosed. Remaining-term items without a due date fall into the shortest bucket. Requires Idempotency-Key.
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      responses:
+        '201': { description: Regrouping run. }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/close/regroupings/{runId}:post:
+    post:
+      operationId: postRegrouping
+      x-passage-duty: close.regrouping.run
+      parameters:
+        - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Posted run. }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/close/regroupings/{runId}:reverse:
+    post:
+      operationId: reverseRegrouping
+      x-passage-duty: close.regrouping.run
+      parameters:
+        - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Reversed run. }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
       operationId: liveness
