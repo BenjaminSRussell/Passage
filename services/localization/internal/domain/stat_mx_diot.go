@@ -93,7 +93,6 @@ func ValidateDIOT(raw []byte) []FieldError {
 		return errs
 	}
 	lines := strings.Split(strings.TrimRight(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n"), "\n")
-	seen := map[string]bool{}
 	for i, line := range lines {
 		at := func(col string) string { return "line" + strconv.Itoa(i+1) + "." + col }
 		cols := strings.Split(line, "|")
@@ -102,11 +101,6 @@ func ValidateDIOT(raw []byte) []FieldError {
 			continue
 		}
 		diotThird(&errs, at, cols)
-		key := cols[0] + "|" + cols[1] + "|" + cols[2] + "|" + cols[3]
-		if seen[key] {
-			errs.add(at("tercero"), "repeats a third party already declared for this tipoOperacion")
-		}
-		seen[key] = true
 		diotAmounts(&errs, at, cols)
 		if m := cols[diotManifest-1]; m != "01" && m != "02" {
 			errs.add(at(diotCol(diotManifest)), "%q must be 01 or 02", m)
@@ -187,12 +181,5 @@ func diotAmounts(errs *fieldErrs, at func(string) string, cols []string) {
 	credit := v[22].Add(v[23]).Add(v[36]).Add(v[37]).Add(v[38]).Add(v[39])
 	if limit := v[base16].Mul(decimal.RequireFromString("0.16")).Ceil(); credit.GreaterThan(limit) {
 		errs.add(at(diotCol(22)), "IVA acreditable and no acreditable %s exceed 16%% of the base (%s)", credit, limit)
-	}
-	paid := decimal.Zero
-	for _, n := range []int{8, 10, 12, 14, 16, 49, 50, 51, 52, 53} {
-		paid = paid.Add(v[n])
-	}
-	if paid.IsZero() {
-		errs.add(at("importe"), "line declares no value of acts")
 	}
 }

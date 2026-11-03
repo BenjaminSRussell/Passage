@@ -133,7 +133,6 @@ func TestSecondaryStatutoryMutations(t *testing.T) {
 		{"MX_DIOT", "ABC8501012A0", "ABC8501012A", "line1.rfc"},
 		{"MX_DIOT", "10000||||||||||1600", "10000||||||||||1601", "line1.col22"},
 		{"MX_DIOT", "|10000|", "|10000.5|", "line1.col12"},
-		{"MX_DIOT", "|3000|", "||", "line5.importe"},
 		{"MX_DIOT", "04|03|", "07|03|", "line2.tipoTercero"},
 		{"MX_DIOT", "05|03|", "05|85|", "line3.tipoOperacion"},
 		{"MX_DIOT", "|DEU|", "|ZZZ|", "line3.jurisdiccion"},
@@ -161,7 +160,7 @@ func TestSecondaryStatutoryMutations(t *testing.T) {
 		{"IN_26Q", "^ABCPK1234D^", "^ABCXK1234D^", "line5.pan"},
 		{"IN_26Q", "^00123^", "^0123^", "line3.challanNo"},
 		{"IN_26Q", "^10082025^", "^10102025^", "line7.paymentDate"},
-		{"IN_26Q", "^94J", "^194J", "line5.section"},
+		{"IN_26Q", "^4JB", "^194J", "line5.section"},
 		{"IN_26Q", "^94H", "^196A", "line7.section"},
 		{"IN_26Q", "^94C", "^194ZZ", "line6.section"},
 		{"IN_26Q", "^700.00^", "^701.00^", "line3.totalDeposit"},
@@ -198,6 +197,11 @@ func TestSecondaryStatutoryAcceptsRegulatorVariants(t *testing.T) {
 		{"FR_CA3", "siren;732829320", "siren;356000000"},
 		{"IN_26Q", "^AABCP1234C^", "^PANNOTREQD^"},
 		{"IN_26Q", "^PANNOTAVBL^", "^PANINVALID^"},
+		{"IN_26Q", "^4JB", "^94Q"},
+		{"IN_26Q", "^94C", "^4JA"},
+		{"IN_26Q", "^94H", "^94R"},
+		{"IN_26Q", "^^^^^^^^00123^^^^6360002^^07082025", "^^Y^^^^^^^^^^^^07082025"},
+		{"IN_26Q", "^^^^^^^^00123^^^^6360002^^07082025", "^^^^^^^^^^88^^7654321^^07082025"},
 		{"IN_26Q", "^07082025^", "^15032025^"},
 		{"IN_26Q", "^700.00^0.00^0.00^0.00^0.00^700.00", "^600.00^50.00^20.00^20.00^10.00^700.00"},
 		{"MX_DIOT", "|ZZZ|ISLA SIN CATALOGO|", "|ZZZ|OTRA JURISDICCION|"},
@@ -216,12 +220,22 @@ func TestSecondaryStatutoryAcceptsRegulatorVariants(t *testing.T) {
 	}
 }
 
+func TestForm26QUnparsableChallanAmountDoesNotRaiseBatchTotalError(t *testing.T) {
+	fx := secondaryStatutoryFixtures["IN_26Q"]
+	raw := strings.Replace(string(readFixture(t, fx.valid)), "^500.00^0.00^0.00^30.00", "^500.50^0.00^0.00^30.00", 1)
+	for _, e := range ValidateForm26Q([]byte(raw)) {
+		if strings.Contains(e.Field, "BH.totalDeposit") {
+			t.Fatalf("spurious batch total error: %+v", e)
+		}
+	}
+}
+
 func TestSecondaryStatutoryInvalidFixturesReportEveryDefect(t *testing.T) {
 	want := map[string][]string{
-		"MX_DIOT": {"line1.rfc", "line2.tipoOperacion", "line2.pais", "line3.col22", "line4.tercero", "line5.columns", "line6.rfc", "line7.importe", "line7.col54"},
+		"MX_DIOT": {"line1.rfc", "line2.tipoOperacion", "line2.pais", "line3.col22", "line5.columns", "line6.rfc", "line7.col54"},
 		"FR_CA3":  {"siren", "periode", "ligne16", "ligne25", "ligne28", "ligne99"},
 		"IN_26Q": {"line1.record", "FH.batchCount", "BH.tan", "line2.deductorPAN", "line2.assessmentYear", "line3.bsrCode",
-			"line3.depositDate", "line3.amount22", "line4.pan", "line4.section", "line4.paymentDate", "line5.section", "BH.totalDeposit"},
+			"line3.depositDate", "line3.amount22", "line4.pan", "line4.section", "line4.paymentDate", "line5.section"},
 	}
 	for report, fx := range secondaryStatutoryFixtures {
 		raw, err := os.ReadFile(fx.invalid)
