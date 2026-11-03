@@ -112,6 +112,25 @@ export interface KillSwitchPort {
   isHalted(tenantId: string): boolean;
 }
 
+export interface BudgetHold {
+  tenantId: string;
+  agentId: string;
+  month: string;
+  tokensIn: number;
+  tokensOut: number;
+}
+
+/** Persisted token budget (AC-47.4): reserve before the run, settle with the actual usage after it. */
+export interface BudgetPort {
+  reserve(hold: BudgetHold): Promise<void>;
+  settle(hold: BudgetHold, actual: ModelUsage): Promise<void>;
+}
+
+/** Persisted audit trail (AC-47.3): the run and its action rows, written once the run has ended. */
+export interface AuditPort {
+  saveRun(req: RunRequest, result: RunResult): Promise<void>;
+}
+
 export interface RunDeps {
   provider: ModelProvider;
   tools: ToolPort;
@@ -121,6 +140,8 @@ export interface RunDeps {
   now: () => string;
   nowMs: () => number;
   pseudonymTtlMs: number;
+  audit?: AuditPort;
+  budgets?: BudgetPort;
 }
 
 export interface RunRequest {
@@ -161,6 +182,30 @@ export interface RunResult {
 const UNAUDITABLE_INPUT = '{"withheld":"AGT-0210"}';
 
 export async function runAgent(
+  deps: RunDeps,
+  req: RunRequest,
+): Promise<RunResult> {
+  const { budgets, audit } = deps;
+  const hold: BudgetHold = {
+    tenantId: req.tenantId,
+    agentId: req.agent.agentId,
+    month: deps.now().slice(0, 7),
+    tokensIn: req.runTokenCap,
+    tokensOut: req.runTokenCap,
+  };
+  await budgets?.reserve(hold);
+  let spent: ModelUsage = { tokensIn: 0, tokensOut: 0 };
+  try {
+    const result = await executeRun(deps, req);
+    spent = { tokensIn: result.tokensIn, tokensOut: result.tokensOut };
+    await audit?.saveRun(req, result);
+    return result;
+  } finally {
+    await budgets?.settle(hold, spent);
+  }
+}
+
+async function executeRun(
   deps: RunDeps,
   req: RunRequest,
 ): Promise<RunResult> {
