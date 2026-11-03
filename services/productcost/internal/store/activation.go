@@ -171,6 +171,7 @@ const activateScope = "version.activate"
 type pendingActivation struct {
 	Activation      Activation `json:"activation"`
 	ReversesEntryID string     `json:"reversesEntryId,omitempty"`
+	CalculationIDs  []string   `json:"calculationIds,omitempty"`
 }
 
 type preparedActivation struct {
@@ -254,6 +255,11 @@ func prepareActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ac
 		return out, err
 	}
 	out.cur = cur
+	if in.ReversesID == "" {
+		if err := refuseRollerActivating(ctx, tx, p, cur); err != nil {
+			return out, err
+		}
+	}
 	key := attemptKey(cur.ID, in)
 	var raw []byte
 	var expired bool
@@ -266,21 +272,24 @@ func prepareActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ac
 				" days; the ledger may no longer recognise its idempotency key, so resending could post it twice. Check the ledger for the entry and resolve it by hand"}
 		}
 		out.post = true
-		return out, json.Unmarshal(raw, &out.pending)
+		if err := json.Unmarshal(raw, &out.pending); err != nil {
+			return out, err
+		}
+		return out, refuseStalePlan(ctx, tx, p.TenantID, cur, out.pending)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
-	}
-	if in.ReversesID == "" {
-		if err := refuseRollerActivating(ctx, tx, p, cur); err != nil {
-			return out, err
-		}
 	}
 	plan, err := planActivation(ctx, tx, p.TenantID, cur, in, true)
 	if err != nil {
 		return out, err
 	}
 	out.pending.Activation = newActivation(p, cur, in, plan)
+	if in.ReversesID == "" {
+		if out.pending.CalculationIDs, err = pendingCalculationIDs(ctx, tx, p.TenantID, cur.ID); err != nil {
+			return out, err
+		}
+	}
 	out.post = !plan.preview.Total.IsZero()
 	if plan.reverses != nil {
 		out.pending.ReversesEntryID = plan.reverses.JournalEntryID
@@ -297,14 +306,35 @@ func prepareActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ac
 	return out, err
 }
 
+func pendingCalculationIDs(ctx context.Context, tx pgx.Tx, tenantID, versionID string) ([]string, error) {
+	rows, err := tx.Query(ctx, `select id::text from cost_calculation where tenant_id = $1 and costing_version_id = $2 and status = 'Pending' order by id`, tenantID, versionID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
+func refuseStalePlan(ctx context.Context, tx pgx.Tx, tenantID string, cur Version, pending pendingActivation) error {
+	if pending.Activation.ReversesActivationID != nil {
+		return nil
+	}
+	var still int
+	err := tx.QueryRow(ctx, `select count(*) from cost_calculation where tenant_id = $1 and costing_version_id = $2 and status = 'Pending' and id = any($3::uuid[])`,
+		tenantID, cur.ID, pending.CalculationIDs).Scan(&still)
+	if err != nil || still == len(pending.CalculationIDs) {
+		return err
+	}
+	return httpx.NewProblem(http.StatusConflict, domain.CodeVersionConflict, "the calculations the pending activation of version "+cur.Code+" planned are no longer Pending; resolve the attempt by hand")
+}
+
 func refuseRollerActivating(ctx context.Context, tx pgx.Tx, p tenant.Principal, cur Version) error {
 	var rolled bool
-	err := tx.QueryRow(ctx, `select exists (select 1 from cost_calculation where tenant_id = $1 and costing_version_id = $2 and status = 'Pending' and rolled_by = $3)`,
+	err := tx.QueryRow(ctx, `select exists (select 1 from cost_calculation where tenant_id = $1 and costing_version_id = $2 and status = 'Pending' and rolled_by <> '' and ($3 = '' or rolled_by = $3))`,
 		p.TenantID, cur.ID, p.UserID).Scan(&rolled)
 	if err != nil || !rolled {
 		return err
 	}
-	return &domain.CodedError{Code: domain.CodeRollerActivates, Detail: "user " + p.UserID + " rolled calculations of version " + cur.Code + " and cannot activate them; another user must"}
+	return &domain.CodedError{Code: domain.CodeRollerActivates, Detail: "user '" + p.UserID + "' cannot activate the calculations of version " + cur.Code + " that a user rolled: the activator must be an identified user other than the roller"}
 }
 
 func serialiseLegalEntity(ctx context.Context, tx pgx.Tx, tenantID string, cur Version) error {
@@ -358,8 +388,13 @@ func finalizeActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in A
 		return res, err
 	}
 	if !reversing {
-		if _, err := tx.Exec(ctx, `update cost_calculation set status = 'Active' where tenant_id = $1 and costing_version_id = $2 and status = 'Pending'`, p.TenantID, in.VersionID); err != nil {
+		tag, err := tx.Exec(ctx, `update cost_calculation set status = 'Active' where tenant_id = $1 and costing_version_id = $2 and status = 'Pending' and id = any($3::uuid[])`,
+			p.TenantID, in.VersionID, prepared.pending.CalculationIDs)
+		if err != nil {
 			return res, err
+		}
+		if tag.RowsAffected() != int64(len(prepared.pending.CalculationIDs)) {
+			return res, httpx.NewProblem(http.StatusConflict, domain.CodeVersionConflict, "the calculations planned for this activation are no longer Pending")
 		}
 	}
 	if !reversing {

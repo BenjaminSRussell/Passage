@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"slices"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/domain"
 )
@@ -80,11 +82,19 @@ func storeRoll(ctx context.Context, tx pgx.Tx, p tenant.Principal, in RollInput)
 	if cur.Status != domain.VersionOpen {
 		return res, &domain.CodedError{Code: domain.CodeVersionNotRollable, Detail: "version " + cur.Code + " is " + cur.Status + "; only an Open version can be rolled"}
 	}
-	if len(cur.SiteIDs) > 0 && !slices.Contains(cur.SiteIDs, in.SiteID) {
-		return res, &domain.CodedError{Code: domain.CodeVersionNotRollable, Detail: "site " + in.SiteID + " is outside the site scope of version " + cur.Code}
+	if !slices.Contains(cur.SiteIDs, in.SiteID) {
+		return res, &domain.CodedError{Code: domain.CodeVersionNotRollable, Detail: "site " + in.SiteID + " is outside the site scope of version " + cur.Code +
+			"; a version must list the sites it is rolled for, because engineering holds no legal entity to check a site against"}
 	}
 	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, domain.RollLockKey(p.TenantID, in.VersionID)); err != nil {
 		return res, err
+	}
+	var attempted bool
+	if err := tx.QueryRow(ctx, `select exists (select 1 from standard_cost_activation_attempt where tenant_id = $1 and costing_version_id = $2)`, p.TenantID, in.VersionID).Scan(&attempted); err != nil {
+		return res, err
+	}
+	if attempted {
+		return res, httpx.NewProblem(http.StatusConflict, domain.CodeActivationPending, "version "+cur.Code+" has an activation in flight; its calculations are fixed until it settles")
 	}
 	byItem := make(map[string]domain.Result, len(in.Run.Results))
 	for _, r := range in.Run.Results {

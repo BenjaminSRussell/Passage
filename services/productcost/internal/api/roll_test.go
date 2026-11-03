@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -125,5 +126,15 @@ func TestRollStoredVersion_FailsClosedWithoutEngineeringOrAPriceInput(t *testing
 	}
 	if f.roll != nil {
 		t.Fatal("a failed read stored a roll")
+	}
+}
+
+func TestRollStoredVersion_ACostedOperationWithoutAnIdIsRefused(t *testing.T) {
+	eng := parentBOM()
+	eng.routes[parentID].Operations[0].OperationID = ""
+	f := &fakeStore{}
+	rec := call{http.MethodPost, rollPath, rollBody(ids.New(), ""), calculate, "k", ""}.do(rollRouter(f, eng))
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), domain.CodeRollInput) || f.roll != nil {
+		t.Fatalf("a costed operation with no operationId: %d %s", rec.Code, rec.Body.String())
 	}
 }

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -31,6 +32,12 @@ func rollInput(version Version, key string, items ...domain.Item) RollInput {
 	}
 	opts := domain.RollOptions{Mode: domain.ModeMultilevel, View: domain.ViewLegal}
 	return RollInput{VersionID: version.ID, SiteID: siteA, Key: key, Fingerprint: key, Options: opts, Roots: roots, Sources: sources, Run: domain.MassRoll(cat, opts)}
+}
+
+func rollSpec(le, code string) domain.VersionSpec {
+	v := spec(le, code)
+	v.SiteIDs = []string{siteA}
+	return v
 }
 
 func asUser(n int, user string) context.Context {
@@ -71,7 +78,7 @@ func TestRoll_ThenActivateThenPostWithNoHandInsertedCalculations(t *testing.T) {
 		return res, err
 	}
 
-	oldVer, _, err := s.CreateVersion(ctx, spec(le, "STD-OLD"), "k-old")
+	oldVer, _, err := s.CreateVersion(ctx, rollSpec(le, "STD-OLD"), "k-old")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +89,7 @@ func TestRoll_ThenActivateThenPostWithNoHandInsertedCalculations(t *testing.T) {
 		t.Fatalf("activating the first version, which has no stock to revalue: %v", err)
 	}
 
-	newVer, _, err := s.CreateVersion(ctx, spec(le, "STD-NEW"), "k-new")
+	newVer, _, err := s.CreateVersion(ctx, rollSpec(le, "STD-NEW"), "k-new")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +116,7 @@ func TestRoll_ThenActivateThenPostWithNoHandInsertedCalculations(t *testing.T) {
 func TestRoll_ARerollSupersedesPendingRowsAndAnErroredItemStoresNothing(t *testing.T) {
 	s, admin, _ := setup(t)
 	ctx := as(1, "")
-	v, _, err := s.CreateVersion(ctx, spec(ids.New(), "STD-REROLL"), "k-v")
+	v, _, err := s.CreateVersion(ctx, rollSpec(ids.New(), "STD-REROLL"), "k-v")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +143,7 @@ func TestRoll_IsIdempotentAndOnlyAnOpenVersionInItsSitesCanBeRolled(t *testing.T
 	s, admin, _ := setup(t)
 	ctx := as(1, "")
 	le := ids.New()
-	v, _, err := s.CreateVersion(ctx, spec(le, "STD-GUARD"), "k-v")
+	v, _, err := s.CreateVersion(ctx, rollSpec(le, "STD-GUARD"), "k-v")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +187,7 @@ func TestRoll_BumpsTheVersionCounterSoAStaleActivationIsRefused(t *testing.T) {
 	s, _, _ := setup(t)
 	ctx := as(1, "")
 	roller := asUser(1, "cost.roller")
-	v, _, err := s.CreateVersion(ctx, spec(ids.New(), "STD-COUNTER"), "k-v")
+	v, _, err := s.CreateVersion(ctx, rollSpec(ids.New(), "STD-COUNTER"), "k-v")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +207,7 @@ func TestRoll_TheUserWhoRolledCannotActivateItsPendingPrices(t *testing.T) {
 	if _, err := s.SetPostingAccounts(roller, PostingAccounts{LegalEntityID: ids.New(), InventoryAccount: "1", CostChangeAccount: "2"}); err != nil {
 		t.Fatal(err)
 	}
-	v, _, err := s.CreateVersion(roller, spec(ids.New(), "STD-FOUR-EYES"), "k-v")
+	v, _, err := s.CreateVersion(roller, rollSpec(ids.New(), "STD-FOUR-EYES"), "k-v")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,5 +237,108 @@ func TestRoll_OnePendingCalculationPerItemSiteAndView(t *testing.T) {
 		values ($1, $2, $3, $4, $5, $6, 1, 'Multilevel', 1, 'Pending')`, testkit.TenantID(1), ids.New(), le, v.ID, itemA, siteA)
 	if pgCode(err) != uniqueViolation {
 		t.Fatalf("a second Pending row for the same item, site and view: %v", err)
+	}
+}
+
+func TestRoll_AVersionWithoutASiteScopeCannotBeRolled(t *testing.T) {
+	s, _, _ := setup(t)
+	ctx := as(1, "")
+	v, _, err := s.CreateVersion(ctx, spec(ids.New(), "STD-NO-SITES"), "k-v")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.StoreRoll(ctx, rollInput(v, "roll-1", purchased(itemA, "1.00"))); codeOf(err) != domain.CodeVersionNotRollable {
+		t.Fatalf("a version with no site scope: %v", err)
+	}
+}
+
+func TestRoll_FourEyesHoldsWhileAnAmbiguousActivationAttemptIsPending(t *testing.T) {
+	s, admin, _ := setup(t)
+	a, b := asUser(1, "cost.roller"), asUser(1, "cost.controller")
+	le := ids.New()
+	if _, err := s.SetPostingAccounts(a, PostingAccounts{LegalEntityID: le, InventoryAccount: "1400-INV", CostChangeAccount: "5900-PPV"}); err != nil {
+		t.Fatal(err)
+	}
+	oldVer, _, err := s.CreateVersion(a, rollSpec(le, "STD-OLD"), "k-old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.StoreRoll(a, rollInput(oldVer, "roll-old", purchased(itemA, "1.00"))); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.ActivateVersion(b, ActivationInput{VersionID: oldVer.ID, Expected: 2, Key: "act-old", Fingerprint: "act-old", LedgerID: ids.Nil,
+		PostingDate: "2026-01-02", Currency: "USD", OnHand: map[inventory.Position]decimal.Decimal{}, Ledger: ledgerclient.NewFake()}); err != nil {
+		t.Fatal(err)
+	}
+	v, _, err := s.CreateVersion(a, rollSpec(le, "STD-NEW"), "k-new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.StoreRoll(a, rollInput(v, "roll-1", purchased(itemA, "2.50"))); err != nil {
+		t.Fatal(err)
+	}
+	ledger := ledgerclient.NewFake()
+	ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusBadGateway})
+	activate := func(expected int) ActivationInput {
+		return ActivationInput{VersionID: v.ID, Expected: expected, Key: "act", Fingerprint: "act", LedgerID: ids.Nil, PostingDate: "2026-01-02", Currency: "USD",
+			OnHand: map[inventory.Position]decimal.Decimal{positionA: decimal.NewFromInt(10)}, Ledger: ledger}
+	}
+	if _, _, err := s.ActivateVersion(b, activate(2)); err == nil {
+		t.Fatal("the ambiguous post should have failed")
+	}
+	if n, ambiguous := pendingAttempts(t, admin); n != 1 || !ambiguous {
+		t.Fatalf("attempts %d ambiguous %v", n, ambiguous)
+	}
+	if _, _, err := s.StoreRoll(a, rollInput(v, "roll-2", purchased(itemA, "99.00"))); codeOf(err) != domain.CodeActivationPending {
+		t.Fatalf("a roll while an activation attempt is pending: %v", err)
+	}
+	if _, _, err := s.ActivateVersion(a, activate(2)); codeOf(err) != domain.CodeRollerActivates {
+		t.Fatalf("the roller resuming the attempt: %v", err)
+	}
+	if got := len(ledger.Entries()); got != 0 {
+		t.Fatalf("ledger entries %d before the controller retries", got)
+	}
+	ledger.FailPosts(nil)
+	res, _, err := s.ActivateVersion(b, activate(2))
+	if err != nil || res.Activation.Total.String() != "15" {
+		t.Fatalf("the controller retrying: %+v %v", res, err)
+	}
+	if got := calculationStatuses(t, admin, v.ID); got["Active"] != 1 || len(got) != 1 {
+		t.Fatalf("calculation statuses %v", got)
+	}
+}
+
+func TestActivation_AResumedAttemptActivatesOnlyTheCalculationsItPlanned(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ledger := ledgerclient.NewFake()
+	ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusBadGateway})
+	ctx := as(1, "")
+	if _, _, err := f.s.ActivateVersion(ctx, f.activate(ledger, "k-act")); err == nil {
+		t.Fatal("the ambiguous post should have failed")
+	}
+	if _, err := f.admin.Exec(context.Background(), `update cost_calculation set status = 'Superseded' where costing_version_id = $1`, f.newVer.ID); err != nil {
+		t.Fatal(err)
+	}
+	ledger.FailPosts(nil)
+	if _, _, err := f.s.ActivateVersion(ctx, f.activate(ledger, "k-act")); codeOf(err) != domain.CodeVersionConflict {
+		t.Fatalf("a planned calculation no longer Pending: %v", err)
+	}
+	if got := len(ledger.Entries()); got != 0 {
+		t.Fatalf("ledger entries %d: nothing is posted for a stale plan", got)
+	}
+}
+
+func TestActivation_APrincipalWithoutAUserCannotActivateRolledCalculations(t *testing.T) {
+	s, _, _ := setup(t)
+	v, _, err := s.CreateVersion(as(1, ""), rollSpec(ids.New(), "STD-NO-USER"), "k-v")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.StoreRoll(asUser(1, "cost.roller"), rollInput(v, "roll-1", purchased(itemA, "1.00"))); err != nil {
+		t.Fatal(err)
+	}
+	in := ActivationInput{VersionID: v.ID, Expected: 2, Key: "act", Fingerprint: "act", LedgerID: ids.Nil, PostingDate: "2026-01-02", Currency: "USD", Ledger: ledgerclient.NewFake()}
+	if _, _, err := s.ActivateVersion(asUser(1, ""), in); codeOf(err) != domain.CodeRollerActivates {
+		t.Fatalf("an activation with no user: %v", err)
 	}
 }

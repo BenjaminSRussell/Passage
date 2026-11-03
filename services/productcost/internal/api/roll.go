@@ -135,8 +135,12 @@ func routeOperations(route *engineering.Route, item string, rates map[string]dec
 		if errSetup != nil || errRun != nil || errLot != nil || errScrap != nil {
 			return nil, rollInputError("route " + route.ID + " of item " + item + " has an operation with a malformed number")
 		}
+		costed := setup.IsPositive() || run.IsPositive()
+		if op.OperationID == "" && costed {
+			return nil, rollInputError("route " + route.ID + " of item " + item + " has a costed operation without an operationId, so no operationRates entry can price it")
+		}
 		rate, ok := rates[op.OperationID]
-		if !ok && (setup.IsPositive() || run.IsPositive()) {
+		if !ok && costed {
 			return nil, &domain.CodedError{Code: domain.CodeNoPrice, Detail: "no operationRates entry for operation " + op.OperationID + " of item " + item}
 		}
 		out = append(out, domain.Operation{SetupHours: setup, RunHours: run, Rate: rate, LotSize: lot, ScrapPct: scrap})
