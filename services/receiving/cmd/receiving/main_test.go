@@ -78,12 +78,13 @@ func withAccounts(env map[string]string) map[string]string {
 	env["AUDIT_SAMPLE_SEED"] = "0123456789abcdef"
 	env["POSTING_LEDGER_ID"] = "0a1b2c3d-0000-4000-8000-000000000001"
 	env["POSTING_ACCOUNT_INVENTORY"], env["POSTING_ACCOUNT_GRIR"], env["POSTING_ACCOUNT_PPV"], env["POSTING_ACCOUNT_VENDOR_CONTROL"] = "1400", "2100", "5200", "2000"
+	env["POSTING_ACCOUNT_EXPENSE"], env["POSTING_ACCOUNT_INPUT_TAX"] = "6000", "1570"
 	return env
 }
 
 func TestBuildProfile(t *testing.T) {
 	profile, err := buildProfile(func(k string) string { return withAccounts(map[string]string{})[k] }, false)
-	if err != nil || profile.Inventory != "1400" || profile.GRIR != "2100" || profile.PPV != "5200" || profile.VendorControl != "2000" {
+	if err != nil || profile.Inventory != "1400" || profile.GRIR != "2100" || profile.PPV != "5200" || profile.VendorControl != "2000" || profile.Expense != "6000" || profile.InputTax != "1570" {
 		t.Fatalf("profile %+v err %v", profile, err)
 	}
 	if profile.LedgerID != "0a1b2c3d-0000-4000-8000-000000000001" {
@@ -190,7 +191,7 @@ func TestBuildPortsIgnoresTheRemovedLegacyPOLineFlag(t *testing.T) {
 
 func TestBuildPortsWiresPlanAndOwnershipLookups(t *testing.T) {
 	base := map[string]string{"LEDGER_URL": "http://l", "CLOSE_URL": "http://c", "PURCHASING_URL": "http://p", "POSTING_LEDGER_ID": "0a1b2c3d-0000-4000-8000-000000000001",
-		"POSTING_ACCOUNT_INVENTORY": "1", "POSTING_ACCOUNT_GRIR": "2", "POSTING_ACCOUNT_PPV": "3", "POSTING_ACCOUNT_VENDOR_CONTROL": "4", "AUDIT_SAMPLE_SEED": "0123456789abcdef"}
+		"POSTING_ACCOUNT_INVENTORY": "1", "POSTING_ACCOUNT_GRIR": "2", "POSTING_ACCOUNT_PPV": "3", "POSTING_ACCOUNT_VENDOR_CONTROL": "4", "POSTING_ACCOUNT_EXPENSE": "5", "POSTING_ACCOUNT_INPUT_TAX": "6", "AUDIT_SAMPLE_SEED": "0123456789abcdef"}
 	build := func(extra map[string]string) api.Ports {
 		t.Helper()
 		env := map[string]string{}
@@ -288,5 +289,25 @@ func TestBuildPorts_MalformedServiceSigningKeyStopsStartup(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("a malformed service signing key must fail startup, not silently fall back to forwarding user duties")
+	}
+}
+
+func TestBuildPortsWiresTaxWhenConfigured(t *testing.T) {
+	env := withAccounts(map[string]string{"LEDGER_URL": "http://l", "CLOSE_URL": "http://c", "PURCHASING_URL": "http://p"})
+	unset, err := buildPorts(func(k string) string { return env[k] })
+	if err != nil || unset.Tax != nil || unset.TaxRecorder != nil {
+		t.Fatalf("unset TAX_URL: tax %T recorder %T err %v", unset.Tax, unset.TaxRecorder, err)
+	}
+	env["TAX_URL"] = "http://tax"
+	wired, err := buildPorts(func(k string) string { return env[k] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wired.Tax == nil || wired.TaxRecorder == nil {
+		t.Fatal("TAX_URL must wire both the calculator and the recorder")
+	}
+	env["TAX_RATE_PCT"] = "not-a-rate"
+	if _, err := buildPorts(func(k string) string { return env[k] }); err == nil || !strings.Contains(err.Error(), "TAX_RATE_PCT") {
+		t.Fatalf("got %v, want TAX_RATE_PCT rejected", err)
 	}
 }

@@ -43,6 +43,11 @@ channels:
     messages:
       serviceSheetDecided:
         $ref: "#/components/messages/ServiceSheetDecided"
+  ersSelfBillEvents:
+    address: passage.receiving.ersselfbill
+    messages:
+      ersSelfBillIssued:
+        $ref: "#/components/messages/ErsSelfBillIssued"
   settlementEvents:
     address: passage.payables.settlement
     messages:
@@ -99,6 +104,11 @@ operations:
     channel: { $ref: "#/channels/serviceEntryEvents" }
     messages:
       - { $ref: "#/channels/serviceEntryEvents/messages/serviceSheetDecided" }
+  publishErsSelfBillIssued:
+    action: send
+    channel: { $ref: "#/channels/ersSelfBillEvents" }
+    messages:
+      - { $ref: "#/channels/ersSelfBillEvents/messages/ersSelfBillIssued" }
   publishSettlementPosted:
     action: send
     channel: { $ref: "#/channels/settlementEvents" }
@@ -179,12 +189,19 @@ components:
     ServiceSheetDecided:
       name: dev.passage.receiving.serviceentrysheet.decided.v1
       summary: >-
-        POST /v1/receiving/service-entry-sheets/{id}:accept or :reject decided a service entry sheet. ACCEPTED sheets are the
-        acceptance of the service performed against purchase order lines; no GR/IR item or ledger entry follows yet.
-        Consumers: audit, purchasing.
+        POST /v1/receiving/service-entry-sheets/{id}:accept or :reject decided a service entry sheet. An accepted sheet also
+        posts Dr expense / Cr GR/IR and emits receipt.posted for the synthetic service receipt. Consumers: audit, purchasing.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/ServiceSheetDecidedData"
+    ErsSelfBillIssued:
+      name: dev.passage.receiving.ersselfbill.issued.v1
+      summary: >-
+        A posted ERS invoice issued the self-billing tax document (PDF) to the vendor. Emitted after invoices:post for source
+        ERS, or after release of an audit-blocked ERS invoice. Consumers: tax, audit, supplier portal.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/ErsSelfBillIssuedData"
     SettlementPosted:
       name: dev.passage.payables.settlement.posted.v1
       summary: >-
@@ -348,6 +365,18 @@ components:
               po_line_no: { type: integer, minimum: 1 }
               qty: { type: string }
               amount: { type: string }
+    ErsSelfBillIssuedData:
+      type: object
+      required: [invoice_id, invoice_number, legal_entity_id, vendor_id, currency, tax, total]
+      properties:
+        invoice_id: { type: string, format: uuid }
+        invoice_number: { type: string }
+        legal_entity_id: { type: string, format: uuid }
+        vendor_id: { type: string, format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        tax_code: { type: string }
+        tax: { type: string, description: "decimal string, input tax" }
+        total: { type: string, description: "decimal string, net plus tax (the vendor control credit)" }
     ErsVendorChangedData:
       type: object
       required: [legal_entity_id, vendor_id, old_enabled, new_enabled, changed_by]

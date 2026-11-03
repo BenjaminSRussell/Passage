@@ -200,7 +200,7 @@ func (a *API) releaseAuditBlock(w http.ResponseWriter, r *http.Request) {
 		}
 		entry, err := domain.PostHeldInvoice(ctx, domain.VendorInvoice{
 			ID: inv.ID, LegalEntityID: inv.LegalEntityID, LedgerID: inv.LedgerID, FiscalPeriodID: inv.FiscalPeriodID,
-			PostingDate: inv.PostingDate, InvoiceDate: inv.InvoiceDate, Currency: inv.Currency, VendorGroupCode: group.Code,
+			PostingDate: inv.PostingDate, InvoiceDate: inv.InvoiceDate, Currency: inv.Currency, TaxAmount: inv.TaxAmount, TaxCode: inv.TaxCode, VendorGroupCode: group.Code,
 		}, lines, a.ports.Periods, a.ledgerFor(subjects...), a.ports.Profile)
 		if err != nil {
 			return store.InvoiceOutcome{}, err
@@ -216,6 +216,13 @@ func (a *API) releaseAuditBlock(w http.ResponseWriter, r *http.Request) {
 	a.pendingPostings.finish(invoiceSubjects(released)...)
 	a.auditReleased.Add(1)
 	a.invoiced.Add(1)
+	if released.Source == domain.InvoiceSourceERS {
+		if err := a.issueSelfBill(r.Context(), p.TenantID, released); err != nil {
+			writeError(w, r, err)
+			return
+		}
+		a.recordERSTax(r.Context(), released)
+	}
 	httpx.JSON(w, http.StatusOK, toInvoiceBody(released))
 }
 
@@ -354,7 +361,7 @@ func (a *API) ersConfirmablePrice(ctx context.Context, rec store.Receipt, lineNo
 		poLine = po.Lines[at]
 	} else {
 		var reason string
-		if poLine, reason = matchPOLine(po, line.ProductID); reason != "" {
+		if poLine, reason = matchPOLine(po, line.ProductID, 0); reason != "" {
 			return decimal.Zero, poProblem(http.StatusConflict, "AP-ERS-003", "the receipt line has no single purchase order line (%s)", reason)
 		}
 	}

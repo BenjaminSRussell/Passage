@@ -48,7 +48,7 @@ func newRigWithGroups(st *memstore.Store, periods domain.PeriodStatus, groups do
 	rg := &rig{st: st, ledger: &domain.FakeLedger{}}
 	a := api.New(rg.st, api.Ports{
 		Periods: domain.FakePeriods{Status: periods}, Ledger: rg.ledger, VendorGroups: groups,
-		Profile:       domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000", VendorGroupDimension: domain.DefaultVendorGroupDimension},
+		Profile:       domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000", Expense: "6000", InputTax: "1570", VendorGroupDimension: domain.DefaultVendorGroupDimension},
 		ResolveMinAge: time.Nanosecond,
 	})
 	router := httpx.NewRouter()

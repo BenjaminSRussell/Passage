@@ -135,6 +135,7 @@ segregation_grants := [
 	["VendorInvoicePost", "POST", "/v1/receiving/ers-settlements:run"],
 	["VendorInvoicePost", "POST", "/v1/receiving/invoice-captures"],
 	["APInquire", "GET", "/v1/receiving/invoice-captures/c1"],
+	["APInquire", "GET", "/v1/receiving/ers-self-bills/i1"],
 	["ServiceEntryMaintain", "POST", "/v1/receiving/service-entry-sheets"],
 	["ServiceEntryMaintain", "GET", "/v1/receiving/service-entry-sheets/s1"],
 	["ServiceEntryAccept", "GET", "/v1/receiving/service-entry-sheets/s1"],
@@ -1170,6 +1171,10 @@ test_compliance_hold_check_is_service_only_and_granted_to_receiving if {
 	data.duties["compliance.legal_hold.check"].service_only
 	data.service_grants.receiving.compliance == ["compliance.legal_hold.check"]
 	data.service_principals["receiving-erasure"] == ["compliance.legal_hold.check"]
+}
+
+test_receiving_may_calculate_and_record_input_tax if {
+	data.service_grants.receiving.tax == ["Calculate tax", "tax.transaction.record"]
 }
 
 test_compliance_erasure_and_retention_duties if {

@@ -130,7 +130,15 @@ func (r *ersRun) ersVendor(vendorID string) (bool, error) {
 	return enabled, err
 }
 
-func matchPOLine(po domain.PurchaseOrder, productID string) (domain.PurchaseOrderLine, string) {
+func matchPOLine(po domain.PurchaseOrder, productID string, poLineNo int) (domain.PurchaseOrderLine, string) {
+	if poLineNo > 0 {
+		for _, l := range po.Lines {
+			if l.Usable() && l.LineNo == poLineNo {
+				return l, ""
+			}
+		}
+		return domain.PurchaseOrderLine{}, skipNoPOLine
+	}
 	var found []domain.PurchaseOrderLine
 	for _, l := range po.Lines {
 		if l.Usable() && strings.EqualFold(l.ProductID, productID) {
@@ -147,7 +155,7 @@ func matchPOLine(po domain.PurchaseOrder, productID string) (domain.PurchaseOrde
 }
 
 func (r *ersRun) invoiceFor(rec store.Receipt, po domain.PurchaseOrder, rejected int, confirmed map[int]store.PriceConfirmation) (store.Invoice, string, string) {
-	number := "ERS-" + rec.Number
+	number := ersInvoiceNumber(rec)
 	if rejected > 0 {
 		number = fmt.Sprintf("%s-R%d", number, rejected)
 	}
@@ -171,7 +179,7 @@ func (r *ersRun) invoiceFor(rec store.Receipt, po domain.PurchaseOrder, rejected
 		if l.InvoicedQty.IsPositive() {
 			continue
 		}
-		poLine, reason := matchPOLine(po, l.ProductID)
+		poLine, reason := matchPOLine(po, l.ProductID, l.POLineNo)
 		if reason != "" {
 			return store.Invoice{}, reason, ""
 		}
@@ -233,7 +241,7 @@ func (r *ersRun) receipt(receiptID string) error {
 		r.skip(ref, skipOtherVendor)
 		return nil
 	}
-	rejected, err := r.api.store.RejectedInvoiceCount(r.ctx, rec.VendorID, "ERS-"+rec.Number)
+	rejected, err := r.api.store.RejectedInvoiceCount(r.ctx, rec.VendorID, ersInvoiceNumber(rec))
 	if err != nil {
 		return err
 	}

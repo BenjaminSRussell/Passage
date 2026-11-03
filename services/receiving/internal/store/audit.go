@@ -94,9 +94,9 @@ func (s *Postgres) ReleaseInvoice(ctx context.Context, id, legalEntityID, by str
 			return err
 		}
 		err := tx.QueryRow(ctx, `SELECT legal_entity_id::text, vendor_id::text, invoice_number, invoice_date, posting_date, currency, ledger_id::text, fiscal_period_id::text,
-			ledger_entry_id, total, created_at, source, status, posted_by, COALESCE(one_time_payee_id::text, '') FROM receiving_vendor_invoice WHERE tenant_id = $1 AND id = $2 FOR UPDATE`, tenantID, id).
+			ledger_entry_id, total, created_at, source, status, posted_by, COALESCE(one_time_payee_id::text, ''), tax_amount, COALESCE(tax_code, '') FROM receiving_vendor_invoice WHERE tenant_id = $1 AND id = $2 FOR UPDATE`, tenantID, id).
 			Scan(&inv.LegalEntityID, &inv.VendorID, &inv.InvoiceNumber, &inv.InvoiceDate, &inv.PostingDate, &inv.Currency, &inv.LedgerID, &inv.FiscalPeriodID,
-				&inv.LedgerEntryID, &inv.Total, &inv.CreatedAt, &inv.Source, &inv.Status, &inv.PostedBy, &inv.OneTimePayeeID)
+				&inv.LedgerEntryID, &inv.Total, &inv.CreatedAt, &inv.Source, &inv.Status, &inv.PostedBy, &inv.OneTimePayeeID, &inv.TaxAmount, &inv.TaxCode)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrInvoiceNotFound
 		}

@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"regexp"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
@@ -15,6 +17,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/party"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/periods"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/purchasing"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/tax"
 )
 
 func buildPorts(getenv func(string) string) (api.Ports, error) {
@@ -81,6 +84,14 @@ func buildPorts(getenv func(string) string) (api.Ports, error) {
 	default:
 		slog.Warn("COMPLIANCE_URL is empty: one-time payee erasure answers 503 until it is set")
 	}
+	if url := getenv("TAX_URL"); url != "" {
+		cfg, err := taxConfig(getenv)
+		if err != nil {
+			return api.Ports{}, err
+		}
+		client := tax.New(url, cfg, nil).WithSigner(signer)
+		ports.Tax, ports.TaxRecorder = client, client
+	}
 	if ports.LegalEntityCountry, err = domain.ParseLegalEntityCountries(getenv("LEGAL_ENTITY_COUNTRIES")); err != nil {
 		return api.Ports{}, err
 	}
@@ -120,6 +131,23 @@ var profileEnv = []struct {
 	{"POSTING_ACCOUNT_GRIR", "2100", func(p *domain.PostingProfile) *string { return &p.GRIR }},
 	{"POSTING_ACCOUNT_PPV", "5200", func(p *domain.PostingProfile) *string { return &p.PPV }},
 	{"POSTING_ACCOUNT_VENDOR_CONTROL", "2000", func(p *domain.PostingProfile) *string { return &p.VendorControl }},
+	{"POSTING_ACCOUNT_EXPENSE", "6000", func(p *domain.PostingProfile) *string { return &p.Expense }},
+	{"POSTING_ACCOUNT_INPUT_TAX", "1570", func(p *domain.PostingProfile) *string { return &p.InputTax }},
+}
+
+func taxConfig(getenv func(string) string) (tax.Config, error) {
+	cfg := tax.Config{
+		Code: getenv("TAX_CODE"), Jurisdiction: getenv("TAX_JURISDICTION"), Group: getenv("TAX_GROUP"),
+		ItemGroup: getenv("TAX_ITEM_GROUP"), Country: getenv("TAX_COUNTRY"), Rounding: getenv("TAX_ROUNDING"),
+	}
+	if raw := getenv("TAX_RATE_PCT"); raw != "" {
+		rate, err := decimal.NewFromString(raw)
+		if err != nil || rate.IsNegative() {
+			return tax.Config{}, fmt.Errorf("TAX_RATE_PCT must be a non-negative decimal")
+		}
+		cfg.RatePct = rate
+	}
+	return cfg, nil
 }
 
 func buildProfile(getenv func(string) string, allowFakes bool) (domain.PostingProfile, error) {

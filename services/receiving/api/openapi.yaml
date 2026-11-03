@@ -365,6 +365,24 @@ paths:
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-007' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/ers-self-bills/{id}:
+    get:
+      operationId: getErsSelfBill
+      x-passage-duty: APInquire
+      description: Returns the self-billing PDF issued to the vendor for a posted ERS invoice. The path id is the invoice id.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The self-billing document.
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-009' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
   /v1/receiving/service-entry-sheets:
     post:
       operationId: createServiceEntrySheet
@@ -419,7 +437,10 @@ paths:
     post:
       operationId: acceptServiceEntrySheet
       x-passage-duty: ServiceEntryAccept
-      description: Accepts a PENDING sheet. The user who entered the sheet cannot decide it (403 AP-SES-002). Writes dev.passage.receiving.serviceentrysheet.decided.v1 to the outbox.
+      description: >-
+        Accepts a PENDING sheet. The user who entered the sheet cannot decide it (403 AP-SES-002). Posts Dr expense / Cr GR/IR
+        through the ledger, opens GR/IR items on a synthetic POSTED service receipt (packing slip SES-{sheet id}) so ERS and
+        vendor invoices can settle it as ERS-{sheet id}, and writes serviceentrysheet.decided and receipt.posted to the outbox.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -434,6 +455,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003; AP-SES-002 the decider entered the sheet.' }
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-008' }
         '409': { $ref: '#/components/responses/Problem', description: 'AP-SES-003 the sheet is not PENDING.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 the AP period is not open.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
   /v1/receiving/service-entry-sheets/{id}:reject:
     post:
@@ -1274,6 +1296,8 @@ components:
         decidedBy: { type: string }
         decidedAt: { type: string, format: date-time }
         rejectReason: { type: string }
+        receiptId: { type: string, format: uuid, description: Present after accept; the synthetic POSTED service receipt that holds the GR/IR items. }
+        ledgerEntryId: { type: string, description: Present after accept; the ledger journal of the Dr expense / Cr GR/IR accrual. }
         lines:
           type: array
           items:

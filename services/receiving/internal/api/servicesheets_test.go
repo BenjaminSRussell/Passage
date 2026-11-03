@@ -1,30 +1,37 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store/memstore"
 )
 
 const sheetsPath = "/v1/receiving/service-entry-sheets"
 
 type sheetJSON struct {
-	ID           string `json:"id"`
-	Status       string `json:"status"`
-	Total        string `json:"total"`
-	VendorID     string `json:"vendorId"`
-	DecidedBy    string `json:"decidedBy"`
-	RejectReason string `json:"rejectReason"`
-	Lines        []struct {
+	ID            string `json:"id"`
+	Status        string `json:"status"`
+	Total         string `json:"total"`
+	VendorID      string `json:"vendorId"`
+	DecidedBy     string `json:"decidedBy"`
+	RejectReason  string `json:"rejectReason"`
+	ReceiptID     string `json:"receiptId"`
+	LedgerEntryID string `json:"ledgerEntryId"`
+	Lines         []struct {
 		POLineNo int    `json:"poLineNo"`
 		Amount   string `json:"amount"`
 	} `json:"lines"`
@@ -34,7 +41,10 @@ func newSheetRig(po domain.PurchaseOrder) *rig {
 	rg := &rig{st: memstore.New(), ledger: &domain.FakeLedger{}}
 	a := api.New(rg.st, api.Ports{
 		Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: rg.ledger,
+		Profile:        domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000", Expense: "6000", InputTax: "1570"},
 		PurchaseOrders: domain.FakePurchaseOrders{Orders: map[string]domain.PurchaseOrder{po.ID: po}},
+		AuditSampler:   testSampler("seed-one-0123456789"),
+		ResolveMinAge:  time.Nanosecond,
 	})
 	router := httpx.NewRouter()
 	a.Register(router)
@@ -98,14 +108,35 @@ func TestServiceSheet_CreateAcceptEmitsOneDecisionEvent(t *testing.T) {
 		t.Fatal("a refused decision emitted an event")
 	}
 	accepted := parseSheet(t, rg.decideSheet(created.ID, "accept", "bob", ""), http.StatusOK)
-	if accepted.Status != "ACCEPTED" || accepted.DecidedBy != "bob" {
+	if accepted.Status != "ACCEPTED" || accepted.DecidedBy != "bob" || accepted.ReceiptID == "" || accepted.LedgerEntryID == "" {
 		t.Fatalf("accepted %+v", accepted)
 	}
+	if len(rg.ledger.Entries) != 1 {
+		t.Fatalf("ledger entries %d, want the service accrual", len(rg.ledger.Entries))
+	}
+	wantLines(t, rg.ledger.Entries[0], "6000=7.52", "2100=-7.52")
+	if rg.ledger.Balance("6000").String() != "7.52" || rg.ledger.Balance("2100").String() != "-7.52" {
+		t.Fatalf("expense %s GR/IR %s", rg.ledger.Balance("6000"), rg.ledger.Balance("2100"))
+	}
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: legalEntityID})
+	page, err := rg.st.ListGrir(ctx, store.GrirFilter{Limit: 10})
+	if err != nil || len(page.Items) != 1 || page.Items[0].ReceiptID != accepted.ReceiptID || page.Items[0].Status != "OPEN" {
+		t.Fatalf("GR/IR %+v err %v", page.Items, err)
+	}
+	rec, err := rg.st.GetReceipt(ctx, accepted.ReceiptID)
+	if err != nil || rec.Source != domain.ReceiptSourceService || rec.PackingSlip != "SES-"+created.ID || rec.State != domain.Posted {
+		t.Fatalf("service receipt %+v err %v", rec, err)
+	}
 	evts := rg.st.Events()
-	if len(evts) != 1 || evts[0].Type != "dev.passage.receiving.serviceentrysheet.decided.v1" {
+	if len(evts) != 2 {
 		t.Fatalf("events %+v", evts)
 	}
+	types := []string{evts[0].Type, evts[1].Type}
+	if types[0] != "dev.passage.receiving.serviceentrysheet.decided.v1" || types[1] != "dev.passage.receiving.receipt.posted.v1" {
+		t.Fatalf("events %v", types)
+	}
 	assertDocumented(t, evts[0])
+	assertDocumented(t, evts[1])
 	byDecider := rg.call(http.MethodGet, sheetsPath+"/"+created.ID, "", duty("ServiceEntryAccept", "", "X-Passage-User", "bob"))
 	if got := decode[sheetJSON](t, byDecider, http.StatusOK); got.ID != created.ID {
 		t.Fatalf("decider read %+v", got)
@@ -189,4 +220,42 @@ func TestServiceSheet_RejectNeedsAReasonAndReadsAreScoped(t *testing.T) {
 	if rec := rg.call(http.MethodGet, missing, "", duty("ServiceEntryMaintain", "", "X-Passage-User", "alice")); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown sheet: %d", rec.Code)
 	}
+}
+
+func TestServiceSheet_AcceptClosedPeriodPostsNothing(t *testing.T) {
+	po := servicePO()
+	rg := &rig{st: memstore.New(), ledger: &domain.FakeLedger{}}
+	a := api.New(rg.st, api.Ports{
+		Periods: domain.FakePeriods{Status: domain.PeriodClosed}, Ledger: rg.ledger,
+		Profile:        domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000", Expense: "6000", InputTax: "1570"},
+		PurchaseOrders: domain.FakePurchaseOrders{Orders: map[string]domain.PurchaseOrder{po.ID: po}},
+		ResolveMinAge:  time.Nanosecond,
+	})
+	router := httpx.NewRouter()
+	a.Register(router)
+	rg.h, rg.api = router, a
+	created := parseSheet(t, rg.sheetAs("alice", sheetBodyFor(sheetLine(1, "1", "2.5"))), http.StatusCreated)
+	if r := rg.decideSheet(created.ID, "accept", "bob", ""); r.code != http.StatusUnprocessableEntity || !strings.Contains(r.body, "PER-AP-001") {
+		t.Fatalf("closed period: %d %s", r.code, r.body)
+	}
+	if len(rg.ledger.Entries) != 0 {
+		t.Fatalf("ledger %+v", rg.ledger.Entries)
+	}
+	read := decode[sheetJSON](t, rg.call(http.MethodGet, sheetsPath+"/"+created.ID, "", duty("ServiceEntryMaintain", "", "X-Passage-User", "alice")), http.StatusOK)
+	if read.Status != "PENDING" {
+		t.Fatalf("sheet moved off PENDING: %+v", read)
+	}
+}
+
+func TestServiceSheet_AcceptedSheetSettlesByERS(t *testing.T) {
+	rg := newSheetRig(servicePO())
+	created := parseSheet(t, rg.sheetAs("alice", sheetBodyFor(sheetLine(1, "3", "2.5"))), http.StatusCreated)
+	accepted := parseSheet(t, rg.decideSheet(created.ID, "accept", "bob", ""), http.StatusOK)
+	rg.enableErs(t, true)
+	run := rg.ersRun(t, http.StatusOK)
+	if len(run.Settled) != 1 || run.Settled[0].InvoiceNumber != "ERS-"+created.ID || run.Settled[0].ReceiptID != accepted.ReceiptID {
+		t.Fatalf("settled %+v", run)
+	}
+	entry := lastEntry(t, rg)
+	wantLines(t, entry, "2100=7.5", "2000=-7.5")
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
@@ -65,6 +67,8 @@ type sheetBody struct {
 	DecidedBy       string          `json:"decidedBy,omitempty"`
 	DecidedAt       string          `json:"decidedAt,omitempty"`
 	RejectReason    string          `json:"rejectReason,omitempty"`
+	ReceiptID       string          `json:"receiptId,omitempty"`
+	LedgerEntryID   string          `json:"ledgerEntryId,omitempty"`
 	Lines           []sheetLineBody `json:"lines"`
 }
 
@@ -91,7 +95,7 @@ func toSheetBody(s store.ServiceSheet) sheetBody {
 	out := sheetBody{
 		ID: s.ID, LegalEntityID: s.LegalEntityID, VendorID: s.VendorID, PurchaseOrderID: s.PurchaseOrderID, Currency: s.Currency, Status: s.Status,
 		Total: s.Total.String(), CreatedBy: s.CreatedBy, CreatedAt: s.CreatedAt.UTC().Format(time.RFC3339), DecidedBy: s.DecidedBy, RejectReason: s.RejectReason,
-		Lines: make([]sheetLineBody, 0, len(s.Lines)),
+		ReceiptID: s.ReceiptID, LedgerEntryID: s.LedgerEntryID, Lines: make([]sheetLineBody, 0, len(s.Lines)),
 	}
 	if s.DecidedAt != nil {
 		out.DecidedAt = s.DecidedAt.UTC().Format(time.RFC3339)
@@ -232,8 +236,89 @@ func (a *API) getServiceSheet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) acceptServiceSheet(w http.ResponseWriter, r *http.Request) {
-	a.decideServiceSheet(w, r, true)
+	p, ok := principalWithUser(w, r)
+	if !ok {
+		return
+	}
+	sheet, ok := a.loadSheet(w, r, p)
+	if !ok {
+		return
+	}
+	now := time.Now().UTC()
+	postingDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	fiscalPeriodID, err := a.resolveFiscalPeriod(r.Context(), sheet.LegalEntityID, postingDate, "")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	products := a.sheetProductIDs(r.Context(), sheet)
+	accepted, err := a.store.AcceptSheet(r.Context(), sheet.ID, p.UserID, func(s store.ServiceSheet, allocated store.Receipt) (store.SheetAcceptOutcome, error) {
+		accrual := domain.ServiceAccrual{
+			ID: s.ID, LegalEntityID: s.LegalEntityID, LedgerID: a.ports.Profile.LedgerID, FiscalPeriodID: fiscalPeriodID,
+			PostingDate: postingDate, Currency: s.Currency,
+		}
+		rec := store.Receipt{
+			ID: allocated.ID, Number: allocated.Number, LegalEntityID: s.LegalEntityID, VendorID: s.VendorID,
+			PurchaseOrderID: s.PurchaseOrderID, PackingSlip: serviceSheetSlipPrefix + s.ID, Date: postingDate,
+			Currency: s.Currency, Source: domain.ReceiptSourceService,
+		}
+		for i, l := range s.Lines {
+			lineNo := i + 1
+			accrual.Lines = append(accrual.Lines, domain.ServiceAccrualLine{
+				LineNo: lineNo, Qty: l.Qty, UnitPrice: money.Amount{Value: l.UnitPrice, Currency: s.Currency},
+			})
+			productID := products[l.POLineNo]
+			if productID == "" {
+				productID = stableID(p.TenantID, strings.ToLower(s.PurchaseOrderID), "service-product", fmt.Sprint(l.POLineNo))
+			}
+			rec.Lines = append(rec.Lines, store.Line{
+				LineNo: lineNo, POLineNo: l.POLineNo,
+				POLineID:  stableID(p.TenantID, strings.ToLower(s.PurchaseOrderID), "po-line", fmt.Sprint(l.POLineNo)),
+				ProductID: productID, Qty: l.Qty, UnitPrice: l.UnitPrice, Unit: l.Unit, Currency: s.Currency,
+			})
+		}
+		entry, items, err := domain.PostServiceSheet(r.Context(), accrual, a.ports.Periods, a.ledgerFor(s.ID), a.ports.Profile)
+		if err != nil {
+			return store.SheetAcceptOutcome{}, err
+		}
+		amounts := make([]store.LineAmount, len(items))
+		for i, item := range items {
+			amounts[i] = store.LineAmount{LineNo: item.LineNo, Amount: item.ReceivedAmount.Value, AmountAcct: acct(item.ReceivedAmount.Value, decimal.NewFromInt(1))}
+		}
+		postedEvt, err := receiptPostedEvent(p.TenantID, rec, amounts, entry.LedgerEntryID)
+		if err != nil {
+			return store.SheetAcceptOutcome{}, err
+		}
+		decidedEvt, err := sheetDecidedEvent(p.TenantID, s)
+		if err != nil {
+			return store.SheetAcceptOutcome{}, err
+		}
+		return store.SheetAcceptOutcome{Receipt: rec, Amounts: amounts, LedgerEntryID: entry.LedgerEntryID, Events: []events.Event{decidedEvt, postedEvt}}, nil
+	})
+	if err != nil {
+		writeSheetError(w, r, err)
+		return
+	}
+	a.sheetsDecided.Add(1)
+	a.posted.Add(1)
+	a.pendingPostings.finish(sheet.ID)
+	httpx.JSON(w, http.StatusOK, toSheetBody(accepted))
 }
+
+func (a *API) sheetProductIDs(ctx context.Context, sheet store.ServiceSheet) map[int]string {
+	out := map[int]string{}
+	po, err := a.loadPurchaseOrder(ctx, sheet.LegalEntityID, sheet.PurchaseOrderID)
+	if err != nil {
+		return out
+	}
+	for _, l := range po.Lines {
+		if ids.Valid(l.ProductID) {
+			out[l.LineNo] = l.ProductID
+		}
+	}
+	return out
+}
+
 func (a *API) rejectServiceSheet(w http.ResponseWriter, r *http.Request) {
 	a.decideServiceSheet(w, r, false)
 }

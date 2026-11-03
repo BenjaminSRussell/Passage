@@ -152,9 +152,9 @@ func lockGrirItem(ctx context.Context, tx pgx.Tx, tenantID string, in Invoice, k
 
 func insertInvoice(ctx context.Context, tx pgx.Tx, tenantID string, in *Invoice) error {
 	if err := tx.QueryRow(ctx, `INSERT INTO receiving_vendor_invoice (tenant_id, id, legal_entity_id, vendor_id, invoice_number, invoice_date, posting_date,
-		currency, ledger_id, fiscal_period_id, ledger_entry_id, total, source, status, posted_by, audit_reason, one_time_payee_id, audit_rule_version) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NULLIF($17, '')::uuid, NULLIF($18, 0)) RETURNING created_at`,
+		currency, ledger_id, fiscal_period_id, ledger_entry_id, total, source, status, posted_by, audit_reason, one_time_payee_id, audit_rule_version, tax_amount, tax_code) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NULLIF($17, '')::uuid, NULLIF($18, 0), $19, $20) RETURNING created_at`,
 		tenantID, in.ID, in.LegalEntityID, in.VendorID, in.InvoiceNumber, in.InvoiceDate, in.PostingDate, in.Currency, in.LedgerID, in.FiscalPeriodID,
-		in.LedgerEntryID, in.Total, in.Source, in.Status, in.PostedBy, in.AuditReason, in.OneTimePayeeID, in.AuditRuleVersion).Scan(&in.CreatedAt); err != nil {
+		in.LedgerEntryID, in.Total, in.Source, in.Status, in.PostedBy, in.AuditReason, in.OneTimePayeeID, in.AuditRuleVersion, in.TaxAmount, in.TaxCode).Scan(&in.CreatedAt); err != nil {
 		return err
 	}
 	rows := make([][]any, len(in.Lines))

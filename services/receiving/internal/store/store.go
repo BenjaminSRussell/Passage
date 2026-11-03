@@ -75,6 +75,7 @@ type Receipt struct {
 	PostedAt        *time.Time
 	PostedBy        string
 	LedgerEntryID   string
+	Source          string
 	CreatedAt       time.Time
 	Lines           []Line
 }
@@ -165,6 +166,8 @@ type Invoice struct {
 	RejectedBy       string
 	RejectedAt       *time.Time
 	RejectReason     string
+	TaxAmount        decimal.Decimal
+	TaxCode          string
 	Lines            []InvoiceLine
 }
 
@@ -278,6 +281,9 @@ type Store interface {
 	CreateSheet(ctx context.Context, in ServiceSheet, limits map[int]decimal.Decimal) (ServiceSheet, error)
 	GetSheet(ctx context.Context, id string) (ServiceSheet, error)
 	DecideSheet(ctx context.Context, id, by string, accept bool, reason string, fn SheetDecisionFunc) (ServiceSheet, error)
+	AcceptSheet(ctx context.Context, id, by string, fn SheetAcceptFunc) (ServiceSheet, error)
+	PutSelfBill(ctx context.Context, in SelfBill, evt events.Event) error
+	GetSelfBill(ctx context.Context, invoiceID string) (SelfBill, error)
 	GetCapture(ctx context.Context, id string) (Capture, error)
 	FindCapture(ctx context.Context, legalEntityID, digest string) (Capture, bool, error)
 	PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) (Invoice, error)

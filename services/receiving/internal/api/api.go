@@ -58,6 +58,8 @@ type Ports struct {
 	LegalHolds         domain.LegalHolds
 	LegalEntityCountry map[string]string
 	AuditSampler       *domain.Sampler
+	Tax                domain.TaxCalculator
+	TaxRecorder        domain.TaxRecorder
 
 	ResolveMinAge time.Duration
 	ResolveLease  time.Duration
@@ -150,6 +152,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/one-time-payees", a.idempotent(a.createOneTimePayee))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoice-captures", a.idempotent(a.createInvoiceCapture))
 	r.With(authz.RequireDuty(dutyAPInquire)).Get("/v1/receiving/invoice-captures/{id}", a.getInvoiceCapture)
+	r.With(authz.RequireDuty(dutyAPInquire)).Get("/v1/receiving/ers-self-bills/{id}", a.getSelfBill)
 	r.With(authz.RequireDuty(dutySheetMaintain)).Post("/v1/receiving/service-entry-sheets", a.idempotent(a.createServiceSheet))
 	r.With(authz.RequireAnyDuty(dutySheetMaintain, dutySheetAccept)).Get("/v1/receiving/service-entry-sheets/{id}", a.getServiceSheet)
 	r.With(authz.RequireDuty(dutySheetAccept)).Post("/v1/receiving/service-entry-sheets/{id}:accept", a.idempotent(a.acceptServiceSheet))

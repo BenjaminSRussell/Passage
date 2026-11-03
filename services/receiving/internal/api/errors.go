@@ -67,6 +67,8 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "RCV-CRY-001", "field encryption is not configured; one-time payees cannot be stored"))
 	case errors.Is(err, store.ErrGrirNotFound):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "RCV-NF-002", "receipt line has no open GR/IR item"))
+	case errors.Is(err, store.ErrSelfBillNotFound):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "RCV-NF-009", "self-billing document not found"))
 	default:
 		slog.Error("receipt request failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusInternalServerError, "COM-0500", "internal error"))

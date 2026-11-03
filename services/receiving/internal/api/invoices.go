@@ -202,6 +202,11 @@ func (a *API) postVendorInvoice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) submitInvoice(ctx context.Context, memo groupMemo, p tenant.Principal, in store.Invoice) (store.Invoice, error) {
+	if in.Source == domain.InvoiceSourceERS {
+		if err := a.applyERSTax(ctx, &in); err != nil {
+			return store.Invoice{}, err
+		}
+	}
 	in.PostedBy = p.UserID
 	policy, err := a.store.AuditPolicy(ctx, in.LegalEntityID)
 	if err != nil {
@@ -226,7 +231,7 @@ func (a *API) submitInvoice(ctx context.Context, memo groupMemo, p tenant.Princi
 		}
 		doc := domain.VendorInvoice{
 			ID: in.ID, LegalEntityID: in.LegalEntityID, LedgerID: in.LedgerID, FiscalPeriodID: in.FiscalPeriodID,
-			PostingDate: in.PostingDate, InvoiceDate: in.InvoiceDate, Currency: in.Currency, Lines: lines, VendorGroupCode: group.Code,
+			PostingDate: in.PostingDate, InvoiceDate: in.InvoiceDate, Currency: in.Currency, TaxAmount: in.TaxAmount, TaxCode: in.TaxCode, Lines: lines, VendorGroupCode: group.Code,
 		}
 		if blocked {
 			entry, err := domain.HoldInvoice(ctx, doc, a.ports.Periods, a.ports.Profile)
@@ -254,6 +259,12 @@ func (a *API) submitInvoice(ctx context.Context, memo groupMemo, p tenant.Princi
 	}
 	a.pendingPostings.finish(invoiceSubjects(posted)...)
 	a.invoiced.Add(1)
+	if posted.Source == domain.InvoiceSourceERS {
+		if err := a.issueSelfBill(ctx, p.TenantID, posted); err != nil {
+			return store.Invoice{}, err
+		}
+		a.recordERSTax(ctx, posted)
+	}
 	return posted, nil
 }
 

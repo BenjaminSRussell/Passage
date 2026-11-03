@@ -41,11 +41,13 @@ assert_env "$dev" POSTING_ACCOUNT_INVENTORY "1400"
 assert_env "$dev" POSTING_ACCOUNT_GRIR "2100"
 assert_env "$dev" POSTING_ACCOUNT_PPV "5200"
 assert_env "$dev" POSTING_ACCOUNT_VENDOR_CONTROL "2000"
+assert_env "$dev" POSTING_ACCOUNT_EXPENSE "6000"
+assert_env "$dev" POSTING_ACCOUNT_INPUT_TAX "1570"
 
 ports_go="$repo_root/services/receiving/cmd/receiving/ports.go"
 for name in LEDGER_URL CLOSE_URL PURCHASING_URL POSTING_LEDGER_ID \
   POSTING_ACCOUNT_INVENTORY POSTING_ACCOUNT_GRIR POSTING_ACCOUNT_PPV \
-  POSTING_ACCOUNT_VENDOR_CONTROL; do
+  POSTING_ACCOUNT_VENDOR_CONTROL POSTING_ACCOUNT_EXPENSE POSTING_ACCOUNT_INPUT_TAX TAX_URL; do
   if ! grep -Fq -- "\"$name\"" "$ports_go"; then
     printf 'cmd/receiving/ports.go no longer reads %s\n' "$name" >&2
     exit 1

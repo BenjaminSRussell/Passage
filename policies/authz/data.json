@@ -572,7 +572,8 @@
     ]},
     "APInquire": {"permissions": [
       {"resource": "/v1/receiving/grir", "methods": ["GET"]},
-      {"resource": "/v1/receiving/invoice-captures/*", "methods": ["GET"]}
+      {"resource": "/v1/receiving/invoice-captures/*", "methods": ["GET"]},
+      {"resource": "/v1/receiving/ers-self-bills/*", "methods": ["GET"]}
     ]},
     "ReceivingAdmin": {"permissions": [
       {"resource": "/v1/receiving/pending-postings", "methods": ["GET"]},
@@ -3006,6 +3007,7 @@
       "purchasing": ["procurement.invoicing-plan.settle", "procurement.purchase-order.lookup"],
       "inventory": ["inventory.ownership-change.read"],
       "party": ["party.read"],
+      "tax": ["Calculate tax", "tax.transaction.record"],
       "compliance": ["compliance.legal_hold.check"]
     },
     "close": {

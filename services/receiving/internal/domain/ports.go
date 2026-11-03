@@ -79,6 +79,8 @@ type PostingProfile struct {
 	GRIR          string
 	PPV           string
 	VendorControl string
+	Expense       string
+	InputTax      string
 	// VendorGroupDimension names the ledger dimension that carries the vendor
 	// group code on the vendor-control line; empty posts no dimension.
 	VendorGroupDimension string
@@ -294,6 +296,57 @@ func (f *FakeLedger) Reverse(_ context.Context, entryID, _, _ string, _ time.Tim
 		return f.Err
 	}
 	f.Reversed = append(f.Reversed, entryID)
+	return nil
+}
+
+type TaxDocumentLine struct {
+	Ref    string
+	Amount decimal.Decimal
+}
+
+type TaxDocument struct {
+	Currency string
+	Date     string
+	Lines    []TaxDocumentLine
+}
+
+type TaxResult struct {
+	Code   string
+	Amount decimal.Decimal
+}
+
+type TaxCalculator interface {
+	CalculateInput(ctx context.Context, legalEntityID string, in TaxDocument) (TaxResult, error)
+}
+
+type FakeTaxCalculator struct {
+	Result TaxResult
+	Err    error
+}
+
+func (f FakeTaxCalculator) CalculateInput(context.Context, string, TaxDocument) (TaxResult, error) {
+	return f.Result, f.Err
+}
+
+type TaxTxn struct {
+	ID, Code, Date string
+	Amount         decimal.Decimal
+}
+
+type TaxRecorder interface {
+	RecordInput(ctx context.Context, legalEntityID string, txn TaxTxn) error
+}
+
+type FakeTaxRecorder struct {
+	Txns []TaxTxn
+	Err  error
+}
+
+func (f *FakeTaxRecorder) RecordInput(_ context.Context, _ string, txn TaxTxn) error {
+	if f.Err != nil {
+		return f.Err
+	}
+	f.Txns = append(f.Txns, txn)
 	return nil
 }
 
