@@ -36,14 +36,14 @@ type ForecastComparison struct {
 	Rows  []domain.ForecastRow
 }
 
-const forecastColumns = `m.id::text, m.project_id, m.name, m.currency, m.version, m.created_by, m.created_at, m.updated_at,
+const forecastColumns = `m.id::text, m.project_id, m.name, m.currency, m.version, m.created_by, m.created_at, m.updated_at, m.is_active,
 	(select count(*) from project_forecast_line l where l.tenant_id = m.tenant_id and l.model_id = m.id),
 	(select coalesce(sum(l.cost_amount), 0)::text from project_forecast_line l where l.tenant_id = m.tenant_id and l.model_id = m.id),
 	(select coalesce(sum(l.sales_amount), 0)::text from project_forecast_line l where l.tenant_id = m.tenant_id and l.model_id = m.id)`
 
 func scanForecast(row pgx.Row) (domain.ForecastModel, error) {
 	var m domain.ForecastModel
-	err := row.Scan(&m.ID, &m.ProjectID, &m.Name, &m.Currency, &m.Version, &m.CreatedBy, &m.CreatedAt, &m.UpdatedAt,
+	err := row.Scan(&m.ID, &m.ProjectID, &m.Name, &m.Currency, &m.Version, &m.CreatedBy, &m.CreatedAt, &m.UpdatedAt, &m.Active,
 		&m.LineCount, &m.TotalCost, &m.TotalSales)
 	if err != nil {
 		return m, err

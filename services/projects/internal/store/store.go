@@ -103,6 +103,7 @@ type Store interface {
 	ListForecastModels(ctx context.Context, projectID string) ([]domain.ForecastModel, error)
 	GetForecast(ctx context.Context, projectID, modelID string) (ForecastComparison, error)
 	ReplaceForecast(ctx context.Context, projectID, modelID string, expected int, in ForecastInput) (domain.ForecastModel, error)
+	ActivateForecastModel(ctx context.Context, projectID, modelID string, expected int) (domain.ForecastModel, error)
 
 	// Categories, transactions and invoice proposals (FR-41.4, FR-41.6). The
 	// transaction comes in priced (domain.PriceLine).

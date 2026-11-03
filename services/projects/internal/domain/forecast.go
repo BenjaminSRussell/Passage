@@ -44,6 +44,7 @@ type ForecastModel struct {
 	ProjectID  string         `json:"projectId"`
 	Name       string         `json:"name"`
 	Currency   string         `json:"currency"`
+	Active     bool           `json:"active"`
 	Version    int            `json:"version"`
 	LineCount  int            `json:"lineCount"`
 	TotalCost  string         `json:"totalCost"`

@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/projects/internal/api"
 	"github.com/BenjaminSRussell/passage/services/projects/internal/store"
 	"github.com/BenjaminSRussell/passage/services/projects/migrations"
@@ -54,8 +56,17 @@ func run() error {
 		}
 	}
 
+	ledger, err := ledgerclient.FromEnv(os.Getenv, "projects")
+	if err != nil {
+		return fmt.Errorf("ledger client: %w", err)
+	}
+	s := store.New(pool)
+	h := api.New(s)
+	if ledger != nil {
+		h.WithGL(s, ledger)
+	}
 	r := httpx.NewRouter()
-	api.New(store.New(pool)).Register(r)
+	h.Register(r)
 	slog.Info("projects listening", "addr", addr)
 	return httpx.Serve(ctx, addr, r)
 }
