@@ -97,6 +97,12 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | PUT `/purchase-orders/{id}/lines/{lineNo}/delivery-schedule` | PurchaseOrderMaintain | If-Match (PO row version) required; replaces the rows on a DRAFT or REJECTED PO; Σ qty = line qty (PRC-DS-001) |
 | DELETE `/purchase-orders/{id}/lines/{lineNo}/delivery-schedule` | PurchaseOrderMaintain | If-Match required; 204 with the new row version as ETag |
 | PUT `/purchase-orders/{id}/lines/{lineNo}/delivery-schedule/rows/{seq}/confirmation` | PurchaseOrderMaintain | If-Match required; the vendor's confirmed date on a CONFIRMED PO; writes `deliveryschedule.confirmed.v1`; the same date again is a no-op |
+| GET `/purchase-orders/{id}/service-lines` | PurchaseOrderInquire or the lookup duty | The service lines of the PO with outlines and limits, in line order |
+| GET `/purchase-orders/{id}/lines/{lineNo}/service` | PurchaseOrderInquire or the lookup duty | One line's service specification; ETag = PO row version; 404 PRC-SRV-NOT-FOUND for a plain line |
+| PUT `/purchase-orders/{id}/lines/{lineNo}/service` | PurchaseOrderMaintain | If-Match (PO row version) required; saves the specification on a DRAFT or REJECTED PO (PRC-SRV-001): value limit, expected value, optional contract agreement line, and an outline tree or a `modelId` to copy; writes `servicespec.changed.v1` |
+| DELETE `/purchase-orders/{id}/lines/{lineNo}/service` | PurchaseOrderMaintain | If-Match required; 204 with the new row version as ETag; writes `servicespec.changed.v1` with `removed` |
+| GET `/purchase-orders/{id}/lines/{lineNo}/service/limit-check?unplanned=&entry=` | PurchaseOrderInquire or the lookup duty | Whether an entry of unplanned services fits the value limit and the contract limit (BR-17.19); a refusal is 200 with `allowed` false and `code` PRC-SRV-003, with `remaining` (what can still be entered) either way; changes nothing (wave 18 asks for a service entry sheet) |
+| POST `/model-service-specs`, GET `/model-service-specs`, GET `/model-service-specs/{id}`, PUT `/model-service-specs/{id}` | ProcurementPolicyMaintain (reads also PurchaseOrderInquire) | Model service specifications (FR-17.23, SAP ML10-ML12): a reusable outline in one currency per legal entity; POST needs an Idempotency-Key (409 PRC-SRV-006 for a duplicate code), PUT needs If-Match (412 PRC-SRV-007); writes `modelservicespec.created.v1` and `modelservicespec.changed.v1` |
 | PUT `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan/rows/{seq}/settlement` | `procurement.invoicing-plan.settle` | Receiving's service token only (#289; 403 for a person, and identity refuses to assign the service-only duty). Body `settlementRef` and `amount`; flips an OPEN row to INVOICED at the settled amount (a reprice in between is absorbed by the other OPEN rows), idempotent per row and reference, records who settled it in `purchase_invoicing_plan_row_settlement`; bumps the PO row version |
 | GET `/requisition-lines` | PurchaseOrderMaintain | Consolidation queue: OPEN lines of APPROVED requisitions; `sourcing` = NEEDS_SOURCING (no preferred vendor) or HAS_VENDOR, `vendorId`, `limit`, `cursor` |
 | POST `/requisitions:consolidate` | PurchaseOrderMaintain | Idempotency-Key required; one DRAFT PO per legal entity × vendor × currency × site × delivery window (`windowDays`, default 7, 1–60); `vendorId` per line overrides the preferred vendor |
@@ -294,6 +300,29 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   vendor's confirmed date of a row is set on a CONFIRMED PO and writes
   `deliveryschedule.confirmed.v1` once per change; the same date again is answered 200 even
   with an older If-Match. Writes take If-Match on the PO row version and bump it.
+- **Service lines (FR-17.23, BR-17.19, AC-17.17).** A PO line becomes a SERVICE line when it
+  has a specification (a plain line has none). The specification holds the value limit for
+  unplanned services (0 allows none), the expected value (never above the limit), an optional
+  contract limit (an agreement line of an EFFECTIVE agreement of the PO's legal entity, vendor
+  and currency whose remaining value, committed minus released, or remaining quantity at the
+  net unit price, also bounds unplanned services) and an optional outline: levels and service
+  items nested up to 5 deep and 200 nodes. An item's amount is quantity × unit price rounded
+  half-even to the currency's minor units, a level's amount is the sum of its children (a
+  stated `total` that differs is 422 PRC-SRV-004), and the planned total (the top-level sum)
+  may not exceed the line amount (PRC-SRV-002, checked again at `:submit` and `:confirm`, and
+  on an edit of a confirmed PO, since the line amount can fall in a later edit). The specification is saved or removed only while the PO is
+  DRAFT or REJECTED (PRC-SRV-001) and under If-Match on the PO row version, which it bumps;
+  after that it changes through change management (not yet versioned, see NOT-IMPLEMENTED).
+  A model service specification is copied into the line (`modelId`), so a later change to the
+  model does not move the line; the model must be ACTIVE, of the PO's legal entity and priced
+  in the PO's currency (PRC-SRV-005). The limit check adds the unplanned amount already
+  entered to the entry and refuses when the total is above the value limit or the contract
+  line's remaining value: 200 with `allowed` false, `code` PRC-SRV-003 and the PRD message in
+  `detail`, so the caller keeps the figures; `remaining` is what may still be entered under both
+  limits. A cancelled line or PO takes no entry (PRC-SRV-001). Wave 18 owns the entered amounts
+  and the entry sheets: it reads the limits and outline `seq`s of every service line of a PO in
+  one call (`GET .../service-lines`, which also tells a plain line from a service line) and
+  enforces `remaining` under its own per-PO lock, since this check holds none.
 - **Subsequent price change (FR-17.22, BR-17.18, AC-17.16).** Only a CONFIRMED PO
   is repriced (PRC-PO-STATE otherwise). Each live line priced from a trade agreement
   (`TRADE_AGREEMENT:<id>`) is looked up again with the PO creation rules (FR-17.6) on
@@ -515,6 +544,15 @@ store codes are returned as the `code` field.
 | PRC-DS-002 | 422 | The PO is not DRAFT or REJECTED (replace, delete) or not CONFIRMED (confirmed date), or the line is cancelled |
 | PRC-DS-003 | 422 | The PO's delivery schedules would hold more than 1,000 rows together |
 | PRC-DS-NOT-FOUND | 404 | The line has no delivery schedule, or the schedule has no such row |
+| PRC-SRV-001 | 422 | The PO is not DRAFT or REJECTED (save, remove), or the line or PO is cancelled (save, remove, limit check) |
+| PRC-SRV-002 | 422 | The planned outline is worth more than the line, the expected value is above the limit, or the contract agreement line is not of an EFFECTIVE agreement of the PO's legal entity, vendor and currency |
+| PRC-SRV-003 | 200 answer | Unplanned services exceed the value limit or the contract line's remaining value (BR-17.19): `allowed` false on the limit check; wave 18 raises it on the entry sheet |
+| PRC-SRV-004 | 422 | The items of an outline level do not sum to the total stated for the level |
+| PRC-SRV-005 | 422 | The model is inactive, of another legal entity or priced in another currency than the PO |
+| PRC-SRV-006 | 409 | The legal entity already has a model service specification with this code |
+| PRC-SRV-007 | 412 | If-Match is not the model service specification's version |
+| PRC-SRV-NOT-FOUND | 404 | The line has no service specification |
+| PRC-SRV-MODEL-NOT-FOUND | 404 | Model service specification not found (or outside the caller's legal entity scope) |
 | PRC-SL-001 | 403 / warning | The signing limit is past its recertification date: an approver cannot approve; a requester's document gets one more approval level (warning on submit) |
 | PRC-SL-002 | 403 | The amount is above the approver's approval limit, or the approver has no limit in the document currency |
 | PRC-SL-003 | 403 | A worker cannot decide a signing limit request they made or that is for them, or recertify their own limit |

@@ -1804,3 +1804,162 @@ export function createAutoCharge(input: AutoChargeInput, idempotencyKey = newIde
 export function changeAutoCharge(id: string, input: AutoChargeInput, version: number) {
   return send<AutoCharge>("PUT", `/auto-charges/${encodeURIComponent(id)}`, { body: input, headers: { "If-Match": `"${version}"` } });
 }
+
+// --- Service PO lines, outlines and model service specifications (FR-17.23, BR-17.19) ---
+
+export type OutlineKind = "LEVEL" | "ITEM";
+
+/** A stored outline node in depth-first order; a level's amount is the sum of its children. */
+export interface OutlineRow {
+  seq: number;
+  parentSeq?: number;
+  depth: number;
+  kind: OutlineKind;
+  description?: string;
+  productId?: string;
+  qty: string;
+  unit?: string;
+  unitPrice: string;
+  amount: string;
+}
+
+/** A node of an outline in a request: a level with children, or an item. */
+export interface OutlineNodeInput {
+  kind: OutlineKind;
+  description?: string;
+  productId?: string;
+  qty?: string;
+  unit?: string;
+  unitPrice?: string;
+  /** The amount the caller expects a level to add up to (422 PRC-SRV-004 when it does not). */
+  total?: string;
+  children?: OutlineNodeInput[];
+}
+
+export interface ServiceSpec {
+  purchaseOrderId: string;
+  lineNo: number;
+  currency: string;
+  lineAmount: string;
+  /** The limit for unplanned services. */
+  valueLimit: string;
+  expectedValue: string;
+  /** The sum of the top-level outline amounts; never above the line amount. */
+  plannedTotal: string;
+  contractAgreementLineId?: string;
+  /** The remaining value of the contract line now. */
+  contractRemaining?: string;
+  modelId?: string;
+  outline: OutlineRow[];
+  updatedBy?: string;
+  updatedAt: string;
+}
+
+/** A specification with the PO row version after the call: writes bump it. */
+export interface ServiceSpecResult extends ServiceSpec {
+  poRowVersion: number;
+}
+
+export interface ServiceSpecInput {
+  valueLimit: string;
+  expectedValue?: string;
+  contractAgreementLineId?: string;
+  /** Copies the model's outline; give this or an outline, not both. */
+  modelId?: string;
+  outline?: OutlineNodeInput[];
+}
+
+export type ModelServiceStatus = "ACTIVE" | "INACTIVE";
+
+export interface ModelServiceSpec {
+  id: string;
+  legalEntityId: string;
+  code: string;
+  name: string;
+  currency: string;
+  status: ModelServiceStatus;
+  plannedTotal: string;
+  /** Empty in a list. */
+  outline: OutlineRow[];
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ModelServiceSpecInput {
+  legalEntityId?: string;
+  code?: string;
+  name: string;
+  currency: string;
+  status?: ModelServiceStatus;
+  outline?: OutlineNodeInput[];
+}
+
+function servicePath(poId: string, lineNo: number) {
+  return `/purchase-orders/${encodeURIComponent(poId)}/lines/${lineNo}/service`;
+}
+
+/** The service lines of a PO with their outlines and limits, in line order. */
+export async function listServiceSpecs(poId: string, signal?: AbortSignal) {
+  const { body } = await send<{ items: ServiceSpec[] }>("GET", `/purchase-orders/${encodeURIComponent(poId)}/service-lines`, { signal });
+  return body.items;
+}
+
+/** One line's specification; 404 PRC-SRV-NOT-FOUND when the line is a plain line. */
+export function getServiceSpec(poId: string, lineNo: number, signal?: AbortSignal) {
+  return send<ServiceSpecResult>("GET", servicePath(poId, lineNo), { signal });
+}
+
+/** Saves the line's specification on a DRAFT or REJECTED PO; rowVersion is the PO ETag (412 PRC-PO-009 when stale). */
+export function putServiceSpec(poId: string, lineNo: number, rowVersion: number, input: ServiceSpecInput) {
+  return send<ServiceSpecResult>("PUT", servicePath(poId, lineNo), { body: input, headers: { "If-Match": `"${rowVersion}"` } });
+}
+
+/** Removes the line's specification; resolves to the new PO row version. */
+export async function deleteServiceSpec(poId: string, lineNo: number, rowVersion: number) {
+  const { etag } = await send<undefined>("DELETE", servicePath(poId, lineNo), { headers: { "If-Match": `"${rowVersion}"` } });
+  return etag === null ? rowVersion + 1 : Number(etag.replace(/"/g, ""));
+}
+
+export function listModelServiceSpecs(
+  filters: { status?: ModelServiceStatus | ""; q?: string; legalEntityId?: string } = {},
+  options: ListOptions = {},
+) {
+  return list<ModelServiceSpec>("/model-service-specs", { status: filters.status || undefined, q: filters.q, legalEntityId: filters.legalEntityId }, options);
+}
+
+export function getModelServiceSpec(id: string, signal?: AbortSignal) {
+  return send<ModelServiceSpec>("GET", `/model-service-specs/${encodeURIComponent(id)}`, { signal });
+}
+
+export function createModelServiceSpec(input: ModelServiceSpecInput, idempotencyKey = newIdempotencyKey()) {
+  return send<ModelServiceSpec>("POST", "/model-service-specs", { body: input, headers: { "Idempotency-Key": idempotencyKey } });
+}
+
+/** Replaces everything but the code and legal entity under the version read. PUT is idempotent, so no key is sent. */
+export function changeModelServiceSpec(id: string, input: ModelServiceSpecInput, version: number) {
+  return send<ModelServiceSpec>("PUT", `/model-service-specs/${encodeURIComponent(id)}`, { body: input, headers: { "If-Match": `"${version}"` } });
+}
+
+/** The answer to an unplanned services check (BR-17.19). */
+export interface ServiceLimitCheck {
+  lineNo: number;
+  currency: string;
+  valueLimit: string;
+  contractRemaining?: string;
+  unplannedEntered: string;
+  entry: string;
+  /** The value limit less what is entered, never negative. */
+  valueRemaining: string;
+  /** What unplanned services may still add before this entry, under both limits. */
+  remaining: string;
+  allowed: boolean;
+  /** PRC-SRV-003 when the entry does not fit. */
+  code?: string;
+  detail?: string;
+}
+
+/** Whether an entry of unplanned services fits the line's limits (BR-17.19); a refusal is allowed false with code PRC-SRV-003, not an error. Changes nothing. */
+export function checkServiceLimit(poId: string, lineNo: number, unplanned: string, entry: string, signal?: AbortSignal) {
+  return send<ServiceLimitCheck>("GET", `${servicePath(poId, lineNo)}/limit-check${query({ unplanned, entry })}`, { signal });
+}

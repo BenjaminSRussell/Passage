@@ -35,6 +35,9 @@ var allTypes = map[string]string{
 	events.ChargeCodeChanged:         "chargecode",
 	events.AutoChargeCreated:         "autocharge",
 	events.AutoChargeChanged:         "autocharge",
+	events.ServiceSpecChanged:        "servicespec",
+	events.ModelServiceSpecCreated:   "modelservicespec",
+	events.ModelServiceSpecChanged:   "modelservicespec",
 }
 
 func TestEventTypesFollowTheNamingRule(t *testing.T) {
@@ -94,6 +97,8 @@ func TestPayloadFieldsAreInTheAsyncAPI(t *testing.T) {
 		events.ChargeCodeData{DebitAccountID: "a", CreditAccountID: "a", VendorID: "v", ChangedBy: "u"},
 		events.AutoChargeData{AccountID: "a", Value: "1", MinOrderAmount: "1", Currency: "USD", ValidTo: "2027-01-01", ChangedBy: "u"},
 		events.DeliveryScheduleConfirmedData{ProductID: "p", PreviousConfirmedDate: "2027-01-01", ConfirmedBy: "u"},
+		events.ServiceSpecData{ContractAgreementLineID: "a", ModelID: "m", ChangedBy: "u"},
+		events.ModelServiceSpecData{ChangedBy: "u"},
 	} {
 		keys = append(keys, jsonKeys(t, v)...)
 	}
