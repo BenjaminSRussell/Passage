@@ -15,6 +15,7 @@ import (
 
 var domainStatus = map[string]int{
 	domain.CodeOverDelivery:      http.StatusUnprocessableEntity,
+	domain.CodeCatchWeight:       http.StatusUnprocessableEntity,
 	domain.CodeDuplicateSerial:   http.StatusUnprocessableEntity,
 	domain.CodeInvalidReceipt:    http.StatusUnprocessableEntity,
 	domain.CodeInvalidTransition: http.StatusConflict,

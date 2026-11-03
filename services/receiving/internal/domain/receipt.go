@@ -74,6 +74,18 @@ type ReceiptLine struct {
 	BatchTracked     bool
 	SerialTracked    bool
 	Tracking         Tracking
+	// CWQty is the catch-weight count (cases). Qty is the actual weight.
+	CWQty       int
+	CatchWeight CatchWeight
+}
+
+// CatchUnits is the quantity checked against the purchase order and serials:
+// cases when the line is catch-weight, otherwise Qty.
+func (l ReceiptLine) CatchUnits() decimal.Decimal {
+	if l.CWQty > 0 {
+		return decimal.NewFromInt(int64(l.CWQty))
+	}
+	return l.Qty
 }
 
 type Receipt struct {
@@ -123,9 +135,15 @@ func (r Receipt) Register(recorded map[SerialKey]struct{}) (Receipt, error) {
 		if l.Qty.Sign() <= 0 {
 			return r, fail(CodeInvalidReceipt, "line %d quantity must be positive", l.LineNo)
 		}
+		if l.CWQty > 0 || l.CatchWeight.Set() {
+			if err := ValidateCatchWeight(l.CatchWeight, l.CWQty, l.Qty); err != nil {
+				return r, err
+			}
+		}
+		units := l.CatchUnits()
 		allowance := l.OrderedRemaining.Mul(decimal.NewFromInt(1).Add(l.OverDeliveryPct.Div(decimal.NewFromInt(100))))
-		if l.Qty.GreaterThan(allowance) {
-			return r, fail(CodeOverDelivery, "line %d quantity %s exceeds allowance %s", l.LineNo, l.Qty, allowance)
+		if units.GreaterThan(allowance) {
+			return r, fail(CodeOverDelivery, "line %d quantity %s exceeds allowance %s", l.LineNo, units, allowance)
 		}
 		if l.BatchTracked && l.Tracking.Batch == "" {
 			return r, fail(CodeInvalidReceipt, "line %d requires a batch", l.LineNo)
@@ -133,7 +151,7 @@ func (r Receipt) Register(recorded map[SerialKey]struct{}) (Receipt, error) {
 		if !l.SerialTracked {
 			continue
 		}
-		if !l.Qty.IsInteger() || int64(len(l.Tracking.Serials)) != l.Qty.IntPart() {
+		if !units.IsInteger() || int64(len(l.Tracking.Serials)) != units.IntPart() {
 			return r, fail(CodeInvalidReceipt, "line %d needs one serial per unit", l.LineNo)
 		}
 		for _, s := range l.Tracking.Serials {
@@ -259,6 +277,10 @@ func (r Receipt) Correct(ctx context.Context, ledger LedgerPoster, profile Posti
 			return "", nil, fail(CodeInvalidReceipt, "line %d corrected quantity must stay positive, cancel the receipt instead", l.LineNo)
 		case next.LessThan(l.InvoicedQty):
 			return "", nil, fail(CodeCorrectionBelow, "line %d has %s invoiced and cannot go below it", l.LineNo, l.InvoicedQty)
+		case l.CWQty > 0:
+			if err := ValidateCatchWeight(l.CatchWeight, l.CWQty, next); err != nil {
+				return "", nil, err
+			}
 		case delta.Sign() > 0 && next.GreaterThan(allowance):
 			return "", nil, fail(CodeOverDelivery, "line %d quantity %s exceeds allowance %s", l.LineNo, next, allowance)
 		case l.SerialTracked:

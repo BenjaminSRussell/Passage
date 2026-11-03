@@ -135,7 +135,7 @@ func ApplyChange(o *Order, req ChangeRequest) ([]domain.FieldChange, []int, erro
 		if len(lineDiff) == 0 {
 			continue
 		}
-		net, err := domain.LineNet(after.Quantity, after.UnitPrice, after.DiscPct)
+		net, err := domain.LineNetFor(after.Quantity, after.UnitPrice, after.DiscPct, l.CatchWeight, l.ActualWeight)
 		if err != nil {
 			return nil, nil, fmt.Errorf("line %d: %w", c.LineNo, err)
 		}

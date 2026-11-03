@@ -31,9 +31,11 @@ const (
 )
 
 // progressLineRequest is the quantity a report covers on one order line.
+// ActualWeight is the catch-weight of a DELIVERED report (FR-24.7).
 type progressLineRequest struct {
-	LineNo   int    `json:"lineNo"`
-	Quantity string `json:"quantity"`
+	LineNo       int     `json:"lineNo"`
+	Quantity     string  `json:"quantity"`
+	ActualWeight *string `json:"actualWeight,omitempty"`
 }
 
 // recordProgressRequest is the body of POST /v1/sales/orders/{id}:record-progress.
@@ -82,7 +84,16 @@ func (a *API) recordProgress(w http.ResponseWriter, r *http.Request) {
 			if err != nil || !q.IsPositive() || q.Exponent() < -quantityPlaces {
 				fields[name+".quantity"] = fmt.Sprintf("must be a positive decimal with at most %d places", quantityPlaces)
 			}
-			in.Lines = append(in.Lines, store.ProgressLineInput{LineNo: l.LineNo, Quantity: q})
+			var actual *decimal.Decimal
+			if l.ActualWeight != nil {
+				w, werr := decimal.NewFromString(*l.ActualWeight)
+				if werr != nil || !w.IsPositive() || w.Exponent() < -quantityPlaces {
+					fields[name+".actualWeight"] = fmt.Sprintf("must be a positive decimal with at most %d places", quantityPlaces)
+				} else {
+					actual = &w
+				}
+			}
+			in.Lines = append(in.Lines, store.ProgressLineInput{LineNo: l.LineNo, Quantity: q, ActualWeight: actual})
 		}
 		if len(fields) > 0 {
 			validationFailed(w, r, fields)
@@ -129,12 +140,18 @@ func mayRecord(p tenant.Principal, kind string) bool {
 // report rather than a conflicting one.
 func canonicalProgress(in store.NewProgress) any {
 	type line struct {
-		LineNo   int    `json:"lineNo"`
-		Quantity string `json:"quantity"`
+		LineNo       int     `json:"lineNo"`
+		Quantity     string  `json:"quantity"`
+		ActualWeight *string `json:"actualWeight,omitempty"`
 	}
 	lines := make([]line, 0, len(in.Lines))
 	for _, l := range in.Lines {
-		lines = append(lines, line{l.LineNo, l.Quantity.String()})
+		item := line{LineNo: l.LineNo, Quantity: l.Quantity.String()}
+		if l.ActualWeight != nil {
+			s := l.ActualWeight.String()
+			item.ActualWeight = &s
+		}
+		lines = append(lines, item)
 	}
 	sort.Slice(lines, func(i, j int) bool { return lines[i].LineNo < lines[j].LineNo })
 	return struct {

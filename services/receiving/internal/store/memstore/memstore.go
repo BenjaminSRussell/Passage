@@ -216,6 +216,7 @@ func (t *tenantData) register(r store.Receipt, fn store.RegisterFunc) (store.Rec
 			r.Lines[i].Qty, r.Lines[i].Batch, r.Lines[i].LocationID = l.Qty, l.Batch, l.LocationID
 			r.Lines[i].InventoryStatus = cmp.Or(l.InventoryStatus, "AVAILABLE")
 			r.Lines[i].Serials = slices.Sorted(slices.Values(l.Serials))
+			r.Lines[i].CWQty, r.Lines[i].CWNominal, r.Lines[i].CWMin, r.Lines[i].CWMax = l.CWQty, l.CWNominal, l.CWMin, l.CWMax
 		}
 	}
 	return r, nil
@@ -232,7 +233,7 @@ func (t *tenantData) receivedOn(excludeID, purchaseOrderID string, poLineNo int)
 		}
 		for _, l := range other.Lines {
 			if l.POLineNo == poLineNo {
-				total = total.Add(l.Qty)
+				total = total.Add(l.CatchUnits())
 			}
 		}
 	}

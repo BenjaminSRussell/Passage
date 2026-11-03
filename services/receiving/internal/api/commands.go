@@ -34,12 +34,20 @@ const (
 
 var inventoryStatuses = []string{inventoryOK, "QUARANTINE", "BLOCKED"}
 
+type catchWeightSpec struct {
+	Nominal *fieldDecimal `json:"nominal"`
+	Min     *fieldDecimal `json:"min"`
+	Max     *fieldDecimal `json:"max"`
+}
+
 type receivedFields struct {
-	Qty             *fieldDecimal `json:"qty"`
-	Batch           string        `json:"batch"`
-	Serials         []string      `json:"serials"`
-	LocationID      string        `json:"locationId"`
-	InventoryStatus string        `json:"inventoryStatus"`
+	Qty             *fieldDecimal    `json:"qty"`
+	CWQty           *int             `json:"cwQty"`
+	CatchWeight     *catchWeightSpec `json:"catchWeight"`
+	Batch           string           `json:"batch"`
+	Serials         []string         `json:"serials"`
+	LocationID      string           `json:"locationId"`
+	InventoryStatus string           `json:"inventoryStatus"`
 }
 
 type receivedLine struct {
@@ -77,6 +85,8 @@ type cancelRequest struct {
 
 type registerInput struct {
 	Qty             decimal.Decimal
+	CWQty           int
+	CatchWeight     domain.CatchWeight
 	Batch           string
 	Serials         []string
 	LocationID      string
@@ -103,6 +113,22 @@ func parseReceived(fields map[string]string, prefix string, f receivedFields) re
 			fields[prefix+"qty"] = "must be greater than zero"
 		}
 		in.Qty = v
+	}
+	if f.CWQty != nil {
+		if *f.CWQty < 1 {
+			fields[prefix+"cwQty"] = "must be a whole number of at least 1"
+		} else {
+			in.CWQty = *f.CWQty
+		}
+	}
+	if f.CatchWeight != nil {
+		nom, _ := decimalField(fields, prefix+"catchWeight.nominal", f.CatchWeight.Nominal, true)
+		minv, _ := decimalField(fields, prefix+"catchWeight.min", f.CatchWeight.Min, true)
+		maxv, _ := decimalField(fields, prefix+"catchWeight.max", f.CatchWeight.Max, true)
+		in.CatchWeight = domain.CatchWeight{Nominal: nom, Min: minv, Max: maxv}
+	}
+	if (in.CWQty > 0) != in.CatchWeight.Set() {
+		fields[prefix+"cwQty"] = "catchWeight and cwQty must be sent together"
 	}
 	checkUUID(fields, prefix+"locationId", f.LocationID)
 	if utf8.RuneCountInString(f.Batch) > maxBatch {
@@ -155,6 +181,7 @@ func toDomain(r store.Receipt) domain.Receipt {
 			LineNo: l.LineNo, ProductID: l.ProductID, Qty: l.Qty, InvoicedQty: l.InvoicedQty, ClearedAmount: l.ClearedAmount, OrderedRemaining: l.OrderedRemaining,
 			OverDeliveryPct: l.OverDeliveryPct, UnitPrice: money.Amount{Value: l.UnitPrice, Currency: l.Currency},
 			BatchTracked: l.BatchTracked, SerialTracked: l.SerialTracked, Tracking: domain.Tracking{Batch: l.Batch, Serials: l.Serials},
+			CWQty: l.CWQty, CatchWeight: domain.CatchWeight{Nominal: l.CWNominal, Min: l.CWMin, Max: l.CWMax},
 		})
 	}
 	return out
@@ -180,12 +207,18 @@ func registerFn(inputs map[int]registerInput, version int, poQty map[int]decimal
 				if !known {
 					return nil, &domain.Error{Code: domain.CodeInvalidReceipt, Detail: fmt.Sprintf("line %d has no purchase order quantity to check against", lines[i].LineNo)}
 				}
-				if err := checkOpenQuantity(r.Lines[i], in.Qty, ordered); err != nil {
+				checkQty := in.Qty
+				if in.CWQty > 0 {
+					checkQty = decimal.NewFromInt(int64(in.CWQty))
+				}
+				if err := checkOpenQuantity(r.Lines[i], checkQty, ordered); err != nil {
 					return nil, err
 				}
 			}
 			dr.Lines[i].Qty, dr.Lines[i].Tracking = in.Qty, domain.Tracking{Batch: in.Batch, Serials: in.Serials}
+			dr.Lines[i].CWQty, dr.Lines[i].CatchWeight = in.CWQty, in.CatchWeight
 			lines[i].Qty, lines[i].Batch, lines[i].Serials, lines[i].LocationID, lines[i].InventoryStatus = in.Qty, in.Batch, in.Serials, in.LocationID, in.InventoryStatus
+			lines[i].CWQty, lines[i].CWNominal, lines[i].CWMin, lines[i].CWMax = in.CWQty, in.CatchWeight.Nominal, in.CatchWeight.Min, in.CatchWeight.Max
 		}
 		if _, err := dr.Register(recorded); err != nil {
 			return nil, err
@@ -397,7 +430,7 @@ func (a *API) correctReceipt(w http.ResponseWriter, r *http.Request) {
 			return store.Adjustment{}, err
 		}
 		for _, l := range rec.Lines {
-			if delta := deltas[l.LineNo]; l.POLineNo > 0 && delta.IsPositive() {
+			if delta := deltas[l.LineNo]; l.POLineNo > 0 && delta.IsPositive() && l.CWQty == 0 {
 				ordered, known := poQty[l.LineNo]
 				if !known {
 					return store.Adjustment{}, &domain.Error{Code: domain.CodeInvalidReceipt, Detail: fmt.Sprintf("line %d has no purchase order quantity to check against", l.LineNo)}

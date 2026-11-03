@@ -149,6 +149,41 @@ func TestReceiptPost_StoresLedgerEntryID(t *testing.T) {
 	}
 }
 
+func catchWeightLine(weight string) domain.ReceiptLine {
+	return domain.ReceiptLine{
+		LineNo: 1, ProductID: "p", Qty: dec(weight), CWQty: 10, OrderedRemaining: dec("10"),
+		CatchWeight: domain.CatchWeight{Nominal: dec("10"), Min: dec("9.8"), Max: dec("11")},
+		UnitPrice:   money.Must("2.00", "USD"),
+	}
+}
+
+func TestRegister_CatchWeightAC245(t *testing.T) {
+	if _, err := receiptWith(catchWeightLine("95")).Register(nil); codeOf(t, err) != domain.CodeCatchWeight {
+		t.Fatalf("95 kg for 10 cases should fail with RCV-CW-001, got %v", err)
+	}
+	next, err := receiptWith(catchWeightLine("102")).Register(nil)
+	if err != nil || next.State != domain.Registered || !next.Lines[0].Qty.Equal(dec("102")) || next.Lines[0].CWQty != 10 {
+		t.Fatalf("102 kg for 10 cases should register: %+v %v", next, err)
+	}
+}
+
+func TestReceiptPost_CatchWeightValuesAtWeight(t *testing.T) {
+	r := receiptWith(catchWeightLine("102"))
+	r.State = domain.Registered
+	r.Lines[0].UnitPrice = money.Must("2.00", "USD")
+	ledger := &domain.FakeLedger{}
+	_, items, err := r.Post(context.Background(), ledger, testProfile)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("post: %v %+v", err, items)
+	}
+	if !items[0].ReceivedQty.Equal(dec("102")) || !items[0].ReceivedAmount.Value.Equal(dec("204")) {
+		t.Fatalf("GR/IR qty %s amount %s, want 102 and 204", items[0].ReceivedQty, items[0].ReceivedAmount.Value)
+	}
+	if got := ledger.Balance("2100"); !got.Equal(dec("-204")) {
+		t.Fatalf("GR/IR ledger %s, want -204 (price × weight, not cases)", got)
+	}
+}
+
 func postedReceipt(invoiced string) domain.Receipt {
 	r := receiptWith(domain.ReceiptLine{LineNo: 1, ProductID: "p", Qty: dec("100"), InvoicedQty: dec(invoiced), OrderedRemaining: dec("100"), OverDeliveryPct: dec("5")})
 	r.State = domain.Posted

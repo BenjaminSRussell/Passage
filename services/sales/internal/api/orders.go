@@ -21,6 +21,12 @@ const (
 	maxOverrideReason = 500
 )
 
+type catchWeightSpec struct {
+	Nominal *string `json:"nominal"`
+	Min     *string `json:"min"`
+	Max     *string `json:"max"`
+}
+
 type orderLineRequest struct {
 	ProductID         string  `json:"productId"`
 	Quantity          string  `json:"quantity"`
@@ -34,7 +40,8 @@ type orderLineRequest struct {
 	// DeliveryDateControl is the line's own control (FR-27.3); absent, the
 	// legal entity's default applies at confirm. omitempty keeps the request
 	// hash of orders that do not set it unchanged.
-	DeliveryDateControl *string `json:"deliveryDateControl,omitempty"`
+	DeliveryDateControl *string          `json:"deliveryDateControl,omitempty"`
+	CatchWeight         *catchWeightSpec `json:"catchWeight,omitempty"`
 }
 
 // createOrderRequest is the body of POST /v1/sales/orders. customerGroup
@@ -178,14 +185,60 @@ func buildLine(i int, l orderLineRequest, f map[string]string, path func(string)
 	if !valid || errQty != nil || errPrice != nil || errDisc != nil {
 		return store.Line{}, false
 	}
-	net, err := domain.LineNet(qty, price, disc)
+	spec, ok := parseCatchWeight(l.CatchWeight, f, path)
+	if !ok {
+		return store.Line{}, false
+	}
+	if spec != nil && (!qty.Truncate(0).Equal(qty) || qty.LessThan(decimal.NewFromInt(1))) {
+		f[path("quantity")] = "catch-weight quantity must be a whole number of at least 1"
+		return store.Line{}, false
+	}
+	net, err := domain.LineNetFor(qty, price, disc, spec, nil)
 	if err != nil {
 		f[path("quantity")] = err.Error()
 		return store.Line{}, false
 	}
 	return store.Line{LineNo: i + 1, ProductID: l.ProductID, Quantity: qty, Unit: l.Unit, SiteID: l.SiteID, WarehouseID: l.WarehouseID,
 		UnitPrice: price, DiscPct: disc, LineNet: net, RequestedShipDate: l.RequestedShipDate, ConfigurationID: l.ConfigurationID,
-		DeliveryDateControl: l.DeliveryDateControl}, true
+		DeliveryDateControl: l.DeliveryDateControl, CatchWeight: spec}, true
+}
+
+func parseCatchWeight(in *catchWeightSpec, f map[string]string, path func(string) string) (*domain.CatchWeight, bool) {
+	if in == nil {
+		return nil, true
+	}
+	ok := true
+	nom, minv, maxv := decimal.Zero, decimal.Zero, decimal.Zero
+	var err error
+	if in.Nominal == nil {
+		f[path("catchWeight.nominal")] = "is required"
+		ok = false
+	} else if nom, err = decimal.NewFromString(*in.Nominal); err != nil || !nom.IsPositive() {
+		f[path("catchWeight.nominal")] = "must be a positive decimal"
+		ok = false
+	}
+	if in.Min == nil {
+		f[path("catchWeight.min")] = "is required"
+		ok = false
+	} else if minv, err = decimal.NewFromString(*in.Min); err != nil || !minv.IsPositive() {
+		f[path("catchWeight.min")] = "must be a positive decimal"
+		ok = false
+	}
+	if in.Max == nil {
+		f[path("catchWeight.max")] = "is required"
+		ok = false
+	} else if maxv, err = decimal.NewFromString(*in.Max); err != nil || !maxv.IsPositive() {
+		f[path("catchWeight.max")] = "must be a positive decimal"
+		ok = false
+	}
+	if !ok {
+		return nil, false
+	}
+	if minv.GreaterThan(maxv) {
+		f[path("catchWeight.min")] = "must be less than or equal to catchWeight.max"
+		return nil, false
+	}
+	return &domain.CatchWeight{Nominal: nom, Min: minv, Max: maxv}, true
 }
 
 // createOrder stores an intake order. A repeat of Idempotency-Key or of

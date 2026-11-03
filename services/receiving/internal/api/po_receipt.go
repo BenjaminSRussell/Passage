@@ -167,7 +167,7 @@ func (a *API) correctionQuantities(ctx context.Context, id string, deltas map[in
 	}
 	var upward []store.Line
 	for _, l := range rec.Lines {
-		if l.POLineNo > 0 && deltas[l.LineNo].IsPositive() {
+		if l.POLineNo > 0 && deltas[l.LineNo].IsPositive() && l.CWQty == 0 {
 			upward = append(upward, l)
 		}
 	}
