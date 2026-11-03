@@ -25,8 +25,11 @@ permissions:
 
 # Cut Actions volume: a new push to a PR cancels that PR's superseded run;
 # runs on main are never cancelled.
+# Prefix with ci-: in a reusable workflow github.workflow is the *caller* name
+# (`gate`), so `${{ github.workflow }}-${{ github.ref }}` matches gate.yml's
+# `gate-${{ github.ref }}` group on push and the called workflow fails to start.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
