@@ -1,4 +1,6 @@
 import {
+  ActivityFailure,
+  ApplicationFailure,
   condition,
   defineQuery,
   defineSignal,
@@ -14,7 +16,7 @@ export * from "./tenderWorkflow.js";
 
 const { decidePartyChange } = proxyActivities<PartyDecisionActivities>({
   startToCloseTimeout: "30 seconds",
-  retry: { maximumInterval: "1 minute" },
+  retry: { maximumInterval: "1 minute", maximumAttempts: 5 },
 });
 
 export interface PartyChangeRef {
@@ -133,7 +135,15 @@ async function recordPartyDecision(
 ): Promise<void> {
   const decidedBy = history[history.length - 1]?.actor;
   if (!input.partyChange || !decidedBy) return;
-  await decidePartyChange({ ...input.partyChange, decision, decidedBy });
+  try {
+    await decidePartyChange({ ...input.partyChange, decision, decidedBy });
+  } catch (error) {
+    if (!(error instanceof ActivityFailure)) throw error;
+    throw ApplicationFailure.nonRetryable(
+      `party decision for change ${input.partyChange.changeId} not recorded: decidePartyChange is not built on this worker (follow-up: authenticated signal actor for credit decisions)`,
+      "PartyDecisionNotBuilt",
+    );
+  }
 }
 
 export function validateInput(input: ApprovalInput): void {

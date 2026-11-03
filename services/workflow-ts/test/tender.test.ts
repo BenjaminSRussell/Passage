@@ -147,11 +147,9 @@ describe("tender workflow", () => {
 
   it("does not lose a response that arrives while the tender is being read", async () => {
     const fake = new FakeTransport();
-    let startedAt = 0;
     let readHookDone = false;
     const result = await run(fake, async (handle) => {
       await until(handle, (state) => state.pendingCarrierId === CARRIERS[0]);
-      startedAt = await environment.currentTimeMs();
       fake.duringNextRead = async () => {
         fake.respond(CARRIERS[0]!, true);
         await handle.signal(tenderResponseSignal);
@@ -160,9 +158,8 @@ describe("tender workflow", () => {
       await handle.signal(tenderResponseSignal);
       while (!readHookDone) await new Promise((resolve) => setTimeout(resolve, 10));
     });
-    const elapsedMs = (await environment.currentTimeMs()) - startedAt;
     expect(result).toMatchObject({ status: "accepted", acceptedCarrierId: CARRIERS[0] });
-    expect(elapsedMs).toBeLessThan(TIMEOUT_MIN * MINUTE_MS);
+    expect(fake.reads).toBe(2);
   }, 60_000);
 
   it("keeps a multi-day tender alive through a transport outage longer than the activity window", async () => {

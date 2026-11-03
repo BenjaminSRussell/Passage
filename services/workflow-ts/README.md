@@ -27,7 +27,7 @@ reject, or be delegated to (BR-7.8); party enforces the same rule.
 
 Not built: live consumption. No Kafka client is wired; waits on #223 and #106.
 The worker does not register the party decision activity (`decidePartyChange`): a real service
-identity waits on #226 and on an authenticated decision route in party, because the approval signal's actor is unauthenticated and a service duty would let a signaller name any user as the decider. Approval levels are passed in by the caller.
+identity waits on a follow-up (authenticated signal actor for credit decisions, to be filed) and on an authenticated decision route in party, because the approval signal's actor is unauthenticated and a service duty would let a signaller name any user as the decider. Approval levels are passed in by the caller.
 
 ## ECO approval workflow
 
