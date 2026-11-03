@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import "./app.css";
 
 /** Device settings provisioned on the handheld. Sign-in (Keycloak device flow) is a handoff. */
 function setting(key: string, fallback: string): string {

@@ -24,6 +24,7 @@ const E2E_DUTIES = [
   "workflow.approve",
   "workflow.read",
   "workflow.write",
+  "WMS_MOBILE_ADMIN",
 ].join(",");
 
 export default defineConfig({
@@ -38,7 +39,10 @@ export default defineConfig({
     screenshot: "only-on-failure",
     reducedMotion: "reduce",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] }, testIgnore: /warehouse-mobile/ },
+    { name: "warehouse-mobile", use: { ...devices["Pixel 5"] }, testMatch: /warehouse-mobile/ },
+  ],
   webServer: {
     command: `npx vite --port ${PORT} --strictPort`,
     url: `http://localhost:${PORT}`,

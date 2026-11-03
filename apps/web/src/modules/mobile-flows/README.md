@@ -62,13 +62,18 @@ Flow designer for warehouse handheld flows, plus the pure domain shared with
   timeout (30 min by default) and no longer holds its work; OPEN work, or ASSIGNED work whose
   holder went stale (BR-31.3), is assignable; resuming re-locks only if nobody else took it.
 - `api/client.ts`: calls to `POST /api/v1/mobile/flows` and `POST .../flows/{id}:publish`
-  (both mobile service endpoints, §6.32.5), and the supervisor conflict calls
-  `GET /api/v1/mobile/offline/conflicts` and `POST .../offline/conflicts/{key}:resolve`. The
-  mobile service is a handoff, so these pages report that it is unavailable.
+  (both mobile service endpoints, §6.32.5), `GET /api/v1/mobile/menus/{id}` and SSE
+  `GET /api/v1/mobile/events` for `flow.published`, and the supervisor conflict calls
+  `GET /api/v1/mobile/offline/conflicts` and `POST .../offline/conflicts/{key}:resolve`.
+  `vite serve` stands in for the flow/menu/SSE paths (`api/devStub.ts`); a missing service
+  still reports that it is unavailable.
+- `DeviceApp.tsx`: the handheld shell shared with `apps/warehouse-mobile`. It loads the
+  published menu (`useDeviceFlows.ts`) and keeps an in-flight flow on the version it started
+  (BR-32.9). `/device` hosts it for Playwright Pixel 5 (AC-32.2, AC-32.4).
 - `api/print.ts`: client for `services/print` through the BFF at `/api/v1/print`.
 - `pages.tsx`: designer screen. It opens on the bundled receive/put-away flow (any core flow can
   be loaded with "Start from"), edits the flow
-  as JSON, validates, saves a draft, and runs a virtual scanner that uses the GS1 parser.
+  as JSON, validates, saves a draft, publishes, and runs a virtual scanner that uses the GS1 parser.
 - `FlowSimulator.tsx`: on the designer screen, runs the edited flow step by step with the
   device runner (§6.32.6 "designer simulation"): a virtual scanner feeds every step (scans on
   non-scan steps are listed as ignored), values and branch outcomes are entered on their steps,
@@ -134,8 +139,8 @@ already present in `apps/web`. No npm dependencies were added.
 
 ## Not yet (see also `apps/warehouse-mobile/NOT-IMPLEMENTED.md` and `services/print/NOT-IMPLEMENTED.md`)
 
-- The simulator runs a flow by hand; smoke scripts that replay every core path before publish
-  (BR-32.9) are not built.
+- Publish is wired; smoke scripts that replay every core path before publish (BR-32.9) are
+  not built.
 - Flow list, version history, diff, and the four-eyes approval UI are not built (§6.32.14).
 - GS1 AIs 710 to 715, and every other AI outside BR-32.1, are not in the parser table yet.
   Unknown AIs report MOB-0103 with their position, so suite vectors for those AIs are excluded

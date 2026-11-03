@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Alert, Button, Card, FormField, Input, PageHeader, Select, Textarea } from "../../shell/ui";
-import { describeFlowError, saveDraft } from "./api/client";
+import { describeFlowError, publishFlow, saveDraft } from "./api/client";
 import { CORE_FLOWS, RECEIVE_PUTAWAY_FLOW } from "./domain/coreFlows";
 import { type FlowDraft, type GraphIssue, validateFlow } from "./domain/flowGraph";
 import { checkScan, type Classified, classifyScan, type ScanClass, type ScanVerdict } from "./domain/gs1";
@@ -44,7 +44,7 @@ export function FlowDesigner() {
     }
   }
 
-  async function onSave() {
+  async function persist(publish: boolean) {
     setFailure(null);
     setMessage(null);
     const flow = parse();
@@ -55,12 +55,25 @@ export function FlowDesigner() {
     setBusy(true);
     try {
       const saved = await saveDraft(flow, crypto.randomUUID());
-      setMessage(`Saved ${saved.code} as draft version ${saved.version}.`);
+      if (!publish) {
+        setMessage(`Saved ${saved.code} as draft version ${saved.version}.`);
+        return;
+      }
+      const published = await publishFlow(saved.flowId, crypto.randomUUID(), `"${saved.version}"`);
+      setMessage(`Published ${published.code} version ${published.version}. Devices pick this up within 60 s, with no app update.`);
     } catch (e) {
       setFailure(describeFlowError(e));
     } finally {
       setBusy(false);
     }
+  }
+
+  async function onSave() {
+    await persist(false);
+  }
+
+  async function onPublish() {
+    await persist(true);
   }
 
   /** Replaces the editor with a bundled core flow (FR-32.4). */
@@ -108,6 +121,9 @@ export function FlowDesigner() {
             <Button variant="primary" loading={busy} onClick={onSave}>
               Save draft
             </Button>
+            <Button variant="primary" loading={busy} onClick={onPublish}>
+              Publish
+            </Button>
           </div>
         </div>
       </Card>
@@ -128,7 +144,7 @@ export function FlowDesigner() {
         </p>
       ) : null}
       {failure ? (
-        <Alert tone="danger" title="Could not save the draft" live="alert">
+        <Alert tone="danger" title="Could not save or publish the flow" live="alert">
           {failure}
         </Alert>
       ) : null}

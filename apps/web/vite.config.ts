@@ -2,6 +2,7 @@
 import { configDefaults } from "vitest/config";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
+import { mobileDevStub } from "./src/modules/mobile-flows/api/devStub";
 import { federationRemotes } from "./src/shell/federation";
 import { devProxy } from "./src/shell/devProxy";
 
@@ -13,7 +14,7 @@ import { devProxy } from "./src/shell/devProxy";
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, decodeURIComponent(new URL(".", import.meta.url).pathname), "PASSAGE_");
   return {
-    plugins: [react()],
+    plugins: [react(), ...(command === "serve" ? [mobileDevStub()] : [])],
     define: {
       __PASSAGE_REMOTES__: JSON.stringify(federationRemotes),
       __PASSAGE_DEV_DUTIES__: JSON.stringify(command === "serve" && mode !== "test" ? (env.PASSAGE_DEV_DUTIES ?? "") : ""),
@@ -22,7 +23,7 @@ export default defineConfig(({ mode, command }) => {
     server: {
       port: 5173,
       proxy: devProxy(env),
-      fs: { allow: ["../warehouse-mobile/public", ...(mode === "test" ? ["../../policies/authz"] : []), "."] },
+      fs: { allow: ["../warehouse-mobile", ...(mode === "test" ? ["../../policies/authz"] : []), "."] },
     },
     test: { environment: "jsdom", globals: true, setupFiles: ["./src/test-setup.ts"], exclude: [...configDefaults.exclude, "e2e/**"] },
   };
