@@ -373,6 +373,14 @@ describe("binding schedule", () => {
     await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ version: 2, scheduleCron: "" }));
   });
 
+  it("names the project's time zone the cron is read in", async () => {
+    detailHandler({ ...healthy, scheduleTimezone: "Europe/Berlin" });
+    renderAt(`/migration/sync/${BINDING}`);
+    expect(await screen.findByText(/follows the schedule of its migration project, \*\/15 \* \* \* \* \(Europe\/Berlin\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Runs on the schedule \*\/15 \* \* \* \* \(Europe\/Berlin\)/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Own schedule (cron, Europe/Berlin)")).toBeInTheDocument();
+  });
+
   it("asks before removing the only schedule a binding has", async () => {
     detailHandler({ ...healthy, scheduleCron: "0 3 * * *", scheduleOverride: "0 3 * * *" });
     const { container } = renderAt(`/migration/sync/${BINDING}`);

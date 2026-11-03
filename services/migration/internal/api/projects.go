@@ -36,6 +36,8 @@ type createProjectRequest struct {
 	ConnectionProfileID string `json:"connectionProfileId"`
 	CutoverAt           string `json:"cutoverAt"`
 	ScheduleCron        string `json:"scheduleCron"`
+	// ScheduleTimezone is the IANA zone scheduleCron is read in; empty is UTC.
+	ScheduleTimezone string `json:"scheduleTimezone"`
 }
 
 // updateProjectRequest changes only the mutable fields; an empty cutoverAt or scheduleCron clears it, an omitted (or
@@ -46,6 +48,8 @@ type updateProjectRequest struct {
 	Status       *string `json:"status"`
 	CutoverAt    *string `json:"cutoverAt"`
 	ScheduleCron *string `json:"scheduleCron"`
+	// ScheduleTimezone changes the zone the cron is read in; empty resets it to UTC.
+	ScheduleTimezone *string `json:"scheduleTimezone"`
 	// ConnectionProfileID attaches a connection profile of the project's source system; empty detaches it.
 	ConnectionProfileID *string `json:"connectionProfileId"`
 }
@@ -117,7 +121,7 @@ func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
 	cutover, ok := parseCutover(req.CutoverAt)
 	p := domain.Project{
 		Name: req.Name, Type: req.ProjectType, SourceSystem: req.SourceSystem, SourceLegalEntityID: req.SourceLegalEntityID,
-		TargetLegalEntityID: req.TargetLegalEntityID, ConnectionProfileID: req.ConnectionProfileID, Status: domain.ProjectActive, CutoverAt: cutover, ScheduleCron: req.ScheduleCron,
+		TargetLegalEntityID: req.TargetLegalEntityID, ConnectionProfileID: req.ConnectionProfileID, Status: domain.ProjectActive, CutoverAt: cutover, ScheduleCron: req.ScheduleCron, ScheduleTimezone: req.ScheduleTimezone,
 	}
 	bad := domain.ValidateProject(p, ids.Valid)
 	if !ok {
@@ -135,7 +139,7 @@ func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
 	}
 	saved, created, err := a.store.SaveProject(r.Context(), store.Project{
 		Name: p.Name, Type: p.Type, SourceSystem: p.SourceSystem, SourceLegalEntityID: p.SourceLegalEntityID,
-		TargetLegalEntityID: p.TargetLegalEntityID, ConnectionProfileID: p.ConnectionProfileID, Status: p.Status, CutoverAt: p.CutoverAt, ScheduleCron: p.ScheduleCron,
+		TargetLegalEntityID: p.TargetLegalEntityID, ConnectionProfileID: p.ConnectionProfileID, Status: p.Status, CutoverAt: p.CutoverAt, ScheduleCron: p.ScheduleCron, ScheduleTimezone: p.ScheduleTimezone,
 	}, r.Header.Get(idempotencyHeader))
 	if err != nil {
 		a.logFailure(r, "create project failed", err)
@@ -253,7 +257,7 @@ func (a *API) updateProject(w http.ResponseWriter, r *http.Request) {
 	saved, err := a.store.UpdateProject(r.Context(), chi.URLParam(r, "id"), *req.Version, func(p *store.Project) error {
 		// An archived project is frozen: the only change it takes is reactivation (with or without other edits).
 		reactivating := req.Status != nil && *req.Status == domain.ProjectActive
-		if p.Status == domain.ProjectArchived && !reactivating && (req.Name != nil || req.CutoverAt != nil || req.ScheduleCron != nil) {
+		if p.Status == domain.ProjectArchived && !reactivating && (req.Name != nil || req.CutoverAt != nil || req.ScheduleCron != nil || req.ScheduleTimezone != nil) {
 			return store.ProjectArchived()
 		}
 		if req.Name != nil {
@@ -268,12 +272,15 @@ func (a *API) updateProject(w http.ResponseWriter, r *http.Request) {
 		if req.ScheduleCron != nil {
 			p.ScheduleCron = *req.ScheduleCron
 		}
+		if req.ScheduleTimezone != nil {
+			p.ScheduleTimezone = *req.ScheduleTimezone
+		}
 		if req.ConnectionProfileID != nil {
 			p.ConnectionProfileID = *req.ConnectionProfileID
 		}
 		fields := domain.ValidateProject(domain.Project{
 			Name: p.Name, Type: p.Type, SourceSystem: p.SourceSystem, SourceLegalEntityID: p.SourceLegalEntityID,
-			TargetLegalEntityID: p.TargetLegalEntityID, ConnectionProfileID: p.ConnectionProfileID, Status: p.Status, CutoverAt: p.CutoverAt, ScheduleCron: p.ScheduleCron,
+			TargetLegalEntityID: p.TargetLegalEntityID, ConnectionProfileID: p.ConnectionProfileID, Status: p.Status, CutoverAt: p.CutoverAt, ScheduleCron: p.ScheduleCron, ScheduleTimezone: p.ScheduleTimezone,
 		}, ids.Valid)
 		if len(fields) > 0 {
 			return validation(fields)

@@ -222,9 +222,16 @@ func MatchesEventType(pattern, eventType string) bool {
 }
 
 // OutboundRef identifies a Passage record: the entity name used in the cross-reference and its id.
+//
+// A render's refs hold the header subject first and then the subject of each collection element, in collection and
+// element order; an element's ref names its Collection and Index so the hub can pair it with the key the legacy ERP
+// answers for that element. xref:record takes the same refs back, each with the LegacyKey the legacy ERP assigned.
 type OutboundRef struct {
-	Entity string `json:"entity"`
-	ID     string `json:"id"`
+	Entity     string `json:"entity"`
+	ID         string `json:"id"`
+	Collection string `json:"collection,omitempty"`
+	Index      *int   `json:"index,omitempty"`
+	LegacyKey  string `json:"legacyKey,omitempty"`
 }
 
 // UnresolvedRef is a lookup that found no legacy key: which xref of the mapping, which Passage record, and why.
@@ -371,6 +378,9 @@ func (d OutboundDefinition) Render(ctx context.Context, sourceSystem, mappingID 
 		return Rendered{}, err
 	}
 	unresolved = append(unresolved, itemUnresolved...)
+	itemRefs, itemBad := itemSubjectRefs(prepared)
+	unresolved = append(unresolved, itemBad...)
+	refs = append(refs, itemRefs...)
 	used = append(used, itemLookups...)
 	if len(unresolved) > 0 {
 		return Rendered{}, &UnresolvedError{Refs: unresolved}

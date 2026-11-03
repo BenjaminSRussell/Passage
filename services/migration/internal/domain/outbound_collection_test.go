@@ -288,3 +288,49 @@ func TestOutboundCollection_DefinitionRefusals(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A collection that names a subject lists one ref per element after the header's, with the position the hub pairs
+// the legacy ERP's answer to; an element without a Passage id is unresolved rather than pushed unrecordable.
+func TestOutboundCollection_SubjectRefsOfEveryLine(t *testing.T) {
+	withSubject := strings.Replace(strings.Replace(linesDef, `"maxItems": 3,`, `"maxItems": 3, "subject": {"entity": "salesOrderLine", "idPath": "id"},`, 1),
+		`"decimalsAsNumbers": true,`, `"subject": {"entity": "salesOrder", "idPath": "data.order_id"}, "decimalsAsNumbers": true,`, 1)
+	def, err := domain.ParseOutboundDefinition([]byte(withSubject), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	order := "44444444-4444-4444-8444-444444444444"
+	l0, l1 := "55555555-5555-4555-8555-555555555555", "66666666-6666-4666-8666-666666666666"
+	line := func(id string) string {
+		return `{"id":` + id + `,"product_id":"` + prodA + `","sku":"SKU-A","unit":"BX","qty":"1"}`
+	}
+	event := func(lines string) map[string]any {
+		return lookupEvent(t, `{"order_id":"`+order+`","customer_id":"`+custID+`","number":"SO-9","currency":"USD","lines":`+lines+`}`)
+	}
+	got, err := def.Render(context.Background(), "custom_acme", "m-1", event(`[`+line(`"`+l0+`"`)+`,`+line(`"`+l1+`"`)+`]`), linesResolver(&calls))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Refs) != 3 || got.Refs[0] != (domain.OutboundRef{Entity: "salesOrder", ID: order}) {
+		t.Fatalf("refs = %+v", got.Refs)
+	}
+	for i, id := range []string{l0, l1} {
+		r := got.Refs[i+1]
+		if r.Entity != "salesOrderLine" || r.ID != id || r.Collection != "Lines" || r.Index == nil || *r.Index != i {
+			t.Fatalf("line ref %d = %+v", i, r)
+		}
+	}
+	_, err = def.Render(context.Background(), "custom_acme", "m-1", event(`[`+line(`"`+l0+`"`)+`,`+line(`"nope"`)+`,`+line(`null`)+`]`), linesResolver(&calls))
+	var u *domain.UnresolvedError
+	if !errors.As(err, &u) || len(u.Refs) != 2 || u.Refs[0].Name != "Lines[1].subject" || u.Refs[1].Name != "Lines[2].subject" {
+		t.Fatalf("err = %v", err)
+	}
+	for name, d := range map[string]string{
+		"bad subject entity": strings.Replace(withSubject, `"entity": "salesOrderLine"`, `"entity": "1 bad"`, 1),
+		"bad subject path":   strings.Replace(withSubject, `"idPath": "id"`, `"idPath": "a b"`, 1),
+	} {
+		if _, err := domain.ParseOutboundDefinition([]byte(d), 1); err == nil {
+			t.Fatalf("%s accepted", name)
+		}
+	}
+}

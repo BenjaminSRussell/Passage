@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/BenjaminSRussell/passage/platform/ids"
 )
 
 // Collections (integration track S5 follow-up): array iteration in the outbound mapping. A collection maps every
@@ -46,6 +48,10 @@ type OutboundCollection struct {
 	MaxItems int `json:"maxItems,omitempty"`
 	// Optional leaves the array out of the body when the event has none; otherwise a missing or empty array is refused.
 	Optional bool `json:"optional,omitempty"`
+	// Subject names the Passage record each element creates in the legacy ERP (an order line); IDPath is relative to
+	// the element. The render lists one ref per element, so the hub can record the legacy key the ERP assigns each
+	// line with xref:record and a later change to a line updates it by key.
+	Subject *OutboundSubject `json:"subject,omitempty"`
 	// Xrefs resolve an id of each element to its legacy key; IdPath is relative to the element.
 	Xrefs []OutboundXref `json:"xrefs,omitempty"`
 	// Lookups read lookup table entries for each element.
@@ -90,6 +96,10 @@ func (d OutboundDefinition) checkCollections() error {
 			return bad(c, "path %s is already used by another collection", c.Path)
 		case c.MaxItems < 0 || c.MaxItems > MaxCollectionItems:
 			return bad(c, "maxItems must be 1 to %d", MaxCollectionItems)
+		case c.Subject != nil && !xrefEntityRE.MatchString(c.Subject.Entity):
+			return bad(c, "subject.entity must start with a letter and use letters, digits, _ . -")
+		case c.Subject != nil && !eventPathRE.MatchString(c.Subject.IDPath):
+			return bad(c, "subject.idPath must be a dotted path into the element, such as id")
 		case len(c.Xrefs) > maxOutboundXrefs:
 			return bad(c, "at most %d xrefs", maxOutboundXrefs)
 		case len(c.Lookups) > maxOutboundLookups:
@@ -358,6 +368,47 @@ func (d OutboundDefinition) resolveItems(ctx context.Context, resolver LegacyKey
 		}
 	}
 	return unresolved, used, nil
+}
+
+// itemSubjectRefs lists the subject of every element of the collections that name one, in collection and element order.
+// An element without a Passage id (UUID) at the subject path is unresolved (at most maxUnresolvedPerList per
+// collection, then a count): the push would create a line that xref:record could not tie a key to.
+func itemSubjectRefs(items []itemRows) ([]OutboundRef, []UnresolvedRef) {
+	var (
+		refs []OutboundRef
+		bad  []UnresolvedRef
+	)
+	for _, it := range items {
+		if it.c.Subject == nil {
+			continue
+		}
+		over := 0
+		for i, row := range it.rows {
+			if row == nil {
+				continue
+			}
+			id, ok := idAt(row, it.c.Subject.IDPath)
+			reason := ""
+			switch {
+			case !ok:
+				reason = "the element has no id at " + it.c.Subject.IDPath
+			case !ids.Valid(id):
+				reason = "the id at " + it.c.Subject.IDPath + " is not a Passage id (UUID)"
+			}
+			if reason != "" {
+				if over++; over <= maxUnresolvedPerList {
+					bad = append(bad, UnresolvedRef{Name: itemName(it.c, i, "subject"), Entity: it.c.Subject.Entity, ID: id, Reason: reason})
+				}
+				continue
+			}
+			idx := i
+			refs = append(refs, OutboundRef{Entity: it.c.Subject.Entity, ID: id, Collection: it.c.Name, Index: &idx})
+		}
+		if over > maxUnresolvedPerList {
+			bad = append(bad, UnresolvedRef{Name: it.c.Name, Entity: "collection", Reason: fmt.Sprintf("%d more element subjects of this collection are not listed", over-maxUnresolvedPerList)})
+		}
+	}
+	return refs, bad
 }
 
 func itemName(c OutboundCollection, i int, name string) string {

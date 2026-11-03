@@ -304,6 +304,8 @@ export interface MigrationProject {
   status: ProjectStatus;
   cutoverAt?: string;
   scheduleCron?: string;
+  /** IANA time zone the cron is read in (UTC unless set). */
+  scheduleTimezone?: string;
   version: number;
   createdBy: string;
   createdAt: string;
@@ -319,6 +321,7 @@ export interface CreateProjectInput {
   connectionProfileId?: string;
   cutoverAt?: string;
   scheduleCron?: string;
+  scheduleTimezone?: string;
 }
 
 export interface KeyRewrite {
@@ -362,6 +365,8 @@ export interface ProjectEdit {
   status?: ProjectStatus;
   cutoverAt?: string;
   scheduleCron?: string;
+  /** The zone the cron is read in; empty resets it to UTC. */
+  scheduleTimezone?: string;
 }
 
 export const updateProject = (id: string, version: number, edit: ProjectEdit) =>
@@ -549,8 +554,10 @@ export interface SyncStatus {
   connectionProfileName: string;
   bindingStatus: "active" | "disabled";
   projectId?: string;
-  /** The cron the binding runs on (UTC): its own override, else the migrate project's; empty when neither exists. */
+  /** The cron the binding runs on (read in scheduleTimezone): its own override, else the migrate project's; empty when neither exists. */
   scheduleCron?: string;
+  /** The time zone the cron is read in (the project's; UTC by default). */
+  scheduleTimezone?: string;
   /** The binding's own cron; empty when it follows the project's schedule. */
   scheduleOverride?: string;
   /** The project's cron the binding falls back to without an override; empty when no project on the profile has one. */

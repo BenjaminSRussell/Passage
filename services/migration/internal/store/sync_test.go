@@ -48,7 +48,7 @@ func newSyncRig(t *testing.T, s store.Store, ctx context.Context, cron string) s
 // seed creates a binding's state through the store's own schedule lookup; a changed schedule moves it to next.
 func seed(t *testing.T, s store.Store, ctx context.Context, bindingID string, next time.Time) {
 	t.Helper()
-	if err := s.SeedSync(ctx, bindingID, func(string) (time.Time, bool) { return next, true }); err != nil {
+	if err := s.SeedSync(ctx, bindingID, func(string, string) (time.Time, bool) { return next, true }); err != nil {
 		t.Fatal(err)
 	}
 }

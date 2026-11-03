@@ -185,10 +185,20 @@ func SystemContext(ctx context.Context, tenantID string) context.Context {
 	return tenant.With(ctx, tenant.Principal{TenantID: tenantID, UserID: Actor, Service: "migration", Duties: map[string]struct{}{tenant.DutyAllScope: {}}})
 }
 
+// nextSlot is the first firing of cron after now, read in the schedule's zone (UTC when the zone is unknown, which the
+// API refuses to store).
+func nextSlot(cron, zone string, now time.Time) (time.Time, bool) {
+	loc, ok := domain.ScheduleLocation(zone)
+	if !ok {
+		loc = time.UTC
+	}
+	return domain.CronNextIn(cron, now, loc)
+}
+
 func (s *Scheduler) handle(ctx context.Context, c store.SyncCandidate) {
 	tctx := SystemContext(ctx, c.TenantID)
 	log := slog.With("tenantId", c.TenantID, "bindingId", c.BindingID)
-	next := func(cron string) (time.Time, bool) { return domain.CronNext(cron, s.now()) }
+	next := func(cron, zone string) (time.Time, bool) { return nextSlot(cron, zone, s.now()) }
 	if err := s.Store.SeedSync(tctx, c.BindingID, next); err != nil {
 		log.ErrorContext(ctx, "seeding sync state failed", "err", err)
 		return
@@ -273,11 +283,11 @@ func (s *Scheduler) finish(st store.SyncState, claimID, runID string, res Result
 		f.Failures = st.ConsecutiveFailures + 1
 		f.BackoffSecs = domain.SyncBackoff(f.Failures).Seconds()
 	}
-	next, ok := domain.CronNext(st.ScheduleCron, s.now())
+	next, ok := nextSlot(st.ScheduleCron, st.ScheduleTimezone, s.now())
 	if !ok {
 		next = s.now().Add(time.Hour)
 	}
-	f.NextCron, f.Cron = next, st.ScheduleCron
+	f.NextCron, f.Cron, f.Timezone = next, st.ScheduleCron, st.ScheduleTimezone
 	// Only a complete read that did not fail says which keys are gone: a failed run may not have seen every row. A
 	// full read that failed still counts as the period's attempt, so the runs after it are deltas again.
 	f.FullRead = res.FullRead && runErr == nil && f.Status != domain.SyncFailed

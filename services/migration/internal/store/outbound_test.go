@@ -182,6 +182,79 @@ func exerciseOutbound(t *testing.T, s store.Store, one, two, hub, hub2 context.C
 	if keys, _ := s.LegacyKeys(hub, "custom_acme", "salesOrder", []string{order}); keys[order] != "SO-77" {
 		t.Fatalf("a record without refs must not touch the cross-reference: %+v", keys)
 	}
+	exerciseBulkRecord(t, s, one, hub)
+}
+
+const linesDefJSON = `{"eventType":"dev.passage.sales.order.*.v1","subject":{"entity":"salesOrder","idPath":"data.order_id"},"collections":[{"name":"Lines","path":"data.lines","subject":{"entity":"salesOrderLine","idPath":"id"},"fields":[{"source":"sku","target":"ItemNo","type":"string"}]}],"mapping":{"entity":"SalesOrder","version":1,"fields":[{"source":"data.order_id","target":"Ref","type":"string"}]}}`
+
+// exerciseBulkRecord covers xref:record with one ref per record the push created: the header and its lines, atomically.
+func exerciseBulkRecord(t *testing.T, s store.Store, admin, hub context.Context) {
+	t.Helper()
+	m, _, err := s.SaveOutboundMapping(admin, store.OutboundMapping{Name: "Orders with lines", SourceSystem: "custom_acme", EventType: "dev.passage.sales.order.*.v1", Definition: json.RawMessage(linesDefJSON), CreatedBy: "ben"}, "bulk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	order, l1, l2 := ids.New(), ids.New(), ids.New()
+	rec := store.OutboundXrefRecord{MappingID: m.ID, EventID: "bulk-1", Actor: "service:integration-hub", Refs: []domain.OutboundRef{
+		{Entity: "salesOrder", ID: order, LegacyKey: "SO-1"},
+		{Entity: "salesOrderLine", ID: l1, LegacyKey: "SO-1/10"},
+		{Entity: "salesOrderLine", ID: l2, LegacyKey: "SO-1/20"}}}
+	if replayed, err := s.RecordOutboundXref(hub, rec); err != nil || replayed {
+		t.Fatalf("bulk record = %v %v", replayed, err)
+	}
+	if replayed, err := s.RecordOutboundXref(hub, rec); err != nil || !replayed {
+		t.Fatalf("bulk repeat = %v %v", replayed, err)
+	}
+	for entity, want := range map[string]map[string]string{"salesOrder": {order: "SO-1"}, "salesOrderLine": {l1: "SO-1/10", l2: "SO-1/20"}} {
+		var idList []string
+		for id := range want {
+			idList = append(idList, id)
+		}
+		got, err := s.LegacyKeys(hub, "custom_acme", entity, idList)
+		if err != nil || len(got) != len(want) {
+			t.Fatalf("%s keys = %+v %v", entity, got, err)
+		}
+		for id, key := range want {
+			if got[id] != key {
+				t.Fatalf("%s %s = %q, want %q", entity, id, got[id], key)
+			}
+		}
+	}
+	// The header may take the top-level key; a changed line key for the same event is a conflict.
+	mixed := rec
+	mixed.EventID, mixed.LegacyKey = "bulk-2", "SO-1"
+	mixed.Refs = []domain.OutboundRef{{Entity: "salesOrder", ID: order}, {Entity: "salesOrderLine", ID: l1, LegacyKey: "SO-1/10"}}
+	if replayed, err := s.RecordOutboundXref(hub, mixed); err != nil || replayed {
+		t.Fatalf("mixed form = %v %v", replayed, err)
+	}
+	changed := rec
+	changed.Refs = []domain.OutboundRef{rec.Refs[0], rec.Refs[1], {Entity: "salesOrderLine", ID: l2, LegacyKey: "SO-1/21"}}
+	_, err = s.RecordOutboundXref(hub, changed)
+	problemStatus(t, err, 409, store.CodeXrefEventConflict)
+	// All or nothing: one line whose key belongs to another record undoes the call, header included.
+	order2, l3 := ids.New(), ids.New()
+	bad := store.OutboundXrefRecord{MappingID: m.ID, EventID: "bulk-3", Refs: []domain.OutboundRef{
+		{Entity: "salesOrder", ID: order2, LegacyKey: "SO-2"},
+		{Entity: "salesOrderLine", ID: l3, LegacyKey: "SO-2/10"},
+		{Entity: "salesOrderLine", ID: ids.New(), LegacyKey: "SO-1/10"}}}
+	_, err = s.RecordOutboundXref(hub, bad)
+	problemStatus(t, err, 409, store.CodeXrefConflict)
+	if keys, _ := s.LegacyKeys(hub, "custom_acme", "salesOrder", []string{order2}); len(keys) != 0 {
+		t.Fatalf("a refused call must leave nothing behind: %+v", keys)
+	}
+	if keys, _ := s.LegacyKeys(hub, "custom_acme", "salesOrderLine", []string{l3}); len(keys) != 0 {
+		t.Fatalf("a refused call must leave nothing behind: %+v", keys)
+	}
+	// The same key for two different records inside one call is refused as well.
+	dup := store.OutboundXrefRecord{MappingID: m.ID, EventID: "bulk-4", Refs: []domain.OutboundRef{
+		{Entity: "salesOrderLine", ID: ids.New(), LegacyKey: "X/1"}, {Entity: "salesOrderLine", ID: ids.New(), LegacyKey: "X/1"}}}
+	_, err = s.RecordOutboundXref(hub, dup)
+	problemStatus(t, err, 409, store.CodeXrefConflict)
+	// An entity the mapping never creates is refused wherever it stands in the list.
+	foreign := store.OutboundXrefRecord{MappingID: m.ID, EventID: "bulk-5", Refs: []domain.OutboundRef{
+		{Entity: "salesOrder", ID: ids.New(), LegacyKey: "SO-9"}, {Entity: "customer", ID: ids.New(), LegacyKey: "C-9"}}}
+	_, err = s.RecordOutboundXref(hub, foreign)
+	problemStatus(t, err, 422, store.CodeXrefRefMismatch)
 }
 
 func TestMem_OutboundContract(t *testing.T) {

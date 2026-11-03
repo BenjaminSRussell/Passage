@@ -102,6 +102,8 @@ export interface ProjectForm {
   connectionProfileId?: string;
   cutoverAt: string;
   scheduleCron: string;
+  /** IANA time zone the cron is read in; blank is UTC. */
+  scheduleTimezone: string;
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -142,7 +144,23 @@ export function parseProjectForm(form: ProjectForm): { value?: CreateProjectInpu
     if (cron.split(/\s+/).length !== 5) errors.scheduleCron = "Enter five fields: minute hour day month weekday.";
     else input.scheduleCron = cron;
   }
+  const zone = form.scheduleTimezone.trim();
+  if (zone !== "") {
+    if (!validTimezone(zone)) errors.scheduleTimezone = "Enter an IANA time zone such as Europe/Berlin, or leave empty for UTC.";
+    else input.scheduleTimezone = zone;
+  }
   return Object.keys(errors).length > 0 ? { errors } : { value: input, errors };
+}
+
+/** Whether the browser knows name as an IANA time zone (the service checks again against its own database). */
+export function validTimezone(name: string): boolean {
+  if (name.length > 64 || name.toLowerCase() === "local") return false;
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: name });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** A datetime-local value read as UTC: the ISO timestamp, "" when blank, or null when it is not a date. */
@@ -161,7 +179,7 @@ export function cutoverInput(value?: string): string {
   return at.toISOString().slice(0, at.getUTCSeconds() === 0 ? 16 : 19);
 }
 
-export type ProjectEditForm = Pick<ProjectForm, "name" | "cutoverAt" | "scheduleCron">;
+export type ProjectEditForm = Pick<ProjectForm, "name" | "cutoverAt" | "scheduleCron" | "scheduleTimezone">;
 
 /** Checks the editable fields and returns only the ones that changed; an emptied cutover or schedule clears it. */
 export function parseProjectEdit(form: ProjectEditForm, current: MigrationProject): { value?: ProjectEdit; errors: Partial<Record<keyof ProjectEditForm, string>> } {
@@ -177,6 +195,9 @@ export function parseProjectEdit(form: ProjectEditForm, current: MigrationProjec
   const cron = form.scheduleCron.trim();
   if (cron !== "" && cron.split(/\s+/).length !== 5) errors.scheduleCron = "Enter five fields: minute hour day month weekday.";
   else if (cron !== (current.scheduleCron ?? "")) edit.scheduleCron = cron;
+  const zone = form.scheduleTimezone.trim();
+  if (zone !== "" && !validTimezone(zone)) errors.scheduleTimezone = "Enter an IANA time zone such as Europe/Berlin, or leave empty for UTC.";
+  else if ((zone || "UTC") !== (current.scheduleTimezone || "UTC")) edit.scheduleTimezone = zone;
   return Object.keys(errors).length > 0 ? { errors } : { value: edit, errors };
 }
 
