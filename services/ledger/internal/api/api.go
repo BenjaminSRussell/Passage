@@ -288,6 +288,8 @@ type createLedgerRequest struct {
 	// ReversalReasonRequired defaults to true (FR-11.15); NegativePostingEnabled to false (BR-11.16).
 	ReversalReasonRequired *bool `json:"reversalReasonRequired"`
 	NegativePostingEnabled *bool `json:"negativePostingEnabled"`
+	// AllowReinstate defaults to true: reversing a reversing entry re-instates the original (FR-11.8).
+	AllowReinstate *bool `json:"allowReinstate"`
 }
 
 var (
@@ -302,6 +304,8 @@ type patchLedgerRequest struct {
 	// AddDimensionAttributes appends dimension attributes (for example VENDGRP);
 	// existing ones stay and an attribute already on the ledger is ignored.
 	AddDimensionAttributes []string `json:"addDimensionAttributes"`
+	// AllowReinstate turns reinstatement by reversing a reversal on or off (FR-11.8).
+	AllowReinstate *bool `json:"allowReinstate"`
 }
 
 func (a *API) patchLedger(w http.ResponseWriter, r *http.Request) {
@@ -319,8 +323,8 @@ func (a *API) patchLedger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields := map[string]string{}
-	if req.CalendarCode == nil && req.AccountingPrinciple == nil && req.ReportingCurrency == nil && len(req.AddDimensionAttributes) == 0 {
-		fields["body"] = "send at least one of calendarCode, accountingPrinciple, reportingCurrency (an empty string clears it), addDimensionAttributes"
+	if req.CalendarCode == nil && req.AccountingPrinciple == nil && req.ReportingCurrency == nil && req.AllowReinstate == nil && len(req.AddDimensionAttributes) == 0 {
+		fields["body"] = "send at least one of calendarCode, accountingPrinciple, reportingCurrency (an empty string clears it), allowReinstate, addDimensionAttributes"
 	}
 	seenAttr := map[string]bool{}
 	for _, attr := range req.AddDimensionAttributes {
@@ -426,7 +430,7 @@ func (a *API) createLedger(w http.ResponseWriter, r *http.Request) {
 	created, err := a.store.CreateLedger(r.Context(), store.Ledger{LegalEntityID: req.LegalEntityID, Code: req.Code,
 		Name: req.Name, ChartCode: req.ChartCode, Currency: req.Currency, DimensionAttributes: req.DimensionAttributes,
 		FirstOpenDate: firstOpen, FuturePostingDays: future, ReversalReasonRequired: reasonRequired,
-		NegativePostingEnabled: negativeEnabled})
+		NegativePostingEnabled: negativeEnabled, AllowReinstate: req.AllowReinstate})
 	if err != nil {
 		a.fail(w, r, err)
 		return

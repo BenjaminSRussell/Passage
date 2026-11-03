@@ -329,6 +329,10 @@ func TestPatchLedger_ValidatesAndPassesSettingsWithTheVersion(t *testing.T) {
 	if rec := call(h, http.MethodPatch, path, `{"addDimensionAttributes":["VENDGRP"]}`, dutyLedgerWrite, nil); rec.Code != http.StatusOK || len(fs.settings) != 2 || len(fs.settings[1].in.AddDimensionAttributes) != 1 || fs.settings[1].in.AddDimensionAttributes[0] != "VENDGRP" {
 		t.Fatalf("append VENDGRP alone: status %d: %s %+v", rec.Code, rec.Body.String(), fs.settings)
 	}
+	if rec := call(h, http.MethodPatch, path, `{"allowReinstate":false}`, dutyLedgerWrite, nil); rec.Code != http.StatusOK ||
+		fs.settings[len(fs.settings)-1].in.AllowReinstate == nil || *fs.settings[len(fs.settings)-1].in.AllowReinstate {
+		t.Errorf("allowReinstate alone: status %d: %+v", rec.Code, fs.settings)
+	}
 }
 
 func TestSetAndSinglePosts_RelayRateAndLedgerLineProblemsUnchanged(t *testing.T) {

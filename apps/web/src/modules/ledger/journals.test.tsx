@@ -22,6 +22,8 @@ function name(patch: Partial<JournalName> = {}): JournalName {
     reversalReasonRequired: false,
     allowReconAccounts: false,
     linesLimit: 5000,
+    postingRestriction: "none",
+    descriptionLanguage: "legal_entity",
     active: true,
     updatedAt: "2026-10-27T10:00:00Z",
     ...patch,
@@ -169,6 +171,8 @@ describe("journal names", () => {
     expect(screen.getByLabelText("Submitter may approve")).toBeDisabled();
     fireEvent.click(screen.getByLabelText("Approval required"));
     fireEvent.click(screen.getByLabelText("Reversal reason required"));
+    fireEvent.change(screen.getByLabelText("Who may post"), { target: { value: "own_journals_only" } });
+    fireEvent.change(screen.getByLabelText("Description language"), { target: { value: "user" } });
     fireEvent.click(screen.getByRole("button", { name: "Save journal name" }));
     await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/ledger/journal-names"));
     const put = server.calls.find((c) => c.method === "PUT");
@@ -180,6 +184,8 @@ describe("journal names", () => {
       reversalReasonRequired: true,
       allowReconAccounts: false,
       linesLimit: 5000,
+      postingRestriction: "own_journals_only",
+      descriptionLanguage: "user",
       active: true,
     });
   });

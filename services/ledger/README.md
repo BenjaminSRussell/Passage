@@ -71,6 +71,14 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   deleted, because reversing entries reference them.
 - Ledger parameters `reversalReasonRequired` (default true) and
   `negativePostingEnabled` (default false), set when the ledger is created.
+  `allowReinstate` (default true, migration 0030) is set at creation or by
+  `PATCH /v1/ledger/ledgers/{id}` (with `If-Match`): when false, reversing a
+  reversing entry is refused with 422 `LEDGER_REINSTATEMENT_NOT_ALLOWED`.
+- Journal names also carry `postingRestriction` (`none` or `own_journals_only`:
+  403 `LEDGER_POSTING_RESTRICTED` when another user posts the batch) and
+  `descriptionLanguage` (`legal_entity` or `user`: with `user` the batch post
+  reads `Accept-Language` for the default description template, falling back to
+  the base language and then `en`).
 - Reversal reasons: the reverse request takes `reasonCode` and `reasonComment`
   (at most 255 characters). The code must exist, be active and apply to `ledger`;
   a comment is needed when the code requires one; a code that forbids an
@@ -391,6 +399,8 @@ today:
 | `LEDGER_DATE_INVALID` | Posting date more than `futurePostingDays` ahead (BR-11.4), a reversal dated before the original (FR-11.8), or a reversal on another date with a reason code that forbids it (FR-11.15) |
 | `LEDGER_PERIOD_CLOSED` | Posting date before the ledger's `firstOpenDate` (BR-11.4; full period status is wave 14) |
 | `LEDGER_REVERSAL_ALREADY_REVERSED` | Entry already has a reversing entry (FR-11.8) |
+| `LEDGER_REINSTATEMENT_NOT_ALLOWED` | 422: reversing a reversing entry on a ledger with `allowReinstate` false (FR-11.8) |
+| `LEDGER_POSTING_RESTRICTED` | 403: a user other than the creator posts a batch of a journal name with `postingRestriction` `own_journals_only` (FR-11.9) |
 | `LEDGER_REASON_REQUIRED` | Reversal without a reason code on a ledger that requires one, an unknown or inactive code, or a missing comment the code requires (FR-11.15) |
 | `LEDGER_REASON_INVALID_MODULE` | Reason code does not apply to `ledger` (FR-11.15) |
 | `LEDGER_NEGATIVE_POSTING_DISABLED` | Reason code allows negative posting but the ledger does not (BR-11.16) |

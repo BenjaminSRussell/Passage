@@ -243,11 +243,13 @@ func reverseEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in ReverseI
 		}
 	}
 	var orig struct {
-		voucher, postingDate, documentID, sourceSystem, realignmentRunID string
+		voucher, postingDate, documentID, sourceSystem, realignmentRunID, reversalOf string
 	}
-	if err := tx.QueryRow(ctx, `select voucher, posting_date::text, document_id::text, source_system, coalesce(realignment_run_id::text, '')
+	if err := tx.QueryRow(ctx, `select voucher, posting_date::text, document_id::text, source_system, coalesce(realignment_run_id::text, ''),
+			coalesce(reversal_of_entry_id::text, '')
 		from journal_entry where tenant_id = $1 and id = $2`,
-		tenantID, in.EntryID).Scan(&orig.voucher, &orig.postingDate, &orig.documentID, &orig.sourceSystem, &orig.realignmentRunID); err != nil {
+		tenantID, in.EntryID).Scan(&orig.voucher, &orig.postingDate, &orig.documentID, &orig.sourceSystem, &orig.realignmentRunID,
+		&orig.reversalOf); err != nil {
 		return out, err
 	}
 	if orig.realignmentRunID != "" && orig.realignmentRunID != in.realignmentRunID {
@@ -265,6 +267,11 @@ func reverseEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in ReverseI
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
+	}
+	if orig.reversalOf != "" && !ledger.ReinstateAllowed() {
+		// Reversing a reversing entry would re-instate the original (FR-11.8).
+		return out, &domain.RejectedError{Violations: []domain.Violation{{Code: CodeReinstatementNotAllowed, Field: "id",
+			Message: "entry " + orig.voucher + " reverses another entry and ledger " + ledger.Code + " does not allow reinstatement"}}}
 	}
 	origDate, err := time.Parse(time.DateOnly, orig.postingDate)
 	if err != nil {

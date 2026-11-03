@@ -151,6 +151,9 @@ type Account struct {
 // Ledger is one accounting ledger of a legal entity.
 // ReversalReasonRequired makes a reason code mandatory on reversal (FR-11.15);
 // NegativePostingEnabled permits reason codes that allow storno postings (BR-11.16).
+// AllowReinstate lets a reversing entry itself be reversed, which re-instates the
+// original (FR-11.8). It is a pointer so the Go zero value is safe: CreateLedger
+// stores true when it is nil, and a ledger read from the database always has it set.
 type Ledger struct {
 	ID                     string    `json:"id"`
 	LegalEntityID          string    `json:"legalEntityId"`
@@ -163,6 +166,7 @@ type Ledger struct {
 	FuturePostingDays      int       `json:"futurePostingDays"`
 	ReversalReasonRequired bool      `json:"reversalReasonRequired"`
 	NegativePostingEnabled bool      `json:"negativePostingEnabled"`
+	AllowReinstate         *bool     `json:"allowReinstate,omitempty"`
 	CalendarCode           *string   `json:"calendarCode,omitempty"`
 	AccountingPrinciple    *string   `json:"accountingPrinciple,omitempty"`
 	ReportingCurrency      *string   `json:"reportingCurrency,omitempty"`
@@ -183,19 +187,25 @@ func (l Ledger) Rules() domain.Rules {
 }
 
 // ReversalPolicy returns the reversal parameters this ledger imposes (FR-11.15, BR-11.16).
+// ReinstateAllowed reports whether a reversing entry of this ledger may be
+// reversed (FR-11.8); unset means the default, true.
+func (l Ledger) ReinstateAllowed() bool { return l.AllowReinstate == nil || *l.AllowReinstate }
+
 func (l Ledger) ReversalPolicy() domain.ReversalPolicy {
 	return domain.ReversalPolicy{ReasonRequired: l.ReversalReasonRequired, NegativeEnabled: l.NegativePostingEnabled}
 }
 
-// PostInput is one entry to post or validate.
+// PostInput is one entry to post or validate. DescriptionLanguage, when set, is
+// the language default descriptions are looked up in first (FR-11.17).
 type PostInput struct {
-	LedgerID     string
-	DocumentID   string
-	PostingDate  time.Time
-	DocumentDate *time.Time
-	Description  string
-	Source       ledgerevents.Source
-	Lines        []domain.LineInput
+	DescriptionLanguage string
+	LedgerID            string
+	DocumentID          string
+	PostingDate         time.Time
+	DocumentDate        *time.Time
+	Description         string
+	Source              ledgerevents.Source
+	Lines               []domain.LineInput
 	// LedgerLines are extra lines per ledger id, posted by PostSetEntry to that ledger
 	// only (no account mapping) on top of the common Lines (BR-12.6 ledger_lines).
 	LedgerLines map[string][]domain.LineInput
@@ -608,7 +618,7 @@ func accountNumbers(lines []domain.LineInput) []string {
 	return out
 }
 
-const ledgerFields = `id, legal_entity_id, code, name, chart_code, currency, dimension_attributes, first_open_date::text, future_posting_days, next_sequence, created_at, reversal_reason_required, negative_posting_enabled, calendar_code, accounting_principle, reporting_currency, settings_version`
+const ledgerFields = `id, legal_entity_id, code, name, chart_code, currency, dimension_attributes, first_open_date::text, future_posting_days, next_sequence, created_at, reversal_reason_required, negative_posting_enabled, calendar_code, accounting_principle, reporting_currency, settings_version, allow_reinstate`
 
 const ledgerColumns = `select ` + ledgerFields
 
@@ -616,7 +626,7 @@ func scanLedger(row pgx.Row) (Ledger, error) {
 	var l Ledger
 	err := row.Scan(&l.ID, &l.LegalEntityID, &l.Code, &l.Name, &l.ChartCode, &l.Currency, &l.DimensionAttributes,
 		&l.FirstOpenDate, &l.FuturePostingDays, &l.NextSequence, &l.CreatedAt, &l.ReversalReasonRequired, &l.NegativePostingEnabled,
-		&l.CalendarCode, &l.AccountingPrinciple, &l.ReportingCurrency, &l.Version)
+		&l.CalendarCode, &l.AccountingPrinciple, &l.ReportingCurrency, &l.Version, &l.AllowReinstate)
 	if l.DimensionAttributes == nil {
 		l.DimensionAttributes = []string{}
 	}

@@ -134,12 +134,14 @@ func TestCreateLedger_ReversalParameterDefaults(t *testing.T) {
 	inScope := map[string]string{"X-Passage-Legal-Entity": testDoc}
 	rec := call(h, http.MethodPost, "/v1/ledger/ledgers", `{`+base+`}`, dutyLedgerWrite, inScope)
 	body := decode(t, rec)
-	if rec.Code != http.StatusCreated || body["reversalReasonRequired"] != true || body["negativePostingEnabled"] != false {
+	// allowReinstate left out reaches the store unset, which stores the default true
+	// (TestPostgres_AllowReinstateFlag); the fake echoes the input back.
+	if _, sent := body["allowReinstate"]; rec.Code != http.StatusCreated || body["reversalReasonRequired"] != true || body["negativePostingEnabled"] != false || sent {
 		t.Fatalf("defaults: status %d: %s", rec.Code, rec.Body.String())
 	}
-	rec = call(h, http.MethodPost, "/v1/ledger/ledgers", `{`+base+`,"reversalReasonRequired":false,"negativePostingEnabled":true}`, dutyLedgerWrite, inScope)
+	rec = call(h, http.MethodPost, "/v1/ledger/ledgers", `{`+base+`,"reversalReasonRequired":false,"negativePostingEnabled":true,"allowReinstate":false}`, dutyLedgerWrite, inScope)
 	body = decode(t, rec)
-	if rec.Code != http.StatusCreated || body["reversalReasonRequired"] != false || body["negativePostingEnabled"] != true {
+	if rec.Code != http.StatusCreated || body["reversalReasonRequired"] != false || body["negativePostingEnabled"] != true || body["allowReinstate"] != false {
 		t.Fatalf("explicit: status %d: %s", rec.Code, rec.Body.String())
 	}
 }

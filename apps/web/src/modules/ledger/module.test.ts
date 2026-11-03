@@ -34,6 +34,7 @@ describe("ledger module", () => {
       "/ledger/journal-names",
       "/ledger/journal-names/new",
       "/ledger/journal-names/:code",
+      "/ledger/ledger-settings",
       "/ledger/recurring-journals",
       "/ledger/recurring-journals/new",
       "/ledger/recurring-journals/:id",

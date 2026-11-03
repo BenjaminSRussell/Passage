@@ -363,6 +363,7 @@ components:
         futurePostingDays: { type: integer, minimum: 0, maximum: 730 }
         reversalReasonRequired: { type: boolean }
         negativePostingEnabled: { type: boolean }
+        allowReinstate: { type: boolean, description: "FR-11.8: when false, reversing a reversing entry (which would re-instate the original) is refused with 422 LEDGER_REINSTATEMENT_NOT_ALLOWED. Default true." }
         calendarCode: { type: string, pattern: '^[A-Z0-9_-]{1,20}$', description: Fiscal calendar the ledger follows (FR-12.7); stored, not consumed by posting yet }
         accountingPrinciple: { type: string, enum: [IFRS, US_GAAP, LOCAL_GAAP, TAX, MANAGEMENT] }
         reportingCurrency: { type: string, pattern: '^[A-Z]{3}$' }
@@ -375,6 +376,7 @@ components:
         calendarCode: { type: string, pattern: '^[A-Z0-9_-]{1,20}$|^$', description: An empty string clears the value }
         accountingPrinciple: { type: string, enum: ["", IFRS, US_GAAP, LOCAL_GAAP, TAX, MANAGEMENT] }
         reportingCurrency: { type: string, pattern: '^[A-Z]{3}$|^$' }
+        allowReinstate: { type: boolean, description: "Turns reinstatement by reversing a reversal on or off (FR-11.8). Applies to later reversals only." }
         addDimensionAttributes:
           type: array
           maxItems: 20
@@ -733,12 +735,14 @@ components:
         reversalReasonRequired: { type: boolean, default: false, description: Reversing an entry posted from a batch of this name needs a reason code (FR-11.15). }
         allowReconAccounts: { type: boolean, default: false, description: Lines may hit reconciliation accounts (BR-11.8; migration and correction use). }
         linesLimit: { type: integer, minimum: 1, maximum: 10000, default: 5000 }
+        postingRestriction: { type: string, enum: [none, own_journals_only], default: none, description: "Who may post the batches of this name (FR-11.9): any holder of the posting duty, or only the user who created the batch (403 LEDGER_POSTING_RESTRICTED otherwise). The PRD value by_user_group needs authorization groups and is not built." }
+        descriptionLanguage: { type: string, enum: [legal_entity, user], default: legal_entity, description: "Language of default descriptions (FR-11.17): legal_entity uses English until legal entities carry a language (wave 6); user uses the poster's Accept-Language, falling back to the base language and then English." }
         active: { type: boolean, default: true, description: Inactive names keep their batches but take no new or submitted batches. }
     JournalName:
       allOf:
         - $ref: "#/components/schemas/JournalNameBody"
         - type: object
-          required: [code, name, requiresApproval, selfApprovalAllowed, reversalReasonRequired, allowReconAccounts, linesLimit, active, updatedAt]
+          required: [code, name, requiresApproval, selfApprovalAllowed, reversalReasonRequired, allowReconAccounts, linesLimit, postingRestriction, descriptionLanguage, active, updatedAt]
           properties:
             code: { type: string, pattern: '^[A-Za-z0-9_-]{1,20}$' }
             updatedAt: { type: string, format: date-time }
@@ -1588,11 +1592,13 @@ paths:
     put:
       tags: [journal]
       operationId: putJournalName
+      summary: Create or replace a journal name
       x-passage-duty: ledger.setup.write
       description: |
         Creates (201) or replaces (200) a journal name; naturally idempotent. Names are deactivated,
         never deleted. A change applies to the next action on each batch: submit reads requiresApproval,
-        approve reads selfApprovalAllowed, post reads allowReconAccounts, reversal reads reversalReasonRequired.
+        approve reads selfApprovalAllowed, post reads allowReconAccounts, postingRestriction and descriptionLanguage,
+        reversal reads reversalReasonRequired.
       parameters:
         - $ref: "#/components/parameters/JournalNameCode"
       requestBody:
@@ -1850,7 +1856,9 @@ paths:
         non-leading ledger of a ledger set also needs ledger.journal.postledger (FB50L, 403 AUTH-0003). On a rule rejection (422) or
         other failure nothing is posted, the batch stays approved or validated and lastError records the
         cause. The same key on the posted batch replays the stored response (200); another key is 409
-        LEDGER_BATCH_STATE.
+        LEDGER_BATCH_STATE. A journal name with postingRestriction own_journals_only lets only the batch's
+        creator post (403 LEDGER_POSTING_RESTRICTED). A journal name with descriptionLanguage user takes
+        the language of default descriptions from Accept-Language.
       parameters:
         - name: id
           in: path
@@ -1858,6 +1866,11 @@ paths:
           schema: { type: string, format: uuid }
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/IfMatch"
+        - name: Accept-Language
+          in: header
+          required: false
+          description: Language tag of the poster (de, de-DE); read only for journal names with descriptionLanguage user.
+          schema: { type: string }
       responses:
         "201":
           description: Entry posted
@@ -2053,6 +2066,7 @@ paths:
                 futurePostingDays: { type: integer, minimum: 0, maximum: 730, default: 366 }
                 reversalReasonRequired: { type: boolean, default: true, description: FR-11.15 }
                 negativePostingEnabled: { type: boolean, default: false, description: BR-11.16 }
+                allowReinstate: { type: boolean, default: true, description: "FR-11.8: whether a reversing entry can itself be reversed" }
       responses:
         "201":
           description: Ledger created
@@ -2441,7 +2455,8 @@ paths:
       description: |
         Creates an exact negating entry linked to the original (reversalOfEntryId; lines carry
         reversalOfLineId). An entry can be reversed once (LEDGER_REVERSAL_ALREADY_REVERSED); a
-        reversal can itself be reversed to re-instate the original. The reversal date defaults to
+        reversal can itself be reversed to re-instate the original unless the ledger's allowReinstate is
+        false (422 LEDGER_REINSTATEMENT_NOT_ALLOWED). The reversal date defaults to
         the original posting date and may not precede it (LEDGER_DATE_INVALID).
         Reversing an entry of a non-leading ledger of a ledger set also needs ledger.journal.postledger
         (FB50L, 403 AUTH-0003). An entry with an open item in an active clearing document (including a

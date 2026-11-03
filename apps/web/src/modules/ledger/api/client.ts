@@ -246,12 +246,21 @@ export const ledgerSchema = z.object({
   chartCode: z.string(),
   currency: z.string(),
   dimensionAttributes: z.array(z.string()),
+  /** FR-11.8: whether a reversing entry can itself be reversed. Absent on services older than migration 0030. */
+  allowReinstate: z.boolean().optional(),
+  /** Settings version, sent back as If-Match on PATCH. */
+  version: z.number().int().optional(),
 });
 export type Ledger = z.infer<typeof ledgerSchema>;
 
 /** GET /api/v1/ledger/ledgers/{id}; 404 LEDGER_NOT_FOUND when missing or out of scope. */
 export function fetchLedger(id: string, fetchImpl: FetchLike = defaultFetch): Promise<Ledger> {
   return getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(id)}`, ledgerSchema, fetchImpl);
+}
+
+/** PATCH /api/v1/ledger/ledgers/{id}: turns reinstatement on or off; 412 LEDGER_VERSION_CONFLICT when the ledger changed. */
+export function patchLedgerReinstatement(id: string, allowReinstate: boolean, version: number | undefined, fetchImpl: FetchLike = defaultFetch): Promise<Ledger> {
+  return sendJSON("PATCH", `/api/v1/ledger/ledgers/${encodeURIComponent(id)}`, ledgerSchema, fetchImpl, { allowReinstate }, version ? { "If-Match": `"${version}"` } : {});
 }
 
 /** The implicit first segment of every account structure; constraint rows may be conditioned on it. */
@@ -454,6 +463,10 @@ export const journalNameSchema = z.object({
   reversalReasonRequired: z.boolean(),
   allowReconAccounts: z.boolean(),
   linesLimit: z.number().int(),
+  /** Who may post the name's batches (FR-11.9). Absent on services older than migration 0030. */
+  postingRestriction: z.enum(["none", "own_journals_only"]).default("none"),
+  /** Where default descriptions take their language from (FR-11.17). */
+  descriptionLanguage: z.enum(["legal_entity", "user"]).default("legal_entity"),
   active: z.boolean(),
   updatedAt: z.string(),
 });
@@ -467,6 +480,8 @@ export interface JournalNameInput {
   reversalReasonRequired: boolean;
   allowReconAccounts: boolean;
   linesLimit: number;
+  postingRestriction: JournalName["postingRestriction"];
+  descriptionLanguage: JournalName["descriptionLanguage"];
   active: boolean;
 }
 

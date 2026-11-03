@@ -97,11 +97,11 @@ func (s *Postgres) CreateLedger(ctx context.Context, in Ledger) (Ledger, error) 
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var scanErr error
 		out, scanErr = scanLedger(tx.QueryRow(ctx, `insert into ledger (tenant_id, id, legal_entity_id, code, name, chart_code, currency, dimension_attributes,
-			first_open_date, future_posting_days, reversal_reason_required, negative_posting_enabled)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, nullif($9::text, '')::date, $10, $11, $12)
+			first_open_date, future_posting_days, reversal_reason_required, negative_posting_enabled, allow_reinstate)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, nullif($9::text, '')::date, $10, $11, $12, coalesce($13::boolean, true))
 			returning `+ledgerFields,
 			p.TenantID, in.ID, in.LegalEntityID, in.Code, in.Name, in.ChartCode, in.Currency, in.DimensionAttributes,
-			derefString(in.FirstOpenDate), in.FuturePostingDays, in.ReversalReasonRequired, in.NegativePostingEnabled))
+			derefString(in.FirstOpenDate), in.FuturePostingDays, in.ReversalReasonRequired, in.NegativePostingEnabled, in.AllowReinstate))
 		return scanErr
 	})
 	if isUnique(err) {
@@ -134,6 +134,8 @@ type LedgerSettings struct {
 	// AddDimensionAttributes appends dimension attributes the ledger does not
 	// have yet (never removes or reorders one); at most 20 in all.
 	AddDimensionAttributes []string
+	// AllowReinstate, when set, turns reinstatement by reversing a reversal on or off (FR-11.8).
+	AllowReinstate *bool
 }
 
 func (s *Postgres) UpdateLedgerSettings(ctx context.Context, id string, version int, in LedgerSettings) (Ledger, error) {
@@ -163,8 +165,9 @@ func (s *Postgres) UpdateLedgerSettings(ctx context.Context, id string, version 
 				accounting_principle = case when $4::text is null then accounting_principle else nullif($4, '') end,
 				reporting_currency = case when $5::text is null then reporting_currency else nullif($5, '') end,
 				dimension_attributes = dimension_attributes || array(select a from unnest($6::text[]) with ordinality as t(a, n) where not a = any(dimension_attributes) group by a, n order by n),
+				allow_reinstate = coalesce($7::boolean, allow_reinstate),
 				settings_version = settings_version + 1
-			where tenant_id = $1 and id = $2 returning `+ledgerFields, p.TenantID, id, in.CalendarCode, in.AccountingPrinciple, in.ReportingCurrency, in.AddDimensionAttributes))
+			where tenant_id = $1 and id = $2 returning `+ledgerFields, p.TenantID, id, in.CalendarCode, in.AccountingPrinciple, in.ReportingCurrency, in.AddDimensionAttributes, in.AllowReinstate))
 		if err != nil {
 			return err
 		}
