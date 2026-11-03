@@ -185,6 +185,7 @@
     ]},
     "Calculate tax": {"permissions": [{"resource": "/v1/tax/calculate", "methods": ["POST"]}]},
     "Calculate withholding tax": {"permissions": [{"resource": "/v1/tax/withholding/calculate", "methods": ["POST"]}]},
+    "production.planned.intake": {"flag": true, "permissions": []},
     "tax.transaction.record": {"permissions": [{"resource": "/v1/tax/transactions", "methods": ["POST"]}]},
     "tax.settlement.run": {"permissions": [{"resource": "/v1/tax/settlements:run", "methods": ["POST"]}]},
     "tax.recommit.run": {"permissions": [{"resource": "/v1/tax/recommit:run", "methods": ["POST"]}]},
@@ -2390,7 +2391,9 @@
       {"resource": "/v1/production/orders/*/trigger-points", "methods": ["GET"]},
       {"resource": "/v1/production/subcontract-operations", "methods": ["GET"]},
       {"resource": "/v1/production/jobs", "methods": ["GET"]},
-      {"resource": "/v1/production/orders/*/jobs", "methods": ["GET"]}
+      {"resource": "/v1/production/orders/*/jobs", "methods": ["GET"]},
+      {"resource": "/v1/production/planned-intake", "methods": ["GET"]},
+      {"resource": "/v1/production/planned-intake/*", "methods": ["GET"]}
     ]},
     "production.order.release": {"permissions": [
       {"resource": "/v1/production/orders/*:cancel", "methods": ["POST"]},
@@ -2410,7 +2413,9 @@
       {"resource": "/v1/production/orders/*/bom", "methods": ["PATCH"]},
       {"resource": "/v1/production/orders/*:estimate", "methods": ["POST"]},
       {"resource": "/v1/production/orders/*:schedule", "methods": ["POST"]},
-      {"resource": "/v1/production/orders/*:apply-finite-dates", "methods": ["POST"]}
+      {"resource": "/v1/production/orders/*:apply-finite-dates", "methods": ["POST"]},
+      {"resource": "/v1/production/planned-intake/*:convert", "methods": ["POST"]},
+      {"resource": "/v1/production/planned-intake/*:dismiss", "methods": ["POST"]}
     ]},
     "production.order.zero-output": {"flag": true, "permissions": []},
     "production.setup.read": {"permissions": [
@@ -2894,6 +2899,7 @@
     "fulfillment-order": ["fulfillment.order.sync"],
     "integration-hub": ["migration.outbound.render", "migration.xref.record"],
     "migration-loader": ["party.import.write", "product.import.write", "receivables.import.write"],
+    "production-planning": ["production.planned.intake"],
     "receiving-erasure": ["compliance.legal_hold.check"],
     "receiving-ers": ["VendorInvoicePost"],
     "scheduling-downtime": ["scheduling.downtime.apply"],
