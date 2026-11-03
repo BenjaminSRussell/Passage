@@ -74,6 +74,8 @@ func intakeServer(t *testing.T, rows ...store.PlannedIntake) (*fakeStore, http.H
 func TestConvertIntake_TakesTheFirmedOrderOverTheBody(t *testing.T) {
 	warehouse := ids.New()
 	row := openRow(&warehouse)
+	arrangement, source := ids.New(), ids.New()
+	row.QuotaArrangementID, row.QuotaSourceID = &arrangement, &source
 	f, h := intakeServer(t, row)
 	body := createBody(func(m map[string]any) {
 		m["quantity"] = "5"
@@ -89,6 +91,9 @@ func TestConvertIntake_TakesTheFirmedOrderOverTheBody(t *testing.T) {
 		t.Fatalf("store called %d times", len(f.created))
 	}
 	in := f.created[0]
+	if in.QuotaArrangementID == nil || *in.QuotaArrangementID != *row.QuotaArrangementID || in.QuotaSourceID == nil || *in.QuotaSourceID != *row.QuotaSourceID {
+		t.Fatalf("quota not passed to the order: %+v", in)
+	}
 	if in.ID != row.TargetID || in.PlannedIntakeID != row.ID || in.OriginType != "PlannedOrder" || in.OriginID == nil || *in.OriginID != row.PlannedOrderID {
 		t.Fatalf("origin: %+v", in)
 	}

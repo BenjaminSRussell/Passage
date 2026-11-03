@@ -160,6 +160,13 @@ describe("Production order detail", () => {
     expect(checkAxeAA(container)).toEqual([]);
   });
 
+  it("shows the quota arrangement and source of a converted planned order", async () => {
+    detailFetch({ order: order({ originType: "PlannedOrder", quotaArrangementId: "quota-arr-1", quotaSourceId: "quota-src-1" }) });
+    renderAt(`/production/${orderId}`);
+    expect(await screen.findByText("quota-arr-1")).toBeInTheDocument();
+    expect(screen.getByText("quota-src-1")).toBeInTheDocument();
+  });
+
   it("applies a command with If-Match and an Idempotency-Key, then shows the new status", async () => {
     const state = { order: order({ status: "Released", version: 4 }) };
     const fetchMock = detailFetch(state, () => {

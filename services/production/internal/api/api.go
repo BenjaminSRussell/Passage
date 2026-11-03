@@ -296,6 +296,9 @@ func (a *API) createWith(w http.ResponseWriter, r *http.Request, p tenant.Princi
 	}
 	key, fields := idempotencyKey(r)
 	validateCreate(req, fields)
+	if intake == nil && req.OriginType == "PlannedOrder" {
+		fields["originType"] = "PlannedOrder is set only by converting a planned order (POST /v1/production/planned-intake/{id}:convert)"
+	}
 	if fromSalesLine && len(req.Operations) == 0 {
 		delete(fields, "operations")
 	}
@@ -353,6 +356,7 @@ func (a *API) createWith(w http.ResponseWriter, r *http.Request, p tenant.Princi
 		ReworkReference: req.ReworkReference, Lines: lines, Operations: ops, CoProducts: coProducts, EstimateOnCreate: a.cfg.EstimateOnCreate,
 		TraceID: middleware.GetReqID(r.Context()), IdempotencyKey: key, RequestHash: hashOf(req),
 		ID: intakeOrderID(intake), PlannedIntakeID: intakeRowID(intake),
+		QuotaArrangementID: intakeQuota(intake, false), QuotaSourceID: intakeQuota(intake, true),
 	})
 	if err != nil {
 		a.fail(w, r, "create production order", err)
@@ -946,4 +950,16 @@ func validateBOMSnapshot(bom []domain.BOMComponent, fields map[string]string) {
 	if count > maxBOMLines {
 		fields["bom"] = fmt.Sprintf("at most %d lines", maxBOMLines)
 	}
+}
+
+// intakeQuota is the quota arrangement (or, with source, the quota source) planning allocated the
+// intake's planned order to; nil without an intake or a quota (FR-22.17).
+func intakeQuota(i *store.PlannedIntake, source bool) *string {
+	switch {
+	case i == nil:
+		return nil
+	case source:
+		return i.QuotaSourceID
+	}
+	return i.QuotaArrangementID
 }

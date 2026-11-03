@@ -599,3 +599,12 @@ Slice 25:
   transaction, and a retry with the same Idempotency-Key replays the order. `:dismiss` sets a row aside with a reason under If-Match.
 - The web module has the Planned orders list, the detail with dismiss, and the convert form (the
   create form with the planned order's fields locked).
+
+Slice 26:
+
+- Origin `PlannedOrder` only through the intake: a plain `POST /v1/production/orders` with it is a 400
+  on `originType`, and the partial unique index `production_order_planned_origin` (migration 0026)
+  keeps one order per planned order; a conversion whose planned order an older order already names is
+  409 `PRODUCTION_INTAKE_NOT_OPEN`. 0026 refuses to run over existing duplicates and names them.
+- A converted order carries the planned order's `quotaArrangementId` and `quotaSourceId` (FR-22.17,
+  migration 0025); the order page shows them. Releasing the allocation is planning's (NOT-IMPLEMENTED.md).

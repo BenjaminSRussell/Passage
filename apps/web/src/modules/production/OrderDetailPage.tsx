@@ -532,6 +532,16 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
             {current.warehouseId}
           </Detail>
           <Detail term="Origin">{current.originType}</Detail>
+          {current.quotaArrangementId ? (
+            <Detail term="Quota arrangement" mono>
+              {current.quotaArrangementId}
+            </Detail>
+          ) : null}
+          {current.quotaSourceId ? (
+            <Detail term="Quota source" mono>
+              {current.quotaSourceId}
+            </Detail>
+          ) : null}
           {current.reworkReference ? (
             <Detail term="Rework of" mono={current.reworkReference.type !== "order"}>
               {current.reworkReference.type === "order" && onOpenOrder ? (

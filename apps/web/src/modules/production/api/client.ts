@@ -157,6 +157,9 @@ export interface ProductionOrder {
   originType: string;
   originId?: string;
   reworkReference?: ReworkReference;
+  /** The quota arrangement and source planning allocated a converted planned order to (FR-22.17). */
+  quotaArrangementId?: string;
+  quotaSourceId?: string;
   /** The order a split took this order's quantity from (FR-21.15). */
   splitFromOrderId?: string;
   /** Set on a cancelled order that a merge moved into another one. */

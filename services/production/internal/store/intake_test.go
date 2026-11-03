@@ -2,9 +2,12 @@ package store
 
 import (
 	"context"
+	"io/fs"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -67,9 +70,14 @@ func TestIntake_ConvertCreatesTheTargetOrderAndClosesTheRow(t *testing.T) {
 	order.ID, order.PlannedIntakeID = row.TargetID, row.ID
 	order.ProductID, order.SiteID, order.WarehouseID, order.Quantity = row.ProductID, row.SiteID, warehouse, row.Quantity
 	order.OriginType, order.OriginID = "PlannedOrder", &row.PlannedOrderID
+	arrangement, source := ids.New(), ids.New()
+	order.QuotaArrangementID, order.QuotaSourceID = &arrangement, &source
 	created, isNew, err := s.CreateOrder(ctx, order)
 	if err != nil || !isNew {
 		t.Fatalf("convert: %v new=%v", err, isNew)
+	}
+	if created.QuotaArrangementID == nil || *created.QuotaArrangementID != arrangement || created.QuotaSourceID == nil || *created.QuotaSourceID != source {
+		t.Fatalf("quota not kept on the order: %+v", created)
 	}
 	if created.ID != in.TargetID || created.WarehouseID != warehouse || created.OriginType != "PlannedOrder" || created.OriginID == nil || *created.OriginID != in.PlannedOrderID {
 		t.Fatalf("order: %+v", created)
@@ -217,5 +225,96 @@ func TestIntake_RowLevelSecurity(t *testing.T) {
 	own.ID, own.PlannedIntakeID = row.TargetID, row.ID
 	if order, _, err := s.CreateOrder(scopedCtx(tid, le1), own); err != nil || order.ID != row.TargetID {
 		t.Fatalf("convert in the planned order's entity: %+v %v", order, err)
+	}
+}
+
+// Slice 26: an order made for the planned order outside the intake (a plain create before slice 26)
+// takes the planned order, so converting its open row is the intake's 409, not a 500, and leaves the
+// row open with no second order.
+func TestIntake_ConvertOfAPlannedOrderThatAlreadyHasAnOrder(t *testing.T) {
+	pool, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(93))
+	le := ids.New()
+	in := firmedIn(nil)
+	record(t, pool, s, ctx, in)
+	page, _ := s.ListPlannedIntake(ctx, IntakeFilter{})
+	row := page.Items[0]
+
+	legacy := sampleOrder(t, "legacy-planned", le)
+	legacy.OriginType, legacy.OriginID = "PlannedOrder", &row.PlannedOrderID
+	if _, _, err := s.CreateOrder(ctx, legacy); err != nil {
+		t.Fatal(err)
+	}
+	convert := sampleOrder(t, "intake-taken", le)
+	convert.ID, convert.PlannedIntakeID = row.TargetID, row.ID
+	convert.OriginType, convert.OriginID = "PlannedOrder", &row.PlannedOrderID
+	_, _, err := s.CreateOrder(ctx, convert)
+	expectProblem(t, err, http.StatusConflict, CodeIntakeNotOpen)
+
+	if got, err := s.GetPlannedIntake(ctx, row.ID); err != nil || got.Status != IntakeOpen || got.Version != 1 {
+		t.Fatalf("row after the refused conversion: %+v %v", got, err)
+	}
+	var n int
+	if err := pool.QueryRow(context.Background(), `select count(*) from production_order where tenant_id = $1 and origin_id = $2`,
+		testkit.TenantID(93), row.PlannedOrderID).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("orders of the planned order: %d %v", n, err)
+	}
+}
+
+// Migration 0026 refuses a database that already holds two orders of one planned order (made by the
+// plain create before slice 26) with a message naming them, and builds the index once they are resolved.
+func TestMigration0026_RefusesExistingDuplicatePlannedOrigins(t *testing.T) {
+	pool := testkit.DB(t)
+	upTo0025 := fstest.MapFS{}
+	entries, err := fs.ReadDir(migrations.FS, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() >= "0026" {
+			continue
+		}
+		body, err := fs.ReadFile(migrations.FS, e.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		upTo0025[e.Name()] = &fstest.MapFile{Data: body}
+	}
+	if err := dbx.Migrate(context.Background(), pool, upTo0025); err != nil {
+		t.Fatal(err)
+	}
+	s := New(pool)
+	ctx := tenantCtx(testkit.TenantID(92))
+	planned := ids.New()
+	var second string
+	for _, key := range []string{"dup-1", "dup-2"} {
+		o := sampleOrder(t, key, ids.New())
+		o.OriginType, o.OriginID = "PlannedOrder", &planned
+		created, _, err := s.CreateOrder(ctx, o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		second = created.ID
+	}
+
+	err = dbx.Migrate(context.Background(), pool, migrations.FS)
+	if err == nil || !strings.Contains(err.Error(), "1 planned order(s) have more than one production order") || !strings.Contains(err.Error(), planned) {
+		t.Fatalf("migration over duplicates: %v", err)
+	}
+	var applied bool
+	if err := pool.QueryRow(context.Background(), `select exists(select 1 from schema_migrations where name = '0026_order_planned_origin.sql')`).Scan(&applied); err != nil || applied {
+		t.Fatalf("0026 recorded as applied: %v %v", applied, err)
+	}
+
+	if _, err := pool.Exec(context.Background(), `update production_order set origin_type = 'Manual' where id = $1`, second); err != nil {
+		t.Fatal(err)
+	}
+	if err := dbx.Migrate(context.Background(), pool, migrations.FS); err != nil {
+		t.Fatalf("migration after the duplicate was resolved: %v", err)
+	}
+	dup := sampleOrder(t, "dup-3", ids.New())
+	dup.OriginType, dup.OriginID = "PlannedOrder", &planned
+	if _, _, err := s.CreateOrder(ctx, dup); err == nil {
+		t.Fatal("a second order of the planned order was stored after 0026")
 	}
 }

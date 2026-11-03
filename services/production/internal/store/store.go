@@ -68,6 +68,10 @@ type Order struct {
 	OriginID                   *string    `json:"originId,omitempty"`
 	// ConfigurationID is the saved configuration of a SalesOrderLine order.
 	ConfigurationID *string `json:"configurationId,omitempty"`
+	// QuotaArrangementID and QuotaSourceID are the quota arrangement and source planning allocated a
+	// converted planned order to (FR-22.17); null on other orders.
+	QuotaArrangementID *string `json:"quotaArrangementId,omitempty"`
+	QuotaSourceID      *string `json:"quotaSourceId,omitempty"`
 	// ReworkReference is the original order, batch or serial of a rework order (FR-21.20).
 	ReworkReference *domain.ReworkRef `json:"reworkReference,omitempty"`
 	// SplitFromOrderID is the order a split took this order's quantity from;
@@ -155,6 +159,8 @@ type NewOrder struct {
 	OriginType      string
 	OriginID        *string
 	ConfigurationID *string
+	// QuotaArrangementID and QuotaSourceID come from the planned order of an intake conversion.
+	QuotaArrangementID, QuotaSourceID *string
 	// ID is the id the order takes; empty draws a new one. A planned-order conversion sets it to the
 	// planned order's target id (FR-22.10).
 	ID string
@@ -303,6 +309,9 @@ func enqueue(ctx context.Context, tx pgx.Tx, orderID, eventType, tenantID, actor
 	return outbox.Enqueue(ctx, tx, aggregateType, orderID, evt)
 }
 
+// plannedOriginIndex keeps one order per planned order (migration 0026).
+const plannedOriginIndex = "production_order_planned_origin"
+
 // CreateOrder inserts an order with its exploded lines and operations and
 // allocates its number from the legal entity's sequence. A replay with the same
 // Idempotency-Key and body returns the stored order and created=false; the same
@@ -362,6 +371,11 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 		return err
 	})
 	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == plannedOriginIndex {
+		// The intake row was open, but an order already names the planned order (one a plain create
+		// made before slice 26, possibly in another legal entity): the planned order is taken.
+		return Order{}, false, httpx.NewProblem(http.StatusConflict, CodeIntakeNotOpen, "the planned order already has a production order")
+	}
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "production_order_sales_line_origin" {
 		var raced Order
 		var found bool
@@ -457,10 +471,11 @@ func insertOrder(ctx context.Context, tx pgx.Tx, tenantID, actor string, in NewO
 	}
 	number := fmt.Sprintf("PO-%06d", seq)
 	if _, err := tx.Exec(ctx, `insert into production_order (tenant_id, id, legal_entity_id, order_number, product_id, site_id, warehouse_id, currency,
-		quantity, delivery_date, origin_type, origin_id, idempotency_key, request_hash, item_group, rework_reference_type, rework_reference_id, configuration_id)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::date, $11, $12, $13, $14, $15, $16, $17, $18)`,
+		quantity, delivery_date, origin_type, origin_id, idempotency_key, request_hash, item_group, rework_reference_type, rework_reference_id, configuration_id,
+		quota_arrangement_id, quota_source_id)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::date, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
 		tenantID, id, in.LegalEntityID, number, in.ProductID, in.SiteID, in.WarehouseID, in.Currency,
-		in.Quantity.String(), in.DeliveryDate, in.OriginType, in.OriginID, in.IdempotencyKey, in.RequestHash, in.ItemGroup, refType, refID, in.ConfigurationID); err != nil {
+		in.Quantity.String(), in.DeliveryDate, in.OriginType, in.OriginID, in.IdempotencyKey, in.RequestHash, in.ItemGroup, refType, refID, in.ConfigurationID, in.QuotaArrangementID, in.QuotaSourceID); err != nil {
 		return "", err
 	}
 	if err := insertLines(ctx, tx, tenantID, id, in.Lines); err != nil {
@@ -1013,11 +1028,13 @@ func loadOrder(ctx context.Context, q querier, tenantID, id string) (Order, erro
 	err := q.QueryRow(ctx, `select id::text, legal_entity_id::text, order_number, product_id::text, site_id::text, warehouse_id::text, currency::text,
 		quantity::text, qty_raf::text, qty_error::text, status, delivery_date::text, origin_type, origin_id::text, version, created_at, updated_at,
 		item_group, rework_reference_type, rework_reference_id, split_from_order_id::text, merged_into_order_id::text, order_bom_modified,
-		configuration_id::text, start_date::text, end_date::text, scheduling_method, schedule_basis, finite_run_id, finite_scheduled_at, finite_compressed_opers
+		configuration_id::text, start_date::text, end_date::text, scheduling_method, schedule_basis, finite_run_id, finite_scheduled_at, finite_compressed_opers,
+		quota_arrangement_id::text, quota_source_id::text
 		from production_order where tenant_id = $1 and id = $2`, tenantID, id).Scan(&o.ID, &o.LegalEntityID, &o.OrderNumber, &o.ProductID,
 		&o.SiteID, &o.WarehouseID, &o.Currency, &qty, &raf, &qerr, &status, &o.DeliveryDate, &o.OriginType, &o.OriginID, &o.Version,
 		&o.CreatedAt, &o.UpdatedAt, &o.ItemGroup, &refType, &refID, &o.SplitFromOrderID, &o.MergedIntoOrderID, &o.OrderBOMModified, &o.ConfigurationID,
-		&o.StartDate, &o.EndDate, &o.SchedulingMethod, &o.ScheduleBasis, &o.FiniteRunID, &o.FiniteScheduledAt, &o.FiniteCompressedOperations)
+		&o.StartDate, &o.EndDate, &o.SchedulingMethod, &o.ScheduleBasis, &o.FiniteRunID, &o.FiniteScheduledAt, &o.FiniteCompressedOperations,
+		&o.QuotaArrangementID, &o.QuotaSourceID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Order{}, notFound()
 	}

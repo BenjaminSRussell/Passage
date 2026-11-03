@@ -268,6 +268,8 @@ components:
           enum: [PlannedOrder, SalesOrderLine, Manual, Kanban, Rework]
           default: Manual
           description: |
+            PlannedOrder is refused here (400 on originType): only POST /v1/production/planned-intake/{id}:convert
+            sets it, so a manual create cannot make a second order for a planned order.
             Rework makes a rework order (FR-21.20) and needs the duty production.order.rework.
             A rework order has no BOM explosion by default: list the components to add, and the
             product itself as a line to issue the reworked units into WIP at their cost.
@@ -373,6 +375,8 @@ components:
         originType: { type: string }
         originId: { type: string, format: uuid }
         configurationId: { type: string, format: uuid }
+        quotaArrangementId: { type: string, format: uuid, description: 'The quota arrangement planning allocated the converted planned order to (FR-22.17); absent on other orders.' }
+        quotaSourceId: { type: string, format: uuid, description: 'The quota source within that arrangement; absent on other orders.' }
         reworkReference: { $ref: '#/components/schemas/ReworkReference' }
         splitFromOrderId: { type: string, format: uuid, description: 'The order a split took this order''s quantity from (FR-21.15).' }
         mergedIntoOrderId: { type: string, format: uuid, description: 'Set on a Cancelled order that a merge moved into this order (FR-21.15).' }
@@ -2936,13 +2940,14 @@ paths:
       description: |
         `:convert` creates the production order of an open row in one transaction (FR-22.10): the order
         takes the row's target id as its id, its legal entity, product, site, quantity and delivery date,
-        originType PlannedOrder with the planned order as originId, and the row's warehouse (the body
-        supplies one when the row has none). The BOM and route snapshot and the currency come in the
+        originType PlannedOrder with the planned order as originId, the planned order's quotaArrangementId
+        and quotaSourceId (FR-22.17), and the row's warehouse (the body supplies one when the row has none). The BOM and route snapshot and the currency come in the
         body, as on a manual create (wave 9 resolves them later); it needs an Idempotency-Key and
         answers like POST /v1/production/orders, so a replay returns the same order even after the row
         was converted by it. `:dismiss` sets an
         open row aside with a reason and needs If-Match. Both need production.order.write; a row that is
-        already converted or dismissed answers 409 PRODUCTION_INTAKE_NOT_OPEN.
+        already converted or dismissed, or whose planned order another order already names (one order per
+        planned order), answers 409 PRODUCTION_INTAKE_NOT_OPEN.
       x-passage-duty: production.order.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2981,7 +2986,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: Unknown row or command (PRODUCTION_INTAKE_NOT_FOUND, PRODUCTION_UNKNOWN_ACTION), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: The row is already converted or dismissed (PRODUCTION_INTAKE_NOT_OPEN), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'The row is already converted or dismissed, or another order already names the planned order (PRODUCTION_INTAKE_NOT_OPEN)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: conflict_version, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: Explosion or operation rule failed (PRODUCTION_INVALID_INPUT), the quantity breaks minimumQty, maximumQty or multiple (PRODUCTION_ORDER_QUANTITY), or the key was used with another body (idempotency_key_reuse), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: precondition_required, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }

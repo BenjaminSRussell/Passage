@@ -336,6 +336,7 @@ func TestCreate_Validation(t *testing.T) {
 		{"seven decimals", func(m map[string]any) { m["quantity"] = "1.0000001" }, "k", "quantity", http.StatusBadRequest, validationCode},
 		{"quantity beyond numeric(18,6)", func(m map[string]any) { m["quantity"] = "1000000000000" }, "k", "quantity", http.StatusBadRequest, validationCode},
 		{"unknown origin", func(m map[string]any) { m["originType"] = "Forecast" }, "k", "originType", http.StatusBadRequest, validationCode},
+		{"planned order origin outside the intake", func(m map[string]any) { m["originType"] = "PlannedOrder"; m["originId"] = ids.New() }, "k", "originType", http.StatusBadRequest, validationCode},
 		{"bad delivery date", func(m map[string]any) { m["deliveryDate"] = "30/11/2026" }, "k", "deliveryDate", http.StatusBadRequest, validationCode},
 		{"no operations", func(m map[string]any) { m["operations"] = []any{} }, "k", "operations", http.StatusBadRequest, validationCode},
 		{"other legal entity", func(m map[string]any) { m["legalEntityId"] = ids.New() }, "k", "legalEntityId", http.StatusBadRequest, validationCode},
