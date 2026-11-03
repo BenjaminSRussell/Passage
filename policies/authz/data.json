@@ -309,7 +309,8 @@
     ]},
     "inventory.admin": {"permissions": [
       {"resource": "/v1/inventory/reconciliations", "methods": ["POST"]},
-      {"resource": "/internal/v1/inventory/onhand:rebuild", "methods": ["POST"]}
+      {"resource": "/internal/v1/inventory/onhand:rebuild", "methods": ["POST"]},
+      {"resource": "/internal/v1/inventory/transfer-orders:backfill-supply", "methods": ["POST"]}
     ]},
     "inventory.reservation.write": {"permissions": [
       {"resource": "/v1/inventory/reservations", "methods": ["POST"]},
