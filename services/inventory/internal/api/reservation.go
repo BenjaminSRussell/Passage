@@ -69,6 +69,8 @@ type reserveRequest struct {
 	SegmentFallback *bool  `json:"segmentFallback"`
 	// TTLHours makes the reservation lapse after that many hours (0 or absent: it holds until released).
 	TTLHours int `json:"ttlHours"`
+	// Against is PHYSICAL (default: available stock) or ORDERED (the expected receipt of one dimension set; MANUAL only).
+	Against string `json:"against"`
 }
 
 type reservationResponse struct {
@@ -82,6 +84,7 @@ type reservationResponse struct {
 	DemandSegment string            `json:"demandSegment,omitempty"`
 	Policy        string            `json:"policy"`
 	Status        string            `json:"status"`
+	Kind          string            `json:"kind"`
 	AllocationNo  int               `json:"allocationNo"`
 	CreatedAt     time.Time         `json:"createdAt"`
 	ReleasedAt    *time.Time        `json:"releasedAt,omitempty"`
@@ -176,6 +179,15 @@ func (a *API) createReservation(w http.ResponseWriter, r *http.Request) {
 	if !slices.Contains(domain.ReservationPolicies, policy) {
 		fields["policy"] = "must be MANUAL, FIFO, FEFO or LIFO"
 	}
+	kind := domain.ReservationKind(strings.ToUpper(strings.TrimSpace(req.Against)))
+	switch {
+	case kind == "":
+		kind = domain.ReserveKindPhysical
+	case kind != domain.ReserveKindPhysical && kind != domain.ReserveKindOrdered:
+		fields["against"] = "must be PHYSICAL or ORDERED"
+	case kind == domain.ReserveKindOrdered && policy != domain.PolicyManual:
+		fields["against"] = "ORDERED reserves the expected receipt of one dimension set and needs policy MANUAL"
+	}
 	if req.TTLHours < 0 || req.TTLHours > maxTTLHours {
 		fields["ttlHours"] = "must be between 0 and 8760"
 	}
@@ -211,7 +223,7 @@ func (a *API) createReservation(w http.ResponseWriter, r *http.Request) {
 		Segment: segment, SegmentFallback: fallback,
 		LegalEntityID: req.LegalEntityID, ProductID: req.ProductID, Qty: qty, DemandType: domain.DemandType(req.DemandType),
 		DemandID: req.DemandID, Policy: policy, Dims: dims, RequiredDate: required, ShelfLifeMarginDays: req.ShelfLifeMarginDays,
-		AllowPartial: req.AllowPartial, IdempotencyKey: key, TTLHours: req.TTLHours,
+		AllowPartial: req.AllowPartial, IdempotencyKey: key, TTLHours: req.TTLHours, Kind: kind,
 	})
 	if err != nil {
 		a.failed(w, r, "create reservation", err)
@@ -433,7 +445,7 @@ func toTransactionResponse(t store.TransactionRow) transactionResponse {
 
 func toReservationResponse(res domain.Reservation) reservationResponse {
 	return reservationResponse{ID: res.ID, LegalEntityID: res.LegalEntityID, ProductID: res.ProductID, Dimensions: res.Dims, Qty: res.Qty.String(),
-		DemandType: string(res.DemandType), DemandID: res.DemandID, DemandSegment: res.DemandSegment, Policy: string(res.Policy), Status: string(res.Status),
+		DemandType: string(res.DemandType), DemandID: res.DemandID, DemandSegment: res.DemandSegment, Policy: string(res.Policy), Status: string(res.Status), Kind: reservationKind(res.Kind),
 		AllocationNo: res.AllocationNo, CreatedAt: res.CreatedAt, ReleasedAt: res.ReleasedAt, ExpiresAt: res.ExpiresAt}
 }
 
@@ -539,4 +551,12 @@ func (a *API) listReservationCandidates(w http.ResponseWriter, r *http.Request) 
 		items = append(items, item)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// reservationKind reads an unset kind as PHYSICAL.
+func reservationKind(k domain.ReservationKind) string {
+	if k == "" {
+		return string(domain.ReserveKindPhysical)
+	}
+	return string(k)
 }

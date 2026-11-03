@@ -34,6 +34,7 @@ func All() []string {
 const (
 	BucketPosted           = "POSTED"
 	BucketReservedPhysical = "RESERVED_PHYSICAL"
+	BucketReservedOrdered  = "RESERVED_ORDERED"
 	BucketHeldPhysical     = "HELD_PHYSICAL"
 	BucketReceived         = "RECEIVED"
 	BucketDeducted         = "DEDUCTED"
@@ -121,6 +122,8 @@ type ReservationData struct {
 	DemandSegment string            `json:"demandSegment"`
 	Policy        string            `json:"policy"`
 	Status        string            `json:"status"`
+	// Kind is PHYSICAL or ORDERED (a reservation against expected receipts).
+	Kind string `json:"kind"`
 	// Reason is "EXPIRED" when the release came from the expiry run, empty otherwise.
 	Reason string `json:"reason,omitempty"`
 }

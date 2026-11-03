@@ -178,6 +178,7 @@ type onHandItem struct {
 	AvailOrdered     *string           `json:"availOrdered,omitempty"`
 	PostedValue      string            `json:"postedValue"`
 	ReservedPhysical *string           `json:"reservedPhysical,omitempty"`
+	ReservedOrdered  *string           `json:"reservedOrdered,omitempty"`
 	HeldPhysical     *string           `json:"heldPhysical,omitempty"`
 	Blocked          string            `json:"blocked"`
 	Currency         string            `json:"currency"`
@@ -478,8 +479,9 @@ func (a *API) onHand(w http.ResponseWriter, r *http.Request) {
 			Blocked: row.Blocked.String(), Currency: row.Currency, Negative: row.Negative}
 		if res.AsOf == "" {
 			avail, ordered, reserved := row.AvailPhysical.String(), row.AvailOrdered.String(), row.ReservedPhysical.String()
-			held := row.HeldPhysical.String()
+			held, reservedOrdered := row.HeldPhysical.String(), row.ReservedOrdered.String()
 			item.AvailPhysical, item.AvailOrdered, item.ReservedPhysical, item.HeldPhysical = &avail, &ordered, &reserved, &held
+			item.ReservedOrdered = &reservedOrdered
 		}
 		items = append(items, item)
 	}

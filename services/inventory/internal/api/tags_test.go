@@ -68,6 +68,11 @@ func (f *fakeStore) RebuildOnHand(_ context.Context, repair bool) (store.Rebuild
 		Diffs: []store.RebuildDiff{{LegalEntityID: ids.New(), ProductID: ids.New(), DimensionSetHash: "ab", Fields: []string{"posted_value"}}}}, nil
 }
 
+func (f *fakeStore) BackfillTransferSupply(_ context.Context, after string, limit int) (store.SupplyBackfillReport, error) {
+	f.backfillAfter, f.backfillLimit = after, limit
+	return store.SupplyBackfillReport{Checked: 2, Booked: 1, More: true, Next: "next-id"}, nil
+}
+
 func TestSlice4DutiesAreEnforcedPerRoute(t *testing.T) {
 	h := newServer(t, &fakeStore{})
 	id := ids.New()

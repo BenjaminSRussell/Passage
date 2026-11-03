@@ -8,6 +8,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
+
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
 	invevents "github.com/BenjaminSRussell/passage/services/inventory/internal/events"
 )
@@ -219,4 +222,125 @@ func announceTransferSupply(ctx context.Context, tx pgx.Tx, tenantID, legalEntit
 		}
 	}
 	return nil
+}
+
+// ownDemand is the ON_ORDER demand order o itself still holds, by projection
+// row (rowKey of the shipping dimension set). A ship or receive of o excludes
+// it from the FR-16.4 financial-negative check on those rows, so a transfer can
+// always move stock against its own booked demand while every other issue still
+// sees that demand in availOrdered.
+func ownDemand(o domain.TransferOrder) (map[string]decimal.Decimal, error) {
+	own := map[string]decimal.Decimal{}
+	for _, l := range o.Lines {
+		sp := o.Supply(l)
+		if !sp.OnOrder.IsPositive() {
+			continue
+		}
+		n, err := o.SourceDims(l).Normalize()
+		if err != nil {
+			return nil, domainProblem(&domain.Error{Code: domain.CodeInvalid, Detail: err.Error()})
+		}
+		k := rowKey(l.ProductID, n.Hash())
+		own[k] = own[k].Add(sp.OnOrder)
+	}
+	return own, nil
+}
+
+// withoutOwnDemand is r with own taken out of its ON_ORDER, before and after
+// (a copy: the row that is saved keeps the demand).
+func withoutOwnDemand(r *row, own decimal.Decimal) *row {
+	if own.IsZero() {
+		return r
+	}
+	c := *r
+	c.oh.OnOrder = c.oh.OnOrder.Sub(own)
+	c.before.OnOrder = c.before.OnOrder.Sub(own)
+	return &c
+}
+
+// SupplyBackfillReport is the outcome of one BackfillTransferSupply batch: the
+// open orders examined and those that had pair rows to book. More is true when
+// further orders follow Next (the last order id examined); the caller passes
+// Next as after to continue.
+type SupplyBackfillReport struct {
+	Checked int
+	Booked  int
+	More    bool
+	Next    string
+}
+
+// BackfillTransferSupply books the ON_ORDER / ORDERED pair for the transfer
+// orders that are open (CREATED, SHIPPED or PARTIALLY_RECEIVED) and hold no
+// transfer_supply rows: the orders already open when migration 0025 ran, whose
+// dimension-set hashes SQL cannot compute. It examines at most limit orders
+// with an id above after (empty: from the start), in id order, so a large
+// tenant is worked through in bounded calls. Each order runs in its own
+// transaction under its order row lock (taken before the supply rows are read
+// again, so an edit, ship or receive committed in the meantime is seen and
+// only the difference is booked) and the projection lock order of every
+// transfer mutation, and announces onhand.changed per moved row. The booking
+// is a difference against transfer_supply, so a re-run (or an order that
+// changed or was booked in the meantime) books nothing twice. It runs per
+// tenant, over the legal entities the caller can see.
+func (s *Postgres) BackfillTransferSupply(ctx context.Context, after string, limit int) (SupplyBackfillReport, error) {
+	if limit <= 0 || limit > maxListLimit {
+		limit = 200
+	}
+	tp, _ := tenant.FromContext(ctx)
+	var rep SupplyBackfillReport
+	var open []string
+	if err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select o.id::text from transfer_order o
+			where o.tenant_id = $1 and o.status in ('CREATED', 'SHIPPED', 'PARTIALLY_RECEIVED')
+			and ($2 = '' or o.id > $2::uuid)
+			and not exists (select 1 from transfer_supply s where s.tenant_id = o.tenant_id and s.transfer_order_id = o.id)
+			order by o.id limit $3`, tp.TenantID, after, limit+1)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			open = append(open, id)
+		}
+		return rows.Err()
+	}); err != nil {
+		return rep, err
+	}
+	if len(open) > limit {
+		open, rep.More = open[:limit], true
+	}
+	for _, id := range open {
+		booked := false
+		err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+			o, err := loadTransfer(ctx, tx, id, true)
+			if err != nil {
+				return err
+			}
+			moved, err := bookTransferSupply(ctx, tx, tp.TenantID, o, nil)
+			if err != nil {
+				return err
+			}
+			if err := announceTransferSupply(ctx, tx, tp.TenantID, o.LegalEntityID, moved); err != nil {
+				return err
+			}
+			booked = len(moved) > 0
+			return nil
+		})
+		if err != nil {
+			return rep, err
+		}
+		rep.Checked++
+		if booked {
+			rep.Booked++
+		}
+		rep.Next = id
+	}
+	if !rep.More {
+		rep.Next = ""
+	}
+	return rep, nil
 }

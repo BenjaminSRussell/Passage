@@ -38,6 +38,9 @@ type ReserveInput struct {
 	SegmentFallback bool
 	// TTLHours makes the reservations lapse that many hours after creation (0: never).
 	TTLHours int
+	// Kind PHYSICAL (default) reserves available stock; ORDERED reserves expected
+	// receipts of one exact dimension set (MANUAL only).
+	Kind domain.ReservationKind
 }
 
 // ReserveResult lists the allocations and the quantity that could not be
@@ -87,6 +90,12 @@ func (s *Postgres) Reserve(ctx context.Context, in ReserveInput) (ReserveResult,
 		return ReserveResult{}, domainProblem(&domain.Error{Code: domain.CodeInvalid,
 			Detail: "a policy reservation takes the demand's segment (segmentType, segmentRef), not a segment dimension filter"})
 	}
+	if in.Kind == "" {
+		in.Kind = domain.ReserveKindPhysical
+	}
+	if in.Kind == domain.ReserveKindOrdered && in.Policy != domain.PolicyManual {
+		return ReserveResult{}, domainProblem(&domain.Error{Code: domain.CodeInvalid, Detail: "a reservation against expected receipts is MANUAL: it names the dimension set that receives"})
+	}
 	p, _ := tenant.FromContext(ctx)
 	var out ReserveResult
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -116,12 +125,22 @@ func (s *Postgres) Reserve(ctx context.Context, in ReserveInput) (ReserveResult,
 		shortfall := decimal.Zero
 		if in.Policy == domain.PolicyManual {
 			key := rowKey(in.ProductID, filter.Hash())
-			avail := decimal.Zero
-			if r, ok := rows[key]; ok {
-				avail = r.oh.AvailPhysical()
-			}
-			if err := domain.CheckReservable(in.Qty, avail); err != nil {
-				return domainProblem(err)
+			if in.Kind == domain.ReserveKindOrdered {
+				var oh domain.OnHand
+				if r, ok := rows[key]; ok {
+					oh = r.oh
+				}
+				if err := domain.CheckReservableOrdered(in.Qty, oh); err != nil {
+					return domainProblem(err)
+				}
+			} else {
+				avail := decimal.Zero
+				if r, ok := rows[key]; ok {
+					avail = r.oh.AvailPhysical()
+				}
+				if err := domain.CheckReservable(in.Qty, avail); err != nil {
+					return domainProblem(err)
+				}
 			}
 			allocs = []domain.Allocation{{Key: key, Qty: in.Qty}}
 		} else {
@@ -138,25 +157,31 @@ func (s *Postgres) Reserve(ctx context.Context, in ReserveInput) (ReserveResult,
 		}
 		for i, a := range allocs {
 			r := rows[a.Key]
-			r.oh.ReservedPhysical = r.oh.ReservedPhysical.Add(a.Qty)
+			bucket := invevents.BucketReservedPhysical
+			if in.Kind == domain.ReserveKindOrdered {
+				r.oh.ReservedOrdered = r.oh.ReservedOrdered.Add(a.Qty)
+				bucket = invevents.BucketReservedOrdered
+			} else {
+				r.oh.ReservedPhysical = r.oh.ReservedPhysical.Add(a.Qty)
+			}
 			if err := saveRow(ctx, tx, p.TenantID, in.LegalEntityID, r, 0); err != nil {
 				return err
 			}
 			res := domain.Reservation{ID: ids.New(), LegalEntityID: in.LegalEntityID, ProductID: in.ProductID, Dims: r.dims, Qty: a.Qty,
 				DemandType: in.DemandType, DemandID: in.DemandID, DemandSegment: in.Segment, Policy: in.Policy, Status: domain.ReservationActive,
-				AllocationNo: i + 1}
+				AllocationNo: i + 1, Kind: in.Kind}
 			if err := tx.QueryRow(ctx, `insert into inventory_reservation (tenant_id, legal_entity_id, id, idempotency_key, allocation_no,
-				product_id, dimension_set_hash, qty, requested_qty, demand_type, demand_id, policy, status, created_by, demand_segment, expires_at)
+				product_id, dimension_set_hash, qty, requested_qty, demand_type, demand_id, policy, status, created_by, demand_segment, expires_at, kind)
 				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'ACTIVE', $13, $14,
-					case when $15::int > 0 then now() + make_interval(hours => $15::int) end) returning created_at, expires_at`,
+					case when $15::int > 0 then now() + make_interval(hours => $15::int) end, $16) returning created_at, expires_at`,
 				p.TenantID, in.LegalEntityID, res.ID, in.IdempotencyKey, res.AllocationNo, in.ProductID, r.hash,
-				a.Qty.String(), in.Qty.String(), string(in.DemandType), in.DemandID, string(in.Policy), optionalText(p.UserID), in.Segment, in.TTLHours).Scan(&res.CreatedAt, &res.ExpiresAt); err != nil {
+				a.Qty.String(), in.Qty.String(), string(in.DemandType), in.DemandID, string(in.Policy), optionalText(p.UserID), in.Segment, in.TTLHours, string(in.Kind)).Scan(&res.CreatedAt, &res.ExpiresAt); err != nil {
 				return scopeProblem(err)
 			}
 			if err := enqueue(ctx, tx, "reservation", res.ID, invevents.ReservationCreated, p.TenantID, reservationData(res)); err != nil {
 				return err
 			}
-			if err := enqueueOnHand(ctx, tx, p.TenantID, in.LegalEntityID, r, invevents.BucketReservedPhysical, a.Qty); err != nil {
+			if err := enqueueOnHand(ctx, tx, p.TenantID, in.LegalEntityID, r, bucket, a.Qty); err != nil {
 				return err
 			}
 			out.Reservations = append(out.Reservations, res)
@@ -263,7 +288,13 @@ func (s *Postgres) releaseReservation(ctx context.Context, id string, onlyExpire
 		if err := lockRow(ctx, tx, p.TenantID, res.LegalEntityID, "", r); err != nil {
 			return err
 		}
-		r.oh.ReservedPhysical = r.oh.ReservedPhysical.Sub(res.Qty)
+		bucket := invevents.BucketReservedPhysical
+		if res.Kind == domain.ReserveKindOrdered {
+			r.oh.ReservedOrdered = r.oh.ReservedOrdered.Sub(res.Qty)
+			bucket = invevents.BucketReservedOrdered
+		} else {
+			r.oh.ReservedPhysical = r.oh.ReservedPhysical.Sub(res.Qty)
+		}
 		if err := saveRow(ctx, tx, p.TenantID, res.LegalEntityID, r, 0); err != nil {
 			return err
 		}
@@ -280,7 +311,7 @@ func (s *Postgres) releaseReservation(ctx context.Context, id string, onlyExpire
 			return err
 		}
 		out = res
-		return enqueueOnHand(ctx, tx, p.TenantID, res.LegalEntityID, r, invevents.BucketReservedPhysical, res.Qty.Neg())
+		return enqueueOnHand(ctx, tx, p.TenantID, res.LegalEntityID, r, bucket, res.Qty.Neg())
 	})
 	return out, done, err
 }
@@ -459,7 +490,7 @@ type reservationRow struct {
 // sets; where is the rest of the statement after "where".
 func queryReservations(ctx context.Context, tx pgx.Tx, where string, args ...any) ([]reservationRow, error) {
 	rows, err := tx.Query(ctx, `select r.id::text, r.legal_entity_id::text, r.product_id::text, d.dims, r.qty::text, r.requested_qty::text,
-		r.demand_type, r.demand_id, r.demand_segment, r.policy, r.status, r.allocation_no, r.created_at, r.released_at, r.expires_at
+		r.demand_type, r.demand_id, r.demand_segment, r.policy, r.status, r.allocation_no, r.created_at, r.released_at, r.expires_at, r.kind
 		from inventory_reservation r join dimension_set d on d.tenant_id = r.tenant_id and d.hash = r.dimension_set_hash
 		where `+where, args...)
 	if err != nil {
@@ -470,9 +501,9 @@ func queryReservations(ctx context.Context, tx pgx.Tx, where string, args ...any
 	for rows.Next() {
 		var rr reservationRow
 		var raw []byte
-		var qty, requested, demand, policy, status string
+		var qty, requested, demand, policy, status, kind string
 		if err := rows.Scan(&rr.ID, &rr.LegalEntityID, &rr.ProductID, &raw, &qty, &requested, &demand, &rr.DemandID, &rr.DemandSegment, &policy, &status,
-			&rr.AllocationNo, &rr.CreatedAt, &rr.ReleasedAt, &rr.ExpiresAt); err != nil {
+			&rr.AllocationNo, &rr.CreatedAt, &rr.ReleasedAt, &rr.ExpiresAt, &kind); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(raw, &rr.Dims); err != nil {
@@ -480,6 +511,7 @@ func queryReservations(ctx context.Context, tx pgx.Tx, where string, args ...any
 		}
 		rr.Qty, rr.requested = decimal.RequireFromString(qty), decimal.RequireFromString(requested)
 		rr.DemandType, rr.Policy, rr.Status = domain.DemandType(demand), domain.ReservationPolicy(policy), domain.ReservationStatus(status)
+		rr.Kind = domain.ReservationKind(kind)
 		out = append(out, rr)
 	}
 	return out, rows.Err()
@@ -489,7 +521,7 @@ func queryReservations(ctx context.Context, tx pgx.Tx, where string, args ...any
 func samePriorRequest(prior []reservationRow, in ReserveInput) bool {
 	first := prior[0]
 	return first.LegalEntityID == in.LegalEntityID && first.ProductID == in.ProductID && first.DemandType == in.DemandType &&
-		first.DemandID == in.DemandID && first.DemandSegment == in.Segment && first.Policy == in.Policy && first.requested.Equal(in.Qty) &&
+		first.DemandID == in.DemandID && first.Kind == in.Kind && first.DemandSegment == in.Segment && first.Policy == in.Policy && first.requested.Equal(in.Qty) &&
 		ttlHoursOf(first.Reservation) == in.TTLHours
 }
 
@@ -505,7 +537,7 @@ func ttlHoursOf(r domain.Reservation) int {
 func reservationData(r domain.Reservation) invevents.ReservationData {
 	return invevents.ReservationData{ReservationID: r.ID, LegalEntityID: r.LegalEntityID, ProductID: r.ProductID, DimensionSet: map[string]string(r.Dims),
 		Qty: r.Qty.String(), DemandType: string(r.DemandType), DemandID: r.DemandID, DemandSegment: r.DemandSegment, Policy: string(r.Policy),
-		Status: string(r.Status)}
+		Status: string(r.Status), Kind: string(r.Kind)}
 }
 
 // CandidateQuery selects the stock a reservation dialog lists (FR-16.7). Dims

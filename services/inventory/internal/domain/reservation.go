@@ -28,6 +28,16 @@ const (
 // ReservationStatuses lists every reservation status.
 var ReservationStatuses = []ReservationStatus{ReservationActive, ReservationReleased, ReservationConsumed}
 
+// ReservationKind says which bucket a reservation holds: physical stock
+// (reserved_physical) or the expected receipt of a dimension set
+// (reserved_ordered, FR-16.7).
+type ReservationKind string
+
+const (
+	ReserveKindPhysical ReservationKind = "PHYSICAL"
+	ReserveKindOrdered  ReservationKind = "ORDERED"
+)
+
 // DemandType names the demand a reservation serves.
 type DemandType string
 
@@ -57,9 +67,11 @@ type Reservation struct {
 	DemandSegment string
 	Policy        ReservationPolicy
 	Status        ReservationStatus
-	AllocationNo  int
-	CreatedAt     time.Time
-	ReleasedAt    *time.Time
+	// Kind is PHYSICAL (empty reads as PHYSICAL) or ORDERED.
+	Kind         ReservationKind
+	AllocationNo int
+	CreatedAt    time.Time
+	ReleasedAt   *time.Time
 	// ExpiresAt is when an ACTIVE reservation lapses (nil: it holds until released).
 	ExpiresAt *time.Time
 }
@@ -86,6 +98,27 @@ func CheckReservable(qty, avail decimal.Decimal) error {
 	}
 	if qty.GreaterThan(avail) {
 		return fail(CodeReserveShortfall, "only %s available to reserve, %s requested", decimal.Max(avail, decimal.Zero), qty)
+	}
+	return nil
+}
+
+// ExpectedReceipt is the supply of a dimension set a reservation against
+// expected receipts can still claim: ordered plus arrived, less what is already
+// reserved against it.
+func (o OnHand) ExpectedReceipt() decimal.Decimal {
+	return o.Ordered.Add(o.Arrived).Sub(o.ReservedOrdered)
+}
+
+// CheckReservableOrdered rejects a reservation against expected receipts larger
+// than the unreserved ordered supply of the dimension set, or one that
+// availability (which counts the open demand ON_ORDER) cannot cover.
+func CheckReservableOrdered(qty decimal.Decimal, oh OnHand) error {
+	if qty.Sign() <= 0 {
+		return fail(CodeInvalid, "reservation quantity must be positive")
+	}
+	room := decimal.Min(oh.ExpectedReceipt(), oh.AvailOrdered())
+	if qty.GreaterThan(room) {
+		return fail(CodeReserveShortfall, "only %s expected to arrive and unreserved, %s requested", decimal.Max(room, decimal.Zero), qty)
 	}
 	return nil
 }

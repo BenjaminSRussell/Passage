@@ -76,6 +76,7 @@ export function ReservationsPage() {
       render: (row) => `${sentence(row.demandType)} ${row.demandId}${row.demandSegment ? ` (segment ${row.demandSegment})` : ""}`,
     },
     { key: "policy", header: "Policy", render: (row) => row.policy },
+    { key: "kind", header: "Reserves", render: (row) => (row.kind === "ORDERED" ? "Expected receipt" : "Stock on hand") },
     { key: "expiresAt", header: "Expires", render: (row) => (row.expiresAt ? formatDateTime(row.expiresAt) : dash) },
     { key: "status", header: "Status", render: (row) => <Badge tone={stateTones[row.status] ?? "neutral"}>{sentence(row.status)}</Badge> },
     {

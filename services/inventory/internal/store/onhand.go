@@ -110,7 +110,9 @@ type OnHandRow struct {
 	AvailOrdered     decimal.Decimal
 	PostedValue      decimal.Decimal
 	ReservedPhysical decimal.Decimal
-	HeldPhysical     decimal.Decimal
+	// ReservedOrdered is the quantity reserved against expected receipts (FR-16.7).
+	ReservedOrdered decimal.Decimal
+	HeldPhysical    decimal.Decimal
 	// Blocked is the physical quantity held with inventory status BLOCKED or
 	// QUARANTINE; it is part of PhysicalInvent and left out of the avail sums.
 	Blocked decimal.Decimal
@@ -162,6 +164,7 @@ func (s *Postgres) ListOnHand(ctx context.Context, f OnHandFilter) (OnHandResult
 		"coalesce(sum("+phys+" - o.reserved_physical - o.held_physical + o.ordered + o.arrived - o.on_order - o.reserved_ordered) filter (where not "+restricted+"), 0)::text",
 		"sum(o.posted_value)::text",
 		"sum(o.reserved_physical)::text",
+		"sum(o.reserved_ordered)::text",
 		"sum(o.held_physical)::text",
 		"coalesce(sum("+phys+") filter (where "+restricted+"), 0)::text",
 		"bool_or(("+phys+") < 0)",
@@ -191,22 +194,23 @@ func (s *Postgres) ListOnHand(ctx context.Context, f OnHandFilter) (OnHandResult
 		defer rows.Close()
 		for rows.Next() {
 			g := make([]string, len(groups))
-			var currency, phys, avail, ordered, value, reserved, held, blocked string
+			var currency, phys, avail, ordered, value, reserved, reservedOrdered, held, blocked string
 			var negative bool
-			dest := make([]any, 0, len(groups)+9)
+			dest := make([]any, 0, len(groups)+10)
 			for i := range g {
 				dest = append(dest, &g[i])
 			}
-			dest = append(dest, &currency, &phys, &avail, &ordered, &value, &reserved, &held, &blocked, &negative)
+			dest = append(dest, &currency, &phys, &avail, &ordered, &value, &reserved, &reservedOrdered, &held, &blocked, &negative)
 			if err := rows.Scan(dest...); err != nil {
 				return err
 			}
 			r := OnHandRow{Group: map[string]string{}, PhysicalInvent: decimal.RequireFromString(phys),
 				AvailPhysical: decimal.RequireFromString(avail), AvailOrdered: decimal.RequireFromString(ordered),
-				PostedValue: decimal.RequireFromString(value), ReservedPhysical: decimal.RequireFromString(reserved), HeldPhysical: decimal.RequireFromString(held), Blocked: decimal.RequireFromString(blocked),
+				PostedValue: decimal.RequireFromString(value), ReservedPhysical: decimal.RequireFromString(reserved),
+				ReservedOrdered: decimal.RequireFromString(reservedOrdered), HeldPhysical: decimal.RequireFromString(held), Blocked: decimal.RequireFromString(blocked),
 				Currency: currency, Negative: negative}
 			if asOf != "" {
-				r.AvailPhysical, r.AvailOrdered, r.ReservedPhysical, r.HeldPhysical = decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero
+				r.AvailPhysical, r.AvailOrdered, r.ReservedPhysical, r.ReservedOrdered, r.HeldPhysical = decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero
 			}
 			for i, name := range groups {
 				r.Group[name] = g[i]

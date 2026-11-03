@@ -289,7 +289,11 @@ func (s *Postgres) ShipTransfer(ctx context.Context, id string, version int, shi
 		if err != nil {
 			return err
 		}
-		if err := moveStockBatch(ctx, tx, tp.TenantID, doc, moves); err != nil {
+		own, err := ownDemand(next)
+		if err != nil {
+			return err
+		}
+		if err := moveStockBatch(ctx, tx, tp.TenantID, doc, moves, own); err != nil {
 			return err
 		}
 		if err := announceTransferSupply(ctx, tx, tp.TenantID, o.LegalEntityID, supply); err != nil {
@@ -368,7 +372,11 @@ func (s *Postgres) ReceiveTransfer(ctx context.Context, id string, version int, 
 		if err != nil {
 			return err
 		}
-		if err := moveStockBatch(ctx, tx, tp.TenantID, doc, moves); err != nil {
+		own, err := ownDemand(o)
+		if err != nil {
+			return err
+		}
+		if err := moveStockBatch(ctx, tx, tp.TenantID, doc, moves, own); err != nil {
 			return err
 		}
 		if err := announceTransferSupply(ctx, tx, tp.TenantID, o.LegalEntityID, supply); err != nil {
@@ -622,7 +630,7 @@ type stockMove struct {
 // deltas. A transfer ship or receive has already locked these rows, with its
 // supply rows, in one ascending pass (bookTransferSupply); locking them again
 // here only re-reads them.
-func moveStockBatch(ctx context.Context, tx pgx.Tx, tenantID string, doc document, moves []stockMove) error {
+func moveStockBatch(ctx context.Context, tx pgx.Tx, tenantID string, doc document, moves []stockMove, own map[string]decimal.Decimal) error {
 	rows := map[string]*row{}
 	policy := map[string]domain.NegativePolicy{}
 	var order []string
@@ -710,7 +718,7 @@ func moveStockBatch(ctx context.Context, tx pgx.Tx, tenantID string, doc documen
 		if count[k] == 0 {
 			continue
 		}
-		if err := checkNegative(r, policy[k]); err != nil {
+		if err := checkNegative(withoutOwnDemand(r, own[k]), policy[k]); err != nil {
 			return err
 		}
 		if err := saveRow(ctx, tx, tenantID, doc.legalEntityID, r, count[k]); err != nil {

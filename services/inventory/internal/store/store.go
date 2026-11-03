@@ -104,6 +104,7 @@ type Store interface {
 	ListABCRuns(ctx context.Context) ([]AbcRunSummary, error)
 	ReverseJournal(ctx context.Context, id string, postingDate time.Time) (domain.Journal, bool, error)
 	RebuildOnHand(ctx context.Context, repair bool) (RebuildReport, error)
+	BackfillTransferSupply(ctx context.Context, after string, limit int) (SupplyBackfillReport, error)
 	GenerateTags(ctx context.Context, planID, key string, count int) ([]domain.CountTag, bool, error)
 	ListTags(ctx context.Context, planID string, status domain.TagStatus) ([]domain.CountTag, error)
 	UseTag(ctx context.Context, tagID string, version int, productID string, dims domain.Dimensions, qty decimal.Decimal) (domain.CountTag, error)

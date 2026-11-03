@@ -68,12 +68,12 @@ from inventory_transaction t
 where t.tenant_id = $1 and ($2 = '' or (t.legal_entity_id::text = $2 and t.product_id::text = $3 and t.dimension_set_hash = $4))
 group by t.legal_entity_id, t.product_id, t.dimension_set_hash, coalesce(t.issue_status, t.receipt_status)
 union all
-select 'R', r.legal_entity_id::text, r.product_id::text, r.dimension_set_hash, '', '',
+select case r.kind when 'ORDERED' then 'Q' else 'R' end, r.legal_entity_id::text, r.product_id::text, r.dimension_set_hash, '', '',
   sum(r.qty)::text, '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'
 from inventory_reservation r
 where r.tenant_id = $1 and r.status = 'ACTIVE'
   and ($2 = '' or (r.legal_entity_id::text = $2 and r.product_id::text = $3 and r.dimension_set_hash = $4))
-group by r.legal_entity_id, r.product_id, r.dimension_set_hash
+group by r.kind, r.legal_entity_id, r.product_id, r.dimension_set_hash
 union all
 select 'H', h.legal_entity_id::text, h.product_id::text, h.dimension_set_hash, '', '',
   sum(h.qty - h.released_qty)::text, '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'
@@ -141,6 +141,8 @@ func readProjection(ctx context.Context, tx pgx.Tx, tenantID, legalEntity, produ
 			p.oh.Ordered = p.oh.Ordered.Add(decimal.RequireFromString(b[0]))
 		case "H":
 			p.oh.HeldPhysical = p.oh.HeldPhysical.Add(decimal.RequireFromString(b[0]))
+		case "Q":
+			p.oh.ReservedOrdered = p.oh.ReservedOrdered.Add(decimal.RequireFromString(b[0]))
 		default: // "R"
 			p.oh.ReservedPhysical = p.oh.ReservedPhysical.Add(decimal.RequireFromString(b[0]))
 		}

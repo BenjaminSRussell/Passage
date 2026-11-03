@@ -182,8 +182,8 @@ paths:
         changes; a journal-posted transaction at its status from its physical date), giving
         physical quantity, posted value, blocked quantity and the negative flag. Value counts only
         transactions at a financial status with a financial date on or before asOf. Availability,
-        ordered and reserved quantities are not kept per date: availPhysical, availOrdered and
-        reservedPhysical are omitted in a replay.
+        ordered and reserved quantities are not kept per date: availPhysical, availOrdered,
+        reservedPhysical, reservedOrdered and heldPhysical are omitted in a replay.
       x-passage-duty: inventory.read
       parameters:
         - { name: asOf, in: query, description: 'Replay date (YYYY-MM-DD, inclusive); omit for the current projection', schema: { type: string, format: date } }
@@ -259,7 +259,9 @@ paths:
         Over-reservation is INV-RES-001 unless allowPartial, which returns the shortfall; a FEFO
         request with no eligible batch is INV-RES-002; a BLOCKED or QUARANTINE dimension set is
         INV-BLK-002. One reservation row is written per allocation. A repeated Idempotency-Key returns
-        the stored allocations (200, Idempotent-Replayed: true).
+        the stored allocations (200, Idempotent-Replayed: true). With against ORDERED a MANUAL request reserves part
+        of the expected receipt (ordered plus arrived, less already reserved) of the one dimension set instead of
+        physical stock; kind on each reservation says which.
       x-passage-duty: inventory.reservation.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -2466,6 +2468,40 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+  /internal/v1/inventory/transfer-orders:backfill-supply:
+    post:
+      operationId: backfillInventoryTransferSupply
+      summary: Book the supply and demand pair of transfer orders that were open before it existed (BR-16.13)
+      description: |
+        One-off, per tenant. Books ON_ORDER at the shipping dimension set and ORDERED at the
+        receiving dimension set for every CREATED, SHIPPED or PARTIALLY_RECEIVED transfer order that
+        holds no transfer_supply rows (orders open when migration 0025 ran; the dimension-set hash is
+        computed in the service, so SQL could not do it). Each order runs in its own transaction
+        under its order row lock and announces onhand.changed per moved row. Idempotent: the booking
+        is the difference against what the order already booked, so a re-run books nothing twice.
+        Covers the legal entities the caller can see. At most limit orders are examined per call, in
+        order id order; while more is true, call again with after set to next. Internal path: not
+        exposed by the web BFF.
+      x-passage-duty: inventory.admin
+      parameters:
+        - { name: limit, in: query, description: Most orders examined in this call (1 to 500, default 200), schema: { type: integer, minimum: 1, maximum: 500, default: 200 } }
+        - { name: after, in: query, description: Continue after this transfer order id (the next of the previous call), schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Orders examined and orders that had a pair to book
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [checked, booked, more]
+                properties:
+                  checked: { type: integer, description: Open orders without booked supply that were examined }
+                  booked: { type: integer, description: Orders whose pair moved at least one projection row }
+                  more: { type: boolean, description: True when further orders follow; call again with after set to next }
+                  next: { type: string, format: uuid, description: Last order id examined; present when more is true }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /v1/inventory/transactions/{id}:unpick:
     post:
       operationId: unpickInventoryTransaction
@@ -2894,6 +2930,7 @@ components:
         availOrdered: { $ref: '#/components/schemas/Decimal', description: Present for the live projection; absent in an asOf replay }
         postedValue: { $ref: '#/components/schemas/Decimal' }
         reservedPhysical: { $ref: '#/components/schemas/Decimal', description: Present for the live projection; absent in an asOf replay }
+        reservedOrdered: { $ref: '#/components/schemas/Decimal', description: 'Quantity reserved against expected receipts (RESERVED_ORDERED, FR-16.7); present for the live projection, absent in an asOf replay' }
         heldPhysical: { $ref: '#/components/schemas/Decimal', description: 'Quantity under an active hold (physical stock that availPhysical and availOrdered leave out); present for the live projection, absent in an asOf replay' }
         blocked: { $ref: '#/components/schemas/Decimal', description: 'Physical quantity with inventory_status BLOCKED or QUARANTINE; part of physicalInvent, left out of availPhysical and availOrdered (FR-16.8)' }
         currency: { type: string }
@@ -3007,6 +3044,7 @@ components:
         segmentRef: { type: string, maxLength: 48, description: Sales order or project reference; required with SALES_ORDER and PROJECT }
         segmentFallback: { type: boolean, default: true }
         ttlHours: { type: integer, minimum: 0, maximum: 8760, default: 0, description: 'Hours after which the reservation lapses and the expiry run releases it (FR-16.7). 0 or absent means no expiry: the reservation holds until released or consumed (PRD reservation_ttl_hours, default 0); it never means expire immediately. Part of the request an Idempotency-Key stands for.' }
+        against: { type: string, enum: [PHYSICAL, ORDERED], default: PHYSICAL, description: 'PHYSICAL reserves available physical stock (reserved_physical). ORDERED reserves part of the unreserved expected receipt (ordered plus arrived, less reserved ordered) of the one dimension set named in dimensions (reserved_ordered, RESERVED_ORDERED); it needs policy MANUAL and is INV-RES-001 when more than is expected and unreserved. Part of the request an Idempotency-Key stands for.' }
     Reservation:
       type: object
       required: [id, legalEntityId, productId, dimensions, qty, demandType, demandId, policy, status, allocationNo, createdAt]
@@ -3021,6 +3059,7 @@ components:
         demandSegment: { type: string, description: 'Segment of the demand (SALES_ORDER:<ref> or PROJECT:<ref>); absent when unsegmented' }
         policy: { type: string, enum: [MANUAL, FIFO, FEFO, LIFO] }
         status: { type: string, enum: [ACTIVE, RELEASED, CONSUMED] }
+        kind: { type: string, enum: [PHYSICAL, ORDERED], description: 'PHYSICAL holds stock on hand; ORDERED holds part of the expected receipt of the dimension set' }
         allocationNo: { type: integer, description: Position of this allocation within its request }
         createdAt: { type: string, format: date-time }
         releasedAt: { type: string, format: date-time }

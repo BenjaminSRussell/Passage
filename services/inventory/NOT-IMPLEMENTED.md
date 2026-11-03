@@ -354,12 +354,46 @@ release without its stock move: both are in one transaction. Consumers: no other
 yet (sales ATP is stateless on caller-supplied buckets, planning computes its own supply); in inventory the ON_ORDER demand lowers
 `availOrdered`, which the FR-16.4 financial-negative check reads, so where financial negative is forbidden an issue at the shipping
 warehouse (including another order's ship) is refused with INV-NEG-002 once open transfer demand exceeds the stock. Known items:
-orders already CREATED, SHIPPED or PARTIALLY_RECEIVED when 0025 is applied carry no booking until their next change (that change books
-their open quantity in full; the dimension-set hash is computed in Go, so 0025 does not backfill); booking the pair does not apply the negative-stock policy (a transfer order is a
+orders already CREATED, SHIPPED or PARTIALLY_RECEIVED when 0025 is applied carry no booking until their next change or the slice 24 backfill (`transfer-orders:backfill-supply`); booking the pair does not apply the negative-stock policy (a transfer order is a
 plan; the ship still does); the pair is booked as projection quantity without `inventory_transaction` rows, so the transaction inquiry
 does not list it and `transactions:apply` is not involved; reservations against the expected receipt (RESERVED_ORDERED) are the
 separate item below. No new duty, no new route, no front-end change (the on-hand inquiry already shows `availOrdered`). The OpenAPI and
 AsyncAPI documents have no FAIL lines on the documentation gates.
+
+PSG-1624 (wave 16 slice 24) closes two slice 23 items and adds reservations against expected receipts (FR-16.7, RESERVED_ORDERED).
+(a) Shipping or receiving a transfer order leaves the order's own open ON_ORDER out of the FR-16.4 financial-negative check on the
+shipping row (`ownDemand`, `withoutOwnDemand` in `transfer_supply.go`; the booking and the slice 23 lock order are unchanged), so a
+transfer can always ship against its own booked demand, including the open remainder of its own lines, while every other issue (another
+order's ship, a journal, a blocking) still sees that demand in `availOrdered`. The physical check is unchanged. Test:
+`TestTransferShipExcludesItsOwnOnOrder` (6 on hand, 10 planned: the 6 ships; before, INV-NEG-002; another order's ship against the
+remaining demand is still INV-NEG-002). (b) `POST /internal/v1/inventory/transfer-orders:backfill-supply` (existing duty
+`inventory.admin`, no new duty; internal path like the rebuild) books the ON_ORDER / ORDERED pair for every CREATED, SHIPPED or
+PARTIALLY_RECEIVED order of the tenant (legal entities the caller sees) that holds no `transfer_supply` rows, i.e. the orders open when
+migration 0025 ran (the dimension-set hash is computed in Go). Each order runs in its own transaction under its order row lock and the
+transfer lock order, announces `onhand.changed` per moved row, and the booking is a difference against `transfer_supply`, so a re-run
+books nothing twice and an order booked in the meantime is not booked again (the order row is locked before its supply rows are read
+again, so a ship or edit committed after the listing is seen). It examines at most `limit` orders per call (1 to 500, default 200) in
+order id order and answers `{checked, booked, more, next}`; while `more` is true the caller repeats it with `after=<next>`, so a large
+tenant is worked through in bounded requests. Run it per tenant after 0025 (or any time: it is idempotent). Tests:
+`TestBackfillBooksTransferSupplyOfOrdersOpenBeforeIt`, `TestBackfillPagesByOrderIDWithinTheTenant` (batches, and another tenant sees
+none of the orders). A reservation can now be
+`against: ORDERED` (`kind` ORDERED on the reservation, migrations 0026 / 0027: a defaulted `kind` column with a NOT VALID check validated
+in the second file, no new table, so no new grant): MANUAL only, it names the dimension set that receives, may not exceed the unreserved
+expected receipt there (ordered plus arrived, less reserved ordered, and not more than `availOrdered`; INV-RES-001) and moves
+`reserved_ordered` and `onhand.changed` `deltaBucket` RESERVED_ORDERED instead of `reserved_physical`; release and expiry give it back
+the same way; the rebuild-and-compare reads ORDERED reservations as `reserved_ordered` (source `Q`) next to the RESERVED_ORDERED
+transaction sums, so drift is found and repaired. `reservation.created/released` carry `kind`; the OpenAPI request has `against` and the
+reservation has `kind`; the on-hand inquiry answers `reservedOrdered` next to `reservedPhysical` (absent in an as-of replay). Web: a
+"Reserve" choice (stock on hand / expected receipt) on the new reservation form that forces policy manual, a "Reserves" column on the
+reservation list and a "Reserved on order" column in the on-hand inquiry; tests `TestReservationAgainstExpectedReceipt`,
+`TestExpiredReservationAgainstExpectedReceiptGivesItBack` (the expiry run gives `reserved_ordered` back with a RESERVED_ORDERED
+`onhand.changed`), `slice24_test.go`, `slice24.test.tsx`. No other reader is affected: sales ATP is stateless on caller-supplied buckets,
+no service consumes `reservation.*` or `onhand.changed`, and inside inventory `reserved_ordered` only lowers `availOrdered` (the financial-negative check and the ORDERED cap); `availPhysical` is unchanged. Purchasing's per-line warehouse (`po.confirmed.v1` lines carry `warehouse_id`, wave 17 slice 16): inventory books no
+purchase ORDERED itself (it has no consumer of `po.confirmed.v1`; the document's service registers the expected receipt through
+`transactions:apply` with the dimension set it chooses, which already accepts any warehouse), so the per-line warehouse is wave 17's
+call to make, handoff below. Not built: converting an ORDERED reservation into a physical one when the receipt arrives, and refusing a
+transfer cancel / edit that would leave `reserved_ordered` above the remaining ordered supply (the reservation stays; `availOrdered`
+shows the over-commitment); ORDERED reservations by FIFO, FEFO or LIFO policy (a policy has no ordered-stock ranking yet).
 
 Every other item in the ticket and PRD 3.16 is listed here.
 
@@ -385,7 +419,7 @@ Every other item in the ticket and PRD 3.16 is listed here.
 | 2 | Journal number sequence `INVJ-` | handoff — wave 5 (numbering) | Journals are identified by id; the number column and sequence call arrive with the numbering client. |
 | 2 | CSV import, paste from spreadsheet, copy journal | later slice of PSG-16 | Web grid features; the slice 1 screen adds one line at a time. |
 | 3 | Reservations: MANUAL, FIFO, FEFO, LIFO against on-hand (RESERVED_PHYSICAL), over-reservation rejected, partial with shortfall, `POST/GET/DELETE /reservations` | built (slice 2) | Every on-hand row of the product in the legal entity is locked before allocation, so reservations never over-reserve (`TestConcurrentReservationsNeverOverReserve`). |
-| 3 | Reservations against expected receipts (RESERVED_ORDERED) | later slice of PSG-16 | Needs the ordered / arrived buckets, which only receiving and purchase orders (waves 17–18) fill through `transactions:apply`. |
+| 3 | Reservations against expected receipts (RESERVED_ORDERED) | built (slice 24) for MANUAL reservations of one dimension set; later slice of PSG-16 for policy reservations and conversion on receipt | `against: ORDERED` on `POST /reservations` reserves part of the unreserved ordered / arrived supply (transfer orders fill it; purchase and receiving fill it through `transactions:apply`). Policy (FIFO / FEFO / LIFO) allocation over expected receipts and moving the reservation to physical stock when the receipt arrives are not built. |
 | 3 | Reservations as RESERVED_PHYSICAL issue transactions, CONSUMED status | handoff — waves 21 / 27 (production, sales) | A reservation is a record that moves the `reserved_physical` bucket; the projection's bucket equals the sum of ACTIVE reservations (reconciliation test). The demand documents that would own an issue transaction, and consume the reservation on issue, belong to the sales and production waves. |
 | 3 | Segment-aware reservations (FR-16.20, BR-16.17) | built (slice 5) | The request names the demand's segment (`segmentType` SALES_ORDER / PROJECT, `segmentRef`, `segmentFallback`, default true). A policy reservation takes that segment's stock first, then unsegmented stock with fallback, never another segment; an unsegmented demand never takes segmented stock. A MANUAL reservation of stock whose segment the demand may not take is `INV-SEG-001`. The demand segment is stored (replay check of the key) and shown in the inquiry and the reservation events. Vendor-owned stock is never reserved (`INV-OWN-001` for MANUAL, skipped by the policies). Store test: `TestSegmentAwareReservations`. |
 | 3 | Reservation TTL (`reservation_ttl_hours`, `expires_at`, 5-minute expiry job) | built (slice 16) for the request TTL and the expiry run; later slice of PSG-16 for the scheduler and the legal-entity default | A reservation request may carry `ttlHours` (0 to 8760); `expires_at` is set on every allocation and `POST /v1/inventory/reservations:expire` (`inventory.reservation.write`, optional `limit`) releases the due ones. No scheduler is wired (see the Temporal jobs row): the run is called by an operator, the "Release expired" button or a job, and is safe to repeat. `reservation_ttl_hours` as a legal-entity default is wave 6 / wave 8 parameter data (the request carries it). |
@@ -544,3 +578,10 @@ Every other item in the ticket and PRD 3.16 is listed here.
   The shared `idempotency_keys` table is not used.
 - Money: cost amounts, cost prices and `posted_value` are `numeric(20,6)` with a currency
   column, values rounded to the currency minor unit with `platform/money`.
+
+## Handoffs from slice 24
+
+| # | Item | Status | Reason |
+|---|---|---|---|
+| - | Purchasing per-line warehouse: `po.confirmed.v1` lines carry `warehouse_id` (wave 17 slice 16) and purchase ORDERED should land at that warehouse | handoff - wave 17 (purchasing) | Inventory books purchase ORDERED only when the calling document registers it through `transactions:apply` with a dimension set; it consumes no `po.confirmed.v1`. Wave 17 passes the line's `warehouse_id` as the `warehouse` dimension of the registration. |
+| - | Route row for `POST /internal/v1/inventory/transfer-orders:backfill-supply` under duty `inventory.admin` | handoff - authz seed | No new duty. Add `{"resource": "/internal/v1/inventory/transfer-orders:backfill-supply", "methods": ["POST"]}` to the `inventory.admin` permissions in `policies/authz/data.json`, next to `/internal/v1/inventory/onhand:rebuild`; until then the policy denies the call for every caller (the service itself enforces `inventory.admin`). |

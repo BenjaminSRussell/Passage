@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -105,4 +106,23 @@ func TestSelectBatchesConservesQuantity(t *testing.T) {
 			t.Fatalf("allocated %s + shortfall %s != requested %s", total, sel.Shortfall, qty)
 		}
 	})
+}
+
+func TestCheckReservableOrderedClaimsOnlyUnreservedExpectedReceipt(t *testing.T) {
+	oh := OnHand{Ordered: decimal.NewFromInt(30), Arrived: decimal.NewFromInt(10), ReservedOrdered: decimal.NewFromInt(15)}
+	if err := CheckReservableOrdered(decimal.NewFromInt(25), oh); err != nil {
+		t.Fatalf("25 of 25 unreserved: %v", err)
+	}
+	var e *Error
+	if err := CheckReservableOrdered(decimal.NewFromInt(26), oh); !errors.As(err, &e) || e.Code != CodeReserveShortfall {
+		t.Fatalf("26 of 25 unreserved: %v", err)
+	}
+	// Open demand against the row lowers availability below the expected receipt.
+	oh.OnOrder = decimal.NewFromInt(20)
+	if err := CheckReservableOrdered(decimal.NewFromInt(10), oh); !errors.As(err, &e) || e.Code != CodeReserveShortfall {
+		t.Fatalf("availability 5 after demand: %v", err)
+	}
+	if err := CheckReservableOrdered(decimal.Zero, oh); !errors.As(err, &e) || e.Code != CodeInvalid {
+		t.Fatalf("zero quantity: %v", err)
+	}
 }

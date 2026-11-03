@@ -109,6 +109,8 @@ export interface OnHandRow {
   postedValue: string;
   /** Absent in an as-of replay. */
   reservedPhysical?: string;
+  /** Reserved against expected receipts (RESERVED_ORDERED). Absent in an as-of replay. */
+  reservedOrdered?: string;
   /** Physical quantity held as BLOCKED or QUARANTINE; not in the available columns. */
   blocked: string;
   /** Quantity under an active hold; left out of the available columns. Absent in an as-of replay. */
@@ -468,6 +470,9 @@ export type DemandType = (typeof DEMAND_TYPES)[number];
 export const RESERVATION_STATUSES = ["ACTIVE", "RELEASED", "CONSUMED"] as const;
 export type ReservationStatus = (typeof RESERVATION_STATUSES)[number];
 
+export const RESERVATION_KINDS = ["PHYSICAL", "ORDERED"] as const;
+export type ReservationKind = (typeof RESERVATION_KINDS)[number];
+
 export interface Reservation {
   id: string;
   legalEntityId: string;
@@ -480,6 +485,8 @@ export interface Reservation {
   demandSegment?: string;
   policy: ReservationPolicy;
   status: ReservationStatus;
+  /** PHYSICAL holds stock on hand; ORDERED holds part of the expected receipt of the dimension set. */
+  kind?: ReservationKind;
   allocationNo: number;
   createdAt: string;
   releasedAt?: string;
@@ -505,6 +512,8 @@ export interface ReserveInput {
   segmentFallback?: boolean;
   /** Hours after which the reservation lapses; 0 or absent means no expiry (it holds until released), never "expire now". */
   ttlHours?: number;
+  /** ORDERED reserves part of the expected receipt of the one dimension set named (policy MANUAL); absent or PHYSICAL reserves stock on hand. */
+  against?: ReservationKind;
 }
 
 export const SEGMENT_TYPES = ["NONE", "SALES_ORDER", "PROJECT"] as const;
@@ -535,6 +544,7 @@ export async function createReservation(input: ReserveInput, key: string = newKe
   const body = { ...input, dimensions: cleanDimensions(input.dimensions) };
   if (!body.requiredDate) delete body.requiredDate;
   if (!body.ttlHours) delete body.ttlHours;
+  if (body.against !== "ORDERED") delete body.against;
   if (!body.segmentType || body.segmentType === "NONE") {
     delete body.segmentType;
     delete body.segmentRef;

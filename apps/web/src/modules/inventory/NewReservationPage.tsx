@@ -12,6 +12,7 @@ import {
   type Problem,
   type ReservationCandidate,
   type Reservation,
+  type ReservationKind,
   type ReservationPolicy,
   type ReserveResult,
   type SegmentType,
@@ -37,6 +38,8 @@ export interface ReservationValues {
   segmentType: SegmentType;
   segmentRef: string;
   segmentFallback: boolean;
+  /** What the reservation holds: stock on hand (default) or part of an expected receipt (manual, one dimension set). */
+  against?: ReservationKind;
 }
 
 const fields = [
@@ -52,6 +55,7 @@ const fields = [
   "dimensions",
   "segmentType",
   "segmentRef",
+  "against",
 ] as const;
 type Field = (typeof fields)[number];
 type Errors = Partial<Record<Field, string>>;
@@ -76,6 +80,7 @@ export function validateReservation(values: ReservationValues): Errors {
   const ttl = values.ttlHours.trim();
   if (ttl !== "" && (!/^\d+$/.test(ttl) || Number(ttl) > 8760)) errors.ttlHours = "Enter 1 to 8760 hours, or leave it empty (or 0) for no expiry.";
   if (values.policy === "MANUAL" && values.dimensions.site.trim() === "") errors.dimensions = "A manual reservation names the site and every dimension of the stock.";
+  if (values.against === "ORDERED" && values.policy !== "MANUAL") errors.against = "A reservation against an expected receipt is manual: it names the dimension set that receives.";
   const ref = values.segmentRef.trim();
   if (values.segmentType !== "NONE" && (ref === "" || ref.length > 48)) errors.segmentRef = "Enter the sales order or project reference (up to 48 characters).";
   return errors;
@@ -190,6 +195,7 @@ export function NewReservationPage() {
           requiredDate: values.requiredDate,
           shelfLifeMarginDays: Number(values.shelfLifeMarginDays || "0"),
           ttlHours: Number(values.ttlHours || "0"),
+          against: values.against,
           allowPartial: values.allowPartial,
           // A manual reservation of a segmented demand reserves that segment's stock.
           dimensions: values.policy === "MANUAL" && segmented ? { ...values.dimensions, segment } : values.dimensions,
@@ -248,7 +254,7 @@ export function NewReservationPage() {
     setValues(next);
     key.current = crypto.randomUUID();
   };
-  const set = (name: Exclude<keyof ReservationValues, "dimensions" | "allowPartial" | "segmentFallback">) => (event: { target: { value: string } }) =>
+  const set = (name: Exclude<keyof ReservationValues, "dimensions" | "allowPartial" | "segmentFallback" | "against">) => (event: { target: { value: string } }) =>
     change({ ...values, [name]: event.target.value });
   const setDim = (name: FormDimension) => (event: { target: { value: string } }) =>
     change({ ...values, dimensions: { ...values.dimensions, [name]: event.target.value } });
@@ -266,6 +272,26 @@ export function NewReservationPage() {
           </FormField>
           <FormField id="res-qty" label="Quantity" error={errors.qty}>
             {(control) => <Input {...control} inputMode="decimal" value={values.qty} onChange={set("qty")} invalid={Boolean(errors.qty)} />}
+          </FormField>
+          <FormField
+            id="res-against"
+            label="Reserve"
+            hint={values.against === "ORDERED" ? "Part of the quantity still expected to arrive at the dimension set below, less what is already reserved against it." : "Stock that is on hand now."}
+            error={errors.against}
+          >
+            {(control) => (
+              <Select
+                {...control}
+                value={values.against ?? "PHYSICAL"}
+                onChange={(event) => {
+                  const against = event.target.value as ReservationKind;
+                  change({ ...values, against, policy: against === "ORDERED" ? "MANUAL" : values.policy });
+                }}
+              >
+                <option value="PHYSICAL">Stock on hand</option>
+                <option value="ORDERED">Expected receipt</option>
+              </Select>
+            )}
           </FormField>
           <FormField id="res-policy" label="Policy" hint={policyHints[values.policy]}>
             {(control) => (
