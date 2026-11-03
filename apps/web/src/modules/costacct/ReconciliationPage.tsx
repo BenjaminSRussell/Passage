@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
-import { Badge, Button, Card, DataTable, FormField, Input, PageHeader, Textarea, type DataTableColumn } from "../../shell/ui";
+import { Badge, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { describeError, listCostElements, reconcile, type JournalBalance, type Reconciliation } from "./api/client";
-import { CURRENCY, formatAmount, isPeriod, parseJournalCsv, UUID } from "./logic";
+import { CURRENCY, formatAmount, isPeriod, UUID } from "./logic";
 import styles from "./pages.module.css";
 import { ErrorList, thisPeriod } from "./parts";
 import { useLoad } from "./useLoad";
@@ -13,12 +13,11 @@ const unmappedColumns: DataTableColumn<JournalBalance>[] = [
   { key: "amount", header: "Journal balance", align: "end", mono: true, render: (b) => formatAmount(b.amount) },
 ];
 
-/** FR-38.11: compares Σ primary cost entries per element with the journal balances of the period. */
+/** FR-38.11: compares Σ primary cost entries per element with the general ledger balances of the period, read by the server. */
 export function ReconciliationPage() {
   const [legalEntityId, setLegalEntityId] = useState("");
   const [period, setPeriod] = useState(thisPeriod());
   const [currency, setCurrency] = useState("USD");
-  const [csv, setCsv] = useState("mainAccount,amount\n");
   const [errors, setErrors] = useState<string[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
   const [result, setResult] = useState<Reconciliation | null>(null);
@@ -40,14 +39,12 @@ export function ReconciliationPage() {
     if (!le) found.push("Enter the legal entity's id (a UUID).");
     if (!isPeriod(period)) found.push("Enter the period as YYYY-MM.");
     if (!CURRENCY.test(currency)) found.push("Use a three-letter currency code.");
-    const parsed = parseJournalCsv(csv);
-    if (!parsed.ok) found.push(parsed.error);
     setErrors(found);
     setFailure(null);
-    if (found.length > 0 || !parsed.ok) return;
+    if (found.length > 0) return;
     setBusy(true);
     try {
-      setResult(await reconcile({ legalEntityId: le, period, currency, journalBalances: parsed.value }));
+      setResult(await reconcile({ legalEntityId: le, period, currency }));
     } catch (err) {
       setResult(null);
       setFailure(describeError(err, "The reconciliation could not be run."));
@@ -60,7 +57,7 @@ export function ReconciliationPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Cost ledger reconciliation"
-        description="Paste the period's journal balances by main account. Each primary element's mirrored cost must equal the journal with a 0.00 difference."
+        description="The server reads the period's balances from the general ledger. Each primary element's mirrored cost must equal the ledger with a 0.00 difference."
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
@@ -73,11 +70,6 @@ export function ReconciliationPage() {
           <FormField id="recon-currency" label="Currency">
             {(c) => <Input {...c} className={styles.mono} value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />}
           </FormField>
-          <div className={styles.wide}>
-            <FormField id="recon-csv" label="Journal balances" hint="One line per main account: mainAccount,amount. A header row is skipped.">
-              {(c) => <Textarea {...c} mono rows={8} value={csv} onChange={(e) => setCsv(e.target.value)} />}
-            </FormField>
-          </div>
           <div className={styles.formActions}>
             <Button type="submit" variant="primary" loading={busy}>
               Reconcile

@@ -856,6 +856,13 @@ func (a *API) trialBalance(w http.ResponseWriter, r *http.Request) {
 			fields[name] = "must be a period as YYYY-MM"
 		}
 	}
+	switch q.Get("exclude_year_end_closing") {
+	case "":
+	case "true":
+		f.ExcludeYearEndClosing = true
+	default:
+		fields["exclude_year_end_closing"] = "must be true when given"
+	}
 	f.Dimensions = map[string]string{}
 	for key, values := range q {
 		attr, ok := strings.CutPrefix(key, "dim.")
@@ -884,6 +891,9 @@ func (a *API) trialBalance(w http.ResponseWriter, r *http.Request) {
 		if len(f.GroupBy) > store.MaxBalanceGroupBy {
 			fields["group_by"] = "must list at most 5 dimension attributes"
 		}
+	}
+	if f.ExcludeYearEndClosing && (len(f.Dimensions) > 0 || len(f.GroupBy) > 0) {
+		fields["exclude_year_end_closing"] = "cannot be combined with dim.* filters or group_by"
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)

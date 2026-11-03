@@ -323,7 +323,15 @@ type BalanceFilter struct {
 	// GroupBy splits each account row by the value of these dimension attributes
 	// (at most MaxBalanceGroupBy); a combination without the attribute groups under "".
 	GroupBy []string
+	// ExcludeYearEndClosing leaves out the year-end closing entries the close service posted and their reversals.
+	ExcludeYearEndClosing bool
 }
+
+const (
+	// ClosePostingService is the token issuer of the close service, the only poster whose year-end closing entries a balance may leave out.
+	ClosePostingService      = "close"
+	YearEndClosingSourceType = "year_end_closing"
+)
 
 // MaxBalanceGroupBy bounds the dimension attributes one balance inquiry groups by.
 const MaxBalanceGroupBy = 5
@@ -380,6 +388,8 @@ type TrialBalance struct {
 	Filtered bool `json:"filtered,omitempty"`
 	// GroupBy echoes the dimension attributes the rows are split by.
 	GroupBy []string `json:"groupBy,omitempty"`
+	// ExcludesYearEndClosing echoes that exclude_year_end_closing was applied, so a caller can tell a ledger that ignores the option.
+	ExcludesYearEndClosing bool `json:"excludesYearEndClosing,omitempty"`
 }
 
 // RebuildResult reports a balance rebuild (BR-11.7, simplified: no shadow table).

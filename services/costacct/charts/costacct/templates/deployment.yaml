@@ -18,6 +18,7 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+      {{- include "costacct.identityVolume" . | nindent 6 }}
       containers:
         - name: costacct
           image: {{ include "costacct.image" . | quote }}
@@ -35,6 +36,8 @@ spec:
                   key: DATABASE_URL
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
+            {{- include "costacct.ledgerEnv" . | nindent 12 }}
+          {{- include "costacct.identityMount" . | nindent 10 }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

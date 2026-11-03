@@ -663,6 +663,23 @@ func TestTrialBalance_DimensionFilterAndGroupBy(t *testing.T) {
 	}
 }
 
+func TestTrialBalance_ExcludeYearEndClosingOption(t *testing.T) {
+	fs := &fakeStore{}
+	h := server(fs)
+	base := "/v1/ledger/balances?ledger=" + testLedger
+	if rec := call(h, http.MethodGet, base+"&exclude_year_end_closing=true", "", dutyBalanceRead, nil); rec.Code != http.StatusOK || !fs.balanceFilter.ExcludeYearEndClosing {
+		t.Fatalf("option not passed to the store: %d %+v", rec.Code, fs.balanceFilter)
+	}
+	if rec := call(h, http.MethodGet, base, "", dutyBalanceRead, nil); rec.Code != http.StatusOK || fs.balanceFilter.ExcludeYearEndClosing {
+		t.Fatalf("the option is off by default: %d %+v", rec.Code, fs.balanceFilter)
+	}
+	for _, q := range []string{"&exclude_year_end_closing=false", "&exclude_year_end_closing=1", "&exclude_year_end_closing=true&group_by=CC", "&exclude_year_end_closing=true&dim.DEPT=D1"} {
+		if rec := call(h, http.MethodGet, base+q, "", dutyBalanceRead, nil); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s must be refused, got %d", q, rec.Code)
+		}
+	}
+}
+
 func TestAdmin_ReadinessAndMetrics(t *testing.T) {
 	fs := &fakeStore{}
 	a := New(fs)

@@ -141,7 +141,6 @@ export interface ReconcileInput {
   legalEntityId: string;
   period: string;
   currency: string;
-  journalBalances: JournalBalance[];
 }
 
 export interface Reconciliation {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/costacct/internal/api"
 	"github.com/BenjaminSRussell/passage/services/costacct/internal/store"
 	"github.com/BenjaminSRussell/passage/services/costacct/migrations"
@@ -24,6 +25,13 @@ const (
 
 func main() {
 	slog.SetDefault(newLogger(os.Stdout))
+	if len(os.Args) > 1 && os.Args[1] == reconcileCommand {
+		if err := costGLReconcile(context.Background(), os.Getenv, os.Args[2:]); err != nil {
+			slog.Error("costacct cost-gl-reconcile stopped", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(context.Background(), os.Getenv); err != nil {
 		slog.Error("costacct stopped", "err", err)
 		os.Exit(1)
@@ -57,7 +65,22 @@ func run(ctx context.Context, getenv func(string) string) error {
 		}
 	}
 	router := httpx.NewRouter()
-	api.New(store.New(pool)).Register(router)
+	a := api.New(store.New(pool))
+	gl, err := ledgerclient.FromEnv(getenv, "costacct")
+	if err != nil {
+		return err
+	}
+	if gl != nil {
+		ledgerIDs, err := parseLedgerIDs(getenv("COSTACCT_LEDGER_IDS"))
+		if err != nil {
+			return err
+		}
+		if len(ledgerIDs) == 0 {
+			return errors.New("COSTACCT_LEDGER_IDS is required when LEDGER_URL is set")
+		}
+		a.WithLedger(gl, ledgerIDs)
+	}
+	a.Register(router)
 	admin := http.NewServeMux()
 	admin.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
