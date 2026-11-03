@@ -18,9 +18,14 @@ import (
 // Parties are master-data ids known now, checked together with the run's snapshot.
 // ExpectedVersion 0 skips the optimistic version check.
 type Release struct {
-	RunID           string
-	Seq             int
-	Fix             domain.Correction
+	RunID string
+	Seq   int
+	Fix   domain.Correction
+	// BankFix and OnhandFix correct a bank_balances or onhand line; each applies to its pack only.
+	BankFix   domain.BankCorrection
+	OnhandFix domain.OnhandCorrection
+	// Parties are the master-data ids known now: parties for open_items, bank accounts for
+	// bank_balances, items for onhand.
 	Parties         []string
 	ExpectedVersion int
 	By              string
@@ -69,32 +74,34 @@ func release(ctx context.Context, tx pgx.Tx, rq Release) (domain.PackRun, bool, 
 	if rq.ExpectedVersion != 0 && rq.ExpectedVersion != run.Version {
 		return domain.PackRun{}, false, fmt.Errorf("%w: run is at version %d, request expected %d", ErrVersion, run.Version, rq.ExpectedVersion)
 	}
-	parties := make(map[string]struct{}, len(run.Parties)+len(rq.Parties))
+	master := make(map[string]struct{}, len(run.Parties)+len(rq.Parties))
 	for _, p := range append(append([]string{}, run.Parties...), rq.Parties...) {
-		parties[p] = struct{}{}
+		master[p] = struct{}{}
 	}
 	before := len(run.Totals)
 	original := append([]domain.ControlTotal(nil), run.Totals...)
-	rec, err := domain.ReleaseOpenItem(&run, q.Record, rq.Fix, parties)
+	var rec domain.Record
+	switch run.Pack {
+	case domain.PackOpenItems:
+		if !rq.BankFix.IsZero() || !rq.OnhandFix.IsZero() {
+			return domain.PackRun{}, false, fmt.Errorf("%w: an open_items record is corrected by party and account only", domain.ErrInvalid)
+		}
+		rec, err = releaseOpenItem(ctx, tx, &run, q, rq, master)
+	case domain.PackBankBal:
+		if !rq.Fix.IsZero() || !rq.OnhandFix.IsZero() {
+			return domain.PackRun{}, false, fmt.Errorf("%w: a bank_balances line is corrected by bankAccount only", domain.ErrInvalid)
+		}
+		rec, err = releaseBank(ctx, tx, &run, q, rq, master)
+	case domain.PackOnhand:
+		if !rq.Fix.IsZero() || !rq.BankFix.IsZero() {
+			return domain.PackRun{}, false, fmt.Errorf("%w: an onhand line is corrected by item, site, warehouse, location, batch and unit only", domain.ErrInvalid)
+		}
+		rec, err = releaseOnhand(ctx, tx, &run, q, rq, master)
+	default:
+		return domain.PackRun{}, false, fmt.Errorf("%w: pack %s has no record release; open_items, bank_balances and onhand do", domain.ErrUnknownPack, run.Pack)
+	}
 	if err != nil {
 		return domain.PackRun{}, false, err
-	}
-
-	sys, company := string(run.SourceSystem), run.SourceCompany
-	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended('xref|' || current_setting('passage.tenant_id', true) || '|' || $1 || '|' || $2 || '|' || $3, 0))`,
-		sys, company, domain.TableOpenItems); err != nil {
-		return domain.PackRun{}, false, fmt.Errorf("lock legacy_xref: %w", err)
-	}
-	tag, err := tx.Exec(ctx, `insert into legacy_xref (tenant_id, xref_id, source_system, source_company, source_table, source_id,
-		passage_entity, passage_id, run_id, amount, currency)
-		values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, 'open_item', $6, $7, $8, $9)
-		on conflict do nothing`,
-		ids.New(), sys, company, domain.OpenItemsTable(rec.Side()), rec.LegacyID, ids.New(), run.RunID, rec.Amount.String(), rec.Currency)
-	if err != nil {
-		return domain.PackRun{}, false, fmt.Errorf("insert legacy_xref: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return domain.PackRun{}, false, fmt.Errorf("%w: legacy id %s is already loaded by cross-reference; it cannot be released again", domain.ErrTransition, rec.LegacyID)
 	}
 
 	now := time.Now().UTC()
@@ -140,4 +147,118 @@ func release(ctx context.Context, tx pgx.Tx, rq Release) (domain.PackRun, bool, 
 		}
 	}
 	return run, false, nil
+}
+
+// lockXref serializes the loads of one (system, company, source table), as a run does.
+func lockXref(ctx context.Context, tx pgx.Tx, run domain.PackRun, table string) error {
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended('xref|' || current_setting('passage.tenant_id', true) || '|' || $1 || '|' || $2 || '|' || $3, 0))`,
+		string(run.SourceSystem), run.SourceCompany, table); err != nil {
+		return fmt.Errorf("lock legacy_xref: %w", err)
+	}
+	return nil
+}
+
+// insertXref writes the line's legacy_xref row; a legacy id the cross-reference already holds
+// cannot be released again (a line quarantined as a repeat of an id that loaded).
+func insertXref(ctx context.Context, tx pgx.Tx, run domain.PackRun, table, entity, legacyID, xrefID, passageID, amount, currency string) error {
+	tag, err := tx.Exec(ctx, `insert into legacy_xref (tenant_id, xref_id, source_system, source_company, source_table, source_id,
+		passage_entity, passage_id, run_id, amount, currency)
+		values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		on conflict do nothing`,
+		xrefID, string(run.SourceSystem), run.SourceCompany, table, legacyID, entity, passageID, run.RunID, amount, currency)
+	if err != nil {
+		return fmt.Errorf("insert legacy_xref: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: legacy id %s is already loaded by cross-reference; it cannot be released again", domain.ErrTransition, legacyID)
+	}
+	return nil
+}
+
+func releaseOpenItem(ctx context.Context, tx pgx.Tx, run *domain.PackRun, q domain.Quarantined, rq Release, parties map[string]struct{}) (domain.Record, error) {
+	rec, err := domain.ReleaseOpenItem(run, q.Record, rq.Fix, parties)
+	if err != nil {
+		return domain.Record{}, err
+	}
+	if err := lockXref(ctx, tx, *run, domain.TableOpenItems); err != nil {
+		return domain.Record{}, err
+	}
+	if err := insertXref(ctx, tx, *run, domain.OpenItemsTable(rec.Side()), "open_item", rec.LegacyID, ids.New(), ids.New(), rec.Amount.String(), rec.Currency); err != nil {
+		return domain.Record{}, err
+	}
+	return rec, nil
+}
+
+// quarantinedLine reads the whole extracted line the quarantine row kept. A row quarantined before
+// the line was kept (0017) has none: the run is re-extracted instead.
+func quarantinedLine(ctx context.Context, tx pgx.Tx, runID string, seq int, into any) error {
+	var raw []byte
+	err := tx.QueryRow(ctx, `select line from pack_quarantine
+		where tenant_id = current_setting('passage.tenant_id', true)::uuid and run_id = $1 and seq = $2`, runID, seq).Scan(&raw)
+	if err != nil {
+		return fmt.Errorf("read pack_quarantine line: %w", err)
+	}
+	if raw == nil {
+		return fmt.Errorf("%w: quarantined record %d was stored before its whole line was kept; re-extract and run the pack again", domain.ErrTransition, seq)
+	}
+	return json.Unmarshal(raw, into)
+}
+
+func releaseBank(ctx context.Context, tx pgx.Tx, run *domain.PackRun, q domain.Quarantined, rq Release, accounts map[string]struct{}) (domain.Record, error) {
+	var orig domain.BankBalanceLine
+	if err := quarantinedLine(ctx, tx, run.RunID, q.Seq, &orig); err != nil {
+		return domain.Record{}, err
+	}
+	line, err := domain.ReleaseBankBalance(run, orig, rq.BankFix, accounts)
+	if err != nil {
+		return domain.Record{}, err
+	}
+	sys, company := string(run.SourceSystem), run.SourceCompany
+	if err := lockXref(ctx, tx, *run, domain.TableBank); err != nil {
+		return domain.Record{}, err
+	}
+	if err := checkBankAccounts(ctx, tx, sys, company, []domain.BankBalanceLine{line}); err != nil {
+		return domain.Record{}, err
+	}
+	xrefID, balanceID := ids.New(), ids.New()
+	if err := insertXref(ctx, tx, *run, domain.TableBank, "bank_opening_balance", line.LegacyID, xrefID, balanceID, line.Balance.String(), line.Currency); err != nil {
+		return domain.Record{}, err
+	}
+	if _, err := tx.Exec(ctx, `insert into bank_opening_balance (tenant_id, balance_id, run_id, legacy_xref_id, source_system, source_company, legacy_id,
+		bank_account, currency, balance)
+		values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		balanceID, run.RunID, xrefID, sys, company, line.LegacyID, line.BankAccount, line.Currency, line.Balance.String()); err != nil {
+		return domain.Record{}, fmt.Errorf("insert bank opening balance: %w", err)
+	}
+	return line.Record(), nil
+}
+
+func releaseOnhand(ctx context.Context, tx pgx.Tx, run *domain.PackRun, q domain.Quarantined, rq Release, items map[string]struct{}) (domain.Record, error) {
+	var orig domain.OnhandLine
+	if err := quarantinedLine(ctx, tx, run.RunID, q.Seq, &orig); err != nil {
+		return domain.Record{}, err
+	}
+	line, err := domain.ReleaseOnhand(run, orig, rq.OnhandFix, items)
+	if err != nil {
+		return domain.Record{}, err
+	}
+	sys, company := string(run.SourceSystem), run.SourceCompany
+	if err := lockXref(ctx, tx, *run, domain.TableOnhand); err != nil {
+		return domain.Record{}, err
+	}
+	if err := checkOnhandKeys(ctx, tx, sys, company, []domain.OnhandLine{line}); err != nil {
+		return domain.Record{}, err
+	}
+	xrefID, balanceID := ids.New(), ids.New()
+	if err := insertXref(ctx, tx, *run, domain.TableOnhand, "onhand_opening_balance", line.LegacyID, xrefID, balanceID, line.Value.String(), line.Currency); err != nil {
+		return domain.Record{}, err
+	}
+	if _, err := tx.Exec(ctx, `insert into onhand_opening_balance (tenant_id, balance_id, run_id, legacy_xref_id, source_system, source_company, legacy_id,
+		item, site, warehouse, location, batch, serial, unit, quantity, value, currency)
+		values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+		balanceID, run.RunID, xrefID, sys, company, line.LegacyID, line.Item, line.Site, line.Warehouse, line.Location, line.Batch, line.Serial,
+		line.Unit, line.Quantity.String(), line.Value.String(), line.Currency); err != nil {
+		return domain.Record{}, fmt.Errorf("insert onhand opening balance: %w", err)
+	}
+	return line.Record(), nil
 }

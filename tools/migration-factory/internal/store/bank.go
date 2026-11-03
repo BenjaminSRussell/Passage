@@ -117,7 +117,7 @@ func runBankBalances(ctx context.Context, tx pgx.Tx, in BankRun) (domain.PackRun
 	for i := range run.Quarantined {
 		q := &run.Quarantined[i]
 		q.Seq, q.Status = i+1, domain.QuarantineOpen
-		if err := insertQuarantine(ctx, tx, run.RunID, q.Seq, q.Record.LegacyID, q.Rule, q.Reason, recordJSON(q.Record)); err != nil {
+		if err := insertQuarantineLine(ctx, tx, run.RunID, q.Seq, q.Record.LegacyID, q.Rule, q.Reason, recordJSON(q.Record), q.Line); err != nil {
 			return domain.PackRun{}, err
 		}
 	}

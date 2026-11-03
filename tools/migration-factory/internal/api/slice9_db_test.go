@@ -135,8 +135,8 @@ func TestOnhand_QuarantineKeepsRunLoadedAndShowsOnTotals(t *testing.T) {
 		t.Fatalf("held-back lines must show on quantity and entity value: %+v", run.ControlTotals)
 	}
 	rel := do(t, h, request{method: "POST", path: "/api/v1/migration/runs/" + run.RunID + "/quarantine/1/release", tenant: tenantA, duties: allDuties, body: `{"account":"BOLT-10"}`})
-	if rel.Code != http.StatusUnprocessableEntity || problemCode(t, rel) != CodeUnsupported {
-		t.Fatalf("onhand has no record release yet: %d %s", rel.Code, rel.Body)
+	if rel.Code != http.StatusUnprocessableEntity || problemCode(t, rel) != CodeInvalid {
+		t.Fatalf("an open_items field on an onhand line is refused (slice 13 releases by item and dimension): %d %s", rel.Code, rel.Body)
 	}
 }
 

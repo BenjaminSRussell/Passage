@@ -38,8 +38,26 @@ interface ProjectRow {
 interface Correction {
   party: string;
   account: string;
+  /** Onhand dimension and unit, blank to keep the extracted value. */
+  site: string;
+  warehouse: string;
+  location: string;
+  batch: string;
+  unit: string;
   parties: string;
 }
+
+const NO_FIX: Correction = { party: "", account: "", site: "", warehouse: "", location: "", batch: "", unit: "", parties: "" };
+
+/** Packs whose quarantined records can be corrected and released (FR-49.11). */
+const RELEASABLE = ["open_items", "bank_balances", "onhand"];
+
+/** What the master-data list of a release names, by pack. */
+const MASTER_LABEL: Record<string, string> = {
+  open_items: "Parties added to master data",
+  bank_balances: "Bank accounts added to master data",
+  onhand: "Items added to master data",
+};
 
 /** One pack run: its counts, the control-total board, the quarantine with release, and its projects (9.49.6). */
 /** Packs whose loaded rows stay in the factory (domain.NotPosted), with the ledger they are not posted to. */
@@ -57,13 +75,13 @@ export function PackRunDetailPage() {
   const state = useLoad((signal) => getRun(id, signal), id);
   const run = state.data;
   const [selected, setSelected] = useState<QuarantinedRecord | null>(null);
-  const [fix, setFix] = useState<Correction>({ party: "", account: "", parties: "" });
+  const [fix, setFix] = useState<Correction>(NO_FIX);
   const [failure, setFailure] = useState<Problem | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const releaseKey = useRef(newKey());
   const mismatches = run ? run.controlTotals.filter((t) => t.status === "MISMATCH").length : 0;
-  const releasable = Boolean(run && run.pack === "open_items" && run.status === "LOADED");
+  const releasable = Boolean(run && RELEASABLE.includes(run.pack) && run.status === "LOADED");
 
   const quarantineColumns: DataTableColumn<QuarantinedRecord>[] = [
     { key: "seq", header: "Seq", mono: true },
@@ -72,7 +90,7 @@ export function PackRunDetailPage() {
     { key: "reason", header: "Reason" },
     {
       key: "dimensions",
-      header: run?.pack === "gl_balances" ? "Account and dimensions" : run?.pack === "onhand" ? "Item and dimension" : run?.pack === "open_orders" ? "Party, item and order line" : "Party and account",
+      header: run?.pack === "gl_balances" ? "Account and dimensions" : run?.pack === "bank_balances" ? "Bank account" : run?.pack === "onhand" ? "Item and dimension" : run?.pack === "open_orders" ? "Party, item and order line" : "Party and account",
       render: (row) =>
         (run?.pack === "gl_balances" || run?.pack === "onhand" ? [row.account, row.dimensions] : run?.pack === "open_orders" ? [row.party, row.account, row.dimensions] : [row.ledger === "AP" ? "Payable" : undefined, row.party, row.account])
           .filter(Boolean)
@@ -108,7 +126,7 @@ export function PackRunDetailPage() {
 
   function choose(record: QuarantinedRecord) {
     setSelected(record);
-    setFix({ party: record.party ?? "", account: record.account ?? "", parties: "" });
+    setFix({ ...NO_FIX, party: record.party ?? "", account: record.account ?? "" });
     setFailure(null);
     setNotice(null);
     releaseKey.current = newKey();
@@ -121,12 +139,30 @@ export function PackRunDetailPage() {
     setBusy(true);
     try {
       const parties = splitList(fix.parties);
+      const changed = (value: string, extracted?: string) => value.trim() !== (extracted ?? "").trim();
+      const fields =
+        run.pack === "bank_balances"
+          ? changed(fix.account, selected.account)
+            ? { bankAccount: fix.account.trim() }
+            : {}
+          : run.pack === "onhand"
+            ? {
+                ...(changed(fix.account, selected.account) ? { item: fix.account.trim() } : {}),
+                ...(fix.site.trim() ? { site: fix.site.trim() } : {}),
+                ...(fix.warehouse.trim() ? { warehouse: fix.warehouse.trim() } : {}),
+                ...(fix.location.trim() ? { location: fix.location.trim() } : {}),
+                ...(fix.batch.trim() ? { batch: fix.batch.trim() } : {}),
+                ...(fix.unit.trim() ? { unit: fix.unit.trim() } : {}),
+              }
+            : {
+                ...(changed(fix.party, selected.party) ? { party: fix.party.trim() } : {}),
+                ...(changed(fix.account, selected.account) ? { account: fix.account.trim() } : {}),
+              };
       const next = await releaseQuarantined(
         run.runId,
         selected.seq,
         {
-          ...(fix.party.trim() !== (selected.party ?? "") ? { party: fix.party.trim() } : {}),
-          ...(fix.account.trim() !== (selected.account ?? "") ? { account: fix.account.trim() } : {}),
+          ...fields,
           ...(parties.length > 0 ? { parties } : {}),
           version: run.version,
         },
@@ -277,17 +313,50 @@ export function PackRunDetailPage() {
         <Card title={`Release ${selected.legacyId}`}>
           <form className={styles.form} onSubmit={submitRelease} noValidate>
             <p className={`${styles.note} ${styles.wide}`}>
-              {selected.rule}: {selected.reason}. Correct the party or control account; amount and currency come from the legacy extract and change only by
-              re-extract.
+              {selected.rule}: {selected.reason}.{" "}
+              {run?.pack === "bank_balances"
+                ? "Correct the bank account; the balance and currency come from the legacy extract and change only by re-extract."
+                : run?.pack === "onhand"
+                  ? "Correct the item, the inventory dimension or the unit (blank keeps the extracted value); quantity, value and serial come from the legacy extract and change only by re-extract."
+                  : "Correct the party or control account; amount and currency come from the legacy extract and change only by re-extract."}
             </p>
-            <FormField id="release-party" label="Party">
-              {(control) => <Input {...control} value={fix.party} onChange={(event) => setFix({ ...fix, party: event.target.value })} />}
-            </FormField>
-            <FormField id="release-account" label="Control account">
-              {(control) => <Input {...control} value={fix.account} onChange={(event) => setFix({ ...fix, account: event.target.value })} />}
-            </FormField>
+            {run?.pack === "open_items" ? (
+              <>
+                <FormField id="release-party" label="Party">
+                  {(control) => <Input {...control} value={fix.party} onChange={(event) => setFix({ ...fix, party: event.target.value })} />}
+                </FormField>
+                <FormField id="release-account" label="Control account">
+                  {(control) => <Input {...control} value={fix.account} onChange={(event) => setFix({ ...fix, account: event.target.value })} />}
+                </FormField>
+              </>
+            ) : null}
+            {run?.pack === "bank_balances" ? (
+              <FormField id="release-bank-account" label="Bank account">
+                {(control) => <Input {...control} value={fix.account} onChange={(event) => setFix({ ...fix, account: event.target.value })} />}
+              </FormField>
+            ) : null}
+            {run?.pack === "onhand" ? (
+              <>
+                <FormField id="release-item" label="Item">
+                  {(control) => <Input {...control} value={fix.account} onChange={(event) => setFix({ ...fix, account: event.target.value })} />}
+                </FormField>
+                {(
+                  [
+                    ["site", "Site"],
+                    ["warehouse", "Warehouse"],
+                    ["location", "Location"],
+                    ["batch", "Batch"],
+                    ["unit", "Unit"],
+                  ] as const
+                ).map(([field, label]) => (
+                  <FormField key={field} id={`release-${field}`} label={label} hint="Blank keeps the extracted value." optional>
+                    {(control) => <Input {...control} value={fix[field]} onChange={(event) => setFix({ ...fix, [field]: event.target.value })} />}
+                  </FormField>
+                ))}
+              </>
+            ) : null}
             <div className={styles.wide}>
-              <FormField id="release-parties" label="Parties added to master data" hint="Ids created since the run, separated by commas." optional>
+              <FormField id="release-parties" label={MASTER_LABEL[run?.pack ?? "open_items"] ?? "Added to master data"} hint="Ids created since the run, separated by commas." optional>
                 {(control) => <Textarea {...control} mono rows={2} value={fix.parties} onChange={(event) => setFix({ ...fix, parties: event.target.value })} />}
               </FormField>
             </div>

@@ -360,16 +360,22 @@ paths:
   /api/v1/migration/runs/{id}/quarantine/{rec}/release:
     post:
       operationId: releaseQuarantined
-      summary: Correct and release a quarantined open item (FR-49.11)
+      summary: Correct and release a quarantined open item, bank balance or on-hand line (FR-49.11)
       description: |
-        Applies the party and account correction, re-runs the open-items suite against the run's
-        master-data snapshot plus `parties`, and loads the record into legacy_xref. The run's
-        counts, control totals and version change under its row lock; a corrected account moves
-        the record's legacy amount to the corrected account's subtotal. When no total is
-        MISMATCH any more the run moves to RECONCILED and writes
+        Applies the correction, re-runs the pack's suite against the run's master-data snapshot
+        plus `parties`, and loads the record into legacy_xref. open_items takes `party` and
+        `account`; bank_balances takes `bankAccount`; onhand takes `item`, `site`, `warehouse`,
+        `location`, `batch` and `unit` (a field of another pack is MIG-0001). Amounts, quantities,
+        currencies, legacy ids and serials are the legacy truth and change only by re-extract.
+        The run's counts, control totals and version change under its row lock; a corrected key
+        moves the record's legacy figures to the corrected key's subtotal, and a bank or stock
+        line also loads its opening row (no posting to treasury or the inventory ledger). When no
+        total is MISMATCH any more the run moves to RECONCILED and writes
         dev.passage.migration.pack.reconciled.v1. Releasing a released record returns the run
-        with Idempotent-Replayed (idempotent by record). Only LOADED open_items runs take a
-        release (MIG-0004 otherwise, MIG-0005 for other packs).
+        with Idempotent-Replayed (idempotent by record). Only LOADED open_items, bank_balances
+        and onhand runs take a release (MIG-0004 otherwise, MIG-0005 for other packs); a bank
+        or stock line quarantined before its whole line was kept (migration 0017) is MIG-0004
+        and is re-extracted.
       x-passage-duty: MigrationRun
       parameters:
         - $ref: "#/components/parameters/Id"
@@ -1896,9 +1902,32 @@ components:
         account:
           type: string
           description: Corrected control account; blank keeps the extracted one.
+        bankAccount:
+          type: string
+          description: Corrected bank account of a bank_balances line; blank keeps the extracted one.
+        item:
+          type: string
+          description: Corrected item of an onhand line; blank keeps the extracted one.
+        site:
+          type: string
+          description: Corrected site of an onhand line; blank keeps the extracted one.
+        warehouse:
+          type: string
+          description: Corrected warehouse of an onhand line; blank keeps the extracted one.
+        location:
+          type: string
+          description: Corrected location of an onhand line; blank keeps the extracted one.
+        batch:
+          type: string
+          description: Corrected batch of an onhand line; blank keeps the extracted one.
+        unit:
+          type: string
+          description: Corrected unit of measure of an onhand line; blank keeps the extracted one.
         parties:
           type: array
-          description: Party ids added to master data since the run, checked with the run's snapshot.
+          description: >-
+            Master-data ids added since the run, checked with the run's snapshot: parties for
+            open_items, bank accounts for bank_balances, items for onhand.
           items:
             type: string
         version:

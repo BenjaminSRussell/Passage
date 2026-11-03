@@ -100,7 +100,7 @@ func (s *Server) startBankRun(w http.ResponseWriter, r *http.Request) {
 	run := domain.PackRun{
 		RunID: ids.New(), TenantID: p.TenantID, Pack: domain.PackBankBal, SourceSystem: sys, SourceCompany: company,
 		CutoffTS: req.CutoffTS.UTC(), InputHash: domain.HashBankBalances(lines), Status: domain.StatusExtracted,
-		RecordsIn: len(lines), RecordsQuarantined: len(quarantined), Quarantined: quarantined,
+		RecordsIn: len(lines), RecordsQuarantined: len(quarantined), Quarantined: quarantined, Parties: master,
 	}
 	if err := run.Advance(domain.StatusValidated); err != nil {
 		fail(w, r, err)
