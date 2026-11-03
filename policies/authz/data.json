@@ -2347,7 +2347,9 @@
       {"resource": "/v1/production/batch-records/*", "methods": ["GET"]},
       {"resource": "/v1/production/inheritance-rules", "methods": ["GET"]},
       {"resource": "/v1/production/inheritance-rules/*", "methods": ["GET"]},
-      {"resource": "/v1/production/batch-derivations", "methods": ["GET"]}
+      {"resource": "/v1/production/batch-derivations", "methods": ["GET"]},
+      {"resource": "/v1/production/rework-orders", "methods": ["GET"]},
+      {"resource": "/v1/production/rework-orders/*", "methods": ["GET"]}
     ]},
     "production.batch-order.write": {"permissions": [
       {"resource": "/v1/production/batch-orders", "methods": ["POST"]},
@@ -2356,7 +2358,9 @@
       {"resource": "/v1/production/batch-orders/*:rescale", "methods": ["POST"]},
       {"resource": "/v1/production/batch-orders/*:start", "methods": ["POST"]},
       {"resource": "/v1/production/bulk-consolidation:preview", "methods": ["POST"]},
-      {"resource": "/v1/production/rework-orders:preview", "methods": ["POST"]}
+      {"resource": "/v1/production/rework-orders:preview", "methods": ["POST"]},
+      {"resource": "/v1/production/rework-orders", "methods": ["POST"]},
+      {"resource": "/v1/production/rework-orders/*:receive", "methods": ["POST"]}
     ]},
     "production.batch-record.approve": {"permissions": [
       {"resource": "/v1/production/batch-records:approve-check", "methods": ["POST"]},
