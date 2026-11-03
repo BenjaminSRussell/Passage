@@ -42,7 +42,9 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   `POST /v1/ledger/balances:rebuild` runs once for it. That first rebuild
   reports `quantityBackfill: true` and does not count the backfilled quantity
   rows in `rowsDiffering`, so it raises no drift alert; later rebuilds count
-  quantity drift as usual.
+  quantity drift as usual. A dimension realignment run on a flagged ledger reads
+  the quantities to move from the journal instead of the projection, so it still
+  empties the old combinations.
 - Ledger transactions (FR-11.14): `GET /v1/ledger/journal-lines?ledger=` lists
   posted lines in posting order (posting sequence, line number) with the entry's
   voucher, date, description, source and trace id. Filters: `account_from`/`account_to`
@@ -260,6 +262,9 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
   (runs skipped by a resume stay skipped); a changed schedule recomputes it from the last run.
 - The web batch screen has "Save as recurring journal", which opens the new recurring journal form
   filled from the batch (fixed amounts, its ledger, journal name, description and posting date).
+- A template line may carry a fixed statistical `quantity` and `unit` (BR-11.2, migration 0029),
+  set together like on batch lines; generation copies them unscaled onto the draft batch line, so a
+  zero-amount template line is a recurring statistical posting (for example a monthly headcount).
 
 ## Open items and manual clearing (slice 8, FR-11.19, BR-11.12, BR-11.13, BR-11.18)
 

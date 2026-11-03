@@ -223,23 +223,7 @@ func checkBatchLines(lines []batchLineDTO, fields map[string]string) []store.Bat
 		if utf8.RuneCountInString(l.SourceLineRef) > maxSourceRefLength {
 			fields[prefix+"sourceLineRef"] = fmt.Sprintf("must be at most %d characters", maxSourceRefLength)
 		}
-		qty, qtyOK := parseQuantity(l.Quantity)
-		switch {
-		case !qtyOK || qty.IsNegative():
-			fields[prefix+"quantity"] = "must be a non-negative decimal string"
-		case !qty.Round(domain.QuantityScale).Equal(qty):
-			fields[prefix+"quantity"] = fmt.Sprintf("has more than %d decimals", domain.QuantityScale)
-		case qty.GreaterThanOrEqual(domain.MaxQuantity):
-			fields[prefix+"quantity"] = "is too large"
-		case (qty.IsZero()) != (l.Unit == ""):
-			fields[prefix+"unit"] = "quantity and unit are set together"
-		case l.Unit != "" && !domain.ValidUnit(l.Unit):
-			fields[prefix+"unit"] = "must be 1 to 10 characters of A-Z or 0-9"
-		}
-		quantity := ""
-		if qtyOK && !qty.IsZero() {
-			quantity = qty.StringFixed(domain.QuantityScale)
-		}
+		quantity := checkLineQuantity(fields, prefix, l.Quantity, l.Unit)
 		out = append(out, store.BatchLine{Account: l.Account, Dimensions: l.Dimensions, DebitCredit: l.DebitCredit,
 			Amount: amount.String(), Currency: l.Amount.Currency, Text: l.Text, SourceLineRef: l.SourceLineRef, Quantity: quantity, Unit: l.Unit})
 	}

@@ -39,6 +39,8 @@ type recurringLineDTO struct {
 	AmountKind  string            `json:"amountKind"`
 	Amount      amountDTO         `json:"amount"`
 	Text        string            `json:"text"`
+	Quantity    string            `json:"quantity"`
+	Unit        string            `json:"unit"`
 }
 
 type recurringRequest struct {
@@ -159,8 +161,9 @@ func checkRecurringLines(lines []recurringLineDTO, fields map[string]string) []s
 		if utf8.RuneCountInString(l.Text) > maxTextLength {
 			fields[prefix+"text"] = fmt.Sprintf("must be at most %d characters", maxTextLength)
 		}
+		quantity := checkLineQuantity(fields, prefix, l.Quantity, l.Unit)
 		out = append(out, store.RecurringLine{Account: l.Account, Dimensions: l.Dimensions, DebitCredit: l.DebitCredit,
-			AmountKind: l.AmountKind, Amount: amount.String(), Currency: l.Amount.Currency, Text: l.Text})
+			AmountKind: l.AmountKind, Amount: amount.String(), Currency: l.Amount.Currency, Text: l.Text, Quantity: quantity, Unit: l.Unit})
 	}
 	return out
 }

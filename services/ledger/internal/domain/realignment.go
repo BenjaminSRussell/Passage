@@ -44,16 +44,26 @@ type RealignmentMapping map[string]map[string]string
 // RealignmentRow is one affected (account, period, old combination) with its new combination.
 // Net is debit minus credit of the period's balance row in the ledger currency.
 type RealignmentRow struct {
-	Account   string            `json:"account"`
-	Period    string            `json:"period"`
-	OldDims   map[string]string `json:"oldDimensions"`
-	NewDims   map[string]string `json:"newDimensions"`
-	OldName   string            `json:"oldCombination"`
-	NewName   string            `json:"newCombination"`
-	Net       string            `json:"net"`
-	Lines     int64             `json:"lineCount"`
-	AccountID string            `json:"-"`
-	OldID     []byte            `json:"-"`
+	Account string            `json:"account"`
+	Period  string            `json:"period"`
+	OldDims map[string]string `json:"oldDimensions"`
+	NewDims map[string]string `json:"newDimensions"`
+	OldName string            `json:"oldCombination"`
+	NewName string            `json:"newCombination"`
+	Net     string            `json:"net"`
+	// Quantities are the statistical quantities (BR-11.2) of the old combination that move with it,
+	// one per unit of measure with a non-zero net.
+	Quantities []RealignmentQuantity `json:"quantities,omitempty"`
+	Lines      int64                 `json:"lineCount"`
+	AccountID  string                `json:"-"`
+	OldID      []byte                `json:"-"`
+}
+
+// RealignmentQuantity is the net statistical quantity of one unit of measure on a balance row:
+// debit minus credit quantity, so a positive net moves as debit quantity on the new combination.
+type RealignmentQuantity struct {
+	Unit string `json:"unit"`
+	Net  string `json:"net"`
 }
 
 // RealignmentCandidate is a balance row read for the filter.
@@ -63,6 +73,7 @@ type RealignmentCandidate struct {
 	DisplayName                string
 	Dimensions                 map[string]string
 	Net                        decimal.Decimal
+	Quantities                 []RealignmentQuantity
 	LineCount                  int64
 }
 
@@ -170,11 +181,12 @@ func PlanRealignment(m RealignmentMapping, candidates []RealignmentCandidate, co
 	var rows []RealignmentRow
 	for _, c := range candidates {
 		newDims, changed := m.Apply(c.Dimensions)
-		if !changed || c.Net.IsZero() {
+		if !changed || (c.Net.IsZero() && len(c.Quantities) == 0) {
 			continue
 		}
 		rows = append(rows, RealignmentRow{Account: c.Account, AccountID: c.AccountID, Period: c.Period, OldDims: c.Dimensions, NewDims: newDims,
-			OldID: c.CombinationID, OldName: c.DisplayName, NewName: combo(c.Account, newDims), Net: c.Net.String(), Lines: c.LineCount})
+			OldID: c.CombinationID, OldName: c.DisplayName, NewName: combo(c.Account, newDims), Net: c.Net.String(),
+			Quantities: c.Quantities, Lines: c.LineCount})
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
 		a, b := rows[i], rows[j]
@@ -191,21 +203,59 @@ func PlanRealignment(m RealignmentMapping, candidates []RealignmentCandidate, co
 
 // RealignmentLines builds the reclassification lines of one period: each row credits (or debits, for
 // a credit balance) the old combination by its net and does the opposite on the new one, so the
-// entry balances by construction and the old combination's period balance returns to zero.
+// entry balances by construction and the old combination's period balance returns to zero. Lines
+// come in pairs, the old side then the new side.
 func RealignmentLines(rows []RealignmentRow, currency, text string) []LineInput {
 	var lines []LineInput
 	for _, r := range rows {
-		net := decimal.RequireFromString(r.Net)
+		lines = append(lines, RealignmentRowLines(r, currency, text)...)
+	}
+	return lines
+}
+
+// RealignmentRowLines builds the pairs (old side, new side) of one row: one for the amount when the
+// net is not zero, then one zero-amount statistical pair per unit of measure whose net quantity
+// is not zero (BR-11.2), so the quantity totals follow the amounts to the new combination.
+func RealignmentRowLines(r RealignmentRow, currency, text string) []LineInput {
+	var lines []LineInput
+	pair := func(net, qty decimal.Decimal, unit string) {
 		oldSide, newSide := SideCredit, SideDebit
 		if net.IsNegative() {
 			oldSide, newSide = SideDebit, SideCredit
 		}
-		amount := net.Abs()
+		amount, quantity := net.Abs(), decimal.Zero
+		if unit != "" {
+			amount, quantity = decimal.Zero, qty.Abs()
+		}
 		lines = append(lines,
-			LineInput{Account: r.Account, Dimensions: r.OldDims, Side: oldSide, Amount: amount, Currency: currency, Text: text},
-			LineInput{Account: r.Account, Dimensions: r.NewDims, Side: newSide, Amount: amount, Currency: currency, Text: text})
+			LineInput{Account: r.Account, Dimensions: r.OldDims, Side: oldSide, Amount: amount, Currency: currency, Text: text, Quantity: quantity, Unit: unit},
+			LineInput{Account: r.Account, Dimensions: r.NewDims, Side: newSide, Amount: amount, Currency: currency, Text: text, Quantity: quantity, Unit: unit})
+	}
+	if net := rowNet(r); !net.IsZero() {
+		pair(net, decimal.Zero, "")
+	}
+	for _, q := range r.Quantities {
+		n := decimal.RequireFromString(q.Net)
+		pair(n, n, q.Unit)
 	}
 	return lines
+}
+
+// RealignmentRowLineCount is the number of lines RealignmentRowLines builds for a row.
+func RealignmentRowLineCount(r RealignmentRow) int {
+	n := 2 * len(r.Quantities)
+	if !rowNet(r).IsZero() {
+		n += 2
+	}
+	return n
+}
+
+// rowNet is the amount net of a row; an empty net is zero.
+func rowNet(r RealignmentRow) decimal.Decimal {
+	if r.Net == "" {
+		return decimal.Zero
+	}
+	return decimal.RequireFromString(r.Net)
 }
 
 // RealignmentTotals sums the absolute net of rows and counts their lines.
@@ -239,23 +289,31 @@ func CheckRealignmentReason(reason *ReasonInfo, code, comment string) []Violatio
 }
 
 // MaxRealignmentRowsPerEntry keeps a reclassification entry within MaxLinesPerEntry: each row
-// produces two lines.
+// produces two lines when it carries no statistical quantity.
 const MaxRealignmentRowsPerEntry = MaxLinesPerEntry / 2
 
 // ChunkRealignmentRows splits one period's rows into the rows of successive entries of at most
-// size rows each, so a period with many combinations posts as several entries instead of failing
-// the line limit.
+// size rows each and at most MaxLinesPerEntry lines each (a row with statistical quantities makes
+// more than two lines), so a period with many combinations posts as several entries instead of
+// failing the line limit.
 func ChunkRealignmentRows(rows []RealignmentRow, size int) [][]RealignmentRow {
 	if size < 1 {
 		size = MaxRealignmentRowsPerEntry
 	}
 	var out [][]RealignmentRow
-	for len(rows) > size {
-		out = append(out, rows[:size])
-		rows = rows[size:]
+	var cur []RealignmentRow
+	lines := 0
+	for _, r := range rows {
+		n := RealignmentRowLineCount(r)
+		if len(cur) > 0 && (len(cur) >= size || lines+n > MaxLinesPerEntry) {
+			out = append(out, cur)
+			cur, lines = nil, 0
+		}
+		cur = append(cur, r)
+		lines += n
 	}
-	if len(rows) > 0 {
-		out = append(out, rows)
+	if len(cur) > 0 {
+		out = append(out, cur)
 	}
 	return out
 }

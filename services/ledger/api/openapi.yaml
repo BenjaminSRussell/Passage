@@ -817,6 +817,8 @@ components:
         amount: { type: string, description: "A decimal string at the currency's minor-unit scale for fixed lines; a percentage of the base amount (0 to 1000) for percent lines" }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         text: { type: string }
+        quantity: { type: string, description: Fixed statistical quantity at scale 6, copied unchanged to every generated line; absent when the line has none (BR-11.2) }
+        unit: { type: string, description: Unit of measure of quantity }
     RecurringLineBody:
       type: object
       required: [account, debitCredit, amountKind, amount]
@@ -834,6 +836,8 @@ components:
             currency: { type: string, pattern: '^[A-Z]{3}$' }
             value: { type: string, description: Decimal string; a percentage when amountKind is percent }
         text: { type: string, maxLength: 255 }
+        quantity: { type: string, description: Statistical quantity (BR-11.2), a non-negative decimal with at most 6 decimals; set together with unit and copied unchanged, not scaled by the base amount }
+        unit: { type: string, pattern: '^[A-Z0-9]{1,10}$', description: Unit of measure; set together with quantity }
     RecurringJournalBody:
       type: object
       required: [ledgerId, journalName, name, frequency, dayOfMonth, startDate, lines]
@@ -1342,6 +1346,18 @@ components:
         oldCombination: { type: string, description: Display name of the combination the balance moves from }
         newCombination: { type: string, description: Display name of the combination the balance moves to }
         net: { type: string, description: Debit minus credit of the period balance being moved, decimal string in the ledger currency }
+        quantities:
+          type: array
+          description: |
+            Statistical quantities (BR-11.2) of the old combination that move with it, one per unit of measure with a
+            non-zero net. Each makes a zero-amount debit and credit pair in the reclassification entry, so the quantity
+            totals follow the amounts. A combination with quantities and a zero net is part of the run.
+          items:
+            type: object
+            required: [unit, net]
+            properties:
+              unit: { type: string, description: Unit of measure }
+              net: { type: string, description: Debit minus credit quantity of the period, decimal string }
         lineCount: { type: integer, format: int64, description: Posted lines behind the balance }
     RealignmentRun:
       type: object

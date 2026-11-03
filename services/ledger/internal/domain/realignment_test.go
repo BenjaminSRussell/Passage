@@ -84,6 +84,46 @@ func TestRealignmentLines_BalanceAndFollowTheNetSign(t *testing.T) {
 	}
 }
 
+func TestRealignmentLines_StatisticalPairsFollowTheQuantitySign(t *testing.T) {
+	r := RealignmentRow{Account: "6010", OldDims: map[string]string{"DEPT": "C100"}, NewDims: map[string]string{"DEPT": "C150"}, Net: "40.00",
+		Quantities: []RealignmentQuantity{{Unit: "KG", Net: "12.5"}, {Unit: "PCS", Net: "-4"}}}
+	lines := RealignmentRowLines(r, "USD", "t")
+	if len(lines) != 6 || RealignmentRowLineCount(r) != 6 {
+		t.Fatalf("lines = %d, count %d", len(lines), RealignmentRowLineCount(r))
+	}
+	// Positive net quantity: the old combination is credited, the new one debited; negative flips.
+	if l := lines[2]; l.Side != SideCredit || l.Unit != "KG" || l.Quantity.String() != "12.5" || !l.Amount.IsZero() {
+		t.Errorf("old KG line: %+v", l)
+	}
+	if l := lines[3]; l.Side != SideDebit || l.Dimensions["DEPT"] != "C150" || l.Quantity.String() != "12.5" {
+		t.Errorf("new KG line: %+v", l)
+	}
+	if l := lines[4]; l.Side != SideDebit || l.Unit != "PCS" || l.Quantity.String() != "4" {
+		t.Errorf("old PCS line: %+v", l)
+	}
+	if l := lines[5]; l.Side != SideCredit || l.Unit != "PCS" {
+		t.Errorf("new PCS line: %+v", l)
+	}
+	// A combination with quantities and no amount makes only statistical pairs.
+	only := RealignmentRow{Account: "6010", Net: "0", Quantities: []RealignmentQuantity{{Unit: "HC", Net: "5"}}}
+	if got := RealignmentRowLines(only, "USD", "t"); len(got) != 2 || !got[0].Amount.IsZero() || RealignmentRowLineCount(only) != 2 {
+		t.Errorf("quantity-only row: %+v", got)
+	}
+}
+
+func TestPlanRealignment_KeepsAZeroNetCombinationThatHoldsQuantities(t *testing.T) {
+	m := RealignmentMapping{"DEPT": {"C100": "C150"}}
+	cands := []RealignmentCandidate{
+		{AccountID: "a1", Account: "6010", Period: "2026-01", Dimensions: map[string]string{"DEPT": "C100"}, Net: decimal.Zero,
+			Quantities: []RealignmentQuantity{{Unit: "HC", Net: "5"}}},
+		{AccountID: "a1", Account: "6010", Period: "2026-02", Dimensions: map[string]string{"DEPT": "C100"}, Net: decimal.Zero},
+	}
+	rows := PlanRealignment(m, cands, func(a string, d map[string]string) string { return a + "-" + d["DEPT"] })
+	if len(rows) != 1 || rows[0].Period != "2026-01" || len(rows[0].Quantities) != 1 {
+		t.Fatalf("rows = %+v", rows)
+	}
+}
+
 func TestPeriodHelpers(t *testing.T) {
 	if n, _ := PeriodSpan("2026-11", "2027-02"); n != 4 {
 		t.Errorf("span = %d", n)
@@ -137,5 +177,22 @@ func TestChunkRealignmentRows(t *testing.T) {
 	}
 	if MaxRealignmentRowsPerEntry*2 != MaxLinesPerEntry {
 		t.Fatalf("an entry of %d rows has %d lines, the limit is %d", MaxRealignmentRowsPerEntry, MaxRealignmentRowsPerEntry*2, MaxLinesPerEntry)
+	}
+}
+
+func TestChunkRealignmentRows_CountsStatisticalLines(t *testing.T) {
+	// Each row has an amount pair and 2,000 statistical pairs: 4,002 lines, so two rows fit an entry
+	// of 10,000 lines and the third starts the next one although size allows more rows.
+	qs := make([]RealignmentQuantity, 2000)
+	for i := range qs {
+		qs[i] = RealignmentQuantity{Unit: fmt.Sprintf("U%d", i), Net: "1"}
+	}
+	rows := make([]RealignmentRow, 3)
+	for i := range rows {
+		rows[i] = RealignmentRow{Account: fmt.Sprint(i), Net: "1", Quantities: qs}
+	}
+	chunks := ChunkRealignmentRows(rows, 100)
+	if len(chunks) != 2 || len(chunks[0]) != 2 || len(chunks[1]) != 1 {
+		t.Fatalf("chunks: %d (%d rows in the first)", len(chunks), len(chunks[0]))
 	}
 }

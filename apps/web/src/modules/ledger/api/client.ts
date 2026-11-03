@@ -761,6 +761,9 @@ export const recurringLineSchema = z.object({
   amount: z.string(),
   currency: z.string(),
   text: z.string().optional(),
+  /** Fixed statistical quantity (BR-11.2) copied to every generated line, with its unit. */
+  quantity: z.string().optional(),
+  unit: z.string().optional(),
 });
 export type RecurringLine = z.infer<typeof recurringLineSchema>;
 
@@ -817,6 +820,8 @@ export interface RecurringJournalInput {
     amountKind: "fixed" | "percent";
     amount: { currency: string; value: string };
     text?: string;
+    quantity?: string;
+    unit?: string;
   }[];
 }
 
@@ -1533,6 +1538,8 @@ export const realignmentRowSchema = z.object({
   oldCombination: z.string(),
   newCombination: z.string(),
   net: z.string(),
+  /** Statistical quantities (BR-11.2) that move with the balance, one per unit of measure. */
+  quantities: z.array(z.object({ unit: z.string(), net: z.string() })).optional(),
   lineCount: z.number(),
 });
 export type RealignmentRow = z.infer<typeof realignmentRowSchema>;

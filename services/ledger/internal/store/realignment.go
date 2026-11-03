@@ -173,7 +173,81 @@ func realignmentCandidates(ctx context.Context, tx pgx.Tx, tenantID string, ledg
 		}
 		out = append(out, c)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	return withCandidateQuantities(ctx, tx, tenantID, ledger.ID, f, out)
+}
+
+// candidateQuantitiesFromProjection reads the net statistical quantities of the filter's accounts and
+// periods from the quantity projection.
+const candidateQuantitiesFromProjection = `select b.main_account_id::text, b.period_key, b.dimension_combination_id, b.unit, b.net_quantity::text
+	from balance_quantity b join main_account a on a.tenant_id = b.tenant_id and a.id = b.main_account_id
+	where b.tenant_id = $1 and b.ledger_id = $2 and b.period_key between $3 and $4 and b.net_quantity <> 0
+		and ($5::text = '' or a.account_number >= $5::text) and ($6::text = '' or a.account_number <= $6::text)
+	order by b.period_key, b.main_account_id, b.dimension_combination_id, b.unit`
+
+// candidateQuantitiesFromJournal reads the same totals from the journal, for a ledger whose
+// projection still misses the quantity lines posted before migration 0027 (quantity_rebuild_pending).
+// A debit adds and a credit subtracts whether or not the line is a negative posting, as in the
+// rebuild (rebuiltQuantityCTE): a negative posting moves the other side's total by a negative amount.
+const candidateQuantitiesFromJournal = `select l.main_account_id::text, e.period_key, l.dimension_combination_id, l.unit,
+		sum(case when l.debit_credit = 'D' then l.quantity else -l.quantity end)::text
+	from journal_line l join journal_entry e on e.tenant_id = l.tenant_id and e.id = l.entry_id
+		join main_account a on a.tenant_id = l.tenant_id and a.id = l.main_account_id
+	where l.tenant_id = $1 and e.ledger_id = $2 and e.period_key between $3 and $4 and l.quantity is not null
+		and ($5::text = '' or a.account_number >= $5::text) and ($6::text = '' or a.account_number <= $6::text)
+	group by l.main_account_id, e.period_key, l.dimension_combination_id, l.unit
+	having sum(case when l.debit_credit = 'D' then l.quantity else -l.quantity end) <> 0
+	order by e.period_key, l.main_account_id, l.dimension_combination_id, l.unit`
+
+// withCandidateQuantities attaches the net statistical quantity per unit (BR-11.2) of each candidate
+// balance row, read from the quantity projection with the filter's accounts and periods. Until a
+// ledger's first rebuild after migration 0027 the projection may miss older quantity lines, so the
+// totals are read from the journal instead: a run must empty the old combination's quantities as it
+// empties its amounts.
+func withCandidateQuantities(ctx context.Context, tx pgx.Tx, tenantID, ledgerID string, f domain.RealignmentFilter,
+	cands []domain.RealignmentCandidate) ([]domain.RealignmentCandidate, error) {
+	if len(cands) == 0 {
+		return cands, nil
+	}
+	var pending bool
+	if err := tx.QueryRow(ctx, `select quantity_rebuild_pending from ledger where tenant_id = $1 and id = $2`,
+		tenantID, ledgerID).Scan(&pending); err != nil {
+		return nil, err
+	}
+	q := candidateQuantitiesFromProjection
+	if pending {
+		q = candidateQuantitiesFromJournal
+	}
+	rows, err := tx.Query(ctx, q, tenantID, ledgerID, f.PeriodFrom, f.PeriodTo, f.AccountFrom, f.AccountTo)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byKey := map[string][]domain.RealignmentQuantity{}
+	for rows.Next() {
+		var account, period, unit, net string
+		var combo []byte
+		if err := rows.Scan(&account, &period, &combo, &unit, &net); err != nil {
+			return nil, err
+		}
+		n, err := decimal.NewFromString(net)
+		if err != nil {
+			return nil, err
+		}
+		k := account + "|" + period + "|" + string(combo)
+		byKey[k] = append(byKey[k], domain.RealignmentQuantity{Unit: unit, Net: n.String()})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range cands {
+		c := &cands[i]
+		c.Quantities = byKey[c.AccountID+"|"+c.Period+"|"+string(c.CombinationID)]
+	}
+	return cands, nil
 }
 
 func planFor(ctx context.Context, tx pgx.Tx, tenantID string, ledger Ledger, f domain.RealignmentFilter, m domain.RealignmentMapping) ([]domain.RealignmentRow, error) {
@@ -502,11 +576,20 @@ func postRealignmentPeriod(ctx context.Context, tx pgx.Tx, tenantID string, ledg
 	}
 	// The new side is validated like any posting (structure, registered and active dimension values).
 	// Each new line is checked against a mirror line so the check balances on its own; the old
-	// side is the stored combination, which may use a value that has been deactivated since.
-	planned := domain.RealignmentLines(rows, ledger.Currency, text)
-	probe := make([]domain.LineInput, 0, len(rows)*2)
-	for i := range rows {
-		n := planned[i*2+1]
+	// side is the stored combination, which may use a value that has been deactivated since. Lines
+	// come in (old, new) pairs: the amount pair of a row, then one statistical pair per unit.
+	var planned []domain.LineInput
+	var pairRows []domain.RealignmentRow
+	for _, r := range rows {
+		ls := domain.RealignmentRowLines(r, ledger.Currency, text)
+		planned = append(planned, ls...)
+		for range len(ls) / 2 {
+			pairRows = append(pairRows, r)
+		}
+	}
+	probe := make([]domain.LineInput, 0, len(planned))
+	for i := 1; i < len(planned); i += 2 {
+		n := planned[i]
 		mirror := n
 		mirror.Side = domain.ReversalSide(n.Side)
 		probe = append(probe, n, mirror)
@@ -524,11 +607,11 @@ func postRealignmentPeriod(ctx context.Context, tx pgx.Tx, tenantID string, ledg
 		return "", &domain.RejectedError{Violations: violations}
 	}
 	lines := make([]writeLine, 0, len(planned))
-	for i, r := range rows {
+	for i, r := range pairRows {
 		old, nw := planned[i*2], res.Lines[i*2]
 		acct := accounts[r.Account]
 		lines = append(lines, writeLine{id: ids.New(), valid: domain.ValidLine{Account: acct, Dimensions: old.Dimensions, Side: old.Side,
-			Amount: old.Amount, Text: text, CombinationID: r.OldID, DisplayName: r.OldName}})
+			Amount: old.Amount, Text: text, Quantity: old.Quantity, Unit: old.Unit, CombinationID: r.OldID, DisplayName: r.OldName}})
 		nw.Side, nw.Text = planned[i*2+1].Side, text
 		lines = append(lines, writeLine{id: ids.New(), valid: nw})
 	}

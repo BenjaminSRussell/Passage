@@ -112,3 +112,20 @@ func TestResolveAmounts(t *testing.T) {
 		t.Errorf("fixed without base: %+v %v", fixedOnly, err)
 	}
 }
+
+func TestResolveAmounts_CarriesTheStatisticalQuantityUnscaled(t *testing.T) {
+	base := decimal.RequireFromString("1000.00")
+	got, err := ResolveAmounts([]RecurringLine{
+		{Account: "6100", DebitCredit: SideDebit, Kind: AmountPercent, Amount: "10", Currency: "EUR", Quantity: "12.500000", Unit: "KG"},
+		{Account: "6100", DebitCredit: SideDebit, Kind: AmountFixed, Amount: "0", Currency: "EUR", Quantity: "3.000000", Unit: "HC"},
+	}, &base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0].Resolved != "100.00" || got[0].Quantity != "12.500000" || got[0].Unit != "KG" {
+		t.Errorf("percent line: %+v", got[0])
+	}
+	if got[1].Resolved != "0.00" || got[1].Quantity != "3.000000" || got[1].Unit != "HC" {
+		t.Errorf("statistical line: %+v", got[1])
+	}
+}

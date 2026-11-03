@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -232,4 +233,59 @@ func TestPostgres_RecurringJournalRules(t *testing.T) {
 func ptrTime(y int, m time.Month, d int) *time.Time {
 	t := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 	return &t
+}
+
+// BR-11.2 with FR-11.10: a template line carries a statistical quantity and unit, kept on replace
+// and copied unscaled onto the generated draft batch line, which then posts as a statistical line.
+func TestPostgres_RecurringJournalCarriesStatisticalQuantity(t *testing.T) {
+	e, _ := setup(t)
+	putName(t, e, "GJ", JournalName{Active: true})
+	id := ids.New()
+	in := recurringOf(e, "GJ")
+	in.Lines = append(in.Lines,
+		RecurringLine{Account: "6010", DebitCredit: "D", AmountKind: "fixed", Amount: "0.00", Currency: "USD", Quantity: "12.500000", Unit: "KG",
+			Dimensions: map[string]string{"DEPT": "D100"}},
+		RecurringLine{Account: "6010", DebitCredit: "C", AmountKind: "fixed", Amount: "0.00", Currency: "USD", Quantity: "12.500000", Unit: "KG",
+			Dimensions: map[string]string{"DEPT": "D200"}})
+	rj, _, err := e.store.PutRecurring(e.ctx, id, 0, in)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if l := rj.Lines[3]; l.Quantity != "12.500000" || l.Unit != "KG" || rj.Lines[0].Quantity != "" || rj.Lines[0].Unit != "" {
+		t.Fatalf("stored lines: %+v", rj.Lines)
+	}
+	run, _, err := e.store.GenerateRecurring(e.ctx, GenerateRecurringInput{ID: id, ScheduledDate: ptrTime(2026, 4, 30)})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	b, err := e.store.GetBatch(e.ctx, run.BatchID)
+	if err != nil || len(b.Lines) != 5 || b.Lines[0].Quantity != "" || b.Lines[3].Quantity != "12.500000" || b.Lines[3].Unit != "KG" ||
+		b.Lines[3].Amount != "0.00" || b.Lines[4].DebitCredit != "C" {
+		t.Fatalf("batch lines: %+v err=%v", b.Lines, err)
+	}
+	// The generated draft submits and posts like any batch; the quantity reaches the projection.
+	submitted, err := e.store.SubmitBatch(e.ctx, run.BatchID, 0, testToday)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if _, err := postBatch(e, e.ctx, submitted, "RJ-QTY-POST", true); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	var n int
+	if err := e.admin.QueryRow(e.ctx, `select count(*) from journal_batch_line where batch_id = $1 and quantity = 12.5 and unit = 'KG'`, run.BatchID).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("statistical batch lines = %d err=%v", n, err)
+	}
+	var debitQty, creditQty string
+	if err := e.admin.QueryRow(e.ctx, `select coalesce(sum(debit_quantity), 0)::text, coalesce(sum(credit_quantity), 0)::text from balance_quantity
+		where ledger_id = $1 and unit = 'KG'`, e.ledger.ID).Scan(&debitQty, &creditQty); err != nil ||
+		!decimal.RequireFromString(debitQty).Equal(decimal.RequireFromString("12.5")) || !decimal.RequireFromString(creditQty).Equal(decimal.RequireFromString("12.5")) {
+		t.Fatalf("posted quantity totals: debit %s credit %s err=%v", debitQty, creditQty, err)
+	}
+
+	// A bad pair is refused by the database even if the API check were bypassed.
+	bad := recurringOf(e, "GJ")
+	bad.Lines[0].Quantity = "5"
+	if _, _, err := e.store.PutRecurring(e.ctx, ids.New(), 0, bad); err == nil {
+		t.Fatal("a quantity without a unit must not be stored")
+	}
 }

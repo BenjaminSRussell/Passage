@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { RealignmentRun } from "./api/client";
 import { parseMapping, toRealignmentInput, validateRealignment } from "./RealignmentFormPage";
@@ -155,6 +155,19 @@ describe("realignment run", () => {
     const call = server.calls.find((c) => c.url.pathname.endsWith(":post"))!;
     expect(call.body).toEqual({ reasonCode: "REORG" });
     expect(new Headers(call.init.headers).get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("lists the statistical quantities that move with a balance", async () => {
+    const withQuantities: RealignmentRun = {
+      ...proposed,
+      preview: [{ ...proposed.preview[0], quantities: [{ unit: "KG", net: "12.5" }, { unit: "PCS", net: "-4" }] }, { ...proposed.preview[1], net: "0", quantities: [{ unit: "HC", net: "5" }] }],
+    };
+    fake(withQuantities);
+    renderAt(`/ledger/realignments/${RUN_ID}?ledger=${LEDGER}`);
+    const table = await screen.findByRole("table", { name: "Affected balances" });
+    expect(within(table).getByRole("columnheader", { name: "Quantities moved" })).toBeInTheDocument();
+    expect(within(table).getByText("12.5 KG, -4 PCS")).toBeInTheDocument();
+    expect(within(table).getByText("5 HC")).toBeInTheDocument();
   });
 
   it("cancels a proposed run without a reason", async () => {

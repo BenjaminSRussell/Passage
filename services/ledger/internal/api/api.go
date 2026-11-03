@@ -1009,3 +1009,26 @@ func parseQuantity(v string) (decimal.Decimal, bool) {
 	q, err := decimal.NewFromString(v)
 	return q, err == nil
 }
+
+// checkLineQuantity validates the statistical quantity and unit of a request line (BR-11.2) and
+// returns the quantity at the stored scale, or "" when the line has none. Problems go to fields
+// under prefix, the line's field path.
+func checkLineQuantity(fields map[string]string, prefix, quantity, unit string) string {
+	qty, ok := parseQuantity(quantity)
+	switch {
+	case !ok || qty.IsNegative():
+		fields[prefix+"quantity"] = "must be a non-negative decimal string"
+	case !qty.Round(domain.QuantityScale).Equal(qty):
+		fields[prefix+"quantity"] = fmt.Sprintf("has more than %d decimals", domain.QuantityScale)
+	case qty.GreaterThanOrEqual(domain.MaxQuantity):
+		fields[prefix+"quantity"] = "is too large"
+	case qty.IsZero() != (unit == ""):
+		fields[prefix+"unit"] = "quantity and unit are set together"
+	case unit != "" && !domain.ValidUnit(unit):
+		fields[prefix+"unit"] = "must be 1 to 10 characters of A-Z or 0-9"
+	}
+	if ok && !qty.IsZero() {
+		return qty.StringFixed(domain.QuantityScale)
+	}
+	return ""
+}
