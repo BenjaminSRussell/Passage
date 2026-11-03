@@ -87,6 +87,7 @@ type Store interface {
 	// Cost transactions and the value report (FR-20.4). RecordCostTransactions
 	// returns the number of rows inserted; replays of a source key are skipped.
 	RecordCostTransactions(ctx context.Context, in []CostTransaction) (int, error)
+	CostTransactionRecorded(ctx context.Context, sourceKey string) (bool, error)
 	ValueBalances(ctx context.Context, q BalanceQuery) ([]domain.Balance, error)
 	ListCostTransactions(ctx context.Context, f CostTxnFilter, after string, limit int) (CostTxnPage, error)
 	// Manual cost adjustments (FR-20.6). CreateAdjustment reports created=false

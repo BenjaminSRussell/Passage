@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS costing_gl_voucher (
   status text NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'POSTED', 'PARKED')),
   journal_entry_id text,
   attempt_count integer NOT NULL DEFAULT 0,
+  rebuild_count integer NOT NULL DEFAULT 0,
   last_error text NOT NULL DEFAULT '',
   next_attempt_at timestamptz NOT NULL DEFAULT now(),
   parked_reason text,

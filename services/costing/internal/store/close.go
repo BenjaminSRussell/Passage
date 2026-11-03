@@ -474,7 +474,7 @@ func (s *Postgres) ReconcileInventory(ctx context.Context, ledger ledgerclient.L
 			t.TenantID, legalEntityID, asOf).Scan(&out.Unposted); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `select coalesce(parked_reason, ''), count(*) from costing_gl_voucher where tenant_id = $1 and legal_entity_id = $2 and status = 'PARKED' group by 1`, t.TenantID, legalEntityID)
+		rows, err := tx.Query(ctx, `select coalesce(parked_reason, ''), count(*) from costing_gl_voucher where tenant_id = $1 and legal_entity_id = $2 and status = 'PARKED' and posting_date <= $3::date group by 1`, t.TenantID, legalEntityID, asOf)
 		if err != nil {
 			return err
 		}

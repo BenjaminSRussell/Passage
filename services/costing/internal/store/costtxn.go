@@ -149,6 +149,15 @@ func (s *Postgres) RecordCostTransactions(ctx context.Context, in []CostTransact
 	return inserted, nil
 }
 
+func (s *Postgres) CostTransactionRecorded(ctx context.Context, sourceKey string) (bool, error) {
+	p, _ := tenant.FromContext(ctx)
+	var found bool
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select exists (select 1 from cost_transaction where tenant_id = $1 and source_key = $2)`, p.TenantID, sourceKey).Scan(&found)
+	})
+	return found, err
+}
+
 // insertCostTransactions appends rows whose ledgers are already resolved and returns the number inserted;
 // a replayed source key must carry the stored content.
 func insertCostTransactions(ctx context.Context, tx pgx.Tx, tenantID string, rows []CostTransaction) (int, error) {

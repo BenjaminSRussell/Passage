@@ -649,8 +649,15 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 			httpx.Fail(w, r, outOfScope())
 			return
 		}
-		if req.Kind == "RECEIPT" && !a.standardMatches(w, r, row, std, req.Currency) {
-			return
+		if req.Kind == "RECEIPT" {
+			recorded, err := a.store.CostTransactionRecorded(r.Context(), row.SourceKey)
+			if err != nil {
+				a.fail(w, r, "ppv replay lookup", err)
+				return
+			}
+			if !recorded && !a.standardMatches(w, r, row, std, req.Currency) {
+				return
+			}
 		}
 		inserted, err := a.store.RecordCostTransactions(r.Context(), []store.CostTransaction{row})
 		if err != nil {

@@ -130,7 +130,8 @@ func (s *Postgres) stageVoucher(ctx context.Context, v voucher) (stored voucher,
 		if _, err := tx.Exec(ctx, `insert into costing_gl_voucher (tenant_id, id, legal_entity_id, source_key, gl_ledger_id, currency, posting_date, idempotency_key, lines)
 			values ($1, $2, $3, $4, $5, $6, $7::date, $8, $9)
 			on conflict (tenant_id, source_key) do update set lines = excluded.lines, gl_ledger_id = excluded.gl_ledger_id, currency = excluded.currency,
-				posting_date = excluded.posting_date, idempotency_key = excluded.idempotency_key || '-' || costing_gl_voucher.attempt_count, rebuild = false
+				posting_date = excluded.posting_date, idempotency_key = excluded.idempotency_key || '-' || (costing_gl_voucher.rebuild_count + 1),
+					rebuild_count = costing_gl_voucher.rebuild_count + 1, rebuild = false
 				where costing_gl_voucher.rebuild and costing_gl_voucher.status = 'PENDING'`,
 			t.TenantID, ids.New(), v.legalEntityID, v.sourceKey, v.glLedgerID, v.currency, v.date, v.key, raw); err != nil {
 			return err

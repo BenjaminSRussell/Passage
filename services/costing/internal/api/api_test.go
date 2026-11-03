@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/costing/internal/store"
@@ -327,16 +329,41 @@ func TestPPV_ClearingAmountIsTheSameAtReceiptAndInvoice(t *testing.T) {
 	f.cost = &store.CostLookup{UnitCost: "0.31", Currency: "EUR"}
 	ref := `"legalEntityId":"` + testLE + `","productId":"22222222-2222-4222-8222-222222222222","siteId":"44444444-4444-4444-8444-444444444444","financialDate":"2026-03-05","sourceLineId":"1"`
 	receipt := `{"kind":"RECEIPT","currency":"EUR","qty":"3","standardUnitCost":"0.31","poUnitPrice":"0.335","sourceDocumentId":"GR-9",` + ref + `}`
-	invoice := `{"kind":"INVOICE","currency":"EUR","qty":"3","poUnitPrice":"0.335","invoiceUnitPrice":"0.40","sourceDocumentId":"INV-9",` + ref + `}`
+	invoice := `{"kind":"INVOICE","currency":"EUR","qty":"3","poUnitPrice":"0.335","invoiceUnitPrice":"0.345","sourceDocumentId":"INV-9",` + ref + `}`
 	for _, body := range []string{receipt, invoice} {
 		if rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", body, allDuties, nil); rec.Code != http.StatusOK {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 		}
 	}
-	for _, key := range []string{"ppv:RECEIPT:" + testLE + ":GR-9:1", "ppv:INVOICE:" + testLE + ":INV-9:1"} {
-		if got := f.costTxns[key].GrirAmount; got != "1.00" {
-			t.Errorf("%s GR/IR = %q, want 1.00 (round(qty x PO price))", key, got)
+	legs := func(key string) (grir, ppv, other decimal.Decimal) {
+		row := f.costTxns[key]
+		grir, ppv = decimal.RequireFromString(row.GrirAmount), decimal.RequireFromString(row.Amount)
+		if strings.HasPrefix(key, "ppv:RECEIPT") {
+			return grir, ppv, grir.Sub(ppv)
 		}
+		return grir, ppv, grir.Add(ppv)
+	}
+	grir, ppv, inventory := legs("ppv:RECEIPT:" + testLE + ":GR-9:1")
+	if grir.String() != "1" || ppv.String() != "0.07" || inventory.String() != "0.93" {
+		t.Errorf("receipt GR/IR %s PPV %s inventory %s, want 1.00, 0.07 and the standard 0.93", grir, ppv, inventory)
+	}
+	grir, ppv, payable := legs("ppv:INVOICE:" + testLE + ":INV-9:1")
+	if grir.String() != "1" || ppv.String() != "0.04" || payable.String() != "1.04" {
+		t.Errorf("invoice GR/IR %s PPV %s payable %s, want 1.00, 0.04 and round(3 x 0.345) = 1.04", grir, ppv, payable)
+	}
+}
+
+func TestPPV_ReplayOfARecordedReceiptSurvivesAStandardChange(t *testing.T) {
+	h, f := server()
+	f.cost = &store.CostLookup{UnitCost: "10", Currency: "EUR"}
+	ref := `"legalEntityId":"` + testLE + `","productId":"22222222-2222-4222-8222-222222222222","siteId":"44444444-4444-4444-8444-444444444444","financialDate":"2026-03-05","sourceLineId":"1"`
+	body := `{"kind":"RECEIPT","currency":"EUR","qty":"100","standardUnitCost":"10.00","poUnitPrice":"10.50","sourceDocumentId":"GR-1",` + ref + `}`
+	if rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", body, allDuties, nil); rec.Code != http.StatusOK {
+		t.Fatalf("first call status %d: %s", rec.Code, rec.Body.String())
+	}
+	f.cost = &store.CostLookup{UnitCost: "11", Currency: "EUR"}
+	if rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", body, allDuties, nil); rec.Code != http.StatusOK || len(f.costTxns) != 1 {
+		t.Fatalf("replay after a same-day activation: status %d rows %d: %s, want 200 and one row", rec.Code, len(f.costTxns), rec.Body.String())
 	}
 }
 

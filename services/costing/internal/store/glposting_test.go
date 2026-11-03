@@ -91,6 +91,56 @@ func TestPostgres_PPVVouchersPostReceiptAndInvoiceOncePerCostTransaction(t *test
 	}
 }
 
+func TestPostgres_PPVVouchersOfAnOddRoundingReceiptTieToTheStandardAndTheInvoice(t *testing.T) {
+	f := newGLFixture(t, 31)
+	qty, po, std, inv := decimal.RequireFromString("3"), decimal.RequireFromString("0.335"), decimal.RequireFromString("0.31"), decimal.RequireFromString("0.345")
+	grir := qty.Mul(po).RoundBank(2).StringFixed(2)
+	f.record(t,
+		f.ppvRow("ppv:RECEIPT:"+f.le+":GR-1:1", "3", domain.ReceiptPPV(qty, po, std, 2).StringFixed(2), grir, "2026-03-05"),
+		f.ppvRow("ppv:INVOICE:"+f.le+":INV-1:1", "0", domain.InvoicePPV(qty, inv, po, 2).StringFixed(2), grir, "2026-03-20"))
+	if res, err := f.s.PostCostVouchers(f.ctx, f.ledger, GLPostRequest{LegalEntityID: f.le}); err != nil || len(res.Booked) != 2 {
+		t.Fatalf("result %+v err %v, want 2 booked", res, err)
+	}
+	want := map[string]string{"1400": "0.93", "2100": "0", "2000": "-1.04", "5100": "0.11"}
+	for account, net := range want {
+		if got := netOf(f, account); got.String() != net {
+			t.Errorf("net of %s = %s, want %s (inventory at round(3 x 0.31), payable at round(3 x 0.345))", account, got, net)
+		}
+	}
+}
+
+func TestPostgres_RebuildKeysStayUniqueWhenTheProfileSaveResetsAttempts(t *testing.T) {
+	f := newGLFixture(t, 32)
+	f.record(t, f.ppvRow("ppv:RECEIPT:"+f.le+":GR-1:1", "100", "50.00", "1050.00", "2026-03-05"))
+	f.ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: "LEDGER_ACCOUNT_UNKNOWN"})
+	keyOf := func() string {
+		var key string
+		err := dbx.WithTenantTx(f.ctx, f.pool, func(tx pgx.Tx) error {
+			return tx.QueryRow(f.ctx, `select idempotency_key from costing_gl_voucher where legal_entity_id = $1`, f.le).Scan(&key)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return key
+	}
+	seen := map[string]bool{}
+	for round, account := range []string{"1410", "1420", "1430"} {
+		f.dueNow(t)
+		if _, err := f.s.PostCostVouchers(f.ctx, f.ledger, GLPostRequest{LegalEntityID: f.le}); err != nil {
+			t.Fatal(err)
+		}
+		if key := keyOf(); seen[key] {
+			t.Fatalf("round %d reused idempotency key %s", round, key)
+		} else {
+			seen[key] = true
+		}
+		if _, err := f.s.SavePostingProfile(f.ctx, PostingProfile{LegalEntityID: f.le, GLLedgerID: f.glID, InventoryAccount: account, GRIRAccount: "2100",
+			APAccount: "2000", PPVAccount: "5100", AdjustmentAccount: "5000"}, "tester"); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestPostgres_PPVVouchersRefuseALedgerOfAnotherEntityAndAMissingProfile(t *testing.T) {
 	f := newGLFixture(t, 22)
 	f.record(t, f.ppvRow("ppv:RECEIPT:"+f.le+":GR-1:1", "100", "50.00", "1050.00", "2026-03-05"))
