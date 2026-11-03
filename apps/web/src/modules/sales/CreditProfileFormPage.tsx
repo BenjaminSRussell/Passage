@@ -38,6 +38,7 @@ export interface ProfileValues {
   unapplied: string;
   deliveredNotInvoiced: string;
   openOrders: string;
+  uncountedDelivered: string;
   overdueAr: string;
   oldestItemDays: string;
   dunningLevel: string;
@@ -63,6 +64,7 @@ export const blankProfile: ProfileValues = {
   unapplied: "0",
   deliveredNotInvoiced: "0",
   openOrders: "0",
+  uncountedDelivered: "",
   overdueAr: "0",
   oldestItemDays: "0",
   dunningLevel: "0",
@@ -90,6 +92,7 @@ export function profileValues(p: CreditProfile): ProfileValues {
     overdueAr: e.overdueAr ?? "0",
     oldestItemDays: String(e.oldestItemDays ?? 0),
     dunningLevel: String(e.dunningLevel ?? 0),
+    uncountedDelivered: (e.deliveredNotInvoicedOtherCurrencies ?? []).map((o) => `${o.amount} ${o.currency}`).join(", "),
     uncountedOpenOrders: (e.openOrdersOtherCurrencies ?? []).map((o) => `${o.amount} ${o.currency}`).join(", "),
   };
 }
@@ -245,7 +248,7 @@ function ProfileForm({ initial, etag, existing, updatedAt }: FormProps) {
         <div className={styles.form}>
           {text("openAr", "Open AR", { decimal: true })}
           {text("unapplied", "Unapplied cash", { decimal: true })}
-          {text("deliveredNotInvoiced", "Delivered, not invoiced", { decimal: true })}
+          {text("deliveredNotInvoiced", "Delivered, not invoiced", { decimal: true, readOnly: true, hint: "Computed from each line's delivered less invoiced quantity on this customer's orders, in the profile currency; counted by limit types Balance with packing slips and Balance all." })}
           {text("openOrders", "Confirmed open orders", { decimal: true, readOnly: true, hint: "Computed from this customer's confirmed orders and the undelivered part of partly shipped orders, in the profile currency; counted by limit type Balance all." })}
           {text("overdueAr", "Overdue AR", { decimal: true })}
           {text("oldestItemDays", "Oldest item, days overdue", { decimal: true })}
@@ -255,6 +258,12 @@ function ProfileForm({ initial, etag, existing, updatedAt }: FormProps) {
           <Alert tone="warning" title="Open orders not counted">
             Orders in other currencies are left out of confirmed open orders until exchange rates are available: {values.uncountedOpenOrders}. A Balance-all credit check warns
             while they are open.
+          </Alert>
+        ) : null}
+        {values.uncountedDelivered ? (
+          <Alert tone="warning" title="Delivered goods not counted">
+            Delivered, not invoiced goods on orders in other currencies are left out until exchange rates are available: {values.uncountedDelivered}. A credit check that counts
+            them warns while they are open.
           </Alert>
         ) : null}
         {errors.exposure ? (

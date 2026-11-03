@@ -826,11 +826,62 @@ func openOrdersTx(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, custo
 	return total, other, rows.Err()
 }
 
-// withOpenOrders replaces the stored open-orders figures of c with the ones
-// computed from the orders (a value sent with the profile is never used).
+// deliveredNotInvoicedSQL is the value of what a line (alias l) has delivered
+// and not invoiced: the delivered less the invoiced quantity at the line's
+// price and discount. It is read only for lines with delivered_qty >
+// invoiced_qty. Like undeliveredNetSQL it assumes a quantity x price line.
+const deliveredNotInvoicedSQL = `round((l.delivered_qty - l.invoiced_qty) * l.unit_price * (100 - l.disc_pct) / 100, 4)`
+
+// deliveredNotInvoicedTx is the customer's delivered, not yet invoiced goods
+// (BR-27.3 deliveredNotInvoiced) from the lines of the customer's other ORDER
+// orders that are PARTIALLY_SHIPPED or SHIPPED, in the profile currency; other
+// currencies are returned per currency, as for open orders. SUBSCRIPTION
+// orders are invoiced per period by billing, not per line quantity, and JOURNAL
+// orders post no slip or invoice, so neither counts. The order being checked is
+// left out: its whole net total is the amount under check.
+func deliveredNotInvoicedTx(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, customerID, currency, exceptOrderID string) (decimal.Decimal, []domain.CurrencyAmount, error) {
+	rows, err := tx.Query(ctx, `select o.currency::text, sum(`+deliveredNotInvoicedSQL+`)::text
+		from sales_order o join sales_order_line l on l.tenant_id = o.tenant_id and l.order_id = o.id
+		where o.tenant_id = $1 and o.legal_entity_id = $2 and o.customer_id = $3
+		  and o.status in ('PARTIALLY_SHIPPED', 'SHIPPED') and o.order_type = 'ORDER'
+		  and ($4::uuid is null or o.id <> $4::uuid)
+		  and l.delivered_qty > l.invoiced_qty
+		group by o.currency order by o.currency`,
+		tenantID, legalEntityID, customerID, nullIfEmpty(exceptOrderID))
+	if err != nil {
+		return decimal.Zero, nil, err
+	}
+	defer rows.Close()
+	total := decimal.Zero
+	var other []domain.CurrencyAmount
+	for rows.Next() {
+		var cur, sum string
+		if err := rows.Scan(&cur, &sum); err != nil {
+			return decimal.Zero, nil, err
+		}
+		amount, err := decimal.NewFromString(sum)
+		if err != nil {
+			return decimal.Zero, nil, err
+		}
+		if cur == currency {
+			total = amount
+		} else {
+			other = append(other, domain.CurrencyAmount{Currency: cur, Amount: amount})
+		}
+	}
+	return total, other, rows.Err()
+}
+
+// withOpenOrders replaces the stored open-orders and delivered-not-invoiced
+// figures of c with the ones computed from the orders (a value sent with the
+// profile is never used).
 func withOpenOrders(ctx context.Context, tx pgx.Tx, tenantID string, c *CreditProfile, exceptOrderID string) error {
 	var err error
 	c.Exposure.OpenOrders, c.Exposure.OpenOrdersOtherCurrencies, err = openOrdersTx(ctx, tx, tenantID, c.LegalEntityID, c.CustomerID, c.Currency, exceptOrderID)
+	if err != nil {
+		return err
+	}
+	c.Exposure.DeliveredNotInvoiced, c.Exposure.DeliveredNotInvoicedOtherCurrencies, err = deliveredNotInvoicedTx(ctx, tx, tenantID, c.LegalEntityID, c.CustomerID, c.Currency, exceptOrderID)
 	return err
 }
 
@@ -1154,9 +1205,10 @@ func (s *Postgres) GetCreditProfile(ctx context.Context, legalEntityID, customer
 // it when version matches the stored version (optimistic concurrency).
 func (s *Postgres) PutCreditProfile(ctx context.Context, in CreditProfile, version int) (CreditProfile, error) {
 	p, _ := tenant.FromContext(ctx)
-	// Open orders are computed from the orders on every read; a figure sent
-	// with the profile is not stored.
+	// Open orders and delivered-not-invoiced goods are computed from the
+	// orders on every read; a figure sent with the profile is not stored.
 	in.Exposure.OpenOrders, in.Exposure.OpenOrdersOtherCurrencies = decimal.Zero, nil
+	in.Exposure.DeliveredNotInvoiced, in.Exposure.DeliveredNotInvoicedOtherCurrencies = decimal.Zero, nil
 	exposure, err := json.Marshal(in.Exposure)
 	if err != nil {
 		return CreditProfile{}, err
@@ -1284,8 +1336,9 @@ func (s *Postgres) listProfiles(ctx context.Context, legalEntityID, dueBy string
 	return out, err
 }
 
-// listOpenOrdersTx fills the computed open-orders figures of a page of
-// profiles with one grouped query rather than one per profile.
+// listOpenOrdersTx fills the computed open-orders and delivered-not-invoiced
+// figures of a page of profiles with one grouped query each rather than one
+// per profile.
 func listOpenOrdersTx(ctx context.Context, tx pgx.Tx, tenantID string, profiles []CreditProfile) error {
 	if len(profiles) == 0 {
 		return nil
@@ -1296,6 +1349,7 @@ func listOpenOrdersTx(ctx context.Context, tx pgx.Tx, tenantID string, profiles 
 		les[i], customers[i] = c.LegalEntityID, c.CustomerID
 		at[[2]string{c.LegalEntityID, c.CustomerID}] = i
 		profiles[i].Exposure.OpenOrders, profiles[i].Exposure.OpenOrdersOtherCurrencies = decimal.Zero, nil
+		profiles[i].Exposure.DeliveredNotInvoiced, profiles[i].Exposure.DeliveredNotInvoicedOtherCurrencies = decimal.Zero, nil
 	}
 	rows, err := tx.Query(ctx, `select legal_entity_id::text, customer_id::text, currency::text, sum(amount)::text from (
 		select o.legal_entity_id, o.customer_id, o.currency, o.net_total as amount
@@ -1326,6 +1380,37 @@ func listOpenOrdersTx(ctx context.Context, tx pgx.Tx, tenantID string, profiles 
 			c.Exposure.OpenOrders = amount
 		} else {
 			c.Exposure.OpenOrdersOtherCurrencies = append(c.Exposure.OpenOrdersOtherCurrencies, domain.CurrencyAmount{Currency: cur, Amount: amount})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+	// Delivered, not invoiced goods, grouped the same way.
+	rows, err = tx.Query(ctx, `select o.legal_entity_id::text, o.customer_id::text, o.currency::text, sum(`+deliveredNotInvoicedSQL+`)::text
+		from sales_order o join unnest($2::uuid[], $3::uuid[]) as k(le, customer) on o.legal_entity_id = k.le and o.customer_id = k.customer
+		join sales_order_line l on l.tenant_id = o.tenant_id and l.order_id = o.id
+		where o.tenant_id = $1 and o.status in ('PARTIALLY_SHIPPED', 'SHIPPED') and o.order_type = 'ORDER'
+		  and l.delivered_qty > l.invoiced_qty
+		group by o.legal_entity_id, o.customer_id, o.currency order by o.currency`, tenantID, les, customers)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var le, customer, cur, sum string
+		if err := rows.Scan(&le, &customer, &cur, &sum); err != nil {
+			return err
+		}
+		amount, err := decimal.NewFromString(sum)
+		if err != nil {
+			return err
+		}
+		c := &profiles[at[[2]string{le, customer}]]
+		if cur == c.Currency {
+			c.Exposure.DeliveredNotInvoiced = amount
+		} else {
+			c.Exposure.DeliveredNotInvoicedOtherCurrencies = append(c.Exposure.DeliveredNotInvoicedOtherCurrencies, domain.CurrencyAmount{Currency: cur, Amount: amount})
 		}
 	}
 	return rows.Err()

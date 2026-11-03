@@ -3143,7 +3143,15 @@ components:
       description: >-
         The customer's open position in the profile currency, supplied with the profile
         until the receivables projection exists (waves 29/30). Amounts are non-negative;
-        unapplied cash lowers the balance. openOrders and openOrdersOtherCurrencies are
+        unapplied cash lowers the balance. deliveredNotInvoiced and
+        deliveredNotInvoicedOtherCurrencies are computed by sales, not stored: the sum over
+        the lines of the customer's other ORDER orders that are PARTIALLY_SHIPPED or SHIPPED
+        of the delivered less the invoiced quantity at the line price and discount, in the
+        profile currency and, for orders in other currencies that cannot be converted
+        without an FX rate, per currency; SUBSCRIPTION and JOURNAL orders count nothing;
+        values sent in a PUT are ignored. A BALANCE_PACKING_SLIP or BALANCE_ALL check with
+        uncounted delivered goods in other currencies is at least a CR-1 WARN naming them.
+        openOrders and openOrdersOtherCurrencies are
         computed by sales, not stored: the net total of the customer's CONFIRMED ORDER
         and SUBSCRIPTION orders plus the undelivered part of the PARTIALLY_SHIPPED ones
         (each line's net less the net of its delivered quantity; cancelled and fully
@@ -3155,7 +3163,17 @@ components:
       properties:
         openAr: {$ref: "#/components/schemas/Money"}
         unapplied: {$ref: "#/components/schemas/Money"}
-        deliveredNotInvoiced: {$ref: "#/components/schemas/Money"}
+        deliveredNotInvoiced: {allOf: [{$ref: "#/components/schemas/Money"}], readOnly: true, description: delivered and not yet invoiced goods in the profile currency, computed}
+        deliveredNotInvoicedOtherCurrencies:
+          type: array
+          readOnly: true
+          description: delivered, not invoiced goods in other currencies, left out of deliveredNotInvoiced for want of an FX rate; absent when there are none
+          items:
+            type: object
+            required: [currency, amount]
+            properties:
+              currency: {type: string, pattern: "^[A-Z]{3}$"}
+              amount: {$ref: "#/components/schemas/Money"}
         openOrders: {allOf: [{$ref: "#/components/schemas/Money"}], readOnly: true, description: open orders in the profile currency, computed}
         openOrdersOtherCurrencies:
           type: array

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -45,7 +46,9 @@ type CreditProfile struct {
 }
 
 // Exposure is the customer's open position in the profile currency. Until the
-// receivables projection exists (waves 29/30) it is supplied with the profile.
+// receivables projection exists (waves 29/30) the AR figures are supplied with
+// the profile; DeliveredNotInvoiced and OpenOrders (with their other-currency
+// lists) are computed by sales from its orders and never stored.
 // Every amount is non-negative; Unapplied is cash received but not yet applied.
 type Exposure struct {
 	OpenAR               decimal.Decimal `json:"openAr"`
@@ -56,9 +59,13 @@ type Exposure struct {
 	// other than the profile's, which OpenOrders leaves out for want of an FX
 	// rate (w12). Computed by sales like OpenOrders, never stored.
 	OpenOrdersOtherCurrencies []CurrencyAmount `json:"openOrdersOtherCurrencies,omitempty"`
-	OverdueAR                 decimal.Decimal  `json:"overdueAr"`
-	OldestItemDays            int              `json:"oldestItemDays"`
-	DunningLevel              int              `json:"dunningLevel"`
+	// DeliveredNotInvoicedOtherCurrencies is the delivered, not yet invoiced
+	// value of orders in other currencies, left out of DeliveredNotInvoiced for
+	// want of an FX rate. Computed by sales, never stored.
+	DeliveredNotInvoicedOtherCurrencies []CurrencyAmount `json:"deliveredNotInvoicedOtherCurrencies,omitempty"`
+	OverdueAR                           decimal.Decimal  `json:"overdueAr"`
+	OldestItemDays                      int              `json:"oldestItemDays"`
+	DunningLevel                        int              `json:"dunningLevel"`
 }
 
 // CurrencyAmount is an amount in a named currency.
@@ -154,16 +161,20 @@ func EvaluateCredit(in CreditInput) CreditEvaluation {
 			result = RuleWarn
 		}
 		r := RuleResult{ID: "CR-1", Result: result, Value: exposure.String(), Threshold: threshold.String()}
+		// The exposure is understated by amounts that cannot be converted; a
+		// pass is shown as a warning so the gap is not silent.
+		var gaps []string
+		if (p.LimitType == LimitBalancePackingSlip || p.LimitType == LimitBalanceAll) && len(e.DeliveredNotInvoicedOtherCurrencies) > 0 {
+			gaps = append(gaps, "delivered, not invoiced goods not counted for want of an FX rate:"+currencyList(e.DeliveredNotInvoicedOtherCurrencies))
+		}
 		if p.LimitType == LimitBalanceAll && len(e.OpenOrdersOtherCurrencies) > 0 {
-			// The exposure is understated by orders that cannot be converted;
-			// a pass is shown as a warning so the gap is not silent.
+			gaps = append(gaps, "open orders not counted for want of an FX rate:"+currencyList(e.OpenOrdersOtherCurrencies))
+		}
+		if len(gaps) > 0 {
 			if result == RulePass {
 				r.Result = RuleWarn
 			}
-			r.Note = "open orders not counted for want of an FX rate:"
-			for _, o := range e.OpenOrdersOtherCurrencies {
-				r.Note += " " + o.Amount.String() + " " + o.Currency
-			}
+			r.Note = strings.Join(gaps, "; ")
 		}
 		rules = append(rules, r)
 	}
@@ -210,4 +221,12 @@ func finish(rules []RuleResult) CreditEvaluation {
 		}
 	}
 	return CreditEvaluation{Rules: rules, Outcome: outcome}
+}
+
+func currencyList(amounts []CurrencyAmount) string {
+	out := ""
+	for _, o := range amounts {
+		out += " " + o.Amount.String() + " " + o.Currency
+	}
+	return out
 }

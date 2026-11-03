@@ -2,12 +2,16 @@ package store
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/sales/internal/domain"
 	salesevents "github.com/BenjaminSRussell/passage/services/sales/internal/events"
 )
@@ -126,5 +130,173 @@ func TestPostgres_CancelLineRemainder(t *testing.T) {
 	end, err := s.CancelLineRemainder(ctx, o.ID, 2, res.Version, "", "rep", now)
 	if err != nil || end.Status != domain.OrderShipped || !end.NetTotal.Equal(d(40)) || end.Lines[1].LineStatus != domain.LineCancelled {
 		t.Fatalf("closing line 2: %v %+v", err, end)
+	}
+}
+
+// TestPostgres_DeliveredNotInvoicedIsComputed covers BR-27.3: the delivered,
+// not yet invoiced value is computed from each line's delivered less invoiced
+// quantity (on the profile read, the list and the credit check), a value sent
+// with the profile is ignored, an invoiced or fully invoiced order counts
+// nothing, and a partly shipped order keeps its full exposure: the delivered
+// part as delivered-not-invoiced, the rest as open orders.
+func TestPostgres_DeliveredNotInvoicedIsComputed(t *testing.T) {
+	s, _, ctx := migrated(t)
+	le, customer, a, b := ids.New(), ids.New(), ids.New(), ids.New()
+	if _, err := s.PutCreditProfile(ctx, CreditProfile{LegalEntityID: le, CustomerID: customer, CreditProfile: domain.CreditProfile{
+		Limit: d(100000), Currency: "USD", LimitType: domain.LimitBalanceAll, OldestItemDaysMax: 30, MaxDunningLevel: 3},
+		Exposure: domain.Exposure{DeliveredNotInvoiced: d(99999)}}, 0); err != nil {
+		t.Fatal(err)
+	}
+	check := func(dni, open string) {
+		t.Helper()
+		wd, wo := decimal.RequireFromString(dni), decimal.RequireFromString(open)
+		p, err := s.GetCreditProfile(ctx, le, customer)
+		if err != nil || !p.Exposure.DeliveredNotInvoiced.Equal(wd) || !p.Exposure.OpenOrders.Equal(wo) {
+			t.Fatalf("want dni %s open %s: %+v %v", dni, open, p.Exposure, err)
+		}
+		l, err := s.ListCreditProfiles(ctx, le, 50)
+		if err != nil || len(l) != 1 || !l[0].Exposure.DeliveredNotInvoiced.Equal(wd) || !l[0].Exposure.OpenOrders.Equal(wo) {
+			t.Fatalf("list want dni %s open %s: %+v %v", dni, open, l, err)
+		}
+	}
+	in := orderOf(le, customer, a, "2027-03-10", 10)
+	line2 := in.Lines[0]
+	line2.LineNo, line2.ProductID = 2, b
+	in.Lines = append(in.Lines, line2)
+	o := confirmed(t, s, ctx, in)
+	check("0", "200")
+	deliver(t, s, ctx, o.ID, "PS-1", 1, 4)
+	check("40", "160") // the whole 200 stays in the exposure
+	deliver(t, s, ctx, o.ID, "PS-2", 2, 10)
+	check("140", "60")
+	invoice := func(ref string, lineNo int, qty int64) {
+		t.Helper()
+		if _, _, err := s.RecordProgress(ctx, progressIn(o.ID, domain.ProgressInvoiced, ref, "k-"+ref, "h-"+ref, ProgressLineInput{LineNo: lineNo, Quantity: d(qty)}), time.Now().UTC()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	invoice("INV-1", 2, 10)
+	check("40", "60") // line 2 is invoiced: it is open AR now
+	invoice("INV-2", 1, 3)
+	check("10", "60")
+	deliver(t, s, ctx, o.ID, "PS-3", 1, 6)
+	check("70", "0") // SHIPPED
+	invoice("INV-3", 1, 7)
+	check("0", "0") // INVOICED
+
+	// A discounted line: 7 x 12.34 less 12.5%, 3 delivered and 1 invoiced.
+	disc := orderOf(le, customer, ids.New(), "2027-03-10", 7)
+	disc.Lines[0].UnitPrice, disc.Lines[0].DiscPct = decimal.RequireFromString("12.34"), decimal.RequireFromString("12.5")
+	disc.Lines[0].LineNet = decimal.RequireFromString("75.5825")
+	o2 := confirmed(t, s, ctx, disc)
+	deliver(t, s, ctx, o2.ID, "PS-4", 1, 3)
+	if _, _, err := s.RecordProgress(ctx, progressIn(o2.ID, domain.ProgressInvoiced, "INV-4", "k-INV-4", "h-INV-4", ProgressLineInput{LineNo: 1, Quantity: d(1)}), time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	check("21.595", "43.19") // 2 x 12.34 x 0.875
+
+	// The order being checked is left out: its whole net total is the amount
+	// under check, so neither its delivered nor its undelivered part is in the
+	// exposure.
+	principal, _ := tenant.FromContext(ctx)
+	tenantID := principal.TenantID
+	if err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		p, _, err := loadProfile(ctx, tx, tenantID, le, customer)
+		if err != nil {
+			return err
+		}
+		if err := withOpenOrders(ctx, tx, tenantID, &p, o2.ID); err != nil {
+			return err
+		}
+		if !p.Exposure.DeliveredNotInvoiced.IsZero() || !p.Exposure.OpenOrders.IsZero() {
+			t.Fatalf("the order under check counts itself: %+v", p.Exposure)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestPostgres_DeliveredNotInvoicedScopeAndCheck: delivered, not invoiced
+// goods count only for the profile's customer and legal entity and only on
+// ORDER orders; those in another currency are listed per currency; and the
+// credit check at confirmation counts them for BALANCE_PACKING_SLIP (and flags
+// the uncounted currency) but not for BALANCE.
+func TestPostgres_DeliveredNotInvoicedScopeAndCheck(t *testing.T) {
+	s, pool, ctx := migrated(t)
+	le, otherLE, customer := ids.New(), ids.New(), ids.New()
+	if _, err := s.PutCreditProfile(ctx, CreditProfile{LegalEntityID: le, CustomerID: customer, CreditProfile: domain.CreditProfile{
+		Limit: d(100000), Currency: "USD", LimitType: domain.LimitBalance, OldestItemDaysMax: 30, MaxDunningLevel: 3}}, 0); err != nil {
+		t.Fatal(err)
+	}
+	// Counted: 3 of 10 delivered at 10 = 30 USD.
+	counted := confirmed(t, s, ctx, orderOf(le, customer, ids.New(), "2027-03-10", 10))
+	deliver(t, s, ctx, counted.ID, "PS-1", 1, 3)
+	// Not counted: the same customer in another legal entity, and a
+	// SUBSCRIPTION order (billing invoices it per period).
+	elsewhere := confirmed(t, s, ctx, orderOf(otherLE, customer, ids.New(), "2027-03-10", 10))
+	deliver(t, s, ctx, elsewhere.ID, "PS-2", 1, 5)
+	sub := confirmed(t, s, ctx, orderOf(le, customer, ids.New(), "2027-03-10", 10))
+	deliver(t, s, ctx, sub.ID, "PS-3", 1, 4)
+	if _, err := pool.Exec(ctx, `update sales_order set order_type = 'SUBSCRIPTION' where id = $1`, sub.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Listed per currency: 1 of 2 delivered on an EUR order = 10 EUR (put
+	// straight to CONFIRMED: CR-1 fails a foreign order at confirmation).
+	eurIn := oneLineOrder(le, customer, ids.New(), time.Date(2027, 2, 20, 0, 0, 0, 0, time.UTC))
+	eurIn.Currency = "EUR"
+	eur, _, err := s.CreateOrder(ctx, eurIn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `update sales_order set status = 'CONFIRMED' where id = $1`, eur.ID); err != nil {
+		t.Fatal(err)
+	}
+	deliver(t, s, ctx, eur.ID, "PS-4", 1, 1)
+
+	p, err := s.GetCreditProfile(ctx, le, customer)
+	other := p.Exposure.DeliveredNotInvoicedOtherCurrencies
+	if err != nil || !p.Exposure.DeliveredNotInvoiced.Equal(d(30)) || len(other) != 1 || other[0].Currency != "EUR" || !other[0].Amount.Equal(d(10)) {
+		t.Fatalf("profile: want 30 USD and 10 EUR: %+v %v", p.Exposure, err)
+	}
+	listed, err := s.ListCreditProfiles(ctx, le, 50)
+	if err != nil || len(listed) != 1 || !listed[0].Exposure.DeliveredNotInvoiced.Equal(d(30)) ||
+		len(listed[0].Exposure.DeliveredNotInvoicedOtherCurrencies) != 1 || !listed[0].Exposure.DeliveredNotInvoicedOtherCurrencies[0].Amount.Equal(d(10)) {
+		t.Fatalf("list: want 30 USD and 10 EUR: %+v %v", listed, err)
+	}
+
+	// A 20 USD order against a 20 USD limit with no tolerance: BALANCE ignores
+	// the 30 delivered and passes at 20; BALANCE_PACKING_SLIP adds them,
+	// 50 > 20, and fails, naming the EUR it could not count.
+	cr1 := func(limitType string, version int) (domain.RuleResult, int) {
+		t.Helper()
+		put, err := s.PutCreditProfile(ctx, CreditProfile{LegalEntityID: le, CustomerID: customer, CreditProfile: domain.CreditProfile{
+			Limit: d(20), Currency: "USD", LimitType: limitType, OldestItemDaysMax: 30, MaxDunningLevel: 3}}, version)
+		if err != nil {
+			t.Fatal(err)
+		}
+		o, _, err := s.CreateOrder(ctx, oneLineOrder(le, customer, ids.New(), time.Date(2027, 2, 20, 0, 0, 0, 0, time.UTC)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := s.ConfirmOrder(ctx, o.ID, o.Version, "sales-rep", time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range res.Evaluation.Rules {
+			if r.ID == "CR-1" {
+				return r, put.Version
+			}
+		}
+		t.Fatalf("no CR-1: %+v", res.Evaluation)
+		return domain.RuleResult{}, 0
+	}
+	r, v := cr1(domain.LimitBalance, p.Version)
+	if r.Result != domain.RulePass || r.Value != "20" {
+		t.Fatalf("BALANCE: %+v", r)
+	}
+	r, _ = cr1(domain.LimitBalancePackingSlip, v)
+	if r.Result != domain.RuleFail || r.Value != "50" || !strings.Contains(r.Note, "10 EUR") {
+		t.Fatalf("BALANCE_PACKING_SLIP: %+v", r)
 	}
 }

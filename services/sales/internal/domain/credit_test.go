@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -241,5 +242,29 @@ func TestEvaluateCredit_FlagsOpenOrdersInOtherCurrencies(t *testing.T) {
 		Order: decimal.NewFromInt(1000), AsOf: asOf})
 	if r := ruleResult(t, ev, "CR-1"); r.Result != RulePass || r.Note != "" {
 		t.Fatalf("BALANCE ignores open orders: %+v", r)
+	}
+}
+
+// TestEvaluateCredit_DeliveredNotInvoicedOtherCurrencies: goods delivered and
+// not invoiced in another currency cannot be counted without an FX rate, so a
+// packing-slip or all-orders check that would pass is a CR-1 warning naming
+// them, and a plain balance check ignores them.
+func TestEvaluateCredit_DeliveredNotInvoicedOtherCurrencies(t *testing.T) {
+	other := []CurrencyAmount{{Currency: "EUR", Amount: decimal.NewFromInt(500)}}
+	for _, tc := range []struct {
+		limitType, want string
+	}{{LimitBalance, RulePass}, {LimitBalancePackingSlip, RuleWarn}, {LimitBalanceAll, RuleWarn}} {
+		p := &CreditProfile{Limit: decimal.NewFromInt(10000), Currency: "USD", LimitType: tc.limitType, OldestItemDaysMax: 30, MaxDunningLevel: 3}
+		ev := EvaluateCredit(CreditInput{Profile: p, Exposure: Exposure{DeliveredNotInvoicedOtherCurrencies: other},
+			Order: decimal.NewFromInt(100), OrderCurrency: "USD", AsOf: time.Now()})
+		var cr1 RuleResult
+		for _, r := range ev.Rules {
+			if r.ID == "CR-1" {
+				cr1 = r
+			}
+		}
+		if cr1.Result != tc.want || (tc.want == RuleWarn && !strings.Contains(cr1.Note, "500 EUR")) {
+			t.Fatalf("%s: %+v", tc.limitType, cr1)
+		}
 	}
 }

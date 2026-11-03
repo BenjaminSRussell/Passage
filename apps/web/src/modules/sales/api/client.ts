@@ -298,7 +298,10 @@ export interface ReleaseOrderResult {
 export interface Exposure {
   openAr?: Decimal;
   unapplied?: Decimal;
+  /** Computed by the service from each line's delivered less invoiced quantity in the profile currency; a value sent is ignored. */
   deliveredNotInvoiced?: Decimal;
+  /** Read-only: delivered, not invoiced goods in other currencies, not counted for want of an FX rate. */
+  deliveredNotInvoicedOtherCurrencies?: { currency: string; amount: Decimal }[];
   /** Computed by the service from the confirmed orders in the profile currency; a value sent is ignored. */
   openOrders?: Decimal;
   /** Read-only: open orders in other currencies, not counted for want of an FX rate. */
