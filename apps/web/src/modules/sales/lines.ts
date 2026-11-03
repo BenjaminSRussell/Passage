@@ -1,4 +1,4 @@
-import type { NewOrderLine } from "./api/client";
+import type { DeliveryDateControl, NewOrderLine } from "./api/client";
 import { DECIMAL, UUID } from "./format";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -12,6 +12,8 @@ export interface LineValues {
   unitPrice: string;
   discPct: string;
   requestedShipDate: string;
+  /** Empty: the legal entity default applies. Shown on the order form only. */
+  deliveryDateControl?: DeliveryDateControl | "";
 }
 
 export function emptyLine(date: string): LineValues {
@@ -56,5 +58,6 @@ export function validateLines(lines: LineValues[], errors: Record<string, string
     unitPrice: l.unitPrice,
     discPct: l.discPct,
     requestedShipDate: l.requestedShipDate,
+    ...(l.deliveryDateControl ? { deliveryDateControl: l.deliveryDateControl } : {}),
   }));
 }

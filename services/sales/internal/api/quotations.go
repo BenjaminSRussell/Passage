@@ -91,6 +91,9 @@ func buildQuotation(req createQuotationRequest, today time.Time) (store.NewQuota
 		Currency: req.Currency, ValidUntil: validUntil, IssuedAt: today, ProbabilityPct: probability}
 	for i, l := range req.Lines {
 		path := func(name string) string { return fmt.Sprintf("lines[%d].%s", i, name) }
+		if l.DeliveryDateControl != nil {
+			f[path("deliveryDateControl")] = "a quotation line has no delivery date control; set it on the order line"
+		}
 		if line, ok := buildLine(i, l, f, path); ok {
 			in.Lines = append(in.Lines, line)
 		}

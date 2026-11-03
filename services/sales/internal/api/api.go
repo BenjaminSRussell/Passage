@@ -183,6 +183,10 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get(allocationQuota, a.listAllocationQuotas)
 	r.With(authz.RequireDuty(dutyRead)).Get(allocationQuota+"/{id}", a.getAllocationQuota)
 	r.With(authz.RequireDuty(dutyAllocation)).Patch(allocationQuota+"/{id}", a.changeAllocationQuota)
+	r.With(authz.RequireDuty(dutyParameter)).Post(deliveryTerms, a.createDeliveryTerms)
+	r.With(authz.RequireDuty(dutyRead)).Get(deliveryTerms, a.listDeliveryTerms)
+	r.With(authz.RequireDuty(dutyRead)).Get(deliveryTerms+"/{id}", a.getDeliveryTerms)
+	r.With(authz.RequireDuty(dutyParameter)).Put(deliveryTerms+"/{id}", a.replaceDeliveryTerms)
 }
 
 // Metrics serves the admin port's Prometheus text.

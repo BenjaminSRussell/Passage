@@ -5,6 +5,7 @@ import { Alert, Button, Card, FormField, Input, PageHeader, Select, Skeleton } f
 import {
   CREDIT_CHECK_POINTS,
   DEFAULT_ORDER_TYPES,
+  DELIVERY_DATE_CONTROLS,
   describeProblem,
   etagOf,
   getSalesParameters,
@@ -12,6 +13,7 @@ import {
   putSalesParameters,
   type CreditCheckPoint,
   type DefaultOrderType,
+  type DeliveryDateControl,
   type Problem,
   type SalesParametersInput,
 } from "./api/client";
@@ -32,6 +34,9 @@ export interface ParameterValues {
   defaultOrderType: DefaultOrderType;
   creditCheckPoints: CreditCheckPoint[];
   intakeDedupWindowDays: string;
+  /** Optional in the type so callers that predate FR-27.3 compile; absent means NONE and 0. */
+  deliveryDateControlDefault?: DeliveryDateControl;
+  salesLeadTimeDays?: string;
   /** Optional: empty means the defaults (5,000 USD, 4,500 EUR). */
   oneTimeOrderLimit?: string;
   oneTimeOrderLimitCurrency?: string;
@@ -46,6 +51,8 @@ export function parameterValues(p: SalesParametersInput): ParameterValues {
     defaultOrderType: p.defaultOrderType,
     creditCheckPoints: p.creditCheckPoints ?? ["confirm", "release"],
     intakeDedupWindowDays: String(p.intakeDedupWindowDays ?? 30),
+    deliveryDateControlDefault: p.deliveryDateControlDefault ?? "NONE",
+    salesLeadTimeDays: String(p.salesLeadTimeDays ?? 0),
     oneTimeOrderLimit: p.oneTimeOrderLimit ?? "",
     oneTimeOrderLimitCurrency: p.oneTimeOrderLimitCurrency ?? "",
   };
@@ -65,6 +72,8 @@ export function validateParameters(v: ParameterValues): { errors: Errors; input?
   if (!inRange(v.creditReleaseValidityDays, 1, 30)) errors.creditReleaseValidityDays = "Enter a whole number of days from 1 to 30.";
   if (!inRange(v.creditHoldSlaBusinessDays, 1, 10)) errors.creditHoldSlaBusinessDays = "Enter a whole number of business days from 1 to 10.";
   if (!inRange(v.intakeDedupWindowDays, 1, 90)) errors.intakeDedupWindowDays = "Enter a whole number of days from 1 to 90.";
+  const leadTime = v.salesLeadTimeDays ?? "0";
+  if (!inRange(leadTime, 0, 365)) errors.salesLeadTimeDays = "Enter a whole number of days from 0 to 365.";
   if (!v.creditCheckPoints.includes("confirm"))
     errors.creditCheckPoints = "Keep confirm: it is the only check point that places a credit hold. To stop credit control for a customer, set its credit limit type to None.";
   const limit = (v.oneTimeOrderLimit ?? "").trim();
@@ -86,6 +95,8 @@ export function validateParameters(v: ParameterValues): { errors: Errors; input?
       defaultOrderType: v.defaultOrderType,
       creditCheckPoints: CREDIT_CHECK_POINTS.filter((c) => v.creditCheckPoints.includes(c)),
       intakeDedupWindowDays: Number(v.intakeDedupWindowDays),
+      deliveryDateControlDefault: v.deliveryDateControlDefault ?? "NONE",
+      salesLeadTimeDays: Number(leadTime),
     },
   };
 }
@@ -133,10 +144,10 @@ function ParametersForm({ legalEntityId, initial, etag, saved, updatedAt, canSav
     }
   }
 
-  const whole = (name: Exclude<keyof ParameterValues, "defaultOrderType" | "creditCheckPoints" | "oneTimeOrderLimit" | "oneTimeOrderLimitCurrency">, label: string, hint: string) => (
+  const whole = (name: Exclude<keyof ParameterValues, "defaultOrderType" | "deliveryDateControlDefault" | "creditCheckPoints" | "oneTimeOrderLimit" | "oneTimeOrderLimitCurrency">, label: string, hint: string) => (
     <FormField id={`param-${name}`} label={label} hint={hint} error={errors[name]}>
       {(control) => (
-        <Input {...control} inputMode="numeric" value={values[name]} readOnly={!canSave} onChange={(e) => setValues({ ...values, [name]: e.target.value })} invalid={Boolean(errors[name])} />
+        <Input {...control} inputMode="numeric" value={values[name] ?? "0"} readOnly={!canSave} onChange={(e) => setValues({ ...values, [name]: e.target.value })} invalid={Boolean(errors[name])} />
       )}
     </FormField>
   );
@@ -151,6 +162,28 @@ function ParametersForm({ legalEntityId, initial, etag, saved, updatedAt, canSav
           {whole("creditReleaseValidityDays", "Credit release validity, days", "How long a released CREDIT hold keeps covering its order, 1 to 30 (BR-27.4).")}
           {whole("creditHoldSlaBusinessDays", "Credit hold SLA, business days", "The release queue marks a hold waiting past this many Monday-to-Friday days, 1 to 10.")}
           {whole("intakeDedupWindowDays", "Order intake dedup window, days", "A channel order with the same reference inside this window returns the existing order instead of creating another, 1 to 90.")}
+          <FormField
+            id="param-deliveryDateControlDefault"
+            label="Delivery date control"
+            hint="How a line without its own control gets its confirmed ship date. None keeps the requested date; sales lead time confirms no earlier than today plus the lead time below. ATP and CTP come with the ATP projection and finite-capacity planning."
+            error={errors.deliveryDateControlDefault}
+          >
+            {(control) => (
+              <Select
+                {...control}
+                value={values.deliveryDateControlDefault ?? "NONE"}
+                disabled={!canSave}
+                onChange={(e) => setValues({ ...values, deliveryDateControlDefault: e.target.value as DeliveryDateControl })}
+              >
+                {DELIVERY_DATE_CONTROLS.map((c) => (
+                  <option key={c} value={c}>
+                    {sentence(c)}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+          {whole("salesLeadTimeDays", "Sales lead time, days", "Days after today before the sales lead time control confirms a line, 0 to 365.")}
           <FormField id="param-oneTimeOrderLimit" label="One-time order limit" hint="The most a one-time customer order may be worth. Empty: 5,000 USD and 4,500 EUR; other currencies then cannot place one-time orders." error={errors.oneTimeOrderLimit} optional>
             {(control) => (
               <Input {...control} inputMode="decimal" value={values.oneTimeOrderLimit ?? ""} readOnly={!canSave} onChange={(e) => setValues({ ...values, oneTimeOrderLimit: e.target.value })} invalid={Boolean(errors.oneTimeOrderLimit)} />

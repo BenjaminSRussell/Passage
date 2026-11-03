@@ -10,6 +10,10 @@ export type OrderType = (typeof ORDER_TYPES)[number];
 export const DEFAULT_ORDER_TYPES = ["ORDER", "JOURNAL", "SUBSCRIPTION"] as const;
 export type DefaultOrderType = (typeof DEFAULT_ORDER_TYPES)[number];
 
+/** How a line gets its confirmed ship date (FR-27.3, BR-27.2). ATP and CTP are PRD values the service refuses until their sources exist. */
+export const DELIVERY_DATE_CONTROLS = ["NONE", "SALES_LEAD_TIME"] as const;
+export type DeliveryDateControl = (typeof DELIVERY_DATE_CONTROLS)[number];
+
 /** Where the credit rules run (FR-27.7). confirm is required: it is the only point that places a CREDIT hold. */
 export const CREDIT_CHECK_POINTS = ["entry", "confirm", "release"] as const;
 export type CreditCheckPoint = (typeof CREDIT_CHECK_POINTS)[number];
@@ -77,6 +81,10 @@ export interface OrderLine {
   lineNet: Decimal;
   requestedShipDate: string;
   confirmedShipDate?: string;
+  /** Confirmed ship date plus the customer's transport days, rolled to its next receiving day (BR-27.2). */
+  confirmedReceiptDate?: string;
+  /** The control the line was entered with; absent when the legal entity default applies. */
+  deliveryDateControl?: DeliveryDateControl;
   lineStatus: string;
   /** Parent line id of a MANDATORY supplementary line added at commit (FR-27.14). */
   supplementaryOf?: string;
@@ -147,6 +155,8 @@ export interface Order {
   customerGroup?: string;
   /** Set only on a one-time customer order (FR-27.22). */
   oneTime?: OneTimeParty;
+  /** The customer's delivery terms copied at confirm (BR-27.2); they date every line's confirmedReceiptDate. Empty receivingDays: every day. */
+  confirmedDeliveryTerms?: { transportDays: number; receivingDays: number[] };
   netTotal: Decimal;
   version: number;
   creditCheck?: CreditEvaluation;
@@ -182,6 +192,8 @@ export interface NewOrderLine {
   unitPrice: Decimal;
   discPct?: Decimal;
   requestedShipDate: string;
+  /** Omitted: the legal entity's delivery date control default applies at confirm. */
+  deliveryDateControl?: DeliveryDateControl;
 }
 
 export interface NewOrder {
@@ -592,6 +604,10 @@ export interface SalesParametersInput {
   creditCheckPoints?: CreditCheckPoint[];
   /** Days a (channel, externalRef) pair identifies one order, 1 to 90; the service defaults to 30 when absent. */
   intakeDedupWindowDays?: number;
+  /** The control of a line without its own (FR-27.3); the service defaults to NONE when absent. */
+  deliveryDateControlDefault?: DeliveryDateControl;
+  /** Days SALES_LEAD_TIME adds to today, 0 to 365; the service defaults to 0 when absent. */
+  salesLeadTimeDays?: number;
 }
 
 /** The parameters of a legal entity; version 0 means none were saved and these are the defaults. */
@@ -1189,6 +1205,49 @@ export function changeAllocationQuota(id: string, etag: string, quotaQty: Decima
     body: JSON.stringify({ quotaQty }),
     headers: { "If-Match": etag },
   });
+}
+
+/** A customer's transport days and receiving weekdays (FR-27.3, BR-27.2). Weekdays are ISO: 1 Monday to 7 Sunday. */
+export interface DeliveryTermsInput {
+  legalEntityId: string;
+  customerId: string;
+  transportDays: number;
+  receivingDays: number[];
+}
+
+export interface DeliveryTerms extends DeliveryTermsInput {
+  id: string;
+  version: number;
+  updatedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DeliveryTermsFilter {
+  legalEntityId?: string;
+  customerId?: string;
+}
+
+export async function listDeliveryTerms(filter: DeliveryTermsFilter = {}, signal?: AbortSignal): Promise<DeliveryTerms[]> {
+  const body = await json<{ items?: DeliveryTerms[] }>(
+    `/delivery-terms${query({ legalEntityId: filter.legalEntityId, customerId: filter.customerId, limit: 200 })}`,
+    {},
+    signal,
+  );
+  return body.items ?? [];
+}
+
+export function getDeliveryTerms(id: string, signal?: AbortSignal): Promise<Versioned<DeliveryTerms>> {
+  return versioned<DeliveryTerms>(`/delivery-terms/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createDeliveryTerms(input: DeliveryTermsInput, key: string = newKey()): Promise<Versioned<DeliveryTerms>> {
+  return versioned<DeliveryTerms>("/delivery-terms", { method: "POST", body: JSON.stringify(input), headers: { "Idempotency-Key": key } });
+}
+
+/** Replaces the transport days and weekdays at the given ETag. */
+export function replaceDeliveryTerms(id: string, etag: string, input: Pick<DeliveryTermsInput, "transportDays" | "receivingDays">): Promise<Versioned<DeliveryTerms>> {
+  return versioned<DeliveryTerms>(`/delivery-terms/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(input), headers: { "If-Match": etag } });
 }
 
 export const SCHEDULE_STATUSES = ["CONFIRMED", "BACKORDER", "UNPROMISED"] as const;

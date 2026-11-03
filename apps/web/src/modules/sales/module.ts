@@ -13,6 +13,7 @@ import { ChangeOrderPage } from "./ChangeOrderPage";
 import { ChangePolicyPage } from "./ChangePolicyPage";
 import { ChangeRequestDetailPage } from "./ChangeRequestDetailPage";
 import { ChangeRequestsPage } from "./ChangeRequestsPage";
+import { DeliveryTermsDetailPage, DeliveryTermsListPage, NewDeliveryTermsPage } from "./DeliveryTermsPage";
 import { CreditProfilePage, NewCreditProfilePage } from "./CreditProfileFormPage";
 import { CreditProfilesPage } from "./CreditProfilesPage";
 import { NewOrderPage } from "./NewOrderPage";
@@ -38,7 +39,7 @@ const sales: PassageModule = {
   id: "sales",
   title: "Sales",
   description:
-    "See the sales workspace and quotation pipeline, expire lapsed quotations, quote and convert to orders, enter, confirm, change and cancel sales orders, approve or reject changes of customers that need change approval, apply holds and work the release queue, maintain credit profiles, the per legal entity sales parameters, product listings, supplementary items, product proposals, allocation quotas and sales agreements, check available-to-promise, reconcile scheduling releases and store them against sales agreements, preview backorder runs and plan and commit them over the open order lines.",
+    "See the sales workspace and quotation pipeline, expire lapsed quotations, quote and convert to orders, enter, confirm, change and cancel sales orders, approve or reject changes of customers that need change approval, apply holds and work the release queue, maintain credit profiles, the per legal entity sales parameters, product listings, customer delivery terms, supplementary items, product proposals, allocation quotas and sales agreements, check available-to-promise, reconcile scheduling releases and store them against sales agreements, preview backorder runs and plan and commit them over the open order lines.",
   routes: [
     { path: "/sales", element: createElement(OrdersPage), handle: { title: "Sales orders", duty: "sales.order.read" } },
     { path: "/sales/workspace", element: createElement(SalesWorkspacePage), handle: { title: "Sales workspace", duty: "sales.order.read" } },
@@ -83,6 +84,9 @@ const sales: PassageModule = {
     { path: "/sales/allocation-quotas", element: createElement(AllocationQuotasPage) },
     { path: "/sales/allocation-quotas/new", element: createElement(NewAllocationQuotaPage), handle: { title: "New allocation quota" } },
     { path: "/sales/allocation-quotas/:id", element: createElement(AllocationQuotaDetailPage), handle: { title: "Allocation quota" } },
+    { path: "/sales/delivery-terms", element: createElement(DeliveryTermsListPage), handle: { title: "Delivery terms", duty: "sales.order.read" } },
+    { path: "/sales/delivery-terms/new", element: createElement(NewDeliveryTermsPage), handle: { title: "New delivery terms" } },
+    { path: "/sales/delivery-terms/:id", element: createElement(DeliveryTermsDetailPage), handle: { title: "Delivery terms" } },
     { path: "/sales/product-proposals/new", element: createElement(NewProposalRulePage), handle: { title: "New product proposal rule" } },
   ],
   nav: [
@@ -104,6 +108,7 @@ const sales: PassageModule = {
     { label: "Product proposals", to: "/sales/product-proposals", duty: "sales.order.read" },
     { label: "Alternative items", to: "/sales/alternative-items", duty: "sales.order.read" },
     { label: "Allocation quotas", to: "/sales/allocation-quotas", duty: "sales.order.read" },
+    { label: "Delivery terms", to: "/sales/delivery-terms", duty: "sales.order.read" },
     { label: "Intake errors", to: "/sales/intake-errors", duty: "sales.order.read" },
     { label: "Sales parameters", to: "/sales/parameters", duty: "sales.order.read" },
   ],

@@ -24,6 +24,10 @@ type parametersRequest struct {
 	CreditCheckPoints []string `json:"creditCheckPoints"`
 	// IntakeDedupWindowDays is optional; absent, the default (30) applies.
 	IntakeDedupWindowDays *int `json:"intakeDedupWindowDays"`
+	// DeliveryDateControlDefault and SalesLeadTimeDays are optional; absent,
+	// NONE and 0 apply.
+	DeliveryDateControlDefault *string `json:"deliveryDateControlDefault"`
+	SalesLeadTimeDays          *int    `json:"salesLeadTimeDays"`
 	// OneTimeOrderLimit and OneTimeOrderLimitCurrency are optional and go
 	// together; absent, the defaults apply (5,000 USD, 4,500 EUR).
 	OneTimeOrderLimit         *string `json:"oneTimeOrderLimit"`
@@ -52,6 +56,13 @@ func (r parametersRequest) parameters() (domain.Parameters, map[string]string) {
 	out.IntakeDedupWindowDays = domain.DefaultIntakeDedupWindowDays
 	if r.IntakeDedupWindowDays != nil {
 		out.IntakeDedupWindowDays = *r.IntakeDedupWindowDays
+	}
+	out.DeliveryDateControlDefault = domain.DeliveryControlNone
+	if r.DeliveryDateControlDefault != nil {
+		out.DeliveryDateControlDefault = *r.DeliveryDateControlDefault
+	}
+	if r.SalesLeadTimeDays != nil {
+		out.SalesLeadTimeDays = *r.SalesLeadTimeDays
 	}
 	if r.OneTimeOrderLimit != nil {
 		limit, err := decimal.NewFromString(*r.OneTimeOrderLimit)

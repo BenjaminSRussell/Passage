@@ -1,4 +1,6 @@
-import { Button, FormField, Input } from "../../shell/ui";
+import { Button, FormField, Input, Select } from "../../shell/ui";
+import { DELIVERY_DATE_CONTROLS, type DeliveryDateControl } from "./api/client";
+import { sentence } from "./format";
 import { emptyLine, lineFields, type LineValues } from "./lines";
 import styles from "./pages.module.css";
 
@@ -9,10 +11,12 @@ export interface LinesEditorProps {
   /** The requested ship date a new line starts with. */
   newLineDate: string;
   onChange(lines: LineValues[]): void;
+  /** Offers the per-line delivery date control (orders only; a quotation line has none). */
+  withDeliveryControl?: boolean;
 }
 
 /** The line grid shared by the order and quotation forms: one fieldset per line. */
-export function LinesEditor({ lines, errors, newLineDate, onChange }: LinesEditorProps) {
+export function LinesEditor({ lines, errors, newLineDate, onChange, withDeliveryControl }: LinesEditorProps) {
   const updateLine = (i: number, patch: Partial<LineValues>) => onChange(lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
   return (
     <div className={`${styles.formActions} ${styles.lines}`}>
@@ -37,6 +41,26 @@ export function LinesEditor({ lines, errors, newLineDate, onChange }: LinesEdito
               </FormField>
             );
           })}
+          {withDeliveryControl ? (
+            <FormField
+              id={`line-${i}-deliveryDateControl`}
+              label="Delivery date control"
+              hint="None keeps the requested date; sales lead time confirms no earlier than today plus the lead time."
+              error={errors[`lines[${i}].deliveryDateControl`]}
+              optional
+            >
+              {(control) => (
+                <Select {...control} value={line.deliveryDateControl ?? ""} onChange={(e) => updateLine(i, { deliveryDateControl: e.target.value as DeliveryDateControl | "" })}>
+                  <option value="">Legal entity default</option>
+                  {DELIVERY_DATE_CONTROLS.map((c) => (
+                    <option key={c} value={c}>
+                      {sentence(c)}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </FormField>
+          ) : null}
           {lines.length > 1 ? (
             <div className={styles.formActions}>
               <Button size="sm" variant="ghost" onClick={() => onChange(lines.filter((_, idx) => idx !== i))}>

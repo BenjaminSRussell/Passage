@@ -41,9 +41,10 @@ interface Outcome {
   text: string;
 }
 
-/** The SLS-0013 notices of a confirmation: lines moved to a later period because their allocation quota was used up (FR-27.16). */
+/** Notices of a confirmation that moved a date: SLS-0013 (allocation quota used up, FR-27.16), SLS-0003 (requested date in the past) and SLS-0057 (sales lead time, BR-27.2). */
+const DATE_NOTICE_CODES = new Set(["SLS-0013", "SLS-0003", "SLS-0057"]);
 function allocationNotes(warnings?: { code: string; message: string }[]): string[] {
-  return (warnings ?? []).filter((w) => w.code === "SLS-0013").map((w) => w.message);
+  return (warnings ?? []).filter((w) => DATE_NOTICE_CODES.has(w.code)).map((w) => w.message);
 }
 
 /** One order: header, lines, holds and the last credit check, with confirm and release. */
@@ -163,7 +164,9 @@ export function OrderDetailPage() {
     { key: "discPct", header: "Discount %", align: "end" },
     { key: "lineNet", header: "Net", align: "end" },
     { key: "requestedShipDate", header: "Requested", mono: true },
-    { key: "confirmedShipDate", header: "Confirmed", mono: true, render: (l) => l.confirmedShipDate ?? dash },
+    { key: "confirmedShipDate", header: "Confirmed ship", mono: true, render: (l) => l.confirmedShipDate ?? dash },
+    { key: "confirmedReceiptDate", header: "Confirmed receipt", mono: true, render: (l) => l.confirmedReceiptDate ?? dash },
+    { key: "deliveryDateControl", header: "Date control", render: (l) => (l.deliveryDateControl ? sentence(l.deliveryDateControl) : "Default") },
     { key: "lineStatus", header: "Status", render: (l) => <StatusPill status={l.lineStatus} /> },
     {
       key: "parentLineNo",

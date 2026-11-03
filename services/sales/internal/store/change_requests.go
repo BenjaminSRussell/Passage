@@ -115,6 +115,13 @@ func changeApprovalRequired(ctx context.Context, tx pgx.Tx, tenantID, legalEntit
 func submitChangeRequestTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, req ChangeRequest, actor string, now time.Time) (*OrderChangeRequest, error) {
 	trial := o
 	trial.Lines = append([]Line(nil), o.Lines...)
+	// The stored diff shows the confirmed ship date the delivery date control
+	// gives today (BR-27.2), as the PATCH without approval would.
+	rule, err := loadDateRule(ctx, tx, tenantID, o.LegalEntityID, now)
+	if err != nil {
+		return nil, err
+	}
+	trial.dates = rule
 	diff, _, err := ApplyChange(&trial, req)
 	if err != nil {
 		return nil, problem(http.StatusUnprocessableEntity, CodeInvalidChange, err.Error())

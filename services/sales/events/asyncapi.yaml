@@ -132,6 +132,16 @@ channels:
     messages:
       intakeErrorResolved:
         $ref: "#/components/messages/IntakeErrorResolved"
+  deliveryTermsCreated:
+    address: passage.sales.deliveryterms
+    messages:
+      deliveryTermsCreated:
+        $ref: "#/components/messages/DeliveryTermsCreated"
+  deliveryTermsChanged:
+    address: passage.sales.deliveryterms
+    messages:
+      deliveryTermsChanged:
+        $ref: "#/components/messages/DeliveryTermsChanged"
   allocationQuotaCreated:
     address: passage.sales.allocationquota
     messages:
@@ -306,6 +316,18 @@ operations:
       collections.
     messages:
       - {$ref: "#/channels/creditCheckEvaluated/messages/creditCheckEvaluated"}
+  publishDeliveryTermsCreated:
+    action: send
+    channel: {$ref: "#/channels/deliveryTermsCreated"}
+    summary: A customer's transport days and receiving weekdays were set (FR-27.3, BR-27.2). Consumers - fulfillment, customer portal, analytics.
+    messages:
+      - {$ref: "#/channels/deliveryTermsCreated/messages/deliveryTermsCreated"}
+  publishDeliveryTermsChanged:
+    action: send
+    channel: {$ref: "#/channels/deliveryTermsChanged"}
+    summary: A customer's transport days or receiving weekdays changed (FR-27.3, BR-27.2); they date orders confirmed afterwards, while confirmed orders keep the terms they were confirmed with. Consumers - fulfillment, customer portal, analytics.
+    messages:
+      - {$ref: "#/channels/deliveryTermsChanged/messages/deliveryTermsChanged"}
   publishAllocationQuotaCreated:
     action: send
     channel: {$ref: "#/channels/allocationQuotaCreated"}
@@ -544,6 +566,22 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/ParametersChangedData"
+    DeliveryTermsCreated:
+      name: dev.passage.sales.deliveryterms.created.v1
+      title: Customer delivery terms created
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/DeliveryTermsData"
+    DeliveryTermsChanged:
+      name: dev.passage.sales.deliveryterms.changed.v1
+      title: Customer delivery terms changed
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/DeliveryTermsData"
     AllocationQuotaChanged:
       name: dev.passage.sales.allocationquota.changed.v1
       title: Allocation quota changed
@@ -650,7 +688,7 @@ components:
         version: {type: integer, description: version after the change}
     ParametersChangedData:
       type: object
-      required: [legal_entity_id, quotation_expiry_days, quotation_probability_default, credit_release_validity_days, credit_hold_sla_business_days, default_order_type, credit_check_points, intake_dedup_window_days, actor, version]
+      required: [legal_entity_id, quotation_expiry_days, quotation_probability_default, credit_release_validity_days, credit_hold_sla_business_days, default_order_type, credit_check_points, intake_dedup_window_days, delivery_date_control_default, sales_lead_time_days, actor, version]
       properties:
         legal_entity_id: {type: string, format: uuid}
         quotation_expiry_days: {type: integer, minimum: 1, maximum: 365}
@@ -662,8 +700,23 @@ components:
         one_time_order_limit_currency: {type: string, pattern: "^[A-Z]{3}$"}
         credit_check_points: {type: array, minItems: 1, items: {type: string, enum: [entry, confirm, release, packing_slip, invoice]}, description: "where the credit rules run for the legal entity; always includes confirm. packing_slip and invoice are PRD values sales refuses until the fulfillment and billing waves run them, listed so consumers accept them then"}
         intake_dedup_window_days: {type: integer, minimum: 1, maximum: 90, description: how many days a (channel, externalRef) pair identifies one order of the legal entity}
+        delivery_date_control_default: {type: string, enum: [NONE, SALES_LEAD_TIME], description: the control of a line without its own (FR-27.3)}
+        sales_lead_time_days: {type: integer, minimum: 0, maximum: 365, description: days SALES_LEAD_TIME adds to today}
         actor: {type: string}
         version: {type: integer, description: version after the change}
+    DeliveryTermsData:
+      type: object
+      required: [terms_id, legal_entity_id, customer_id, transport_days, receiving_days, actor, version]
+      properties:
+        terms_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        transport_days: {type: integer, minimum: 0, maximum: 60}
+        receiving_days: {type: array, items: {type: integer, minimum: 1, maximum: 7}, description: ISO weekdays, 1 Monday to 7 Sunday}
+        previous_transport_days: {type: integer, description: absent on created}
+        previous_receiving_days: {type: array, items: {type: integer}, description: absent on created}
+        actor: {type: string}
+        version: {type: integer, description: terms version after the change}
     AllocationQuotaData:
       type: object
       required: [quota_id, product_id, period_start, period_end, quota_qty, consumed_qty, actor, version]
@@ -729,6 +782,7 @@ components:
               site_id: {type: string, format: uuid}
               warehouse_id: {type: string, format: uuid}
               confirmed_ship_date: {type: string, format: date}
+              confirmed_receipt_date: {type: string, format: date, description: "confirmed_ship_date plus the customer's transport days, rolled to its next receiving weekday (BR-27.2)"}
               configuration_id: {type: string, format: uuid, description: the saved configuration of a configured line; production builds the line to it (absent on ordinary lines)}
         net_total: {type: string}
         version: {type: integer}

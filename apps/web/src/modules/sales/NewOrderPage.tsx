@@ -174,7 +174,7 @@ export function NewOrderPage() {
             )}
           </FormField>
           {values.oneTime ? <OneTimeFields values={values.oneTime} errors={errors} onChange={(oneTime) => update({ oneTime })} /> : null}
-          <LinesEditor lines={values.lines} errors={errors} newLineDate={values.requestedShipDate} onChange={(lines) => update({ lines })} />
+          <LinesEditor lines={values.lines} errors={errors} newLineDate={values.requestedShipDate} onChange={(lines) => update({ lines })} withDeliveryControl />
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "SLS-0011" ? "A product is not listed for this customer" : failure.code === "SLS-0016" ? "The order is over the one-time order limit" : "Could not save the order"} live="alert">

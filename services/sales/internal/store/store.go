@@ -71,6 +71,14 @@ type Line struct {
 	ConfirmedShipDate *string         `json:"confirmedShipDate,omitempty"`
 	LineStatus        string          `json:"lineStatus"`
 
+	// DeliveryDateControl is the line's own delivery date control (FR-27.3);
+	// absent, the legal entity's default applies at confirm. ConfirmedReceiptDate
+	// is the confirmed ship date plus the transport days, rolled to the next
+	// receiving day (BR-27.2), of the customer's delivery terms as they were when
+	// the order was confirmed (Order.ConfirmedDeliveryTerms).
+	DeliveryDateControl  *string `json:"deliveryDateControl,omitempty"`
+	ConfirmedReceiptDate *string `json:"confirmedReceiptDate,omitempty"`
+
 	// ConfigurationID is the saved configuration the line is sold to; ProductionOrderID
 	// the production order planned for it (absent until :plan-production ran).
 	ConfigurationID   *string `json:"configurationId,omitempty"`
@@ -134,6 +142,16 @@ type Order struct {
 	// its sealed column for the response; absent on an ordinary order.
 	OneTime *domain.OneTimeParty `json:"oneTime,omitempty"`
 	oneTime *sealedParty
+	// ConfirmedDeliveryTerms are the customer's delivery terms copied onto the
+	// order at confirm (BR-27.2); they date every line's confirmed receipt, so a
+	// later change of the customer's terms does not move a confirmed promise.
+	// Absent until the order is confirmed (and on orders confirmed before the
+	// terms existed, whose receipt date is their ship date).
+	ConfirmedDeliveryTerms *domain.DeliveryTerms `json:"confirmedDeliveryTerms,omitempty"`
+	// dates, when set by a store flow, makes ApplyChange give a re-promised
+	// line the confirmed ship date its delivery date control decides (BR-27.2)
+	// instead of the requested date.
+	dates *dateRule
 	// Warnings is set only on the result of a create (including a replay),
 	// a quotation conversion or an agreement release.
 	Warnings []Notice `json:"warnings,omitempty"`
@@ -287,6 +305,10 @@ type Store interface {
 	ListAllocationQuotas(ctx context.Context, f AllocationFilter) ([]AllocationQuota, error)
 	GetAllocationQuota(ctx context.Context, id string) (AllocationQuota, error)
 	ChangeAllocationQuota(ctx context.Context, id string, version int, qty decimal.Decimal, actor string, now time.Time) (AllocationQuota, error)
+	CreateDeliveryTerms(ctx context.Context, in NewDeliveryTerms) (DeliveryTerms, bool, error)
+	ListDeliveryTerms(ctx context.Context, f DeliveryTermsFilter) ([]DeliveryTerms, error)
+	GetDeliveryTerms(ctx context.Context, id string) (DeliveryTerms, error)
+	ReplaceDeliveryTerms(ctx context.Context, id string, version int, terms domain.DeliveryTerms, actor string, now time.Time) (DeliveryTerms, error)
 	PromiseLine(ctx context.Context, orderID string, version int, req PromiseRequest, actor string, now time.Time) (PromiseResult, error)
 	ListScheduleLines(ctx context.Context, orderID string) ([]ScheduleLine, error)
 	ListBackorders(ctx context.Context, f BackorderFilter) ([]BackorderItem, error)
@@ -456,10 +478,10 @@ func createOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder)
 	for _, l := range in.Lines {
 		lineIDs[l.LineNo] = ids.New()
 		if _, err := tx.Exec(ctx, `insert into sales_order_line (tenant_id, id, order_id, line_no, product_id, quantity, unit, site_id, warehouse_id,
-				unit_price, disc_pct, line_net, requested_ship_date, line_status, configuration_id)
-			values ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10::numeric, $11::numeric, $12::numeric, $13::date, 'OPEN', $14)`,
+				unit_price, disc_pct, line_net, requested_ship_date, line_status, configuration_id, delivery_date_control)
+			values ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10::numeric, $11::numeric, $12::numeric, $13::date, 'OPEN', $14, $15)`,
 			tenantID, lineIDs[l.LineNo], id, l.LineNo, l.ProductID, l.Quantity.String(), l.Unit, l.SiteID, l.WarehouseID,
-			l.UnitPrice.String(), l.DiscPct.String(), l.LineNet.String(), l.RequestedShipDate, l.ConfigurationID); err != nil {
+			l.UnitPrice.String(), l.DiscPct.String(), l.LineNet.String(), l.RequestedShipDate, l.ConfigurationID, l.DeliveryDateControl); err != nil {
 			return Order{}, err
 		}
 	}
@@ -551,7 +573,8 @@ func orderNotFound() error { return problem(http.StatusNotFound, CodeOrderNotFou
 func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (Order, error) {
 	q := `select id::text, legal_entity_id::text, order_number, customer_id::text, invoice_account_id::text, order_type, status, currency::text,
 			requested_ship_date::text, channel, external_ref, customer_group, net_total::text, version, request_hash, credit_check_result::text,
-			listing_overrides::text, one_time_party_sealed, one_time_country::text, created_at, updated_at
+			listing_overrides::text, one_time_party_sealed, one_time_country::text, created_at, updated_at,
+			confirmed_transport_days, confirmed_receiving_days
 		from sales_order where tenant_id = $1 and id = $2`
 	if lock {
 		q += " for update"
@@ -560,9 +583,11 @@ func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 	var net, overrides string
 	var creditCheck, oneTimeCountry *string
 	var oneTimeSealed []byte
+	var termsTransport *int
+	var termsDays []int16
 	err := tx.QueryRow(ctx, q, tenantID, id).Scan(&o.ID, &o.LegalEntityID, &o.OrderNumber, &o.CustomerID, &o.InvoiceAccountID, &o.OrderType,
 		&o.Status, &o.Currency, &o.RequestedShipDate, &o.Channel, &o.ExternalRef, &o.CustomerGroup, &net, &o.Version, &o.RequestHash, &creditCheck, &overrides,
-		&oneTimeSealed, &oneTimeCountry, &o.CreatedAt, &o.UpdatedAt)
+		&oneTimeSealed, &oneTimeCountry, &o.CreatedAt, &o.UpdatedAt, &termsTransport, &termsDays)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Order{}, orderNotFound()
 	}
@@ -580,10 +605,13 @@ func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 	if oneTimeSealed != nil && oneTimeCountry != nil {
 		o.oneTime = &sealedParty{envelope: oneTimeSealed, country: *oneTimeCountry}
 	}
+	if termsTransport != nil {
+		o.ConfirmedDeliveryTerms = &domain.DeliveryTerms{TransportDays: *termsTransport, ReceivingDays: ints(termsDays)}
+	}
 	lineRows, err := tx.Query(ctx, `select id::text, line_no, product_id::text, quantity::text, unit, site_id::text, warehouse_id::text,
 			unit_price::text, disc_pct::text, line_net::text, requested_ship_date::text, confirmed_ship_date::text, line_status,
 			supplementary_of::text, supplementary_rule_id::text, coalesce(supplementary_base_qty, 0)::text, coalesce(supplementary_qty_per_base, 0)::text,
-			configuration_id::text,
+			configuration_id::text, delivery_date_control,
 			(select p.production_order_id::text from order_line_production p where p.tenant_id = l.tenant_id and p.line_id = l.id)
 		from sales_order_line l where l.tenant_id = $1 and l.order_id = $2 order by l.line_no`, tenantID, id)
 	if err != nil {
@@ -595,7 +623,7 @@ func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 		var l Line
 		var qty, price, disc, net, base, perBase string
 		if err := lineRows.Scan(&l.ID, &l.LineNo, &l.ProductID, &qty, &l.Unit, &l.SiteID, &l.WarehouseID, &price, &disc, &net,
-			&l.RequestedShipDate, &l.ConfirmedShipDate, &l.LineStatus, &l.SupplementaryOf, &l.SupplementaryRuleID, &base, &perBase, &l.ConfigurationID, &l.ProductionOrderID); err != nil {
+			&l.RequestedShipDate, &l.ConfirmedShipDate, &l.LineStatus, &l.SupplementaryOf, &l.SupplementaryRuleID, &base, &perBase, &l.ConfigurationID, &l.DeliveryDateControl, &l.ProductionOrderID); err != nil {
 			return Order{}, err
 		}
 		l.Quantity, l.UnitPrice = decimal.RequireFromString(qty), decimal.RequireFromString(price)
@@ -623,7 +651,11 @@ func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 		h.OrderAmount = decimal.RequireFromString(amount)
 		o.Holds = append(o.Holds, h)
 	}
-	return o, holdRows.Err()
+	if err := holdRows.Err(); err != nil {
+		return Order{}, err
+	}
+	addReceiptDates(&o)
+	return o, nil
 }
 
 func setOrderState(ctx context.Context, tx pgx.Tx, tenantID, id, status string) error {
@@ -708,7 +740,7 @@ func (s *Postgres) ConfirmOrder(ctx context.Context, id string, version int, act
 			res.Order, err = loadOrder(ctx, tx, p.TenantID, o.ID, false)
 			return err
 		}
-		confirmed, err := confirmOrderTx(ctx, tx, p.TenantID, o)
+		confirmed, err := confirmOrderTx(ctx, tx, p.TenantID, o, now)
 		if err != nil {
 			return err
 		}
@@ -828,18 +860,27 @@ func applyCreditHoldTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order,
 		OrderID: o.ID, HoldID: holdID, HoldType: domain.HoldCredit, ReasonCode: reason, Actor: actor, Version: version})
 }
 
-// confirmOrderTx confirms every line at its requested ship date (delivery date
-// control NONE until the ATP projection exists) unless allocation quota moves
-// it to a later period (FR-27.16), moves the order to CONFIRMED
-// and writes order.confirmed in the same transaction.
-func confirmOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order) (Order, error) {
+// confirmOrderTx confirms every line at the ship date its delivery date
+// control gives (FR-27.3, BR-27.2: the requested date, today when that is
+// past, or the sales lead time when later; ATP and CTP wait for their
+// sources) unless allocation quota moves it to a later period (FR-27.16),
+// moves the order to CONFIRMED and writes order.confirmed in the same
+// transaction.
+func confirmOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, now time.Time) (Order, error) {
 	if o.isOneTime() {
 		if err := checkOneTimeLimitTx(ctx, tx, tenantID, o.LegalEntityID, o.NetTotal, o.Currency); err != nil {
 			return Order{}, err
 		}
 	}
-	if _, err := tx.Exec(ctx, `update sales_order_line set confirmed_ship_date = requested_ship_date
-		where tenant_id = $1 and order_id = $2 and line_status <> 'CANCELLED'`, tenantID, o.ID); err != nil {
+	rule, err := loadDateRule(ctx, tx, tenantID, o.LegalEntityID, now)
+	if err != nil {
+		return Order{}, err
+	}
+	dateNotices, err := confirmDatesTx(ctx, tx, tenantID, o, rule)
+	if err != nil {
+		return Order{}, err
+	}
+	if err := copyDeliveryTermsTx(ctx, tx, tenantID, o); err != nil {
 		return Order{}, err
 	}
 	alloc, err := allocateOrderTx(ctx, tx, tenantID, o, nil)
@@ -856,14 +897,18 @@ func confirmOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order) (O
 	if err != nil {
 		return Order{}, err
 	}
-	confirmed.Warnings = alloc.Notices
+	confirmed.Warnings = append(dateNotices, alloc.Notices...)
 	lines := make([]salesevents.ConfirmedLine, 0, len(confirmed.Lines))
 	for _, l := range confirmed.Lines {
 		if l.ConfirmedShipDate == nil {
 			continue
 		}
-		lines = append(lines, salesevents.ConfirmedLine{LineID: l.ID, ProductID: l.ProductID, Quantity: l.Quantity.String(),
-			SiteID: l.SiteID, WarehouseID: l.WarehouseID, ConfirmedShipDate: *l.ConfirmedShipDate, ConfigurationID: l.ConfigurationID})
+		line := salesevents.ConfirmedLine{LineID: l.ID, ProductID: l.ProductID, Quantity: l.Quantity.String(),
+			SiteID: l.SiteID, WarehouseID: l.WarehouseID, ConfirmedShipDate: *l.ConfirmedShipDate, ConfigurationID: l.ConfigurationID}
+		if l.ConfirmedReceiptDate != nil {
+			line.ConfirmedReceiptDate = *l.ConfirmedReceiptDate
+		}
+		lines = append(lines, line)
 	}
 	data := salesevents.OrderConfirmedData{
 		OrderID: o.ID, CustomerID: o.CustomerID, OrderType: o.OrderType, Currency: o.Currency, Lines: lines, NetTotal: o.NetTotal.String(), Version: confirmed.Version}
@@ -947,7 +992,7 @@ func (s *Postgres) ReleaseHold(ctx context.Context, orderID, holdID string, vers
 		if err != nil {
 			return err
 		}
-		confirmed, err := confirmOrderTx(ctx, sp, p.TenantID, released)
+		confirmed, err := confirmOrderTx(ctx, sp, p.TenantID, released, now)
 		var refused *httpx.Problem
 		if errors.As(err, &refused) && (refused.Code == CodeAllocationExhausted || refused.Code == CodeOneTimeLimit) {
 			if err := sp.Rollback(ctx); err != nil {

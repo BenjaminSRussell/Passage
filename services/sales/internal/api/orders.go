@@ -31,6 +31,10 @@ type orderLineRequest struct {
 	DiscPct           *string `json:"discPct"`
 	RequestedShipDate string  `json:"requestedShipDate"`
 	ConfigurationID   *string `json:"configurationId,omitempty"`
+	// DeliveryDateControl is the line's own control (FR-27.3); absent, the
+	// legal entity's default applies at confirm. omitempty keeps the request
+	// hash of orders that do not set it unchanged.
+	DeliveryDateControl *string `json:"deliveryDateControl,omitempty"`
 }
 
 // createOrderRequest is the body of POST /v1/sales/orders. customerGroup
@@ -146,6 +150,12 @@ func buildLine(i int, l orderLineRequest, f map[string]string, path func(string)
 		f[path("configurationId")] = "must be a UUID"
 		valid = false
 	}
+	if l.DeliveryDateControl != nil {
+		if msg := domain.ValidateDeliveryControl(*l.DeliveryDateControl); msg != "" {
+			f[path("deliveryDateControl")] = msg
+			valid = false
+		}
+	}
 	qty, errQty := decimal.NewFromString(l.Quantity)
 	price, errPrice := decimal.NewFromString(l.UnitPrice)
 	disc := decimal.Zero
@@ -174,7 +184,8 @@ func buildLine(i int, l orderLineRequest, f map[string]string, path func(string)
 		return store.Line{}, false
 	}
 	return store.Line{LineNo: i + 1, ProductID: l.ProductID, Quantity: qty, Unit: l.Unit, SiteID: l.SiteID, WarehouseID: l.WarehouseID,
-		UnitPrice: price, DiscPct: disc, LineNet: net, RequestedShipDate: l.RequestedShipDate, ConfigurationID: l.ConfigurationID}, true
+		UnitPrice: price, DiscPct: disc, LineNet: net, RequestedShipDate: l.RequestedShipDate, ConfigurationID: l.ConfigurationID,
+		DeliveryDateControl: l.DeliveryDateControl}, true
 }
 
 // createOrder stores an intake order. A repeat of Idempotency-Key or of

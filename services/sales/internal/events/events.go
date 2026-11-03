@@ -41,6 +41,9 @@ var (
 	OrderChangeRejected  = events.Type(Context, "orderchange", "rejected", 1)
 	OrderChangeWithdrawn = events.Type(Context, "orderchange", "withdrawn", 1)
 	ChangePolicyChanged  = events.Type(Context, "changepolicy", "changed", 1)
+
+	DeliveryTermsCreated = events.Type(Context, "deliveryterms", "created", 1)
+	DeliveryTermsChanged = events.Type(Context, "deliveryterms", "changed", 1)
 )
 
 // All lists every event type this service publishes.
@@ -49,7 +52,8 @@ func All() []string {
 		AgreementChanged, AgreementClosed, AgreementReturned,
 		QuotationConverted, QuotationExpired, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
 		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted, ParametersChanged, IntakeErrorRecorded, IntakeErrorResolved,
-		OrderChangeRequested, OrderChangeApproved, OrderChangeRejected, OrderChangeWithdrawn, ChangePolicyChanged}
+		OrderChangeRequested, OrderChangeApproved, OrderChangeRejected, OrderChangeWithdrawn, ChangePolicyChanged,
+		DeliveryTermsCreated, DeliveryTermsChanged}
 }
 
 // PromisedSlice is one schedule line of an ATP promise.
@@ -235,6 +239,9 @@ type ConfirmedLine struct {
 	SiteID            string `json:"site_id"`
 	WarehouseID       string `json:"warehouse_id"`
 	ConfirmedShipDate string `json:"confirmed_ship_date"`
+	// ConfirmedReceiptDate is the ship date plus the customer's transport days
+	// rolled to its next receiving day (BR-27.2).
+	ConfirmedReceiptDate string `json:"confirmed_receipt_date,omitempty"`
 	// ConfigurationID is the saved configuration of a configured line; absent otherwise.
 	ConfigurationID *string `json:"configuration_id,omitempty"`
 }
@@ -357,8 +364,11 @@ type ParametersChangedData struct {
 	OneTimeOrderLimitCurrency *string  `json:"one_time_order_limit_currency,omitempty"`
 	CreditCheckPoints         []string `json:"credit_check_points"`
 	IntakeDedupWindowDays     int      `json:"intake_dedup_window_days"`
-	Actor                     string   `json:"actor"`
-	Version                   int      `json:"version"`
+	// DeliveryDateControlDefault and SalesLeadTimeDays are the FR-27.3 settings.
+	DeliveryDateControlDefault string `json:"delivery_date_control_default"`
+	SalesLeadTimeDays          int    `json:"sales_lead_time_days"`
+	Actor                      string `json:"actor"`
+	Version                    int    `json:"version"`
 }
 
 // OrderChangeRequestedData is the data member of orderchange.requested.v1: a
@@ -413,4 +423,20 @@ type IntakeErrorData struct {
 	Attempts      int    `json:"attempts"`
 	Actor         string `json:"actor,omitempty"`
 	Version       int    `json:"version"`
+}
+
+// DeliveryTermsData is the data member of deliveryterms.created.v1 and
+// deliveryterms.changed.v1: a customer's transport days and receiving weekdays
+// (ISO 1 Monday to 7 Sunday) were set (FR-27.3, BR-27.2). previous_* are empty
+// on created.
+type DeliveryTermsData struct {
+	TermsID               string `json:"terms_id"`
+	LegalEntityID         string `json:"legal_entity_id"`
+	CustomerID            string `json:"customer_id"`
+	TransportDays         int    `json:"transport_days"`
+	ReceivingDays         []int  `json:"receiving_days"`
+	PreviousTransportDays *int   `json:"previous_transport_days,omitempty"`
+	PreviousReceivingDays []int  `json:"previous_receiving_days,omitempty"`
+	Actor                 string `json:"actor"`
+	Version               int    `json:"version"`
 }

@@ -62,8 +62,9 @@ type OrderVersion struct {
 // recomputes each changed line's net and the order total. Only OPEN and
 // RESERVED lines can change (BR-27.5). On a CONFIRMED order a changed quantity
 // or requested date re-promises that line, and only that line (AC-27.7): its
-// confirmed ship date follows the requested date, the same delivery date
-// control confirm applies until the ATP projection exists. A supplementary
+// confirmed ship date follows the requested date through the same delivery
+// date control confirm applies (BR-27.2; only when the store loaded the
+// rule). A supplementary
 // line follows its parent and cannot be changed on its own (BR-27.14): its
 // quantity and requested date are refused, and a change of the parent
 // recomputes, re-dates or cancels it. A request that changes nothing returns
@@ -140,13 +141,20 @@ func ApplyChange(o *Order, req ChangeRequest) ([]domain.FieldChange, []int, erro
 		}
 		if o.Status == domain.OrderConfirmed && domain.Repromises(before, after) {
 			repromised = append(repromised, c.LineNo)
-			if l.ConfirmedShipDate == nil || *l.ConfirmedShipDate != after.RequestedShipDate {
+			confirmed := after.RequestedShipDate
+			if o.dates != nil {
+				dec, err := o.dates.ship(*l, o.Lines, after.RequestedShipDate)
+				if err != nil {
+					return nil, nil, fmt.Errorf("line %d requestedShipDate must be yyyy-mm-dd", c.LineNo)
+				}
+				confirmed = dec.Date.Format(dayLayout)
+			}
+			if l.ConfirmedShipDate == nil || *l.ConfirmedShipDate != confirmed {
 				old := ""
 				if l.ConfirmedShipDate != nil {
 					old = *l.ConfirmedShipDate
 				}
-				lineDiff = append(lineDiff, domain.FieldChange{LineNo: c.LineNo, Field: "confirmedShipDate", Old: old, New: after.RequestedShipDate})
-				confirmed := after.RequestedShipDate
+				lineDiff = append(lineDiff, domain.FieldChange{LineNo: c.LineNo, Field: "confirmedShipDate", Old: old, New: confirmed})
 				l.ConfirmedShipDate = &confirmed
 			}
 		}
@@ -283,6 +291,13 @@ func applyChangeTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, id 
 			before[l.LineNo] = l
 		}
 		oldTotal := o.NetTotal
+		if o.Status == domain.OrderConfirmed {
+			rule, err := loadDateRule(ctx, tx, tenantID, o.LegalEntityID, now)
+			if err != nil {
+				return err
+			}
+			o.dates = rule
+		}
 		diff, repromised, err := ApplyChange(&o, req)
 		if err != nil {
 			return problem(http.StatusUnprocessableEntity, CodeInvalidChange, err.Error())
