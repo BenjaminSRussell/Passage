@@ -40,6 +40,16 @@ channels:
     messages:
       supplierClaimSettled:
         $ref: "#/components/messages/SupplierClaimSettled"
+  agreementChanged:
+    address: passage.service.agreement
+    messages:
+      agreementChanged:
+        $ref: "#/components/messages/AgreementChanged"
+  agreementVisitRecorded:
+    address: passage.service.agreementvisit
+    messages:
+      agreementVisitRecorded:
+        $ref: "#/components/messages/AgreementVisitRecorded"
 operations:
   publishCaseOpened:
     action: send
@@ -83,11 +93,24 @@ operations:
     summary: A vendor credit note was matched to an accepted supplier warranty claim, which is now SETTLED (FR-45.15, BR-45.12); analytics and the GL warranty recovery consume it.
     messages:
       - $ref: "#/channels/supplierClaimSettled/messages/supplierClaimSettled"
+  publishAgreementChanged:
+    action: send
+    channel: { $ref: "#/channels/agreementChanged" }
+    summary: A service agreement was activated, suspended, resumed, canceled or expired (FR-45.3); wave 29 starts or stops the subscription from it.
+    messages:
+      - $ref: "#/channels/agreementChanged/messages/agreementChanged"
+  publishAgreementVisitRecorded:
+    action: send
+    channel: { $ref: "#/channels/agreementVisitRecorded" }
+    summary: An included visit of an agreement line was consumed (FR-45.3); wave 29 bills PER_VISIT agreements from it.
+    messages:
+      - $ref: "#/channels/agreementVisitRecorded/messages/agreementVisitRecorded"
 components:
   messages:
     CaseOpened:
       name: dev.passage.service.case.opened.v1
       contentType: application/cloudevents+json
+      summary: A service case was opened with its entitlement resolved and its SLA clocks started.
       payload:
         type: object
         required: [caseId, number, customerId, priority, agreementId, responseDue, resolutionDue]
@@ -145,6 +168,7 @@ components:
     SLAWarning:
       name: dev.passage.service.sla.warning.v1
       contentType: application/cloudevents+json
+      summary: A case SLA clock reached the warning threshold; emitted once per case and clock.
       payload:
         type: object
         required: [caseId, number, slaType, priority, dueAt, warnedAt, thresholdPercent]
@@ -238,3 +262,48 @@ components:
           creditNoteId: { type: string, description: The vendor credit note (wave 18) that settled the claim. }
           vendorReference: { type: string, description: The vendor's reference of the claim, quoted on the credit note. }
           settledAt: { type: string, format: date-time }
+    AgreementChanged:
+      name: dev.passage.service.agreement.changed.v1
+      contentType: application/cloudevents+json
+      summary: A service agreement changed status.
+      description: |
+        Written in the transaction of the change (the activate, suspend, resume or cancel action, or the
+        expiry pass). Only ACTIVE agreements entitle cases and cover work orders, so wave 29 starts the
+        subscription on ACTIVE and stops it on SUSPENDED, CANCELED or EXPIRED.
+      payload:
+        type: object
+        required: [agreementId, number, customerId, legalEntityId, billingModel, from, to, reason, validTo, at, actor]
+        additionalProperties: false
+        properties:
+          agreementId: { type: string, format: uuid }
+          number: { type: string, example: SA-000001 }
+          customerId: { type: string, format: uuid }
+          legalEntityId: { type: string, format: uuid }
+          billingModel: { type: string, enum: [PREPAID, PER_VISIT, SUBSCRIPTION], description: Tells wave 29 whether a subscription starts or stops. }
+          from: { type: string, enum: [DRAFT, ACTIVE, SUSPENDED, EXPIRED, CANCELED] }
+          to: { type: string, enum: [DRAFT, ACTIVE, SUSPENDED, EXPIRED, CANCELED] }
+          reason: { type: string, description: The caller's reason; empty for an activation, and "validTo passed" from the expiry pass. }
+          validTo: { type: [string, "null"], format: date }
+          at: { type: string, format: date-time }
+          actor: { type: string, description: User id of the caller who made the change or ran the expiry pass; empty when the caller has no user. }
+    AgreementVisitRecorded:
+      name: dev.passage.service.agreementvisit.recorded.v1
+      contentType: application/cloudevents+json
+      summary: An included visit of an agreement line was consumed.
+      description: Written in the transaction that records the visit. visitsLeft is what remains of the line's includedVisits.
+      payload:
+        type: object
+        required: [visitId, agreementId, number, customerId, legalEntityId, billingModel, lineIndex, kind, visitDate, workOrderId, visitsLeft]
+        additionalProperties: false
+        properties:
+          visitId: { type: string, format: uuid }
+          agreementId: { type: string, format: uuid }
+          number: { type: string, example: SA-000001 }
+          customerId: { type: string, format: uuid, description: The customer party wave 29 bills. }
+          legalEntityId: { type: string, format: uuid }
+          billingModel: { type: string, enum: [PREPAID, PER_VISIT, SUBSCRIPTION], description: Wave 29 bills the visit when PER_VISIT. }
+          lineIndex: { type: integer, minimum: 0 }
+          kind: { type: string, enum: [PREVENTIVE, CORRECTIVE] }
+          visitDate: { type: string, format: date }
+          workOrderId: { type: [string, "null"], format: uuid }
+          visitsLeft: { type: integer, minimum: 0 }

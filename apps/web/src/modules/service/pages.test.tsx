@@ -110,6 +110,8 @@ const agreement = {
   status: "ACTIVE",
   lines: [{ includedVisits: 2, includedHours: "1", partsCovered: false, laborCovered: true, travelCovered: false }],
   hoursConsumed: "0.5",
+  visitsConsumed: 0,
+  version: 1,
 };
 
 function workOrder(overrides: Record<string, unknown> = {}) {

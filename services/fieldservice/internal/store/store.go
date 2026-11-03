@@ -262,6 +262,13 @@ type Agreement struct {
 	Lines           []domain.AgreementLine `json:"lines"`
 	// HoursConsumed is the included labor consumed by posted work orders (FR-45.10).
 	HoursConsumed decimal.Decimal `json:"hoursConsumed"`
+	// VisitsConsumed counts the recorded visits over all lines (FR-45.3); the
+	// per-line count is in the visit list.
+	VisitsConsumed int `json:"visitsConsumed"`
+	// StatusReason is the reason given for the last suspension or cancellation.
+	StatusReason *string `json:"statusReason,omitempty"`
+	// Version is the If-Match / ETag version, bumped by every status change.
+	Version int `json:"version"`
 }
 
 // CreateAgreement stores an agreement after checking its SLA profile exists.
@@ -294,6 +301,7 @@ func (s *Postgres) CreateAgreement(ctx context.Context, in Agreement, key, reque
 		out.ID = ids.New()
 		out.Number = number
 		out.HoursConsumed = decimal.Zero
+		out.Version = 1
 		_, err = tx.Exec(ctx, `insert into service_agreement (tenant_id, id, number, customer_party_id, legal_entity_id, valid_from, valid_to, sla_profile_id,
 			billing_model, priority_rank, status, lines, idempotency_key, request_hash)
 			values ($1, $2, $3, $4, $5, $6::date, $7::date, $8, $9, $10, $11, $12, $13, $14)`,
@@ -321,14 +329,15 @@ func (s *Postgres) GetAgreement(ctx context.Context, id string) (Agreement, erro
 
 const agreementColumns = `a.id::text, a.number, a.customer_party_id::text, a.legal_entity_id::text, a.valid_from::text, a.valid_to::text,
 	a.sla_profile_id::text, a.billing_model, a.priority_rank, a.status, a.lines,
-	(select coalesce(sum(u.hours), 0)::text from service_entitlement_usage u where u.tenant_id = a.tenant_id and u.agreement_id = a.id)`
+	(select coalesce(sum(u.hours), 0)::text from service_entitlement_usage u where u.tenant_id = a.tenant_id and u.agreement_id = a.id),
+	(select count(*)::int from service_agreement_visit v where v.tenant_id = a.tenant_id and v.agreement_id = a.id), a.status_reason, a.version`
 
 func scanAgreement(row pgx.Row) (Agreement, error) {
 	var a Agreement
 	var lines []byte
 	var consumed string
 	if err := row.Scan(&a.ID, &a.Number, &a.CustomerPartyID, &a.LegalEntityID, &a.ValidFrom, &a.ValidTo, &a.SLAProfileID, &a.BillingModel,
-		&a.PriorityRank, &a.Status, &lines, &consumed); err != nil {
+		&a.PriorityRank, &a.Status, &lines, &consumed, &a.VisitsConsumed, &a.StatusReason, &a.Version); err != nil {
 		return a, err
 	}
 	var err error

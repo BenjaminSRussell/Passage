@@ -254,7 +254,8 @@ func (s *Postgres) PostWorkOrder(ctx context.Context, id string, version int, ke
 // agreementCover derives the coverage and remaining included hours of the
 // agreement on a work order: the best-matching line less earlier usage. The
 // agreement row is locked so two posts against it consume hours in turn. An
-// agreement that is no longer ACTIVE covers nothing (BR-45.1).
+// agreement that is no longer ACTIVE, or whose term ended before the order was
+// completed, covers nothing (BR-45.1, FR-45.3).
 func agreementCover(ctx context.Context, tx pgx.Tx, tenantID string, wo WorkOrder) (*domain.AgreementCover, error) {
 	if wo.AgreementID == nil {
 		return nil, nil
@@ -264,6 +265,11 @@ func agreementCover(ctx context.Context, tx pgx.Tx, tenantID string, wo WorkOrde
 		return nil, err
 	}
 	if a.Status != domain.AgreementActive {
+		return nil, nil
+	}
+	// Nor does an agreement whose term does not hold the completion day, even
+	// before the expiry pass has marked it EXPIRED (FR-45.3).
+	if wo.CompletedAt != nil && !domain.AgreementCovers(a.ValidFrom, a.ValidTo, wo.CompletedAt.UTC().Format(dateLayout)) {
 		return nil, nil
 	}
 	objectID := ""
