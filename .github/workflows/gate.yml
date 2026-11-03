@@ -16,6 +16,11 @@ permissions:
 jobs:
   changes:
     runs-on: ubuntu-24.04
+    # paths-filter lists PR files through the Pulls API, which needs this scope.
+    # contents:read alone yields "Resource not accessible by integration" on PRs.
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       go: ${{ steps.filter.outputs.go }}
       web: ${{ steps.filter.outputs.web }}
