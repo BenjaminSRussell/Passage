@@ -69,6 +69,7 @@ type Store interface {
 	GetHierarchy(ctx context.Context, code string, version int) (domain.Hierarchy, int, error)
 	PublishHierarchy(ctx context.Context, code, actor string, members []domain.Member) (domain.Hierarchy, domain.Membership, error)
 	HierarchyMembership(ctx context.Context, code string, version int) (domain.Membership, int, error)
+	RunDefinition(ctx context.Context, runID string) (domain.Definition, error)
 	RunOutput(ctx context.Context, runID string) (store.Run, domain.Definition, []domain.Cell, error)
 	ListSchedules(ctx context.Context) ([]domain.Schedule, error)
 	GetSchedule(ctx context.Context, code string) (domain.Schedule, int, error)
@@ -110,6 +111,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyRun)).Post("/runs", a.createRun)
 		r.With(authz.RequireDuty(DutyView)).Get("/runs", a.listRuns)
 		r.With(authz.RequireDuty(DutyView)).Get("/runs/{id}", a.getRun)
+		r.With(authz.RequireDuty(DutyView)).Get("/runs/{id}/definition", a.runDefinition)
 		r.With(authz.RequireDuty(DutyView)).Get("/runs/{id}/cells", a.listCells)
 		r.With(authz.RequireDuty(DutyView)).Get("/runs/{id}/cells/{row}/{column}/balances", a.drillBalances)
 		r.With(authz.RequireDuty(DutyLines)).Get("/runs/{id}/cells/{row}/{column}/lines", a.drillLines)
@@ -117,7 +119,8 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyView)).Get("/lag", a.lag)
 		r.With(authz.RequireDuty(DutyMaintain)).Get("/standard-definitions", a.listStandard)
 		r.With(authz.RequireDuty(DutyMaintain)).Post("/standard-definitions:install", a.installStandard)
-		r.With(authz.RequireDuty(DutyMaintain)).Get("/hierarchies", a.listHierarchies)
+		// Statement runners read the published hierarchies to pick one on the run form.
+		r.With(authz.RequireAnyDuty(DutyMaintain, DutyRun)).Get("/hierarchies", a.listHierarchies)
 		r.With(authz.RequireDuty(DutyMaintain)).Get("/hierarchies/{code}", a.getHierarchy)
 		r.With(authz.RequireDuty(DutyMaintain)).Put("/hierarchies/{code}", a.putHierarchy)
 		r.With(authz.RequireDuty(DutyMaintain)).Get("/hierarchies/{code}/members", a.hierarchyMembers)
@@ -315,14 +318,25 @@ type periodDTO struct {
 }
 
 type runRequest struct {
-	Definition        string      `json:"definition"`
-	DefinitionVersion int         `json:"definitionVersion"`
-	LedgerID          string      `json:"ledgerId"`
-	LegalEntityID     string      `json:"legalEntityId"`
-	CurrencyType      string      `json:"currencyType"`
-	Period            periodDTO   `json:"period"`
-	Calendar          []periodDTO `json:"calendar"`
-	IncludeAdjustment bool        `json:"includeAdjustmentPeriods"`
+	Definition        string           `json:"definition"`
+	DefinitionVersion int              `json:"definitionVersion"`
+	LedgerID          string           `json:"ledgerId"`
+	LegalEntityID     string           `json:"legalEntityId"`
+	CurrencyType      string           `json:"currencyType"`
+	Period            periodDTO        `json:"period"`
+	Calendar          []periodDTO      `json:"calendar"`
+	IncludeAdjustment bool             `json:"includeAdjustmentPeriods"`
+	Hierarchy         *hierarchyRunDTO `json:"hierarchy"`
+}
+
+// hierarchyRunDTO asks for the rows of the run to be the nodes of a published
+// hierarchy (FR-15.4); the definition keeps supplying the columns.
+type hierarchyRunDTO struct {
+	Code          string `json:"code"`
+	Version       int    `json:"version"`
+	NormalBalance string `json:"normalBalance"`
+	AccountFrom   string `json:"accountFrom"`
+	AccountTo     string `json:"accountTo"`
 }
 
 func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
@@ -355,7 +369,11 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 		cal = append(cal, domain.Period{Year: c.Year, No: c.No, Quarter: c.Quarter, Adjustment: c.Adjustment})
 	}
 	sum := sha256.Sum256(raw)
-	run, err := a.store.CreateRun(r.Context(), store.RunSpec{
+	var hier *store.HierarchyRun
+	if h := req.Hierarchy; h != nil {
+		hier = &store.HierarchyRun{Code: h.Code, Version: h.Version, NormalBalance: h.NormalBalance, AccountFrom: h.AccountFrom, AccountTo: h.AccountTo}
+	}
+	run, err := a.store.CreateRun(r.Context(), store.RunSpec{Hierarchy: hier,
 		Code: req.Definition, Version: req.DefinitionVersion, LedgerID: req.LedgerID, LegalEntityID: req.LegalEntityID, CurrencyType: req.CurrencyType,
 		PeriodYear: req.Period.Year, PeriodNo: req.Period.No, IncludeAdjustment: req.IncludeAdjustment, Calendar: cal,
 		RequestedBy: p.UserID, IdempotencyKey: key, RequestHash: hex.EncodeToString(sum[:]),
@@ -424,6 +442,16 @@ func validateRun(req runRequest) error {
 	default:
 		return bad("currencyType must be txn, acct or rpt")
 	}
+	if h := req.Hierarchy; h != nil {
+		switch {
+		case !domain.ValidReportCode(h.Code):
+			return bad("hierarchy.code is required")
+		case h.Version < 0:
+			return bad("hierarchy.version must be 0 (latest published) or a published version")
+		case h.NormalBalance != "" && h.NormalBalance != "debit" && h.NormalBalance != "credit":
+			return bad("hierarchy.normalBalance must be debit or credit")
+		}
+	}
 	return nil
 }
 
@@ -438,6 +466,21 @@ func (a *API) getRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, run)
+}
+
+// runDefinition returns the definition a run was evaluated with. For a run over
+// a hierarchy this is the expanded definition, one row per hierarchy node.
+func (a *API) runDefinition(w http.ResponseWriter, r *http.Request) {
+	id, ok := runID(w, r)
+	if !ok {
+		return
+	}
+	def, err := a.store.RunDefinition(r.Context(), id)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, def)
 }
 
 type cellDTO struct {

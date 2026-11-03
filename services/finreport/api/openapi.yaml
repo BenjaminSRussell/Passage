@@ -254,6 +254,24 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Run'}
         '404': {$ref: '#/components/responses/Problem'}
+  /v1/reporting/runs/{id}/definition:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+    get:
+      operationId: getRunDefinition
+      summary: The definition a run was evaluated with
+      description: >-
+        The published definition version of an ordinary run. For a run over a hierarchy
+        (POST /runs with hierarchy) the expanded definition that was evaluated: one row per
+        hierarchy node, an Unassigned row and a grand total. It never changes after the run.
+      x-passage-duty: reporting.statement.view
+      responses:
+        '200':
+          description: The definition with its rows and columns
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Definition'}
+        '404': {$ref: '#/components/responses/Problem'}
   /v1/reporting/runs/{id}/cells:
     parameters:
       - $ref: '#/components/parameters/RunId'
@@ -505,7 +523,11 @@ paths:
     get:
       operationId: listHierarchies
       summary: One summary per derived hierarchy code (FR-15.13)
-      x-passage-duty: reporting.definition.maintain
+      description: >-
+        Maintainers see every code, drafts included. A caller with reporting.statement.run
+        and without reporting.definition.maintain (a statement runner picking the rows of a
+        run, FR-15.4) sees only codes with a published version, and hasDraft is always false.
+      x-passage-duty: reporting.definition.maintain or reporting.statement.run
       responses:
         '200':
           description: Hierarchy summaries ordered by code
@@ -908,6 +930,11 @@ components:
         label: {type: string}
         accountFrom: {type: string}
         accountTo: {type: string}
+        accounts:
+          type: array
+          maxItems: 20000
+          items: {type: string}
+          description: An explicit account list for account_range rows, instead of or together with the range (hierarchy runs write it)
         dimensionFilter:
           type: object
           additionalProperties:
@@ -948,6 +975,23 @@ components:
           description: The ledger's fiscal periods, used to place balances in columns. Replaced by the ledger calendar in a later slice.
           items: {$ref: '#/components/schemas/Period'}
         includeAdjustmentPeriods: {type: boolean, description: Counts adjustment periods in P-n, YTD, Q and FY even when the definition does not}
+        hierarchy: {$ref: '#/components/schemas/HierarchyRun'}
+    HierarchyRun:
+      type: object
+      required: [code]
+      description: >-
+        Takes the rows of the run from a published main account or dimension value hierarchy.
+        The definition keeps supplying the columns and the kind (a cash flow cannot be used,
+        REPORT-0033). One row per node with members in the ledger, depth first; parents total
+        their children; members no node claims go to an Unassigned row (REPORT-0034 warning);
+        a Total row closes the statement. Members that match no stored membership are placed by
+        the rules on their key; two matching leaves fail the run with REPORT-0014.
+      properties:
+        code: {type: string, description: Hierarchy code}
+        version: {type: integer, minimum: 0, description: 0 or omitted means the latest published version}
+        normalBalance: {type: string, enum: [debit, credit], description: How amounts are presented; debit when omitted}
+        accountFrom: {type: string, description: Dimension hierarchies only; with accountTo, limits the rows to this account range}
+        accountTo: {type: string}
     Period:
       type: object
       required: [year, no, quarter]
@@ -971,6 +1015,12 @@ components:
           type: object
           additionalProperties: {type: integer}
         resultHash: {type: string, description: SHA-256 hex over cells}
+        hierarchy:
+          type: object
+          description: Present when the rows of the run are the nodes of a hierarchy
+          properties:
+            code: {type: string}
+            version: {type: integer}
         cellCount: {type: integer}
         requestedBy: {type: string}
         startedAt: {type: string, format: date-time}

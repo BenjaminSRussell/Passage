@@ -2,8 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 
 	"github.com/jackc/pgx/v5"
 
@@ -24,12 +22,7 @@ func (s *Postgres) RunOutput(ctx context.Context, runID string) (Run, domain.Def
 		if run, err = getRunTx(ctx, tx, runID); err != nil {
 			return err
 		}
-		var body []byte
-		if err := tx.QueryRow(ctx, `select body from report_definition where code=$1 and version=$2`,
-			run.DefinitionCode, run.DefinitionVersion).Scan(&body); err != nil {
-			return fmt.Errorf("definition %s v%d of run %s: %w", run.DefinitionCode, run.DefinitionVersion, runID, err)
-		}
-		if err := json.Unmarshal(body, &def); err != nil {
+		if def, err = runDefinitionTx(ctx, tx, run); err != nil {
 			return err
 		}
 		cells, err = listCellsTx(ctx, tx, runID)

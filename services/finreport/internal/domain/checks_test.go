@@ -120,6 +120,24 @@ func TestCashFlow_UntaggedAccountFailsWithREPORT0009(t *testing.T) {
 	}
 }
 
+// A tagged row with an explicit account list classifies only the accounts it
+// lists, not every balance-sheet account.
+func TestCashFlow_TaggedAccountListCoversOnlyItsAccounts(t *testing.T) {
+	def := standardByCode(t, CodeCFStd)
+	for i := range def.Rows {
+		if def.Rows[i].Code == "INV_OTH" {
+			def.Rows[i].AccountFrom, def.Rows[i].AccountTo, def.Rows[i].Accounts = "", "", []string{"160000"}
+		}
+	}
+	bal := append(demoBalances(false),
+		Balance{LedgerID: "L1", Period: 1, Account: "180100", Dims: map[string]string{}, CurrencyType: "rpt", Net: d(50)},
+		Balance{LedgerID: "L1", Period: 1, Account: "100100", Dims: map[string]string{}, CurrencyType: "rpt", Net: d(-50)})
+	in, res := cfInput(t, def, bal)
+	if err := CheckCashFlow(in, res); codeOf(err) != CodeUnclassified || !strings.Contains(err.Error(), "180100") {
+		t.Fatalf("err = %v, want %s naming account 180100", err, CodeUnclassified)
+	}
+}
+
 func TestCashFlow_OtherKindsAndUntaggedDefinitionsPass(t *testing.T) {
 	bal := append(demoBalances(false), Balance{LedgerID: "L1", Period: 1, Account: "100100", Dims: map[string]string{}, CurrencyType: "rpt", Net: d(50)})
 	in, res := cfInput(t, standardByCode(t, CodeBSStd), bal)

@@ -259,3 +259,36 @@ func TestGetHierarchy_DraftCarriesETag(t *testing.T) {
 		t.Fatalf("hierarchy list with the view duty only: status %d, want 403", w.Code)
 	}
 }
+
+// draftAndPublished lists one published hierarchy with a draft in progress and
+// one that was never published.
+type draftAndPublished struct{ catalogStore }
+
+func (draftAndPublished) ListHierarchies(context.Context) ([]store.HierarchySummary, error) {
+	return []store.HierarchySummary{
+		{Code: "HIER-BS", Name: "Balance sheet", Subject: "main_account", LatestVersion: 2, HasDraft: true},
+		{Code: "HIER-NEW", Name: "Not yet published", Subject: "dimension_value", HasDraft: true},
+	}, nil
+}
+
+// A statement runner lists only published hierarchies for the run form; a
+// maintainer still sees drafts.
+func TestListHierarchies_RunnerSeesPublishedOnly(t *testing.T) {
+	r := chi.NewRouter()
+	New(&draftAndPublished{}).Register(r)
+	var body struct{ Items []store.HierarchySummary }
+	w := call(r, http.MethodGet, "/v1/reporting/hierarchies", "", nil, DutyRun)
+	if err := json.Unmarshal(w.Body.Bytes(), &body); w.Code != http.StatusOK || err != nil {
+		t.Fatalf("runner: status %d: %s", w.Code, w.Body.String())
+	}
+	if len(body.Items) != 1 || body.Items[0].Code != "HIER-BS" || body.Items[0].HasDraft {
+		t.Fatalf("runner items = %+v, want HIER-BS only, without its draft flag", body.Items)
+	}
+	w = call(r, http.MethodGet, "/v1/reporting/hierarchies", "", nil, DutyMaintain)
+	if err := json.Unmarshal(w.Body.Bytes(), &body); w.Code != http.StatusOK || err != nil || len(body.Items) != 2 || !body.Items[0].HasDraft {
+		t.Fatalf("maintainer: status %d items %+v", w.Code, body.Items)
+	}
+	if w := call(r, http.MethodGet, "/v1/reporting/hierarchies/HIER-BS", "", nil, DutyRun); w.Code != http.StatusForbidden {
+		t.Fatalf("runner reading a hierarchy body: status %d, want 403", w.Code)
+	}
+}

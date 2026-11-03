@@ -132,6 +132,11 @@ describe("NewRunPage", () => {
     periodsPerYear: "12",
     firstYear: "2025",
     includeAdjustmentPeriods: false,
+    hierarchy: "",
+    hierarchyVersion: "",
+    normalBalance: "debit",
+    accountFrom: "",
+    accountTo: "",
   };
 
   it("checks the form before sending", () => {
