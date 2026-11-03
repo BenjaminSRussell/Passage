@@ -3006,7 +3006,8 @@
       "sales": ["sales.order.record-invoice", "sales.order.record-delivery"]
     },
     "fulfillment": {
-      "sales": ["sales.order.record-delivery"]
+      "sales": ["sales.order.record-delivery"],
+      "inventory": ["inventory.read"]
     },
     "batch": {
       "product": ["product.variants.explode", "product.released.read", "product.jobs.write"]
@@ -3023,7 +3024,8 @@
       "ledger": ["ledger.ledger.lookup", "ledger.entry.post", "ledger.journal.reverse", "ledger.balance.read", "ledger.account.lookup", "ledger.period.postclosed"]
     },
     "production": {
-      "ledger": ["ledger.entry.post", "ledger.balance.read"]
+      "ledger": ["ledger.entry.post", "ledger.balance.read"],
+      "inventory": ["inventory.read"]
     },
     "productcost": {
       "ledger": ["ledger.entry.post", "ledger.journal.reverse"],
@@ -3082,6 +3084,9 @@
     },
     "quality": {
       "inventory": ["inventory.hold.apply"]
+    },
+    "warehouse": {
+      "inventory": ["inventory.read"]
     },
     "hr": {
       "numbering": ["numbering.sequence.allocate"],
