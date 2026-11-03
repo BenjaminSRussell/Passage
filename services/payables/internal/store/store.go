@@ -112,20 +112,21 @@ func scan(row rowScanner) (OpenItem, error) {
 }
 
 type openItemEvent struct {
-	OpenItemID    string `json:"open_item_id"`
-	LegalEntityID string `json:"legal_entity_id"`
-	VendorID      string `json:"vendor_id"`
-	VendorGroupID string `json:"vendor_group_id,omitempty"`
-	Currency      string `json:"currency"`
-	OpenAmount    string `json:"open_amount"`
-	Status        string `json:"status"`
-	SettledAmount string `json:"settled_amount,omitempty"`
-	SettlementID  string `json:"settlement_id,omitempty"`
+	OpenItemID      string `json:"open_item_id"`
+	LegalEntityID   string `json:"legal_entity_id"`
+	VendorID        string `json:"vendor_id"`
+	VendorGroupID   string `json:"vendor_group_id,omitempty"`
+	SourceInvoiceID string `json:"source_invoice_id"`
+	Currency        string `json:"currency"`
+	OpenAmount      string `json:"open_amount"`
+	Status          string `json:"status"`
+	SettledAmount   string `json:"settled_amount,omitempty"`
+	SettlementID    string `json:"settlement_id,omitempty"`
 }
 
 func enqueue(ctx context.Context, tx pgx.Tx, eventType string, o OpenItem, tenantID string, settled decimal.Decimal, settlementID string) error {
 	payload := openItemEvent{
-		OpenItemID: o.ID, LegalEntityID: o.LegalEntityID, VendorID: o.VendorID, VendorGroupID: o.VendorGroupID, Currency: o.Currency,
+		OpenItemID: o.ID, LegalEntityID: o.LegalEntityID, VendorID: o.VendorID, VendorGroupID: o.VendorGroupID, SourceInvoiceID: o.SourceInvoiceID, Currency: o.Currency,
 		OpenAmount: o.OpenAmount.String(), Status: o.Status, SettlementID: settlementID,
 	}
 	if eventType == OpenItemSettledType {

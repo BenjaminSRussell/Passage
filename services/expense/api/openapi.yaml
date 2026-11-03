@@ -387,6 +387,36 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/reports/{id}/decide:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    post:
+      operationId: decideReport
+      x-passage-duty: expense.approve
+      description: >-
+        Approves or rejects a SUBMITTED report (409 EXP-REP-002 otherwise). The decision needs
+        an authenticated user (401 AUTH-0001), and the user who submitted the report may not
+        decide it (403 EXP-SOD-001). An approval with a reimbursable amount writes
+        dev.passage.expense.report.approved.v1 to the outbox, carrying the stored reimbursable
+        amount, in the same transaction; payables creates the employee's AP open item and a
+        payment run pays it, after which the report becomes PAID. A report with nothing to
+        reimburse becomes PAID at once.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Decision' }
+      responses:
+        '200':
+          description: The decided report, or the replay of an earlier decision with the same key.
+          headers: { ETag: { $ref: '#/components/headers/ETag' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExpenseReport' }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/expense/cash-advances:
     get:
       operationId: listCashAdvances

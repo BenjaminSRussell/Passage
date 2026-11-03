@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/expense/internal/domain"
@@ -34,6 +35,7 @@ type reportStore interface {
 	AddLine(ctx context.Context, reportID, key, hash string, l domain.Line, commitDate time.Time) (store.Report, bool, error)
 	DeleteLine(ctx context.Context, reportID, lineID string, expectedVersion int, commitDate time.Time) (store.Report, error)
 	SubmitReport(ctx context.Context, reportID, key, hash string, expectedVersion int, submitDate time.Time) (store.Report, bool, error)
+	DecideReport(ctx context.Context, id string, approve bool, decidedOn time.Time, c store.Command) (store.Report, bool, error)
 }
 
 // WithReports attaches report persistence to the /v1/expense/reports routes.
@@ -56,6 +58,7 @@ func (a *API) registerReports(r chi.Router, duty func(http.Handler) http.Handler
 	r.With(duty).Post("/v1/expense/reports/{id}/lines", a.addLine)
 	r.With(duty).Delete("/v1/expense/reports/{id}/lines/{lineId}", a.deleteLine)
 	r.With(duty).Post("/v1/expense/reports/{id}/submit", a.submitReport)
+	r.With(authz.RequireDuty(dutyApprove)).Post("/v1/expense/reports/{id}/decide", a.decideReport)
 }
 
 type createReportRequest struct {
@@ -284,6 +287,33 @@ func (a *API) submitReport(w http.ResponseWriter, r *http.Request) {
 	}
 	if !replayed {
 		a.reportsSubmitted.Add(1)
+	}
+	writeReport(w, rep, replayed, http.StatusOK)
+}
+
+func (a *API) decideReport(w http.ResponseWriter, r *http.Request) {
+	if !a.authorize(w, r) || !a.storeReady(w, r) {
+		return
+	}
+	id, ok := pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	req, ok := decision(w, r)
+	if !ok {
+		return
+	}
+	c, ok := command(w, r, "report.decide", id, req)
+	if !ok {
+		return
+	}
+	rep, replayed, err := a.reports.DecideReport(r.Context(), id, req.Decision == "APPROVE", a.today(), c)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if !replayed {
+		a.reportsDecided.Add(1)
 	}
 	writeReport(w, rep, replayed, http.StatusOK)
 }
