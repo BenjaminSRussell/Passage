@@ -419,7 +419,8 @@
       {"resource": "/v1/procurement/charge-codes", "methods": ["GET"]},
       {"resource": "/v1/procurement/charge-codes/*", "methods": ["GET"]},
       {"resource": "/v1/procurement/auto-charges", "methods": ["GET"]},
-      {"resource": "/v1/procurement/auto-charges/*", "methods": ["GET"]}
+      {"resource": "/v1/procurement/auto-charges/*", "methods": ["GET"]},
+      {"resource": "/v1/procurement/purchase-order-lines", "methods": ["GET"]}
     ]},
     "PurchaseOrderConfirm": {"permissions": [
       {"resource": "/v1/procurement/purchase-orders/*:approve", "methods": ["POST"]},
