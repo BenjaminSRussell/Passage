@@ -26,7 +26,7 @@ func TestLedgerIdempotencyTTLDays_DefaultsToFourHundredAndRejectsLess(t *testing
 	if got, err := ledgerIdempotencyTTLDays(env(map[string]string{"PRODUCTCOST_LEDGER_IDEMPOTENCY_TTL_DAYS": "500"})); err != nil || got != 500 {
 		t.Fatalf("500: %d %v", got, err)
 	}
-	for _, bad := range []string{"399", "x", "-1"} {
+	for _, bad := range []string{"399", "x", "-1", "3651", "9999999999"} {
 		if _, err := ledgerIdempotencyTTLDays(env(map[string]string{"PRODUCTCOST_LEDGER_IDEMPOTENCY_TTL_DAYS": bad})); err == nil {
 			t.Errorf("%q accepted", bad)
 		}

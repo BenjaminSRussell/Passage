@@ -15,6 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/api"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/productcost/internal/engineering"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/store"
 	"github.com/BenjaminSRussell/passage/services/productcost/migrations"
@@ -74,8 +75,8 @@ func ledgerIdempotencyTTLDays(getenv func(string) string) (int, error) {
 		return domain.MinLedgerIdempotencyTTLDays, nil
 	}
 	days, err := strconv.Atoi(raw)
-	if err != nil || days < domain.MinLedgerIdempotencyTTLDays {
-		return 0, fmt.Errorf("PRODUCTCOST_LEDGER_IDEMPOTENCY_TTL_DAYS must be an integer of at least %d, got %q", domain.MinLedgerIdempotencyTTLDays, raw)
+	if err != nil || days < domain.MinLedgerIdempotencyTTLDays || days > domain.MaxLedgerIdempotencyTTLDays {
+		return 0, fmt.Errorf("PRODUCTCOST_LEDGER_IDEMPOTENCY_TTL_DAYS must be an integer from %d to %d, got %q", domain.MinLedgerIdempotencyTTLDays, domain.MaxLedgerIdempotencyTTLDays, raw)
 	}
 	return days, nil
 }
@@ -110,6 +111,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	if onHand != nil {
 		a.WithInventory(onHand)
+	}
+	design, err := engineering.FromEnv(getenv)
+	if err != nil {
+		return fmt.Errorf("engineering client: %w", err)
+	}
+	if design != nil {
+		a.WithEngineering(design)
 	}
 	ledger, err := ledgerclient.FromEnv(getenv, "productcost")
 	if err != nil {

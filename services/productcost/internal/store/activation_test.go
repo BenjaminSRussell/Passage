@@ -946,3 +946,17 @@ func TestActivation_LegalEntityScopeAppliesToTheVersion(t *testing.T) {
 		t.Fatal("a journal was posted for a version outside the caller's scope")
 	}
 }
+
+func TestActivation_AttemptKeepsTheTTLItWasCreatedUnderWhenTheLedgerRetentionIsRaised(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ledger := ledgerclient.NewFake()
+	f.leaveAmbiguousAttempt(t, ledger)
+	f.s.WithLedgerIdempotencyTTLDays(500)
+	f.ageAttempts(t, 371)
+	if _, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act")); codeOf(err) != domain.CodeLedgerReplayExpired {
+		t.Fatalf("an attempt made under a 400-day ledger key, retried after the setting rose to 500: %v", err)
+	}
+	if len(ledger.Entries()) != 0 {
+		t.Fatal("the aged attempt was resent")
+	}
+}

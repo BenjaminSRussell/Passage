@@ -203,7 +203,7 @@ func (s *Postgres) ActivateVersion(ctx context.Context, in ActivationInput) (Act
 			replayed = done
 			return err
 		}
-		if prepared, err = prepareActivation(ctx, tx, p, in, s.replayWindowDays()); err != nil || prepared.post {
+		if prepared, err = prepareActivation(ctx, tx, p, in, s.ledgerIdempotencyTTL); err != nil || prepared.post {
 			return err
 		}
 		done = true
@@ -232,7 +232,7 @@ func (s *Postgres) ActivateVersion(ctx context.Context, in ActivationInput) (Act
 	return out, replayed, err
 }
 
-func prepareActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in ActivationInput, replayWindowDays int) (preparedActivation, error) {
+func prepareActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in ActivationInput, ttlDays int) (preparedActivation, error) {
 	var out preparedActivation
 	cur, err := lockVersion(ctx, tx, p.TenantID, in)
 	if err != nil {
@@ -257,11 +257,12 @@ func prepareActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ac
 	key := attemptKey(cur.ID, in)
 	var raw []byte
 	var expired bool
-	err = tx.QueryRow(ctx, `select payload, attempted_ambiguous, created_at <= now() - make_interval(days => $3) from standard_cost_activation_attempt where tenant_id = $1 and attempt_key = $2`,
-		p.TenantID, key, replayWindowDays).Scan(&raw, &out.ambiguous, &expired)
+	err = tx.QueryRow(ctx, `select payload, attempted_ambiguous, created_at <= now() - make_interval(days => least(ledger_idempotency_ttl_days, $3) - $4)
+		from standard_cost_activation_attempt where tenant_id = $1 and attempt_key = $2`,
+		p.TenantID, key, ttlDays, domain.LedgerReplaySafetyMarginDays).Scan(&raw, &out.ambiguous, &expired)
 	if err == nil {
 		if expired {
-			return out, &domain.CodedError{Code: domain.CodeLedgerReplayExpired, Detail: "the pending journal for version " + cur.Code + " is older than " + strconv.Itoa(replayWindowDays) +
+			return out, &domain.CodedError{Code: domain.CodeLedgerReplayExpired, Detail: "the pending journal for version " + cur.Code + " is older than the ledger idempotency retention less " + strconv.Itoa(domain.LedgerReplaySafetyMarginDays) +
 				" days; the ledger may no longer recognise its idempotency key, so resending could post it twice. Check the ledger for the entry and resolve it by hand"}
 		}
 		out.post = true
@@ -269,6 +270,11 @@ func prepareActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ac
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
+	}
+	if in.ReversesID == "" {
+		if err := refuseRollerActivating(ctx, tx, p, cur); err != nil {
+			return out, err
+		}
 	}
 	plan, err := planActivation(ctx, tx, p.TenantID, cur, in, true)
 	if err != nil {
@@ -286,9 +292,19 @@ func prepareActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ac
 	if err != nil {
 		return out, err
 	}
-	_, err = tx.Exec(ctx, `insert into standard_cost_activation_attempt (tenant_id, attempt_key, legal_entity_id, costing_version_id, payload) values ($1, $2, $3, $4, $5)`,
-		p.TenantID, key, cur.LegalEntityID, cur.ID, payload)
+	_, err = tx.Exec(ctx, `insert into standard_cost_activation_attempt (tenant_id, attempt_key, legal_entity_id, costing_version_id, payload, ledger_idempotency_ttl_days) values ($1, $2, $3, $4, $5, $6)`,
+		p.TenantID, key, cur.LegalEntityID, cur.ID, payload, ttlDays)
 	return out, err
+}
+
+func refuseRollerActivating(ctx context.Context, tx pgx.Tx, p tenant.Principal, cur Version) error {
+	var rolled bool
+	err := tx.QueryRow(ctx, `select exists (select 1 from cost_calculation where tenant_id = $1 and costing_version_id = $2 and status = 'Pending' and rolled_by = $3)`,
+		p.TenantID, cur.ID, p.UserID).Scan(&rolled)
+	if err != nil || !rolled {
+		return err
+	}
+	return &domain.CodedError{Code: domain.CodeRollerActivates, Detail: "user " + p.UserID + " rolled calculations of version " + cur.Code + " and cannot activate them; another user must"}
 }
 
 func serialiseLegalEntity(ctx context.Context, tx pgx.Tx, tenantID string, cur Version) error {
@@ -342,6 +358,11 @@ func finalizeActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in A
 		return res, err
 	}
 	if !reversing {
+		if _, err := tx.Exec(ctx, `update cost_calculation set status = 'Active' where tenant_id = $1 and costing_version_id = $2 and status = 'Pending'`, p.TenantID, in.VersionID); err != nil {
+			return res, err
+		}
+	}
+	if !reversing {
 		if err := enqueue(ctx, tx, "costingversion", next.ID, costevents.VersionTransitioned, p, costevents.VersionTransitionedData{
 			ID: next.ID, LegalEntityID: next.LegalEntityID, Code: next.Code, Type: next.Type, Action: domain.ActionActivate,
 			FromStatus: prepared.cur.Status, ToStatus: next.Status, Version: next.Version, ActivatedAt: next.ActivatedAt, Actor: p.UserID,
@@ -369,8 +390,8 @@ func (s *Postgres) recordFailedAttempt(ctx context.Context, in ActivationInput, 
 	err := s.tenantTx(ctx, func(tx pgx.Tx, p tenant.Principal) error {
 		key := attemptKey(prepared.cur.ID, in)
 		withinWindow := true
-		err := tx.QueryRow(ctx, `select created_at > now() - make_interval(days => $3) from standard_cost_activation_attempt where tenant_id = $1 and attempt_key = $2`,
-			p.TenantID, key, s.replayWindowDays()).Scan(&withinWindow)
+		err := tx.QueryRow(ctx, `select created_at > now() - make_interval(days => least(ledger_idempotency_ttl_days, $3) - $4) from standard_cost_activation_attempt where tenant_id = $1 and attempt_key = $2`,
+			p.TenantID, key, s.ledgerIdempotencyTTL, domain.LedgerReplaySafetyMarginDays).Scan(&withinWindow)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}

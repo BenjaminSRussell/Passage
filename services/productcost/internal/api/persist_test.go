@@ -119,7 +119,7 @@ func (f *fakeStore) ActivationPositions(context.Context, string) ([]inventory.Po
 func (f *fakeStore) StoreRoll(_ context.Context, in store.RollInput) (store.RollResult, bool, error) {
 	f.calls++
 	f.roll = &in
-	return store.RollResult{VersionID: in.VersionID, SiteID: in.SiteID, ItemCount: in.Run.ItemCount, StoredCount: in.Run.ItemCount - in.Run.ErrorCount, ErrorCount: in.Run.ErrorCount}, f.replayed, f.err
+	return store.RollResult{VersionID: in.VersionID, SiteID: in.SiteID, ItemCount: len(in.Roots), StoredCount: len(in.Roots)}, f.replayed, f.err
 }
 
 func (f *fakeStore) GetPostingAccounts(context.Context, string) (store.PostingAccounts, error) {
@@ -152,6 +152,7 @@ func (c call) do(h http.Handler) *httptest.ResponseRecorder {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(tenant.HeaderTenant, testkit.TenantID(1))
 	req.Header.Set(tenant.HeaderDuties, c.duties)
+	req.Header.Set(tenant.HeaderUser, "cost.roller")
 	if c.key != "" {
 		req.Header.Set("Idempotency-Key", c.key)
 	}

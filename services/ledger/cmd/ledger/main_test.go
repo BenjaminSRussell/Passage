@@ -13,7 +13,7 @@ import (
 func TestConfigureIdempotencyTTL_RejectsShortOrMalformedValues(t *testing.T) {
 	t.Cleanup(func() { _ = store.SetIdempotencyTTLDays(store.MinIdempotencyTTLDays) })
 	with := func(v string) func(string) string { return func(string) string { return v } }
-	for _, bad := range []string{"399", "abc", "-5"} {
+	for _, bad := range []string{"399", "abc", "-5", "3651"} {
 		if err := configureIdempotencyTTL(with(bad)); err == nil {
 			t.Errorf("%q accepted", bad)
 		}

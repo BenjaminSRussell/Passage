@@ -121,7 +121,7 @@ func TestPostgres_IdempotencyKeyExpiryFollowsTheConfiguredTTL(t *testing.T) {
 
 func TestSetIdempotencyTTLDays_RejectsLessThanFourHundred(t *testing.T) {
 	t.Cleanup(func() { _ = SetIdempotencyTTLDays(MinIdempotencyTTLDays) })
-	for _, days := range []int{399, 0, -1} {
+	for _, days := range []int{399, 0, -1, 3651, 1 << 40} {
 		if err := SetIdempotencyTTLDays(days); err == nil {
 			t.Fatalf("%d days accepted", days)
 		}

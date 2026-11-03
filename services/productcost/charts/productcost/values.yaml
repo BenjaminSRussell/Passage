@@ -12,6 +12,7 @@ costing:
 ledgerUrl: ""
 ledgerIdempotencyTtlDays: 400
 inventoryUrl: ""
+engineeringUrl: ""
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""

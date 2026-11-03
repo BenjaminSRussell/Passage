@@ -111,10 +111,6 @@ func (s *Postgres) WithLedgerIdempotencyTTLDays(days int) *Postgres {
 	return s
 }
 
-func (s *Postgres) replayWindowDays() int {
-	return s.ledgerIdempotencyTTL - domain.LedgerReplaySafetyMarginDays
-}
-
 // Ping checks the database is reachable (readiness).
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 

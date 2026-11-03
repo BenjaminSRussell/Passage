@@ -480,15 +480,18 @@ func storeIdempotent(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, ke
 	return err
 }
 
-const MinIdempotencyTTLDays = 400
+const (
+	MinIdempotencyTTLDays = 400
+	MaxIdempotencyTTLDays = 3650
+)
 
 var idempotencyTTLDays atomic.Int64
 
 func init() { idempotencyTTLDays.Store(MinIdempotencyTTLDays) }
 
 func SetIdempotencyTTLDays(days int) error {
-	if days < MinIdempotencyTTLDays {
-		return fmt.Errorf("LEDGER_IDEMPOTENCY_TTL_DAYS must be at least %d, got %d", MinIdempotencyTTLDays, days)
+	if days < MinIdempotencyTTLDays || days > MaxIdempotencyTTLDays {
+		return fmt.Errorf("LEDGER_IDEMPOTENCY_TTL_DAYS must be from %d to %d, got %d", MinIdempotencyTTLDays, MaxIdempotencyTTLDays, days)
 	}
 	idempotencyTTLDays.Store(int64(days))
 	return nil

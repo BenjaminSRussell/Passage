@@ -2879,7 +2879,8 @@
     },
     "productcost": {
       "ledger": ["ledger.entry.post", "ledger.journal.reverse"],
-      "inventory": ["inventory.read"]
+      "inventory": ["inventory.read"],
+      "engineering": ["engineering.read"]
     },
     "eam": {
       "ledger": ["ledger.entry.post", "ledger.balance.read"]

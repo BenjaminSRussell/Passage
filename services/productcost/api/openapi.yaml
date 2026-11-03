@@ -584,13 +584,13 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem", description: "CST-0717 version not found, CST-0723 reversal target not found" }
         "409": { $ref: "#/components/responses/Problem", description: "CST-0714 the version changed since it was read, CST-0710 a roll holds the version, CST-0723 the activation was already reversed, CST-0729 another version of the legal entity has a pending activation attempt (the detail names that version)" }
-        "422": { $ref: "#/components/responses/Problem", description: "CST-0711 simulation versions cannot be activated, CST-0715 not Open or Blocked, CST-0723 reversal target of another version, itself a reversal, or booked before a later non-reversed activation of the same positions, CST-0724 no posting accounts configured for the legal entity, CST-0725 a position holds stock but has no earlier standard, CST-0726 the inventory reports no on-hand for a position with an earlier standard, CST-0727 a version that is not Standard cannot revalue stock, CST-0728 too many items or positions for one activation, CST-0730 a pending attempt is older than the ledger idempotency retention less 30 days and needs manual review before it is resent or cleared" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-0711 simulation versions cannot be activated, CST-0715 not Open or Blocked, CST-0723 reversal target of another version, itself a reversal, or booked before a later non-reversed activation of the same positions, CST-0724 no posting accounts configured for the legal entity, CST-0725 a position holds stock but has no earlier standard, CST-0726 the inventory reports no on-hand for a position with an earlier standard, CST-0727 a version that is not Standard cannot revalue stock, CST-0728 too many items or positions for one activation, CST-0738 the user who rolled the version's pending calculations cannot activate them, CST-0730 a pending attempt is older than the ledger idempotency retention less 30 days and needs manual review before it is resent or cleared" }
         "502": { $ref: "#/components/responses/Problem", description: "CST-0721 the ledger did not accept the journal (nothing is activated), CST-0722 the on-hand could not be read" }
         "503": { $ref: "#/components/responses/Problem", description: "CST-0721 no ledger configured, CST-0722 no inventory service configured, or the store is unavailable" }
   /v1/product-costing/versions/{id}/roll:
     post:
       operationId: rollStoredCostingVersion
-      summary: Roll the supplied items at one site and store the results as Pending Legal (or Group, ProfitCenter) calculations of an Open version, superseding earlier Pending rows of the rolled items. These stored calculations are what activation revalues (FR-39.4, FR-39.6). An item that fails to roll is reported in errors and stores nothing
+      summary: Roll items at one site and store the results as Pending calculations of an Open version (FR-39.4). The BOM and route versions (and their ids) are read from the engineering service for the date; the request cannot send item structures, BOMs, routes or costing sheets. Purchased item prices and operation rates have no stored source yet, so they are the request's two price inputs; the user who rolled cannot activate the version (CST-0738). Each roll adds 1 to the version counter, so an activation that read the version before it is refused (CST-0714). Rolled items supersede their earlier Pending rows; an item that fails to roll stores nothing and is listed in errors
       x-passage-duty: CostingCalculate
       parameters:
         - $ref: "#/components/parameters/VersionId"
@@ -604,32 +604,39 @@ paths:
           application/json:
             schema:
               type: object
-              required: [siteId, items]
+              additionalProperties: false
+              required: [siteId, itemIds]
               properties:
                 siteId: { type: string, format: uuid }
-                items: { type: array, minItems: 1, items: { type: object, description: "Same item shape as the mass roll; every id must be a UUID" } }
-                options: { type: object, description: "Same options as the mass roll" }
+                itemIds: { type: array, minItems: 1, maxItems: 200, uniqueItems: true, items: { type: string, format: uuid }, description: The items to store; their components are rolled with them but not stored }
+                asOf: { type: string, format: date, description: The date the active BOM and route are read for; defaults to today }
+                prices: { type: object, additionalProperties: { type: string }, description: Unit price by item id for each purchased component (an item with no active BOM) }
+                operationRates: { type: object, additionalProperties: { type: string }, description: Rate per hour by engineering operationId }
+                options: { type: object, description: Same options as the mass roll }
       responses:
         "201":
-          description: Counts of the items rolled and stored, with the diagnostics of each item that failed (flagged Idempotent-Replayed on a replay)
+          description: Counts of the items rolled and stored, the new version counter, the roller and the diagnostics of each item that failed (flagged Idempotent-Replayed on a replay)
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   costingVersionId: { type: string, format: uuid }
+                  version: { type: integer }
                   siteId: { type: string, format: uuid }
                   view: { type: string }
+                  rolledBy: { type: string }
                   itemCount: { type: integer }
                   storedCount: { type: integer }
                   errorCount: { type: integer }
                   errors: { type: array, items: { type: object } }
-        "400": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/Problem", description: "Unknown fields (items, bom, operations and sheets among them) are refused" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem", description: "CST-0717 version not found" }
-        "422": { $ref: "#/components/responses/Problem", description: "CST-0709 the version is not Open or the site is outside its site scope; the Idempotency-Key was used with a different request" }
-        "503": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-0709 the version is not Open or the site is outside its scope, CST-0702 a purchased component has no price or an operation no rate, CST-0739 an engineering BOM or route the roll cannot cost (alternative groups, constant scrap, malformed numbers, non-UUID components, too many items); the Idempotency-Key was used with a different request" }
+        "502": { $ref: "#/components/responses/Problem", description: "CST-0737 engineering could not be read" }
+        "503": { $ref: "#/components/responses/Problem", description: "CST-0737 no engineering service configured, or the store is unavailable" }
   /v1/product-costing/posting-accounts/{legalEntityId}:
     get:
       operationId: getPostingAccounts

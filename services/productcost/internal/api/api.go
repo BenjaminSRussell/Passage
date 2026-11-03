@@ -25,6 +25,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/productcost/internal/engineering"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/inventory"
 )
 
@@ -61,12 +62,13 @@ type Config struct {
 
 // API serves the costing routes and counts what it computes for /metrics.
 type API struct {
-	pinger Pinger
-	cfg    Config
-	store  Store
-	onHand inventory.Reader
-	ledger ledgerclient.Ledger
-	now    func() time.Time
+	pinger      Pinger
+	cfg         Config
+	store       Store
+	onHand      inventory.Reader
+	ledger      ledgerclient.Ledger
+	engineering engineering.Reader
+	now         func() time.Time
 
 	activations            atomic.Int64
 	activationPostFailures atomic.Int64
