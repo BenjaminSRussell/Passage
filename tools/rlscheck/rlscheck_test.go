@@ -95,6 +95,20 @@ func migrationDirs(t *testing.T) map[string]string {
 	return dirs
 }
 
+// createdByMigration reports whether schema is one a service migration would
+// create (today only `migration`). testkit throwaways are t_<32 hex>; other
+// packages on a shared Postgres can leak those mid-migrate and must not be
+// attributed to the service under check.
+func createdByMigration(schema string) bool {
+	if schema == "public" || schema == "pg_temp" {
+		return false
+	}
+	if strings.HasPrefix(schema, "t_") && len(schema) == 34 {
+		return false
+	}
+	return true
+}
+
 func userSchemas(t *testing.T, ctx context.Context, pool *pgxpool.Pool) map[string]bool {
 	t.Helper()
 	rows, err := pool.Query(ctx, userSchemasQuery)
@@ -136,7 +150,7 @@ func schemaViolations(t *testing.T, service, dir string) []violation {
 		t.Fatalf("%s: migrate: %v", service, err)
 	}
 	for s := range userSchemas(t, ctx, pool) {
-		if !before[s] {
+		if !before[s] && createdByMigration(s) {
 			extra = append(extra, s)
 		}
 	}
@@ -200,6 +214,29 @@ func judge(service string, f tableFacts) []violation {
 	return out
 }
 
+func TestAllowReasonCoversReplayOnAnyService(t *testing.T) {
+	v := violation{"revrec", "service_token_replay", problemNotForced}
+	reason, ok := allowReason(v)
+	if !ok || reason != replayNotForcedReason {
+		t.Fatalf("replay table on an unlisted service: reason %q ok %v", reason, ok)
+	}
+	if _, ok := allowReason(violation{"revrec", "revenue_contract", problemNotForced}); ok {
+		t.Fatal("a real gap on revrec must still fail")
+	}
+}
+
+func TestCreatedByMigrationIgnoresTestkitLeftovers(t *testing.T) {
+	if createdByMigration("t_0123456789abcdef0123456789abcdef") {
+		t.Fatal("testkit leftover schema must not be attributed to a service")
+	}
+	if createdByMigration("public") {
+		t.Fatal("public is never a service-created schema")
+	}
+	if !createdByMigration("migration") {
+		t.Fatal("the migration service creates schema migration")
+	}
+}
+
 func TestJudge(t *testing.T) {
 	clean := tableFacts{Name: "x", Enabled: true, Forced: true, HasTenantID: true, TenantPolicy: true, HasEntity: true, EntityPolicy: true}
 	if got := judge("s", clean); len(got) != 0 {
@@ -245,7 +282,7 @@ func TestEveryTableEnforcesRLS(t *testing.T) {
 	seen := map[string]bool{}
 	for _, v := range all {
 		seen[v.key()] = true
-		if _, ok := allowlist[v.key()]; ok {
+		if _, ok := allowReason(v); ok {
 			allowed = append(allowed, v)
 		} else {
 			unexpected = append(unexpected, v)

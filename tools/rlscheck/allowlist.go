@@ -1,21 +1,22 @@
 package rlscheck
 
+// replayNotForcedReason is the documented gap on dbx.ServiceTokenReplayDDL:
+// RLS is enabled but not forced so SECURITY DEFINER service_token_replay_purge()
+// can delete every tenant's expired ids; passage_app is still bound by the
+// tenant policy and may only insert. Any service that copies the template is
+// covered — the table is allowlisted by name so a new copy cannot fail CI.
+const replayNotForcedReason = "permanent: RLS enabled but not forced so the SECURITY DEFINER service_token_replay_purge() can delete every tenant's expired ids; passage_app is still bound by the tenant policy and may only insert"
+
+func allowReason(v violation) (string, bool) {
+	if v.Table == "service_token_replay" && v.Problem == problemNotForced {
+		return replayNotForcedReason, true
+	}
+	reason, ok := allowlist[v.key()]
+	return reason, ok
+}
+
 var allowlist = map[string]string{
-	"close.service_token_replay:" + problemNotForced:       "permanent: RLS enabled but not forced so the SECURITY DEFINER service_token_replay_purge() can delete every tenant's expired ids; passage_app is still bound by the tenant policy and may only insert",
-	"fx.service_token_replay:" + problemNotForced:          "permanent: RLS enabled but not forced so the SECURITY DEFINER service_token_replay_purge() can delete every tenant's expired ids; passage_app is still bound by the tenant policy and may only insert",
-	"inventory.service_token_replay:" + problemNotForced:   "permanent: RLS enabled but not forced so the SECURITY DEFINER service_token_replay_purge() can delete every tenant's expired ids; passage_app is still bound by the tenant policy and may only insert",
-	"ledger.service_token_replay:" + problemNotForced:      "permanent: RLS enabled but not forced so the SECURITY DEFINER service_token_replay_purge() can delete every tenant's expired ids; passage_app is still bound by the tenant policy and may only insert",
-	"numbering.service_token_replay:" + problemNotForced:   "permanent: RLS enabled but not forced so the SECURITY DEFINER service_token_replay_purge() can delete every tenant's expired ids; passage_app is still bound by the tenant policy and may only insert",
-	"payables.service_token_replay:" + problemNotForced:    "permanent: RLS enabled but not forced so the SECURITY DEFINER service_token_replay_purge() can delete every tenant's expired ids; passage_app is still bound by the tenant policy and may only insert",
-	"party.service_token_replay:" + problemNotForced:       "permanent: RLS enabled but not forced so the SECURITY DEFINER service_token_replay_purge() can delete every tenant's expired ids; passage_app is still bound by the tenant policy and may only insert",
-	"product.service_token_replay:" + problemNotForced:     "permanent: RLS enabled but not forced so the SECURITY DEFINER service_token_replay_purge() can delete every tenant's expired ids; passage_app is still bound by the tenant policy and may only insert",
-	"purchasing.service_token_replay:" + problemNotForced:  "permanent: RLS enabled but not forced so the SECURITY DEFINER service_token_replay_purge() can delete every tenant's expired ids; passage_app is still bound by the tenant policy and may only insert",
-	"production.service_token_replay:" + problemNotForced:  "permanent: RLS enabled but not forced so the SECURITY DEFINER service_token_replay_purge() can delete every tenant's expired ids; passage_app is still bound by the tenant policy and may only insert",
-	"billing.service_token_replay:" + problemNotForced:     "permanent: RLS enabled but not forced so the SECURITY DEFINER service_token_replay_purge() can delete every tenant's expired ids; passage_app is still bound by the tenant policy and may only insert",
-	"compliance.service_token_replay:" + problemNotForced:  "permanent: RLS enabled but not forced so the SECURITY DEFINER service_token_replay_purge() can delete every tenant's expired ids; passage_app is still bound by the tenant policy and may only insert",
-	"fulfillment.service_token_replay:" + problemNotForced: "permanent: RLS enabled but not forced so the SECURITY DEFINER service_token_replay_purge() can delete every tenant's expired ids; passage_app is still bound by the tenant policy and may only insert",
-	"sales.service_token_replay:" + problemNotForced:       "permanent: RLS enabled but not forced so the SECURITY DEFINER service_token_replay_purge() can delete every tenant's expired ids; passage_app is still bound by the tenant policy and may only insert",
-	"eam.asset:" + problemNoEntityPol:                      "permanent: legal_entity_id is nullable until PUT /v1/eam/assets/{id}/legal-entity; tenant policy still binds",
+	"eam.asset:" + problemNoEntityPol: "permanent: legal_entity_id is nullable until PUT /v1/eam/assets/{id}/legal-entity; tenant policy still binds",
 	"eam.work_order:" + problemNoEntityPol:                 "permanent: legal_entity_id is copied from the asset and may be null for legacy orders; tenant policy still binds",
 	"eam.eam_gl_posting:" + problemNoEntityPol:             "permanent: tenant policy binds; legal-entity scope is enforced on eam_pending_booking before the subledger row is written",
 	"eam.eam_posting_profile:" + problemNoEntityPol:        "permanent: tenant policy binds; profile rows are keyed by legal_entity_id in the primary key",
