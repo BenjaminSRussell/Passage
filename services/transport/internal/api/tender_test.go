@@ -286,8 +286,13 @@ func doIssuedBy(t *testing.T, h http.Handler, issuer, method, path string, dutie
 		granted[d] = struct{}{}
 	}
 	principal := tenant.Principal{TenantID: "00000000-0000-0000-0000-000000000001", LegalEntityID: "00000000-0000-0000-0000-0000000000e1", UserID: "user-test", Duties: granted, Service: issuer}
-	req := httptest.NewRequest(method, path, strings.NewReader(`{}`)).WithContext(tenant.With(context.Background(), principal))
+	body := `{}`
+	if strings.HasSuffix(path, ":tender") {
+		body = `{"carriers":[{"carrierId":"` + carrierA + `"}]}`
+	}
+	req := httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(tenant.With(context.Background(), principal))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "issued-by")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
@@ -304,8 +309,8 @@ func TestTenderServiceDuty_ReachesOnlyTheWorkflowRoutes(t *testing.T) {
 		{http.MethodPost, base + "/tenders:expire"},
 	}
 	for _, tc := range reach {
-		if rec := doIssuedBy(t, h, "workflow-ts", tc.method, tc.path, api.DutyTenderExec); rec.Code == http.StatusForbidden {
-			t.Fatalf("%s %s with the service duty = 403", tc.method, tc.path)
+		if rec := doIssuedBy(t, h, "workflow-ts", tc.method, tc.path, api.DutyTenderExec); rec.Code < 200 || rec.Code >= 300 {
+			t.Fatalf("%s %s with the service duty = %d, want 2xx, body %s", tc.method, tc.path, rec.Code, rec.Body.String())
 		}
 		if rec := doIssuedBy(t, h, "", tc.method, tc.path, api.DutyTenderExec); rec.Code != http.StatusForbidden {
 			t.Fatalf("%s %s with the service duty and no workflow-ts issuer = %d, want 403", tc.method, tc.path, rec.Code)
