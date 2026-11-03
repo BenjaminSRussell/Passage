@@ -126,4 +126,18 @@ func TestHandleInvoicePosted_StoresVendorGroupAndBackfillsOnRedelivery(t *testin
 	if !errors.Is(err, ErrInvalidEvent) {
 		t.Fatalf("bad vendor_group_id err = %v, want ErrInvalidEvent", err)
 	}
+	if items, _ := s.List(ctx, store.Filter{}, 10); items[0].VendorGroupCode != "" {
+		t.Fatalf("no code was sent: %+v", items)
+	}
+	if err := HandleInvoicePosted(context.Background(), s, event(t, InvoicePostedType, payload(map[string]any{"vendor_group_id": group, "vendor_group_code": "DOM"}))); err != nil {
+		t.Fatal(err)
+	}
+	if items, _ := s.List(ctx, store.Filter{}, 10); items[0].VendorGroupCode != "DOM" {
+		t.Fatalf("redelivery with a code must fill it: %+v", items)
+	}
+	for _, bad := range []string{"dom", "TOO-LONG-CODE", "A B"} {
+		if err := HandleInvoicePosted(context.Background(), s, event(t, InvoicePostedType, payload(map[string]any{"vendor_group_code": bad}))); !errors.Is(err, ErrInvalidEvent) {
+			t.Fatalf("vendor_group_code %q err = %v, want ErrInvalidEvent", bad, err)
+		}
+	}
 }

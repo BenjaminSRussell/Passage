@@ -190,7 +190,7 @@ func (a *API) releaseAuditBlock(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	vendorGroupID := a.vendorGroupID(ctx, nil, id, req.LegalEntityID, vendorID)
+	group := a.vendorGroup(ctx, nil, id, req.LegalEntityID, vendorID)
 	released, err := a.store.ReleaseInvoice(ctx, id, req.LegalEntityID, p.UserID, func(inv store.Invoice) (store.InvoiceOutcome, error) {
 		lines := make([]domain.HeldLine, len(inv.Lines))
 		subjects := []string{inv.ID}
@@ -200,13 +200,13 @@ func (a *API) releaseAuditBlock(w http.ResponseWriter, r *http.Request) {
 		}
 		entry, err := domain.PostHeldInvoice(ctx, domain.VendorInvoice{
 			ID: inv.ID, LegalEntityID: inv.LegalEntityID, LedgerID: inv.LedgerID, FiscalPeriodID: inv.FiscalPeriodID,
-			PostingDate: inv.PostingDate, InvoiceDate: inv.InvoiceDate, Currency: inv.Currency,
+			PostingDate: inv.PostingDate, InvoiceDate: inv.InvoiceDate, Currency: inv.Currency, VendorGroupCode: group.Code,
 		}, lines, a.ports.Periods, a.ledgerFor(subjects...), a.ports.Profile)
 		if err != nil {
 			return store.InvoiceOutcome{}, err
 		}
 		total := entry.Lines[len(entry.Lines)-1].Amount.Value.Neg()
-		evt, err := invoicePostedEvent(p.TenantID, inv, vendorGroupID, entry.LedgerEntryID, total, entry.GrirCleared)
+		evt, err := invoicePostedEvent(p.TenantID, inv, group, entry.LedgerEntryID, total, entry.GrirCleared)
 		return store.InvoiceOutcome{LedgerEntryID: entry.LedgerEntryID, Total: total, Event: evt}, err
 	})
 	if err != nil {

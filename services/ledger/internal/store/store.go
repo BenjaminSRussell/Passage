@@ -210,6 +210,10 @@ type PostInput struct {
 	// CanPostLedgerSpecific is true when the caller holds the duty "Post to a
 	// ledger-specific ledger" (FB50L), needed to post to one non-leading ledger of a set.
 	CanPostLedgerSpecific bool
+	// OptionalDimensions are dimension attributes the poster tags lines with
+	// only where the ledger defines them: on a ledger without one it is dropped
+	// from the lines instead of refused (the vendor group code, #421).
+	OptionalDimensions []string
 }
 
 // rules returns the ledger's posting rules for this input: a manual journal

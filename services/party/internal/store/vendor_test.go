@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
@@ -411,5 +414,123 @@ func TestVendor_IdempotentReplayAndKeyReuse(t *testing.T) {
 	other, created, err := s.CreateVendorRole(asUser(1, legalEntityB, "service:migration-loader"), partyID, in)
 	if err != nil || !created || other.ID == first.ID || other.LegalEntityID != legalEntityB {
 		t.Fatalf("same key in legal entity B = %+v created=%v err=%v", other, created, err)
+	}
+}
+
+func TestVendorGroup_CreateReplayAndCode(t *testing.T) {
+	app := migratedApp(t)
+	s := store.New(app)
+	ctx := asUser(1, legalEntityA, "buyer")
+
+	g, created, err := s.CreateVendorGroup(ctx, store.NewVendorGroupRequest{In: domain.NewVendorGroup{Code: "DOM", Name: "Domestic"}, Key: "k1", Hash: "h1"})
+	if err != nil || !created || g.Code != "DOM" || g.Version != 1 {
+		t.Fatalf("create = %+v created=%v err=%v", g, created, err)
+	}
+	again, created, err := s.CreateVendorGroup(ctx, store.NewVendorGroupRequest{In: domain.NewVendorGroup{Code: "DOM", Name: "Domestic"}, Key: "k1", Hash: "h1"})
+	if err != nil || created || again != g {
+		t.Fatalf("replay = %+v created=%v err=%v; want the original", again, created, err)
+	}
+	if _, _, err := s.CreateVendorGroup(ctx, store.NewVendorGroupRequest{In: domain.NewVendorGroup{Code: "OTH", Name: "Other"}, Key: "k1", Hash: "h2"}); problemCode(t, err) != store.CodeIdempotencyReuse {
+		t.Fatalf("key reuse = %v", err)
+	}
+	if _, _, err := s.CreateVendorGroup(ctx, store.NewVendorGroupRequest{In: domain.NewVendorGroup{Code: "DOM", Name: "Again"}}); problemCode(t, err) != store.CodeVendorGroupExists {
+		t.Fatalf("duplicate code = %v, want exists", err)
+	}
+	if _, _, err := s.CreateVendorGroup(asUser(2, legalEntityA, "buyer"), store.NewVendorGroupRequest{In: domain.NewVendorGroup{Code: "DOM", Name: "Other tenant"}}); err != nil {
+		t.Fatalf("the same code in another tenant = %v, want allowed", err)
+	}
+	if _, err := s.GetVendorGroup(asUser(2, legalEntityA, "buyer"), g.ID); problemCode(t, err) != store.CodeVendorGroupNotFound {
+		t.Fatalf("other tenant read = %v", err)
+	}
+	if list, err := s.ListVendorGroups(ctx); err != nil || len(list) != 1 || list[0] != g {
+		t.Fatalf("list = %+v, %v", list, err)
+	}
+
+	partyID, err := insertParty(principalContext(1, ""), app, testkit.TenantID(1), "P-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := s.CreateVendor(ctx, partyID, newVendor(g.ID))
+	if err != nil || v.VendorGroupCode != "DOM" {
+		t.Fatalf("vendor = %+v, %v; want vendorGroupCode DOM", v, err)
+	}
+	got, err := s.GetVendor(ctx, v.ID)
+	if err != nil || got.VendorGroupCode != "DOM" {
+		t.Fatalf("get = %+v, %v", got, err)
+	}
+	if got := outboxTypes(t, app); got != "dev.passage.party.vendorgroup.created.v1" {
+		t.Fatalf("outbox = %s; want one vendorgroup.created (replay and refusals emit nothing)", got)
+	}
+
+	// A role loaded with a group id before the group existed has no code until the group is registered with that id.
+	legacyGroup := ids.New()
+	legacyParty, err := insertParty(principalContext(1, ""), app, testkit.TenantID(1), "P-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyIn := newVendor(legacyGroup)
+	legacyIn.AccountNumber = "V-1002"
+	legacy, err := s.CreateVendor(ctx, legacyParty, legacyIn)
+	if err != nil || legacy.VendorGroupCode != "" {
+		t.Fatalf("vendor with an unregistered group = %+v, %v; want no code", legacy, err)
+	}
+	if reg, _, err := s.CreateVendorGroup(ctx, store.NewVendorGroupRequest{In: domain.NewVendorGroup{ID: legacyGroup, Code: "LEG", Name: "Legacy"}}); err != nil || reg.ID != legacyGroup {
+		t.Fatalf("register the existing id = %+v, %v", reg, err)
+	}
+	if got, err := s.GetVendor(ctx, legacy.ID); err != nil || got.VendorGroupCode != "LEG" {
+		t.Fatalf("vendor after registration = %+v, %v; want code LEG", got, err)
+	}
+	if _, _, err := s.CreateVendorGroup(ctx, store.NewVendorGroupRequest{In: domain.NewVendorGroup{ID: legacyGroup, Code: "LEG2", Name: "Again"}}); problemCode(t, err) != store.CodeVendorGroupExists {
+		t.Fatalf("the same id twice = %v, want exists", err)
+	}
+}
+
+// Vendor groups already on vendor roles get a deterministic code on migration
+// 0011, and a prefix collision falls to the next code shape.
+func TestVendorGroup_BackfillCodes(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	ctx := principalContext(1, "")
+	before := fstest.MapFS{}
+	entries, err := fs.ReadDir(migrations.FS, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".sql") && e.Name() < "0011" {
+			data, err := fs.ReadFile(migrations.FS, e.Name())
+			if err != nil {
+				t.Fatal(err)
+			}
+			before[e.Name()] = &fstest.MapFile{Data: data}
+		}
+	}
+	if err := dbx.Migrate(ctx, admin, before); err != nil {
+		t.Fatal(err)
+	}
+	groupA := "abcdef12-0000-4000-8000-000000000001"
+	groupB := "abcdef12-0000-4000-8000-000000000002" // same first 8 hex digits as A
+	for i, g := range []string{groupA, groupB} {
+		partyID, err := insertParty(ctx, admin, testkit.TenantID(1), "P-"+string(rune('1'+i)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := admin.Exec(ctx, `insert into vendor_role (tenant_id, id, party_id, legal_entity_id, account_number, vendor_group_id, currency_code) values ($1, $2, $3, $4, $5, $6, 'USD')`,
+			testkit.TenantID(1), ids.New(), partyID, legalEntityA, "V-"+string(rune('1'+i)), g); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := store.New(app).ListVendorGroups(asUser(1, legalEntityA, "buyer"))
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("groups = %+v, %v; want two", rows, err)
+	}
+	got := map[string]string{}
+	for _, g := range rows {
+		got[g.ID] = g.Code
+	}
+	if got[groupA] != "VGABCDEF12" || got[groupB] != "VABCDEF120" {
+		t.Fatalf("backfilled codes = %v; want VGABCDEF12 and the collision fallback VABCDEF120", got)
 	}
 }

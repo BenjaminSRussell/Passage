@@ -21,15 +21,18 @@ var (
 )
 
 type Vendor struct {
-	ID            string  `json:"id"`
-	PartyID       string  `json:"partyId"`
-	LegalEntityID string  `json:"legalEntityId"`
-	AccountNumber string  `json:"accountNumber"`
-	VendorGroupID string  `json:"vendorGroupId"`
-	PaymentTermID *string `json:"paymentTermId,omitempty"`
-	CurrencyCode  string  `json:"currencyCode"`
-	Blocked       string  `json:"blocked"`
-	Version       int     `json:"version"`
+	ID            string `json:"id"`
+	PartyID       string `json:"partyId"`
+	LegalEntityID string `json:"legalEntityId"`
+	AccountNumber string `json:"accountNumber"`
+	VendorGroupID string `json:"vendorGroupId"`
+	// VendorGroupCode is the short code of the vendor group; empty when the
+	// group id is not a registered vendor group.
+	VendorGroupCode string  `json:"vendorGroupCode,omitempty"`
+	PaymentTermID   *string `json:"paymentTermId,omitempty"`
+	CurrencyCode    string  `json:"currencyCode"`
+	Blocked         string  `json:"blocked"`
+	Version         int     `json:"version"`
 }
 
 type NewVendor struct {

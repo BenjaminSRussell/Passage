@@ -2,13 +2,16 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/services/ledger/internal/domain"
 	ledgerevents "github.com/BenjaminSRussell/passage/services/ledger/internal/events"
 )
 
@@ -128,6 +131,9 @@ type LedgerSettings struct {
 	CalendarCode        *string
 	AccountingPrinciple *string
 	ReportingCurrency   *string
+	// AddDimensionAttributes appends dimension attributes the ledger does not
+	// have yet (never removes or reorders one); at most 20 in all.
+	AddDimensionAttributes []string
 }
 
 func (s *Postgres) UpdateLedgerSettings(ctx context.Context, id string, version int, in LedgerSettings) (Ledger, error) {
@@ -144,11 +150,21 @@ func (s *Postgres) UpdateLedgerSettings(ctx context.Context, id string, version 
 		if version > 0 && cur.Version != version {
 			return httpx.NewProblem(http.StatusPreconditionFailed, CodeVersionConflict, "the ledger changed since it was read; reload it and try again")
 		}
+		added := 0
+		for _, a := range in.AddDimensionAttributes {
+			if !slices.Contains(cur.DimensionAttributes, a) {
+				added++
+			}
+		}
+		if len(cur.DimensionAttributes)+added > domain.MaxDimensionAttributes {
+			return httpx.NewProblem(http.StatusBadRequest, "LEDGER_DIMENSION_LIMIT", fmt.Sprintf("a ledger holds at most %d dimension attributes", domain.MaxDimensionAttributes))
+		}
 		out, err = scanLedger(tx.QueryRow(ctx, `update ledger set calendar_code = case when $3::text is null then calendar_code else nullif($3, '') end,
 				accounting_principle = case when $4::text is null then accounting_principle else nullif($4, '') end,
 				reporting_currency = case when $5::text is null then reporting_currency else nullif($5, '') end,
+				dimension_attributes = dimension_attributes || array(select a from unnest($6::text[]) with ordinality as t(a, n) where not a = any(dimension_attributes) group by a, n order by n),
 				settings_version = settings_version + 1
-			where tenant_id = $1 and id = $2 returning `+ledgerFields, p.TenantID, id, in.CalendarCode, in.AccountingPrinciple, in.ReportingCurrency))
+			where tenant_id = $1 and id = $2 returning `+ledgerFields, p.TenantID, id, in.CalendarCode, in.AccountingPrinciple, in.ReportingCurrency, in.AddDimensionAttributes))
 		if err != nil {
 			return err
 		}

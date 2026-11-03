@@ -598,6 +598,7 @@
       {"resource": "/v1/party/parties/*", "methods": ["PATCH"]},
       {"resource": "/v1/party/customers/*/credit-limit", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*/vendor", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-groups", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*/customer", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*:merge", "methods": ["POST"]}
     ]},
@@ -605,6 +606,7 @@
       {"resource": "/v1/party/parties", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*", "methods": ["PATCH"]},
       {"resource": "/v1/party/parties/*/vendor", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-groups", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*/customer", "methods": ["POST"]}
     ]},
     "party.read": {"permissions": [
@@ -613,6 +615,8 @@
       {"resource": "/v1/party/legal-entities/*/protected-fields", "methods": ["GET"]},
       {"resource": "/v1/party/parties/*/vendors", "methods": ["GET"]},
       {"resource": "/v1/party/vendors/*", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-groups", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-groups/*", "methods": ["GET"]},
       {"resource": "/v1/party/vendors/*/bank-accounts", "methods": ["GET"]}
     ]},
     "party.vendor_bank.write": {"permissions": [

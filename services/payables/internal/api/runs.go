@@ -49,6 +49,7 @@ type RunStore interface {
 	RunFileContent(ctx context.Context, id string) (string, error)
 	RunFileConfig(ctx context.Context, id string) ([]byte, error)
 	InvoiceNumbers(ctx context.Context, proposalID string) (map[string]string, error)
+	VendorGroupCodes(ctx context.Context, proposalID string) (map[string]string, error)
 	SaveRunFile(ctx context.Context, id string, f store.RunFile) (store.PaymentRun, error)
 	RecordJournal(ctx context.Context, id, entryID string) (store.PaymentRun, error)
 	SettleRun(ctx context.Context, id string) (store.PaymentRun, error)
@@ -477,14 +478,28 @@ func (a *API) postRunJournal(w http.ResponseWriter, r *http.Request) {
 	if run.WithholdingAccount != nil {
 		withholdingAccount = *run.WithholdingAccount
 	}
+	dims := domain.VendorGroupDims{Attribute: a.vendorGroupDim}
+	if dims.Attribute != "" {
+		if dims.Codes, err = a.runs.store.VendorGroupCodes(ctx, proposal.ID); err != nil {
+			a.fault(w, r, "payment run vendor group codes failed", err)
+			return
+		}
+	}
 	entry := ledger.Entry{
 		LegalEntityID: run.LegalEntityID, LedgerID: run.LedgerID, DocumentID: run.ID, PostingDate: proposal.RunDate, Currency: proposal.LegalEntityCurrency,
 		IdempotencyKey: runKeyPrefix + run.ID, SourceType: runSourceType,
-		Lines: domain.RunJournal(proposal.LegalEntityCurrency, proposal.Groups, run.ControlAccount, run.BankAccount, discountAccount, withholdingAccount),
+		Lines: domain.RunJournal(proposal.LegalEntityCurrency, proposal.Groups, run.ControlAccount, run.BankAccount, discountAccount, withholdingAccount, dims),
+	}
+	if dims.Attribute != "" && len(dims.Codes) > 0 {
+		// A ledger that has not added the vendor group dimension drops it from the control debits instead of refusing the run.
+		entry.OptionalDimensions = []string{dims.Attribute}
 	}
 	entryID, err := a.runs.ledger.Post(ctx, entry)
 	if err != nil {
-		if ledgerRejected(err) {
+		// A 409 means the idempotency key was already used with another body: the control debits are split by the
+		// vendor group codes of the items, which a redelivered invoice.posted can fill between two attempts, so
+		// the entry an earlier attempt posted is looked up and recorded rather than failing the run.
+		if ledgerRejected(err) || ledgerConflict(err) {
 			existing, lookupErr := a.runs.ledger.EntryForDocument(ctx, entry)
 			if lookupErr != nil {
 				a.ledgerUnavailable(w, r, lookupErr)
@@ -495,6 +510,8 @@ func (a *API) postRunJournal(w http.ResponseWriter, r *http.Request) {
 				a.runResult(w, r, "post-journal", recorded, recordErr)
 				return
 			}
+		}
+		if ledgerRejected(err) {
 			if _, rerr := a.runs.store.RejectJournal(ctx, id); rerr != nil {
 				a.fault(w, r, "payment run journal rejection not recorded", rerr)
 				return
@@ -641,6 +658,13 @@ func (a *API) upstreamFailure(w http.ResponseWriter, r *http.Request, what strin
 	w.Header().Set("Retry-After", "1")
 	fail(w, r, httpx.NewProblem(http.StatusBadGateway, "COM-0502", what+" unavailable"))
 }
+
+func ledgerConflict(err error) bool {
+	var se *ledger.StatusError
+	return errors.As(err, &se) && se.Status == http.StatusConflict && se.Code == ledgerIdempotencyConflict
+}
+
+const ledgerIdempotencyConflict = "LEDGER_IDEMPOTENCY_CONFLICT"
 
 func ledgerRejected(err error) bool {
 	var se *ledger.StatusError

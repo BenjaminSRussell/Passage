@@ -1083,9 +1083,9 @@ type countingGroups struct {
 	calls *int
 }
 
-func (c countingGroups) VendorGroupID(context.Context, string, string) (string, error) {
+func (c countingGroups) VendorGroup(context.Context, string, string) (domain.VendorGroupRef, error) {
 	*c.calls++
-	return c.group, nil
+	return domain.VendorGroupRef{ID: c.group}, nil
 }
 
 func lastPostedData(t *testing.T, rg *rig) string {

@@ -168,6 +168,16 @@ components:
         ledgerLines:
           type: array
           items: { $ref: "#/components/schemas/LedgerLines" }
+        optionalDimensions:
+          type: array
+          maxItems: 20
+          items: { type: string, pattern: '^[A-Z][A-Z0-9_]{0,19}$' }
+          description: >-
+            Dimension attributes the poster tags lines with only where the ledger defines them. A ledger that does not
+            define one drops it from the lines (the rest of the line posts unchanged) instead of refusing the entry with
+            422 LEDGER_DIMENSION_INVALID; on a ledger set this is decided per member ledger. Receiving and payables send
+            VENDGRP (the vendor group code, #421), so their postings keep working on ledgers that have not added it
+            with addDimensionAttributes. The idempotency payload hash leaves out this list and the values of these attributes on the lines (they are best-effort tags), so a retry that tags a line differently replays the first entry instead of 409 LEDGER_IDEMPOTENCY_CONFLICT; a request without optionalDimensions hashes as before.
     SetEntryRequest:
       type: object
       required: [documentId, postingDate, source]
@@ -203,6 +213,16 @@ components:
           type: array
           description: At most one group per ledger of the set; a ledger outside the set is rejected with 422 LEDGER_LINES_LEDGER_NOT_IN_SET.
           items: { $ref: "#/components/schemas/LedgerLines" }
+        optionalDimensions:
+          type: array
+          maxItems: 20
+          items: { type: string, pattern: '^[A-Z][A-Z0-9_]{0,19}$' }
+          description: >-
+            Dimension attributes the poster tags lines with only where the ledger defines them. A ledger that does not
+            define one drops it from the lines (the rest of the line posts unchanged) instead of refusing the entry with
+            422 LEDGER_DIMENSION_INVALID; on a ledger set this is decided per member ledger. Receiving and payables send
+            VENDGRP (the vendor group code, #421), so their postings keep working on ledgers that have not added it
+            with addDimensionAttributes. The idempotency payload hash leaves out this list and the values of these attributes on the lines (they are best-effort tags), so a retry that tags a line differently replays the first entry instead of 409 LEDGER_IDEMPOTENCY_CONFLICT; a request without optionalDimensions hashes as before.
     LedgerLines:
       type: object
       required: [ledgerId, lines]
@@ -355,6 +375,11 @@ components:
         calendarCode: { type: string, pattern: '^[A-Z0-9_-]{1,20}$|^$', description: An empty string clears the value }
         accountingPrinciple: { type: string, enum: ["", IFRS, US_GAAP, LOCAL_GAAP, TAX, MANAGEMENT] }
         reportingCurrency: { type: string, pattern: '^[A-Z]{3}$|^$' }
+        addDimensionAttributes:
+          type: array
+          maxItems: 20
+          items: { type: string, pattern: '^[A-Z][A-Z0-9_]{0,19}$' }
+          description: Dimension attributes to append to the ledger (for example VENDGRP, the vendor group code that receiving posts on the vendor-control credit). Attributes already on the ledger are ignored; none is removed. The ledger holds at most 20 (400 beyond that).
     LedgerSetRequest:
       type: object
       required: [code, name, leadingLedgerId, parallelLedgerIds]
@@ -2046,9 +2071,11 @@ paths:
     patch:
       tags: [ledgers]
       operationId: updateLedgerSettings
-      summary: Change the calendar, accounting principle or reporting currency of a ledger
+      summary: Change the calendar, accounting principle, reporting currency or dimension attributes of a ledger
       description: |
-        Fields that are omitted keep their value; an empty string clears one. If-Match carries the ledger version
+        Fields that are omitted keep their value; an empty string clears one. addDimensionAttributes only appends
+        (a line combination id hashes the attributes in ledger order, so a later append gives lines that hold no value
+        for it a new combination id: balances stay correct and sum per account, but those rows split). If-Match carries the ledger version
         (412 LEDGER_VERSION_CONFLICT when it changed). Each change announces dev.passage.ledger.rules.changed.v1
         with kind ledger_settings.
       x-passage-duty: ledger.ledger.write

@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -298,6 +299,9 @@ type patchLedgerRequest struct {
 	CalendarCode        *string `json:"calendarCode"`
 	AccountingPrinciple *string `json:"accountingPrinciple"`
 	ReportingCurrency   *string `json:"reportingCurrency"`
+	// AddDimensionAttributes appends dimension attributes (for example VENDGRP);
+	// existing ones stay and an attribute already on the ledger is ignored.
+	AddDimensionAttributes []string `json:"addDimensionAttributes"`
 }
 
 func (a *API) patchLedger(w http.ResponseWriter, r *http.Request) {
@@ -315,8 +319,18 @@ func (a *API) patchLedger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields := map[string]string{}
-	if req.CalendarCode == nil && req.AccountingPrinciple == nil && req.ReportingCurrency == nil {
-		fields["body"] = "send at least one of calendarCode, accountingPrinciple, reportingCurrency (an empty string clears it)"
+	if req.CalendarCode == nil && req.AccountingPrinciple == nil && req.ReportingCurrency == nil && len(req.AddDimensionAttributes) == 0 {
+		fields["body"] = "send at least one of calendarCode, accountingPrinciple, reportingCurrency (an empty string clears it), addDimensionAttributes"
+	}
+	seenAttr := map[string]bool{}
+	for _, attr := range req.AddDimensionAttributes {
+		if !dimAttrRe.MatchString(attr) || seenAttr[attr] {
+			fields["addDimensionAttributes"] = "each attribute must be unique, A-Z with digits or underscores, at most 20 characters"
+		}
+		seenAttr[attr] = true
+	}
+	if len(req.AddDimensionAttributes) > domain.MaxDimensionAttributes {
+		fields["addDimensionAttributes"] = fmt.Sprintf("at most %d attributes per ledger", domain.MaxDimensionAttributes)
 	}
 	if v := req.CalendarCode; v != nil && *v != "" && !calendarCodeRe.MatchString(*v) {
 		fields["calendarCode"] = "must be 1 to 20 characters of A-Z, 0-9, '_' or '-'"
@@ -565,11 +579,54 @@ type postEntryRequest struct {
 	Description  string    `json:"description"`
 	Source       sourceDTO `json:"source"`
 	Lines        []lineDTO `json:"lines"`
+	// OptionalDimensions name dimension attributes that are dropped from the
+	// lines of a ledger that does not define them instead of refused.
+	OptionalDimensions []string `json:"optionalDimensions,omitempty"`
 }
 
 type singleEntryRequest struct {
 	postEntryRequest
 	LedgerLines []ledgerLinesDTO `json:"ledgerLines,omitempty"`
+}
+
+// withoutOptional is the request as the idempotency hash sees it: optional dimensions are best-effort tags
+// (the vendor group code comes from a party lookup that can fail on one attempt and answer on the next), so
+// their values and the optionalDimensions list are left out and a retry that tags differently replays the
+// entry the first attempt posted. A request without optionalDimensions is hashed exactly as before.
+func withoutOptional(req postEntryRequest, groups []ledgerLinesDTO) (postEntryRequest, []ledgerLinesDTO) {
+	if len(req.OptionalDimensions) == 0 {
+		return req, groups
+	}
+	strip := func(lines []lineDTO) []lineDTO {
+		out := make([]lineDTO, len(lines))
+		for i, l := range lines {
+			out[i] = l
+			if len(l.Dimensions) == 0 {
+				continue
+			}
+			dims := map[string]string{}
+			for k, v := range l.Dimensions {
+				if !slices.Contains(req.OptionalDimensions, k) {
+					dims[k] = v
+				}
+			}
+			if len(dims) == 0 {
+				dims = nil
+			}
+			out[i].Dimensions = dims
+		}
+		return out
+	}
+	req.Lines = strip(req.Lines)
+	req.OptionalDimensions = nil
+	stripped := make([]ledgerLinesDTO, len(groups))
+	for i, g := range groups {
+		stripped[i] = ledgerLinesDTO{LedgerID: g.LedgerID, Lines: strip(g.Lines)}
+	}
+	if groups == nil {
+		stripped = nil
+	}
+	return req, stripped
 }
 
 // toPostInput checks the request's syntax and builds the store input. Rule
@@ -613,6 +670,15 @@ func (a *API) toPostInput(req postEntryRequest, r *http.Request) (store.PostInpu
 	for i, l := range req.Lines {
 		in.Lines = append(in.Lines, lineInput(fmt.Sprintf("lines[%d]", i), l, fields))
 	}
+	if len(req.OptionalDimensions) > domain.MaxDimensionAttributes {
+		fields["optionalDimensions"] = fmt.Sprintf("at most %d attributes", domain.MaxDimensionAttributes)
+	}
+	for _, attr := range req.OptionalDimensions {
+		if !dimAttrRe.MatchString(attr) {
+			fields["optionalDimensions"] = "each attribute must be A-Z with digits or underscores, at most 20 characters"
+		}
+	}
+	in.OptionalDimensions = req.OptionalDimensions
 	in.TraceID = traceID(r)
 	return in, fields
 }
@@ -665,8 +731,10 @@ func (a *API) postEntry(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	req.LedgerLines = canonicalGroups(req.LedgerLines)
-	hash, err := domain.HashPayload(req)
+	hashed := req
+	hashed.postEntryRequest, hashed.LedgerLines = withoutOptional(req.postEntryRequest, req.LedgerLines)
+	hashed.LedgerLines = canonicalGroups(hashed.LedgerLines)
+	hash, err := domain.HashPayload(hashed)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return

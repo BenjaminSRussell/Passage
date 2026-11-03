@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"regexp"
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
@@ -98,8 +99,12 @@ func run(ctx context.Context, getenv func(string) string) error {
 		slog.Warn("withholding is disabled", "reason", err)
 		withholding = nil
 	}
+	groupDim, err := vendorGroupDimension(getenv)
+	if err != nil {
+		return err
+	}
 	a := api.New(pool, validator, time.Now).WithAging(items, balances, getenv("AP_CONTROL_ACCOUNT")).WithProposals(items, rates).WithPaymentRuns(items, poster, profiles).
-		WithVendorBanks(banks, keys).WithWithholding(withholding, items, profiles)
+		WithVendorBanks(banks, keys).WithWithholding(withholding, items, profiles).WithVendorGroupDimension(groupDim)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -111,6 +116,25 @@ func run(ctx context.Context, getenv func(string) string) error {
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), a.Instrument(router)) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
 	return <-errs
+}
+
+var dimensionAttrRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,19}$`)
+
+// vendorGroupDimension is the ledger dimension attribute for the vendor group code: AP_VENDOR_GROUP_DIMENSION,
+// VENDGRP when unset, none when "-". A ledger that does not define it drops it from the run journal (optional
+// dimension) and makes the per-group reconcile lines uncomparable.
+func vendorGroupDimension(getenv func(string) string) (string, error) {
+	switch v := getenv("AP_VENDOR_GROUP_DIMENSION"); v {
+	case "":
+		return api.DefaultVendorGroupDimension, nil
+	case "-":
+		return "", nil
+	default:
+		if !dimensionAttrRe.MatchString(v) {
+			return "", errors.New("AP_VENDOR_GROUP_DIMENSION must be a ledger dimension attribute (A-Z, digits, underscore) or -")
+		}
+		return v, nil
+	}
 }
 
 func ledgerClient(getenv func(string) string) (*ledger.Client, error) {

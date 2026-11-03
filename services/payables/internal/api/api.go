@@ -46,6 +46,8 @@ type API struct {
 	proposals        *proposalDeps
 	runs             *runDeps
 	withholding      *withholdingDeps
+	// vendorGroupDim is the ledger dimension attribute that carries the vendor group code on the AP control account; empty posts and compares none.
+	vendorGroupDim string
 }
 
 type problemBody struct {
@@ -80,7 +82,16 @@ var unprocessableCodes = map[string]bool{
 }
 
 func New(db Pinger, files FileValidator, now func() time.Time) *API {
-	return &API{db: db, files: files, now: now, http: newRequestMetrics()}
+	return &API{db: db, files: files, now: now, http: newRequestMetrics(), vendorGroupDim: DefaultVendorGroupDimension}
+}
+
+// DefaultVendorGroupDimension is the ledger dimension attribute for the vendor group code (issue #421).
+const DefaultVendorGroupDimension = "VENDGRP"
+
+// WithVendorGroupDimension names the ledger dimension attribute that carries the vendor group code; "" turns it off.
+func (a *API) WithVendorGroupDimension(attr string) *API {
+	a.vendorGroupDim = attr
+	return a
 }
 
 func (a *API) Register(r chi.Router) {

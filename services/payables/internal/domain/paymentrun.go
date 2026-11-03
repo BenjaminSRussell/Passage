@@ -55,6 +55,8 @@ type RunJournalLine struct {
 	Credit  bool
 	Amount  decimal.Decimal
 	Text    string
+	// Dimensions are ledger dimension values of the line (the vendor group code on a control-account debit).
+	Dimensions map[string]string
 }
 
 func RunSupportsMethod(method string) bool { return method == MethodTransfer || method == MethodWire }
@@ -118,17 +120,46 @@ func BuildRunFile(cfg RunFileConfig, creditors map[string]CreditorDTO, runID str
 	return file, payments, err
 }
 
-func RunJournal(currency string, groups []ProposalGroup, controlAccount, bankAccount, discountAccount, withholdingAccount string) []RunJournalLine {
+// VendorGroupDims tells RunJournal which dimension carries the vendor group code and the code of each open
+// item; a zero value posts no dimension.
+type VendorGroupDims struct {
+	Attribute string
+	// Codes maps an open item id to its vendor group code; an item without one is untagged.
+	Codes map[string]string
+}
+
+func RunJournal(currency string, groups []ProposalGroup, controlAccount, bankAccount, discountAccount, withholdingAccount string, dims VendorGroupDims) []RunJournalLine {
 	minor := money.MinorUnits(currency)
 	var lines []RunJournalLine
 	paid, withheld, discount := decimal.Zero, decimal.Zero, decimal.Zero
 	for _, g := range groups {
 		gross, groupWithheld := decimal.Zero, decimal.Zero
+		// The control debit is split per vendor group code so each group's ledger balance falls with its own items.
+		var codes []string
+		perCode := map[string]decimal.Decimal{}
 		for _, l := range g.Lines {
-			gross = gross.Add(l.OpenAmount.Mul(l.Rate).Round(minor))
+			amount := l.OpenAmount.Mul(l.Rate).Round(minor)
+			gross = gross.Add(amount)
 			groupWithheld = groupWithheld.Add(l.Withheld.Mul(l.Rate).Round(minor))
+			code := ""
+			if dims.Attribute != "" {
+				code = dims.Codes[l.OpenItemID]
+			}
+			if _, seen := perCode[code]; !seen {
+				codes = append(codes, code)
+			}
+			perCode[code] = perCode[code].Add(amount)
 		}
-		lines = append(lines, RunJournalLine{Account: controlAccount, Amount: gross, Text: "vendor " + g.VendorID})
+		for _, code := range codes {
+			line := RunJournalLine{Account: controlAccount, Amount: perCode[code], Text: "vendor " + g.VendorID}
+			if code != "" {
+				line.Dimensions = map[string]string{dims.Attribute: code}
+			}
+			lines = append(lines, line)
+		}
+		if len(codes) == 0 {
+			lines = append(lines, RunJournalLine{Account: controlAccount, Amount: gross, Text: "vendor " + g.VendorID})
+		}
 		paid = paid.Add(g.Valued)
 		withheld = withheld.Add(groupWithheld)
 		discount = discount.Add(gross.Sub(g.Valued).Sub(groupWithheld))

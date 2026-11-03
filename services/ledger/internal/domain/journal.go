@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -484,6 +485,41 @@ func Net(debit, credit decimal.Decimal) decimal.Decimal { return debit.Sub(credi
 
 // HashPayload returns the SHA-256 of the canonical JSON form of v. Used to
 // detect Idempotency-Key reuse with a different body (BR-11.6).
+// DropUndefinedOptional removes from each line the dimensions named in optional
+// that the ledger does not define (attributes), so a poster can tag lines with
+// an attribute (the vendor group code, VENDGRP) that only some ledgers carry.
+// Any other dimension is left for ValidateEntry to refuse. Lines are copied,
+// never changed in place: a ledger set shares them across ledgers.
+func DropUndefinedOptional(lines []LineInput, attributes, optional []string) []LineInput {
+	if len(optional) == 0 {
+		return lines
+	}
+	drop := map[string]bool{}
+	for _, a := range optional {
+		if !slices.Contains(attributes, a) {
+			drop[a] = true
+		}
+	}
+	if len(drop) == 0 {
+		return lines
+	}
+	out := make([]LineInput, len(lines))
+	for i, l := range lines {
+		out[i] = l
+		if len(l.Dimensions) == 0 {
+			continue
+		}
+		dims := make(map[string]string, len(l.Dimensions))
+		for k, v := range l.Dimensions {
+			if !drop[k] {
+				dims[k] = v
+			}
+		}
+		out[i].Dimensions = dims
+	}
+	return out
+}
+
 func HashPayload(v any) ([]byte, error) {
 	raw, err := json.Marshal(v)
 	if err != nil {

@@ -40,6 +40,7 @@ type AgingStore interface {
 
 type LedgerBalances interface {
 	AccountBalance(ctx context.Context, legalEntityID, ledgerID, account, periodTo string) (ledger.Balance, error)
+	AccountBalanceByDimension(ctx context.Context, legalEntityID, ledgerID, account, periodTo, attr string) (ledger.GroupBalance, error)
 	LegalEntity(ctx context.Context, legalEntityID, ledgerID string) (string, error)
 }
 
@@ -145,7 +146,11 @@ type reconcileResponse struct {
 	LedgerPeriod   string                        `json:"ledgerPeriod"`
 	Currencies     []domain.Reconciliation       `json:"currencies"`
 	VendorGroups   *[]domain.GroupReconciliation `json:"vendorGroups,omitempty"`
-	Reconciled     bool                          `json:"reconciled"`
+	// VendorGroupDimension names the ledger dimension the vendorGroups lines were compared on.
+	VendorGroupDimension string `json:"vendorGroupDimension,omitempty"`
+	// VendorGroupsReconciled is true when every comparable vendor group line reconciles and none is left uncomparable; present with vendorGroups.
+	VendorGroupsReconciled *bool `json:"vendorGroupsReconciled,omitempty"`
+	Reconciled             bool  `json:"reconciled"`
 }
 
 func (a *API) agingReconcile(w http.ResponseWriter, r *http.Request) {
@@ -198,14 +203,50 @@ func (a *API) agingReconcile(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("ap subledger does not reconcile to the control account", "legalEntityId", q.legalEntityID, "ledgerId", ledgerID, "asOf", q.asOf.Format(dateLayout), "correlationId", middleware.GetReqID(r.Context()))
 	}
 	var groups *[]domain.GroupReconciliation
+	var groupsOK *bool
 	if q.byVendorGroup {
-		breakdown := append([]domain.GroupReconciliation{}, domain.GroupBreakdown(rows)...)
-		groups = &breakdown
+		breakdown, ok, err := a.reconcileGroups(r.Context(), q, ledgerID, period, bal.Currency, rows)
+		if err != nil {
+			a.ledgerFailure(w, r, ledgerID, err)
+			return
+		}
+		if !ok {
+			slog.Warn("ap subledger does not reconcile to the control account per vendor group", "legalEntityId", q.legalEntityID, "ledgerId", ledgerID, "asOf", q.asOf.Format(dateLayout), "correlationId", middleware.GetReqID(r.Context()))
+		}
+		groups, groupsOK = &breakdown, &ok
 	}
 	httpx.JSON(w, http.StatusOK, reconcileResponse{
 		AsOf: q.asOf.Format(dateLayout), LegalEntityID: q.legalEntityID, LedgerID: ledgerID, ControlAccount: a.aging.controlAccount,
-		LedgerPeriod: period, Currencies: currencies, VendorGroups: groups, Reconciled: all,
+		LedgerPeriod: period, Currencies: currencies, VendorGroups: groups, VendorGroupDimension: a.vendorGroupDim, VendorGroupsReconciled: groupsOK, Reconciled: all,
 	})
+}
+
+// reconcileGroups compares the subledger per vendor group code with the control account split by the
+// vendor group dimension. A ledger that does not define the dimension (400) or a switched-off dimension
+// gives uncomparable lines with the reason; any other ledger failure is returned.
+func (a *API) reconcileGroups(ctx context.Context, q agingQuery, ledgerID, period, ledgerCurrency string, rows []domain.AgingRow) ([]domain.GroupReconciliation, bool, error) {
+	var byValue map[string]decimal.Decimal
+	unavailable := ""
+	if a.vendorGroupDim == "" {
+		unavailable = domain.ReasonGroupsOff
+	} else {
+		bal, err := a.aging.ledger.AccountBalanceByDimension(ctx, q.legalEntityID, ledgerID, a.aging.controlAccount, period, a.vendorGroupDim)
+		var se *ledger.StatusError
+		switch {
+		case errors.As(err, &se) && se.Status == http.StatusBadRequest:
+			unavailable = domain.ReasonLedgerNoGroupDimension
+		case err != nil:
+			return nil, false, err
+		default:
+			byValue = bal.ByValue
+		}
+	}
+	lines := append([]domain.GroupReconciliation{}, domain.ReconcileGroups(rows, ledgerCurrency, byValue, unavailable)...)
+	ok := true
+	for _, l := range lines {
+		ok = ok && l.Comparable && l.Reconciled
+	}
+	return lines, ok, nil
 }
 
 func (a *API) ledgerFailure(w http.ResponseWriter, r *http.Request, ledgerID string, err error) {

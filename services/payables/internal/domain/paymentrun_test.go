@@ -25,7 +25,7 @@ func twoGroups() []domain.ProposalGroup {
 }
 
 func TestRunJournal_BalancesGrossControlAgainstBankAndDiscount(t *testing.T) {
-	lines := domain.RunJournal("USD", twoGroups(), "2000", "1010", "4900", "")
+	lines := domain.RunJournal("USD", twoGroups(), "2000", "1010", "4900", "", domain.VendorGroupDims{})
 	type row struct {
 		account string
 		credit  bool
@@ -52,7 +52,7 @@ func TestRunJournal_BalancesGrossControlAgainstBankAndDiscount(t *testing.T) {
 }
 
 func TestRunJournal_NoDiscountLineWithoutDiscount(t *testing.T) {
-	lines := domain.RunJournal("USD", twoGroups()[1:], "2000", "1010", "", "")
+	lines := domain.RunJournal("USD", twoGroups()[1:], "2000", "1010", "", "", domain.VendorGroupDims{})
 	if len(lines) != 2 || lines[1].Account != "1010" {
 		t.Fatalf("lines = %+v", lines)
 	}
@@ -95,7 +95,7 @@ func TestBuildRunFile_RefusesAVendorWithoutBankDetails(t *testing.T) {
 func TestRunJournal_CreditsWithheldTaxAndStillBalances(t *testing.T) {
 	groups := twoGroups()[1:]
 	groups[0].Withhold(0, "WHT30", d("150"), 2)
-	lines := domain.RunJournal("USD", groups, "2000", "1010", "4900", "2300")
+	lines := domain.RunJournal("USD", groups, "2000", "1010", "4900", "2300", domain.VendorGroupDims{})
 	if len(lines) != 3 || lines[1].Account != "1010" || !lines[1].Amount.Equal(d("350")) || lines[2].Account != "2300" || !lines[2].Amount.Equal(d("150")) {
 		t.Fatalf("lines = %+v, want debit 500, bank credit 350, withholding credit 150", lines)
 	}
@@ -151,5 +151,25 @@ func TestHasDiscount(t *testing.T) {
 	groups := twoGroups()
 	if !domain.HasDiscount(groups) || domain.HasDiscount(groups[1:]) {
 		t.Fatal("HasDiscount must follow the group discount totals")
+	}
+}
+
+func TestRunJournal_ControlDebitsCarryTheVendorGroupCodePerItem(t *testing.T) {
+	groups := []domain.ProposalGroup{{ID: groupOne, VendorID: "v1", Currency: "USD", Method: "TRANSFER", Net: d("30"), Valued: d("30"),
+		Lines: []domain.ProposalLine{
+			{OpenItemID: "i1", OpenAmount: d("10"), Pay: d("10"), Rate: d("1"), Valued: d("10")},
+			{OpenItemID: "i2", OpenAmount: d("5"), Pay: d("5"), Rate: d("1"), Valued: d("5")},
+			{OpenItemID: "i3", OpenAmount: d("15"), Pay: d("15"), Rate: d("1"), Valued: d("15")},
+		}}}
+	dims := domain.VendorGroupDims{Attribute: "VENDGRP", Codes: map[string]string{"i1": "DOM", "i3": "DOM"}}
+	lines := domain.RunJournal("USD", groups, "2000", "1010", "", "", dims)
+	if len(lines) != 3 {
+		t.Fatalf("lines = %+v, want two control debits (DOM and untagged) and the bank credit", lines)
+	}
+	if lines[0].Dimensions["VENDGRP"] != "DOM" || lines[0].Amount.String() != "25" || len(lines[1].Dimensions) != 0 || lines[1].Amount.String() != "5" || lines[2].Account != "1010" || lines[2].Amount.String() != "30" {
+		t.Fatalf("lines = %+v, want DOM 25, untagged 5, bank 30", lines)
+	}
+	if off := domain.RunJournal("USD", groups, "2000", "1010", "", "", domain.VendorGroupDims{Codes: dims.Codes}); len(off) != 2 || len(off[0].Dimensions) != 0 || off[0].Amount.String() != "30" {
+		t.Fatalf("with the dimension off the control debit stays one untagged line: %+v", off)
 	}
 }

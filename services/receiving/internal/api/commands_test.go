@@ -48,7 +48,7 @@ func newRigWithGroups(st *memstore.Store, periods domain.PeriodStatus, groups do
 	rg := &rig{st: st, ledger: &domain.FakeLedger{}}
 	a := api.New(rg.st, api.Ports{
 		Periods: domain.FakePeriods{Status: periods}, Ledger: rg.ledger, VendorGroups: groups,
-		Profile:       domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
+		Profile:       domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000", VendorGroupDimension: domain.DefaultVendorGroupDimension},
 		ResolveMinAge: time.Nanosecond,
 	})
 	router := httpx.NewRouter()
@@ -478,7 +478,7 @@ func TestInvoice_EventCarriesVendorGroupFromParty(t *testing.T) {
 		want   string
 		failed string
 	}{
-		{"known vendor", domain.FakeVendorGroups{Groups: map[string]string{vendorID: group}}, `"vendor_group_id":"` + group + `"`, "0"},
+		{"known vendor", domain.FakeVendorGroups{Groups: map[string]string{vendorID: group}, Codes: map[string]string{vendorID: "DOM"}}, `"vendor_group_id":"` + group + `","vendor_group_code":"DOM"`, "0"},
 		{"party unreachable", domain.FakeVendorGroups{Err: errors.New("party down")}, "", "1"},
 		{"unknown vendor", domain.FakeVendorGroups{}, "", "1"},
 		{"group is not a uuid", domain.FakeVendorGroups{Groups: map[string]string{vendorID: "not-a-uuid"}}, "", "1"},

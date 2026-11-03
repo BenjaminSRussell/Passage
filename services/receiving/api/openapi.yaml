@@ -117,6 +117,7 @@ paths:
   /v1/receiving/receipts/{id}:
     get:
       operationId: getReceipt
+      summary: Read one goods receipt
       x-passage-duty: ReceivingMaintain
       parameters:
         - $ref: '#/components/parameters/ReceiptId'
@@ -258,7 +259,7 @@ paths:
     post:
       operationId: postVendorInvoice
       x-passage-duty: VendorInvoicePost
-      description: Posts a vendor invoice against GR/IR items. Checks the AP period, clears GR/IR pro rata (the last quantity clears the exact remainder), posts to the ledger, persists the invoice and writes dev.passage.payables.invoice.posted.v1 to the outbox. The invoice id derives from tenant, vendor and invoice number, so the ledger idempotency key is stable across retries. When the legal entity has a stochastic audit sample rate (PUT /v1/receiving/audit-policy), the invoice may be drawn for audit: it is stored with status AUDIT_BLOCKED, reserves its GR/IR quantity (so no other invoice, ERS run or plan settlement can take it), posts nothing to the ledger and writes dev.passage.payables.invoice.sampled.v1 instead, until an auditor calls :release-audit-block. Subsequent debits and credits against a blocked invoice are refused (AP-AUD-001).
+      description: 'Posts a vendor invoice against GR/IR items. Checks the AP period, clears GR/IR pro rata (the last quantity clears the exact remainder), posts to the ledger, persists the invoice and writes dev.passage.payables.invoice.posted.v1 to the outbox. The invoice id derives from tenant, vendor and invoice number, so the ledger idempotency key is stable across retries. When the legal entity has a stochastic audit sample rate (PUT /v1/receiving/audit-policy), the invoice may be drawn for audit: it is stored with status AUDIT_BLOCKED, reserves its GR/IR quantity (so no other invoice, ERS run or plan settlement can take it), posts nothing to the ledger and writes dev.passage.payables.invoice.sampled.v1 instead, until an auditor calls :release-audit-block. Subsequent debits and credits against a blocked invoice are refused (AP-AUD-001).'
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -285,7 +286,7 @@ paths:
     post:
       operationId: createOneTimePayee
       x-passage-duty: VendorInvoicePost
-      description: Records the document-level payee of a vendor invoice for the legal entity's one-time vendor account (FR-18.19). Name, address, tax id, email and bank account are encrypted with platform fieldcrypt (a per-tenant data key derived from the service key in FIELDCRYPT_KEYS_FILE or FIELDCRYPT_KEYS, with tenant and field bound as additional data) before they reach the database; the payee is immutable once stored. The response, error bodies, logs and events carry the payee id, never its data: a validation error names the field and the rule, not the value. The bank account is validated like a vendor bank account (IBAN mod-97 and ISO 13616 per-country length, or ABA checksum, AP-BNK-001). With fieldcrypt keys the Idempotency-Key record stores an HMAC of the request under the tenant's key, not a plain digest of the payee data. Reference the returned id as oneTimePayeeId on POST /v1/receiving/invoices:post. There is no read endpoint; payment (FR-19.23) needs a separate decrypting read. Erasure is a separate route (POST /v1/receiving/one-time-payees:erase); the optional subjectRef is the opaque data-subject id a compliance erasure command names.
+      description: 'Records the document-level payee of a vendor invoice for the legal entity''s one-time vendor account (FR-18.19). Name, address, tax id, email and bank account are encrypted with platform fieldcrypt (a per-tenant data key derived from the service key in FIELDCRYPT_KEYS_FILE or FIELDCRYPT_KEYS, with tenant and field bound as additional data) before they reach the database; the payee is immutable once stored. The response, error bodies, logs and events carry the payee id, never its data: a validation error names the field and the rule, not the value. The bank account is validated like a vendor bank account (IBAN mod-97 and ISO 13616 per-country length, or ABA checksum, AP-BNK-001). With fieldcrypt keys the Idempotency-Key record stores an HMAC of the request under the tenant''s key, not a plain digest of the payee data. Reference the returned id as oneTimePayeeId on POST /v1/receiving/invoices:post. There is no read endpoint; payment (FR-19.23) needs a separate decrypting read. Erasure is a separate route (POST /v1/receiving/one-time-payees:erase); the optional subjectRef is the opaque data-subject id a compliance erasure command names.'
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -349,6 +350,7 @@ paths:
   /v1/receiving/invoice-captures/{id}:
     get:
       operationId: getInvoiceCapture
+      summary: Read one captured vendor invoice
       x-passage-duty: APInquire
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -398,6 +400,7 @@ paths:
   /v1/receiving/service-entry-sheets/{id}:
     get:
       operationId: getServiceEntrySheet
+      summary: Read one service entry sheet
       x-passage-duty: ServiceEntryMaintain or ServiceEntryAccept
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }

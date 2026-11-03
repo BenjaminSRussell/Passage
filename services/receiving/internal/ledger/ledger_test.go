@@ -48,6 +48,7 @@ type ledgerPostEntryRequest struct {
 		Text          string `json:"text"`
 		SourceLineRef string `json:"sourceLineRef"`
 	} `json:"lines"`
+	OptionalDimensions []string `json:"optionalDimensions"`
 }
 
 // ledgerReverseRequest mirrors reverseRequest in services/ledger/internal/api/api.go.
@@ -83,6 +84,26 @@ func TestPostBodyDecodesIntoTheLedgersRequestShape(t *testing.T) {
 	if len(got.Lines) != 2 || got.Lines[0].DebitCredit != "D" || got.Lines[0].Amount.Value != "12.50" || got.Lines[0].Amount.Currency != "USD" ||
 		got.Lines[1].DebitCredit != "C" || got.Lines[1].Amount.Value != "12.50" || got.Lines[1].Account != "2100" {
 		t.Fatalf("lines %+v", got.Lines)
+	}
+}
+
+func TestPostSendsLineDimensions(t *testing.T) {
+	client, _, raw := serve(t, http.StatusCreated, `{"entries":[{"id":"E1"}]}`)
+	entry := testEntry()
+	entry.Lines[1].Dimensions = map[string]string{"VENDGRP": "DOM"}
+	entry.OptionalDimensions = []string{"VENDGRP"}
+	if _, err := client.Post(testCtx(), entry); err != nil {
+		t.Fatal(err)
+	}
+	var got ledgerPostEntryRequest
+	strictDecode(t, *raw, &got)
+	if len(got.Lines[0].Dimensions) != 0 || got.Lines[1].Dimensions["VENDGRP"] != "DOM" {
+		t.Fatalf("line dimensions %v and %v, want none and VENDGRP=DOM", got.Lines[0].Dimensions, got.Lines[1].Dimensions)
+	}
+	// The ledger drops an optional dimension it does not define, so a ledger
+	// without VENDGRP keeps accepting the posting.
+	if len(got.OptionalDimensions) != 1 || got.OptionalDimensions[0] != "VENDGRP" {
+		t.Fatalf("optionalDimensions %v, want [VENDGRP]", got.OptionalDimensions)
 	}
 }
 

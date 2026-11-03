@@ -21,24 +21,26 @@ var (
 )
 
 var (
-	currencyPattern = regexp.MustCompile(`^[A-Z]{3}$`)
-	uuidPattern     = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	currencyPattern  = regexp.MustCompile(`^[A-Z]{3}$`)
+	groupCodePattern = regexp.MustCompile(`^[A-Z0-9_-]{1,10}$`)
+	uuidPattern      = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 )
 
 const amountScale = 6
 
 type invoicePosted struct {
-	InvoiceID     string  `json:"invoice_id"`
-	LegalEntityID string  `json:"legal_entity_id"`
-	VendorID      string  `json:"vendor_id"`
-	VendorGroupID string  `json:"vendor_group_id"`
-	InvoiceNumber string  `json:"invoice_number"`
-	InvoiceDate   string  `json:"invoice_date"`
-	DueDate       string  `json:"due_date"`
-	DiscountDate  *string `json:"discount_date"`
-	DiscountAmt   string  `json:"discount_amount"`
-	Currency      string  `json:"currency"`
-	Total         string  `json:"total"`
+	InvoiceID       string  `json:"invoice_id"`
+	LegalEntityID   string  `json:"legal_entity_id"`
+	VendorID        string  `json:"vendor_id"`
+	VendorGroupID   string  `json:"vendor_group_id"`
+	VendorGroupCode string  `json:"vendor_group_code"`
+	InvoiceNumber   string  `json:"invoice_number"`
+	InvoiceDate     string  `json:"invoice_date"`
+	DueDate         string  `json:"due_date"`
+	DiscountDate    *string `json:"discount_date"`
+	DiscountAmt     string  `json:"discount_amount"`
+	Currency        string  `json:"currency"`
+	Total           string  `json:"total"`
 }
 
 func HandleInvoicePosted(ctx context.Context, items *store.Postgres, evt events.Event) error {
@@ -56,6 +58,9 @@ func HandleInvoicePosted(ctx context.Context, items *store.Postgres, evt events.
 	}
 	if d.VendorGroupID != "" && !uuidPattern.MatchString(d.VendorGroupID) {
 		return fmt.Errorf("%w: vendor_group_id %q is not a uuid", ErrInvalidEvent, d.VendorGroupID)
+	}
+	if d.VendorGroupCode != "" && !groupCodePattern.MatchString(d.VendorGroupCode) {
+		return fmt.Errorf("%w: vendor_group_code %q", ErrInvalidEvent, d.VendorGroupCode)
 	}
 	if d.InvoiceNumber == "" || !currencyPattern.MatchString(d.Currency) {
 		return fmt.Errorf("%w: invoice_number or currency %q", ErrInvalidEvent, d.Currency)
@@ -92,7 +97,7 @@ func HandleInvoicePosted(ctx context.Context, items *store.Postgres, evt events.
 	}
 	ctx = tenant.With(ctx, tenant.Principal{TenantID: evt.TenantID, LegalEntityID: d.LegalEntityID, UserID: "system:invoice.posted"})
 	_, _, err = items.CreateFromInvoice(ctx, store.OpenItem{
-		LegalEntityID: d.LegalEntityID, VendorID: d.VendorID, VendorGroupID: d.VendorGroupID, SourceInvoiceID: d.InvoiceID, InvoiceNumber: d.InvoiceNumber,
+		LegalEntityID: d.LegalEntityID, VendorID: d.VendorID, VendorGroupID: d.VendorGroupID, VendorGroupCode: d.VendorGroupCode, SourceInvoiceID: d.InvoiceID, InvoiceNumber: d.InvoiceNumber,
 		InvoiceDate: d.InvoiceDate, DueDate: due, DueDateSource: dueSource, Currency: d.Currency, Amount: total, DiscountDate: d.DiscountDate, DiscountAmount: discount,
 	})
 	return err

@@ -46,6 +46,56 @@ func TestAccountBalance(t *testing.T) {
 	}
 }
 
+func TestAccountBalanceByDimension_SplitsByTheDimensionValue(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"currency":"USD","groupBy":["VENDGRP"],"rows":[
+			{"account":"2000","debit":"0.00","credit":"100.00","dimensions":{"VENDGRP":"DOM"}},
+			{"account":"2000","debit":"30.00","credit":"0.00","dimensions":{"VENDGRP":"DOM"}},
+			{"account":"2000","debit":"0.00","credit":"7.00","dimensions":{"VENDGRP":""}},
+			{"account":"2001","debit":"0.00","credit":"9.00","dimensions":{"VENDGRP":"DOM"}}]}`))
+	}))
+	defer srv.Close()
+	got, err := ledger.New(srv.URL, nil).AccountBalanceByDimension(ctx(), "", "led-1", "2000", "2027-06", "VENDGRP")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gotQuery, "group_by=VENDGRP") || got.Currency != "USD" || got.ByValue["DOM"].String() != "70" || got.ByValue[""].String() != "7" || len(got.ByValue) != 2 {
+		t.Fatalf("query %s, balance %+v; want DOM 70 and blank 7 (credits minus debits, only the requested account)", gotQuery, got)
+	}
+}
+
+func TestAccountBalanceByDimension_UndefinedDimensionIsAStatusError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadRequest) }))
+	defer srv.Close()
+	_, err := ledger.New(srv.URL, nil).AccountBalanceByDimension(ctx(), "", "led-1", "2000", "2027-06", "VENDGRP")
+	var se *ledger.StatusError
+	if !errors.As(err, &se) || se.Status != http.StatusBadRequest {
+		t.Fatalf("err = %v, want a 400 StatusError", err)
+	}
+}
+
+func TestPost_SendsLineDimensions(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"entries":[{"id":"entry-9"}]}`))
+	}))
+	defer srv.Close()
+	e := postEntry()
+	e.Lines[0].Dimensions = map[string]string{"VENDGRP": "DOM"}
+	if _, err := postClient(srv.URL).Post(postCtx(), e); err != nil {
+		t.Fatal(err)
+	}
+	lines := body["lines"].([]any)
+	first, second := lines[0].(map[string]any), lines[1].(map[string]any)
+	if first["dimensions"].(map[string]any)["VENDGRP"] != "DOM" || second["dimensions"] != nil {
+		t.Fatalf("lines = %v, want VENDGRP=DOM on the first only", lines)
+	}
+}
+
 func TestAccountBalance_AccountWithNoRowsIsZero(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"currency":"USD","rows":[]}`)) }))
 	defer srv.Close()

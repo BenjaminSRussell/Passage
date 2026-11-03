@@ -160,19 +160,19 @@ components:
         $ref: "#/components/schemas/InvoiceRejectedData"
     AuditPolicyChanged:
       name: dev.passage.receiving.auditpolicy.changed.v1
-      summary: PUT /v1/receiving/audit-policy changed the stochastic audit sample rate of a legal entity. Consumers: audit.
+      summary: 'PUT /v1/receiving/audit-policy changed the stochastic audit sample rate of a legal entity. Consumers: audit.'
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/AuditPolicyChangedData"
     ErsVendorChanged:
       name: dev.passage.receiving.ersvendor.changed.v1
-      summary: PUT /v1/receiving/ers-vendors/{vendorId} turned evaluated receipt settlement on or off for a vendor. Consumers: audit.
+      summary: 'PUT /v1/receiving/ers-vendors/{vendorId} turned evaluated receipt settlement on or off for a vendor. Consumers: audit.'
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/ErsVendorChangedData"
     ErsPriceConfirmed:
       name: dev.passage.receiving.erspriceconfirmation.confirmed.v1
-      summary: A buyer confirmed the PO price an ERS run may settle a receipt line at (BR-18.9). Consumers: audit.
+      summary: 'A buyer confirmed the PO price an ERS run may settle a receipt line at (BR-18.9). Consumers: audit.'
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/ErsPriceConfirmedData"
@@ -257,6 +257,7 @@ components:
         legal_entity_id: { type: string, format: uuid }
         vendor_id: { type: string, format: uuid }
         vendor_group_id: { type: string, format: uuid, description: "the vendor's group from the party vendor master; omitted when party is unreachable, refuses the lookup or does not know the vendor, because AP posting does not depend on party availability" }
+        vendor_group_code: { type: string, pattern: '^[A-Z0-9_-]{1,10}$', description: "the short code of the vendor group (party vendor group, issue #421); also posted as the VENDGRP dimension of the vendor-control credit line on a ledger that defines VENDGRP (an optional dimension, dropped by a ledger without it). Omitted when the lookup fails or the group has no registered code." }
         invoice_number: { type: string }
         invoice_date: { type: string, format: date }
         posting_date: { type: string, format: date }

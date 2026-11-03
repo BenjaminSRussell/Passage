@@ -30,7 +30,7 @@ const (
 	CodePartyMerged     = "PTY-PARTY-MERGED"
 	FieldBankAccountNo  = "vendor_bank_account.account_number"
 	FieldBankRoutingNo  = "vendor_bank_account.routing_number"
-	vendorColumns       = `id::text, party_id::text, legal_entity_id::text, account_number, vendor_group_id::text, payment_term_id::text, currency_code, blocked, version`
+	vendorColumns       = `id::text, party_id::text, legal_entity_id::text, account_number, vendor_group_id::text, coalesce((select g.code from vendor_group g where g.tenant_id = vendor_role.tenant_id and g.id = vendor_role.vendor_group_id), ''), payment_term_id::text, currency_code, blocked, version`
 	bankColumns         = `id::text, vendor_id::text, account_holder, bank_country, currency_code, account_last4`
 	foreignKeyViolation = "23503"
 	vendorKeyPrefix     = "vendor-role:"
@@ -50,6 +50,9 @@ type VendorStore interface {
 	CreateVendorRole(ctx context.Context, partyID string, in NewVendorRole) (domain.Vendor, bool, error)
 	GetVendor(ctx context.Context, vendorID string) (domain.Vendor, error)
 	ListPartyVendors(ctx context.Context, partyID string) ([]domain.Vendor, error)
+	CreateVendorGroup(ctx context.Context, in NewVendorGroupRequest) (domain.VendorGroup, bool, error)
+	GetVendorGroup(ctx context.Context, groupID string) (domain.VendorGroup, error)
+	ListVendorGroups(ctx context.Context) ([]domain.VendorGroup, error)
 	AddBankAccount(ctx context.Context, vendorID string, in domain.NewBankAccount) (domain.BankAccount, error)
 	ListBankAccounts(ctx context.Context, vendorID string, reveal bool) ([]domain.BankAccount, error)
 }
@@ -68,7 +71,7 @@ func vendorNotFound() error { return notFound(CodeVendorNotFound, "vendor not fo
 
 func scanVendor(row pgx.Row) (domain.Vendor, error) {
 	var v domain.Vendor
-	err := row.Scan(&v.ID, &v.PartyID, &v.LegalEntityID, &v.AccountNumber, &v.VendorGroupID, &v.PaymentTermID, &v.CurrencyCode, &v.Blocked, &v.Version)
+	err := row.Scan(&v.ID, &v.PartyID, &v.LegalEntityID, &v.AccountNumber, &v.VendorGroupID, &v.VendorGroupCode, &v.PaymentTermID, &v.CurrencyCode, &v.Blocked, &v.Version)
 	return v, err
 }
 

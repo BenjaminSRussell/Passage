@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -287,5 +288,80 @@ func TestPostgres_MixedCurrencySetResolvesRatesForAnUppercaseSetId(t *testing.T)
 	out, err := e.store.PostSetEntry(WithRateSource(e.ctx, rates), strings.ToUpper(e.set.ID), vendorInvoice("", "MIX-UPPER", "100.00"))
 	if err != nil || len(out.Entries) != 3 || rates.calls != 1 {
 		t.Fatalf("entries %d, lookups %d, err %v", len(out.Entries), rates.calls, err)
+	}
+}
+
+func TestPostgres_AddDimensionAttributesAppendsOnceAndIsCapped(t *testing.T) {
+	e, eur := setupMixedCurrencySet(t)
+	before := eur.DimensionAttributes
+	updated, err := e.store.UpdateLedgerSettings(e.ctx, eur.ID, 0, LedgerSettings{AddDimensionAttributes: []string{"VENDGRP"}})
+	if err != nil || len(updated.DimensionAttributes) != len(before)+1 || updated.DimensionAttributes[len(before)] != "VENDGRP" || updated.Version != eur.Version+1 {
+		t.Fatalf("append VENDGRP: %+v %v (before %v)", updated, err, before)
+	}
+	for i := range before {
+		if updated.DimensionAttributes[i] != before[i] {
+			t.Fatalf("existing attributes must keep their order: %v then %v", before, updated.DimensionAttributes)
+		}
+	}
+	again, err := e.store.UpdateLedgerSettings(e.ctx, eur.ID, 0, LedgerSettings{AddDimensionAttributes: []string{"VENDGRP"}})
+	if err != nil || len(again.DimensionAttributes) != len(updated.DimensionAttributes) {
+		t.Fatalf("an attribute already on the ledger is ignored: %+v %v", again, err)
+	}
+	many := make([]string, 0, 25)
+	for i := 0; i < 25; i++ {
+		many = append(many, fmt.Sprintf("ATTR%02d", i))
+	}
+	if _, err := e.store.UpdateLedgerSettings(e.ctx, eur.ID, 0, LedgerSettings{AddDimensionAttributes: many}); problemCode(err) != "LEDGER_DIMENSION_LIMIT" {
+		t.Fatalf("more than 20 attributes: %v", err)
+	}
+}
+
+// A poster names VENDGRP optional (#421): a ledger that does not define it drops it from the line and posts, a
+// ledger that defines it keeps it, and a dimension that is not optional is still refused.
+func TestPostgres_OptionalDimensionIsDroppedOnlyWhereTheLedgerLacksIt(t *testing.T) {
+	e, _ := setup(t)
+	tagged := func(key string, optional ...string) PostInput {
+		in := vendorInvoice(e.ledger.ID, key, "10.00")
+		in.Lines[1].Dimensions = map[string]string{"VENDGRP": "DOM"}
+		in.OptionalDimensions = optional
+		return in
+	}
+	var rej *domain.RejectedError
+	if _, err := e.store.PostEntry(e.ctx, tagged("OPT-REFUSED")); !errors.As(err, &rej) || rej.Violations[0].Code != domain.CodeDimensionInvalid {
+		t.Fatalf("an undefined dimension that is not optional: %v", err)
+	}
+	in := tagged("OPT-DROPPED", "VENDGRP")
+	out, err := e.store.PostEntry(e.ctx, in)
+	if err != nil || len(out.Entries) != 1 {
+		t.Fatalf("post with an optional undefined dimension: %+v %v", out, err)
+	}
+	for _, l := range out.Entries[0].Lines {
+		if _, ok := l.Dimensions["VENDGRP"]; ok {
+			t.Fatalf("line %s kept VENDGRP on a ledger without it: %v", l.Account, l.Dimensions)
+		}
+	}
+	if in.Lines[1].Dimensions["VENDGRP"] != "DOM" {
+		t.Fatal("the caller's lines must not be changed in place")
+	}
+	if replay, err := e.store.PostEntry(e.ctx, in); err != nil || !replay.Idempotency.Replayed || replay.Entries[0].ID != out.Entries[0].ID {
+		t.Fatalf("a retry replays the entry: %+v %v", replay, err)
+	}
+	if _, err := e.store.UpdateLedgerSettings(e.ctx, e.ledger.ID, 0, LedgerSettings{AddDimensionAttributes: []string{"VENDGRP"}}); err != nil {
+		t.Fatal(err)
+	}
+	kept, err := e.store.PostEntry(e.ctx, tagged("OPT-KEPT", "VENDGRP"))
+	if err != nil || kept.Entries[0].Lines[1].Dimensions["VENDGRP"] != "DOM" {
+		t.Fatalf("a ledger that defines VENDGRP keeps it: %+v %v", kept, err)
+	}
+	tb, err := e.store.TrialBalance(e.ctx, BalanceFilter{LedgerID: e.ledger.ID, AccountFrom: "2100", AccountTo: "2100", GroupBy: []string{"VENDGRP"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byCode := map[string]string{}
+	for _, r := range tb.Rows {
+		byCode[r.Dimensions["VENDGRP"]] = r.Credit
+	}
+	if byCode["DOM"] != "10.00" || byCode[""] != "10.00" {
+		t.Fatalf("control balance per VENDGRP %v, want 10.00 tagged and 10.00 untagged", byCode)
 	}
 }

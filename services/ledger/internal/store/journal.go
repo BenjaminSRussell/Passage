@@ -124,6 +124,7 @@ func requireLedgerSpecific(ctx context.Context, tx pgx.Tx, tenantID, ledgerID st
 }
 
 func postToLedger(ctx context.Context, tx pgx.Tx, tenantID string, ledger Ledger, in PostInput) (Entry, []Notice, error) {
+	in.Lines = domain.DropUndefinedOptional(in.Lines, ledger.DimensionAttributes, in.OptionalDimensions)
 	accounts, err := loadAccounts(ctx, tx, tenantID, ledger.ChartCode, accountNumbers(in.Lines))
 	if err != nil {
 		return Entry{}, nil, err
@@ -646,6 +647,7 @@ func (s *Postgres) ValidateEntry(ctx context.Context, in PostInput) (domain.Resu
 		if err := requireLedgerSpecific(ctx, tx, p.TenantID, ledger.ID, in.CanPostLedgerSpecific); err != nil {
 			return err
 		}
+		in.Lines = domain.DropUndefinedOptional(in.Lines, ledger.DimensionAttributes, in.OptionalDimensions)
 		accounts, err := loadAccounts(ctx, tx, p.TenantID, ledger.ChartCode, accountNumbers(in.Lines))
 		if err != nil {
 			return err

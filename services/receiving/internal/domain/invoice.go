@@ -28,6 +28,9 @@ type VendorInvoice struct {
 	InvoiceDate    time.Time
 	Currency       string
 	Lines          []PostLine
+	// VendorGroupCode is the short code of the vendor's group in the party
+	// master; empty when unknown. It rides on the vendor-control line.
+	VendorGroupCode string
 }
 
 type HeldLine struct {
@@ -78,7 +81,7 @@ func buildInvoiceEntry(in VendorInvoice, lines []HeldLine, profile PostingProfil
 		}
 		entry.GrirCleared = append(entry.GrirCleared, l.Clearing)
 	}
-	entry.Lines = append(entry.Lines, JournalLine{Account: profile.VendorControl, Amount: payable.Neg()})
+	profile.addVendorControlLine(&entry, payable.Neg(), in.VendorGroupCode)
 	return entry
 }
 
