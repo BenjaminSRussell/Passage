@@ -148,8 +148,8 @@ func TestPostgres_FailingVouchersDoNotStarveNewerOnesAndParkAfterFiveAttempts(t 
 		t.Fatalf("after five attempts: %+v err %v, want the voucher parked and not tried", res, err)
 	}
 	rec, err := single.s.ReconcileInventory(single.ctx, single.ledger, single.le, "2026-03-31")
-	if err != nil || rec.Parked != 1 || rec.ParkedReasons[ledgerclient.CodePeriodClosed] != 1 || rec.Unposted != 1 || rec.Ties {
-		t.Fatalf("reconciliation %+v err %v, want one parked voucher with its reason and no tie", rec, err)
+	if err != nil || rec.Parked != 1 || rec.ParkedReasons[ledgerclient.CodePeriodClosed] != 1 || rec.Unposted != 0 || rec.Ties {
+		t.Fatalf("reconciliation %+v err %v, want one parked voucher with its reason, not also counted as unposted, and no tie", rec, err)
 	}
 	single.ledger.RefuseClosedThrough("")
 	if _, err := single.s.SavePostingProfile(single.ctx, PostingProfile{LegalEntityID: single.le, GLLedgerID: single.glID, InventoryAccount: "1400", GRIRAccount: "2100",

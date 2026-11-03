@@ -594,7 +594,8 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-        "422": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem", description: "CST-COST-001 no stored standard cost for a recorded receipt" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-PPV-001 a recorded receipt whose standardUnitCost or currency differs from the stored ACTIVE item cost" }
   /v1/costing/value-report:
     get:
       operationId: getValueReport
@@ -1048,7 +1049,7 @@ paths:
       operationId: ledgerTieOut
       summary: Tie the inventory value to the ledger balance of the profile's inventory account
       description: >-
-        Reads the balance itself through the ledger. ties is true only when the difference is zero and no PPV
+        Reads the balance itself through the ledger by calendar month, so asOf must be a month end. ties is true only when the difference is zero and no PPV
         voucher is unposted or parked; bookedByCosting is the net this service booked on the account, shown for
         explanation and not compared with the whole-account balance.
       x-passage-duty: costing.read
@@ -1067,6 +1068,8 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem", description: "CST-GL-002 no posting profile; CST-GL-005 foreign ledger" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-GL-008 asOf is not a month end" }
+        "502": { $ref: "#/components/responses/Problem", description: "CST-GL-007 the ledger refused the request" }
         "503": { $ref: "#/components/responses/Problem", description: "CST-GL-003 no general ledger configured" }
 components:
   parameters:
