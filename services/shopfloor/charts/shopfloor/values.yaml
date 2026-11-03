@@ -31,3 +31,21 @@ resources:
 serviceMonitor:
   enabled: false
   interval: 30s
+
+# The production operation status consumer (slice 17). It exits at start until
+# service:shopfloor-production is seeded in the service principal table.
+consumer:
+  enabled: false
+  replicaCount: 1
+  kafka:
+    brokers: ""
+    group: shopfloor-production
+    username: shopfloor-consumer
+    secret: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi

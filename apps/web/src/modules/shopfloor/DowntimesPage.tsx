@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
-import { codeDowntime, describeProblem, listDowntimes, newKey, type Downtime, type DowntimeCategory, type Problem } from "./api/client";
+import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, type DataTableColumn } from "../../shell/ui";
+import { codeDowntime, describeProblem, listDowntimeReasons, listDowntimes, newKey, type Downtime, type DowntimeCategory, type Problem } from "./api/client";
 import { dash, durationMinutes, formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -119,19 +119,24 @@ function CodeReasonForm({ downtime, onDone, onCancel }: CodeReasonFormProps) {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  // With a reason code master the code is chosen from the active reasons and the downtime takes
+  // the reason's category; with none defined it stays free text.
+  const reasons = useLoad((signal) => listDowntimeReasons({ active: true }, signal), "downtime-reasons|active");
+  const master = reasons.data ?? [];
+  const useMaster = master.length > 0;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     const code = reason.trim();
     if (!REASON.test(code)) {
-      setError("Enter a reason code of up to 32 characters.");
+      setError(useMaster ? "Choose a reason code." : "Enter a reason code of up to 32 characters.");
       return;
     }
     setError(null);
     setFailure(null);
     setBusy(true);
     try {
-      onDone(await codeDowntime(downtime.id, { reasonCode: code, category }, key.current));
+      onDone(await codeDowntime(downtime.id, useMaster ? { reasonCode: code } : { reasonCode: code, category }, key.current));
     } catch (failed) {
       const problem = describeProblem(failed);
       if (problem.fields.reasonCode) setError(problem.fields.reasonCode);
@@ -146,35 +151,66 @@ function CodeReasonForm({ downtime, onDone, onCancel }: CodeReasonFormProps) {
   return (
     <Card title={`Code downtime from ${formatDateTime(downtime.startedAt)}`} headingLevel={3}>
       <form className={styles.form} onSubmit={submit} noValidate>
-        <FormField id="downtime-reason" label="Reason code" hint="From your downtime reason list, e.g. JAM or NO-MATERIAL." error={error ?? undefined}>
-          {(control) => (
-            <Input
-              {...control}
-              value={reason}
-              maxLength={32}
-              invalid={Boolean(error)}
-              onChange={(event) => {
-                setReason(event.target.value);
-                key.current = newKey();
-              }}
-            />
-          )}
-        </FormField>
-        <FormField id="downtime-category" label="Category" hint="Planned stops do not lower availability.">
-          {(control) => (
-            <Select
-              {...control}
-              value={category}
-              onChange={(event) => {
-                setCategory(event.target.value as DowntimeCategory);
-                key.current = newKey();
-              }}
-            >
-              <option value="unplanned">Unplanned</option>
-              <option value="planned">Planned</option>
-            </Select>
-          )}
-        </FormField>
+        {reasons.loading ? (
+          <Skeleton />
+        ) : reasons.error ? (
+          <Alert tone="danger" title="Could not load the downtime reasons" live="alert" action={<Button size="sm" onClick={reasons.reload}>Try again</Button>}>
+            {reasons.error.message} ({reasons.error.code})
+          </Alert>
+        ) : useMaster ? (
+          <FormField id="downtime-reason" label="Reason code" hint="The downtime takes the category of the reason." error={error ?? undefined}>
+            {(control) => (
+              <Select
+                {...control}
+                value={reason}
+                invalid={Boolean(error)}
+                onChange={(event) => {
+                  setReason(event.target.value);
+                  key.current = newKey();
+                }}
+              >
+                <option value="">Choose a reason</option>
+                {master.map((r) => (
+                  <option key={r.id} value={r.code}>
+                    {`${r.code} - ${r.name} (${r.category === "planned" ? "planned" : "unplanned"})`}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+        ) : (
+          <>
+            <FormField id="downtime-reason" label="Reason code" hint="Free text until you define downtime reasons, e.g. JAM or NO-MATERIAL." error={error ?? undefined}>
+              {(control) => (
+                <Input
+                  {...control}
+                  value={reason}
+                  maxLength={32}
+                  invalid={Boolean(error)}
+                  onChange={(event) => {
+                    setReason(event.target.value);
+                    key.current = newKey();
+                  }}
+                />
+              )}
+            </FormField>
+            <FormField id="downtime-category" label="Category" hint="Planned stops do not lower availability.">
+              {(control) => (
+                <Select
+                  {...control}
+                  value={category}
+                  onChange={(event) => {
+                    setCategory(event.target.value as DowntimeCategory);
+                    key.current = newKey();
+                  }}
+                >
+                  <option value="unplanned">Unplanned</option>
+                  <option value="planned">Planned</option>
+                </Select>
+              )}
+            </FormField>
+          </>
+        )}
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not save the reason" live="alert">
@@ -183,7 +219,7 @@ function CodeReasonForm({ downtime, onDone, onCancel }: CodeReasonFormProps) {
           </div>
         ) : null}
         <div className={styles.formActions}>
-          <Button type="submit" variant="primary" loading={busy}>
+          <Button type="submit" variant="primary" loading={busy} disabled={reasons.loading || Boolean(reasons.error)}>
             Save reason
           </Button>
           <Button variant="ghost" onClick={onCancel}>

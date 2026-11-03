@@ -19,6 +19,16 @@ home resource, says the list holds every job; the worker page has a *Home resour
 resources of registered machines and of the jobs on the dispatch list). The OpenAPI file also lost a stray duplicate `PayRange` block that made
 it invalid YAML, so the doc gates run with no FAIL line again.
 
+## Slice 17: production status and downtime reasons
+
+`cmd/shopfloor consume` runs the `shopfloor-production` consumer of `operation.statuschanged.v1` (production, w21). It stores
+the latest status per production order id and operation number in `operation_production_status` (migration `0016`),
+ordered by the order version then `occurredAt`, and dead-letters an event whose source is not `production`. An online
+job-start on a job of a finished operation, at or after the finish, is SF-0157; an offline replay of one is accepted and
+flagged `job-finished-conflict` (BR-25.7). It starts only once
+its service principal is seeded (see NOT-IMPLEMENTED.md). Migration `0017` adds the downtime reason code master
+(`downtime-reasons`); coding a downtime then takes an active reason and its category (SF-0158 to SF-0160).
+
 ## Slice 15: supervisor reopen of a finished job (FR-25.3)
 
 A finished job takes no feedback (SF-0122) and leaves the dispatch list. `POST jobs/{id}:reopen` (duty
@@ -588,6 +598,10 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0154` | 403 | The caller is not the connector bound to this edge node (or the node has none): configuration pull and heartbeat refused |
 | `SF-0155` | 422 | The job to reopen is not finished |
 | `SF-0156` | 422 | The home resource has no registered machine and no dispatch jobs on this tenant's shop floor |
+| `SF-0157` | 422 | An online job-start on a job whose operation production finished (at or after the finish); reopen the operation in production. Offline replays are accepted and flagged instead |
+| `SF-0158` | 404 or 422 | The downtime reason does not exist (404 on a read or change; 422 when coding a downtime with an unknown code) |
+| `SF-0159` | 422 | The downtime reason is inactive |
+| `SF-0160` | 422 | The category sent when coding a downtime is not the reason's category |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Warnings on an accepted registration (`items[].warnings`, the request succeeds):

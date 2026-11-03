@@ -40,6 +40,7 @@ const columns: DataTableColumn<Job>[] = [
       <span className={styles.flags}>
         <JobStatusBadge status={row.status} />
         {row.checks.some((c) => c.mandatory) ? <Badge tone="warning">Mandatory checks</Badge> : null}
+        {row.productionFinishedAt ? <Badge tone="danger">Production finished</Badge> : null}
       </span>
     ),
   },

@@ -779,6 +779,11 @@ export interface Job {
   /** Latest value per check; empty in the dispatch list. */
   results: JobCheckResult[];
   finishedAt: string | null;
+  /**
+   * When production (w21) finished the job's operation; null while it is open or after production
+   * reopened it. An online start at or after it is refused (SF-0157); an offline replay is flagged job-finished-conflict.
+   */
+  productionFinishedAt?: string | null;
   version: number;
   updatedAt: string;
 }
@@ -960,6 +965,47 @@ export function listPayAgreements(filter: { active?: boolean } = {}, signal?: Ab
 
 export function createPayAgreement(input: NewPayAgreement, key: string = newKey()): Promise<PayAgreement> {
   return post<PayAgreement>("/pay-agreements", input, key);
+}
+
+/** One entry of the downtime reason code master: a code with its planned or unplanned category (FR-25.11). */
+export interface DowntimeReason {
+  id: string;
+  code: string;
+  name: string;
+  category: DowntimeCategory;
+  active: boolean;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewDowntimeReason {
+  code: string;
+  name: string;
+  category: DowntimeCategory;
+  active?: boolean;
+}
+
+export function listDowntimeReasons(filter: { active?: boolean } = {}, signal?: AbortSignal): Promise<DowntimeReason[]> {
+  return items<DowntimeReason>(`/downtime-reasons${query({ active: filter.active })}`, signal);
+}
+
+/** Creates a reason; reuse one key per form so a retried submit cannot create two. A used code is SF-0142. */
+export function createDowntimeReason(input: NewDowntimeReason, key: string = newKey()): Promise<DowntimeReason> {
+  return post<DowntimeReason>("/downtime-reasons", input, key);
+}
+
+/**
+ * Replaces a reason's name, category and status (the code never changes). The version is the If-Match
+ * entity tag; another change in between is SF-0143 (412).
+ */
+export function updateDowntimeReason(reason: DowntimeReason, changes: { name?: string; category?: DowntimeCategory; active?: boolean }): Promise<DowntimeReason> {
+  return send<DowntimeReason>(`/downtime-reasons/${encodeURIComponent(reason.id)}`, {
+    method: "PUT",
+    headers: { "If-Match": `"${reason.version}"` },
+    body: JSON.stringify({ name: reason.name, category: reason.category, active: reason.active, ...changes }),
+  });
 }
 
 /** An absence code: whether absence time is paid and at what share of the worker's rate (FR-25.2). */

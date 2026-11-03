@@ -23,7 +23,7 @@ const (
 
 func main() {
 	slog.SetDefault(newLogger(os.Stdout))
-	if err := run(context.Background(), os.Getenv); err != nil {
+	if err := run(context.Background(), os.Getenv, os.Args); err != nil {
 		slog.Error("shopfloor stopped", "err", err)
 		os.Exit(1)
 	}
@@ -40,7 +40,11 @@ func newLogger(w io.Writer) *slog.Logger {
 	return slog.New(handler).With("service", "shopfloor")
 }
 
-func run(ctx context.Context, getenv func(string) string) error {
+func run(ctx context.Context, getenv func(string) string, args []string) error {
+	consume := len(args) > 1 && args[1] == "consume"
+	if len(args) > 1 && !consume {
+		return fmt.Errorf("unknown command %q (use no argument to serve or \"consume\" to run the production operation status consumer)", args[1])
+	}
 	databaseURL := getenv("DATABASE_URL")
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")
@@ -50,12 +54,16 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return fmt.Errorf("connect database: %w", err)
 	}
 	defer pool.Close()
-	if getenv("MIGRATE_ON_START") == "true" {
+	if getenv("MIGRATE_ON_START") == "true" && !consume {
 		if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(store.New(pool))
+	st := store.New(pool)
+	if consume {
+		return runConsumer(ctx, getenv, st, pool)
+	}
+	a := api.New(st)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

@@ -1,5 +1,5 @@
 import { findTable } from "../../test-utils";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
@@ -133,6 +133,22 @@ describe("job detail", () => {
     expect(length).toHaveTextContent("Not recorded");
     expect(within(checks).getByText("Visual (visual)").closest("tr")).toHaveTextContent("Pass");
     expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("tells the reader that production finished the operation, and the dispatch list marks the job", async () => {
+    const finished = job({ productionFinishedAt: "2026-10-21T12:00:00Z" });
+    handler = (url) => {
+      if (url.pathname === `/api/v1/shopfloor/jobs/${JOB}`) return json(200, finished);
+      if (url.pathname.endsWith("/jobs")) return json(200, { items: [finished] });
+      return undefined;
+    };
+    const { container } = renderAt(`/shopfloor/jobs/${JOB}`);
+    expect(await screen.findByText("Production finished this operation")).toBeInTheDocument();
+    expect(screen.getByText(/SF-0157/)).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+    cleanup();
+    renderAt("/shopfloor/jobs");
+    expect(await screen.findByText("Production finished")).toBeInTheDocument();
   });
 
   it("reports quantities and check values with one feedbackId and shows the new totals", async () => {

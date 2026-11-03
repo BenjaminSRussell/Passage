@@ -139,6 +139,10 @@ type Store interface {
 	RecordFeedback(ctx context.Context, jobID string, in store.FeedbackInput) (store.FeedbackResult, error)
 	ReopenJob(ctx context.Context, jobID string, version int, reason, reopenedBy string, idem store.Idem) (store.Job, error)
 	ListJobReopenings(ctx context.Context, jobID string, limit int) ([]store.JobReopening, error)
+	CreateDowntimeReason(ctx context.Context, in store.DowntimeReasonInput, createdBy string, idem store.Idem) (store.DowntimeReason, error)
+	UpdateDowntimeReason(ctx context.Context, id string, version int, in store.DowntimeReasonInput, updatedBy string) (store.DowntimeReason, error)
+	GetDowntimeReason(ctx context.Context, id string) (store.DowntimeReason, error)
+	ListDowntimeReasons(ctx context.Context, activeOnly bool, limit int) ([]store.DowntimeReason, error)
 }
 
 // API holds the handlers and the counters served on the admin port.
@@ -266,6 +270,7 @@ type itemsResponse[T any] struct {
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	a.registerAbsence(r)
+	a.registerDowntimeReasons(r)
 	a.registerEdge(r)
 	r.With(authz.RequireDuty(DutySetup)).Post("/v1/shopfloor/workers", a.createWorker)
 	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/workers", a.listWorkers)

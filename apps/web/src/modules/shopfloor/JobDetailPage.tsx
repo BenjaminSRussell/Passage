@@ -192,6 +192,12 @@ export function JobDetailPage() {
               empty={{ title: "No checks on this operation", description: "The job can be finished without recording a check." }}
             />
           </Card>
+          {job.productionFinishedAt ? (
+            <Alert tone="warning" title="Production finished this operation">
+              Production finished it on {formatDateTime(job.productionFinishedAt)}. Starting work on this job is refused (SF-0157) until the planner reopens the
+              operation; a start replayed from an offline kiosk is kept and flagged for supervisor review.
+            </Alert>
+          ) : null}
           {job.status === "finished" && !canReopen ? (
             <Alert tone="info" title="This job is finished">
               It takes no more reports. A supervisor reopens a job before more is reported on it.

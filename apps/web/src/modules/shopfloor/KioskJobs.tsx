@@ -171,7 +171,11 @@ export function KioskJobs({ workerId, homeResourceId = null, openJobs, onOpenJob
     },
     { key: "job", header: "Job", render: (row) => <Link to={`/shopfloor/jobs/${row.id}`}>{`${row.orderRef} ${row.operationRef}`}</Link> },
     { key: "start", header: "Planned start", render: (row) => formatDateTime(row.sequenceStart) },
-    { key: "status", header: "Status", render: (row) => <JobStatusBadge status={row.status} /> },
+    {
+      key: "status",
+      header: "Status",
+      render: (row) => (row.productionFinishedAt ? <Badge tone="danger">Production finished</Badge> : <JobStatusBadge status={row.status} />),
+    },
   ];
 
   return (

@@ -54,6 +54,7 @@ type fakeStore struct {
 	resourceSet   *string
 	absenceIn     *store.AbsenceCodeInput
 	absences      []domain.Absence
+	reasonIn      *store.DowntimeReasonInput
 }
 
 func (f *fakeStore) Ping(context.Context) error { return nil }

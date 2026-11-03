@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -183,9 +184,16 @@ func (s *Postgres) CreateRegistrations(ctx context.Context, items []Registration
 		}
 		for _, i := range order {
 			in := items[i]
+			productionConflict, err := productionFinishedStart(ctx, tx, p.TenantID, in)
+			if err != nil {
+				return err
+			}
 			jobStatus, flags, err := jobStartFlags(ctx, tx, p.TenantID, in)
 			if err != nil {
 				return err
+			}
+			if productionConflict && !slices.Contains(flags, domain.ConflictJobFinished) {
+				flags = append(flags, domain.ConflictJobFinished)
 			}
 			var hours *string
 			if in.Hours != nil {

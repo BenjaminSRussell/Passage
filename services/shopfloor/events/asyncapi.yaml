@@ -62,6 +62,24 @@ channels:
     messages:
       absenceCodeSaved:
         $ref: "#/components/messages/AbsenceCodeSaved"
+  downtimeReasonSaved:
+    address: passage.shopfloor.downtimereason
+    description: A downtime reason code was created or changed (FR-25.11). Not in the PRD event table.
+    messages:
+      downtimeReasonSaved:
+        $ref: "#/components/messages/DowntimeReasonSaved"
+  productionOperation:
+    address: passage.production.operation
+    description: |
+      Production's operation status (w21), consumed by the `shopfloor-production` consumer: an
+      operation was finished (the finish command, or the last report as finished) or reopened. A
+      finished operation stops new online job starts on its jobs (SF-0157) and flags offline ones
+      (`job-finished-conflict`) until it is reopened. The consumer keeps the latest status per order
+      and operation, ordered by `orderVersion` and then `occurredAt`, and refuses (dead-letters) an
+      event whose CloudEvents `source` is not `production`.
+    messages:
+      operationStatusChanged:
+        $ref: "#/components/messages/OperationStatusChanged"
   edgeNodeSaved:
     address: passage.shopfloor.edge-node
     description: An edge node was registered or its name, site, ring, connector identity or status changed (FR-25.19). Not in the PRD event table.
@@ -127,6 +145,18 @@ channels:
       processMessageDeleted:
         $ref: "#/components/messages/ProcessMessageDeleted"
 operations:
+  receiveOperationStatusChanged:
+    action: receive
+    channel:
+      $ref: "#/channels/productionOperation"
+    messages:
+      - $ref: "#/channels/productionOperation/messages/operationStatusChanged"
+  publishDowntimeReasonSaved:
+    action: send
+    channel:
+      $ref: "#/channels/downtimeReasonSaved"
+    messages:
+      - $ref: "#/channels/downtimeReasonSaved/messages/downtimeReasonSaved"
   publishJobReopened:
     action: send
     channel:
@@ -334,6 +364,20 @@ components:
       description: Published in the transaction that creates or replaces an absence code; payMultiplier is a decimal string.
       payload:
         $ref: "#/components/schemas/AbsenceCodeSavedData"
+    DowntimeReasonSaved:
+      name: dev.passage.shopfloor.downtimereason.saved.v1
+      contentType: application/cloudevents+json
+      summary: Downtime reason code created or changed
+      description: Published in the transaction that creates or replaces a downtime reason code; the Kafka key is the reason id.
+      payload:
+        $ref: "#/components/schemas/DowntimeReasonSavedData"
+    OperationStatusChanged:
+      x-passage-type: dev.passage.production.operation.statuschanged.v1
+      contentType: application/cloudevents+json
+      summary: Production finished or reopened an operation (consumed)
+      description: Published by production (w21); the shop floor stores the status per order and operation. `to` finished stops new job starts on the operation's jobs; any other status lets them start again.
+      payload:
+        $ref: "#/components/schemas/OperationStatusChangedData"
     EdgeNodeSaved:
       name: dev.passage.shopfloor.edgenode.saved.v1
       contentType: application/cloudevents+json
@@ -863,6 +907,56 @@ components:
           minimum: 1
         savedBy:
           type: string
+    DowntimeReasonSavedData:
+      type: object
+      required: [reasonId, code, name, category, active, version, savedBy]
+      additionalProperties: false
+      properties:
+        reasonId:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+          enum: [planned, unplanned]
+        active:
+          type: boolean
+        version:
+          type: integer
+          minimum: 1
+        savedBy:
+          type: string
+    OperationStatusChangedData:
+      type: object
+      description: The part of production's payload the shop floor reads.
+      required: [orderId, operNumber, to, orderVersion, occurredAt]
+      properties:
+        orderId:
+          type: string
+          format: uuid
+        operNumber:
+          type: integer
+          minimum: 1
+        action:
+          type: string
+          description: finish or reopen.
+        from:
+          type: string
+        to:
+          type: string
+          description: open, started or finished.
+        orderVersion:
+          type: integer
+          minimum: 1
+          description: The order's version after the change; orders the events of one order.
+        actor:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
     AbsenceCodeSavedData:
       type: object
       required: [absenceCodeId, code, name, paid, payMultiplier, active, version, savedBy]

@@ -210,6 +210,16 @@ paths:
         dispatch effects. To stop work without starting another, send a closed
         `job-stop` (startedAt = the job's start, stoppedAt = now), one per job of
         a bundle in one batch. A duplicate item has no flags or auto-stops.
+
+        Production status (FR-25.3, BR-25.7): once production (w21) finishes an
+        operation (`operation.statuschanged.v1` to `finished`), a new `job-start`
+        on a job of that operation at or after the finish is refused with SF-0157
+        (422) when sent online, and nothing in the batch is stored, until
+        production reopens the operation. Sent with `offline: true` (a replay of
+        work already done) it is accepted, flagged `job-finished-conflict` and
+        warned SF-0004, like a job the shop floor finished while the kiosk was
+        offline. A start before the finish, a resend of an item already stored
+        (duplicate) and every `job-stop` pass.
       requestBody:
         required: true
         content:
@@ -716,7 +726,12 @@ paths:
     post:
       operationId: codeDowntime
       summary: Assign a downtime reason code (FR-25.11)
-      description: The andon raised for the downtime stays open until its condition clears (AC-25.6).
+      description: |
+        The andon raised for the downtime stays open until its condition clears (AC-25.6).
+        While the tenant has no downtime reason defined the code is free text. Once it has one
+        (`downtime-reasons`), `reasonCode` must be the code of an existing reason (SF-0158) that is
+        active (SF-0159), a `category` in the request must be the reason's own (SF-0160), and an
+        omitted category takes the reason's.
       x-passage-duty: shopfloor.time.register
       parameters:
         - name: id
@@ -2047,6 +2062,153 @@ paths:
           $ref: "#/components/responses/Problem"
         "412":
           $ref: "#/components/responses/Problem"
+  /v1/shopfloor/downtime-reasons:
+    post:
+      operationId: createDowntimeReason
+      summary: Create a downtime reason code
+      description: |
+        The downtime reason code master (FR-25.11): a code, a name and the planned or unplanned
+        category OEE and andon report on. Once a tenant has defined a reason, coding a downtime
+        takes one of the active codes. Publishes `dev.passage.shopfloor.downtimereason.saved.v1`.
+        A code already used is SF-0142.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewDowntimeReason"
+      responses:
+        "201":
+          description: Created (or the stored outcome of a repeated key).
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DowntimeReason"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: listDowntimeReasons
+      summary: List downtime reason codes by code
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: active
+          in: query
+          description: With true, only active rows.
+          schema:
+            type: boolean
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Downtime reasons.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DowntimeReason"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/downtime-reasons/{id}:
+    get:
+      operationId: getDowntimeReason
+      summary: Get one downtime reason code
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The downtime reason with its version as ETag.
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DowntimeReason"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: updateDowntimeReason
+      summary: Replace the editable fields of a downtime reason code
+      description: |
+        Replaces the name, category and status (the code does not change) and bumps the version.
+        `If-Match` carries the version you read; another change in between is SF-0143 (412).
+        Downtimes already coded keep the category they were coded with. An inactive reason refuses
+        new coding (SF-0159) but stays on the downtimes that carry it.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDowntimeReason"
+      responses:
+        "200":
+          description: Updated; the new version is in the ETag header.
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DowntimeReason"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
   /v1/shopfloor/edge-nodes:
     post:
       operationId: createEdgeNode
@@ -2854,6 +3016,64 @@ components:
         payMultiplier:
           type: string
           description: Decimal string; the share of the worker's rate for a paid code, 0 for an unpaid one.
+        active:
+          type: boolean
+        version:
+          type: integer
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    NewDowntimeReason:
+      type: object
+      required: [code, name, category]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 32
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        category:
+          type: string
+          enum: [planned, unplanned]
+        active:
+          type: boolean
+          default: true
+    UpdateDowntimeReason:
+      type: object
+      required: [name, category]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        category:
+          type: string
+          enum: [planned, unplanned]
+        active:
+          type: boolean
+          default: true
+    DowntimeReason:
+      type: object
+      required: [id, code, name, category, active, version, createdBy, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+          enum: [planned, unplanned]
         active:
           type: boolean
         version:
@@ -3711,7 +3931,7 @@ components:
         category:
           type: string
           enum: [planned, unplanned]
-          description: Omit to keep the current category.
+          description: Omit to keep the current category (or take the reason's, when the tenant maintains downtime reasons).
     Andon:
       type: object
       required: [id, resourceId, siteId, kind, severity, downtimeId, startedAt]
@@ -3972,10 +4192,12 @@ components:
           type: string
           minLength: 1
           maxLength: 64
+          description: The production order id (w21), matched in any case. Production's operation status reaches the job by this reference and `operationRef`; a job with other references never sees it.
         operationRef:
           type: string
           minLength: 1
           maxLength: 64
+          description: The operation number as text ("20"), as in production's operation.statuschanged.v1.
         resourceId:
           type: string
           format: uuid
@@ -3992,7 +4214,7 @@ components:
             $ref: "#/components/schemas/JobCheck"
     Job:
       type: object
-      required: [id, orderRef, operationRef, resourceId, status, plannedQuantity, goodQuantity, scrapQuantity, sequenceStart, checks, results, finishedAt, version, updatedAt]
+      required: [id, orderRef, operationRef, resourceId, status, plannedQuantity, goodQuantity, scrapQuantity, sequenceStart, checks, results, finishedAt, productionFinishedAt, version, updatedAt]
       properties:
         id:
           type: string
@@ -4028,6 +4250,10 @@ components:
         finishedAt:
           type: [string, "null"]
           format: date-time
+        productionFinishedAt:
+          type: [string, "null"]
+          format: date-time
+          description: When production (w21) finished the job's operation; null while it is open or after production reopened it. An online job-start at or after it is refused (SF-0157); an offline one is accepted and flagged job-finished-conflict.
         version:
           type: integer
         updatedAt:

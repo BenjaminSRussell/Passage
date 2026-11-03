@@ -50,8 +50,11 @@ type Job struct {
 	Checks        []domain.Check       `json:"checks"`
 	Results       []domain.CheckResult `json:"results"`
 	FinishedAt    *time.Time           `json:"finishedAt"`
-	Version       int                  `json:"version"`
-	UpdatedAt     time.Time            `json:"updatedAt"`
+	// ProductionFinishedAt is when production (w21) finished the job's operation, null while it
+	// is open or after production reopened it; job-starts at or after it are refused (SF-0157).
+	ProductionFinishedAt *time.Time `json:"productionFinishedAt"`
+	Version              int        `json:"version"`
+	UpdatedAt            time.Time  `json:"updatedAt"`
 }
 
 // JobFilter narrows the dispatch list. An empty Status hides finished jobs.
@@ -330,7 +333,10 @@ func loadJobs(ctx context.Context, tx pgx.Tx, where string, args []any, lock str
 	p, _ := tenant.FromContext(ctx)
 	params := append([]any{p.TenantID}, args...)
 	q := `select id::text, order_ref, operation_ref, resource_id::text, status, planned_qty::text, good_qty::text, scrap_qty::text,
-		sequence_start, checks, finished_at, version, updated_at from shop_job where tenant_id = $1 and (` + where + `)
+		sequence_start, checks, finished_at,
+		(select o.changed_at from operation_production_status o where o.tenant_id = shop_job.tenant_id and o.order_ref = lower(shop_job.order_ref)
+		   and o.operation_ref = shop_job.operation_ref and o.finished),
+		version, updated_at from shop_job where tenant_id = $1 and (` + where + `)
 		order by sequence_start, id limit ` + fmt.Sprint(limit) + ` ` + lock
 	rows, err := tx.Query(ctx, q, params...)
 	if err != nil {
@@ -343,7 +349,7 @@ func loadJobs(ctx context.Context, tx pgx.Tx, where string, args []any, lock str
 		var checks []byte
 		var planned, good, scrap string
 		if err := rows.Scan(&j.ID, &j.OrderRef, &j.OperationRef, &j.ResourceID, &j.Status, &planned, &good, &scrap,
-			&j.SequenceStart, &checks, &j.FinishedAt, &j.Version, &j.UpdatedAt); err != nil {
+			&j.SequenceStart, &checks, &j.FinishedAt, &j.ProductionFinishedAt, &j.Version, &j.UpdatedAt); err != nil {
 			return nil, err
 		}
 		for _, q := range []struct {

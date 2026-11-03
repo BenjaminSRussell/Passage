@@ -156,6 +156,7 @@ describe("Downtimes", () => {
         coded = true;
         return json(200, downtime({ reasonCode: "JAM", category: "planned" }));
       }
+      if (url.pathname.endsWith("/downtime-reasons")) return json(200, { items: [] });
       if (url.pathname.endsWith("/downtimes")) return json(200, { items: coded ? [] : [downtime()] });
       return undefined;
     };
@@ -166,6 +167,7 @@ describe("Downtimes", () => {
     expect(within(table).getByText("Raised")).toBeInTheDocument();
 
     fireEvent.click(within(table).getByRole("button", { name: /Code reason for downtime/ }));
+    await screen.findByLabelText("Reason code");
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Save reason" }));
     expect(await screen.findByText("Enter a reason code of up to 32 characters.")).toBeInTheDocument();
@@ -182,13 +184,14 @@ describe("Downtimes", () => {
   });
 
   it("shows a refused coding next to the form", async () => {
-    handler = (_url, init) => {
+    handler = (url, init) => {
       if (init.method === "POST") return json(404, { code: "SF-0110", detail: "downtime not found" });
+      if (url.pathname.endsWith("/downtime-reasons")) return json(200, { items: [] });
       return json(200, { items: [downtime({ endedAt: "2026-10-21T08:32:00Z", reasonCode: "JAM" })] });
     };
     renderAt(`/shopfloor/downtimes?open=false&downtime=${DOWN}`);
     expect(await screen.findByRole("heading", { name: /Code downtime from/ })).toBeInTheDocument();
-    expect(screen.getByLabelText("Reason code")).toHaveValue("JAM");
+    expect(await screen.findByLabelText("Reason code")).toHaveValue("JAM");
     expect(calls[0].url.search).toBe("");
     fireEvent.click(screen.getByRole("button", { name: "Save reason" }));
     expect(await screen.findByText(/downtime not found \(SF-0110\)/)).toBeInTheDocument();

@@ -7,6 +7,7 @@ import { BundleDetailPage } from "./BundleDetailPage";
 import { ClockedInPage } from "./ClockedInPage";
 import { CorrectionsPage } from "./CorrectionsPage";
 import { CorrectRegistrationPage } from "./CorrectRegistrationPage";
+import { DowntimeReasonsPage } from "./DowntimeReasonsPage";
 import { DowntimesPage } from "./DowntimesPage";
 import { EdgeNodeDetailPage } from "./EdgeNodeDetailPage";
 import { EdgeNodesPage } from "./EdgeNodesPage";
@@ -15,6 +16,7 @@ import { JobsPage } from "./JobsPage";
 import { KioskPage } from "./KioskPage";
 import { MachinesPage } from "./MachinesPage";
 import { NewAbsenceCodePage } from "./NewAbsenceCodePage";
+import { NewDowntimeReasonPage } from "./NewDowntimeReasonPage";
 import { NewEdgeNodePage } from "./NewEdgeNodePage";
 import { NewMachinePage } from "./NewMachinePage";
 import { NewProcessMessagePage } from "./NewProcessMessagePage";
@@ -38,7 +40,7 @@ const shopfloor: PassageModule = {
   id: "shopfloor",
   title: "Shop floor",
   description:
-    "Kiosk clock in and out; the job dispatch list with quantity, scrap and quality check reports; supervisor time corrections with a reason, pay revision with reversal lines and the review of clock-ins closed automatically; workers with their time profiles, pay agreements and absence codes, who is clocked in, their time, job bundles, pay approval and payroll export; machines, the edge fleet with its connector heartbeats and versioned configuration, downtimes, andon alerts and OEE; process messages and their deliveries.",
+    "Kiosk clock in and out; the job dispatch list with quantity, scrap and quality check reports; supervisor time corrections with a reason, pay revision with reversal lines and the review of clock-ins closed automatically; workers with their time profiles, pay agreements and absence codes, who is clocked in, their time, job bundles, pay approval and payroll export; machines, the edge fleet with its connector heartbeats and versioned configuration, downtimes with their reason code master, andon alerts and OEE; process messages and their deliveries.",
   routes: [
     { path: "/shopfloor/workers", element: createElement(WorkersPage), handle: { title: "Workers" } },
     { path: "/shopfloor/workers/new", element: createElement(NewWorkerPage), handle: { title: "New worker" } },
@@ -65,6 +67,8 @@ const shopfloor: PassageModule = {
     { path: "/shopfloor/machines", element: createElement(MachinesPage), handle: { title: "Machines" } },
     { path: "/shopfloor/machines/new", element: createElement(NewMachinePage), handle: { title: "Register machine" } },
     { path: "/shopfloor/downtimes", element: createElement(DowntimesPage), handle: { title: "Downtimes" } },
+    { path: "/shopfloor/downtime-reasons", element: createElement(DowntimeReasonsPage), handle: { title: "Downtime reasons", duty: "shopfloor.view" } },
+    { path: "/shopfloor/downtime-reasons/new", element: createElement(NewDowntimeReasonPage), handle: { title: "New downtime reason", duty: "shopfloor.setup.maintain" } },
     { path: "/shopfloor/andon", element: createElement(AndonPage), handle: { title: "Andon board" } },
     { path: "/shopfloor/oee", element: createElement(OeePage), handle: { title: "OEE" } },
     { path: "/shopfloor/edge-nodes", element: createElement(EdgeNodesPage), handle: { title: "Edge fleet", duty: "shopfloor.view" } },
@@ -88,6 +92,7 @@ const shopfloor: PassageModule = {
     { label: "Payroll export", to: "/shopfloor/pay-exports", duty: "shopfloor.pay.export" },
     { label: "Machines", to: "/shopfloor/machines", duty: "shopfloor.view" },
     { label: "Downtimes", to: "/shopfloor/downtimes", duty: "shopfloor.view" },
+    { label: "Downtime reasons", to: "/shopfloor/downtime-reasons", duty: "shopfloor.view" },
     { label: "Andon board", to: "/shopfloor/andon", duty: "shopfloor.view" },
     { label: "OEE", to: "/shopfloor/oee", duty: "shopfloor.view" },
     { label: "Edge fleet", to: "/shopfloor/edge-nodes", duty: "shopfloor.view" },

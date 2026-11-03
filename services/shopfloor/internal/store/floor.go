@@ -381,7 +381,10 @@ func (s *Postgres) CodeDowntime(ctx context.Context, id, reason, category string
 	p, _ := tenant.FromContext(ctx)
 	var out Downtime
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		var err error
+		category, err := checkDowntimeReason(ctx, tx, p.TenantID, reason, category)
+		if err != nil {
+			return err
+		}
 		out, err = scanDowntime(tx.QueryRow(ctx, `update downtime_record
 			set reason_code = $3, category = coalesce(nullif($4, ''), category)
 			where tenant_id = $1 and id = $2 returning `+downtimeColumns, p.TenantID, id, reason, category))

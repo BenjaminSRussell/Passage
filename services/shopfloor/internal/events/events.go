@@ -46,6 +46,9 @@ var (
 	// The edge fleet events (FR-25.19) are not in the PRD event table: the config publish and
 	// apply are the audit trail of what a connector ran with, and a heartbeat publishes nothing
 	// (50 edges report twice a minute).
+	// DowntimeReasonSaved is not in the PRD event table: OEE reporting and the andon consumers
+	// need the planned or unplanned category behind a coded downtime.
+	DowntimeReasonSaved = events.Type(Context, "downtimereason", "saved", 1)
 	EdgeNodeSaved       = events.Type(Context, "edgenode", "saved", 1)
 	EdgeConfigPublished = events.Type(Context, "edgeconfig", "published", 1)
 	EdgeConfigApplied   = events.Type(Context, "edgeconfig", "applied", 1)
@@ -55,7 +58,7 @@ var (
 func All() []string {
 	return []string{RegistrationPosted, PaydayApproved, PaydayExported, AndonRaised, ProcessMessageReceived, ProcessMessageDelivered, ProcessMessageDeleted,
 		OEEBucketUpdated, OEEBucketRemoved, JobReported, JobReopened, RegistrationCorrected, PaydayRevised, TimeProfileSaved, PayAgreementSaved, WorkerAssigned, AbsenceCodeSaved,
-		EdgeNodeSaved, EdgeConfigPublished, EdgeConfigApplied}
+		EdgeNodeSaved, EdgeConfigPublished, EdgeConfigApplied, DowntimeReasonSaved}
 }
 
 // ProcessMessageReceivedData is the payload of dev.passage.shopfloor.processmessage.received.v1,
@@ -324,6 +327,18 @@ type AbsenceCodeSavedData struct {
 	Active        bool   `json:"active"`
 	Version       int    `json:"version"`
 	SavedBy       string `json:"savedBy"`
+}
+
+// DowntimeReasonSavedData is the payload of dev.passage.shopfloor.downtimereason.saved.v1,
+// published when a downtime reason code is created or changed.
+type DowntimeReasonSavedData struct {
+	ReasonID string `json:"reasonId"`
+	Code     string `json:"code"`
+	Name     string `json:"name"`
+	Category string `json:"category"`
+	Active   bool   `json:"active"`
+	Version  int    `json:"version"`
+	SavedBy  string `json:"savedBy"`
 }
 
 // EdgeNodeSavedData is the payload of dev.passage.shopfloor.edgenode.saved.v1, published when
