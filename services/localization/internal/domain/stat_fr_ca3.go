@@ -11,7 +11,7 @@ import (
 // FR_CA3: the boxes of the DGFiP monthly VAT return 3310-CA3 as a semicolon
 // CSV of code;value rows. The EDI-TVA envelope (EDIFACT VATDEC) is not
 // encoded: DGFiP publishes the CA3 boxes and their arithmetic, which this
-// validator enforces. Rows: siren (nine digits, Luhn), periode (YYYY-MM), then
+// validator enforces. Rows: siren (nine digits, Luhn), periode (YYYY-MM or YYYY-Q1 to YYYY-Q4), then
 // the boxes ligne01 and ligne02 (bases), ligne08, ligne09 and ligne9B (VAT at
 // 20%, 5.5% and 10%), ligne16 (total gross VAT), ligne19, ligne20 and ligne22
 // (deductible VAT on fixed assets, on other goods and services, credit
@@ -20,9 +20,10 @@ import (
 // 16 = 08 + 09 + 9B, 23 = 19 + 20 + 22, 28 = max(16 - 23, 0), 25 = max(23 - 16, 0).
 
 var (
-	ca3SIREN   = regexp.MustCompile(`^\d{9}$`)
-	ca3Periode = regexp.MustCompile(`^\d{4}-(0[1-9]|1[0-2])$`)
-	ca3Boxes   = []string{"ligne01", "ligne02", "ligne08", "ligne09", "ligne9B", "ligne16", "ligne19", "ligne20", "ligne22", "ligne23", "ligne25", "ligne28"}
+	laPosteSIREN = "356000000"
+	ca3SIREN     = regexp.MustCompile(`^\d{9}$`)
+	ca3Periode   = regexp.MustCompile(`^\d{4}-(0[1-9]|1[0-2]|Q[1-4])$`)
+	ca3Boxes     = []string{"ligne01", "ligne02", "ligne08", "ligne09", "ligne9B", "ligne16", "ligne19", "ligne20", "ligne22", "ligne23", "ligne25", "ligne28"}
 )
 
 // ValidateCA3 checks a CA3 file; it returns every failure.
@@ -40,11 +41,11 @@ func ValidateCA3(raw []byte) []FieldError {
 		}
 		rows[code] = strings.TrimSpace(value)
 	}
-	if s := rows["siren"]; !ca3SIREN.MatchString(s) || !luhnValid(s) {
+	if s := rows["siren"]; !ca3SIREN.MatchString(s) || (!luhnValid(s) && s != laPosteSIREN) {
 		errs.add("siren", "%q must be nine digits with a valid Luhn check digit", s)
 	}
 	if p := rows["periode"]; !ca3Periode.MatchString(p) {
-		errs.add("periode", "%q must be YYYY-MM", p)
+		errs.add("periode", "%q must be YYYY-MM or YYYY-Q1 to YYYY-Q4", p)
 	}
 	known := map[string]bool{"siren": true, "periode": true}
 	v := map[string]decimal.Decimal{}
