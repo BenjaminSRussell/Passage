@@ -28,7 +28,7 @@ const (
 	testMainAcct = "0190b7a0-0000-7000-8000-000000000003"
 	testIBAN     = "DE89370400440532013000"
 	allDuties    = "treasury.view,treasury.bank-account.write,treasury.bank-account.approve,treasury.statement.import,treasury.forecast.write," +
-		"treasury.check.write,treasury.facility.write,treasury.facility.override,treasury.loan.write"
+		"treasury.check.write,treasury.facility.write,treasury.facility.override,treasury.loan.write,treasury.reconciliation.write"
 )
 
 // fakeStore is an in-memory store.Store for handler tests.
@@ -49,6 +49,10 @@ type fakeStore struct {
 	instruments  map[string]store.Instrument
 	loans        map[string]store.Loan
 	lastAccount  store.NewBankAccount
+	lastRule     store.NewReconRule
+	lastRun      store.RunInput
+	lastMatch    store.NewMatch
+	matchErr     error
 }
 
 func newFakeStore() *fakeStore {

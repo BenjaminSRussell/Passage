@@ -37,6 +37,7 @@ const (
 	dutyFacilityWrite    = "treasury.facility.write"
 	dutyFacilityOverride = "treasury.facility.override"
 	dutyLoanWrite        = "treasury.loan.write"
+	dutyReconcile        = "treasury.reconciliation.write"
 	validationDetail     = "request failed validation"
 	defaultMaxFileMB     = 50
 	maxFileMBLimit       = 200
@@ -60,6 +61,11 @@ type API struct {
 	instrumentsBooked    atomic.Int64
 	limitOverrides       atomic.Int64
 	loansCreated         atomic.Int64
+	rulesCreated         atomic.Int64
+	reconRuns            atomic.Int64
+	autoMatches          atomic.Int64
+	manualMatches        atomic.Int64
+	unmatches            atomic.Int64
 }
 
 // New returns the API over s with the default 50 MB statement upload limit.
@@ -110,6 +116,15 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyLoanWrite)).Post("/v1/treasury/loans", a.createLoan)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/loans", a.listLoans)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/loans/{id}", a.getLoan)
+	r.With(authz.RequireDuty(dutyReconcile)).Post("/v1/treasury/reconciliation-rules", a.createReconRule)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/reconciliation-rules", a.listReconRules)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/reconciliation-rules/{id}", a.getReconRule)
+	r.With(authz.RequireDuty(dutyReconcile)).Post("/v1/treasury/reconciliation-rules/{id}:deactivate", a.deactivateReconRule)
+	r.With(authz.RequireDuty(dutyReconcile)).Post("/v1/treasury/reconciliation-runs", a.runReconciliation)
+	r.With(authz.RequireDuty(dutyReconcile)).Post("/v1/treasury/reconciliation-matches", a.createManualMatch)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/reconciliation-matches", a.listMatches)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/reconciliation-matches/{id}", a.getMatch)
+	r.With(authz.RequireDuty(dutyReconcile)).Post("/v1/treasury/reconciliation-matches/{id}:unmatch", a.unmatch)
 }
 
 // Metrics serves the counters in Prometheus text format on the admin port.
@@ -132,6 +147,11 @@ func (a *API) Metrics() http.Handler {
 			{"treasury_facility_instruments_total", "Letters of credit and guarantees booked on a facility.", a.instrumentsBooked.Load()},
 			{"treasury_facility_limit_overrides_total", "Instrument requests that asked to override the facility limit.", a.limitOverrides.Load()},
 			{"treasury_loans_created_total", "Loan contracts created with their schedule.", a.loansCreated.Load()},
+			{"treasury_reconciliation_rules_created_total", "Reconciliation rules created.", a.rulesCreated.Load()},
+			{"treasury_reconciliation_runs_total", "Reconciliation runs completed.", a.reconRuns.Load()},
+			{"treasury_reconciliation_auto_matches_total", "Matches stored by reconciliation runs.", a.autoMatches.Load()},
+			{"treasury_reconciliation_manual_matches_total", "Manual matches stored.", a.manualMatches.Load()},
+			{"treasury_reconciliation_unmatches_total", "Matches dissolved.", a.unmatches.Load()},
 		} {
 			fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", m.name, m.help, m.name, m.name, m.value)
 		}

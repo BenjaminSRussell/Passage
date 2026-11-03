@@ -9,7 +9,9 @@ schedules. Slice 4: BAI2 and MT940 statement parsers beside camt.053, with the
 format detected from the file's content, an optional statement account number
 on the bank account (so files that name the account by its domestic number
 match), and the reconciliation close rule and BR-36.3 state machine (domain
-only, like the matching engine). Screens live in `apps/web/src/modules/treasury`.
+only, like the matching engine). Slice 5: stored reconciliation rules, a stored match table
+(N:1, 1:N, manual match and unmatch) with run, match and unmatch routes, and an SFTP bank
+channel adapter with an in-memory test double. Screens live in `apps/web/src/modules/treasury`.
 
 ## Run
 
@@ -42,7 +44,11 @@ always run, including the OpenAPI-matches-routes contract test.
 - `internal/store`: pgx repositories, tenant-scoped transactions (RLS).
 - `internal/api`: HTTP handlers, RFC 9457 problems, idempotency and `If-Match`.
 - `internal/events`: event type constants and payloads.
-- `internal/bankconnect`: bank file sending. `Signer` (Vault transit `sign`; private keys never leave Vault), an EBICS upload-order subset, and `Sender`, which audits every file in `bank_file_audit` (migration 0007) before and after it is sent. Not yet wired to a route.
+- `internal/bankconnect`: bank file sending. `Signer` (Vault transit `sign`; private keys never leave Vault), an EBICS upload-order subset, an SFTP channel (`SFTP` over an `SFTPClient` interface; drop `.sig` and `.part`, publish by rename), and `Sender`, which audits every file in `bank_file_audit` (migration 0007) before and after it is sent. Not yet wired to a route.
+- `migrations/0008_reconciliation.sql`: `reconciliation_rule`, `reconciliation_match`,
+  `reconciliation_match_line`, `reconciliation_match_item` (a line and an item are in at
+  most one active match; an unmatch keeps the row as history) and the column-level
+  `UPDATE (status, version)` grant on `bank_statement_line`.
 - `migrations/0001_init.sql`: tables `bank_account`, `bank_statement`,
   `bank_statement_line`, `cash_forecast_entry`, `idempotency_keys`, `outbox`.
 - `migrations/0002_checks_facilities_loans.sql`: `bank_account.next_check_number`
@@ -82,10 +88,28 @@ keeps it with the contract. Interest per period is opening principal × rate ×
 days / basis (ACT/360, ACT/365 or 30E/360), rounded half-up to the currency
 minor unit; the last period repays the remaining principal (BR-36.15).
 
+Reconciliation: `POST /reconciliation-rules` stores a rule (criterion weights summing to 100,
+amount tolerance, date window, strict flag, priority; for one bank account or the whole legal
+entity). `POST /reconciliation-runs` applies the account's active rules to a statement's
+unmatched lines against the open items the caller offers (ledger, AR and AP own them): unique
+matches are stored and published, N:1 batch receipts match when the items sharing the line's
+batch reference add up exactly, an item wanted by two matches is released from both, and other
+lines with a candidate become `suggested`. `POST /reconciliation-matches` matches lines to
+items by hand (reason required, must balance), `:unmatch` dissolves a match with a reason and records who did it.
+A run and a manual match carry the `legalEntityId` of the statement (TRS-0488 when it differs, 403 outside the caller's scope); entity and item ids are lower-cased on the way in, so letter case never changes a scope check, an item match or the rule cap. A bank statement's MT940 `:61:` bank reference (after `//`) is stored apart as `bank_reference` and is never read as a payer reference.
+A run considers one page of open lines after `afterLineNo`; `remainingLines` and `nextAfterLineNo` drive the next call.
+`GET /reconciliation-matches` pages with `limit` (max 500) and `offset`, and returns `nextOffset` for a full page.
+A placeholder end-to-end id (NOTPROVIDED, NONREF) is ignored and the remittance reference is scored instead.
+A reference-only candidate (the reference agrees, amount, date or payer does not) is suggested and never auto-matched.
+A rule that does not require the reference never auto-matches a candidate whose reference contradicts a usable reference of the line (8 or more characters, not a placeholder); it is suggested.
+A bank account has at most 20 active rules, its own and the entity-wide ones (TRS-0489). Item amounts are trimmed before they are validated and stored.
+All creates take `Idempotency-Key`; `:deactivate` and `:unmatch` take `If-Match`. Events:
+`dev.passage.treasury.reconciliation.matched.v1` and `...unmatched.v1`.
+
 Duties: `treasury.view`, `treasury.bank-account.write`,
 `treasury.bank-account.approve`, `treasury.statement.import`,
 `treasury.forecast.write`, `treasury.check.write`, `treasury.facility.write`,
-`treasury.facility.override`, `treasury.loan.write` (the PRD's `TreasuryView`,
+`treasury.facility.override`, `treasury.loan.write`, `treasury.reconciliation.write` (the PRD's `TreasuryView`,
 `TreasuryBankAccountMaintain`, `TreasuryStatementImport`,
 `TreasuryCheckMaintain`, `TreasuryFacilityMaintain`,
 `TreasuryFacilityOverride` and `TreasuryLoanMaintain` in the kernel's dotted
@@ -110,6 +134,7 @@ Problems use `type` `https://passage.dev/problems/<code>` and carry `code` and
 | `TRS-0408` | 422 | statement currency differs from the account currency |
 | `TRS-0409` | 422 | the statement's account (IBAN, or BAI2 / MT940 / camt `Othr` account number) is neither the bank account's IBAN nor its `statementAccount` |
 | `TRS-0412` | 422 | statements can only be imported into, and checks issued on, an active account |
+| `TRS-0411` | 409 | a statement line or item is already in an active match |
 | `TRS-0413` | 404 | statement not found |
 | `TRS-0414` | 422 | a cleared check cannot be voided or reprinted (BR-36.5) |
 | `TRS-0415` | 422 | facility limit exceeded by the amount in `detail` (FR-36.7) |
@@ -126,6 +151,16 @@ Problems use `type` `https://passage.dev/problems/<code>` and carry `code` and
 | `TRS-0436` | 422 | reconciliation state does not allow the transition (BR-36.3; domain rule, no endpoint yet; TRS-0410 is the close difference) |
 | `TRS-0446` | 422 | loan terms cannot produce a schedule (maturity not a whole number of periods, instalment below interest) |
 | `TRS-0447` | 404 | loan contract not found |
+| `TRS-0480` | 422 | the bank account has no active reconciliation rule |
+| `TRS-0481` | 422 | a manual match's lines and items do not add up to the same total |
+| `TRS-0482` | 409 | a rule with this name exists for the legal entity |
+| `TRS-0483` | 404 | reconciliation rule not found |
+| `TRS-0484` | 404 | reconciliation match not found |
+| `TRS-0485` | 409 | the match is already unmatched |
+| `TRS-0486` | 422 | a line is not on the statement, or a line or item is not in the statement currency |
+| `TRS-0487` | 409 | the reconciliation rule is already inactive |
+| `TRS-0488` | 422 | the items or the request belong to a different legal entity than the statement |
+| `TRS-0489` | 422 | the rule would give a bank account more than 20 active reconciliation rules |
 | `TRS-0490` | 413 | statement file exceeds `TREASURY_MAX_FILE_MB` |
 | `TRS-0491` | 400 | statement file could not be read |
 | `TRS-0493` | 422 | statement cannot be parsed as camt.053, BAI2 or MT940, or the file holds more than one statement; `errors.line` names the BAI2 / MT940 line, `errors.entry` the camt.053 entry |

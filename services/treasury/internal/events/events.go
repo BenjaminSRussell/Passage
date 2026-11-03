@@ -9,7 +9,9 @@ const Context = "treasury"
 const StatementImported = "dev.passage.treasury.statement.imported.v1"
 
 // All lists every event type this service publishes.
-func All() []string { return []string{StatementImported, CheckVoided} }
+func All() []string {
+	return []string{StatementImported, CheckVoided, ReconciliationMatched, ReconciliationUnmatched}
+}
 
 // StatementImportedData is the payload of StatementImported. Amounts are decimal strings.
 type StatementImportedData struct {

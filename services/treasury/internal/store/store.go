@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/events"
@@ -171,6 +170,15 @@ type Store interface {
 	CreateLoan(ctx context.Context, in NewLoan, idempotencyKey string) (Loan, error)
 	ListLoans(ctx context.Context, legalEntityID string) ([]Loan, error)
 	GetLoan(ctx context.Context, id string) (Loan, error)
+	CreateReconRule(ctx context.Context, in NewReconRule, idempotencyKey string) (ReconRule, error)
+	ListReconRules(ctx context.Context, legalEntityID, bankAccountID string) ([]ReconRule, error)
+	GetReconRule(ctx context.Context, id string) (ReconRule, error)
+	DeactivateReconRule(ctx context.Context, id string, version int) (ReconRule, error)
+	RunReconciliation(ctx context.Context, in RunInput, idempotencyKey string) (RunResult, error)
+	CreateManualMatch(ctx context.Context, in NewMatch, idempotencyKey string) (Match, error)
+	ListMatches(ctx context.Context, statementID string, limit, offset int) ([]Match, error)
+	GetMatch(ctx context.Context, id string) (Match, error)
+	Unmatch(ctx context.Context, id string, version int, reason string) (Match, error)
 	Ping(ctx context.Context) error
 }
 
@@ -367,7 +375,11 @@ func (s *Postgres) importStatement(ctx context.Context, in StatementImport) (Imp
 			return err
 		}
 		if existing, err := scanStatement(tx.QueryRow(ctx, `select `+statementColumns+` from bank_statement where tenant_id = $1 and bank_account_id = $2 and statement_id = $3`, p.TenantID, in.BankAccountID, in.Parsed.StatementID)); err == nil {
-			if err := domain.Duplicate(decimal.RequireFromString(existing.ClosingBalance), in.Parsed.ClosingAmount); err != nil {
+			closing, err := parseAmount(domain.CodeStatementBalance, "stored closing balance", existing.ClosingBalance)
+			if err != nil {
+				return err
+			}
+			if err := domain.Duplicate(closing, in.Parsed.ClosingAmount); err != nil {
 				return err
 			}
 			res = ImportResult{Statement: existing, Replayed: true}
@@ -406,9 +418,9 @@ func (s *Postgres) importStatement(ctx context.Context, in StatementImport) (Imp
 		batch := &pgx.Batch{}
 		for _, l := range in.Parsed.Lines {
 			batch.Queue(`insert into bank_statement_line (tenant_id, statement_id, legal_entity_id, bank_account_id, line_no, booking_date, value_date, amount, currency,
-				btc_code, end_to_end_ref, reference, counterparty_name, raw_fragment) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+				btc_code, end_to_end_ref, reference, bank_reference, counterparty_name, raw_fragment) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 				p.TenantID, st.ID, legalEntityID, in.BankAccountID, l.LineNo, l.BookingDate, l.ValueDate, l.Amount.String(), l.Currency,
-				l.BTCCode, l.EndToEndRef, l.Reference, l.CounterpartyName, l.RawFragment)
+				l.BTCCode, l.EndToEndRef, l.Reference, l.BankReference, l.CounterpartyName, l.RawFragment)
 		}
 		br := tx.SendBatch(ctx, batch)
 		for range in.Parsed.Lines {

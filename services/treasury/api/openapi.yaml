@@ -1,10 +1,10 @@
 openapi: 3.1.0
 info:
-  title: Passage Treasury (slices 1 and 3, PSG-36)
-  version: 0.3.0
+  title: Passage Treasury (slices 1 and 3 and reconciliation, PSG-36)
+  version: 0.4.0
   summary: Bank accounts, statement import, cash forecast, checks, facilities with LCs and guarantees, and loan contracts.
   description: |
-    Wave 36 slices 1 and 3. Matching, reconciliation close, bills of exchange, promissory
+    Wave 36 slices 1 and 3. Reconciliation rules, runs and matches are served; the reconciliation close, bills of exchange, promissory
     notes, postdated checks, deals, payment requests, bank connectivity and IHC endpoints
     are later slices (see NOT-IMPLEMENTED.md). Errors are RFC 9457 problem details with a stable `code`.
 servers:
@@ -677,6 +677,236 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Loan"}
         "404": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/reconciliation-rules:
+    post:
+      operationId: createReconciliationRule
+      summary: Store a matching rule for a bank account or for every account of a legal entity (FR-36.3)
+      description: |
+        Weights (amount, date, reference, counterparty) sum to 100 and the amount carries at least 20.
+        A strict rule may only auto-match on a reference of 8 or more characters. Rules run in priority
+        order (1 first). The name is unique per legal entity (TRS-0482). A bank account may have at most 20 active
+        rules, counting the entity-wide ones (422 TRS-0489).
+      x-passage-duty: treasury.reconciliation.write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateReconciliationRuleRequest"}
+      responses:
+        "201":
+          description: Rule stored (or the stored rule for a repeated key)
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReconciliationRule"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    get:
+      operationId: listReconciliationRules
+      summary: Rules of a legal entity in run order, optionally those that apply to one bank account
+      x-passage-duty: treasury.view
+      parameters:
+        - name: legalEntityId
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+        - name: bankAccountId
+          in: query
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Rules
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/ReconciliationRule"}
+        "400": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/reconciliation-rules/{id}:
+    get:
+      operationId: getReconciliationRule
+      summary: Read a reconciliation rule
+      x-passage-duty: treasury.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Rule
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReconciliationRule"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/reconciliation-rules/{id}:deactivate:
+    post:
+      operationId: deactivateReconciliationRule
+      summary: Stop a rule from running; matches it made stay
+      x-passage-duty: treasury.reconciliation.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Rule deactivated; the version (ETag) is incremented
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReconciliationRule"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/reconciliation-runs:
+    post:
+      operationId: runReconciliation
+      summary: Run the account's active rules over a statement against the open items offered (FR-36.3)
+      description: |
+        Ledger, AR and AP own the open items, so the caller offers them (at most 2,000; amounts in the
+        statement's sign convention). The next 2,000 unmatched or suggested lines after `afterLineNo` are
+        considered; `remainingLines` counts the open lines after that page and `nextAfterLineNo` is the cursor to
+        run again with. Lines of the page that an earlier run suggested but found no candidate now return to
+        unmatched; lines outside the page keep their status. `legalEntityId` must be the statement's legal entity
+        (TRS-0488) and inside the caller's scope (403). A reference-only candidate (the reference agrees but the
+        amount, date or payer does not) is suggested, never auto-matched. A placeholder end-to-end id such as
+        NOTPROVIDED is ignored; the remittance reference of the line is scored instead.
+        Unique matches are stored and published; N:1 batch receipts match when the items sharing the line's
+        batch reference add up to the line exactly. An item wanted by two matches is released from both.
+        Other lines with a candidate become suggested and are listed. TRS-0480 when the account has no active rule.
+      x-passage-duty: treasury.reconciliation.write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ReconciliationRunRequest"}
+      responses:
+        "201":
+          description: Run result (or the stored result for a repeated key)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReconciliationRunResult"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/reconciliation-matches:
+    post:
+      operationId: createManualMatch
+      summary: Match statement lines to items by hand with a reason (FR-36.3)
+      description: |
+        Many-to-one or one-to-many. The lines' amounts must add up to the items' exactly (TRS-0481);
+        lines and items must be in the statement currency (TRS-0486) and free of another active
+        match (409 TRS-0411). `legalEntityId` must be the statement's legal entity (TRS-0488).
+      x-passage-duty: treasury.reconciliation.write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateManualMatchRequest"}
+      responses:
+        "201":
+          description: Match stored (or the stored match for a repeated key)
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReconciliationMatch"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    get:
+      operationId: listReconciliationMatches
+      summary: Matches of a statement, oldest first, unmatched ones included
+      x-passage-duty: treasury.view
+      parameters:
+        - name: statementId
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 500}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, default: 0}}
+      responses:
+        "200":
+          description: A page of matches; nextOffset is present when the page is full
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/ReconciliationMatch"}
+                  nextOffset: {type: integer, minimum: 1}
+        "400": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/reconciliation-matches/{id}:
+    get:
+      operationId: getReconciliationMatch
+      summary: Read a match with its lines and items
+      x-passage-duty: treasury.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Match
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReconciliationMatch"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/reconciliation-matches/{id}:unmatch:
+    post:
+      operationId: unmatchReconciliationMatch
+      summary: Dissolve a match with a reason; its lines return to unmatched and its items are free again
+      description: 409 TRS-0485 when the match is already unmatched. The match row stays as history and records `unmatchedBy`.
+      x-passage-duty: treasury.reconciliation.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              additionalProperties: false
+              properties:
+                reason: {type: string, minLength: 1, maxLength: 200}
+      responses:
+        "200":
+          description: Match unmatched; the version (ETag) is incremented
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReconciliationMatch"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
 components:
   parameters:
     Id:
@@ -985,6 +1215,150 @@ components:
           type: array
           description: Present on create and get; omitted in the list
           items: {$ref: "#/components/schemas/LoanScheduleLine"}
+    ReconciliationWeights:
+      type: object
+      required: [amount, date, reference, counterparty]
+      additionalProperties: false
+      properties:
+        amount: {type: integer, minimum: 20, maximum: 100}
+        date: {type: integer, minimum: 0, maximum: 80}
+        reference: {type: integer, minimum: 0, maximum: 80}
+        counterparty: {type: integer, minimum: 0, maximum: 80}
+    CreateReconciliationRuleRequest:
+      type: object
+      required: [legalEntityId, name, priority, weights, amountTolerance, dateWindowDays]
+      additionalProperties: false
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        bankAccountId: {type: string, format: uuid, description: Omit for a rule that applies to every account of the legal entity}
+        name: {type: string, minLength: 1, maxLength: 80}
+        priority: {type: integer, minimum: 1, maximum: 1000}
+        weights: {$ref: "#/components/schemas/ReconciliationWeights"}
+        amountTolerance: {type: string, description: Largest amount difference that still scores, decimal string}
+        dateWindowDays: {type: integer, minimum: 0, maximum: 30}
+        strict: {type: boolean, description: Auto-match only on a reference of 8 or more characters, unique among the open items}
+    ReconciliationRule:
+      type: object
+      required: [id, legalEntityId, name, priority, weights, amountTolerance, dateWindowDays, strict, active, version, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        bankAccountId: {type: string, format: uuid}
+        name: {type: string}
+        priority: {type: integer}
+        weights: {$ref: "#/components/schemas/ReconciliationWeights"}
+        amountTolerance: {type: string}
+        dateWindowDays: {type: integer}
+        strict: {type: boolean}
+        active: {type: boolean}
+        version: {type: integer, minimum: 1}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    ReconciliationItem:
+      type: object
+      required: [type, id, currency, amount]
+      additionalProperties: false
+      properties:
+        type: {type: string, enum: [ledger, ar, ap]}
+        id: {type: string, minLength: 1, maxLength: 100}
+        currency: {type: string}
+        amount: {$ref: "#/components/schemas/Money"}
+    ReconciliationRunItem:
+      type: object
+      required: [type, id, currency, amount, valueDate]
+      additionalProperties: false
+      properties:
+        type: {type: string, enum: [ledger, ar, ap]}
+        id: {type: string, minLength: 1, maxLength: 100}
+        currency: {type: string}
+        amount: {$ref: "#/components/schemas/Money"}
+        valueDate: {type: string, format: date}
+        reference: {type: string, maxLength: 140, description: Invoice number, end-to-end id or check number}
+        counterparty: {type: string, maxLength: 140}
+        batch: {type: string, maxLength: 140, description: Remittance or batch id; items sharing it match one batch receipt line whose reference names it}
+    ReconciliationRunRequest:
+      type: object
+      required: [statementId, legalEntityId, items]
+      additionalProperties: false
+      properties:
+        statementId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid, description: Legal entity the offered items belong to; must be the statement's}
+        afterLineNo: {type: integer, minimum: 0, default: 0, description: Only lines with a higher number are considered; pass the previous nextAfterLineNo}
+        items:
+          type: array
+          minItems: 1
+          maxItems: 2000
+          items: {$ref: "#/components/schemas/ReconciliationRunItem"}
+    ReconciliationRunResult:
+      type: object
+      required: [matches, suggestions, linesConsidered, itemsConsidered, remainingLines, nextAfterLineNo]
+      properties:
+        matches:
+          type: array
+          items: {$ref: "#/components/schemas/ReconciliationMatch"}
+        suggestions:
+          type: array
+          items:
+            type: object
+            required: [lineNo, itemType, itemId, score]
+            properties:
+              lineNo: {type: integer}
+              itemType: {type: string}
+              itemId: {type: string}
+              score: {type: integer, minimum: 0, maximum: 100}
+        linesConsidered: {type: integer}
+        itemsConsidered: {type: integer, description: Offered items in the statement currency and not already in an active match}
+        remainingLines: {type: integer, description: Open lines after this page}
+        nextAfterLineNo: {type: integer, description: Cursor for the next run; 0 when no lines remain}
+    CreateManualMatchRequest:
+      type: object
+      required: [statementId, legalEntityId, lineNos, items, reason]
+      additionalProperties: false
+      properties:
+        statementId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        lineNos:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: {type: integer, minimum: 1}
+        items:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: {$ref: "#/components/schemas/ReconciliationItem"}
+        reason: {type: string, minLength: 1, maxLength: 200}
+    ReconciliationMatch:
+      type: object
+      required: [id, legalEntityId, bankAccountId, statementId, kind, status, difference, createdBy, version, lines, items, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        bankAccountId: {type: string, format: uuid}
+        statementId: {type: string, format: uuid}
+        kind: {type: string, enum: [auto, manual]}
+        status: {type: string, enum: [matched, unmatched]}
+        ruleName: {type: string, description: The rule that decided an auto match, or batch}
+        score: {type: integer, minimum: 0, maximum: 100}
+        difference: {$ref: "#/components/schemas/Money"}
+        reason: {type: string}
+        unmatchReason: {type: string}
+        unmatchedBy: {type: string}
+        createdBy: {type: string}
+        version: {type: integer, minimum: 1}
+        lines:
+          type: array
+          items:
+            type: object
+            required: [lineNo, amount]
+            properties:
+              lineNo: {type: integer}
+              amount: {$ref: "#/components/schemas/Money"}
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/ReconciliationItem"}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
     Problem:
       type: object
       required: [type, title, status, code]

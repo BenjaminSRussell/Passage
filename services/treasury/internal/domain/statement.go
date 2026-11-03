@@ -47,6 +47,7 @@ type Line struct {
 	BTCCode          string // domain/family/subfamily
 	EndToEndRef      string
 	Reference        string // first unstructured remittance text
+	BankReference    string // bank or servicer reference (MT940 :61: after //); never a payer reference
 	CounterpartyName string
 	RawFragment      string // source XML slice kept for audit
 }

@@ -1169,6 +1169,25 @@ test_receiving_payee_erase_reaches_only_the_erase_route if {
 	not allowed("VendorInvoicePost", "POST", "/v1/receiving/one-time-payees:erase")
 }
 
+test_treasury_reconciliation_write_reaches_only_its_post_routes if {
+	allowed("treasury.reconciliation.write", "POST", "/v1/treasury/reconciliation-rules")
+	allowed("treasury.reconciliation.write", "POST", "/v1/treasury/reconciliation-rules/r-1:deactivate")
+	allowed("treasury.reconciliation.write", "POST", "/v1/treasury/reconciliation-runs")
+	allowed("treasury.reconciliation.write", "POST", "/v1/treasury/reconciliation-matches")
+	allowed("treasury.reconciliation.write", "POST", "/v1/treasury/reconciliation-matches/m-1:unmatch")
+	not allowed("treasury.reconciliation.write", "GET", "/v1/treasury/reconciliation-rules")
+	not allowed("treasury.reconciliation.write", "GET", "/v1/treasury/reconciliation-matches/m-1")
+	not allowed("treasury.reconciliation.write", "DELETE", "/v1/treasury/reconciliation-rules/r-1")
+	not allowed("treasury.reconciliation.write", "PUT", "/v1/treasury/reconciliation-rules/r-1:deactivate")
+	not allowed("treasury.reconciliation.write", "POST", "/v1/treasury/reconciliation-matches/m-1")
+	not allowed("treasury.reconciliation.write", "POST", "/v1/treasury/bank-accounts")
+	not allowed("treasury.reconciliation.write", "POST", "/v1/treasury/statements/import")
+	not allowed("treasury.view", "POST", "/v1/treasury/reconciliation-runs")
+	not allowed("treasury.view", "POST", "/v1/treasury/reconciliation-matches/m-1:unmatch")
+	not allowed("treasury.view", "POST", "/v1/treasury/reconciliation-rules/r-1:deactivate")
+	not allowed("treasury.statement.import", "POST", "/v1/treasury/reconciliation-runs")
+}
+
 test_payroll_run_duties_split_maintain_finalize_post_and_read if {
 	allowed("payroll.run.maintain", "POST", "/v1/payroll/runs")
 	allowed("payroll.run.maintain", "POST", "/v1/payroll/runs/r-1/review")

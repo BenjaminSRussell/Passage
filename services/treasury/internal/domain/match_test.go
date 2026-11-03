@@ -299,3 +299,16 @@ func TestMatchLine_AdversarialFixture1000(t *testing.T) {
 		}
 	}
 }
+
+func TestScore_RemittanceReferenceCountsWhenEndToEndIsAPlaceholder(t *testing.T) {
+	line := facts("100.00", "2026-10-22", "NOTPROVIDED", "")
+	line.AltReference = "INV-778812"
+	cand := facts("100.00", "2026-10-22", "INV-778812", "")
+	if got := Score(line, cand, tol); got != 85 {
+		t.Fatalf("score = %d; want 85 (amount, date and the remittance reference)", got)
+	}
+	line.AltReference = ""
+	if got := Score(line, cand, tol); got != 60 {
+		t.Fatalf("score = %d; want 60 without the remittance reference", got)
+	}
+}
