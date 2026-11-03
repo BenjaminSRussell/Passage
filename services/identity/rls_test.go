@@ -404,3 +404,32 @@ func TestSCIMTablesAreTenantIsolated(t *testing.T) {
 		requireDenied(t, err, "tenant A inserting a tenant B row into "+table)
 	}
 }
+
+// A tenant-scoped session may not insert even its own tenant row: tenant creation needs the operator context
+// (0009_tenant_insert_operator_context) that only the tenant create handler sets.
+func TestTenantInsertNeedsOperatorContext(t *testing.T) {
+	admin, app, tenantA, _ := setupWithAdmin(t)
+	ctx := context.Background()
+	newTenant := testkit.TenantID(9)
+	insertAs := func(session, operator string) error {
+		return asTenant(t, app, session, "*", func(tx pgx.Tx) error {
+			if operator != "" {
+				if _, err := tx.Exec(ctx, `select set_config('passage.operator_context', $1, true)`, operator); err != nil {
+					return err
+				}
+			}
+			_, err := tx.Exec(ctx, `insert into identity_tenants (tenant_id, realm_name, display_name) values ($1, 'new', 'New')`, newTenant)
+			return err
+		})
+	}
+	insert := func(operator string) error { return insertAs(newTenant, operator) }
+	requireDenied(t, insert(""), "tenant insert without operator context")
+	requireDenied(t, insert(tenantA), "tenant insert naming a non-operator tenant")
+	if _, err := admin.Exec(ctx, `insert into identity_operator (tenant_id) values ($1)`, tenantA); err != nil {
+		t.Fatal(err)
+	}
+	requireDenied(t, insertAs(tenantA, tenantA), "operator context inserting a tenant other than the session tenant")
+	if err := insert(tenantA); err != nil {
+		t.Fatalf("tenant insert in operator context: %v", err)
+	}
+}

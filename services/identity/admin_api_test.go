@@ -849,13 +849,23 @@ func TestOperatorGrantsTenantAdministrator(t *testing.T) {
 
 	t.Run("a half-given initial administrator is refused", func(t *testing.T) {
 		wantProblem(t, f.do(f.operatorCaller(), http.MethodPost, "/v1/tenants", map[string]string{"realmName": "half-co", "displayName": "Half", "adminUserId": adminUser}), http.StatusBadRequest, "COM-0001")
+		wantProblem(t, f.do(f.operatorCaller(), http.MethodPost, "/v1/tenants", map[string]string{"realmName": "urn-co", "displayName": "Urn", "adminUserId": "urn:uuid:" + adminUser, "adminIdpSubject": "s"}), http.StatusBadRequest, "COM-0001")
+	})
+
+	t.Run("display name length counts characters", func(t *testing.T) {
+		created := decode[tenantRow](t, f.do(f.operatorCaller(), http.MethodPost, "/v1/tenants", map[string]string{"realmName": "accent-co", "displayName": strings.Repeat("é", 200)}), http.StatusCreated)
+		if created.TenantID == "" {
+			t.Fatalf("created = %+v", created)
+		}
+		wantProblem(t, f.do(f.operatorCaller(), http.MethodPost, "/v1/tenants", map[string]string{"realmName": "accent-long", "displayName": strings.Repeat("é", 201)}), http.StatusBadRequest, "COM-0001")
 	})
 
 	t.Run("the operator recovers an existing tenant", func(t *testing.T) {
 		path := "/v1/tenants/" + f.tenantA + "/admins"
-		body := map[string]string{"userId": userID, "reason": "rollout of tenant.administer"}
+		wantProblem(t, f.do(f.operatorCaller(), http.MethodPost, path, map[string]string{"userId": userID, "reason": strings.Repeat("é", 501)}), http.StatusBadRequest, "COM-0001")
+		body := map[string]string{"userId": strings.ToUpper(userID), "reason": strings.Repeat("é", 500)}
 		granted := decode[assignmentRow](t, f.do(f.operatorCaller(), http.MethodPost, path, body), http.StatusCreated)
-		if granted.Role != dutyTenantAdmin || granted.LegalEntityID != "" || holders(f.tenantA) != 1 {
+		if granted.Role != dutyTenantAdmin || granted.UserID != userID || granted.LegalEntityID != "" || holders(f.tenantA) != 1 {
 			t.Fatalf("granted = %+v", granted)
 		}
 		if got := count(t, f.app, f.operator, "", `select count(*) from identity_audit where action = 'tenant.administrator-granted' and entity_id = '`+f.tenantA+`'`); got != 1 {
@@ -873,7 +883,15 @@ func TestOperatorGrantsTenantAdministrator(t *testing.T) {
 		bySubject := caller{tenantID: f.operator, user: "subject-" + f.tenantB, duties: []string{dutyTenants}}
 		wantProblem(t, f.do(byUserID, http.MethodPost, path, body), http.StatusForbidden, "IAM-0416")
 		wantProblem(t, f.do(bySubject, http.MethodPost, path, body), http.StatusForbidden, "IAM-0416")
-		wantProblem(t, f.do(f.operatorCaller(), http.MethodPost, "/v1/tenants/"+f.operator+"/admins", body), http.StatusForbidden, "AUTH-0003")
+		bySubjectCase := caller{tenantID: f.operator, user: strings.ToUpper("subject-" + f.tenantB), duties: []string{dutyTenants}}
+		wantProblem(t, f.do(bySubjectCase, http.MethodPost, path, body), http.StatusForbidden, "IAM-0416")
+		wantProblem(t, f.do(f.operatorCaller(), http.MethodPost, path, map[string]string{"userId": "urn:uuid:" + userID, "reason": "x"}), http.StatusBadRequest, "COM-0001")
+		for _, operatorID := range []string{f.operator, strings.ToUpper(f.operator)} {
+			wantProblem(t, f.do(f.operatorCaller(), http.MethodPost, "/v1/tenants/"+operatorID+"/admins", body), http.StatusForbidden, "AUTH-0003")
+		}
+		if got := holders(f.operator); got != 0 {
+			t.Fatalf("refused grants left %d operator-tenant administrators", got)
+		}
 		if got := holders(f.tenantB); got != 0 {
 			t.Fatalf("refused grants left %d rows", got)
 		}

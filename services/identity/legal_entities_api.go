@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -78,7 +79,7 @@ func (a *LegalEntitiesAPI) create(w http.ResponseWriter, r *http.Request) {
 	if !legalEntityCodePattern.MatchString(req.Code) {
 		fields["code"] = "must be 1-32 letters, digits, hyphens or underscores"
 	}
-	if req.DisplayName == "" || len(req.DisplayName) > maxDisplayName {
+	if req.DisplayName == "" || utf8.RuneCountInString(req.DisplayName) > maxDisplayName {
 		fields["displayName"] = "must be 1-200 characters"
 	}
 	if len(fields) > 0 {

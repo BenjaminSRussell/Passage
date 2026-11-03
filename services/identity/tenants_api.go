@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -119,13 +120,15 @@ func (a *TenantsAPI) create(w http.ResponseWriter, r *http.Request) {
 	if !realmNamePattern.MatchString(req.RealmName) {
 		fields["realmName"] = "must be 2-63 lowercase letters, digits or hyphens, starting with a letter or digit"
 	}
-	if req.DisplayName == "" || len(req.DisplayName) > maxDisplayName {
+	if req.DisplayName == "" || utf8.RuneCountInString(req.DisplayName) > maxDisplayName {
 		fields["displayName"] = "must be 1-200 characters"
 	}
-	if (req.AdminUserID == "") != (req.AdminIdpSubject == "") || (req.AdminUserID != "" && !validUUID(req.AdminUserID)) {
+	adminUserID, adminUserOK := canonicalUUID(req.AdminUserID)
+	if (req.AdminUserID == "") != (req.AdminIdpSubject == "") || (req.AdminUserID != "" && !adminUserOK) {
 		fields["adminUserId"] = "adminUserId (UUID) and adminIdpSubject are given together"
 	}
-	if len(req.AdminIdpSubject) > maxIdpSubject {
+	req.AdminUserID = adminUserID
+	if utf8.RuneCountInString(req.AdminIdpSubject) > maxIdpSubject {
 		fields["adminIdpSubject"] = "must be at most 255 characters"
 	}
 	if len(fields) > 0 {
@@ -136,7 +139,7 @@ func (a *TenantsAPI) create(w http.ResponseWriter, r *http.Request) {
 	created := tenantResource{}
 	tenantID := ids.New()
 	err := pgx.BeginFunc(r.Context(), a.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(r.Context(), `select set_config('passage.tenant_id', $1, true)`, tenantID); err != nil {
+		if _, err := tx.Exec(r.Context(), `select set_config('passage.tenant_id', $1, true), set_config('passage.operator_context', $2, true)`, tenantID, a.operatorTenantID); err != nil {
 			return err
 		}
 		rows, err := tx.Query(r.Context(), `insert into identity_tenants (tenant_id, realm_name, display_name) values ($1, $2, $3) returning `+tenantColumns,
@@ -145,6 +148,10 @@ func (a *TenantsAPI) create(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if created, err = pgx.CollectExactlyOneRow(rows, scanTenant); err != nil {
+			return err
+		}
+		// The operator context covers the tenant row only; the rest of the transaction runs without it.
+		if _, err := tx.Exec(r.Context(), `select set_config('passage.operator_context', '', true)`); err != nil {
 			return err
 		}
 		if err := record(r.Context(), tx, tenantID, p.UserID, "tenant", tenantID, "created", created); err != nil {
@@ -197,13 +204,17 @@ func (a *TenantsAPI) grantAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Reason = strings.TrimSpace(req.Reason)
 	fields := map[string]string{}
-	if !validUUID(id) {
+	if canonical, ok := canonicalUUID(id); ok {
+		id = canonical
+	} else {
 		fields["id"] = "must be a UUID"
 	}
-	if !validUUID(req.UserID) {
+	if canonical, ok := canonicalUUID(req.UserID); ok {
+		req.UserID = canonical
+	} else {
 		fields["userId"] = "must be a UUID"
 	}
-	if req.Reason == "" || len(req.Reason) > maxReason {
+	if req.Reason == "" || utf8.RuneCountInString(req.Reason) > maxReason {
 		fields["reason"] = "is required, at most 500 characters"
 	}
 	if len(fields) > 0 {
@@ -236,7 +247,7 @@ func (a *TenantsAPI) grantAdmin(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if p.UserID == req.UserID || p.UserID == idpSubject {
+		if strings.EqualFold(p.UserID, req.UserID) || strings.EqualFold(p.UserID, idpSubject) {
 			return httpx.NewProblem(http.StatusForbidden, codeSelfGrant, "You cannot grant a role to yourself")
 		}
 		if status != "active" {
