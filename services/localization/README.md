@@ -43,6 +43,9 @@ any pack fails validation, or when the directory does not hold the seven packs.
 | IN | `IN_GSTR1` | `in/fixtures/gstr1-082025.json` | GSTN offline-tool GSTR-1 JSON, b2b and hsn: GSTIN check characters, period, invoice number and date, place of supply, rate slabs, IGST or CGST = SGST, HSN summary reconciled |
 | MX | `MX_CFDI40` | `mx/fixtures/cfdi40-ingreso.xml` | SAT cfdv40.xsd and tdCFDI.xsd patterns and the Anexo 20 arithmetic; also SAT's own XSD with `xmllint` when `PASSAGE_SAT_CFDI_XSD` points at a local copy (`TestMXFixtureAgainstSATXSD`) |
 | CA | `CA_GST34` | `ca/fixtures/gst34-2025q3.xml` | the GST34 form: BN with Luhn check digit and RT account, period, line 101 whole dollars, 105 = 103 + 104, 108 = 106 + 107, 109 = 105 - 108 |
+| MX | `MX_DIOT` | `mx/fixtures/diot-2025-01.txt` | pipe-delimited SAT DIOT lines: tipoTercero/tipoOperacion catalogues, RFC shape, date and mod-11 homoclave, foreign-supplier fields, whole-peso amounts, IVA acreditable at most 16% of the base |
+| FR | `FR_CA3` | `fr/fixtures/ca3-2025-01.csv` | DGFiP 3310-CA3 boxes as `code;value`: SIREN Luhn, period, whole euros, 16 = 08 + 09 + 9B, 23 = 19 + 20 + 22, 28 and 25 as the positive and negative difference |
+| IN | `IN_26Q` | `in/fixtures/26q-2025-26-q2.txt` | caret-delimited FH/BH/CD/DD records: TAN and PAN formats, FY and quarter, dates inside the quarter, BSR code, section, record counts, deducted = deposited TDS = batch total |
 
 `TestEveryPackShipsAValidStatutoryFixture` validates the seven fixtures with 0 errors;
 `stat_mutation_test.go` holds about 120 adversarial mutations (one regulator-rejected change each, plus
