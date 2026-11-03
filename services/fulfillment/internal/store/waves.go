@@ -134,7 +134,7 @@ type WaveFilter struct {
 func candidates(ctx context.Context, tx pgx.Tx, req WaveRequest) ([]domain.WaveCandidate, map[string]WaveShipment, error) {
 	rows, err := tx.Query(ctx, `select s.id, s.shipment_number, s.order_id, s.legal_entity_id, s.customer_id, s.carrier_code, s.planned_ship_date
 		from shipment s
-		where s.warehouse_id = $1 and s.status = 'RELEASED'
+		where s.warehouse_id = $1 and s.status = 'RELEASED' and s.order_type <> 'JOURNAL'
 		  and ($2 = '' or s.customer_id::text = $2)
 		  and ($3 = '' or s.carrier_code = $3)
 		  and ($4 = '' or exists (select 1 from shipment_line z where z.tenant_id = s.tenant_id and z.shipment_id = s.id and z.zone_code = $4))
@@ -275,7 +275,7 @@ func insertWave(ctx context.Context, tx pgx.Tx, tenantID string, req WaveRequest
 	}
 	for _, sid := range plan.ShipmentIDs {
 		tag, err := tx.Exec(ctx, `update shipment set status = 'PICKING', version = version + 1, updated_at = now()
-			where tenant_id = $1 and id = $2 and status = 'RELEASED'`, tenantID, sid)
+			where tenant_id = $1 and id = $2 and status = 'RELEASED' and order_type <> 'JOURNAL'`, tenantID, sid)
 		if err != nil {
 			return Wave{}, err
 		}

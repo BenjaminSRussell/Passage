@@ -3,6 +3,8 @@ package domain
 import (
 	"testing"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 var today = time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC)
@@ -74,5 +76,41 @@ func TestReleaseIsDeterministic(t *testing.T) {
 	b, _ := Release([]ReleaseLine{lines[1], lines[0]}, rule)
 	if a[0].OrderID != b[0].OrderID || a[1].OrderID != b[1].OrderID || a[0].OrderID != "o1" {
 		t.Fatalf("order differs: %s %s", a[0].OrderID, b[0].OrderID)
+	}
+}
+
+func TestRelease_JournalPriorityAndPartialATP(t *testing.T) {
+	rule := ReleaseRule{Today: today, HorizonDays: 2, RequireFullATP: false}
+	atp := func(s string) *decimal.Decimal { v := d(s); return &v }
+	lines := []ReleaseLine{
+		rl("j", "oj", "w1", 10, func(l *ReleaseLine) { l.OrderType = OrderTypeJournal }),
+		rl("low", "o9", "w1", 10, func(l *ReleaseLine) { l.Priority = 9 }),
+		rl("hi", "o1", "w1", 11, func(l *ReleaseLine) { l.Priority = 1 }),
+		rl("part", "o5", "w1", 10, func(l *ReleaseLine) { l.Qty = d("10"); l.ATPQty = atp("4") }),
+		rl("none", "o6", "w1", 10, func(l *ReleaseLine) { l.ATPQty = atp("0") }),
+	}
+	groups, skipped := Release(lines, rule)
+	reasons := map[string]string{}
+	for _, s := range skipped {
+		reasons[s.OrderLineID] = s.Reason
+	}
+	if reasons["j"] != SkipJournalOrder || reasons["none"] != SkipATPShort || len(skipped) != 2 {
+		t.Fatalf("skipped = %v", skipped)
+	}
+	var order []string
+	for _, g := range groups {
+		order = append(order, g.OrderID)
+	}
+	if len(order) != 3 || order[0] != "o1" || order[1] != "o5" || order[2] != "o9" {
+		t.Fatalf("group order = %v, want priority 1, default 5, 9", order)
+	}
+	part := groups[1].Lines[0]
+	if !part.Partial || !part.Qty.Equal(d("4")) || !part.OrderQty.Equal(d("10")) {
+		t.Fatalf("partial line = %+v, want 4 of 10", part)
+	}
+	// Full ATP required: ATP below the quantity skips the line instead.
+	_, skipped = Release([]ReleaseLine{rl("p", "o", "w1", 10, func(l *ReleaseLine) { l.Qty = d("10"); l.ATPQty = atp("4") })}, ReleaseRule{Today: today, HorizonDays: 2, RequireFullATP: true})
+	if len(skipped) != 1 || skipped[0].Reason != SkipATPShort {
+		t.Fatalf("full ATP skip = %v", skipped)
 	}
 }

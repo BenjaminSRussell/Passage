@@ -120,6 +120,9 @@ func confirmWavePickTx(ctx context.Context, tx pgx.Tx, tenantID, waveID string, 
 		if err != nil {
 			return result, err
 		}
+		if err := checkShippable(sh); err != nil {
+			return result, err
+		}
 		todo := append([]PickInput(nil), listed[sid]...)
 		if pickRest {
 			if len(todo) == 0 && !pickable(sh.Status) {

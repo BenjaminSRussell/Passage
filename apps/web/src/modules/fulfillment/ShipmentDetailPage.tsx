@@ -29,6 +29,7 @@ const lineColumns: DataTableColumn<ShipmentLine>[] = [
   { key: "remaining", header: "To ship", align: "end", render: (row) => subtractDecimal(row.qtyPlanned, row.qtyShipped) },
   { key: "qtyClosed", header: "Closed", align: "end", render: (row) => row.qtyClosed ?? "0" },
   { key: "zone", header: "Zone", render: (row) => row.zone ?? dash },
+  { key: "partial", header: "Release", render: (row) => (row.partial ? "Partial (ATP)" : "Full") },
   {
     key: "tracking",
     header: "Batch / serial",
@@ -112,7 +113,7 @@ export function ShipmentDetailPage() {
     <div className={styles.stack}>
       <PageHeader
         title={`Shipment ${shipment.shipmentNumber}`}
-        description={`Planned to ship ${formatDate(shipment.plannedShipDate)}`}
+        description={`Planned to ship ${formatDate(shipment.plannedShipDate)}${shipment.priority ? `, priority ${shipment.priority}` : ""}`}
         meta={<ShipmentStatusBadge status={shipment.status} />}
         actions={
           <Link className={buttonClassName("secondary")} to="/fulfillment/shipments">

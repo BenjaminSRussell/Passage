@@ -179,3 +179,18 @@ func TestDropShip_PartialConfirmQtyAndCloseRemainder(t *testing.T) {
 		t.Fatalf("close: %d %q %s", rec.Code, rec.Header().Get("ETag"), rec.Body.String())
 	}
 }
+
+func TestDropShip_CreateRefusesAJournalOrder(t *testing.T) {
+	h := newServer(t, &fakeStore{})
+	key := map[string]string{"Idempotency-Key": "d-journal"}
+	rec := do(t, h, http.MethodPost, "/v1/fulfillment/drop-ships",
+		dropShipBody(func(b string) string { return strings.TrimSuffix(b, "}") + `,"orderType":"JOURNAL"}` }), key)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "FUL-0065") {
+		t.Fatalf("journal drop-ship: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodPost, "/v1/fulfillment/drop-ships",
+		dropShipBody(func(b string) string { return strings.TrimSuffix(b, "}") + `,"orderType":"NOPE"}` }), map[string]string{"Idempotency-Key": "d-bad"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad order type: %d", rec.Code)
+	}
+}

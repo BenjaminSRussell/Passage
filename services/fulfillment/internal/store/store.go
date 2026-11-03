@@ -29,8 +29,10 @@ import (
 
 // Error codes returned by the store (service catalog FUL-*).
 const (
-	CodeShipmentNotFound   = "FUL-0020"
-	CodeStatus             = "FUL-0001"
+	CodeShipmentNotFound = "FUL-0020"
+	CodeStatus           = "FUL-0001"
+	// CodeJournalOrder: the order is a JOURNAL order, which never ships.
+	CodeJournalOrder       = "FUL-0065"
 	CodeOverPick           = "FUL-0004"
 	CodeInvalidMove        = "FUL-0021"
 	CodeOverPack           = "FUL-0023"
@@ -82,9 +84,13 @@ type Shipment struct {
 	PlannedShipDate time.Time             `json:"plannedShipDate"`
 	ActualShipDate  *time.Time            `json:"actualShipDate"`
 	CarrierCode     *string               `json:"carrierCode"`
-	Version         int                   `json:"version"`
-	Lines           []ShipmentLine        `json:"lines"`
-	Containers      []Container           `json:"containers"`
+	// OrderType is the sales order type the shipment was released from.
+	OrderType string `json:"orderType"`
+	// Priority is the order priority, 1 (first) to 9, at release.
+	Priority   int            `json:"priority"`
+	Version    int            `json:"version"`
+	Lines      []ShipmentLine `json:"lines"`
+	Containers []Container    `json:"containers"`
 	// BackorderOfID is the shipment this one took its quantity from, and
 	// BackorderID the shipment that took over this one's closed remainder
 	// (short pick action BACKORDER).
@@ -143,6 +149,9 @@ type ShipmentLine struct {
 	// (BR-28.10); Tracking lists the batch, serial and location entries.
 	TrackingRequired bool            `json:"trackingRequired"`
 	Tracking         []TrackingEntry `json:"tracking"`
+	// Partial marks a line released for less than the order line quantity
+	// because ATP was short; a later release run releases the open remainder.
+	Partial bool `json:"partial"`
 }
 
 // Container is a closed package with its SSCC (BR-28.5). Tare, returnable and
@@ -433,6 +442,14 @@ func mapDomain(err error) error {
 	return err
 }
 
+// checkShippable refuses a shipment of a JOURNAL order: it never picks, packs or ships.
+func checkShippable(sh Shipment) error {
+	if sh.OrderType == domain.OrderTypeJournal {
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeJournalOrder, "FUL-0065: a JOURNAL order never picks, packs or ships")
+	}
+	return nil
+}
+
 func statusProblem(action string, status domain.ShipmentStatus) error {
 	return httpx.NewProblem(http.StatusUnprocessableEntity, CodeStatus, fmt.Sprintf("cannot %s a shipment in status %s", action, status))
 }
@@ -504,14 +521,32 @@ func (s *Postgres) RunRelease(ctx context.Context, warehouseID string, groups []
 			if err != nil {
 				return ReleaseResult{}, err
 			}
+			dealt, err := partialDealt(ctx, tx, groups)
+			if err != nil {
+				return ReleaseResult{}, err
+			}
 			result := ReleaseResult{Shipments: []Shipment{}, Skipped: []domain.Skip{}}
 			for _, g := range groups {
 				open := g
 				open.Lines = nil
 				for _, l := range g.Lines {
 					if reason, ok := taken[l.OrderLineID]; ok {
-						result.Skipped = append(result.Skipped, domain.Skip{OrderLineID: l.OrderLineID, Reason: reason})
-						continue
+						// A line that an earlier run released only in part is offered again
+						// for what is still open (FR-28.1, release_requires_full_atp false).
+						d, partial := dealt[l.OrderLineID]
+						if reason != domain.SkipAlreadyReleased || !partial {
+							result.Skipped = append(result.Skipped, domain.Skip{OrderLineID: l.OrderLineID, Reason: reason})
+							continue
+						}
+						left := l.OrderQty.Sub(d)
+						if !left.IsPositive() {
+							result.Skipped = append(result.Skipped, domain.Skip{OrderLineID: l.OrderLineID, Reason: reason})
+							continue
+						}
+						if l.Qty.GreaterThan(left) {
+							l.Qty = left
+						}
+						l.Partial = l.Qty.LessThan(left)
 					}
 					open.Lines = append(open.Lines, l)
 				}
@@ -563,6 +598,47 @@ func takenLines(ctx context.Context, tx pgx.Tx, groups []domain.ReleaseGroup) (m
 		if _, seen := out[id]; !seen || reason == domain.SkipAlreadyReleased {
 			out[id] = reason
 		}
+	}
+	return out, rows.Err()
+}
+
+// partialDealt returns, for the order lines of groups that an earlier run
+// released in part (on any shipment, cancelled or not), the quantity already
+// dealt with: planned on shipments that are not cancelled plus what a shipment closed without handing it to a
+// backorder shipment (that one carries it in its own planned quantity). A line
+// with no partial release is absent, so it stays "already released".
+func partialDealt(ctx context.Context, tx pgx.Tx, groups []domain.ReleaseGroup) (map[string]decimal.Decimal, error) {
+	var lineIDs []string
+	for _, g := range groups {
+		for _, l := range g.Lines {
+			lineIDs = append(lineIDs, l.OrderLineID)
+		}
+	}
+	out := map[string]decimal.Decimal{}
+	if len(lineIDs) == 0 {
+		return out, nil
+	}
+	// "Released in part" looks at every shipment, cancelled ones too: once the
+	// partial shipment is cancelled after its remainder was released, the line
+	// must still count only what live shipments carry, or the cancelled
+	// quantity would never be released again.
+	rows, err := tx.Query(ctx, `select sl.order_line_id::text, coalesce(sum(sl.qty_planned
+			+ case when exists (select 1 from shipment b where b.tenant_id = s.tenant_id and b.backorder_of_id = s.id and b.status <> 'CANCELLED') then 0 else sl.qty_closed end)
+			filter (where s.status <> 'CANCELLED'), 0)::text
+		from shipment_line sl join shipment s on s.tenant_id = sl.tenant_id and s.id = sl.shipment_id
+		where sl.order_line_id = any($1::uuid[])
+		group by sl.order_line_id
+		having bool_or(sl.partial)`, lineIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, sum string
+		if err := rows.Scan(&id, &sum); err != nil {
+			return nil, err
+		}
+		out[id] = dec(sum)
 	}
 	return out, rows.Err()
 }
@@ -639,6 +715,13 @@ func (s *Postgres) GetPackingSlip(ctx context.Context, id string) (PackingSlip, 
 	return slip, err
 }
 
+func priorityOf(p int) int {
+	if p == 0 {
+		return domain.DefaultPriority
+	}
+	return p
+}
+
 func insertReleased(ctx context.Context, tx pgx.Tx, tenantID string, g domain.ReleaseGroup, backorderOf *string) (Shipment, error) {
 	first := g.Lines[0]
 	seq, err := nextNumber(ctx, tx, tenantID, "SH")
@@ -648,7 +731,7 @@ func insertReleased(ctx context.Context, tx pgx.Tx, tenantID string, g domain.Re
 	sh := Shipment{
 		ID: ids.New(), ShipmentNumber: fmt.Sprintf("SH-%07d", seq), LegalEntityID: first.LegalEntityID,
 		WarehouseID: g.WarehouseID, OrderID: g.OrderID, CustomerID: first.CustomerID,
-		Status: domain.StatusReleased, PlannedShipDate: g.ShipDate, Version: 1,
+		Status: domain.StatusReleased, PlannedShipDate: g.ShipDate, Version: 1, OrderType: domain.NormalOrderType(first.OrderType), Priority: priorityOf(g.Priority),
 		Lines: []ShipmentLine{}, Containers: []Container{}, BackorderOfID: backorderOf,
 	}
 	// The API refuses lines of one order with different carriers, so any line names it.
@@ -658,18 +741,18 @@ func insertReleased(ctx context.Context, tx pgx.Tx, tenantID string, g domain.Re
 			break
 		}
 	}
-	if _, err := tx.Exec(ctx, `insert into shipment (tenant_id, id, shipment_number, legal_entity_id, warehouse_id, order_id, customer_id, status, planned_ship_date, carrier_code, backorder_of_id)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, tenantID, sh.ID, sh.ShipmentNumber, sh.LegalEntityID, sh.WarehouseID, sh.OrderID, sh.CustomerID,
-		string(sh.Status), sh.PlannedShipDate, sh.CarrierCode, backorderOf); err != nil {
+	if _, err := tx.Exec(ctx, `insert into shipment (tenant_id, id, shipment_number, legal_entity_id, warehouse_id, order_id, customer_id, status, planned_ship_date, carrier_code, backorder_of_id, order_type, priority)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`, tenantID, sh.ID, sh.ShipmentNumber, sh.LegalEntityID, sh.WarehouseID, sh.OrderID, sh.CustomerID,
+		string(sh.Status), sh.PlannedShipDate, sh.CarrierCode, backorderOf, sh.OrderType, sh.Priority); err != nil {
 		return Shipment{}, err
 	}
 	refs := []fulevents.LineRef{}
 	for _, l := range g.Lines {
 		line := ShipmentLine{ID: ids.New(), OrderLineID: l.OrderLineID, ProductID: l.ProductID, Unit: l.Unit, Planned: l.Qty,
 			Picked: decimal.Zero, Packed: decimal.Zero, Shipped: decimal.Zero, Zone: optional(l.Zone),
-			TrackingRequired: l.TrackingRequired, Tracking: []TrackingEntry{}}
-		if _, err := tx.Exec(ctx, `insert into shipment_line (tenant_id, id, shipment_id, order_line_id, product_id, unit, qty_planned, zone_code, tracking_required)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, tenantID, line.ID, sh.ID, line.OrderLineID, line.ProductID, line.Unit, line.Planned, line.Zone, l.TrackingRequired); err != nil {
+			TrackingRequired: l.TrackingRequired, Tracking: []TrackingEntry{}, Partial: l.Partial}
+		if _, err := tx.Exec(ctx, `insert into shipment_line (tenant_id, id, shipment_id, order_line_id, product_id, unit, qty_planned, zone_code, tracking_required, partial)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`, tenantID, line.ID, sh.ID, line.OrderLineID, line.ProductID, line.Unit, line.Planned, line.Zone, l.TrackingRequired, l.Partial); err != nil {
 			return Shipment{}, err
 		}
 		sh.Lines = append(sh.Lines, line)
@@ -697,10 +780,10 @@ func (s *Postgres) GetShipment(ctx context.Context, id string) (Shipment, error)
 func loadShipment(ctx context.Context, tx pgx.Tx, id string) (Shipment, error) {
 	var sh Shipment
 	var status string
-	err := tx.QueryRow(ctx, `select id, shipment_number, legal_entity_id, warehouse_id, order_id, customer_id, status, planned_ship_date, actual_ship_date, carrier_code, version, backorder_of_id,
+	err := tx.QueryRow(ctx, `select id, shipment_number, legal_entity_id, warehouse_id, order_id, customer_id, status, planned_ship_date, actual_ship_date, carrier_code, version, backorder_of_id, order_type, priority,
 		(select b.id from shipment b where b.backorder_of_id = shipment.id)
 		from shipment where id = $1`, id).Scan(&sh.ID, &sh.ShipmentNumber, &sh.LegalEntityID, &sh.WarehouseID, &sh.OrderID, &sh.CustomerID, &status, &sh.PlannedShipDate,
-		&sh.ActualShipDate, &sh.CarrierCode, &sh.Version, &sh.BackorderOfID, &sh.BackorderID)
+		&sh.ActualShipDate, &sh.CarrierCode, &sh.Version, &sh.BackorderOfID, &sh.OrderType, &sh.Priority, &sh.BackorderID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sh, httpx.NewProblem(http.StatusNotFound, CodeShipmentNotFound, "shipment not found")
 	}
@@ -709,7 +792,7 @@ func loadShipment(ctx context.Context, tx pgx.Tx, id string) (Shipment, error) {
 	}
 	sh.Status = domain.ShipmentStatus(status)
 	sh.Lines = []ShipmentLine{}
-	rows, err := tx.Query(ctx, `select id, order_line_id, product_id, unit, qty_planned::text, qty_picked::text, qty_packed::text, qty_shipped::text, pick_confirmed, zone_code, qty_closed::text, short_pick_reason, tracking_required
+	rows, err := tx.Query(ctx, `select id, order_line_id, product_id, unit, qty_planned::text, qty_picked::text, qty_packed::text, qty_shipped::text, pick_confirmed, zone_code, qty_closed::text, short_pick_reason, tracking_required, partial
 		from shipment_line where shipment_id = $1 order by id`, id)
 	if err != nil {
 		return sh, err
@@ -717,7 +800,7 @@ func loadShipment(ctx context.Context, tx pgx.Tx, id string) (Shipment, error) {
 	for rows.Next() {
 		var l ShipmentLine
 		var planned, picked, packed, shipped, closed string
-		if err := rows.Scan(&l.ID, &l.OrderLineID, &l.ProductID, &l.Unit, &planned, &picked, &packed, &shipped, &l.PickConfirmed, &l.Zone, &closed, &l.ShortPickReason, &l.TrackingRequired); err != nil {
+		if err := rows.Scan(&l.ID, &l.OrderLineID, &l.ProductID, &l.Unit, &planned, &picked, &packed, &shipped, &l.PickConfirmed, &l.Zone, &closed, &l.ShortPickReason, &l.TrackingRequired, &l.Partial); err != nil {
 			rows.Close()
 			return sh, err
 		}
@@ -796,6 +879,9 @@ func (s *Postgres) ConfirmPick(ctx context.Context, id string, version int, pick
 		res, err := runIdempotent(ctx, tx, p.TenantID, idem, func() (Shipment, error) {
 			sh, err := loadShipment(ctx, tx, id)
 			if err != nil {
+				return sh, err
+			}
+			if err := checkShippable(sh); err != nil {
 				return sh, err
 			}
 			if err := checkVersion(sh, version); err != nil {
@@ -907,6 +993,9 @@ func (s *Postgres) PackContainer(ctx context.Context, id string, version int, co
 			if err := checkVersion(sh, version); err != nil {
 				return PackResult{}, err
 			}
+			if err := checkShippable(sh); err != nil {
+				return PackResult{}, err
+			}
 			if sh.Status != domain.StatusPicked && sh.Status != domain.StatusPacked {
 				return PackResult{}, statusProblem("pack", sh.Status)
 			}
@@ -966,6 +1055,9 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 				return PackingSlip{}, err
 			}
 			if err := checkVersion(sh, version); err != nil {
+				return PackingSlip{}, err
+			}
+			if err := checkShippable(sh); err != nil {
 				return PackingSlip{}, err
 			}
 			if sh.Status != domain.StatusPacked {

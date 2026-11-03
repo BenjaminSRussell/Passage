@@ -203,7 +203,7 @@ func closeRemainderTx(ctx context.Context, tx pgx.Tx, tenantID string, sh *Shipm
 // insertBackorder creates the shipment that takes over the remainder closed on
 // sh: the lines that owed quantity, planned for the closed quantity.
 func insertBackorder(ctx context.Context, tx pgx.Tx, tenantID string, sh Shipment, closed []domain.ClosedQty, date time.Time) (Shipment, error) {
-	group := domain.ReleaseGroup{OrderID: sh.OrderID, WarehouseID: sh.WarehouseID, ShipDate: date}
+	group := domain.ReleaseGroup{OrderID: sh.OrderID, WarehouseID: sh.WarehouseID, ShipDate: date, Priority: sh.Priority}
 	carrier := ""
 	if sh.CarrierCode != nil {
 		carrier = *sh.CarrierCode
@@ -216,7 +216,7 @@ func insertBackorder(ctx context.Context, tx pgx.Tx, tenantID string, sh Shipmen
 		}
 		group.Lines = append(group.Lines, domain.ReleaseLine{OrderID: sh.OrderID, OrderLineID: l.OrderLineID, CustomerID: sh.CustomerID,
 			LegalEntityID: sh.LegalEntityID, WarehouseID: sh.WarehouseID, ProductID: l.ProductID, Unit: l.Unit, Qty: b.Qty,
-			CarrierCode: carrier, Zone: zone, TrackingRequired: l.TrackingRequired})
+			CarrierCode: carrier, Zone: zone, TrackingRequired: l.TrackingRequired, OrderType: sh.OrderType, Priority: sh.Priority})
 	}
 	origin := sh.ID
 	return insertReleased(ctx, tx, tenantID, group, &origin)

@@ -131,6 +131,7 @@ export const SKIP_LABELS: Record<ReleaseSkip["reason"], string> = {
   non_positive_qty: "No quantity to release",
   already_released: "Already on an open shipment",
   drop_ship: "Shipped by the vendor (drop-ship)",
+  journal_order: "Journal order (never ships)",
 };
 
 /** Short form of a UUID for dense tables: the first 8 characters. */

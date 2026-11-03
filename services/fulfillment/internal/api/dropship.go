@@ -48,6 +48,8 @@ type dropShipRequest struct {
 	PurchaseOrderLineID string `json:"purchaseOrderLineId"`
 	UnitCost            string `json:"unitCost"`
 	Currency            string `json:"currency"`
+	// OrderType is order_type of order.confirmed; a JOURNAL order never ships.
+	OrderType string `json:"orderType"`
 }
 
 type dropShipConfirmRequest struct {
@@ -75,6 +77,14 @@ func (a *API) createDropShip(w http.ResponseWriter, r *http.Request) {
 	}
 	if !unitCode.MatchString(req.Unit) {
 		fail(w, r, "unit", "must be 1 to 8 letters or digits")
+		return
+	}
+	if !domain.ValidOrderType(req.OrderType) {
+		fail(w, r, "orderType", "must be JOURNAL, ORDER, SUBSCRIPTION or RETURNED when given")
+		return
+	}
+	if req.OrderType == domain.OrderTypeJournal {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeJournalOrder, "FUL-0065: a JOURNAL order never ships, so it has no drop-ship"))
 		return
 	}
 	qty, err := positive(req.Qty)

@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
-import { describeProblem, newKey, runRelease, type Problem, type ReleaseInput, type ReleaseResult, type ReleaseSkip, type Shipment } from "./api/client";
+import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
+import { describeProblem, newKey, ORDER_TYPES, runRelease, type OrderType, type Problem, type ReleaseInput, type ReleaseResult, type ReleaseSkip, type Shipment } from "./api/client";
 import { ShipmentStatusBadge } from "./badges";
 import { DECIMAL, formatDate, LOGISTICS_CODE, SKIP_LABELS, today, UUID } from "./format";
 import styles from "./pages.module.css";
@@ -20,6 +20,9 @@ interface LineValues {
   carrierCode: string;
   zone: string;
   trackingRequired: boolean;
+  orderType: OrderType;
+  priority: string;
+  atpQty: string;
 }
 
 interface Values {
@@ -42,7 +45,7 @@ const ID_FIELDS = [
 ] as const;
 
 export function emptyLine(): LineValues {
-  return { orderId: "", orderLineId: "", customerId: "", legalEntityId: "", productId: "", unit: "EA", qty: "", confirmedShipDate: today(), atpOk: true, held: false, carrierCode: "", zone: "", trackingRequired: false };
+  return { orderId: "", orderLineId: "", customerId: "", legalEntityId: "", productId: "", unit: "EA", qty: "", confirmedShipDate: today(), atpOk: true, held: false, carrierCode: "", zone: "", trackingRequired: false, orderType: "ORDER", priority: "", atpQty: "" };
 }
 
 /** Checks that mirror the service (FUL-0050), keyed like its field names, and the request to send. */
@@ -61,6 +64,8 @@ export function validateRelease(values: Values): { errors: Errors; input?: Relea
     if (!DATE.test(l.confirmedShipDate)) errors[`lines[${i}].confirmedShipDate`] = "Enter the confirmed ship date.";
     if (l.carrierCode.trim() !== "" && !LOGISTICS_CODE.test(l.carrierCode.trim())) errors[`lines[${i}].carrierCode`] = "Use 1 to 32 letters, digits, '.', '_' or '-'.";
     if (l.zone.trim() !== "" && !LOGISTICS_CODE.test(l.zone.trim())) errors[`lines[${i}].zone`] = "Use 1 to 32 letters, digits, '.', '_' or '-'.";
+    if (l.priority.trim() !== "" && !/^[1-9]$/.test(l.priority.trim())) errors[`lines[${i}].priority`] = "Enter 1 (first) to 9, or leave it empty for 5.";
+    if (l.atpQty.trim() !== "" && !DECIMAL.test(l.atpQty.trim())) errors[`lines[${i}].atpQty`] = "Enter 0 or more with at most 6 decimals.";
     const lineId = l.orderLineId.trim().toLowerCase();
     if (lineId && seen.has(lineId)) errors[`lines[${i}].orderLineId`] = "This order line is already listed.";
     seen.add(lineId);
@@ -86,6 +91,9 @@ export function validateRelease(values: Values): { errors: Errors; input?: Relea
         ...(l.carrierCode.trim() ? { carrierCode: l.carrierCode.trim() } : {}),
         ...(l.zone.trim() ? { zone: l.zone.trim() } : {}),
         ...(l.trackingRequired ? { trackingRequired: true } : {}),
+        ...(l.orderType !== "ORDER" ? { orderType: l.orderType } : {}),
+        ...(l.priority.trim() ? { priority: Number(l.priority.trim()) } : {}),
+        ...(l.atpQty.trim() ? { atpQty: l.atpQty.trim() } : {}),
       })),
     },
   };
@@ -174,6 +182,19 @@ export function ReleasePage() {
               {text(`lines[${i}].confirmedShipDate`, "Confirmed ship date", line.confirmedShipDate, (v) => updateLine(i, { confirmedShipDate: v }), undefined, { type: "date" })}
               {text(`lines[${i}].carrierCode`, "Carrier", line.carrierCode, (v) => updateLine(i, { carrierCode: v }), "Same for every line of an order; the workbench groups by it.", { maxLength: 32 }, true)}
               {text(`lines[${i}].zone`, "Pick zone", line.zone, (v) => updateLine(i, { zone: v }), undefined, { maxLength: 32 }, true)}
+              <FormField id={`release-lines-${i}-orderType`} label="Order type" hint="A journal order never ships; its lines are not released.">
+                {(control) => (
+                  <Select {...control} value={line.orderType} onChange={(event) => updateLine(i, { orderType: event.target.value as OrderType })}>
+                    {ORDER_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </FormField>
+              {text(`lines[${i}].priority`, "Priority", line.priority, (v) => updateLine(i, { priority: v }), "1 (first) to 9; empty is 5. Higher priority orders get their shipments first; the same for every line of an order.", { inputMode: "numeric", maxLength: 1 }, true)}
+              {text(`lines[${i}].atpQty`, "Available quantity (ATP)", line.atpQty, (v) => updateLine(i, { atpQty: v }), "With full availability off, a line above this releases for this quantity and the rest waits for a later run.", { inputMode: "decimal" }, true)}
               <FormField id={`release-lines-${i}-atpOk`} label="Available (ATP)">
                 {(control) => <Input {...control} type="checkbox" checked={line.atpOk} onChange={(event) => updateLine(i, { atpOk: event.target.checked })} />}
               </FormField>

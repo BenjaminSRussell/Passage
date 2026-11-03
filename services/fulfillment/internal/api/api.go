@@ -112,6 +112,16 @@ type releaseLine struct {
 	Zone        string `json:"zone"`
 	// TrackingRequired marks a batch or serial tracked product (BR-28.10).
 	TrackingRequired bool `json:"trackingRequired"`
+	// OrderType is order_type of order.confirmed (JOURNAL, ORDER, SUBSCRIPTION,
+	// RETURNED); empty is ORDER. A JOURNAL order never ships, so its lines are skipped.
+	OrderType string `json:"orderType"`
+	// Priority is the order priority, 1 (first) to 9; 5 when left out. Every
+	// line of one order names the same one.
+	Priority int `json:"priority"`
+	// ATPQty is the quantity available to promise now, a decimal of 0 or more.
+	// When the warehouse does not require full ATP and it is below qty, the
+	// line is released for ATPQty and the rest stays open for a later run.
+	ATPQty *string `json:"atpQty"`
 }
 
 type releaseResponse struct {
@@ -521,7 +531,10 @@ func toReleaseLines(req releaseRequest) ([]domain.ReleaseLine, error) {
 	}
 	out := make([]domain.ReleaseLine, 0, len(req.Lines))
 	seen := map[string]bool{}
-	type orderParties struct{ customer, legalEntity, carrier string }
+	type orderParties struct {
+		customer, legalEntity, carrier, orderType string
+		priority                                  int
+	}
 	orders := map[string]orderParties{}
 	for i, l := range req.Lines {
 		field := func(name string) string { return fmt.Sprintf("lines[%d].%s", i, name) }
@@ -548,6 +561,20 @@ func toReleaseLines(req releaseRequest) ([]domain.ReleaseLine, error) {
 		if l.Zone != "" && !logisticsCode.MatchString(l.Zone) {
 			return nil, invalid(field("zone"), "must be 1 to 32 letters, digits, '.', '_' or '-' when given")
 		}
+		if !domain.ValidOrderType(l.OrderType) {
+			return nil, invalid(field("orderType"), "must be JOURNAL, ORDER, SUBSCRIPTION or RETURNED when given")
+		}
+		if l.Priority != 0 && (l.Priority < 1 || l.Priority > 9) {
+			return nil, invalid(field("priority"), "must be 1 (first) to 9 when given")
+		}
+		var atpQty *decimal.Decimal
+		if l.ATPQty != nil {
+			q, err := decimal.NewFromString(*l.ATPQty)
+			if err != nil || q.IsNegative() || !q.Equal(q.Round(maxScale)) {
+				return nil, invalid(field("atpQty"), "must be a decimal of 0 or more with at most 6 decimals when given")
+			}
+			atpQty = &q
+		}
 		if seen[l.OrderLineID] {
 			return nil, invalid(field("orderLineId"), "appears more than once")
 		}
@@ -564,15 +591,28 @@ func toReleaseLines(req releaseRequest) ([]domain.ReleaseLine, error) {
 			if prev.carrier != l.CarrierCode {
 				return nil, invalid(field("carrierCode"), "differs from another line of the same order")
 			}
+			if prev.priority != normalPriority(l.Priority) {
+				return nil, invalid(field("priority"), "differs from another line of the same order")
+			}
+			if prev.orderType != domain.NormalOrderType(l.OrderType) {
+				return nil, invalid(field("orderType"), "differs from another line of the same order")
+			}
 		} else {
-			orders[l.OrderID] = orderParties{customer: l.CustomerID, legalEntity: l.LegalEntityID, carrier: l.CarrierCode}
+			orders[l.OrderID] = orderParties{customer: l.CustomerID, legalEntity: l.LegalEntityID, carrier: l.CarrierCode, orderType: domain.NormalOrderType(l.OrderType), priority: normalPriority(l.Priority)}
 		}
 		out = append(out, domain.ReleaseLine{OrderID: l.OrderID, OrderLineID: l.OrderLineID, CustomerID: l.CustomerID,
 			LegalEntityID: l.LegalEntityID, WarehouseID: req.WarehouseID, ProductID: l.ProductID, Unit: l.Unit, Qty: qty,
 			ConfirmedShipDate: ship, ATPOK: l.ATPOK, Held: l.Held, CarrierCode: l.CarrierCode, Zone: l.Zone,
-			TrackingRequired: l.TrackingRequired})
+			TrackingRequired: l.TrackingRequired, OrderType: l.OrderType, Priority: l.Priority, ATPQty: atpQty})
 	}
 	return out, nil
+}
+
+func normalPriority(p int) int {
+	if p == 0 {
+		return domain.DefaultPriority
+	}
+	return p
 }
 
 // limitParam reads ?limit= (default 100, 1 to 500).

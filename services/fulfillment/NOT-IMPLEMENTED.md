@@ -235,10 +235,46 @@ the short pick setting, configured defaults, range checks), API and web tests co
 lists the rules (`WarehouseView`) and saves them (form shown to `WarehouseRelease` only). Built in review: the
 legal entity of a warehouse is now shared by its short pick setting and its release rule (neither can be saved
 under another one than the other), the unsaved rule reads the service configuration instead of fixed values, the
-first-save race is tested, and the web form keeps the saved version of a typed warehouse id. No new duty. Authz
-seed handoff: see the release rules row below. Not built: release priority ordering, partial-quantity release by
-ATP, `posting_date_source`, `auto_pack_enabled` and `workbench_group_key_default` (the other warehouse parameters of
-section 5.28.13). The OpenAPI and AsyncAPI have zero FAIL lines on the doc gates.
+first-save race is tested, and the web form keeps the saved version of a typed warehouse id. No new duty. The
+release-rule routes are seeded in `policies/authz/data.json`. Slice 18 built release priority ordering and
+partial-quantity release by ATP; not built: `posting_date_source`, `auto_pack_enabled` and
+`workbench_group_key_default` (the other warehouse parameters of section 5.28.13). The OpenAPI and AsyncAPI have
+zero FAIL lines on the doc gates.
+
+Slice 18 keeps journal orders out of the warehouse and adds release priority and partial release by ATP (FR-28.1,
+BR-27.7). Sales now carries `order_type` on `order.confirmed.v1` and a JOURNAL order skips credit check and ATP, so it
+must never ship. This service reads no sales events (the caller offers the confirmed lines), so the release line takes
+`orderType` (JOURNAL, ORDER, SUBSCRIPTION or RETURNED, ORDER when left out; one type per order): release skips a
+JOURNAL line as `journal_order`, and migration 0021 stores the type on the shipment (`orderType`, also carried to a
+backorder shipment). A shipment that carries JOURNAL anyway refuses `:confirm-pick`, the wave pick, `containers`
+(pack), `:auto-pack`, `:capture-tracking` and the packing slip post with FUL-0065 (422), stays out of the picking
+workbench and cannot be put in a wave (cancel stays allowed), and `POST /drop-ships` refuses `orderType` JOURNAL with
+FUL-0065. A release line also takes `priority` (1 first to 9, 5 when left out, one per order): a run creates the
+shipments of higher priority orders first (then the earlier ship date), so they get the lower shipment numbers, and the
+shipment stores and returns `priority` (migration 0021). Partial release: a line takes `atpQty` (0 or more). With
+full ATP not required (request `requireFullAtp` false or the warehouse rule) a line above its `atpQty` is released for
+`atpQty` and its shipment line is flagged `partial` (migration 0021); an `atpQty` of 0 is skipped as `atp_short`; the
+next run offering the same order line releases what is still open (the order line quantity less what live shipments
+plan, counting a closed remainder only when no backorder shipment carries it) for the new `atpQty`, and a line that is
+fully dealt with stays `already_released`. With full ATP required a line above its `atpQty` is skipped as `atp_short`;
+a line with no `atpQty` behaves as before (`atpOk` decides). Store tests (Postgres, as the application role), domain,
+API and web tests cover it; the release board has the order type, priority and ATP quantity fields and the shipment
+detail shows the priority and which lines were released in part. No new duty and no new route. Handoff to sales (wave
+27): its release call must send `orderType` (from `order.confirmed`), `priority` and `atpQty`; until it does every line
+reads as an ORDER of priority 5 and `atpOk`, as before. Priority does not yet order the picking workbench waves or the
+release board list, and a line's ATP is not read from inventory (wave 16). The OpenAPI and AsyncAPI have zero FAIL
+lines on the doc gates (`FUL-0065` is documented on each refusing operation).
+Built in review: a line whose partial shipment is cancelled after its remainder was released is released again
+for the cancelled quantity (the "released in part" test now looks at cancelled shipments too, while the open
+quantity counts only live ones; before, the line read as `already_released` and the cancelled quantity was lost),
+with a store test that also covers a short-picked remainder moved to a backorder shipment (still dealt with, so
+nothing is released twice); migration 0021 now only changes the catalog (fast defaults, `NOT VALID` checks,
+`lock_timeout` 5s) and 0022 validates the two checks under SHARE UPDATE EXCLUSIVE, so no scan of `shipment` runs
+under ACCESS EXCLUSIVE. Concurrency: runs for one warehouse hold the per-warehouse advisory lock before they read
+what is released, so two runs never release the same remainder; a cancel or short pick that commits during a run
+can only leave quantity for the next run, never release it twice. Known limit: the full-ATP check compares
+`atpQty` with the order line quantity, so with full ATP required a remainder whose ATP covers it but not the whole
+line is skipped as `atp_short` until full ATP is turned off or the ATP covers the line.
 
 ## Important gaps (read first)
 
@@ -255,6 +291,7 @@ section 5.28.13). The OpenAPI and AsyncAPI have zero FAIL lines on the doc gates
 | The packaging fee is statistical only. The `packaging_fee_billable` SURCHARGE / FREIGHT line with its own tax code (BR-28.12) is not created here. | handoff to billing (wave 29) | Billing owns invoice lines. The fee lines are on the slip and in `packingslip.posted.v1` (`packaging_fees`), so wave 29 can bill them when `packaging_fee_billable` is set. The setting itself is not modelled here. |
 | Auto-pack takes unit weights per shipment line from the caller (`unitWeights`); a line without one is limited by quantity only. | handoff to product (wave 8) for unit weights | Product weights and packaging units belong to the product master (wave 8). |
 | The ship-to country of the packaging fee comes from the caller (`countryCode` on the post), not from the order's ship-to address. | handoff to sales (wave 27) | The order ship-to is not read yet. Without a country no fee is posted. |
+| Whether an order is a JOURNAL order (never ships) comes from the release caller, not from sales data held here: a JOURNAL order whose lines are offered without `orderType` read as ORDER and **are released and shipped** | handoff to sales (wave 27); later slice of PSG-28 for a fulfillment-side source of truth | This service consumes no sales events and keeps no copy of the order, so it cannot decide the type itself. Sales, when it builds the call to `POST /v1/fulfillment/releases:run` (and `POST /v1/fulfillment/drop-ships`), must set `orderType` on every line to the order's `order_type` (sales `sales_order.order_type`, the `order_type` member of `dev.passage.sales.order.confirmed.v1`), `priority` to the order priority (1 to 9) and `atpQty` to the line's confirmed ATP quantity; a JOURNAL order's lines may also simply not be offered. Sales must also read `shipment.released` line quantities as what was released (a partial release releases less than the order line and a later run the rest), not mark the line fully released. The durable fix is a fulfillment consumer of `order.confirmed.v1` that stores `order_id → order_type` and lets release prefer the stored type (refusing a caller type that contradicts it); no consumer infrastructure exists in this service yet. |
 
 Slice 12 adds nested containers, pallet to carton (FR-28.3; `container.parent_container_id` of section 5.28.4).
 Migration 0013 gives `container` a `parent_container_id` (no new table, the
@@ -370,7 +407,7 @@ is nothing new for #313. The OpenAPI and AsyncAPI have zero FAIL lines on the do
 
 | # | Deliverable | Status | Reason |
 |---|---|---|---|
-| D1 | Order release rules (horizon, ATP, hold, one shipment per order × warehouse × date) | built (domain + `POST /releases:run` + release board screen) | A line already on a shipment that is not cancelled is skipped as `already_released`, and runs per warehouse are serialised. Release priority ordering and consolidation (BR-28.8, `fulfillment.consolidation`) are not built. The caller supplies the confirmed lines; reading them from sales (wave 27) is a later slice. |
+| D1 | Order release rules (horizon, ATP, hold, one shipment per order × warehouse × date) | built (domain + `POST /releases:run` + release board screen) | A line already on a shipment that is not cancelled is skipped as `already_released`, and runs per warehouse are serialised. Release priority ordering and partial release by ATP are built (slice 18); consolidation (BR-28.8, `fulfillment.consolidation`) is not built. The caller supplies the confirmed lines; reading them from sales (wave 27) is a later slice. |
 | D1 | Wave and batch picking, wave creation, wave pick-list print | partial | Built: waves from the picking workbench (see D6), the waves list and detail, shipments moved to PICKING, `wave.created`, pick confirmation per wave (slice 9), picker assignment and reassignment, wave close and the printable pick list (slice 11). Not built: batch picking (one picker walking several orders' lines as one task), the pick list as a stored document (`WV-` PDF/ZPL, wave 5 docgen), bin-sequenced paths (the list orders by zone and product, because lines carry no bin location yet, wave 31), and automatic close of a wave when its last line is picked (close is a manual command). |
 | D1 | Pick confirmation with batch/serial/location, `short_pick_action` | partial | Quantity confirmation is built; batch, serial and location capture per line with the FUL-0006 check at post is built (slice 10). The `short_pick_action` warehouse setting is built (slice 13). Not built: capture inside the pick call itself and per wave (capture is its own command after the pick), batch and serial existence or on-hand checks against inventory (wave 16), and expiry or batch-status rules (handoff to inventory, wave 16). |
 | D1 | `trackingRequired` source | handoff to product (wave 8) and sales (wave 27) | The release caller supplies `trackingRequired` per line (the web release form has a checkbox for it); this service does not read the product's tracking dimension group, so a caller that omits it releases the line as untracked. |
@@ -483,7 +520,6 @@ slips to 5); the comparison with the ledger's GL 1405 is a handoff to ledger.
 | The short pick action is per warehouse (scoped by the warehouse's legal entity), and a warehouse is listed once it has a shipment or a saved setting | deviation; handoff to org (wave 6) | There is no warehouse master in this service (warehouses live in org). The caller names the legal entity on save and the service checks it only against the saved setting, the warehouse's release rule (slice 17) and its shipments, so a setting saved for a warehouse with none of them yet trusts the caller; reading the warehouse's legal entity from org (or its `warehouse` events) would close that. The settings screen also accepts a warehouse id typed in. |
 | The release rules are per warehouse (scoped by the warehouse's legal entity), and a warehouse is listed once it has a shipment, a short pick setting or a saved rule | deviation; handoff to org (wave 6) | As for the short pick action: there is no warehouse master here, so the caller names the legal entity on save and the service checks it against the warehouse's saved rule, short pick setting and shipments that the caller can see. A first save for a warehouse with none of them, or whose records are all in a legal entity outside the caller's scope, trusts the caller; reading the warehouse's legal entity from org would close that. |
 | A release rule that is saved replaces the service configuration (`RELEASE_HORIZON_DAYS`, `RELEASE_REQUIRES_FULL_ATP`) for that warehouse | deviation | The configuration stays the default of a warehouse without a rule, so nothing changes until a rule is saved; a request's `horizonDays` or `requireFullAtp` still wins over both. |
-| The routes `/v1/fulfillment/release-rules` and `/v1/fulfillment/release-rules/*` in `policies/authz/data.json` | handoff (authz seed) | GET under `WarehouseView`, PUT (`/v1/fulfillment/release-rules/*`) under `WarehouseRelease`. Seeded by the main session after review. No new duty name. |
 | A backorder shipment is planned for the date given, else today (a post-triggered backorder keeps the original planned date unless it has passed), and its lines carry no pick progress. It is RELEASED at once, without a fresh ATP check, and can be waved like any released shipment | deviation; handoff to inventory (wave 16) | The remainder is released as a fresh shipment, so inventory sees `pick.confirmed` (`backordered`: release the short-picked reservation), `shipment.closed` (release only what is still reserved for the closed quantity, so the backordered part is not released twice) and `shipment.released` with `backorder_of` (reserve the backorder lines again, which may find no stock). Inventory must consume all three; no consumer exists yet. |
 | `short_pick_action` has a third value, KEEP_OPEN, beside the PRD's two (section 5.28.13) | deviation | REMAINDER_BACKORDER is the default (product decision 2026-11-01, migration 0016, `domain.DefaultShortPickAction`); KEEP_OPEN stays allowed for the re-pick of the remainder on the same shipment that slices 6 and 7 built. |
 | A confirmed drop-ship does not create a packing slip: it has its own `DS-` number and journal, the `PS-` sequence and the delivered-not-invoiced report are untouched | deviation; handoff to billing (wave 29) and the ledger (wave 11) | `packing_slip` is tied to a shipment of warehouse stock. The drop-ship carries its own journal (Dr 5000 / Cr 2110) and `dropship.confirmed`; the ledger posts it with Idempotency-Key = `drop_ship_id` once fulfillment is wired to `ledgerclient` (see the packing slip journal row), and billing invoices the order line from the event. AC-28.5's "a slip posts" is met by the confirmed drop-ship and its journal, not by a PS- slip. |

@@ -133,6 +133,9 @@ func (s *Postgres) CaptureTracking(ctx context.Context, shipmentID, lineID strin
 			if err := checkVersion(sh, version); err != nil {
 				return sh, err
 			}
+			if err := checkShippable(sh); err != nil {
+				return sh, err
+			}
 			switch sh.Status {
 			case domain.StatusPicking, domain.StatusPicked, domain.StatusPacked, domain.StatusPartiallyShipped:
 			default:

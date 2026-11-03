@@ -448,3 +448,38 @@ func TestOpenAPIMatchesRoutes(t *testing.T) {
 		}
 	}
 }
+
+// A JOURNAL line is skipped before the store sees it; order type, priority and
+// ATP quantity are validated and must agree within one order.
+func TestRunRelease_OrderTypePriorityAndATPQty(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(t, fs)
+	order, customer, le := ids.New(), ids.New(), ids.New()
+	with := func(extra string) string {
+		return strings.Replace(relLine(order, customer, le, ids.New()), `"atpOk":true}`, `"atpOk":true,`+extra+`}`, 1)
+	}
+	post := func(key, lines string) *httptest.ResponseRecorder {
+		return do(t, h, http.MethodPost, "/v1/fulfillment/releases:run", `{"warehouseId":"`+ids.New()+`","lines":[`+lines+`]}`, map[string]string{"Idempotency-Key": key})
+	}
+	rec := post("journal", with(`"orderType":"JOURNAL"`))
+	if rec.Code != http.StatusCreated || len(fs.released) != 0 || !strings.Contains(rec.Body.String(), "journal_order") {
+		t.Fatalf("journal: %d %s released=%v", rec.Code, rec.Body.String(), fs.released)
+	}
+	for name, c := range map[string]struct{ lines, field string }{
+		"bad order type": {with(`"orderType":"QUOTE"`), "lines[0].orderType"},
+		"mixed types":    {with(`"orderType":"ORDER"`) + "," + with(`"orderType":"JOURNAL"`), "lines[1].orderType"},
+		"priority range": {with(`"priority":10`), "lines[0].priority"},
+		"mixed priority": {with(`"priority":1`) + "," + with(`"priority":2`), "lines[1].priority"},
+		"negative atp":   {with(`"atpQty":"-1"`), "lines[0].atpQty"},
+		"atp scale":      {with(`"atpQty":"1.0000001"`), "lines[0].atpQty"},
+	} {
+		rec := post("k-"+name, c.lines)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), c.field) {
+			t.Fatalf("%s: %d %s, want 400 naming %s", name, rec.Code, rec.Body.String(), c.field)
+		}
+	}
+	rec = post("partial", with(`"priority":2,"atpQty":"1","orderType":"ORDER"`))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("valid line: %d %s", rec.Code, rec.Body.String())
+	}
+}

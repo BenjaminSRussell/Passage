@@ -29,6 +29,8 @@ export interface ShipmentLine {
   shortPickReason?: ShortPickReason | null;
   /** The product is batch or serial tracked; the slip posts only with entries for what it ships (BR-28.10). */
   trackingRequired?: boolean;
+  /** Released for less than the order line quantity because ATP was short; a later run releases the rest. */
+  partial?: boolean;
   /** Batch, serial and location entries captured at pick. */
   tracking?: TrackingEntry[];
 }
@@ -91,6 +93,10 @@ export interface Shipment extends Omit<ShipmentSummary, "lineCount"> {
   backorderOfId?: string | null;
   /** The backorder shipment that took over this shipment's closed remainder. */
   backorderId?: string | null;
+  /** The sales order type at release; a JOURNAL order never ships. */
+  orderType?: OrderType;
+  /** Order priority at release, 1 first. */
+  priority?: number;
 }
 
 /** FR-28.8: what happens to the open remainder once a slip has shipped part of a shipment. */
@@ -366,7 +372,16 @@ export interface ReleaseLineInput {
   zone?: string;
   /** The product is batch or serial tracked (BR-28.10). */
   trackingRequired?: boolean;
+  /** order_type of order.confirmed; ORDER when left out. A JOURNAL order never ships. */
+  orderType?: OrderType;
+  /** 1 (first) to 9; 5 when left out. The same for every line of an order. */
+  priority?: number;
+  /** Quantity available now; with full ATP off a line above it releases partly. */
+  atpQty?: string;
 }
+
+export type OrderType = "ORDER" | "JOURNAL" | "SUBSCRIPTION" | "RETURNED";
+export const ORDER_TYPES: OrderType[] = ["ORDER", "JOURNAL", "SUBSCRIPTION", "RETURNED"];
 
 export interface ReleaseInput {
   warehouseId: string;
@@ -377,7 +392,7 @@ export interface ReleaseInput {
 
 export interface ReleaseSkip {
   orderLineId: string;
-  reason: "held" | "beyond_horizon" | "atp_short" | "non_positive_qty" | "already_released" | "drop_ship";
+  reason: "held" | "beyond_horizon" | "atp_short" | "non_positive_qty" | "already_released" | "drop_ship" | "journal_order";
 }
 
 export interface ReleaseResult {
