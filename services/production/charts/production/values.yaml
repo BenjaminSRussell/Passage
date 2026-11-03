@@ -16,6 +16,7 @@ resources:
 serviceMonitor: { enabled: false }
 
 ledgerUrl: ""
+inventoryUrl: ""
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""

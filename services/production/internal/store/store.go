@@ -22,6 +22,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/production/internal/domain"
 	prodevents "github.com/BenjaminSRussell/passage/services/production/internal/events"
+	"github.com/BenjaminSRussell/passage/services/production/internal/inventory"
 )
 
 // Stable error codes returned by the store.
@@ -275,13 +276,22 @@ type Store interface {
 
 // Postgres is the production store.
 type Postgres struct {
-	pool *pgxpool.Pool
+	pool  *pgxpool.Pool
+	holds inventory.Checker
 }
 
 var _ Store = (*Postgres)(nil)
 
 // New returns a store over pool.
 func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
+
+// WithHolds checks inventory holds on consume (picking list and start
+// backflush). A nil checker (the default, when INVENTORY_URL is unset) leaves
+// current behaviour.
+func (s *Postgres) WithHolds(h inventory.Checker) *Postgres {
+	s.holds = h
+	return s
+}
 
 // Ping checks the database for readiness.
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
@@ -665,6 +675,7 @@ type orderHead struct {
 	legalEntityID string
 	productID     string
 	siteID        string
+	warehouseID   string
 	itemGroup     string
 	currency      string
 	createdOn     string
@@ -681,9 +692,9 @@ func lockOrder(ctx context.Context, tx pgx.Tx, tenantID, orderID string, ifMatch
 	h := orderHead{id: orderID}
 	var status, qty, raf, qerr string
 	err := tx.QueryRow(ctx, `select status, version, quantity::text, qty_raf::text, qty_error::text, legal_entity_id::text,
-			product_id::text, site_id::text, item_group, currency::text, (created_at at time zone 'UTC')::date::text, origin_type
+			product_id::text, site_id::text, coalesce(warehouse_id::text, ''), item_group, currency::text, (created_at at time zone 'UTC')::date::text, origin_type
 		from production_order where tenant_id = $1 and id = $2 for update`, tenantID, orderID).Scan(&status, &h.version, &qty, &raf, &qerr,
-		&h.legalEntityID, &h.productID, &h.siteID, &h.itemGroup, &h.currency, &h.createdOn, &h.originType)
+		&h.legalEntityID, &h.productID, &h.siteID, &h.warehouseID, &h.itemGroup, &h.currency, &h.createdOn, &h.originType)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return h, notFound()
 	}
@@ -866,7 +877,7 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 				return err
 			}
 		case domain.CmdStart:
-			if err := startOrder(ctx, tx, p.TenantID, &h, t.Actor, "sys:start:"+t.IdempotencyKey); err != nil {
+			if err := startOrder(ctx, tx, p.TenantID, &h, t.Actor, "sys:start:"+t.IdempotencyKey, s.holds); err != nil {
 				return err
 			}
 		case domain.CmdReportFinished:
@@ -875,7 +886,7 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 			}
 			raf := NewJournal{Type: domain.JournalReportFinished, Proposal: domain.ProposeProportional, QtyGood: t.Good, QtyError: t.Error,
 				CoProductsProportional: true}
-			if err := autoPost(ctx, tx, p.TenantID, &h, raf, t.Actor, "sys:raf:"+t.IdempotencyKey, prm.RAFTolerancePct); err != nil {
+			if err := autoPost(ctx, tx, p.TenantID, &h, raf, t.Actor, "sys:raf:"+t.IdempotencyKey, prm.RAFTolerancePct, s.holds); err != nil {
 				return err
 			}
 		case domain.CmdEstimate:

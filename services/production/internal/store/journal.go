@@ -17,6 +17,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/production/internal/domain"
 	prodevents "github.com/BenjaminSRussell/passage/services/production/internal/events"
+	"github.com/BenjaminSRussell/passage/services/production/internal/inventory"
 )
 
 // Stable error codes of journals and settlement.
@@ -35,6 +36,8 @@ const (
 	CodePostingBeforeOrder  = "PRODUCTION_POSTING_DATE_BEFORE_ORDER"
 	CodeUnpostedJournals    = "PRODUCTION_UNPOSTED_JOURNALS"
 	CodeEndBeforeLastPosted = "PRODUCTION_END_BEFORE_LAST_JOURNAL"
+	// CodeQualityHold refuses a consume that would issue held stock (wave 33 AC2).
+	CodeQualityHold = "QUALITY_HOLD"
 )
 
 // Journal line kinds.
@@ -554,7 +557,7 @@ func (s *Postgres) PostJournal(ctx context.Context, r PostRequest) (Journal, boo
 		from := h.status
 		if h.status == domain.Released {
 			// FR-21.6: feedback on a Released order starts it, with the effects of :start.
-			if err := startOrder(ctx, tx, p.TenantID, &h, r.Actor, "sys:auto-start:"+r.IdempotencyKey); err != nil {
+			if err := startOrder(ctx, tx, p.TenantID, &h, r.Actor, "sys:auto-start:"+r.IdempotencyKey, s.holds); err != nil {
 				return err
 			}
 			if err := logStatus(ctx, tx, p.TenantID, h, domain.CmdStart, from, domain.Started, r.Actor, r.TraceID, "sys:auto-start:"+r.IdempotencyKey); err != nil {
@@ -562,7 +565,7 @@ func (s *Postgres) PostJournal(ctx context.Context, r PostRequest) (Journal, boo
 			}
 			h.status = domain.Started
 		}
-		opts := postOptions{overDuty: r.OverConsumptionDuty, overPct: prm.OverConsumptionPct, rafTolerancePct: prm.RAFTolerancePct, actor: r.Actor, key: r.IdempotencyKey}
+		opts := postOptions{overDuty: r.OverConsumptionDuty, overPct: prm.OverConsumptionPct, rafTolerancePct: prm.RAFTolerancePct, actor: r.Actor, key: r.IdempotencyKey, holds: s.holds}
 		if err := postJournal(ctx, tx, p.TenantID, &h, &j, opts); err != nil {
 			return err
 		}
@@ -603,6 +606,7 @@ type postOptions struct {
 	rafTolerancePct decimal.Decimal
 	actor           string
 	key             string
+	holds           inventory.Checker
 }
 
 // postJournal posts j on the locked order h: it checks the posting date
@@ -669,6 +673,9 @@ func postJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, 
 			after := bl.QtyConsumed.Add(consumed[bl.LineNo]).Add(l.Qty)
 			if err := domain.CheckConsumption(bl.LineNo, bl.QtyRequired, after, o.overPct, o.overDuty); err != nil {
 				return domainProblem(err)
+			}
+			if err := checkIssueHold(ctx, o.holds, *h, bl, l.Qty); err != nil {
+				return err
 			}
 			consumed[bl.LineNo] = consumed[bl.LineNo].Add(l.Qty)
 			l.Amount = domain.RoundMoney(l.Qty.Mul(l.UnitCost), h.currency)
@@ -837,7 +844,7 @@ func enqueueJournalPosted(ctx context.Context, tx pgx.Tx, tenantID string, h ord
 // startOrder applies the posting effect of Released → Started (BR-21.1): the
 // start-flushed lines are issued for their remaining quantity by an
 // auto-posted picking list. key makes the journal idempotent with the command.
-func startOrder(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, actor, key string) error {
+func startOrder(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, actor, key string, holds inventory.Checker) error {
 	lines, err := loadLines(ctx, tx, tenantID, h.id)
 	if err != nil {
 		return err
@@ -851,18 +858,33 @@ func startOrder(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, a
 	if len(issues) == 0 {
 		return nil
 	}
-	return autoPost(ctx, tx, tenantID, h, NewJournal{Type: domain.JournalPickingList, Issues: issues}, actor, key, decimal.Zero)
+	return autoPost(ctx, tx, tenantID, h, NewJournal{Type: domain.JournalPickingList, Issues: issues}, actor, key, decimal.Zero, holds)
 }
 
 // autoPost creates and posts a system journal (start backflush, report as
 // finished through the :report-finished command) under key.
-func autoPost(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, in NewJournal, actor, key string, rafTolerancePct decimal.Decimal) error {
+func autoPost(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, in NewJournal, actor, key string, rafTolerancePct decimal.Decimal, holds inventory.Checker) error {
 	in.OrderID, in.PostingDate, in.Actor, in.IdempotencyKey, in.RequestHash = h.id, today(), actor, key, key
 	j, err := createJournal(ctx, tx, tenantID, h, in)
 	if err != nil {
 		return err
 	}
-	return postJournal(ctx, tx, tenantID, h, &j, postOptions{overDuty: true, rafTolerancePct: rafTolerancePct, actor: actor, key: key})
+	return postJournal(ctx, tx, tenantID, h, &j, postOptions{overDuty: true, rafTolerancePct: rafTolerancePct, actor: actor, key: key, holds: holds})
+}
+
+func checkIssueHold(ctx context.Context, holds inventory.Checker, h orderHead, line domain.OrderLine, qty decimal.Decimal) error {
+	if holds == nil || !qty.IsPositive() {
+		return nil
+	}
+	lot, err := holds.Lot(ctx, h.legalEntityID, line.ItemID, h.warehouseID, "")
+	if err != nil {
+		return httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "inventory hold check failed")
+	}
+	if inventory.Blocks(lot.Physical, lot.Held, qty) {
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeQualityHold,
+			fmt.Sprintf("item %s is on quality hold; consume not allowed", line.ItemID))
+	}
+	return nil
 }
 
 // reverseJournals reverses the posted journals of the given types that are

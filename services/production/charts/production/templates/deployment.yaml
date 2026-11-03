@@ -61,6 +61,9 @@ spec:
 {{- if .Values.ledgerUrl }}
             - { name: LEDGER_URL, value: {{ .Values.ledgerUrl | quote }} }
 {{- end }}
+{{- if .Values.inventoryUrl }}
+            - { name: INVENTORY_URL, value: {{ .Values.inventoryUrl | quote }} }
+{{- end }}
 {{- if .Values.serviceIdentity.signingKeySecret }}
             - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
               value: /var/run/passage/service-identity/signing-key
