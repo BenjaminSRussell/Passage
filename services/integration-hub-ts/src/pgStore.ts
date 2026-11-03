@@ -82,6 +82,10 @@ export interface DeliveryRecord {
   responseExcerpt: string | null;
   /** The legacy key the receiver answered with (rest-push). */
   legacyKey: string | null;
+  /** The legacy keys of the elements of the pushed collection, by position (rest-push with lineKeyPath). */
+  lineKeys: { index: number; legacyKey: string }[];
+  /** The lookup table versions the last render read (rest-push, migration slice 20), for audit. */
+  lookups: { name: string; table: string; version: number }[];
   createdAt: string;
 }
 
@@ -187,6 +191,8 @@ interface DeliveryRow {
   dead_letter_code: string | null;
   response_excerpt: string | null;
   legacy_key: string | null;
+  line_keys: { index: number; legacyKey: string }[] | null;
+  render_lookups: { name: string; table: string; version: number }[] | null;
   created_at: Date;
   cursor_ts: string;
 }
@@ -207,6 +213,8 @@ function toDelivery(r: DeliveryRow): DeliveryRecord {
     deadLetterCode: r.dead_letter_code,
     responseExcerpt: r.response_excerpt,
     legacyKey: r.legacy_key,
+    lineKeys: r.line_keys ?? [],
+    lookups: r.render_lookups ?? [],
     createdAt: r.created_at.toISOString(),
   };
 }
@@ -430,7 +438,7 @@ export class HubStore {
     return this.withTenant(tenantId, async (c) => {
       const res = await c.query<DeliveryRow>(
         `select id, subscription_id, event_id, event_type, aggregate_id, sequence, status, attempts, last_status,
-                next_retry_at, replay, dead_letter_code, response_excerpt, legacy_key, created_at, created_at::text as cursor_ts
+                next_retry_at, replay, dead_letter_code, response_excerpt, legacy_key, line_keys, render_lookups, created_at, created_at::text as cursor_ts
            from hub_delivery
           where ($1::text is null or status = $1) and ($2::uuid is null or subscription_id = $2)
             and ($3::timestamptz is null or (created_at, id) < ($3::timestamptz, $4::uuid))
@@ -662,7 +670,7 @@ type Op =
   | { kind: "remove"; eventId: string }
   | { kind: "dead"; letter: DeadLetter }
   | { kind: "paused"; paused: boolean }
-  | { kind: "attempt"; eventId: string; status: number | null; excerpt: string | null; legacyKey: string | null };
+  | { kind: "attempt"; eventId: string; status: number | null; excerpt: string | null; legacyKey: string | null; lineKeys: string | null; lookups: string | null };
 
 export class PgDeliveryStore implements DeliveryStore {
   readonly #db: HubStore;
@@ -724,8 +732,12 @@ export class PgDeliveryStore implements DeliveryStore {
   }
 
   /** Queues the record of one send (its HTTP status, or null for no response). */
-  recordAttempt(eventId: string, status: number | null, detail: { excerpt?: string; legacyKey?: string } = {}): void {
-    this.#ops.push({ kind: "attempt", eventId, status, excerpt: detail.excerpt ?? null, legacyKey: detail.legacyKey ?? null });
+  recordAttempt(eventId: string, status: number | null, detail: { excerpt?: string; legacyKey?: string; lineKeys?: { index: number; legacyKey: string }[]; lookups?: { name: string; table: string; version: number }[] } = {}): void {
+    this.#ops.push({
+      kind: "attempt", eventId, status, excerpt: detail.excerpt ?? null, legacyKey: detail.legacyKey ?? null,
+      lineKeys: detail.lineKeys === undefined ? null : JSON.stringify(detail.lineKeys),
+      lookups: detail.lookups === undefined ? null : JSON.stringify(detail.lookups),
+    });
   }
 
   /** Writes the queued changes in order, in one tenant transaction. */
@@ -792,11 +804,12 @@ export class PgDeliveryStore implements DeliveryStore {
         await c.query(
           `with d as (
              update hub_delivery set attempts = attempts + 1, last_status = $3, response_excerpt = $6,
-                    legacy_key = coalesce($7, legacy_key), updated_at = now()
+                    legacy_key = coalesce($7, legacy_key), line_keys = coalesce($8::jsonb, line_keys),
+                    render_lookups = coalesce($9::jsonb, render_lookups), updated_at = now()
               where subscription_id = $1 and event_id = $2 returning id, attempts)
            insert into hub_attempt (tenant_id, id, delivery_id, attempt_no, http_status)
            select $4, $5, d.id, d.attempts, $3 from d`,
-          [sub, op.eventId, op.status, this.#tenantId, randomUUID(), op.excerpt, op.legacyKey],
+          [sub, op.eventId, op.status, this.#tenantId, randomUUID(), op.excerpt, op.legacyKey, op.lineKeys, op.lookups],
         );
         return;
     }

@@ -15,6 +15,18 @@ const columns: DataTableColumn<Delivery>[] = [
   { key: "attempts", header: "Attempts", align: "end" },
   { key: "lastStatus", header: "Last HTTP status", align: "end", render: (row) => (row.lastStatus === null ? dash : String(row.lastStatus)) },
   { key: "legacyKey", header: "ERP key", mono: true, render: (row) => row.legacyKey ?? dash },
+  {
+    key: "lineKeys",
+    header: "Line keys",
+    mono: true,
+    render: (row) => (row.lineKeys && row.lineKeys.length > 0 ? row.lineKeys.map((l) => l.legacyKey).join(", ") : dash),
+  },
+  {
+    key: "lookups",
+    header: "Lookup versions",
+    mono: true,
+    render: (row) => (row.lookups && row.lookups.length > 0 ? row.lookups.map((l) => `${l.table} v${l.version}`).join(", ") : dash),
+  },
   { key: "nextRetryAt", header: "Next try", render: (row) => (row.status === "pending" ? formatUnix(row.nextRetryAt) : dash) },
   { key: "createdAt", header: "Received", render: (row) => formatDateTime(row.createdAt) },
 ];

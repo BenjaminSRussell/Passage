@@ -191,7 +191,14 @@ cannot receive a CloudEvents webhook:
    service never changes) the delivery is dead-lettered HUB-0118 with the key the receiver
    returned: it is never resent, and both replays refuse it (409 for one, skipped by the
    subscription replay), since a resend could only add a duplicate in the legacy ERP. The
-   operator reconciles the record there.
+   operator reconciles the record there. With `lineKeyPath` (one `[*]`, `$.data.lines[*].id`)
+   the key of each line of a pushed collection is read too, by position or by
+   `lineCorrelation` (`bodyPath` / `responsePath`, a field both sides carry). Every line must
+   get exactly one key, or the accepted push is dead-lettered HUB-0117 with nothing recorded.
+   The keys are kept on the delivery (`lineKeys`, with the render's lookup table versions as
+   `lookups`) and, when the render names element refs, sent as their `legacyKey` in the same
+   `xref:record` call (only the refs of the collection `bodyPath` iterates, so a mapping with
+   several collections needs `lineCorrelation`).
 5. Failures: a 4xx other than 410 and 429 dead-letters at once (HUB-0117) with the receiver's
    answer kept in `responseExcerpt` (2000 characters, control characters stripped, every
    credential value removed), unless the subscription says `onClientError: "retry"`; 5xx,

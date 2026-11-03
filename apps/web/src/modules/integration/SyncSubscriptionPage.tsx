@@ -196,6 +196,14 @@ export function SyncSubscriptionPage() {
               <Term term="Legacy key in the response" mono>
                 {rest.responseKeyPath || dash}
               </Term>
+              <Term term="Line keys in the response" mono>
+                {rest.lineKeyPath || dash}
+              </Term>
+              {rest.lineCorrelation ? (
+                <Term term="Lines matched by" mono>
+                  {rest.lineCorrelation.bodyPath} = {rest.lineCorrelation.responsePath}
+                </Term>
+              ) : null}
               <Term term="When the ERP refuses (4xx)">{rest.onClientError === "retry" ? "Retry on the schedule" : "Dead-letter at once"}</Term>
               <Term term="Authentication">
                 {rest.auth.type}

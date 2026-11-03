@@ -3,6 +3,7 @@
 //   POST /v1/integration/outbound-mappings/{id}:render   {event}  ->  {body, idempotencyKey, refs}
 //        422 MIG-XREF-UNRESOLVED when a referenced Passage record has no legacy key yet
 //   POST /v1/integration/xref:record  {outboundMappingId, refs, legacyKey, eventId}  ->  204
+//        refs: the subject, plus (migration slice 23) one ref per element of a pushed collection, each with its legacyKey
 //
 // The client is an interface so the rest-push flow is tested against a fake. The HTTP
 // implementation authenticates with a service token (signer `integration-hub`) and keeps
@@ -23,10 +24,19 @@ export interface RenderInput {
   actor?: string;
 }
 
+/** A lookup table version a render read (migration slice 20): the audit trail from a pushed body to the entries behind it. */
+export interface LookupUse {
+  name: string;
+  table: string;
+  version: number;
+}
+
 export interface Rendered {
   body: unknown;
   idempotencyKey: string;
   refs: unknown;
+  /** The lookup table versions the render read; empty when the mapping has no lookups. */
+  lookups: LookupUse[];
 }
 
 export type RenderOutcome =
@@ -41,7 +51,73 @@ export interface XrefInput {
   refs: unknown;
   legacyKey: string;
   eventId: string;
+  /**
+   * The legacy keys of the elements of a pushed collection, by position. Sent in the same call as the header's key, as
+   * the keys of the render's element refs (the refs that carry an `index`) once the migration service renders them
+   * (wave 10 slice 23: `refs` may then hold several refs, each element ref with `legacyKey`). Without element refs in
+   * the render nothing is sent for them, so a migration service without that slice sees the single-subject call it knows.
+   */
+  lines?: { index: number; legacyKey: string }[];
+  /** The collection (the element refs' `collection`, null when they carry none) the `lines` belong to; other element refs get no key. */
+  linesCollection?: string | null;
   actor?: string;
+}
+
+/** An element ref's collection: its `collection`, or null when it carries none; undefined when the ref is not an element ref (no index). */
+function elementCollection(r: unknown): string | null | undefined {
+  if (typeof r !== "object" || r === null) return undefined;
+  const o = r as Record<string, unknown>;
+  if (typeof o["index"] !== "number") return undefined;
+  return typeof o["collection"] === "string" ? o["collection"] : null;
+}
+
+/**
+ * The render's refs with each element's legacy key added: the multi-ref body of xref:record. Refs without an index are
+ * the subject; only the element refs of `collection` get a key, so the lines of one collection never key another's.
+ */
+export function withLineKeys(refs: unknown, lines: { index: number; legacyKey: string }[], collection: string | null): { refs: unknown; recorded: number } {
+  if (!Array.isArray(refs)) return { refs, recorded: 0 };
+  const byIndex = new Map(lines.map((l) => [l.index, l.legacyKey]));
+  let recorded = 0;
+  const out = refs.map((r) => {
+    if (elementCollection(r) !== collection) return r;
+    const legacyKey = byIndex.get((r as Record<string, number>)["index"] as number);
+    if (legacyKey === undefined) return r;
+    recorded++;
+    return { ...(r as Record<string, unknown>), legacyKey };
+  });
+  return { refs: out, recorded };
+}
+
+/** The element refs the line keys are for: their collection and how many there are; a failure when that cannot be told. */
+export type ElementRefs = { ok: true; collection: string | null; count: number } | { ok: false; reason: string };
+
+/**
+ * The element refs (refs with an index) of the collection the line keys belong to: null when the render named none, so
+ * no line keys can be recorded. `bodyArray` is the body array the keys were matched against (lineCorrelation.bodyPath),
+ * when known. With elements of several collections the keys can only be placed when `bodyArray` names one of them.
+ */
+export function elementRefs(refs: unknown, bodyArray?: string): ElementRefs | null {
+  if (!Array.isArray(refs)) return null;
+  const counts = new Map<string | null, number>();
+  for (const r of refs) {
+    const c = elementCollection(r);
+    if (c !== undefined) counts.set(c, (counts.get(c) ?? 0) + 1);
+  }
+  if (counts.size === 0) return null;
+  const names = [...counts.keys()].map((c) => c ?? "(unnamed)").join(", ");
+  if (bodyArray !== undefined && counts.has(bodyArray)) return { ok: true, collection: bodyArray, count: counts.get(bodyArray) as number };
+  if (counts.size === 1) {
+    const [[collection, count]] = [...counts] as [[string | null, number]];
+    if (bodyArray === undefined || collection === null) return { ok: true, collection, count };
+    return { ok: false, reason: `the render's element refs are of the collection ${collection}, not ${bodyArray} (lineCorrelation.bodyPath)` };
+  }
+  return {
+    ok: false,
+    reason: bodyArray === undefined
+      ? `the render names elements of several collections (${names}); set lineCorrelation so its bodyPath names the one lineKeyPath reads`
+      : `the render names elements of the collections ${names}, not ${bodyArray} (lineCorrelation.bodyPath)`,
+  };
 }
 
 /** `code` is the problem code (MIG-XREF-EVENT-CONFLICT, MIG-XREF-CONFLICT, MIG-XREF-REF-MISMATCH, ...) when the service sent one. */
@@ -80,6 +156,21 @@ export function cloudEventOf(event: HubEvent, source = "/passage/integration-hub
 }
 
 const MAX_DETAIL = 500;
+const MAX_LOOKUPS = 200;
+
+/** The render's `lookups`, kept to well-formed entries (a bounded audit record, never trusted as input). */
+export function lookupsOf(raw: unknown): LookupUse[] {
+  if (!Array.isArray(raw)) return [];
+  const out: LookupUse[] = [];
+  for (const e of raw) {
+    if (out.length >= MAX_LOOKUPS) break;
+    const o = (typeof e === "object" && e !== null ? e : {}) as Record<string, unknown>;
+    if (typeof o["name"] === "string" && typeof o["table"] === "string" && typeof o["version"] === "number" && Number.isInteger(o["version"])) {
+      out.push({ name: o["name"].slice(0, 200), table: o["table"].slice(0, 200), version: o["version"] });
+    }
+  }
+  return out;
+}
 
 export const RENDER_ROUTE_MISSING =
   "the migration service has no outbound render route (POST /v1/integration/outbound-mappings/{id}:render, wave 10 slice S5); nothing was pushed";
@@ -136,7 +227,7 @@ export function httpMigrationClient(options: {
       if (out.status === 200) {
         const r = out.json as Record<string, unknown>;
         if (typeof r === "object" && r !== null && "body" in r) {
-          return { ok: true, rendered: { body: r["body"], idempotencyKey: String(r["idempotencyKey"] ?? ""), refs: r["refs"] ?? null } };
+          return { ok: true, rendered: { body: r["body"], idempotencyKey: String(r["idempotencyKey"] ?? ""), refs: r["refs"] ?? null, lookups: lookupsOf(r["lookups"]) } };
         }
         return { ok: false, status: 200, code: null, detail: "the render answer has no body", retryable: false };
       }
@@ -147,8 +238,9 @@ export function httpMigrationClient(options: {
       }
       return { ok: false, status: out.status, ...p, retryable: migrationRetryable(out.status) };
     },
-    async recordXref({ tenantId, legalEntityId, mappingId, refs, legacyKey, eventId, actor }) {
-      const out = await post("/v1/integration/xref:record", tenantId, legalEntityId, actor, { outboundMappingId: mappingId, refs, legacyKey, eventId });
+    async recordXref({ tenantId, legalEntityId, mappingId, refs, legacyKey, eventId, lines, linesCollection, actor }) {
+      const sent = lines === undefined || lines.length === 0 ? refs : withLineKeys(refs, lines, linesCollection ?? null).refs;
+      const out = await post("/v1/integration/xref:record", tenantId, legalEntityId, actor, { outboundMappingId: mappingId, refs: sent, legacyKey, eventId });
       if (out === null) {
         return { ok: false, status: null, code: null, detail: "the migration service did not answer", retryable: true };
       }

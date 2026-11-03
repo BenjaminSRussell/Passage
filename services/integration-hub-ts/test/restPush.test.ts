@@ -66,6 +66,9 @@ class FakeMigration implements MigrationClient {
   renders: RenderInput[] = [];
   xrefs: XrefInput[] = [];
   unresolved = new Set<string>();
+  /** Migration slice 23: the render names a ref per element of a pushed collection. */
+  lineRefs = false;
+  lookups: { name: string; table: string; version: number }[] = [];
   renderStatus: number | null = null;
   xrefStatus: number | null = null;
   async render(input: RenderInput): Promise<RenderOutcome> {
@@ -87,7 +90,8 @@ class FakeMigration implements MigrationClient {
           NetAmount: data.net_total,
         },
         idempotencyKey: `render-${input.event["id"]}`,
-        refs: [{ entity: "salesOrder", id: data.order_id }],
+        refs: [{ entity: "salesOrder", id: data.order_id }, ...(this.lineRefs ? data.lines.map((l, i) => ({ entity: "salesOrderLine", id: l.line_id, collection: "Lines", index: i })) : [])],
+        lookups: this.lookups,
       },
     };
   }
@@ -165,6 +169,8 @@ describe.skipIf(ownerUrl === undefined)("rest-push on Postgres", () => {
   });
   afterEach(() => {
     erp.script = () => undefined;
+    migration.lineRefs = false;
+    migration.lookups = [];
     erp.records.clear();
     now = T0;
     migration.renderStatus = null;
@@ -349,6 +355,62 @@ describe.skipIf(ownerUrl === undefined)("rest-push on Postgres", () => {
     expect(new Set(erp.hits.map((h) => h.headers["idempotency-key"])).size).toBe(1);
     expect((await deliveries(tenant))[0]).toMatchObject({ status: "delivered", legacyKey: expect.stringMatching(/^SO-/) });
     now = T0;
+  });
+
+  test("the legacy keys of a pushed collection's lines are read per element, recorded with the header in one xref call, and the render's lookups are kept for audit", async () => {
+    const tenant = randomUUID();
+    erp.hits.length = 0;
+    migration.lineRefs = true;
+    migration.lookups = [{ name: "Lines.uom", table: "uom_conversion", version: 4 }];
+    erp.script = (_n, hit) => {
+      const lines = (JSON.parse(hit.body) as { Lines: { LineNum: number }[] }).Lines;
+      // The ERP answers its lines in reverse order, so only the correlation field can tell them apart.
+      return { status: 201, body: JSON.stringify({ data: { id: "SO-7", lines: lines.map((l) => ({ id: `SOL-${l.LineNum}`, lineNo: l.LineNum })).reverse() } }) };
+    };
+    await subscribe(tenant, { lineKeyPath: "$.data.lines[*].id", lineCorrelation: { bodyPath: "Lines[*].LineNum", responsePath: "$.data.lines[*].lineNo" } });
+    const line = (n: number) => ({ line_id: randomUUID(), product_id: "ab12cd34-0000-4000-8000-000000000002", quantity: String(n), site_id: randomUUID(), warehouse_id: randomUUID(), confirmed_ship_date: "2026-12-01" });
+    const e = confirmed(tenant, {}, { lines: [line(1), line(2), line(3)] });
+    await consume(message(e));
+    await poller().pollOnce();
+
+    const [d] = await deliveries(tenant);
+    expect(d).toMatchObject({
+      status: "delivered", legacyKey: "SO-7",
+      lineKeys: [{ index: 0, legacyKey: "SOL-1" }, { index: 1, legacyKey: "SOL-2" }, { index: 2, legacyKey: "SOL-3" }],
+      lookups: [{ name: "Lines.uom", table: "uom_conversion", version: 4 }],
+    });
+    expect(migration.xrefs.filter((x) => x.eventId === e["id"])).toHaveLength(1);
+    const call = migration.xrefs.find((x) => x.eventId === e["id"]) as XrefInput;
+    expect(call.legacyKey).toBe("SO-7");
+    expect(call.lines).toEqual(d.lineKeys);
+    expect(call.refs).toHaveLength(4);
+  });
+
+  test("line keys that cannot be matched dead-letter the accepted push without recording anything; replay is allowed (HUB-0117)", async () => {
+    const tenant = randomUUID();
+    erp.hits.length = 0;
+    migration.lineRefs = true;
+    erp.script = () => ({ status: 201, body: JSON.stringify({ data: { id: "SO-8", lines: [{ id: "SOL-1" }] } }) });
+    await subscribe(tenant, { lineKeyPath: "$.data.lines[*].id" });
+    const before = migration.xrefs.length;
+    await consume(message(confirmed(tenant, {}, { lines: [{ line_id: randomUUID(), product_id: "ab12cd34-0000-4000-8000-000000000002", quantity: "1" }, { line_id: randomUUID(), product_id: "ab12cd34-0000-4000-8000-000000000002", quantity: "2" }] })));
+    await poller().pollOnce();
+    const [d] = await deliveries(tenant);
+    expect(d).toMatchObject({ status: "dead_letter", deadLetterCode: "HUB-0117", lastStatus: 201 });
+    expect(d.responseExcerpt).toContain("1 line keys for 2 pushed elements");
+    expect(migration.xrefs).toHaveLength(before);
+  });
+
+  test("lineKeyPath is validated on create: it needs responseKeyPath and one [*]", async () => {
+    const tenant = randomUUID();
+    const body = { kind: "rest-push", name: "x", url: url("/api/o"), patterns: ["dev.passage.sales.order.confirmed.v1"], outboundMappingId: MAPPING, auth: { type: "bearer", token: "tok-123456" } };
+    const noKey = await hub.call("POST", "/v1/hub/subscriptions", { tenant }, { ...body, lineKeyPath: "lines[*].id" });
+    expect(noKey.status).toBe(400);
+    const noStar = await hub.call("POST", "/v1/hub/subscriptions", { tenant }, { ...body, responseKeyPath: "$.id", lineKeyPath: "lines.id" });
+    expect(noStar.status).toBe(400);
+    const ok = await hub.call("POST", "/v1/hub/subscriptions", { tenant }, { ...body, responseKeyPath: "$.id", lineKeyPath: "lines[*].id" });
+    expect(ok.status).toBe(201);
+    expect(ok.body.rest.lineKeyPath).toBe("lines[*].id");
   });
 
   test("an accepted record without a legacy key at responseKeyPath is dead-lettered for an operator", async () => {

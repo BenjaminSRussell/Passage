@@ -69,6 +69,8 @@ function recordingRest(store: PgDeliveryStore, pusher: RestPusher, target: RestT
     store.recordAttempt(delivery.event.eventId, outcome.status, {
       ...(outcome.excerpt === undefined ? {} : { excerpt: outcome.excerpt }),
       ...(outcome.legacyKey === undefined ? {} : { legacyKey: outcome.legacyKey }),
+      ...(outcome.lineKeys === undefined ? {} : { lineKeys: outcome.lineKeys }),
+      ...(outcome.lookups === undefined ? {} : { lookups: outcome.lookups }),
     });
     return outcome;
   };

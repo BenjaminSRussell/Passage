@@ -25,10 +25,29 @@ export type ClientErrorPolicy = "dead_letter" | "retry";
 export type DeliveryStatus = "pending" | "delivered" | "dead_letter";
 export const DELIVERY_STATUSES: readonly DeliveryStatus[] = ["pending", "delivered", "dead_letter"];
 
+export interface LineCorrelation {
+  bodyPath: string;
+  responsePath: string;
+}
+
+export interface LineKey {
+  index: number;
+  legacyKey: string;
+}
+
+export interface LookupUse {
+  name: string;
+  table: string;
+  version: number;
+}
+
 export interface RestSettings {
   outboundMappingId: string;
   method: SyncMethod;
   responseKeyPath: string;
+  /** Path with one [*] to the legacy key of each element of a pushed collection (absent on older subscriptions). */
+  lineKeyPath?: string;
+  lineCorrelation?: LineCorrelation;
   onClientError: ClientErrorPolicy;
   auth: { type: AuthType; username?: string; headerName?: string; tokenUrl?: string; clientId?: string; scope?: string; hasCredentials: true };
 }
@@ -69,6 +88,8 @@ export interface NewRestSubscription {
   outboundMappingId: string;
   method: SyncMethod;
   responseKeyPath?: string;
+  lineKeyPath?: string;
+  lineCorrelation?: LineCorrelation;
   onClientError: ClientErrorPolicy;
   auth: AuthInput;
 }
@@ -88,6 +109,10 @@ export interface Delivery {
   deadLetterCode: string | null;
   responseExcerpt: string | null;
   legacyKey: string | null;
+  /** The key the ERP assigned to each element of the pushed collection. */
+  lineKeys?: LineKey[];
+  /** The lookup table versions the last render read. */
+  lookups?: LookupUse[];
   createdAt: string;
 }
 
@@ -104,6 +129,9 @@ export interface TestSendResult {
   status?: number | null;
   excerpt?: string;
   legacyKey?: string;
+  lineKeys?: LineKey[];
+  lineKeyError?: string;
+  lookups?: LookupUse[];
 }
 
 async function toError(res: Response): Promise<EdiApiError> {
