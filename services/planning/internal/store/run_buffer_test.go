@@ -156,7 +156,7 @@ func TestRunPlan_StoresBufferPriorityAndRedZoneMessage(t *testing.T) {
 			t.Errorf("get buffer order = %+v, %v", got, err)
 		}
 	}
-	msgs, err := st.ListMessages(ctx, "MAIN", domain.ActionRedZone, "", 10)
+	msgs, err := st.ListMessages(ctx, "MAIN", domain.ActionRedZone, "", "", 10)
 	if err != nil || len(msgs) != 1 || msgs[0].SupplyRef != bufferOrder || !decimal.RequireFromString(msgs[0].Qty).Equal(decimal.NewFromInt(80)) {
 		t.Fatalf("red-zone messages = %+v, %v", msgs, err)
 	}
@@ -234,7 +234,7 @@ func TestListPlannedOrdersAndMessages_SortByPriority(t *testing.T) {
 			t.Errorf("default order after the priority-based buffer is not by number: %s before %s", byDefault[i-1].Number, byDefault[i].Number)
 		}
 	}
-	msgs, err := st.ListMessages(ctx, "MAIN", domain.ActionRedZone, store.SortPriority, 10)
+	msgs, err := st.ListMessages(ctx, "MAIN", domain.ActionRedZone, "", store.SortPriority, 10)
 	if err != nil || len(msgs) != 2 || msgs[0].ItemID != red2 || msgs[1].ItemID != red1 {
 		t.Fatalf("red-zone messages by priority = %+v, %v", msgs, err)
 	}
@@ -242,12 +242,12 @@ func TestListPlannedOrdersAndMessages_SortByPriority(t *testing.T) {
 		t.Errorf("message does not carry the buffer's priority and zone: %+v", msgs[0])
 	}
 	// By default the priority-based red1 leads although red2 is more urgent.
-	msgs, err = st.ListMessages(ctx, "MAIN", domain.ActionRedZone, "", 10)
+	msgs, err = st.ListMessages(ctx, "MAIN", domain.ActionRedZone, "", "", 10)
 	if err != nil || len(msgs) != 2 || msgs[0].ItemID != red1 || msgs[1].ItemID != red2 {
 		t.Fatalf("red-zone messages by default = %+v, %v", msgs, err)
 	}
 	// A message about supply that is not a planned order of the version carries no priority.
-	all, err := st.ListMessages(ctx, "MAIN", "", "", 10)
+	all, err := st.ListMessages(ctx, "MAIN", "", "", "", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestRunPlan_StoresSalesOnTopMessage(t *testing.T) {
 	if _, _, err := st.RunPlan(ctx, runRequest(res, "run-top", "in-top")); err != nil {
 		t.Fatal(err)
 	}
-	msgs, err := st.ListMessages(ctx, "MAIN", domain.ActionSalesOnTop, "", 10)
+	msgs, err := st.ListMessages(ctx, "MAIN", domain.ActionSalesOnTop, "", "", 10)
 	if err != nil || len(msgs) != 1 || msgs[0].ItemID != item || msgs[0].DemandRef != "SO-1" || !decimal.RequireFromString(msgs[0].Qty).Equal(decimal.NewFromInt(30)) {
 		t.Fatalf("sales-on-top messages = %+v, %v", msgs, err)
 	}
@@ -301,7 +301,7 @@ func TestRunPlan_StoresNoVendorMessageWithCatalogText(t *testing.T) {
 	if _, _, err := st.RunPlan(ctx, runRequest(res, "run-vendor", "in-vendor")); err != nil {
 		t.Fatal(err)
 	}
-	msgs, err := st.ListMessages(ctx, "MAIN", domain.ActionNoVendor, "", 10)
+	msgs, err := st.ListMessages(ctx, "MAIN", domain.ActionNoVendor, "", "", 10)
 	if err != nil || len(msgs) != 1 || msgs[0].ItemID != bare || msgs[0].Code != "PLAN-0008" ||
 		msgs[0].Text != "No vendor for planned purchase of "+bare+"; using none." || !decimal.RequireFromString(msgs[0].Qty).Equal(decimal.NewFromInt(5)) {
 		t.Fatalf("no-vendor messages = %+v, %v", msgs, err)

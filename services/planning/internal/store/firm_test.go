@@ -265,7 +265,7 @@ func TestRunPlan_StoresCancelAndDecrease(t *testing.T) {
 		t.Fatal(err)
 	}
 	for action, want := range map[string]string{domain.ActionDecrease: "PO-1 200.000000", domain.ActionCancel: "PO-2 80.000000"} {
-		msgs, err := st.ListMessages(ctx, "MAIN", action, "", 10)
+		msgs, err := st.ListMessages(ctx, "MAIN", action, "", "", 10)
 		if err != nil {
 			t.Fatal(err)
 		}

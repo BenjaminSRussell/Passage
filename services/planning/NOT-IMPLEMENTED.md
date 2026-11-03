@@ -1,4 +1,4 @@
-# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 29)
+# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 30)
 
 Every ticket deliverable and acceptance criterion that slices 1 to 18 do not
 build. Slice 2 added the freeze, action and futures fences (BR-22.4),
@@ -289,7 +289,7 @@ not edit that code).
 | 3 | Approved orders "become firmed on next run" (FR-22.11), and firmed orders as supply of the next run (FR-22.1) | partly built | Firmed orders as supply: built opt-in (slice 14, `carryForward`; `TestRun_CarryForwardCountsFirmedOrdersAsSupply`, `TestFirmedSupply`). It is off by default because a caller that already sends the target orders as `receipts` would count them twice; an order whose delivery date has passed is taken as received (part of on-hand). Built in slice 16: approved orders become firmed (batch and event, grouped `vendor-date`) by the next operational run and, with `carryForward`, are supply of that same run (`store/approved_firm.go`, `TestRunPlan_FirmsApprovedOrders`). Gaps: the legal-entity grouping parameter is still not persisted (default `vendor-date`); a run without `carryForward` plans the demand of an order it just firmed again; an approved order deleted or edited while a run is computing was counted as supply at its snapshot quantity but is then not firmed (deleted) or firmed at its new quantity (edited). Not built: carrying edited or unprocessed orders of the previous version forward; matching a carried order to the target order once it reaches the snapshot (handoff PSG-17, PSG-21: the target order must name the planned order id), and knowing whether a target order was delivered (an order whose delivery date has passed is dropped rather than read from the target order). The firmed orders are read before the run's transaction, so an order firmed while a run is computing is first carried by the following run. |
 | 3 | Vendor check against w17 vendors on PATCH | handoff (PSG-17) | `vendorId` is checked as a UUID and only on purchase orders; whether the vendor exists is not checked. |
 | 3 | Order grouping on firm (vendor, vendor-date, vendor-week) | built | `domain.GroupForFirming`: planned purchases of one site and vendor merge per grouping (weeks run Monday to Sunday); production and transfer orders never merge. AC-22.8 is `TestGroupForFirming_AC228` and the store test `TestFirmPlannedOrders`. The legal-entity default is the request default `vendor-date`; the parameter itself is not persisted (setup, see "Coverage groups API"). |
-| 3 | Decrease, increase, cancel and derived action messages for existing supply (FR-22.7) | partly built | Built: delay (with propagation to parents and to the sales line or forecast), postpone, advance, shortage, Cancel/Decrease for receipts at or beyond the coverage time fence whose quantity is not (fully) pegged, inside the action fence, and (slice 6) Increase: a shortage inside the freeze fence, where no planned order may be created, raises Increase on the latest existing receipt dated on or before it inside the action fence (`domain/increase_test.go`, with a property that increases never exceed the reported shortages; stored and filtered in `TestRunPlan_StoresIncrease`). Outside the freeze fence a shortfall still becomes a new planned order rather than an Increase of existing supply, and a receipt after the shortage gets no combined Advance-and-Increase. Not built: Derived (a parent's message passed to its components). |
+| 3 | Decrease, increase, cancel and derived action messages for existing supply (FR-22.7) | partly built | Built: delay (with propagation to parents and to the sales line or forecast), postpone, advance, shortage, Cancel/Decrease for receipts at or beyond the coverage time fence whose quantity is not (fully) pegged, inside the action fence, and (slice 6) Increase: a shortage inside the freeze fence, where no planned order may be created, raises Increase on the latest existing receipt dated on or before it inside the action fence (`domain/increase_test.go`, with a property that increases never exceed the reported shortages; stored and filtered in `TestRunPlan_StoresIncrease`). Outside the freeze fence a shortfall still becomes a new planned order rather than an Increase of existing supply, and a receipt after the shortage gets no combined Advance-and-Increase. Not built: Derived (a parent's message passed to its components). Slice 30 adds the planner's decision on a message (see the slice 30 handoffs): apply or dismiss with `message.applied.v1` or `message.dismissed.v1`; applying changes no order inside planning because the existing supply belongs to purchasing and production. |
 | 3 | Kanban planned-order type (FR-22.3) | later slice of PSG-22 | Order types purchase, production and transfer are planned; kanban needs wave 24 kanban rules. |
 | 3 | Planned transfer demand at the from-warehouse (BR-22.7) | built | A transfer order of a warehouse scope creates demand for the item at the site on its order date (delivery date less the transfer lead time), pegged as a `bom-line` and delaying the transfer when the site is late (`domain.ExpandWarehouses`; `TestWarehouseScopeTransfer_AC2216`, `TestWarehouseSiteDemandAddsToTransfer`). The from-warehouse is the site's inventory; a different from-warehouse per transfer needs w16 warehouse topology (handoff PSG-16). |
 | 3 | Message catalog codes on messages (PLAN-0006, PLAN-0007, PLAN-0008, PLAN-0010 to PLAN-0015) | partly built | Slice 24: `GET /messages` carries `code` and `text` for postpone (PLAN-0006), delay (PLAN-0007), no-vendor (PLAN-0008), red-zone (PLAN-0010) and sales-on-top (PLAN-0015). Not built: the catalog lines of the actions with none in the PRD (advance, shortage, cancel, decrease, increase), PLAN-0004 BOM cycle, PLAN-0005 lot-size splits, PLAN-0009 as a stored message, PLAN-0011, PLAN-0013 and PLAN-0014 (their causes are not raised yet), item names in the text and translation. Earlier note: messages carry an action (`delay`, `postpone`, `advance`, `shortage`, `cancel`, `decrease`, `increase`, since slice 20 `red-zone` for PLAN-0010 and since slice 23 `sales-on-top` for PLAN-0015), not a catalog code; the user texts of 4.22.18 are not rendered yet. |
@@ -362,7 +362,7 @@ not edit that code).
 
 | Item | Status | Reason |
 |---|---|---|
-| Database-backed tests and `0001_init.sql` to `0025_net_requirement_drop_site_key.sql` on an empty database | built | Run in review against Postgres 16 with an admin URL and a non-superuser app role (`PASSAGE_TEST_DATABASE_URL`, `PASSAGE_TEST_APP_DATABASE_URL`). CI must set both. |
+| Database-backed tests and `0001_init.sql` to `0026_message_disposition.sql` on an empty database | built | Run in review against Postgres 16 with an admin URL and a non-superuser app role (`PASSAGE_TEST_DATABASE_URL`, `PASSAGE_TEST_APP_DATABASE_URL`). CI must set both. |
 | Pytest run of `services/forecast-py` | built | Run in review with Python 3.12; CI wiring for Python services belongs to the platform owner. |
 
 ## Reconciliation and test plan (PRD 4.22.9)
@@ -391,6 +391,27 @@ service token and no tenant: forecast-py is stateless, in-cluster and sees only 
 from zero to 6 decimals (BR-22.10), not to the item's unit decimals (planning holds no unit of measure); a value above the
 largest storable quantity is 422 `PLAN-FORECAST-RANGE` and nothing is written. The flags are per deployment (one
 `PLANNING_FEATURE_FLAGS` value for every tenant), so the service refuses to start with the flag on and no valid `FORECAST_URL`.
+
+Slice 30 (action message decisions, FR-22.7): `action_message` gains `status` (open, applied, dismissed), `version`, `decided_by`,
+`decided_at`, `decision_note` and `decision_key` (migration `0026`, no new table, so no new grant: passage_app already holds SELECT, INSERT,
+UPDATE and DELETE on it, under the tenant and legal-entity policies). `GET /messages` lists open messages by default (`status` open, applied,
+dismissed or all) and every message carries its `id`, `status` and `version`; `GET /messages/{id}`, `POST /messages/{id}:apply` and
+`POST /messages/{id}:dismiss` (duty `planning.order.maintain`, If-Match, optional Idempotency-Key, optional `note` up to 500 characters). Rules:
+404 `PLAN-MESSAGE-NOT-FOUND`; 409 `PLAN-MESSAGE-DECIDED` for a message decided before (a retry with the same Idempotency-Key and decision replays it
+with 200 and `Idempotent-Replayed`); 409 `PLAN-MESSAGE-STALE` when its plan version is no longer current; 412 for a stale If-Match; 422
+`PLAN-MESSAGE-NOT-ACTIONABLE` when applying delay, shortage, red-zone, sales-on-top or no-vendor (they can only be dismissed). The event is written in the deciding
+transaction. Decisions across runs (review fix): every run writes new message rows under a new version, so the run now carries each
+applied or dismissed decision of the version it replaces onto the identical message of the new version (same item, scope, action, supply,
+demand, suggested date, quantity and delay; `carried_from` names the message the planner decided, `carriedFrom` in the API) and raises no
+`message.raised.v1` for it; a dismissed message therefore does not come back as open, and an applied one is not applied (and published) twice
+while its owner has not changed the order. A message whose date or quantity changed is a new message and is open. A decision locks the
+message's version (`for share`) before the message, so a concurrent run either carries it or the decision gets 409 `PLAN-MESSAGE-STALE`.
+Tests: `domain/message_decision_test.go`, `api/message_decision_test.go`, store `message_decision_test.go`
+(`TestRunPlan_CarriesMessageDecisions`, `TestDecideMessage_TenantAndLegalEntityIsolation`), web `messagedecision.test.tsx`. Not built:
+changing the order itself (the owning context does that from the event, and no consumer exists yet, so an applied message about an order
+nobody changed keeps being raised and stays applied on every run), undoing a decision, bulk decisions, and applying a message to a planned order
+of this service (runs raise no messages of those actions on planned orders). The decision row of a message that no run raises again is deleted
+with its version by the retention purge (20 versions by default); the `message.applied.v1` or `message.dismissed.v1` event is the lasting record.
 
 ## Handoffs to other waves
 
@@ -439,3 +460,15 @@ largest storable quantity is 422 `PLAN-FORECAST-RANGE` and nothing is written. T
   `POST /v1/planning/forecasts/{modelCode}:generate`. No new duty, service grant or service principal.
 - **tenant feature flags (platform)**: `planning.statistical-forecast` is one setting per deployment; per-tenant enablement
   needs the platform feature-flag API (`GET /v1/platform/feature-flags`), which does not exist yet.
+
+## Slice 30 handoffs
+
+- **authz seed (main session)**: add the route rows `{"resource": "/v1/planning/messages/*", "methods": ["GET"]}` to duty `planning.read` and
+  `{"resource": "/v1/planning/messages/*:apply", "methods": ["POST"]}` and `{"resource": "/v1/planning/messages/*:dismiss", "methods": ["POST"]}` to duty
+  `planning.order.maintain` in `policies/authz/data.json`. Both duties exist. Without the rows the gateway denies the three new routes. No new duty,
+  service grant or service principal.
+- **PSG-17 procurement / PSG-21 manufacturing (consumers)**: act on `message.applied.v1` (`action`, `supply_ref` the receipt or order number,
+  `suggested_date`, `qty`, `warehouse_id`): postpone and advance move the receipt to `suggested_date`, cancel removes it, decrease and increase lower or raise its
+  quantity by `qty` (the surplus or the shortage the message reports). `message.dismissed.v1` lets a task mirror close. Neither consumer exists yet.
+  Planning publishes one `message.applied.v1` per decision (a run that raises the message again carries the decision without a new event), but
+  the consumer must still treat `message_id` as its idempotency key, since the outbox delivers at least once and `decrease`/`increase` are deltas.

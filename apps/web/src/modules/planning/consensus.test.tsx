@@ -138,7 +138,7 @@ describe("Forecast consensus (FR-22.9)", () => {
 
 describe("Increase messages (FR-22.7)", () => {
   it("lists them and filters by increase", async () => {
-    const increase: Message = { action: "increase", itemId: cell.itemId, supplyRef: "PO-1", demandRef: "SO-1", suggestedDate: "2026-11-03", delayDays: 0, qty: "10" };
+    const increase: Message = { id: "00000000-0000-0000-0000-00000000f001", status: "open", version: 1, action: "increase", itemId: cell.itemId, supplyRef: "PO-1", demandRef: "SO-1", suggestedDate: "2026-11-03", delayDays: 0, qty: "10" };
     const shortage: Message = { ...increase, action: "shortage", supplyRef: "" };
     const fetchMock = vi.fn(async (url: string) => json({ items: url.includes("action=increase") ? [increase] : [increase, shortage] }));
     vi.stubGlobal("fetch", fetchMock);
@@ -153,7 +153,7 @@ describe("Increase messages (FR-22.7)", () => {
 
 describe("Red-zone messages (PLAN-0010, FR-22.16)", () => {
   it("lists them and filters by red zone", async () => {
-    const red: Message = { action: "red-zone", itemId: cell.itemId, supplyRef: "PO-7", demandRef: "ddmrp:red:item", suggestedDate: "2026-11-12", delayDays: 0, qty: "115" };
+    const red: Message = { id: "00000000-0000-0000-0000-00000000f002", status: "open", version: 1, action: "red-zone", itemId: cell.itemId, supplyRef: "PO-7", demandRef: "ddmrp:red:item", suggestedDate: "2026-11-12", delayDays: 0, qty: "115" };
     const delay: Message = { ...red, action: "delay", supplyRef: "PO-8" };
     const fetchMock = vi.fn(async (url: string) => json({ items: url.includes("action=red-zone") ? [red] : [red, delay] }));
     vi.stubGlobal("fetch", fetchMock);

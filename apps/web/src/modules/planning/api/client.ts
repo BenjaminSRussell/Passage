@@ -43,7 +43,23 @@ export type PlannedOrder = z.infer<typeof PlannedOrder>;
 /** Only unprocessed and approved orders of the current version can be changed (FR-22.11). */
 export const isOpen = (o: Pick<PlannedOrder, "status">) => o.status === "unprocessed" || o.status === "approved";
 
+/** open until a planner applies or dismisses the message (FR-22.7). */
+export const MessageStatus = z.enum(["open", "applied", "dismissed"]);
+export type MessageStatus = z.infer<typeof MessageStatus>;
+
+/** Only messages about existing supply change a source order when applied; the others can only be dismissed. */
+export const APPLICABLE_ACTIONS: readonly z.infer<typeof MessageAction>[] = ["postpone", "advance", "cancel", "decrease", "increase"];
+
 export const Message = z.object({
+  id: z.string(),
+  status: MessageStatus,
+  /** The ETag to send as If-Match when deciding. */
+  version: z.number().int(),
+  decidedBy: z.string().nullish(),
+  decidedAt: z.string().nullish(),
+  decisionNote: z.string().nullish(),
+  /** The earlier version's message the planner decided, when a later run raised it again unchanged and carried the decision. */
+  carriedFrom: z.string().nullish(),
   action: MessageAction,
   itemId: z.string(),
   /** The warehouse planning scope the message is about (FR-22.18); null for the site scope. */
@@ -271,12 +287,31 @@ export async function listMessages(
   action?: z.infer<typeof MessageAction>,
   init?: RequestInit,
   sort?: ListSort,
+  /** Left out, the service lists open messages; `all` lists every status. */
+  status?: MessageStatus | "all",
 ): Promise<Message[]> {
   const params = new URLSearchParams({ planCode });
   if (action) params.set("action", action);
   if (sort) params.set("sort", sort);
+  if (status) params.set("status", status);
   const body = await request(`/messages?${params.toString()}`, z.object({ items: z.array(Message) }), init);
   return body.items;
+}
+
+export async function getMessage(id: string, init?: RequestInit): Promise<Message> {
+  return request(`/messages/${encodeURIComponent(id)}`, Message, init);
+}
+
+/**
+ * Applies or dismisses an open message under If-Match (FR-22.7). The Idempotency-Key makes a retry
+ * of the same decision return the stored message instead of a 409.
+ */
+export async function decideMessage(id: string, version: number, decision: "apply" | "dismiss", note: string, idempotencyKey: string): Promise<Message> {
+  return request(`/messages/${encodeURIComponent(id)}:${decision}`, Message, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "If-Match": ifMatch(version), "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(note.trim() ? { note: note.trim() } : {}),
+  });
 }
 
 /**

@@ -26,6 +26,9 @@ func TestEventTypesFollowTheNamingRule(t *testing.T) {
 	if MessageRaised != "dev.passage.planning.message.raised.v1" {
 		t.Errorf("MessageRaised = %s", MessageRaised)
 	}
+	if MessageApplied != "dev.passage.planning.message.applied.v1" || MessageDismissed != "dev.passage.planning.message.dismissed.v1" {
+		t.Errorf("MessageApplied = %s, MessageDismissed = %s", MessageApplied, MessageDismissed)
+	}
 	if ForecastPublished != "dev.passage.planning.forecast.published.v1" {
 		t.Errorf("ForecastPublished = %s", ForecastPublished)
 	}
