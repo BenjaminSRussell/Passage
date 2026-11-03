@@ -66,6 +66,7 @@ type Store interface {
 	ChangeAgreementStatus(ctx context.Context, id string, version int, action string, idem Idem) (AgreementDetail, error)
 	ListOpenRequisitionLines(ctx context.Context, f SourcingFilter, after string, limit int) (Page[SourcingLine], error)
 	RequisitionLinesByID(ctx context.Context, lineIDs []string) ([]SourcingLine, error)
+	ListOpenOrderLines(ctx context.Context, f OpenLineFilter, after string, limit int) (Page[OpenOrderLine], error)
 	ConsolidateRequisitionLines(ctx context.Context, orders []PurchaseOrder, lineIDs []string, idem Idem) ([]PurchaseOrder, error)
 	CreateRFQ(ctx context.Context, in domain.RFQ, idem Idem) (domain.RFQ, error)
 	GetRFQ(ctx context.Context, id string) (domain.RFQ, error)

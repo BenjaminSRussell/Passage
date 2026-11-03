@@ -32,6 +32,7 @@ type requisitionLineBody struct {
 	EstimatedUnitPrice string `json:"estimatedUnitPrice,omitempty"`
 	RequestedDate      string `json:"requestedDate"`
 	SiteID             string `json:"siteId,omitempty"`
+	WarehouseID        string `json:"warehouseId,omitempty"`
 	PreferredVendorID  string `json:"preferredVendorId,omitempty"`
 	// CatalogEntryID picks the line from a published procurement catalog (FR-17.18).
 	CatalogEntryID string `json:"catalogEntryId,omitempty"`
@@ -132,7 +133,7 @@ func buildRequisitionLine(no int, l requisitionLineBody, minor int32) (store.Req
 	if l.ProductID == "" && (strings.TrimSpace(l.Description) == "" || strings.TrimSpace(l.Category) == "") {
 		return store.RequisitionLine{}, invalid(field("productId"), "or description and category are required")
 	}
-	for _, f := range []struct{ name, value string }{{"productId", l.ProductID}, {"siteId", l.SiteID}, {"preferredVendorId", l.PreferredVendorID}, {"catalogEntryId", l.CatalogEntryID}} {
+	for _, f := range []struct{ name, value string }{{"productId", l.ProductID}, {"siteId", l.SiteID}, {"warehouseId", l.WarehouseID}, {"preferredVendorId", l.PreferredVendorID}, {"catalogEntryId", l.CatalogEntryID}} {
 		if err := uuidField(field(f.name), f.value, false); err != nil {
 			return store.RequisitionLine{}, err
 		}
@@ -169,6 +170,7 @@ func buildRequisitionLine(no int, l requisitionLineBody, minor int32) (store.Req
 		Amount:             qty.Mul(price).RoundBank(minor),
 		RequestedDate:      date,
 		SiteID:             l.SiteID,
+		WarehouseID:        l.WarehouseID,
 		PreferredVendorID:  l.PreferredVendorID,
 		CatalogEntryID:     l.CatalogEntryID,
 	}, nil

@@ -143,6 +143,8 @@ interface LineDraft {
   estimatedUnitPrice: string;
   requestedDate: string;
   preferredVendorId: string;
+  /** The warehouse the line is wanted in; orders are split by it. */
+  warehouseId: string;
   /** Set when the line was picked from a catalog; the service fills the item from the entry. */
   catalogEntryId: string;
 }
@@ -158,6 +160,7 @@ function emptyLine(): LineDraft {
     estimatedUnitPrice: "",
     requestedDate: todayIso(),
     preferredVendorId: "",
+    warehouseId: "",
     catalogEntryId: "",
   };
 }
@@ -196,6 +199,7 @@ export function validateRequisition(legalEntityId: string, currency: string, lin
     if (l.unit.trim() === "") errors[f("unit")] = "Enter a unit.";
     if (l.estimatedUnitPrice !== "" && !decimalPattern.test(l.estimatedUnitPrice)) errors[f("estimatedUnitPrice")] = "Enter a decimal price.";
     if (l.preferredVendorId !== "" && !uuidPattern.test(l.preferredVendorId)) errors[f("preferredVendorId")] = "Vendor id must be a UUID.";
+    if (l.warehouseId !== "" && !uuidPattern.test(l.warehouseId.trim())) errors[f("warehouseId")] = "Warehouse id must be a UUID.";
   });
   return errors;
 }
@@ -208,7 +212,7 @@ function toInput(legalEntityId: string, currency: string, lines: LineDraft[], op
     currency,
     lines: lines.map((l) =>
       l.catalogEntryId !== ""
-        ? { catalogEntryId: l.catalogEntryId, qty: l.qty.trim(), unit: l.unit.trim(), requestedDate: l.requestedDate }
+        ? { catalogEntryId: l.catalogEntryId, qty: l.qty.trim(), unit: l.unit.trim(), requestedDate: l.requestedDate, warehouseId: opt(l.warehouseId) }
         : {
       productId: opt(l.productId),
       description: opt(l.description),
@@ -218,6 +222,7 @@ function toInput(legalEntityId: string, currency: string, lines: LineDraft[], op
       estimatedUnitPrice: opt(l.estimatedUnitPrice),
       requestedDate: l.requestedDate,
       preferredVendorId: opt(l.preferredVendorId),
+      warehouseId: opt(l.warehouseId),
     },
     ),
   };
@@ -326,6 +331,9 @@ export function RequisitionCreatePage() {
                       <FormField id={id("date")} label="Requested date" error={err("requestedDate")}>
                         {(c) => <Input {...c} type="date" value={line.requestedDate} onChange={(e) => update(i, { requestedDate: e.target.value })} />}
                       </FormField>
+                      <FormField id={id("warehouse")} label="Deliver to warehouse id" optional error={err("warehouseId")}>
+                        {(c) => <Input {...c} value={line.warehouseId} onChange={(e) => update(i, { warehouseId: e.target.value })} />}
+                      </FormField>
                     </div>
                   </>
                 ) : null}
@@ -356,6 +364,9 @@ export function RequisitionCreatePage() {
                   </FormField>
                   <FormField id={id("vendor")} label="Preferred vendor id" optional error={err("preferredVendorId")}>
                     {(c) => <Input {...c} value={line.preferredVendorId} onChange={(e) => update(i, { preferredVendorId: e.target.value })} />}
+                  </FormField>
+                  <FormField id={id("warehouse")} label="Deliver to warehouse id" optional error={err("warehouseId")}>
+                    {(c) => <Input {...c} value={line.warehouseId} onChange={(e) => update(i, { warehouseId: e.target.value })} />}
                   </FormField>
                 </div>
                 )}
@@ -388,6 +399,7 @@ const lineColumns = (currency: string): DataTableColumn<RequisitionLine>[] => [
   { key: "estimatedUnitPrice", header: "Estimate", align: "end", render: (l) => money(l.estimatedUnitPrice, currency) },
   { key: "amount", header: "Amount", align: "end", render: (l) => money(l.amount, currency) },
   { key: "requestedDate", header: "Requested", mono: true },
+  { key: "warehouseId", header: "Warehouse", render: (l) => <ShortId id={l.warehouseId} /> },
   { key: "status", header: "Status", render: (l) => <StatusBadge status={l.status} /> },
   {
     key: "purchaseOrder",

@@ -30,6 +30,10 @@ type POLineData struct {
 	LineAmount   string `json:"line_amount"`
 	DeliveryDate string `json:"delivery_date"`
 	Status       string `json:"status"`
+	// SiteID and WarehouseID are where the line is delivered: the line's own, else the PO's. Planning
+	// (wave 22) and inventory read open supply by warehouse from them.
+	SiteID      string `json:"site_id,omitempty"`
+	WarehouseID string `json:"warehouse_id,omitempty"`
 	// Schedule is the delivery schedule of the line (FR-17.10), one entry per
 	// ORDERED inventory transaction; absent when the line has none.
 	Schedule []POScheduleRow `json:"schedule,omitempty"`

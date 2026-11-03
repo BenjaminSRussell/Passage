@@ -169,6 +169,7 @@ func (a *API) Register(r chi.Router) {
 		// Subsequent price change over many POs (FR-17.22); preview needs
 		// PurchaseOrderInquire and apply PurchaseOrderConfirm, checked in repriceRun.
 		r.Post("/purchase-orders:reprice", a.repriceRun)
+		inquire.Get("/purchase-order-lines", a.listOpenOrderLines)
 		inquire.Get("/purchase-orders/{id}/versions", a.orderVersions)
 		inquire.Get("/purchase-orders/{id}/versions/{n}/diff", a.orderVersionDiff)
 		// Invoicing plans per PO line (FR-17.21); a line amount change
@@ -439,17 +440,27 @@ func inScope(p tenant.Principal, legalEntityID string) error {
 // the previous page.
 func listParams(r *http.Request) (limit int, after string, err error) {
 	q := r.URL.Query()
-	if raw := q.Get("limit"); raw != "" {
-		limit, err = strconv.Atoi(raw)
-		if err != nil || limit < 1 || limit > store.MaxPageSize {
-			return 0, "", invalid("limit", fmt.Sprintf("must be an integer from 1 to %d", store.MaxPageSize))
-		}
+	if limit, err = listLimit(r); err != nil {
+		return 0, "", err
 	}
 	after = q.Get("cursor")
 	if after != "" && !ids.Valid(after) {
 		return 0, "", invalid("cursor", "is invalid")
 	}
 	return limit, after, nil
+}
+
+// listLimit reads the limit query parameter; zero when absent.
+func listLimit(r *http.Request) (int, error) {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" {
+		return 0, nil
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit < 1 || limit > store.MaxPageSize {
+		return 0, invalid("limit", fmt.Sprintf("must be an integer from 1 to %d", store.MaxPageSize))
+	}
+	return limit, nil
 }
 
 // pageBody is the list response: items and the cursor of the next page.

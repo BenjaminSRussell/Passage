@@ -39,14 +39,14 @@ type SourcingFilter struct {
 const sourcingColumns = `l.id, l.line_no, coalesce(l.product_id::text, ''), l.description, l.category, l.qty, l.unit,
 	l.estimated_unit_price, l.amount, l.requested_date, coalesce(l.site_id::text, ''), coalesce(l.preferred_vendor_id::text, ''),
 	l.status, r.id, r.number, r.status, r.legal_entity_id, r.currency, coalesce(l.purchase_order_id::text, ''),
-	coalesce(l.purchase_order_line_no, 0)`
+	coalesce(l.purchase_order_line_no, 0), coalesce(l.warehouse_id::text, '')`
 
 func scanSourcingLine(row pgx.CollectableRow) (SourcingLine, error) {
 	var s SourcingLine
 	var requested time.Time
 	err := row.Scan(&s.ID, &s.LineNo, &s.ProductID, &s.Description, &s.Category, &s.Qty, &s.Unit, &s.EstimatedUnitPrice, &s.Amount,
 		&requested, &s.SiteID, &s.PreferredVendorID, &s.Status, &s.RequisitionID, &s.RequisitionNumber, &s.RequisitionStatus,
-		&s.LegalEntityID, &s.Currency, &s.PurchaseOrderID, &s.PurchaseOrderLineNo)
+		&s.LegalEntityID, &s.Currency, &s.PurchaseOrderID, &s.PurchaseOrderLineNo, &s.WarehouseID)
 	s.RequestedDate = day(requested)
 	return s, err
 }

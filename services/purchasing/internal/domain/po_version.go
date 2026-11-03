@@ -22,6 +22,11 @@ type SnapshotLine struct {
 	TaxAmount    decimal.Decimal `json:"taxAmount"`
 	DeliveryDate Day             `json:"deliveryDate"`
 	Status       string          `json:"status"`
+	// SiteID and WarehouseID are recorded only when the line is delivered somewhere other than the
+	// PO header's site and warehouse, so a version taken before lines had a destination still compares
+	// equal and a move of one line shows as /lines/<i>/warehouseId.
+	SiteID      string `json:"siteId,omitempty"`
+	WarehouseID string `json:"warehouseId,omitempty"`
 }
 
 // SnapshotCharge is one header charge in a version.

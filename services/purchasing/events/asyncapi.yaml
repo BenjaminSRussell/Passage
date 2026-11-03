@@ -693,6 +693,8 @@ components:
               line_amount: { type: string, description: decimal string }
               delivery_date: { type: string, format: date }
               status: { type: string, enum: [OPEN, RECEIVED, INVOICED, CANCELLED] }
+              site_id: { type: string, format: uuid, description: "Site the line is delivered to: the line's own, else the PO's." }
+              warehouse_id: { type: string, format: uuid, description: "Warehouse the line is delivered to: the line's own, else the PO's. Planning and inventory read open supply by warehouse from it." }
               schedule:
                 type: array
                 description: The line's delivery schedule (FR-17.10), one entry per ORDERED inventory transaction; absent when the line has none. The quantities add up to qty.

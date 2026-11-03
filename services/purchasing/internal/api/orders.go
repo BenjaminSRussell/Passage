@@ -30,6 +30,9 @@ type orderBody struct {
 	// keepCharges are the charges the PO already carries, by charge code id: an edit keeps the
 	// calculation, value and sides they were entered with.
 	keepCharges map[string]store.PurchaseOrderCharge
+	// curSiteID and curWarehouseID are the stored header's on an edit: an existing line that
+	// delivered to them follows the header when the edit moves it.
+	curSiteID, curWarehouseID string
 	// autoApplied are the charge codes auto charges added to the PO before: applyAutoCharges on an
 	// edit does not add them again, so a charge the buyer removed stays removed.
 	autoApplied map[string]bool
@@ -43,7 +46,11 @@ type orderLineBody struct {
 	Description string `json:"description,omitempty"`
 	// Category is the procurement category of the line (FR-17.20); a requisition-backed
 	// line takes its requisition line's, and an existing line of a PATCH keeps its own.
-	Category          string     `json:"category,omitempty"`
+	Category string `json:"category,omitempty"`
+	// SiteID and WarehouseID are where the line is delivered; omitted, a new line goes where the PO
+	// does and an existing line of a PATCH keeps its destination (following the header if it did).
+	SiteID            string     `json:"siteId,omitempty"`
+	WarehouseID       string     `json:"warehouseId,omitempty"`
 	Qty               string     `json:"qty"`
 	Unit              string     `json:"unit"`
 	UnitPrice         string     `json:"unitPrice,omitempty"`
@@ -167,6 +174,7 @@ func (a *API) buildOrder(ctx context.Context, body orderBody) (store.PurchaseOrd
 		if err != nil {
 			return store.PurchaseOrder{}, err
 		}
+		line.SiteID, line.WarehouseID = lineDestination(body, l)
 		out.Lines = append(out.Lines, line)
 		inputs = append(inputs, in)
 	}
@@ -180,6 +188,28 @@ func (a *API) buildOrder(ctx context.Context, body orderBody) (store.PurchaseOrd
 	copyChargeSides(&out, sides)
 	out.AutoChargeCodes = autoCodes
 	return out, nil
+}
+
+// lineDestination is the site and warehouse a line is delivered to: its own, else for an existing
+// line of an edit its stored destination (the new header's if it followed the old header), else
+// the PO header's.
+func lineDestination(body orderBody, l orderLineBody) (site, warehouse string) {
+	site, warehouse = l.SiteID, l.WarehouseID
+	if k := l.keep; k != nil {
+		if site == "" && k.SiteID != body.curSiteID {
+			site = k.SiteID
+		}
+		if warehouse == "" && k.WarehouseID != body.curWarehouseID {
+			warehouse = k.WarehouseID
+		}
+	}
+	if site == "" {
+		site = body.SiteID
+	}
+	if warehouse == "" {
+		warehouse = body.WarehouseID
+	}
+	return site, warehouse
 }
 
 // priceDocument fills line amounts, charge amounts and header totals of out from
@@ -214,6 +244,12 @@ func priceDocument(out *store.PurchaseOrder, inputs []domain.LineInput, charges 
 func (a *API) buildOrderLine(ctx context.Context, idx int, l orderLineBody, vendor, cur string, orderDay domain.Day) (store.PurchaseOrderLine, domain.LineInput, error) {
 	field := func(name string) string { return "lines[" + strconv.Itoa(idx) + "]." + name }
 	if err := uuidField(field("productId"), l.ProductID, false); err != nil {
+		return store.PurchaseOrderLine{}, domain.LineInput{}, err
+	}
+	if err := uuidField(field("siteId"), l.SiteID, false); err != nil {
+		return store.PurchaseOrderLine{}, domain.LineInput{}, err
+	}
+	if err := uuidField(field("warehouseId"), l.WarehouseID, false); err != nil {
 		return store.PurchaseOrderLine{}, domain.LineInput{}, err
 	}
 	if err := uuidField(field("requisitionLineId"), l.RequisitionLineID, false); err != nil {

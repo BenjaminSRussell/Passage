@@ -81,6 +81,7 @@ func (a *API) editOrder(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
+	body.curSiteID, body.curWarehouseID = cur.SiteID, cur.WarehouseID
 	body.keepCharges = map[string]store.PurchaseOrderCharge{}
 	for _, c := range cur.Charges {
 		if _, ok := body.keepCharges[c.ChargeCodeID]; !ok && c.ChargeCodeID != "" {

@@ -139,6 +139,7 @@ export function ConsolidationPage() {
     { key: "amount", header: "Estimate", align: "end", render: (l) => money(l.amount, l.currency) },
     { key: "requestedDate", header: "Requested", mono: true },
     { key: "siteId", header: "Site", render: (l) => <ShortId id={l.siteId} /> },
+    { key: "warehouseId", header: "Warehouse", render: (l) => <ShortId id={l.warehouseId} /> },
     {
       key: "vendor",
       header: "Vendor",
@@ -160,7 +161,7 @@ export function ConsolidationPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Consolidation"
-        description="Approved requisition lines waiting to be ordered. Select lines and create purchase orders: one per vendor, currency, site and delivery window."
+        description="Approved requisition lines waiting to be ordered. Select lines and create purchase orders: one per vendor, currency, site, warehouse and delivery window."
       />
       <div className={styles.toolbar}>
         <div className={styles.filter}>

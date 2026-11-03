@@ -450,6 +450,10 @@ func checkLineChanges(cur, next []PurchaseOrderLine, allowInvoiceBeforeReceipt b
 		if c.AgreementLineID != "" && (!c.Qty.Equal(n.Qty) || !c.LineAmount.Equal(n.LineAmount) || c.ProductID != n.ProductID || c.Unit != n.Unit) {
 			return nil, linkErr("line %d draws on a purchase agreement; its product, unit, quantity and amount cannot change (cancel the line and order again)", n.LineNo)
 		}
+		if c.ReceivedQty.Sign() > 0 && (c.SiteID != n.SiteID || c.WarehouseID != n.WarehouseID) {
+			return nil, &domain.Error{Code: domain.CodeValidation, Detail: fmt.Sprintf(
+				"line %d has receipts; its site and warehouse cannot change (cancel the open quantity and order the rest again)", n.LineNo)}
+		}
 		if err := domain.CheckReduction(n.LineNo, c.ReceivedQty, c.InvoicedQty, n.Qty, allowInvoiceBeforeReceipt); err != nil {
 			return nil, err
 		}
@@ -529,7 +533,8 @@ func snapshotOf(po PurchaseOrder, lines []PurchaseOrderLine) domain.Snapshot {
 	for _, l := range lines {
 		out = append(out, domain.SnapshotLine{LineNo: l.LineNo, ProductID: l.ProductID, Description: l.Description,
 			Qty: l.Qty, Unit: l.Unit, UnitPrice: l.UnitPrice, PriceUnit: l.PriceUnit, DiscountPct: l.DiscountPct,
-			LineAmount: l.LineAmount, TaxAmount: l.TaxAmount, DeliveryDate: l.DeliveryDate, Status: l.Status})
+			LineAmount: l.LineAmount, TaxAmount: l.TaxAmount, DeliveryDate: l.DeliveryDate, Status: l.Status,
+			SiteID: lineOverride(l.SiteID, po.SiteID), WarehouseID: lineOverride(l.WarehouseID, po.WarehouseID)})
 	}
 	charges := make([]domain.SnapshotCharge, 0, len(po.Charges))
 	for _, c := range po.Charges {
@@ -574,10 +579,11 @@ func applyLines(ctx context.Context, tx pgx.Tx, next PurchaseOrder, removed []Pu
 	for _, l := range next.Lines {
 		tag, err := tx.Exec(ctx, `update purchase_order_line set product_id = $3, description = $4, qty = $5, unit = $6,
 			unit_price = $7, price_unit = $8, discount_pct = $9, gross_amount = $10, discount_amount = $11, line_amount = $12,
-			tax_amount = $13, delivery_date = $14, price_source = $15
+			tax_amount = $13, delivery_date = $14, price_source = $15, site_id = $17, warehouse_id = $18
 			where tenant_id = $1 and purchase_order_id = $2 and line_no = $16 and status <> 'CANCELLED'`,
 			p.TenantID, next.ID, nullable(l.ProductID), l.Description, l.Qty, l.Unit, l.UnitPrice, l.PriceUnit, l.DiscountPct,
-			l.GrossAmount, l.DiscountAmount, l.LineAmount, l.TaxAmount, l.DeliveryDate.Time, l.PriceSource, l.LineNo)
+			l.GrossAmount, l.DiscountAmount, l.LineAmount, l.TaxAmount, l.DeliveryDate.Time, l.PriceSource, l.LineNo,
+			nullable(lineOverride(l.SiteID, next.SiteID)), nullable(lineOverride(l.WarehouseID, next.WarehouseID)))
 		if err != nil {
 			return err
 		}
@@ -586,10 +592,11 @@ func applyLines(ctx context.Context, tx pgx.Tx, next PurchaseOrder, removed []Pu
 		}
 		if _, err := tx.Exec(ctx, `insert into purchase_order_line (tenant_id, purchase_order_id, line_no, product_id, description,
 			qty, unit, unit_price, price_unit, discount_pct, gross_amount, discount_amount, line_amount, tax_amount, delivery_date,
-			price_source, category, status)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'OPEN')`,
+			price_source, category, site_id, warehouse_id, status)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, 'OPEN')`,
 			p.TenantID, next.ID, l.LineNo, nullable(l.ProductID), l.Description, l.Qty, l.Unit, l.UnitPrice, l.PriceUnit,
-			l.DiscountPct, l.GrossAmount, l.DiscountAmount, l.LineAmount, l.TaxAmount, l.DeliveryDate.Time, l.PriceSource, l.Category); err != nil {
+			l.DiscountPct, l.GrossAmount, l.DiscountAmount, l.LineAmount, l.TaxAmount, l.DeliveryDate.Time, l.PriceSource, l.Category,
+			nullable(lineOverride(l.SiteID, next.SiteID)), nullable(lineOverride(l.WarehouseID, next.WarehouseID))); err != nil {
 			return err
 		}
 	}
@@ -721,7 +728,7 @@ func emitConfirmed(ctx context.Context, tx pgx.Tx, po PurchaseOrder) error {
 	for _, l := range po.Lines {
 		data.Lines = append(data.Lines, purchasingevents.POLineData{LineNo: l.LineNo, ProductID: l.ProductID, Description: l.Description,
 			Qty: l.Qty.String(), Unit: l.Unit, UnitPrice: l.UnitPrice.String(), PriceUnit: l.PriceUnit.String(),
-			LineAmount: l.LineAmount.String(), DeliveryDate: l.DeliveryDate.String(), Status: l.Status, Schedule: schedules[l.LineNo]})
+			LineAmount: l.LineAmount.String(), DeliveryDate: l.DeliveryDate.String(), Status: l.Status, SiteID: l.SiteID, WarehouseID: l.WarehouseID, Schedule: schedules[l.LineNo]})
 	}
 	return enqueue(ctx, tx, "purchase_order", po.ID, purchasingevents.POConfirmed, data)
 }

@@ -81,6 +81,7 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | GET `/purchase-orders` | PurchaseOrderInquire | Newest first; `approvalStatus`, `vendorId`, `limit`, `cursor` |
 | GET `/purchase-orders/{id}` | PurchaseOrderInquire, or the service-only `procurement.purchase-order.lookup` (receiving's signed token, #305) | ETag = row version |
 | PATCH `/purchase-orders/{id}` | PurchaseOrderMaintain | If-Match (row version) required; whole order as on create, `lineNo` names an existing line; see the change rules below |
+| GET `/purchase-order-lines` | PurchaseOrderInquire | Open supply: lines of CONFIRMED POs with quantity left to receive, by delivery date; `warehouseId`, `siteId`, `productId`, `legalEntityId`, `dueFrom`, `dueTo`, `limit`, `cursor` (opaque `<date>|<po id>|<line no>`). Master planning (wave 22) reads it per warehouse |
 | POST `/purchase-orders/{id}:submit` / `:cancel` | PurchaseOrderMaintain | Idempotency-Key and If-Match required |
 | POST `/purchase-orders/{id}:approve` / `:reject` / `:confirm` | PurchaseOrderConfirm | Idempotency-Key and If-Match required; approve and reject stand in for the wave 4 approval task |
 | POST `/purchase-orders/{id}:reprice` | PurchaseOrderInquire (preview) / PurchaseOrderConfirm (apply) | Subsequent price change on one CONFIRMED PO; `{"apply": false}` previews (ETag = row version); apply needs If-Match and Idempotency-Key |
@@ -218,8 +219,14 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
 - **Change limits (BR-17.7, BR-17.9, BR-17.10).** A line left out of the PATCH is
   cancelled (it stays in later versions as CANCELLED) and returns what it held. No
   line may drop below its received quantity, nor below invoiced (PRC-PO-007).
-  Vendor, currency and legal entity never change; site and warehouse not after the
-  first confirmation. A line's requisition and agreement links cannot change and a
+  Vendor, currency and legal entity never change; the header site and warehouse not
+  after the first confirmation. A line has its own `siteId` and `warehouseId`
+  (slice 16): omitted, a new line goes where the header does and an existing line
+  keeps its destination (and keeps following the header if it did). A line stores a
+  destination only when it differs from the header, so a version taken before lines
+  had one still compares equal; a move of one line is a new version whose patch names
+  `/lines/<i>/warehouseId`, confirmed at once unless a reapproval rule fires, and is
+  refused once the line has receipts. A line's requisition and agreement links cannot change and a
   new line cannot have them (PRC-PO-010); a line drawn on an agreement keeps its
   product, unit, quantity and amount, and a new delivery date must stay within the
   agreement validity (PRC-AGR-005). An existing line that omits `unitPrice` keeps its

@@ -365,6 +365,7 @@ components:
         estimatedUnitPrice: { $ref: '#/components/schemas/Money' }
         requestedDate: { $ref: '#/components/schemas/Day' }
         siteId: { type: string, format: uuid }
+        warehouseId: { type: string, format: uuid, description: "Warehouse the line is wanted in. Consolidation puts lines of different sites or warehouses on different POs, and the PO line is delivered there." }
         preferredVendorId: { type: string, format: uuid, description: "With productId and no estimate, the estimate defaults from this vendor's trade agreement." }
         catalogEntryId: { type: string, format: uuid, description: "Pick the line from a PUBLISHED catalog entry (FR-17.18): blank product, description, category, unit, estimate and preferred vendor take the entry's values; a different unit, product or category is refused (COM-0001). 422 PRC-CAT-004 when the catalog is not published to the legal entity and unit today, PRC-CAT-006 when its currency differs." }
     RequisitionInput:
@@ -394,6 +395,7 @@ components:
         amount: { $ref: '#/components/schemas/Money' }
         requestedDate: { $ref: '#/components/schemas/Day' }
         siteId: { type: string, format: uuid }
+        warehouseId: { type: string, format: uuid }
         preferredVendorId: { type: string, format: uuid }
         status: { type: string, enum: [OPEN, CONSOLIDATED, CANCELLED] }
         purchaseOrderId: { type: string, format: uuid, description: "Set when CONSOLIDATED: the PO that orders the line." }
@@ -463,6 +465,8 @@ components:
         productId: { type: string, format: uuid }
         description: { type: string }
         category: { type: string, maxLength: 200, description: "Procurement category the category access rule checks against the PO vendor (FR-17.20, PRC-CAT-002). A line that orders a requisition line takes that line's category (another value is refused); on PATCH an existing line keeps its category (another value is refused) and only added lines are checked. Under HARD a line with neither productId nor category is refused (COM-0001); a product line without a category is not checked." }
+        siteId: { type: string, format: uuid, description: "Site the line is delivered to. Omitted, a new line goes where the PO header does; on PATCH an existing line keeps its destination (and follows the header if it did). Changing it on a line with receipts is refused (COM-0001)." }
+        warehouseId: { type: string, format: uuid, description: "Warehouse the line is delivered to; same defaults as siteId. Versioned: a change on a confirmed PO shows in the version patch as /lines/<i>/warehouseId." }
         qty: { $ref: '#/components/schemas/Money' }
         unit: { type: string }
         unitPrice: { $ref: '#/components/schemas/Money', description: "Omit to take the trade agreement price (on PATCH, an existing line with the same product and unit keeps its price)." }
@@ -501,6 +505,8 @@ components:
         productId: { type: string, format: uuid }
         description: { type: string }
         category: { type: string, description: "Procurement category of the line (FR-17.20); absent when none." }
+        siteId: { type: string, format: uuid, description: "Site the line is delivered to: its own, else the PO's." }
+        warehouseId: { type: string, format: uuid, description: "Warehouse the line is delivered to: its own, else the PO's." }
         qty: { $ref: '#/components/schemas/Money' }
         unit: { type: string }
         unitPrice: { $ref: '#/components/schemas/Money' }
@@ -660,6 +666,32 @@ components:
             requisitionStatus: { type: string }
             legalEntityId: { type: string, format: uuid }
             currency: { type: string }
+    OpenOrderLine:
+      type: object
+      description: "Open supply: a line of a CONFIRMED purchase order with quantity still to receive."
+      required: [purchaseOrderId, number, lineNo, legalEntityId, vendorId, unit, qty, receivedQty, openQty, deliveryDate]
+      properties:
+        purchaseOrderId: { type: string, format: uuid }
+        number: { type: string, example: "PO-00000001" }
+        lineNo: { type: integer }
+        legalEntityId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        description: { type: string }
+        siteId: { type: string, format: uuid, description: "Effective delivery site of the line." }
+        warehouseId: { type: string, format: uuid, description: "Effective delivery warehouse of the line." }
+        unit: { type: string }
+        qty: { $ref: '#/components/schemas/Money' }
+        receivedQty: { $ref: '#/components/schemas/Money' }
+        openQty: { $ref: '#/components/schemas/Money', description: "qty - receivedQty, always positive." }
+        deliveryDate: { $ref: '#/components/schemas/Day' }
+        confirmedDate: { $ref: '#/components/schemas/Day', description: "Earliest vendor-confirmed date among the line's delivery schedule rows, when any is confirmed." }
+    OpenOrderLinePage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/OpenOrderLine' } }
+        nextCursor: { type: string, description: "Opaque cursor of the last row, '<date>|<po id>|<line no>'; pass it back as cursor." }
     SourcingLinePage:
       type: object
       required: [items]
@@ -1668,11 +1700,39 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/SourcingLinePage' }
         '422': { $ref: '#/components/responses/Problem' }
+  /v1/procurement/purchase-order-lines:
+    get:
+      operationId: listOpenOrderLines
+      x-passage-duty: PurchaseOrderInquire
+      summary: Open supply - lines of CONFIRMED purchase orders with quantity left to receive, by delivery date (duty PurchaseOrderInquire)
+      description: |
+        Returns the lines of CONFIRMED purchase orders that are OPEN and not fully received, with the
+        effective delivery site and warehouse of each (the line's own, else the PO's), the open quantity
+        and the delivery date, ordered by delivery date, PO and line number. Master planning (wave 22)
+        reads it per warehouse to net purchases against that warehouse's demand.
+      parameters:
+        - { name: warehouseId, in: query, required: false, description: Effective delivery warehouse, schema: { type: string, format: uuid } }
+        - { name: siteId, in: query, required: false, description: Effective delivery site, schema: { type: string, format: uuid } }
+        - { name: productId, in: query, required: false, description: Product, schema: { type: string, format: uuid } }
+        - { name: legalEntityId, in: query, required: false, description: Legal entity of the PO; must be in the caller's scope, schema: { type: string, format: uuid } }
+        - { name: dueFrom, in: query, required: false, description: Earliest delivery date (inclusive), schema: { $ref: '#/components/schemas/Day' } }
+        - { name: dueTo, in: query, required: false, description: Latest delivery date (inclusive), schema: { $ref: '#/components/schemas/Day' } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of open order lines
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpenOrderLinePage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { description: Missing duty or legalEntityId outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/procurement/requisitions:consolidate:
     post:
       operationId: consolidateRequisitions
       x-passage-duty: PurchaseOrderMaintain
-      summary: Create DRAFT purchase orders from approved requisition lines, one per legal entity, vendor, currency, site and delivery window (FR-17.3; duty PurchaseOrderMaintain). A replayed Idempotency-Key returns the POs the lines went into.
+      summary: Create DRAFT purchase orders from approved requisition lines, one per legal entity, vendor, currency, site, warehouse and delivery window (FR-17.3; duty PurchaseOrderMaintain). A replayed Idempotency-Key returns the POs the lines went into.
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
         required: true

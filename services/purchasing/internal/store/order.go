@@ -60,7 +60,12 @@ type PurchaseOrderLine struct {
 	Description string `json:"description,omitempty"`
 	// Category is the procurement category the category access rule checks (FR-17.20):
 	// the requisition line's on a requisition-backed line, else the one given; fixed once written.
-	Category          string          `json:"category,omitempty"`
+	Category string `json:"category,omitempty"`
+	// SiteID and WarehouseID are where the line is delivered. On a read they are always the effective
+	// values (the PO header's when the line has none of its own); a line stores a value only when it
+	// differs from the header, so a line that follows the header keeps following it until confirmation.
+	SiteID            string          `json:"siteId,omitempty"`
+	WarehouseID       string          `json:"warehouseId,omitempty"`
 	Qty               decimal.Decimal `json:"qty"`
 	Unit              string          `json:"unit"`
 	UnitPrice         decimal.Decimal `json:"unitPrice"`
@@ -177,11 +182,12 @@ func insertPurchaseOrder(ctx context.Context, tx pgx.Tx, in PurchaseOrder) (Purc
 	for _, l := range in.Lines {
 		if _, err := tx.Exec(ctx, `insert into purchase_order_line (tenant_id, purchase_order_id, line_no, product_id, description,
 			qty, unit, unit_price, price_unit, discount_pct, gross_amount, discount_amount, line_amount, tax_amount, delivery_date,
-			price_source, requisition_line_id, agreement_line_id, category, status)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, 'OPEN')`,
+			price_source, requisition_line_id, agreement_line_id, category, site_id, warehouse_id, status)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 'OPEN')`,
 			p.TenantID, in.ID, l.LineNo, nullable(l.ProductID), l.Description, l.Qty, l.Unit, l.UnitPrice, l.PriceUnit,
 			l.DiscountPct, l.GrossAmount, l.DiscountAmount, l.LineAmount, l.TaxAmount, l.DeliveryDate.Time, l.PriceSource,
-			nullable(l.RequisitionLineID), nullable(l.AgreementLineID), l.Category); err != nil {
+			nullable(l.RequisitionLineID), nullable(l.AgreementLineID), l.Category,
+			nullable(lineOverride(l.SiteID, in.SiteID)), nullable(lineOverride(l.WarehouseID, in.WarehouseID))); err != nil {
 			return PurchaseOrder{}, err
 		}
 	}
@@ -225,7 +231,7 @@ func loadPurchaseOrder(ctx context.Context, tx pgx.Tx, id string) (PurchaseOrder
 	lines, err := tx.Query(ctx, `select line_no, coalesce(product_id::text, ''), description, qty, unit, unit_price, price_unit,
 		discount_pct, gross_amount, discount_amount, line_amount, tax_amount, delivery_date, price_source,
 		coalesce(requisition_line_id::text, ''), coalesce(agreement_line_id::text, ''), received_qty, invoiced_qty, status,
-		coalesce(invoiced_reprice_source, ''), category
+		coalesce(invoiced_reprice_source, ''), category, coalesce(site_id::text, ''), coalesce(warehouse_id::text, '')
 		from purchase_order_line where tenant_id = $1 and purchase_order_id = $2 order by line_no`, p.TenantID, id)
 	if err != nil {
 		return PurchaseOrder{}, err
@@ -237,8 +243,14 @@ func loadPurchaseOrder(ctx context.Context, tx pgx.Tx, id string) (PurchaseOrder
 		var due time.Time
 		if err := lines.Scan(&l.LineNo, &l.ProductID, &l.Description, &l.Qty, &l.Unit, &l.UnitPrice, &l.PriceUnit, &l.DiscountPct,
 			&l.GrossAmount, &l.DiscountAmount, &l.LineAmount, &l.TaxAmount, &due, &l.PriceSource, &l.RequisitionLineID,
-			&l.AgreementLineID, &l.ReceivedQty, &l.InvoicedQty, &l.Status, &l.InvoicedRepriceSource, &l.Category); err != nil {
+			&l.AgreementLineID, &l.ReceivedQty, &l.InvoicedQty, &l.Status, &l.InvoicedRepriceSource, &l.Category, &l.SiteID, &l.WarehouseID); err != nil {
 			return PurchaseOrder{}, err
+		}
+		if l.SiteID == "" {
+			l.SiteID = o.SiteID
+		}
+		if l.WarehouseID == "" {
+			l.WarehouseID = o.WarehouseID
 		}
 		l.DeliveryDate = day(due)
 		o.Lines = append(o.Lines, l)
@@ -318,4 +330,13 @@ func (s *Postgres) ListPurchaseOrders(ctx context.Context, f PurchaseOrderFilter
 		items = []PurchaseOrderSummary{}
 	}
 	return pageOf(items, limit, func(o PurchaseOrderSummary) string { return o.ID }), nil
+}
+
+// lineOverride is the value a PO line stores for its site or warehouse: nothing when it is the
+// header's (the line follows the header), the line's own value otherwise.
+func lineOverride(line, header string) string {
+	if line == header {
+		return ""
+	}
+	return line
 }

@@ -141,3 +141,18 @@ func TestConsolidate_PropertyPartition(t *testing.T) {
 		}
 	})
 }
+
+// Slice 16: lines of one vendor and site but different warehouses make different POs.
+func TestConsolidate_SplitsByWarehouse(t *testing.T) {
+	mk := func(id, wh string) ConsolidationLine {
+		return ConsolidationLine{RequisitionLineID: id, LegalEntityID: "LE", VendorID: "V", SiteID: "S", WarehouseID: wh,
+			Currency: "USD", RequestedDate: day("2027-03-01")}
+	}
+	groups, err := Consolidate([]ConsolidationLine{mk("a", "W2"), mk("b", "W1"), mk("c", "W2"), mk("d", "")}, DefaultConsolidationWindowDays)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 3 || groups[0].WarehouseID != "" || groups[1].WarehouseID != "W1" || len(groups[2].Lines) != 2 {
+		t.Fatalf("groups = %v", groups)
+	}
+}

@@ -67,6 +67,8 @@ export interface RequisitionLine {
   amount: string;
   requestedDate: string;
   siteId?: string;
+  /** The warehouse the line is wanted in; consolidation keeps different warehouses on different orders. */
+  warehouseId?: string;
   preferredVendorId?: string;
   /** The procurement catalog entry the line was picked from; absent on a non-catalog line. */
   catalogEntryId?: string;
@@ -116,6 +118,7 @@ export interface RequisitionLineInput {
   estimatedUnitPrice?: string;
   requestedDate: string;
   siteId?: string;
+  warehouseId?: string;
   preferredVendorId?: string;
   /** Pick the line from a published catalog entry; the service fills the blanks from it. */
   catalogEntryId?: string;
@@ -134,6 +137,9 @@ export interface PurchaseOrderLine {
   description?: string;
   /** Procurement category the category access rule checks (FR-17.20); fixed once the line is written. */
   category?: string;
+  /** Where the line is delivered: its own, else the order's. */
+  siteId?: string;
+  warehouseId?: string;
   qty: string;
   unit: string;
   unitPrice: string;
@@ -221,6 +227,9 @@ export interface PurchaseOrderLineInput {
   description?: string;
   /** Required under HARD category access when there is no product; a requisition line's category wins. */
   category?: string;
+  /** Blank on a new line goes where the order does; on an edit a line keeps its destination. */
+  siteId?: string;
+  warehouseId?: string;
   qty: string;
   unit: string;
   unitPrice?: string;
@@ -606,12 +615,45 @@ export function listOpenRequisitionLines(filters: { sourcing?: SourcingFilter | 
   return list<SourcingLine>("/requisition-lines", { sourcing: filters.sourcing || undefined, vendorId: filters.vendorId }, options);
 }
 
-/** Creates one DRAFT purchase order per vendor, currency, site and delivery window. */
+/** Creates one DRAFT purchase order per vendor, currency, site, warehouse and delivery window. */
 export function consolidateRequisitions(input: ConsolidationInput, idempotencyKey = newIdempotencyKey()) {
   return send<{ purchaseOrders: PurchaseOrder[]; warnings?: Warning[] }>("POST", "/requisitions:consolidate", {
     body: input,
     headers: { "Idempotency-Key": idempotencyKey },
   });
+}
+
+// --- Open supply (FR-17.14, read by master planning) ---
+
+/** A line of a confirmed purchase order with quantity still to receive. */
+export interface OpenOrderLine {
+  purchaseOrderId: string;
+  number: string;
+  lineNo: number;
+  legalEntityId: string;
+  vendorId: string;
+  productId?: string;
+  description?: string;
+  siteId?: string;
+  warehouseId?: string;
+  unit: string;
+  qty: string;
+  receivedQty: string;
+  openQty: string;
+  deliveryDate: string;
+  confirmedDate?: string;
+}
+
+export interface OpenSupplyFilters {
+  warehouseId?: string;
+  siteId?: string;
+  productId?: string;
+  dueFrom?: string;
+  dueTo?: string;
+}
+
+export function listOpenOrderLines(filters: OpenSupplyFilters = {}, options: ListOptions = {}) {
+  return list<OpenOrderLine>("/purchase-order-lines", { ...filters }, options);
 }
 
 // --- Requests for quotation (FR-17.4, BR-17.11) ---

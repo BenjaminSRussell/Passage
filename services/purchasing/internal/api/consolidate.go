@@ -144,7 +144,7 @@ func (a *API) buildConsolidation(ctx context.Context, p tenant.Principal, body c
 			Ref:      "requisition " + s.RequisitionNumber + " line " + strconv.Itoa(s.LineNo),
 			Category: s.Category, VendorID: vendor})
 		cl = append(cl, domain.ConsolidationLine{RequisitionLineID: id, LegalEntityID: s.LegalEntityID, VendorID: vendor,
-			SiteID: s.SiteID, Currency: s.Currency, RequestedDate: s.RequestedDate})
+			SiteID: s.SiteID, WarehouseID: s.WarehouseID, Currency: s.Currency, RequestedDate: s.RequestedDate})
 	}
 	// FR-17.20: the vendor each line would be bought from, against the category assignments.
 	var warnings []store.Warning
@@ -162,13 +162,13 @@ func (a *API) buildConsolidation(ctx context.Context, p tenant.Principal, body c
 
 	orders := make([]store.PurchaseOrder, 0, len(groups))
 	for _, g := range groups {
-		ob := orderBody{LegalEntityID: g.LegalEntityID, VendorID: g.VendorID, SiteID: g.SiteID, Currency: g.Currency}
+		ob := orderBody{LegalEntityID: g.LegalEntityID, VendorID: g.VendorID, SiteID: g.SiteID, WarehouseID: g.WarehouseID, Currency: g.Currency}
 		for _, l := range g.Lines {
 			s := byID[l.RequisitionLineID]
 			estimate := s.EstimatedUnitPrice
 			ob.Lines = append(ob.Lines, orderLineBody{
 				ProductID: s.ProductID, Description: s.Description, Category: s.Category, Qty: s.Qty.String(), Unit: s.Unit,
-				DeliveryDate: s.RequestedDate, RequisitionLineID: s.ID, AgreementLineID: byLine[s.ID].AgreementLineID,
+				SiteID: s.SiteID, WarehouseID: s.WarehouseID, DeliveryDate: s.RequestedDate, RequisitionLineID: s.ID, AgreementLineID: byLine[s.ID].AgreementLineID,
 				estimate: &estimate,
 			})
 		}

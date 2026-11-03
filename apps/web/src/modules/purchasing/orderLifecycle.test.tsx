@@ -208,9 +208,42 @@ describe("change a purchase order", () => {
     expect(body.lines).toHaveLength(2);
     expect(body.lines[0]).toMatchObject({ lineNo: 1, productId: PRODUCT, qty: "110", unit: "EA" });
     expect(body.lines[0].unitPrice).toBeUndefined();
+    // An unchanged destination is not sent, so the line keeps following the order.
+    expect(body.lines[0].warehouseId).toBeUndefined();
     expect(body.lines[1].lineNo).toBeUndefined();
     expect(body.lines[1]).toMatchObject({ description: "Freight box", unitPrice: "4" });
     expect(await screen.findByText("Change saved as version 2. It needs re-approval before the vendor sees it.")).toBeInTheDocument();
+  });
+
+  it("sends a changed delivery warehouse of an existing line and of a new line", async () => {
+    const WH_OLD = "88888888-8888-4888-8888-888888888881";
+    const WH_NEW = "88888888-8888-4888-8888-888888888882";
+    const withWarehouse = { ...confirmed, lines: confirmed.lines.map((l) => (l.lineNo === 1 ? { ...l, warehouseId: WH_OLD } : l)) };
+    const fetchMock = serve(withWarehouse, [v1], () => json({ ...withWarehouse, rowVersion: 5 }));
+    renderAt(`/purchasing/purchase-orders/${PO_ID}/edit`);
+    const line1 = await screen.findByRole("group", { name: "Line 1" });
+    expect(within(line1).getByLabelText(/Deliver to warehouse id/)).toHaveValue(WH_OLD);
+    expect(within(line1).getByLabelText(/Deliver to warehouse id/)).toHaveAttribute("readonly");
+    expect(within(line1).getByLabelText(/Deliver to site id/)).toHaveAttribute("readonly");
+    // Line 3 has no receipts: its warehouse can be changed and the change is sent.
+    const line3 = screen.getByRole("group", { name: "Line 3" });
+    expect(within(line3).getByLabelText(/Deliver to warehouse id/)).not.toHaveAttribute("readonly");
+    fireEvent.change(within(line3).getByLabelText(/Deliver to warehouse id/), { target: { value: WH_NEW } });
+    fireEvent.click(screen.getByRole("button", { name: "Add line" }));
+    const added = screen.getByRole("group", { name: "New line 1" });
+    fireEvent.change(within(added).getByLabelText("Description"), { target: { value: "Pallet" } });
+    fireEvent.change(within(added).getByLabelText("Unit price"), { target: { value: "4" } });
+    fireEvent.change(within(added).getByLabelText(/Deliver to warehouse id/), { target: { value: "nope" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save change" }));
+    expect(await screen.findByText("Warehouse id must be a UUID.")).toBeInTheDocument();
+    fireEvent.change(within(added).getByLabelText(/Deliver to warehouse id/), { target: { value: WH_NEW } });
+    fireEvent.click(screen.getByRole("button", { name: "Save change" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => (init as Init).method === "PATCH")).toBe(true));
+    const patch = fetchMock.mock.calls.find(([, init]) => (init as Init).method === "PATCH") as [string, Init];
+    const body = JSON.parse(String(patch[1].body));
+    expect(body.lines[0].warehouseId).toBeUndefined();
+    expect(body.lines.find((l: { lineNo?: number }) => l.lineNo === 3)).toMatchObject({ warehouseId: WH_NEW });
+    expect(body.lines.at(-1)).toMatchObject({ description: "Pallet", warehouseId: WH_NEW });
   });
 
   it("keeps an existing line's category, sends a new line's category and shows category warnings", async () => {

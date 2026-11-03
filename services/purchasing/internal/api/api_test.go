@@ -39,6 +39,8 @@ type fakeStore struct {
 
 	purchaseAgreements map[string]store.AgreementDetail
 	sourcing           []store.SourcingLine
+	openLines          []store.OpenOrderLine
+	lastOpenLines      store.OpenLineFilter
 	lastAgrFilter      store.AgreementFilter
 	lastSourcing       store.SourcingFilter
 	lastConsolidated   []string
@@ -227,6 +229,11 @@ func (f *fakeStore) ChangeAgreementStatus(_ context.Context, id string, version 
 func (f *fakeStore) ListOpenRequisitionLines(_ context.Context, sf store.SourcingFilter, after string, limit int) (store.Page[store.SourcingLine], error) {
 	f.lastSourcing, f.lastAfter, f.lastLimit = sf, after, limit
 	return store.Page[store.SourcingLine]{Items: f.sourcing}, nil
+}
+
+func (f *fakeStore) ListOpenOrderLines(_ context.Context, of store.OpenLineFilter, after string, limit int) (store.Page[store.OpenOrderLine], error) {
+	f.lastOpenLines, f.lastAfter, f.lastLimit = of, after, limit
+	return store.Page[store.OpenOrderLine]{Items: f.openLines}, nil
 }
 
 func (f *fakeStore) RequisitionLinesByID(_ context.Context, lineIDs []string) ([]store.SourcingLine, error) {

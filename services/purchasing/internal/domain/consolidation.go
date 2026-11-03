@@ -22,31 +22,33 @@ type ConsolidationLine struct {
 	LegalEntityID     string
 	VendorID          string
 	SiteID            string
+	WarehouseID       string
 	Currency          string
 	RequestedDate     Day
 }
 
 // ConsolidationGroup is one future PO: lines sharing legal entity, vendor,
-// currency, site and delivery window.
+// currency, site, warehouse and delivery window.
 type ConsolidationGroup struct {
 	LegalEntityID string
 	VendorID      string
 	SiteID        string
+	WarehouseID   string
 	Currency      string
 	WindowStart   Day
 	Lines         []ConsolidationLine
 }
 
 func (l ConsolidationLine) sameStream(g ConsolidationGroup) bool {
-	return l.LegalEntityID == g.LegalEntityID && l.VendorID == g.VendorID && l.Currency == g.Currency && l.SiteID == g.SiteID
+	return l.LegalEntityID == g.LegalEntityID && l.VendorID == g.VendorID && l.Currency == g.Currency && l.SiteID == g.SiteID && l.WarehouseID == g.WarehouseID
 }
 
 // Consolidate groups lines into POs by legal entity × vendor × currency × site
-// × delivery window (FR-17.3; a PO belongs to one legal entity). Within each
+// × warehouse × delivery window (FR-17.3; a PO belongs to one legal entity). Within each
 // stream lines are ordered by requested date then id; a window opens at the
 // earliest unassigned date and takes every line dated less than windowDays
 // after it, so no PO spans more than windowDays. Groups come out ordered by
-// legal entity, vendor, currency, site and window start, so the same input
+// legal entity, vendor, currency, site, warehouse and window start, so the same input
 // always yields the same POs.
 func Consolidate(lines []ConsolidationLine, windowDays int) ([]ConsolidationGroup, error) {
 	if windowDays < MinConsolidationWindowDays || windowDays > MaxConsolidationWindowDays {
@@ -56,7 +58,7 @@ func Consolidate(lines []ConsolidationLine, windowDays int) ([]ConsolidationGrou
 	sorted := append([]ConsolidationLine(nil), lines...)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		a, b := sorted[i], sorted[j]
-		for _, k := range [][2]string{{a.LegalEntityID, b.LegalEntityID}, {a.VendorID, b.VendorID}, {a.Currency, b.Currency}, {a.SiteID, b.SiteID}} {
+		for _, k := range [][2]string{{a.LegalEntityID, b.LegalEntityID}, {a.VendorID, b.VendorID}, {a.Currency, b.Currency}, {a.SiteID, b.SiteID}, {a.WarehouseID, b.WarehouseID}} {
 			if k[0] != k[1] {
 				return k[0] < k[1]
 			}
@@ -70,7 +72,7 @@ func Consolidate(lines []ConsolidationLine, windowDays int) ([]ConsolidationGrou
 	for _, l := range sorted {
 		n := len(out)
 		if n == 0 || !l.sameStream(out[n-1]) || !l.RequestedDate.Before(out[n-1].WindowStart.AddDate(0, 0, windowDays)) {
-			out = append(out, ConsolidationGroup{LegalEntityID: l.LegalEntityID, VendorID: l.VendorID, SiteID: l.SiteID,
+			out = append(out, ConsolidationGroup{LegalEntityID: l.LegalEntityID, VendorID: l.VendorID, SiteID: l.SiteID, WarehouseID: l.WarehouseID,
 				Currency: l.Currency, WindowStart: l.RequestedDate})
 			n++
 		}
@@ -81,5 +83,5 @@ func Consolidate(lines []ConsolidationLine, windowDays int) ([]ConsolidationGrou
 
 // String is a debugging aid for group keys in test failures.
 func (g ConsolidationGroup) String() string {
-	return fmt.Sprintf("%s/%s/%s/%s@%s(%d)", g.LegalEntityID, g.VendorID, g.SiteID, g.Currency, g.WindowStart, len(g.Lines))
+	return fmt.Sprintf("%s/%s/%s/%s/%s@%s(%d)", g.LegalEntityID, g.VendorID, g.SiteID, g.WarehouseID, g.Currency, g.WindowStart, len(g.Lines))
 }

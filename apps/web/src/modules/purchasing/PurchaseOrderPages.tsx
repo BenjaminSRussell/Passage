@@ -158,6 +158,12 @@ interface LineDraft {
   discountPct: string;
   taxAmount: string;
   deliveryDate: string;
+  /** Delivery destination; blank on a new line goes where the order does. */
+  siteId: string;
+  warehouseId: string;
+  /** The destination an existing line had when the form opened, so only a change is sent. */
+  keptSiteId?: string;
+  keptWarehouseId?: string;
   agreementLineId: string;
   /** Stored price and received quantity of an existing line, shown as hints. */
   keptPrice?: string;
@@ -187,6 +193,8 @@ function emptyLine(): LineDraft {
     discountPct: "",
     taxAmount: "",
     deliveryDate: todayIso(),
+    siteId: "",
+    warehouseId: "",
     agreementLineId: "",
   };
 }
@@ -206,6 +214,10 @@ function draftOf(l: PurchaseOrderLine): LineDraft {
     discountPct: l.discountPct,
     taxAmount: l.taxAmount,
     deliveryDate: l.deliveryDate,
+    siteId: l.siteId ?? "",
+    warehouseId: l.warehouseId ?? "",
+    keptSiteId: l.siteId ?? "",
+    keptWarehouseId: l.warehouseId ?? "",
     agreementLineId: l.agreementLineId ?? "",
     keptPrice: `${l.unitPrice} / ${l.priceUnit}`,
     receivedQty: l.receivedQty,
@@ -234,6 +246,8 @@ export function validateOrder(legalEntityId: string, vendorId: string, currency:
     }
     if (l.taxAmount !== "" && !decimalPattern.test(l.taxAmount)) errors[f("taxAmount")] = "Enter a decimal tax amount.";
     if (!datePattern.test(l.deliveryDate)) errors[f("deliveryDate")] = "Enter a date.";
+    if (l.siteId !== "" && !uuidPattern.test(l.siteId.trim())) errors[f("siteId")] = "Site id must be a UUID.";
+    if (l.warehouseId !== "" && !uuidPattern.test(l.warehouseId.trim())) errors[f("warehouseId")] = "Warehouse id must be a UUID.";
     if (l.agreementLineId !== "" && !uuidPattern.test(l.agreementLineId.trim())) errors[f("agreementLineId")] = "Agreement line id must be a UUID.";
   });
   charges.forEach((c, i) => {
@@ -264,6 +278,9 @@ function toInput(
       discountPct: opt(l.discountPct),
       taxAmount: opt(l.taxAmount),
       deliveryDate: l.deliveryDate,
+      // A new line may name its own destination; an existing line sends one only when it was changed.
+      siteId: l.lineNo === undefined || opt(l.siteId) !== opt(l.keptSiteId ?? "") ? opt(l.siteId) : undefined,
+      warehouseId: l.lineNo === undefined || opt(l.warehouseId) !== opt(l.keptWarehouseId ?? "") ? opt(l.warehouseId) : undefined,
       // An existing line keeps its agreement link; the service refuses a changed one.
       agreementLineId: l.lineNo === undefined ? opt(l.agreementLineId) : undefined,
     })),
@@ -303,6 +320,9 @@ function LinesCard({
         const id = (name: string) => `po-line-${i}-${name}`;
         const err = (name: string) => errors[`lines[${i}].${name}`];
         const existing = line.lineNo !== undefined;
+        // A line with receipts keeps its site and warehouse (the service refuses a move).
+        const received = Boolean(line.receivedQty && Number(line.receivedQty) > 0);
+        const destinationHint = received ? "Has receipts; the destination cannot change" : existing ? undefined : "Blank goes where the order does";
         const newCount = lines.slice(0, i + 1).filter((l) => l.lineNo === undefined).length;
         const title = existing ? `Line ${line.lineNo}` : editing ? `New line ${newCount}` : `Line ${i + 1}`;
         return (
@@ -362,6 +382,24 @@ function LinesCard({
               </FormField>
               <FormField id={id("delivery")} label="Delivery date" error={err("deliveryDate")}>
                 {(c) => <Input {...c} type="date" value={line.deliveryDate} onChange={(e) => update(i, { deliveryDate: e.target.value })} />}
+              </FormField>
+              <FormField
+                id={id("site")}
+                label="Deliver to site id"
+                optional
+                hint={destinationHint}
+                error={err("siteId")}
+              >
+                {(c) => <Input {...c} value={line.siteId} readOnly={received} onChange={(e) => update(i, { siteId: e.target.value })} />}
+              </FormField>
+              <FormField
+                id={id("warehouse")}
+                label="Deliver to warehouse id"
+                optional
+                hint={destinationHint}
+                error={err("warehouseId")}
+              >
+                {(c) => <Input {...c} value={line.warehouseId} readOnly={received} onChange={(e) => update(i, { warehouseId: e.target.value })} />}
               </FormField>
               {existing ? (
                 line.agreementLineId ? (
@@ -787,6 +825,7 @@ const lineColumns = (
   { key: "lineAmount", header: "Net amount", align: "end", render: (l) => money(l.lineAmount, currency) },
   { key: "taxAmount", header: "Tax", align: "end", render: (l) => money(l.taxAmount, currency) },
   { key: "deliveryDate", header: "Delivery", mono: true },
+  { key: "warehouseId", header: "Deliver to", render: (l) => <ShortId id={l.warehouseId} /> },
   { key: "status", header: "Status", render: (l) => <StatusBadge status={l.status} /> },
   ...(plan
     ? [
@@ -852,6 +891,8 @@ const fieldLabels: Record<string, string> = {
   lineAmount: "net amount",
   taxAmount: "tax",
   deliveryDate: "delivery date",
+  warehouseId: "warehouse",
+  siteId: "site",
   status: "status",
   description: "description",
   productId: "product",
