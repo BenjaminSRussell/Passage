@@ -19,6 +19,10 @@ const (
 	CodeMixedItems        = "WMS-0103"
 	CodeNestDepth         = "WMS-0104"
 	CodeIllegalTransition = "WMS-0110"
+	// CodeHoldBlocked is wave 33 AC2: a pick of quantity that is still held
+	// (QUALITY_HOLD). Distinct from CodeQualityHold (WMS-0113), the cross-dock
+	// warning that supply is not ACCEPTED.
+	CodeHoldBlocked = "QUALITY_HOLD"
 )
 
 func errorf(code, format string, args ...any) *Error {

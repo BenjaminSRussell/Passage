@@ -13,6 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/warehouse/internal/api"
+	"github.com/BenjaminSRussell/passage/services/warehouse/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/warehouse/internal/store"
 	"github.com/BenjaminSRussell/passage/services/warehouse/migrations"
 )
@@ -66,7 +67,12 @@ func run(ctx context.Context, getenv func(string) string) error {
 		if err != nil {
 			return err
 		}
-		a = api.NewWithStore(store.New(pool), lock)
+		st := store.New(pool)
+		holds, err := inventory.FromEnv(getenv)
+		if err != nil {
+			return fmt.Errorf("inventory client: %w", err)
+		}
+		a = api.NewWithStore(st.WithHolds(holds), lock)
 	}
 	router := httpx.NewRouter()
 	a.Register(router)

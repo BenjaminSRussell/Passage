@@ -22,6 +22,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	evts "github.com/BenjaminSRussell/passage/services/warehouse/internal/events"
+	"github.com/BenjaminSRussell/passage/services/warehouse/internal/inventory"
 )
 
 // MaxPageSize caps every list page.
@@ -49,11 +50,19 @@ type Idem struct {
 
 // Store is the Postgres repository of the warehouse context.
 type Store struct {
-	pool *pgxpool.Pool
+	pool  *pgxpool.Pool
+	holds inventory.Checker
 }
 
 // New returns a store on pool.
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+
+// WithHolds checks inventory holds on PICK confirmations. A nil checker (the
+// default, when INVENTORY_URL is unset) leaves current behaviour.
+func (s *Store) WithHolds(h inventory.Checker) *Store {
+	s.holds = h
+	return s
+}
 
 // Ping checks the database for /readyz.
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }

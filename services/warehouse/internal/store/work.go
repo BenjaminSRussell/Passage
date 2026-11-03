@@ -12,8 +12,10 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/warehouse/internal/domain"
 	evts "github.com/BenjaminSRussell/passage/services/warehouse/internal/events"
+	"github.com/BenjaminSRussell/passage/services/warehouse/internal/inventory"
 )
 
 // PlanInput is a CreateWorkFromOrderLines command (§6.31.5).
@@ -254,7 +256,7 @@ func (s *Store) ConfirmLine(ctx context.Context, idem Idem, in ConfirmInput) (do
 			if err != nil {
 				return w, err
 			}
-			if err := moveStock(ctx, tx, line); err != nil {
+			if err := s.moveStock(ctx, tx, w.WarehouseID, line); err != nil {
 				return w, err
 			}
 			if err := updateWork(ctx, tx, &w); err != nil {
@@ -319,7 +321,7 @@ func (s *Store) ExceptWork(ctx context.Context, idem Idem, in ExceptionInput) (E
 			}
 			switch in.Action {
 			case ActionShortPick:
-				return shortPick(ctx, tx, w, in)
+				return s.shortPick(ctx, tx, w, in)
 			case ActionCancel:
 				if err := w.Cancel(in.Reason, in.User, in.Supervise); err != nil {
 					return Excepted{}, err
@@ -339,7 +341,7 @@ func (s *Store) ExceptWork(ctx context.Context, idem Idem, in ExceptionInput) (E
 	return out, replayed, err
 }
 
-func shortPick(ctx context.Context, tx pgx.Tx, w domain.Work, in ExceptionInput) (Excepted, error) {
+func (s *Store) shortPick(ctx context.Context, tx pgx.Tx, w domain.Work, in ExceptionInput) (Excepted, error) {
 	remainder, err := w.ShortPick(in.LineNo, in.Qty, in.Reason, ids.New(), in.User)
 	if err != nil {
 		return Excepted{}, err
@@ -348,7 +350,7 @@ func shortPick(ctx context.Context, tx pgx.Tx, w domain.Work, in ExceptionInput)
 	if err != nil {
 		return Excepted{}, err
 	}
-	if err := moveStock(ctx, tx, line); err != nil {
+	if err := s.moveStock(ctx, tx, w.WarehouseID, line); err != nil {
 		return Excepted{}, err
 	}
 	if err := updateWork(ctx, tx, &w); err != nil {
@@ -384,7 +386,7 @@ func lockWork(ctx context.Context, tx pgx.Tx, id string, ifMatch int) (domain.Wo
 }
 
 // moveStock applies a confirmed line to its location under a row lock.
-func moveStock(ctx context.Context, tx pgx.Tx, line domain.WorkLine) error {
+func (s *Store) moveStock(ctx context.Context, tx pgx.Tx, warehouseID string, line domain.WorkLine) error {
 	if line.ConfirmedQty.IsZero() {
 		return nil
 	}
@@ -396,10 +398,34 @@ func moveStock(ctx context.Context, tx pgx.Tx, line domain.WorkLine) error {
 	if err != nil {
 		return err
 	}
+	if err := s.checkHold(ctx, warehouseID, loc, line); err != nil {
+		return err
+	}
 	if refusal, ok := loc.Move(line.Direction, line.ItemID, line.ConfirmedQty, line.ConfirmedUsage()); !ok {
 		return domain.MoveError(refusal)
 	}
 	return writeLocation(ctx, tx, loc, line.ItemID)
+}
+
+func (s *Store) checkHold(ctx context.Context, warehouseID string, loc domain.Location, line domain.WorkLine) error {
+	if s.holds == nil || line.Direction != domain.DirectionPick {
+		return nil
+	}
+	p, _ := tenant.FromContext(ctx)
+	batch := ""
+	if line.Attributes != nil {
+		batch = line.Attributes["batch"]
+	}
+	lot, err := s.holds.Lot(ctx, p.LegalEntityID, line.ItemID, warehouseID, batch)
+	if err != nil {
+		return &domain.Error{Code: domain.CodeHoldBlocked, Detail: fmt.Sprintf("inventory hold check failed: %v", err)}
+	}
+	physical := loc.Stock[line.ItemID]
+	if inventory.Blocks(physical, lot.Held, line.ConfirmedQty) {
+		return &domain.Error{Code: domain.CodeHoldBlocked,
+			Detail: fmt.Sprintf("item %s is on quality hold; pick not allowed", line.ItemID)}
+	}
+	return nil
 }
 
 const workColumns = `id::text, warehouse_id::text, work_type, status, priority, coalesce(parent_work_id::text, ''),

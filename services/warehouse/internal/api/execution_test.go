@@ -272,6 +272,7 @@ func TestPersistedRoutes_ErrorMapping(t *testing.T) {
 		{&domain.Error{Code: domain.CodeLineConfirmed, Detail: "x"}, 409, "WMS-0105"},
 		{&domain.Error{Code: domain.CodeOverPick, Detail: "x"}, 422, "WMS-0106"},
 		{&domain.Error{Code: domain.CodeCapacity, Detail: "x"}, 422, "WMS-0102"},
+		{&domain.Error{Code: domain.CodeHoldBlocked, Detail: "x"}, 422, domain.CodeHoldBlocked},
 		{&domain.Error{Code: domain.CodeIllegalTransition, Detail: "x"}, 409, "WMS-0110"},
 		{domain.ErrNotAssignee, 403, codeNotAssignee},
 		{domain.ErrLineNotFound, 404, codeLineNotFound},
