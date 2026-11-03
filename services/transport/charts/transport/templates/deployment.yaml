@@ -50,6 +50,12 @@ spec:
               value: {{ .Values.features.landedCost | quote }}
             - name: TMS_FEATURE_VRP
               value: {{ .Values.features.vrp | quote }}
+            - name: PASSAGE_SERVICE_NAME
+              value: transport
+            {{- with .Values.serviceIdentity.publicKeys }}
+            - name: PASSAGE_SERVICE_PUBLIC_KEYS
+              value: {{ . | quote }}
+            {{- end }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:

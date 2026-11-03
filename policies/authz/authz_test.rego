@@ -834,6 +834,18 @@ test_workflow_ts_eco_and_capa_service_duties if {
 	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1:refuse")
 }
 
+test_workflow_ts_transport_service_duty if {
+	data.service_grants["workflow-ts"].transport == ["transport.tender.execute"]
+	data.duties["transport.tender.execute"].service_only
+	allowed("transport.tender.execute", "POST", "/v1/transport/loads/l1:tender")
+	allowed("transport.tender.execute", "GET", "/v1/transport/tenders/t1")
+	allowed("transport.tender.execute", "POST", "/v1/transport/tenders:expire")
+	not allowed("transport.tender.execute", "GET", "/v1/transport/tenders")
+	not allowed("transport.tender.execute", "POST", "/v1/transport/tenders/t1:respond")
+	not allowed("transport.tender.execute", "POST", "/v1/transport/tracking-events")
+	not allowed("transport.tender.execute", "POST", "/v1/transport/freight-bills")
+}
+
 principal_allowed(name, method, resource) if {
 	result := decision with input as {
 		"subject": {"tenant_id": "tenant-a", "user_id": sprintf("service:%s", [name])},

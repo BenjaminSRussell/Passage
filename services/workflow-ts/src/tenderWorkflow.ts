@@ -1,4 +1,4 @@
-import { condition, defineQuery, defineSignal, metricMeter, proxyActivities, setHandler, sleep, workflowInfo } from "@temporalio/workflow";
+import { ActivityFailure, ApplicationFailure, condition, defineQuery, defineSignal, metricMeter, proxyActivities, setHandler, sleep, workflowInfo } from "@temporalio/workflow";
 import type { TenderActivities } from "./tenderActivities.js";
 
 export interface TenderCarrier {
@@ -10,6 +10,7 @@ export interface TenderInput {
   tenantId: string;
   legalEntityId: string;
   loadId: string;
+  legalEntityScope: string[];
   carriers: TenderCarrier[];
   currency?: string;
   timeoutMin?: number;
@@ -20,6 +21,7 @@ export interface TenderRef {
   tenantId: string;
   legalEntityId: string;
   actor: string;
+  scope: string[];
 }
 
 export interface TenderView {
@@ -49,6 +51,8 @@ export const tenderStateQuery = defineQuery<TenderState>("tender-state");
 const SWEEP_GRACE_MS = 5_000;
 const SWEEP_RETRY_MS = 60_000;
 const MAX_STUCK_SWEEPS = 5;
+const MAX_FAILED_CALLS = 6;
+const INVALID_INPUT = "InvalidTenderInput";
 
 const activities = proxyActivities<TenderActivities>({
   startToCloseTimeout: "1 minute",
@@ -56,16 +60,22 @@ const activities = proxyActivities<TenderActivities>({
   retry: { initialInterval: "1 second", maximumInterval: "1 minute", nonRetryableErrorTypes: ["ServiceCallRejected"] },
 });
 
-export function tenderWorkflowId(loadId: string): string {
-  return `tender:${loadId}`;
+export function tenderWorkflowId(tenantId: string, loadId: string): string {
+  return `tender:${tenantId}:${loadId}`;
 }
 
 export function validateTenderInput(input: TenderInput): void {
-  if (!input.tenantId || !input.legalEntityId || !input.loadId || !input.requestedBy) {
-    throw new TypeError("tenantId, legalEntityId, loadId and requestedBy are required");
-  }
-  if (input.carriers.length === 0) throw new TypeError("at least one carrier is required");
-  if (new Set(input.carriers.map((carrier) => carrier.carrierId)).size !== input.carriers.length) throw new TypeError("list each carrier once, in rank order");
+  const invalid = (message: string): never => {
+    throw ApplicationFailure.nonRetryable(message, INVALID_INPUT);
+  };
+  if (!input.tenantId || !input.legalEntityId || !input.loadId || !input.requestedBy) invalid("tenantId, legalEntityId, loadId and requestedBy are required");
+  if (!(input.legalEntityScope ?? []).includes(input.legalEntityId)) invalid("legalEntityScope must include the load's legal entity");
+  if (input.carriers.length === 0) invalid("at least one carrier is required");
+  if (new Set(input.carriers.map((carrier) => carrier.carrierId)).size !== input.carriers.length) invalid("list each carrier once, in rank order");
+}
+
+function outage(error: unknown): boolean {
+  return error instanceof ActivityFailure && error.retryState === "TIMEOUT";
 }
 
 export async function tenderWorkflow(input: TenderInput): Promise<TenderState> {
@@ -78,7 +88,7 @@ export async function tenderWorkflow(input: TenderInput): Promise<TenderState> {
     nudged = true;
   });
 
-  const ref: TenderRef = { tenantId: input.tenantId, legalEntityId: input.legalEntityId, actor: input.requestedBy };
+  const ref: TenderRef = { tenantId: input.tenantId, legalEntityId: input.legalEntityId, actor: input.requestedBy, scope: input.legalEntityScope };
   const follow = (tender: TenderView): TenderView => {
     state.tenderId = tender.id;
     state.pendingCarrierId = tender.pendingCarrierId;
@@ -86,31 +96,48 @@ export async function tenderWorkflow(input: TenderInput): Promise<TenderState> {
     state.acceptedCarrierId = tender.acceptedCarrierId;
     return tender;
   };
-  const counter = (name: string, description: string) => metricMeter.createCounter(name, "1", description).add(1, { load_id: input.loadId });
+  const counter = (name: string, description: string, attributes: Record<string, string> = {}) => metricMeter.createCounter(name, "1", description).add(1, attributes);
+
+  const stall = (reason: "sweep_stuck" | "transport_unreachable"): TenderState => {
+    counter("passage_tender_stalled", "Tenders the workflow gave up on: the expiry sweep did not advance them or transport stayed unreachable", { reason });
+    return Object.assign(state, { status: "stalled" as const });
+  };
 
   let tender = follow(
-    await activities.startTender({ ...ref, loadId: input.loadId, carriers: input.carriers, currency: input.currency, timeoutMin: input.timeoutMin, idempotencyKey: `tender:${workflowInfo().runId}` }),
+    await activities.startTender({ ...ref, loadId: input.loadId, carriers: input.carriers, currency: input.currency, timeoutMin: input.timeoutMin, idempotencyKey: `tender:${workflowInfo().firstExecutionRunId}` }),
   );
 
   let stuckSweeps = 0;
+  let failedCalls = 0;
   while (tender.status === "PENDING") {
-    if (tender.overdue) {
-      const attempts = tender.attempts.length;
-      await activities.sweepExpiredTenders(ref);
-      tender = follow(await activities.getTender({ ...ref, tenderId: tender.id }));
-      if (tender.status !== "PENDING") break;
-      stuckSweeps = tender.attempts.length === attempts ? stuckSweeps + 1 : 0;
-      if (stuckSweeps >= MAX_STUCK_SWEEPS) {
-        counter("passage_tender_stalled", "Tenders whose overdue attempt the expiry sweep could not advance");
-        return Object.assign(state, { status: "stalled" as const });
+    try {
+      if (tender.overdue) {
+        const attempts = tender.attempts.length;
+        nudged = false;
+        await activities.sweepExpiredTenders(ref);
+        tender = follow(await activities.getTender({ ...ref, tenderId: tender.id }));
+        failedCalls = 0;
+        if (tender.status !== "PENDING") break;
+        stuckSweeps = tender.attempts.length === attempts ? stuckSweeps + 1 : 0;
+        if (stuckSweeps >= MAX_STUCK_SWEEPS) {
+          return stall("sweep_stuck");
+        }
+        if (tender.overdue) await sleep(SWEEP_RETRY_MS);
+        continue;
       }
-      if (tender.overdue) await sleep(SWEEP_RETRY_MS);
-      continue;
+      const untilDeadline = tender.pendingExpiresAt ? Math.max(0, Date.parse(tender.pendingExpiresAt) - Date.now()) : 0;
+      await condition(() => nudged, untilDeadline + SWEEP_GRACE_MS);
+      nudged = false;
+      tender = follow(await activities.getTender({ ...ref, tenderId: tender.id }));
+      failedCalls = 0;
+    } catch (error) {
+      if (!outage(error)) throw error;
+      failedCalls += 1;
+      if (failedCalls >= MAX_FAILED_CALLS) {
+        return stall("transport_unreachable");
+      }
+      await sleep(SWEEP_RETRY_MS);
     }
-    nudged = false;
-    const untilDeadline = tender.pendingExpiresAt ? Math.max(0, Date.parse(tender.pendingExpiresAt) - Date.now()) : 0;
-    await condition(() => nudged, untilDeadline + SWEEP_GRACE_MS);
-    tender = follow(await activities.getTender({ ...ref, tenderId: tender.id }));
   }
 
   if (tender.status === "ACCEPTED") return Object.assign(state, { status: "accepted" as const });

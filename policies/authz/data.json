@@ -1498,6 +1498,11 @@
       {"resource": "/v1/transport/tenders/*", "methods": ["GET"]},
       {"resource": "/v1/transport/tenders:expire", "methods": ["POST"]}
     ]},
+    "transport.tender.execute": {"service_only": true, "permissions": [
+      {"resource": "/v1/transport/loads/*:tender", "methods": ["POST"]},
+      {"resource": "/v1/transport/tenders/*", "methods": ["GET"]},
+      {"resource": "/v1/transport/tenders:expire", "methods": ["POST"]}
+    ]},
     "TMS_TRACK_INGEST": {"service_only": true, "permissions": [{"resource": "/v1/transport/tracking-events", "methods": ["POST"]}]},
     "TMS_VIEW": {"permissions": [
       {"resource": "/v1/transport/freight-bills", "methods": ["GET"]},
@@ -2933,7 +2938,8 @@
     "workflow-ts": {
       "payables": ["payment-run.execute"],
       "engineering": ["engineering.eco.workflow"],
-      "quality": ["quality.capa.execute"]
+      "quality": ["quality.capa.execute"],
+      "transport": ["transport.tender.execute"]
     },
     "party": {
       "numbering": ["numbering.sequence.allocate"]
