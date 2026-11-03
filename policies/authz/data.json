@@ -189,6 +189,10 @@
     ]},
     "Calculate tax": {"permissions": [{"resource": "/v1/tax/calculate", "methods": ["POST"]}]},
     "Calculate withholding tax": {"permissions": [{"resource": "/v1/tax/withholding/calculate", "methods": ["POST"]}]},
+    "production.inheritance-rule.write": {"permissions": [
+      {"resource": "/v1/production/inheritance-rules", "methods": ["POST"]},
+      {"resource": "/v1/production/inheritance-rules/*:retire", "methods": ["POST"]}
+    ]},
     "production.planned.intake": {"flag": true, "permissions": []},
     "sales.order.record-delivery": {"permissions": [{"resource": "/v1/sales/orders/*:record-progress", "methods": ["POST"]}]},
     "sales.order.record-invoice": {"permissions": [{"resource": "/v1/sales/orders/*:record-progress", "methods": ["POST"]}]},
@@ -2311,7 +2315,8 @@
       {"resource": "/v1/production/batch-attributes:check", "methods": ["POST"]},
       {"resource": "/v1/production/batch-derivation:preview", "methods": ["POST"]},
       {"resource": "/v1/production/batches", "methods": ["POST"]},
-      {"resource": "/v1/production/batches/*/attributes", "methods": ["PUT"]}
+      {"resource": "/v1/production/batches/*/attributes", "methods": ["PUT"]},
+      {"resource": "/v1/production/batches/*:derive", "methods": ["POST"]}
     ]},
     "production.batch-disposition.write": {"permissions": [{"resource": "/v1/production/batches/*:disposition", "methods": ["POST"]}]},
     "production.batch-requirement.write": {"permissions": [
@@ -2339,7 +2344,10 @@
       {"resource": "/v1/production/batch-record-profiles", "methods": ["GET"]},
       {"resource": "/v1/production/batch-record-profiles/*", "methods": ["GET"]},
       {"resource": "/v1/production/batch-records", "methods": ["GET"]},
-      {"resource": "/v1/production/batch-records/*", "methods": ["GET"]}
+      {"resource": "/v1/production/batch-records/*", "methods": ["GET"]},
+      {"resource": "/v1/production/inheritance-rules", "methods": ["GET"]},
+      {"resource": "/v1/production/inheritance-rules/*", "methods": ["GET"]},
+      {"resource": "/v1/production/batch-derivations", "methods": ["GET"]}
     ]},
     "production.batch-order.write": {"permissions": [
       {"resource": "/v1/production/batch-orders", "methods": ["POST"]},
