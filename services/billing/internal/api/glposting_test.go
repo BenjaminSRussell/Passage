@@ -342,12 +342,53 @@ func TestGLPostings_InvoiceWhoseBilledNetsDifferFromTheAllocationIsParkedNotBook
 	}
 }
 
+func TestGLPostings_HardwareShippedFirstIsParkedNotBookedAtTheBilledPrice(t *testing.T) {
+	g := newGLRig(t, true)
+	id := g.invoice(t, gridLine{"8000.00", "4000", "", ""})
+	order, hardware := ids.New(), ids.New()
+	g.shipLine(t, id, 1, order, hardware)
+	g.allocate(order, revrec.Obligation{ProductID: hardware, Allocated: decimal.RequireFromString("7200.00"), Method: revrec.MethodPoint},
+		revrec.Obligation{ProductID: ids.New(), Allocated: decimal.RequireFromString("3600.00"), Method: "RATABLE"})
+	out := g.book(t, http.StatusOK, "")
+	if len(out.Items) != 0 || len(out.Failed) != 1 || out.Failed[0].LedgerCode != CodeAllocationMismatch || len(g.fake.Entries()) != 0 || g.parkedCode(t, id) != CodeAllocationMismatch {
+		t.Fatalf("hardware first: %+v with %d entries, parked %q; want BIL-0208 and nothing booked (billed 8,000.00 against 7,200.00 allocated)", out, len(g.fake.Entries()), g.parkedCode(t, id))
+	}
+}
+
+func TestGLPostings_RevrecOutageEndsTheBatchAfterTheFirstFailure(t *testing.T) {
+	g := newGLRig(t, true)
+	for i := 0; i < 3; i++ {
+		g.deferredInvoice(t, "100.00")
+	}
+	g.allocs.err = errors.New("status 503")
+	out := g.book(t, http.StatusOK, "")
+	if g.allocs.reads != 1 || len(out.Failed) != 1 || !out.More {
+		t.Errorf("outage: %d reads, %d failed, more %v; want one read, one failure and more", g.allocs.reads, len(out.Failed), out.More)
+	}
+}
+
+func TestApportion_PartsSumToTheRoundedWhole(t *testing.T) {
+	third := decimal.RequireFromString("3.333333333333")
+	got := apportion([]decimal.Decimal{third, third, third}, 2)
+	sum := decimal.Zero
+	for _, p := range got {
+		sum = sum.Add(p)
+	}
+	if !sum.Equal(decimal.RequireFromString("10.00")) {
+		t.Errorf("parts %v sum to %s, want 10.00", got, sum)
+	}
+}
+
 func TestGLPostings_AllocationNotAvailableBacksOffAndNeverBooksTheBilledAmounts(t *testing.T) {
 	g := newGLRig(t, true)
 	id := g.deferredInvoice(t, "900.00")
 	ok := g.invoice(t, gridLine{"40.00", "4000", "", ""})
-	for name, err := range map[string]error{"no contract": revrec.ErrNoContract, "revrec down": errors.New("status 503"), "two contracts": revrec.ErrAmbiguous} {
-		g.allocs.err = err
+	for _, c := range []struct {
+		name string
+		err  error
+	}{{"no contract", revrec.ErrNoContract}, {"revrec down", errors.New("status 503")}, {"two contracts", revrec.ErrAmbiguous}} {
+		name := c.name
+		g.allocs.err = c.err
 		for attempt := 0; attempt < store.MaxGLAttempts+2; attempt++ {
 			g.clock = g.clock.AddDate(0, 0, 2)
 			out := g.book(t, http.StatusOK, "")

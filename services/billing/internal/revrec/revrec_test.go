@@ -81,7 +81,7 @@ func TestAllocation_ReadsTheLiveContractWithASignedReadOnlyToken(t *testing.T) {
 	if got.Currency != "USD" || len(got.Obligations) != 2 || got.Obligations[0].ProductID != productA || got.Obligations[0].Allocated.String() != "7200" || got.Obligations[1].Method != "RATABLE" {
 		t.Fatalf("allocation %+v", got)
 	}
-	if len(paths) != 2 || !strings.Contains(paths[0], "orderId="+orderID) || !strings.Contains(paths[0], "legalEntityId="+entityID) || paths[1] != contractsPath+"/"+contract+"?" {
+	if len(paths) != 2 || !strings.Contains(paths[0], "orderId="+orderID) || !strings.Contains(paths[0], "legalEntityId="+entityID) || paths[1] != contractsPath+"/"+contract+"?orderId="+orderID {
 		t.Errorf("requests %v", paths)
 	}
 	if len(claims.Duties) != 1 || claims.Duties[0] != dutyRead || claims.Aud != audience || claims.Le != entityID {

@@ -144,7 +144,7 @@ func (c *Client) Allocation(ctx context.Context, legalEntityID, orderID string) 
 		return Allocation{}, fmt.Errorf("revrec allocation: contract id %q is not a UUID", live[0].ID)
 	}
 	var contract contractBody
-	if err := c.get(ctx, le, contractsPath+"/"+id, &contract); err != nil {
+	if err := c.get(ctx, le, contractsPath+"/"+id+"?"+url.Values{"orderId": {order}}.Encode(), &contract); err != nil {
 		return Allocation{}, err
 	}
 	if gotLE, _ := ids.Canonical(contract.LegalEntityID); gotLE != le {

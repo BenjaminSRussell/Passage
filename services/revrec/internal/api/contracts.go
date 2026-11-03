@@ -238,6 +238,9 @@ func (a *API) listContracts(w http.ResponseWriter, r *http.Request) {
 	if f.OrderID != "" && !ids.Valid(f.OrderID) {
 		fields["orderId"] = "must be a UUID"
 	}
+	if f.OrderID == "" && allocationOnly(r) {
+		fields["orderId"] = "is required for a caller holding only " + dutyAllocationRead
+	}
 	if f.Status != "" && f.Status != domain.ContractOpen && f.Status != domain.ContractComplete && f.Status != domain.ContractCancelled {
 		fields["status"] = "must be OPEN, COMPLETE or CANCELLED"
 	}
@@ -294,7 +297,16 @@ func (a *API) getContract(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	if allocationOnly(r) && !strings.EqualFold(c.OrderID, r.URL.Query().Get("orderId")) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeNotFound, "contract not found"))
+		return
+	}
 	writeContract(w, http.StatusOK, c)
+}
+
+func allocationOnly(r *http.Request) bool {
+	p, _ := tenant.FromContext(r.Context())
+	return !p.HasDuty(dutyView)
 }
 
 // satisfyMilestone recognizes a MILESTONE obligation on the given date

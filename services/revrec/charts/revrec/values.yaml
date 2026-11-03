@@ -15,6 +15,7 @@ ledgerIds: {}
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""
+  publicKeys: ""
 replicaCount: 2
 service:
   port: 8080

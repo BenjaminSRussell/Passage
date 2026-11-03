@@ -241,7 +241,7 @@ func (s *Postgres) ListContracts(ctx context.Context, f ContractFilter) (Contrac
 			  and ($5 = '' or exists (select 1 from performance_obligation o
 			        where o.tenant_id = c.tenant_id and o.contract_id = c.id and o.method = $5))
 			  and ($6 = '' or (c.created_at, c.id) < (select a.created_at, a.id from revenue_contract a where a.id = nullif($6, '')::uuid))
-			  and ($7 = '' or c.order_id::text = $7)
+			  and ($7 = '' or c.order_id::text = lower($7))
 			order by c.created_at desc, c.id desc limit $4`, f.LegalEntityID, f.CustomerID, f.Status, f.Limit+1, f.Method, f.After, f.OrderID)
 		if err != nil {
 			return err

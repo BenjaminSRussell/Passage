@@ -107,7 +107,11 @@ func onDeferredAccount(p store.GLProfile, l store.GLLine) bool {
 var errAllocationsNotConfigured = errors.New("revrec is not configured for this service")
 
 func (a *API) allocationsFor(ctx context.Context, le string, p store.GLProfile, d store.GLDocument) (map[string]revrec.Allocation, error) {
-	if d.CreditNote || !slices.ContainsFunc(d.Lines, func(l store.GLLine) bool { return onDeferredAccount(p, l) }) {
+	if d.CreditNote {
+		return nil, nil
+	}
+	hasDeferred := slices.ContainsFunc(d.Lines, func(l store.GLLine) bool { return onDeferredAccount(p, l) })
+	if a.allocations == nil && !hasDeferred {
 		return nil, nil
 	}
 	out := map[string]revrec.Allocation{}
@@ -132,17 +136,43 @@ func (a *API) allocationsFor(ctx context.Context, le string, p store.GLProfile, 
 
 type orderProduct struct{ order, product string }
 
-func portion(whole, part, of decimal.Decimal, places int32) decimal.Decimal {
+func portion(whole, part, of decimal.Decimal) decimal.Decimal {
 	if part.Equal(of) {
 		return whole
 	}
-	return whole.Mul(part).DivRound(of, 12).Round(places)
+	return whole.Mul(part).DivRound(of, 12)
+}
+
+func apportion(exact []decimal.Decimal, places int32) []decimal.Decimal {
+	total := decimal.Zero
+	out := make([]decimal.Decimal, len(exact))
+	for i, e := range exact {
+		total, out[i] = total.Add(e), e.RoundFloor(places)
+	}
+	left := total.Round(places)
+	for _, o := range out {
+		left = left.Sub(o)
+	}
+	unit := decimal.New(1, -places)
+	order := make([]int, len(exact))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(a, b int) int { return exact[b].Sub(out[b]).Cmp(exact[a].Sub(out[a])) })
+	for _, i := range order {
+		if !left.IsPositive() {
+			break
+		}
+		out[i], left = out[i].Add(unit), left.Sub(unit)
+	}
+	return out
 }
 
 func glSplit(p store.GLProfile, d store.GLDocument, allocs map[string]revrec.Allocation) (map[int]store.GLShare, string) {
 	places := money.MinorUnits(d.Currency)
 	shares := make(map[int]store.GLShare, len(d.Lines))
 	billed := map[orderProduct][]store.GLLine{}
+	var mirrored []store.GLLine
 	for _, l := range d.Lines {
 		alloc, covered := allocs[l.OrderID]
 		_, inContract := allocatedFor(alloc, l.ProductID)
@@ -152,7 +182,7 @@ func glSplit(p store.GLProfile, d store.GLDocument, allocs map[string]revrec.All
 			if o.Net.IsZero() {
 				shares[l.No] = store.GLShare{}
 			} else {
-				shares[l.No] = store.GLShare{Allocated: portion(l.Net, o.Share.Allocated, o.Net, places), Deferred: portion(l.Net, o.Share.Deferred, o.Net, places)}
+				mirrored = append(mirrored, l)
 			}
 		case !d.CreditNote && covered && l.ProductID != "" && inContract:
 			if alloc.Currency != d.Currency {
@@ -165,6 +195,14 @@ func glSplit(p store.GLProfile, d store.GLDocument, allocs map[string]revrec.All
 		default:
 			shares[l.No] = store.GLShare{Allocated: l.Net}
 		}
+	}
+	allocatedParts, deferredParts := make([]decimal.Decimal, len(mirrored)), make([]decimal.Decimal, len(mirrored))
+	for i, l := range mirrored {
+		allocatedParts[i], deferredParts[i] = portion(l.Net, l.Original.Share.Allocated, l.Original.Net), portion(l.Net, l.Original.Share.Deferred, l.Original.Net)
+	}
+	allocatedShares, deferredShares := apportion(allocatedParts, places), apportion(deferredParts, places)
+	for i, l := range mirrored {
+		shares[l.No] = store.GLShare{Allocated: allocatedShares[i], Deferred: deferredShares[i]}
 	}
 	for key, lines := range billed {
 		total := decimal.Zero
@@ -181,14 +219,13 @@ func glSplit(p store.GLProfile, d store.GLDocument, allocs map[string]revrec.All
 				deferred = deferred.Add(o.Allocated)
 			}
 		}
-		leftA, leftD := allocated, deferred
+		allocatedParts, deferredParts := make([]decimal.Decimal, len(lines)), make([]decimal.Decimal, len(lines))
 		for i, l := range lines {
-			s := store.GLShare{Allocated: leftA, Deferred: leftD}
-			if i < len(lines)-1 {
-				s = store.GLShare{Allocated: portion(allocated, l.Net, total, places), Deferred: portion(deferred, l.Net, total, places)}
-			}
-			leftA, leftD = leftA.Sub(s.Allocated), leftD.Sub(s.Deferred)
-			shares[l.No] = s
+			allocatedParts[i], deferredParts[i] = portion(allocated, l.Net, total), portion(deferred, l.Net, total)
+		}
+		allocatedShares, deferredShares := apportion(allocatedParts, places), apportion(deferredParts, places)
+		for i, l := range lines {
+			shares[l.No] = store.GLShare{Allocated: allocatedShares[i], Deferred: deferredShares[i]}
 		}
 	}
 	allocatedTotal, billedTotal := decimal.Zero, decimal.Zero
@@ -314,6 +351,10 @@ func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			failed = append(failed, glFailedOut{DocumentID: d.ID, Number: d.Number, LedgerCode: CodeAllocationUnavailable})
+			if !errors.Is(aerr, revrec.ErrNoContract) && !errors.Is(aerr, revrec.ErrAmbiguous) {
+				more = true
+				break
+			}
 			continue
 		}
 		shares, imbalance := glSplit(profile, d, allocs)

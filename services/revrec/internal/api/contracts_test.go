@@ -657,6 +657,29 @@ func TestListContracts_PagesAndFiltersByMethod(t *testing.T) {
 	}
 }
 
+func TestAllocationRead_IsLimitedToTheContractOfOneOrder(t *testing.T) {
+	h := newHandler(newFakeStore())
+	created := decodeContract(t, postContract(t, h, bundleContract, "alloc-read"))
+	const order = "018f0000-0000-7000-8000-00000000000f"
+	read := func(path string) int {
+		return callAs(t, h, http.MethodGet, path, "", dutyAllocationRead, entityID, nil).Code
+	}
+	for path, want := range map[string]int{
+		"/v1/revrec/contracts":                                                      http.StatusBadRequest,
+		"/v1/revrec/contracts?orderId=" + order:                                     http.StatusOK,
+		"/v1/revrec/contracts/" + created.ID:                                        http.StatusNotFound,
+		"/v1/revrec/contracts/" + created.ID + "?orderId=" + ids.New():              http.StatusNotFound,
+		"/v1/revrec/contracts/" + created.ID + "?orderId=" + strings.ToUpper(order): http.StatusOK,
+	} {
+		if got := read(path); got != want {
+			t.Errorf("allocation reader GET %s = %d, want %d", path, got, want)
+		}
+	}
+	if rec := call(t, h, http.MethodGet, "/v1/revrec/contracts", "", nil); rec.Code != http.StatusOK {
+		t.Errorf("revrec.view list without orderId = %d, want 200", rec.Code)
+	}
+}
+
 // pointInTimeOnly is a single goods obligation recognized at transfer.
 const pointInTimeOnly = `{
   "legalEntityId": "` + entityID + `",

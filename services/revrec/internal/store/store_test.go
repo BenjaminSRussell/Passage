@@ -392,6 +392,9 @@ func TestContracts_CompleteListAndIsolation(t *testing.T) {
 	if err != nil || len(byOrder.Items) != 1 || byOrder.Items[0].ID != bundle.ID {
 		t.Errorf("order filter %+v err %v, want the bundle only", byOrder, err)
 	}
+	if upper, err := s.ListContracts(ctx, ContractFilter{OrderID: strings.ToUpper(bundle.OrderID), Limit: 10}); err != nil || len(upper.Items) != 1 {
+		t.Errorf("uppercase order filter %+v err %v, want the bundle", upper, err)
+	}
 	if none, err := s.ListContracts(ctx, ContractFilter{OrderID: ids.New(), Limit: 10}); err != nil || len(none.Items) != 0 {
 		t.Errorf("another order's filter %+v err %v, want none", none, err)
 	}
