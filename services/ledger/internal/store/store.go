@@ -342,8 +342,20 @@ type BalanceRow struct {
 	Credit    string `json:"credit"`
 	Net       string `json:"net"`
 	LineCount int64  `json:"lineCount"`
+	// Quantities are the statistical quantity totals of the row per unit (BR-11.2); empty when
+	// no line in the filter carries a quantity.
+	Quantities []QuantityTotal `json:"quantities,omitempty"`
 	// Dimensions holds the group_by attribute values of the row (empty when not grouped).
 	Dimensions map[string]string `json:"dimensions,omitempty"`
+}
+
+// QuantityTotal is the statistical quantity turnover of one unit: quantities of different
+// units are never added together. Net is debit minus credit, like the amounts.
+type QuantityTotal struct {
+	Unit   string `json:"unit"`
+	Debit  string `json:"debit"`
+	Credit string `json:"credit"`
+	Net    string `json:"net"`
 }
 
 // TrialBalance is the account-level summary with totals.
@@ -355,6 +367,12 @@ type TrialBalance struct {
 	Credit   string       `json:"credit"`
 	Net      string       `json:"net"`
 	Balanced bool         `json:"balanced"`
+	// Quantities are the totals per unit over every row (BR-11.2); a unit's net need not be zero.
+	Quantities []QuantityTotal `json:"quantities,omitempty"`
+	// QuantitiesPending is true for a ledger that existed before the quantity projection
+	// (migration 0027) and has not been rebuilt since: quantity lines posted before it are
+	// missing from Quantities until POST /balances:rebuild runs once.
+	QuantitiesPending bool `json:"quantitiesPending,omitempty"`
 	// Filtered is true when a dimension filter was applied: the totals then cover part of
 	// the ledger, so Balanced only describes that part and need not be true.
 	Filtered bool `json:"filtered,omitempty"`
@@ -369,6 +387,13 @@ type RebuildResult struct {
 	RowsWritten       int64  `json:"rowsWritten"`
 	RowsDiffering     int64  `json:"rowsDiffering"`
 	DurationMs        int64  `json:"durationMs"`
+	// QuantityRowsWritten counts the statistical quantity projection rows (BR-11.2) the rebuild wrote;
+	// RowsDiffering includes the quantity rows that differed, except on the backfill run.
+	QuantityRowsWritten int64 `json:"quantityRowsWritten"`
+	// QuantityBackfill is true when this was the ledger's first rebuild after migration 0027: it
+	// folded in the quantity lines posted before the projection existed, and those missing rows
+	// are not counted in RowsDiffering.
+	QuantityBackfill bool `json:"quantityBackfill,omitempty"`
 }
 
 func principalOf(ctx context.Context) (tenant.Principal, error) {

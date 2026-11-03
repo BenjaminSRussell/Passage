@@ -407,6 +407,59 @@ func AggregateBalances(periodKey string, lines []ValidLine) []BalanceDelta {
 	return out
 }
 
+// QuantityDelta is one quantity projection row change for a posting (BR-11.2):
+// the unsigned quantities per side for one unit, with the side flipped and the
+// quantity negated for a negative posting, like the amounts of BalanceDelta.
+type QuantityDelta struct {
+	MainAccountID string
+	Combination   []byte
+	PeriodKey     string
+	Unit          string
+	Debit         decimal.Decimal
+	Credit        decimal.Decimal
+	LineCount     int64
+}
+
+// AggregateQuantities folds the lines that carry a quantity into one delta per
+// (account, combination, unit), sorted by primary key. Lines without a
+// quantity add nothing.
+func AggregateQuantities(periodKey string, lines []ValidLine) []QuantityDelta {
+	byKey := map[string]*QuantityDelta{}
+	for _, l := range lines {
+		if l.Quantity.IsZero() || l.Unit == "" {
+			continue
+		}
+		d := QuantityDelta{MainAccountID: l.Account.ID, Combination: l.CombinationID, PeriodKey: periodKey, Unit: l.Unit}
+		k := d.Key()
+		if byKey[k] == nil {
+			d.Debit, d.Credit = decimal.Zero, decimal.Zero
+			byKey[k] = &d
+		}
+		agg := byKey[k]
+		side, qty := l.Side, l.Quantity
+		if l.Negative {
+			side, qty = ReversalSide(side), qty.Neg()
+		}
+		if side == SideCredit {
+			agg.Credit = agg.Credit.Add(qty)
+		} else {
+			agg.Debit = agg.Debit.Add(qty)
+		}
+		agg.LineCount++
+	}
+	out := make([]QuantityDelta, 0, len(byKey))
+	for _, d := range byKey {
+		out = append(out, *d)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key() < out[j].Key() })
+	return out
+}
+
+// Key orders deltas the way the projection's primary key does.
+func (d QuantityDelta) Key() string {
+	return d.MainAccountID + "|" + hex.EncodeToString(d.Combination) + "|" + d.Unit
+}
+
 // CheckReversalDate applies FR-11.8: a reversal may not be dated before the
 // entry it reverses; the usual posting-date rules (BR-11.4) apply as well.
 func CheckReversalDate(r Rules, original, reversal, today time.Time) []Violation {

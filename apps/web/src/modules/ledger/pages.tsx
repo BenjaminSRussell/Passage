@@ -55,6 +55,12 @@ const amountColumns: DataTableColumn<Row>[] = [
   { key: "credit", header: "Credit", align: "end" },
   { key: "net", header: "Net", align: "end" },
   { key: "lineCount", header: "Lines", align: "end" },
+  {
+    key: "quantities",
+    header: "Net quantity",
+    align: "end",
+    render: (r) => (r.quantities ?? []).map((q) => `${q.net} ${q.unit}`).join(", "),
+  },
 ];
 
 /** Trial balance: account rows from the balance projection, with the balanced check. */
@@ -136,6 +142,12 @@ export function TrialBalanceScreen() {
         </Alert>
       ) : (
         <>
+          {result.data?.quantitiesPending ? (
+            <Alert tone="warning" title="Quantity totals are incomplete">
+              This ledger has not been rebuilt since statistical quantity totals were added, so quantities posted before then are missing. An
+              administrator can run the balance rebuild once to include them.
+            </Alert>
+          ) : null}
           {result.data ? (
             <dl className={styles.totals}>
               <div className={styles.entry}>
@@ -156,6 +168,14 @@ export function TrialBalanceScreen() {
                 <dt className={styles.term}>Net</dt>
                 <dd className={styles.value}>{result.data.net}</dd>
               </div>
+              {(result.data.quantities ?? []).map((q) => (
+                <div className={styles.entry} key={q.unit}>
+                  <dt className={styles.term}>Net quantity ({q.unit})</dt>
+                  <dd className={styles.value} data-testid={`tb-qty-${q.unit}`}>
+                    {q.net} (debit {q.debit}, credit {q.credit})
+                  </dd>
+                </div>
+              ))}
             </dl>
           ) : null}
           <DataTable

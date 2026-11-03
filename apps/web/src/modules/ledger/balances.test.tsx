@@ -128,6 +128,38 @@ describe("balance dimension inquiry", () => {
     expect(await screen.findByTestId("tb-balanced")).toHaveTextContent("Not applicable to a dimension filter");
   });
 
+  it("shows statistical quantity totals per unit beside the amounts (BR-11.2)", async () => {
+    const withQty = {
+      ...grouped,
+      groupBy: undefined,
+      rows: [
+        { account: "6010", name: "Freight", debit: "140.00", credit: "0.00", net: "140.00", lineCount: 3,
+          quantities: [{ unit: "KG", debit: "12.500000", credit: "2.500000", net: "10.000000" }, { unit: "PCS", debit: "3.000000", credit: "0.000000", net: "3.000000" }] },
+        { account: "2100", name: "Payable", debit: "0.00", credit: "140.00", net: "-140.00", lineCount: 1 },
+      ],
+      quantities: [{ unit: "KG", debit: "12.500000", credit: "2.500000", net: "10.000000" }, { unit: "PCS", debit: "3.000000", credit: "0.000000", net: "3.000000" }],
+    };
+    server.handler = (url) => (url.pathname === "/api/v1/ledger/balances" ? json(200, withQty) : undefined);
+    renderAt("/ledger/trial-balance");
+    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
+    fireEvent.click(screen.getByRole("button", { name: "Show trial balance" }));
+    expect(await screen.findByTestId("tb-qty-KG")).toHaveTextContent("10.000000 (debit 12.500000, credit 2.500000)");
+    expect(screen.getByTestId("tb-qty-PCS")).toHaveTextContent("3.000000");
+    const table = await screen.findByRole("table", { name: "Trial balance" });
+    expect(within(table).getByRole("columnheader", { name: "Net quantity" })).toBeInTheDocument();
+    expect(within(table).getByText("10.000000 KG, 3.000000 PCS")).toBeInTheDocument();
+    expect(screen.queryByText("Quantity totals are incomplete")).not.toBeInTheDocument();
+  });
+
+  it("warns that quantity totals are incomplete until the ledger is rebuilt (BR-11.2)", async () => {
+    server.handler = (url) =>
+      url.pathname === "/api/v1/ledger/balances" ? json(200, { ...grouped, groupBy: undefined, quantitiesPending: true }) : undefined;
+    renderAt("/ledger/trial-balance");
+    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
+    fireEvent.click(screen.getByRole("button", { name: "Show trial balance" }));
+    expect(await screen.findByText("Quantity totals are incomplete")).toBeInTheDocument();
+  });
+
   it("reports a failed load with a retry", async () => {
     server.handler = (url) => (url.pathname === "/api/v1/ledger/balances" ? json(404, { code: "LEDGER_NOT_FOUND", detail: "ledger not found" }) : undefined);
     renderAt("/ledger/trial-balance");

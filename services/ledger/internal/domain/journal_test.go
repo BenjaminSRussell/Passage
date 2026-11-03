@@ -195,6 +195,30 @@ func TestAggregateBalances_SortedAndSummed(t *testing.T) {
 	}
 }
 
+func TestAggregateQuantities_PerUnitAndNegative(t *testing.T) {
+	acct := Account{ID: "acct-a"}
+	id1, _ := CombinationID(nil, "STD", "x", nil)
+	lines := []ValidLine{
+		{Account: acct, Side: SideDebit, Amount: dec("0"), Quantity: dec("5"), Unit: "KG", CombinationID: id1},
+		{Account: acct, Side: SideCredit, Amount: dec("0"), Quantity: dec("2"), Unit: "KG", CombinationID: id1},
+		{Account: acct, Side: SideDebit, Amount: dec("0"), Quantity: dec("3"), Unit: "PCS", CombinationID: id1},
+		{Account: acct, Side: SideDebit, Amount: dec("9"), CombinationID: id1},
+		{Account: acct, Side: SideDebit, Amount: dec("0"), Quantity: dec("1"), Unit: "KG", CombinationID: id1, Negative: true},
+	}
+	got := AggregateQuantities("2026-03", lines)
+	if len(got) != 2 || got[0].Unit != "KG" || got[1].Unit != "PCS" {
+		t.Fatalf("one delta per unit, sorted: %+v", got)
+	}
+	// A negative posting flips the side and negates the quantity (a storno of a credit line is
+	// a negative debit line), so the negative 1 KG debit reduces the credit side: 2 - 1 = 1.
+	if !got[0].Debit.Equal(dec("5")) || !got[0].Credit.Equal(dec("1")) || got[0].LineCount != 3 {
+		t.Fatalf("KG: %+v", got[0])
+	}
+	if !got[1].Debit.Equal(dec("3")) || !got[1].Credit.IsZero() {
+		t.Fatalf("PCS: %+v", got[1])
+	}
+}
+
 func TestValidateEntry_BlankDimensionHashesLikeAbsent(t *testing.T) {
 	pd := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 	withBlank := ValidateEntry(testRules(), testAccounts(), pd, today, []LineInput{

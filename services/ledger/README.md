@@ -28,7 +28,18 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 - Balances: a projection per (account, dimension combination, period) written in
   the posting transaction; `GET /v1/ledger/balances` is the trial balance with
   a balanced flag; `POST /v1/ledger/balances:rebuild` recomputes the projection
-  from the journal and reports differing rows.
+  from the journal and reports differing rows. Statistical quantities (BR-11.2)
+  have their own projection per unit (`balance_quantity`); the trial balance
+  returns `quantities` (debit, credit, net per unit) per row and in total.
+  **Upgrade step for migration 0027:** quantity lines posted before it are not
+  in the new projection (row-level security keeps the migration from reading
+  the journal). Every ledger that existed before 0027 is flagged
+  (`ledger.quantity_rebuild_pending`) and its trial balance returns
+  `quantitiesPending: true` (the web screen shows a warning) until
+  `POST /v1/ledger/balances:rebuild` runs once for it. That first rebuild
+  reports `quantityBackfill: true` and does not count the backfilled quantity
+  rows in `rowsDiffering`, so it raises no drift alert; later rebuilds count
+  quantity drift as usual.
 - Ledger transactions (FR-11.14): `GET /v1/ledger/journal-lines?ledger=` lists
   posted lines in posting order (posting sequence, line number) with the entry's
   voucher, date, description, source and trace id. Filters: `account_from`/`account_to`

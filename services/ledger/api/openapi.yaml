@@ -478,6 +478,10 @@ components:
               credit: { type: string }
               net: { type: string }
               lineCount: { type: integer, format: int64 }
+              quantities:
+                type: array
+                description: Statistical quantity turnover of the row per unit of measure (BR-11.2); absent when no line carries a quantity.
+                items: { $ref: "#/components/schemas/QuantityTotal" }
               dimensions:
                 type: object
                 description: Values of the group_by attributes for this row; absent when the query is not grouped.
@@ -486,6 +490,13 @@ components:
         credit: { type: string }
         net: { type: string }
         balanced: { type: boolean }
+        quantities:
+          type: array
+          description: Statistical quantity totals per unit over every row (BR-11.2). Quantities of different units are never added; a unit's net need not be zero.
+          items: { $ref: "#/components/schemas/QuantityTotal" }
+        quantitiesPending:
+          type: boolean
+          description: True for a ledger created before the quantity projection that has not been rebuilt since; quantity lines posted before it are missing from quantities until POST /v1/ledger/balances:rebuild runs once. Absent when false.
         filtered:
           type: boolean
           description: True when a dim.{ATTRIBUTE} filter was applied, so the totals cover part of the ledger.
@@ -493,13 +504,24 @@ components:
           type: array
           description: The dimension attributes the rows are split by.
           items: { type: string }
+    QuantityTotal:
+      type: object
+      description: Statistical quantity turnover of one unit of measure (BR-11.2), decimal strings with six decimals.
+      required: [unit, debit, credit, net]
+      properties:
+        unit: { type: string, description: Unit of measure, A-Z and 0-9, up to 10 characters }
+        debit: { type: string, description: Quantity on debit lines, a negative posting reduces it }
+        credit: { type: string, description: Quantity on credit lines, a negative posting reduces it }
+        net: { type: string, description: Debit quantity minus credit quantity }
     RebuildResult:
       type: object
       properties:
         ledgerId: { type: string, format: uuid }
         highWaterSequence: { type: integer, format: int64 }
         rowsWritten: { type: integer, format: int64 }
-        rowsDiffering: { type: integer, format: int64 }
+        rowsDiffering: { type: integer, format: int64, description: Amount and statistical quantity projection rows that differed from the journal (quantity rows not counted on the backfill run) }
+        quantityRowsWritten: { type: integer, format: int64, description: Statistical quantity projection rows written (BR-11.2) }
+        quantityBackfill: { type: boolean, description: True on a ledger's first rebuild after the quantity projection was added; the quantity rows it backfilled are not counted in rowsDiffering. Absent when false. }
         durationMs: { type: integer, format: int64 }
     StructureConstraint:
       type: object

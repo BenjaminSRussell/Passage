@@ -583,3 +583,175 @@ func TestPostgres_StatisticalQuantityRoundTrips(t *testing.T) {
 		t.Fatalf("inquiry shows %d statistical lines, want 4", n)
 	}
 }
+
+// statLine is a zero-amount statistical line on account 6010.
+func statLine(side, dept, qty, unit string) domain.LineInput {
+	return domain.LineInput{Account: "6010", Side: side, Amount: decimal.Zero, Currency: "USD", Dimensions: map[string]string{"DEPT": dept},
+		Quantity: decimal.RequireFromString(qty), Unit: unit}
+}
+
+func TestPostgres_TrialBalanceQuantityTotals(t *testing.T) {
+	e, _ := setup(t)
+	post := func(key string, lines ...domain.LineInput) Entry {
+		in := vendorInvoice(e.ledger.ID, key, "10.00")
+		in.Lines = append(in.Lines, lines...)
+		out, err := e.store.PostEntry(e.ctx, in)
+		if err != nil {
+			t.Fatalf("post %s: %v", key, err)
+		}
+		return out.Entries[0]
+	}
+	first := post("QT-1", statLine(domain.SideDebit, "D100", "12.5", "KG"), statLine(domain.SideCredit, "D100", "2.5", "KG"),
+		statLine(domain.SideDebit, "D200", "3", "PCS"))
+	post("QT-2", statLine(domain.SideDebit, "D100", "1", "KG"))
+
+	byUnit := func(qs []QuantityTotal) map[string]QuantityTotal {
+		m := map[string]QuantityTotal{}
+		for _, q := range qs {
+			m[q.Unit] = q
+		}
+		return m
+	}
+	tb, err := e.store.TrialBalance(e.ctx, BalanceFilter{LedgerID: e.ledger.ID})
+	if err != nil {
+		t.Fatalf("trial balance: %v", err)
+	}
+	if len(tb.Quantities) != 2 {
+		t.Fatalf("totals per unit: %+v", tb.Quantities)
+	}
+	kg := byUnit(tb.Quantities)["KG"]
+	if kg.Debit != "13.500000" || kg.Credit != "2.500000" || kg.Net != "11.000000" {
+		t.Fatalf("KG total: %+v", kg)
+	}
+	if pcs := byUnit(tb.Quantities)["PCS"]; pcs.Debit != "3.000000" || pcs.Credit != "0.000000" || pcs.Net != "3.000000" {
+		t.Fatalf("PCS total (units never add up): %+v", pcs)
+	}
+	for _, r := range tb.Rows {
+		if r.Account == "2100" && len(r.Quantities) != 0 {
+			t.Fatalf("an account without quantities has none: %+v", r)
+		}
+		if r.Account == "6010" && (len(r.Quantities) != 2 || r.LineCount != 6) {
+			t.Fatalf("6010 row: %+v", r)
+		}
+	}
+
+	// Grouped and filtered: the quantities follow the dimension.
+	g, err := e.store.TrialBalance(e.ctx, BalanceFilter{LedgerID: e.ledger.ID, GroupBy: []string{"DEPT"}, AccountFrom: "6010", AccountTo: "6010"})
+	if err != nil || len(g.Rows) != 2 {
+		t.Fatalf("grouped: %+v %v", g, err)
+	}
+	for _, r := range g.Rows {
+		switch r.Dimensions["DEPT"] {
+		case "D100":
+			if len(r.Quantities) != 1 || r.Quantities[0].Unit != "KG" || r.Quantities[0].Net != "11.000000" {
+				t.Fatalf("D100: %+v", r)
+			}
+		case "D200":
+			if len(r.Quantities) != 1 || r.Quantities[0].Unit != "PCS" {
+				t.Fatalf("D200: %+v", r)
+			}
+		}
+	}
+	f, err := e.store.TrialBalance(e.ctx, BalanceFilter{LedgerID: e.ledger.ID, Dimensions: map[string]string{"DEPT": "D200"}})
+	if err != nil || len(f.Quantities) != 1 || f.Quantities[0].Unit != "PCS" {
+		t.Fatalf("filtered: %+v %v", f.Quantities, err)
+	}
+
+	// Reversing the first entry takes its quantities back out (the sides swap).
+	hash, _ := domain.HashPayload("reverse qt")
+	if _, err := e.store.ReverseEntry(e.ctx, ReverseInput{EntryID: first.ID, Key: "QT-REV", Hash: hash, Actor: "test-user", TraceID: testTrace, Today: testToday}); err != nil {
+		t.Fatalf("reverse: %v", err)
+	}
+	after, err := e.store.TrialBalance(e.ctx, BalanceFilter{LedgerID: e.ledger.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Ordinary reversal posts the swapped sides: debit 12.5 + 1 + 2.5, credit 2.5 + 12.5.
+	if kg := byUnit(after.Quantities)["KG"]; kg.Debit != "16.000000" || kg.Credit != "15.000000" || kg.Net != "1.000000" {
+		t.Fatalf("KG after reversal: %+v", kg)
+	}
+
+	// The projection equals the journal: a rebuild finds nothing to fix and writes the same rows.
+	var before int64
+	if err := e.admin.QueryRow(e.ctx, `select count(*) from balance_quantity where tenant_id = $1`, e.tenant).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	res, err := e.store.RebuildBalances(e.ctx, e.ledger.ID)
+	if err != nil || res.RowsDiffering != 0 || res.QuantityRowsWritten != before || before == 0 {
+		t.Fatalf("rebuild: %+v (%d rows before) %v", res, before, err)
+	}
+	// A damaged quantity row is reported and repaired.
+	if _, err := e.admin.Exec(e.ctx, `update balance_quantity set debit_quantity = debit_quantity + 1, net_quantity = net_quantity + 1 where tenant_id = $1 and unit = 'PCS'`, e.tenant); err != nil {
+		t.Fatal(err)
+	}
+	res, err = e.store.RebuildBalances(e.ctx, e.ledger.ID)
+	if err != nil || res.RowsDiffering != 1 {
+		t.Fatalf("rebuild after damage: %+v %v", res, err)
+	}
+}
+
+func TestPostgres_NegativeReversalRestoresQuantityTotals(t *testing.T) {
+	e, _ := setup(t)
+	l := newLedger(t, e, "GLQ", true, true)
+	putReason(t, e, "STORNO", ReasonCode{Name: "Storno", AppliesTo: []string{"ledger"}, NegativePostingAllowed: true,
+		AlternativePostingDateAllowed: true, Active: true})
+	in := vendorInvoice(l.ID, "NQ-1", "50.00")
+	in.Lines = append(in.Lines, statLine(domain.SideDebit, "D100", "7", "KG"), statLine(domain.SideCredit, "D100", "7", "KG"))
+	orig, err := e.store.PostEntry(e.ctx, in)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	if _, err := reverseWith(t, e, orig.Entries[0].ID, "NQ-REV", "STORNO"); err != nil {
+		t.Fatalf("storno: %v", err)
+	}
+	tb, err := e.store.TrialBalance(e.ctx, BalanceFilter{LedgerID: l.ID})
+	if err != nil || len(tb.Quantities) != 1 || tb.Quantities[0].Debit != "0.000000" || tb.Quantities[0].Credit != "0.000000" || tb.Quantities[0].Net != "0.000000" {
+		t.Fatalf("storno returns the quantity turnover to zero: %+v %v", tb.Quantities, err)
+	}
+	if res, err := e.store.RebuildBalances(e.ctx, l.ID); err != nil || res.RowsDiffering != 0 {
+		t.Fatalf("rebuild must match the negative quantity projection: %+v %v", res, err)
+	}
+}
+
+// A ledger that existed before migration 0027 is flagged until its first rebuild: the trial
+// balance says its quantity totals are incomplete, and that rebuild backfills the missing rows
+// without reporting them as drift.
+func TestPostgres_QuantityBackfillOnFirstRebuild(t *testing.T) {
+	e, _ := setup(t)
+	in := vendorInvoice(e.ledger.ID, "QB-1", "10.00")
+	in.Lines = append(in.Lines, statLine(domain.SideDebit, "D100", "4", "KG"))
+	if _, err := e.store.PostEntry(e.ctx, in); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	tb, err := e.store.TrialBalance(e.ctx, BalanceFilter{LedgerID: e.ledger.ID})
+	if err != nil || tb.QuantitiesPending || len(tb.Quantities) != 1 {
+		t.Fatalf("a ledger created after 0027 is complete: %+v %v", tb, err)
+	}
+	// The state migration 0027 leaves behind: the line exists, its quantity row does not.
+	if _, err := e.admin.Exec(e.ctx, `delete from balance_quantity where tenant_id = $1`, e.tenant); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.admin.Exec(e.ctx, `update ledger set quantity_rebuild_pending = true where tenant_id = $1 and id = $2`, e.tenant, e.ledger.ID); err != nil {
+		t.Fatal(err)
+	}
+	tb, err = e.store.TrialBalance(e.ctx, BalanceFilter{LedgerID: e.ledger.ID})
+	if err != nil || !tb.QuantitiesPending || len(tb.Quantities) != 0 {
+		t.Fatalf("before the rebuild the totals are flagged incomplete: %+v %v", tb, err)
+	}
+	res, err := e.store.RebuildBalances(e.ctx, e.ledger.ID)
+	if err != nil || !res.QuantityBackfill || res.RowsDiffering != 0 || res.QuantityRowsWritten != 1 {
+		t.Fatalf("first rebuild backfills without drift: %+v %v", res, err)
+	}
+	tb, err = e.store.TrialBalance(e.ctx, BalanceFilter{LedgerID: e.ledger.ID})
+	if err != nil || tb.QuantitiesPending || len(tb.Quantities) != 1 || tb.Quantities[0].Debit != "4.000000" {
+		t.Fatalf("after the rebuild: %+v %v", tb, err)
+	}
+	// Later rebuilds count a missing quantity row as drift again.
+	if _, err := e.admin.Exec(e.ctx, `delete from balance_quantity where tenant_id = $1`, e.tenant); err != nil {
+		t.Fatal(err)
+	}
+	res, err = e.store.RebuildBalances(e.ctx, e.ledger.ID)
+	if err != nil || res.QuantityBackfill || res.RowsDiffering != 1 {
+		t.Fatalf("second rebuild reports drift: %+v %v", res, err)
+	}
+}

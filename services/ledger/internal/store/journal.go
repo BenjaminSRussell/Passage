@@ -433,6 +433,18 @@ func writeEntry(ctx context.Context, tx pgx.Tx, tenantID string, ne newEntry) (E
 			tenantID, l.LegalEntityID, l.ID, d.MainAccountID, d.Combination, d.PeriodKey, l.Currency,
 			d.Debit.String(), d.Credit.String(), domain.Net(d.Debit, d.Credit).String(), d.LineCount, seq)
 	}
+	for _, d := range domain.AggregateQuantities(period, valid) {
+		batch.Queue(`insert into balance_quantity (tenant_id, legal_entity_id, ledger_id, main_account_id, dimension_combination_id, period_key, unit,
+				debit_quantity, credit_quantity, net_quantity, line_count)
+			values ($1, $2, $3, $4, $5, $6, $7, $8::text::numeric, $9::text::numeric, $10::text::numeric, $11)
+			on conflict (tenant_id, ledger_id, main_account_id, dimension_combination_id, period_key, unit) do update set
+				debit_quantity = balance_quantity.debit_quantity + excluded.debit_quantity,
+				credit_quantity = balance_quantity.credit_quantity + excluded.credit_quantity,
+				net_quantity = balance_quantity.net_quantity + excluded.net_quantity,
+				line_count = balance_quantity.line_count + excluded.line_count`,
+			tenantID, l.LegalEntityID, l.ID, d.MainAccountID, d.Combination, d.PeriodKey, d.Unit,
+			d.Debit.String(), d.Credit.String(), domain.Net(d.Debit, d.Credit).String(), d.LineCount)
+	}
 	if batch.Len() > 0 {
 		if err := execBatch(ctx, tx, batch); err != nil {
 			return Entry{}, err

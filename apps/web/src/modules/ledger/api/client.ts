@@ -13,6 +13,15 @@ export const violationSchema = z.object({
 });
 export type Violation = z.infer<typeof violationSchema>;
 
+/** Statistical quantity turnover of one unit (BR-11.2); units are never added together. */
+export const quantityTotalSchema = z.object({
+  unit: z.string(),
+  debit: z.string(),
+  credit: z.string(),
+  net: z.string(),
+});
+export type QuantityTotal = z.infer<typeof quantityTotalSchema>;
+
 export const trialBalanceRowSchema = z.object({
   account: z.string(),
   name: z.string(),
@@ -20,6 +29,8 @@ export const trialBalanceRowSchema = z.object({
   credit: z.string(),
   net: z.string(),
   lineCount: z.number(),
+  /** Statistical quantity totals per unit (BR-11.2); absent when no line carries a quantity. */
+  quantities: z.array(quantityTotalSchema).optional(),
   /** Values of the group_by attributes for this row (FR-11.14); absent when not grouped. */
   dimensions: z.record(z.string(), z.string()).optional(),
 });
@@ -32,6 +43,10 @@ export const trialBalanceSchema = z.object({
   credit: z.string(),
   net: z.string(),
   balanced: z.boolean(),
+  /** Statistical quantity totals per unit over every row (BR-11.2). */
+  quantities: z.array(quantityTotalSchema).optional(),
+  /** True until a ledger created before the quantity projection is rebuilt once; its quantity totals are incomplete. */
+  quantitiesPending: z.boolean().optional(),
   /** True when a dimension filter was applied, so the totals cover part of the ledger. */
   filtered: z.boolean().optional(),
   groupBy: z.array(z.string()).optional(),
