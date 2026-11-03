@@ -23,6 +23,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/costing/internal/domain"
@@ -70,6 +71,9 @@ type API struct {
 	adjustmentsPosted   atomic.Int64
 	reconciliations     atomic.Int64
 	reconciliationDiffs atomic.Int64
+	vouchersPosted      atomic.Int64
+	closesCompleted     atomic.Int64
+	ledger              ledgerclient.Ledger
 }
 
 // New returns an API over s.
@@ -111,6 +115,12 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/reconciliations", a.listReconciliations)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/reconciliations/{id}", a.getReconciliation)
 	r.With(authz.RequireDuty(dutyPPVPost)).Post("/internal/v1/costing/ppv", a.postPPV)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/posting-profiles", a.getPostingProfile)
+	r.With(authz.RequireDuty(dutyPostingProfileWrite)).Post("/v1/costing/posting-profiles", a.savePostingProfile)
+	r.With(authz.RequireDuty(dutyGLPost)).Post("/v1/costing/gl-postings", a.postGL)
+	r.With(authz.RequireDuty(dutyCloseRun)).Post("/v1/costing/closes", a.runClose)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/closes", a.listCloses)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/value-report:ledger-tie-out", a.ledgerTieOut)
 }
 
 // Metrics serves Prometheus text for the admin port.
@@ -130,6 +140,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP costing_adjustments_posted_total Manual cost adjustments posted; idempotent replays are not counted.\n# TYPE costing_adjustments_posted_total counter\ncosting_adjustments_posted_total %d\n", a.adjustmentsPosted.Load())
 		fmt.Fprintf(w, "# HELP costing_reconciliations_total Reconciliation runs stored; idempotent replays are not counted.\n# TYPE costing_reconciliations_total counter\ncosting_reconciliations_total %d\n", a.reconciliations.Load())
 		fmt.Fprintf(w, "# HELP costing_reconciliation_diffs_total Differing groups of stored reconciliation runs (one reconciliation.diff event each).\n# TYPE costing_reconciliation_diffs_total counter\ncosting_reconciliation_diffs_total %d\n", a.reconciliationDiffs.Load())
+		fmt.Fprintf(w, "# HELP costing_gl_vouchers_posted_total PPV vouchers confirmed by the ledger.\n# TYPE costing_gl_vouchers_posted_total counter\ncosting_gl_vouchers_posted_total %d\n", a.vouchersPosted.Load())
+		fmt.Fprintf(w, "# HELP costing_closes_completed_total Inventory closes completed.\n# TYPE costing_closes_completed_total counter\ncosting_closes_completed_total %d\n", a.closesCompleted.Load())
 	})
 }
 
@@ -566,7 +578,7 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 	}
 	qty := parseDecimal(fields, "qty", req.Qty, false)
 	po := parseDecimal(fields, "poUnitPrice", req.PoUnitPrice, true)
-	var amount decimal.Decimal
+	var amount, grir decimal.Decimal
 	scale := money.MinorUnits(req.Currency)
 	if req.Kind == "RECEIPT" {
 		std := parseDecimal(fields, "standardUnitCost", req.StandardUnitCost, true)
@@ -577,6 +589,7 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		amount = domain.ReceiptPPV(qty, po, std, scale)
+		grir = qty.Mul(std).RoundBank(scale).Add(amount)
 	} else {
 		inv := parseDecimal(fields, "invoiceUnitPrice", req.InvoiceUnitPrice, true)
 		if len(fields) == 0 {
@@ -586,6 +599,7 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		amount = domain.InvoicePPV(qty, inv, po, scale)
+		grir = qty.Mul(inv).RoundBank(scale).Sub(amount)
 	}
 	persist := req.SourceLineID != "" || req.LegalEntityID != "" || req.ProductID != "" || req.SiteID != "" || req.FinancialDate != ""
 	var row store.CostTransaction
@@ -609,6 +623,7 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 			SourceKey:     strings.Join([]string{"ppv", req.Kind, strings.ToLower(req.LegalEntityID), req.SourceDocumentID, req.SourceLineID}, ":"),
 			LegalEntityID: req.LegalEntityID, ProductID: req.ProductID, SiteID: req.SiteID, Kind: domain.KindPPV, Qty: ppvQty,
 			Amount: amount.StringFixed(scale), Currency: req.Currency, FinancialDate: req.FinancialDate})
+		row.GrirAmount = grir.StringFixed(scale)
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)

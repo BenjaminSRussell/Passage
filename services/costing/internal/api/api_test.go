@@ -29,6 +29,7 @@ type fakeStore struct {
 	slice4
 	slice5
 	slice6
+	slice7
 }
 
 func (f *fakeStore) CreateCostingVersion(_ context.Context, in store.CostingVersion, key string) (store.CostingVersion, bool, error) {

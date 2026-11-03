@@ -29,7 +29,8 @@ const (
 	MaxCostTransactionBatch = 500
 	costTxnColumns          = `id::text, source_key, legal_entity_id::text, coalesce(inventory_transaction_id::text, ''),
 		coalesce(ledger_entry_id::text, ''), product_id::text, site_id::text, coalesce(warehouse_id::text, ''), valuation_type,
-		coalesce(valuation_ledger_id::text, ''), kind, qty::text, amount_acct::text, currency, financial_date::text, created_at`
+		coalesce(valuation_ledger_id::text, ''), kind, qty::text, amount_acct::text, currency, financial_date::text, created_at,
+			coalesce(gr_ir_amount::text, '')`
 )
 
 // CostTransaction is one value-affecting event of the value report (FR-20.4).
@@ -53,6 +54,7 @@ type CostTransaction struct {
 	Currency               string    `json:"currency"`
 	FinancialDate          string    `json:"financialDate"`
 	CreatedAt              time.Time `json:"createdAt"`
+	GrirAmount             string    `json:"grirAmount,omitempty"`
 }
 
 // sameContent compares everything a producer sends; decimals compare by value.
@@ -64,10 +66,19 @@ func (c CostTransaction) sameContent(o CostTransaction) bool {
 	if errA != nil || errB != nil || errC != nil || errD != nil {
 		return false
 	}
-	return c.LegalEntityID == o.LegalEntityID && c.InventoryTransactionID == o.InventoryTransactionID &&
+	return sameOptionalDecimal(c.GrirAmount, o.GrirAmount) && c.LegalEntityID == o.LegalEntityID && c.InventoryTransactionID == o.InventoryTransactionID &&
 		c.LedgerEntryID == o.LedgerEntryID && c.ProductID == o.ProductID && c.SiteID == o.SiteID &&
 		c.WarehouseID == o.WarehouseID && c.ValuationType == o.ValuationType && c.ValuationLedgerID == o.ValuationLedgerID &&
 		c.Kind == o.Kind && qa.Equal(qb) && aa.Equal(ab) && c.Currency == o.Currency && c.FinancialDate == o.FinancialDate
+}
+
+func sameOptionalDecimal(a, b string) bool {
+	if a == "" || b == "" {
+		return a == b
+	}
+	da, errA := decimal.NewFromString(a)
+	db, errB := decimal.NewFromString(b)
+	return errA == nil && errB == nil && da.Equal(db)
 }
 
 // BalanceQuery selects the cost transactions summed into the value report: one
@@ -101,7 +112,7 @@ func scanCostTxn(row pgx.Row) (CostTransaction, error) {
 	var c CostTransaction
 	err := row.Scan(&c.ID, &c.SourceKey, &c.LegalEntityID, &c.InventoryTransactionID, &c.LedgerEntryID, &c.ProductID,
 		&c.SiteID, &c.WarehouseID, &c.ValuationType, &c.ValuationLedgerID, &c.Kind, &c.Qty, &c.Amount, &c.Currency,
-		&c.FinancialDate, &c.CreatedAt)
+		&c.FinancialDate, &c.CreatedAt, &c.GrirAmount)
 	return c, err
 }
 
@@ -125,56 +136,65 @@ func (s *Postgres) RecordCostTransactions(ctx context.Context, in []CostTransact
 		if err := resolveLedgers(ctx, tx, p.TenantID, rows); err != nil {
 			return err
 		}
-		n := len(rows)
-		cols := make([][]string, 14)
-		for i := range cols {
-			cols[i] = make([]string, n)
-		}
-		for i, c := range rows {
-			for j, v := range []string{ids.New(), c.SourceKey, c.LegalEntityID, c.InventoryTransactionID, c.LedgerEntryID, c.ProductID,
-				c.SiteID, c.WarehouseID, c.ValuationType, c.ValuationLedgerID, c.Kind, c.Qty, c.Amount, c.Currency} {
-				cols[j][i] = v
-			}
-		}
-		dates := make([]string, n)
-		for i, c := range rows {
-			dates[i] = c.FinancialDate
-		}
-		res, err := tx.Query(ctx, `insert into cost_transaction (tenant_id, id, source_key, legal_entity_id, inventory_transaction_id,
-				ledger_entry_id, product_id, site_id, warehouse_id, valuation_type, valuation_ledger_id, kind, qty, amount_acct,
-				currency, financial_date)
-			select $1, i.id::uuid, i.sk, i.le::uuid, nullif(i.inv, '')::uuid, nullif(i.je, '')::uuid, i.pr::uuid, i.si::uuid,
-				nullif(i.wh, '')::uuid, i.vt, nullif(i.vl, '')::uuid, i.kind, i.qty::numeric, i.amt::numeric, i.cur, i.fd::date
-			from unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::text[],
-				$11::text[], $12::text[], $13::text[], $14::text[], $15::text[], $16::text[])
-				as i(id, sk, le, inv, je, pr, si, wh, vt, vl, kind, qty, amt, cur, fd)
-			on conflict (tenant_id, source_key) do nothing
-			returning source_key`,
-			p.TenantID, cols[0], cols[1], cols[2], cols[3], cols[4], cols[5], cols[6], cols[7], cols[8], cols[9], cols[10],
-			cols[11], cols[12], cols[13], dates)
-		if err != nil {
+		if err := checkPeriodsOpen(ctx, tx, p.TenantID, rows); err != nil {
 			return err
 		}
-		fresh := map[string]bool{}
-		for res.Next() {
-			var key string
-			if err := res.Scan(&key); err != nil {
-				res.Close()
-				return err
-			}
-			fresh[key] = true
-		}
-		res.Close()
-		if err := res.Err(); err != nil {
-			return err
-		}
-		inserted = len(fresh)
-		return checkReplays(ctx, tx, p.TenantID, rows, fresh)
+		var err error
+		inserted, err = insertCostTransactions(ctx, tx, p.TenantID, rows)
+		return err
 	})
 	if err != nil {
 		return 0, err
 	}
 	return inserted, nil
+}
+
+// insertCostTransactions appends rows whose ledgers are already resolved and returns the number inserted;
+// a replayed source key must carry the stored content.
+func insertCostTransactions(ctx context.Context, tx pgx.Tx, tenantID string, rows []CostTransaction) (int, error) {
+	n := len(rows)
+	cols := make([][]string, 15)
+	for i := range cols {
+		cols[i] = make([]string, n)
+	}
+	dates := make([]string, n)
+	for i, c := range rows {
+		for j, v := range []string{ids.New(), c.SourceKey, c.LegalEntityID, c.InventoryTransactionID, c.LedgerEntryID, c.ProductID,
+			c.SiteID, c.WarehouseID, c.ValuationType, c.ValuationLedgerID, c.Kind, c.Qty, c.Amount, c.Currency, c.GrirAmount} {
+			cols[j][i] = v
+		}
+		dates[i] = c.FinancialDate
+	}
+	res, err := tx.Query(ctx, `insert into cost_transaction (tenant_id, id, source_key, legal_entity_id, inventory_transaction_id,
+			ledger_entry_id, product_id, site_id, warehouse_id, valuation_type, valuation_ledger_id, kind, qty, amount_acct,
+			currency, financial_date, gr_ir_amount)
+		select $1, i.id::uuid, i.sk, i.le::uuid, nullif(i.inv, '')::uuid, nullif(i.je, '')::uuid, i.pr::uuid, i.si::uuid,
+			nullif(i.wh, '')::uuid, i.vt, nullif(i.vl, '')::uuid, i.kind, i.qty::numeric, i.amt::numeric, i.cur, i.fd::date,
+			nullif(i.gi, '')::numeric
+		from unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::text[],
+			$11::text[], $12::text[], $13::text[], $14::text[], $15::text[], $16::text[], $17::text[])
+			as i(id, sk, le, inv, je, pr, si, wh, vt, vl, kind, qty, amt, cur, gi, fd)
+		on conflict (tenant_id, source_key) do nothing
+		returning source_key`,
+		tenantID, cols[0], cols[1], cols[2], cols[3], cols[4], cols[5], cols[6], cols[7], cols[8], cols[9], cols[10],
+		cols[11], cols[12], cols[13], cols[14], dates)
+	if err != nil {
+		return 0, err
+	}
+	fresh := map[string]bool{}
+	for res.Next() {
+		var key string
+		if err := res.Scan(&key); err != nil {
+			res.Close()
+			return 0, err
+		}
+		fresh[key] = true
+	}
+	res.Close()
+	if err := res.Err(); err != nil {
+		return 0, err
+	}
+	return len(fresh), checkReplays(ctx, tx, tenantID, rows, fresh)
 }
 
 // resolveLedgers checks each row's ledger and currency and stores the primary

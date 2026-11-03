@@ -1711,7 +1711,10 @@
       {"resource": "/v1/costing/aging/bucket-sets", "methods": ["POST"]},
       {"resource": "/v1/costing/aging/snapshots", "methods": ["POST"]}
     ]},
+    "costing.close.run": {"permissions": [{"resource": "/v1/costing/closes", "methods": ["POST"]}]},
     "costing.cost-transaction.post": {"service_only": true, "permissions": [{"resource": "/internal/v1/costing/cost-transactions", "methods": ["POST"]}]},
+    "costing.gl.post": {"permissions": [{"resource": "/v1/costing/gl-postings", "methods": ["POST"]}]},
+    "costing.posting-profile.write": {"permissions": [{"resource": "/v1/costing/posting-profiles", "methods": ["POST"]}]},
     "costing.ppv.post": {"service_only": true, "permissions": [{"resource": "/internal/v1/costing/ppv", "methods": ["POST"]}]},
     "costing.read": {"permissions": [
       {"resource": "/v1/costing/adjustments", "methods": ["GET"]},
@@ -1721,7 +1724,9 @@
       {"resource": "/v1/costing/aging/snapshots", "methods": ["GET"]},
       {"resource": "/v1/costing/aging/snapshots/*", "methods": ["GET"]},
       {"resource": "/v1/costing/aging:preview", "methods": ["POST"]},
+      {"resource": "/v1/costing/closes", "methods": ["GET"]},
       {"resource": "/v1/costing/cost-transactions", "methods": ["GET"]},
+      {"resource": "/v1/costing/posting-profiles", "methods": ["GET"]},
       {"resource": "/v1/costing/products/*/cost", "methods": ["GET"]},
       {"resource": "/v1/costing/reconciliations", "methods": ["GET"]},
       {"resource": "/v1/costing/reconciliations/*", "methods": ["GET"]},
@@ -1730,6 +1735,7 @@
       {"resource": "/v1/costing/valuation-ledgers", "methods": ["GET"]},
       {"resource": "/v1/costing/valuation-ledgers:preview", "methods": ["POST"]},
       {"resource": "/v1/costing/value-report", "methods": ["GET"]},
+      {"resource": "/v1/costing/value-report:ledger-tie-out", "methods": ["GET"]},
       {"resource": "/v1/costing/value-report:tie-out", "methods": ["POST"]},
       {"resource": "/v1/costing/versions", "methods": ["GET"]},
       {"resource": "/v1/costing/versions/*", "methods": ["GET"]},
@@ -2882,6 +2888,9 @@
       "ledger": ["ledger.entry.post", "ledger.journal.reverse"],
       "inventory": ["inventory.read"],
       "engineering": ["engineering.read"]
+    },
+    "costing": {
+      "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
     },
     "eam": {
       "ledger": ["ledger.entry.post", "ledger.balance.read"]
