@@ -11,11 +11,13 @@ resources:
   limits: { cpu: 250m, memory: 256Mi }
 serviceMonitor: { enabled: false }
 # Bank connectivity keys stay in Vault transit and are never exported. Leave addr
-# empty to switch it off (refused outside dev while bankChannels is set). Use
-# k8sRole (Vault Kubernetes auth) or tokenSecret (a Secret holding VAULT_TOKEN).
+# empty to switch it off (refused outside dev while bankChannels is set; the
+# chart still emits TREASURY_BANK_CHANNELS so that refusal fires). Use k8sRole
+# (Vault Kubernetes auth) or tokenSecret (a Secret holding VAULT_TOKEN).
 # The Vault role must set bound_service_account_names to this release's
 # ServiceAccount (named after the release) and bound_service_account_namespaces
-# to its namespace, so no other pod can log in.
+# to its namespace, so no other pod can log in. sftpKeyVersion pins the transit
+# key the bank is onboarded with; a rotation does not switch the login key.
 vault:
   addr: ""
   k8sRole: ""
@@ -23,4 +25,5 @@ vault:
   tokenSecret: ""
   signingKeyNames: []
   sftpKeyName: ""
+  sftpKeyVersion: 0
   bankChannels: []

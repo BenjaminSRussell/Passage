@@ -39,6 +39,10 @@ spec:
             - name: TREASURY_MAX_FILE_MB
               value: {{ .Values.statement.maxFileMb | quote }}
             {{- with .Values.vault }}
+            {{- if .bankChannels }}
+            - name: TREASURY_BANK_CHANNELS
+              value: {{ join "," .bankChannels | quote }}
+            {{- end }}
             {{- if .addr }}
             - name: VAULT_ADDR
               value: {{ .addr | quote }}
@@ -58,8 +62,10 @@ spec:
               value: {{ join "," .signingKeyNames | quote }}
             - name: TREASURY_SFTP_KEY_NAME
               value: {{ .sftpKeyName | quote }}
-            - name: TREASURY_BANK_CHANNELS
-              value: {{ join "," .bankChannels | quote }}
+            {{- if .sftpKeyVersion }}
+            - name: TREASURY_SFTP_KEY_VERSION
+              value: {{ .sftpKeyVersion | quote }}
+            {{- end }}
             {{- end }}
             {{- end }}
           ports:
