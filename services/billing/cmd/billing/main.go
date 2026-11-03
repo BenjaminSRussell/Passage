@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/api"
+	"github.com/BenjaminSRussell/passage/services/billing/internal/revrec"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/store"
 	"github.com/BenjaminSRussell/passage/services/billing/migrations"
 )
@@ -88,6 +89,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return err
 		}
 		a.WithLedger(ledger, st, profiles)
+	}
+	allocations, err := revrec.FromEnv(getenv)
+	if err != nil {
+		return fmt.Errorf("revrec client: %w", err)
+	}
+	if allocations != nil {
+		a.WithAllocations(allocations)
 	}
 	router := httpx.NewRouter()
 	a.Register(router)

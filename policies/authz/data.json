@@ -2489,6 +2489,10 @@
       {"resource": "/v1/production/posting-profiles", "methods": ["PUT"]},
       {"resource": "/v1/production/trigger-points/*", "methods": ["DELETE"]}
     ]},
+    "revrec.allocation.read": {"service_only": true, "permissions": [
+      {"resource": "/v1/revrec/contracts", "methods": ["GET"]},
+      {"resource": "/v1/revrec/contracts/*", "methods": ["GET"]}
+    ]},
     "revrec.maintain": {"permissions": [
       {"resource": "/v1/revrec/contracts", "methods": ["POST"]},
       {"resource": "/v1/revrec/milestones/*:satisfy", "methods": ["POST"]}
@@ -2870,7 +2874,8 @@
   },
   "service_grants": {
     "billing": {
-      "ledger": ["ledger.entry.post"],
+      "ledger": ["ledger.entry.post", "ledger.ledger.lookup"],
+      "revrec": ["revrec.allocation.read"],
       "sales": ["sales.order.record-invoice", "sales.order.record-delivery"]
     },
     "fulfillment": {

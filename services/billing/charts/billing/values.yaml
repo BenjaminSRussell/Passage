@@ -26,6 +26,9 @@ serviceIdentity:
 # taxAccount, chargeAccount and deferredRevenueAccounts.
 ledgerUrl: ""
 glProfiles: []
+# Revrec reads the allocation of a contract (REVREC_URL). Unset, an invoice that has lines on a
+# deferred revenue account is not booked: it backs off with BIL-0207 until revrec answers.
+revrecUrl: ""
 resources:
   requests: { cpu: 100m, memory: 128Mi }
   limits: { cpu: 500m, memory: 256Mi }

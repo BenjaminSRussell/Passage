@@ -93,6 +93,7 @@ paths:
       parameters:
         - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
         - { name: customerId, in: query, schema: { type: string, format: uuid } }
+        - { name: orderId, in: query, description: "The contracts of one sales order; billing reads the allocation of the order it invoices.", schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { type: string, enum: [OPEN, COMPLETE, CANCELLED] } }
         - { name: method, in: query, description: "Contracts with at least one obligation of this recognition method.", schema: { type: string, enum: [POINT_IN_TIME, RATABLE, MILESTONE, USAGE] } }
         - { name: cursor, in: query, description: "The nextCursor of the previous page (opaque).", schema: { type: string } }
@@ -307,9 +308,11 @@ paths:
         period (`difference`: recognized revenue the ledger does not hold yet), and
         the roll-forward's closing deferred balance (the allocated deferred amounts
         less revenue recognized) with the ledger's closing 2400 balance, credits less
-        debits (`closingDifference`). An invoice that booked a deferred share other than
-        the allocation shows as a closing difference. `reconciled` needs both
-        differences to be zero.
+        debits (`closingDifference`). A deferral booked off the allocation shows as a
+        closing difference. The roll-forward adds a contract on its `contractDate`, the
+        ledger credits 2400 on the invoice's posting date, so an invoice posted in a later
+        month than its contract date shows a timing difference until it posts.
+        `reconciled` needs both differences to be zero.
       parameters:
         - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
         - { name: currency, in: query, required: true, schema: { type: string, pattern: "^[A-Z]{3}$" } }

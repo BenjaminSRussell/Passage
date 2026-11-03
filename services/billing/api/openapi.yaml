@@ -302,18 +302,28 @@ paths:
       x-passage-duty: billing.invoice.post (InvoicePost)
       description: >
         Books one balanced entry per posted invoice not yet booked: Dr receivable
-        (gross), Cr revenue per line account, Cr 2400 for lines on the deferred revenue
-        accounts of the entity's GL posting profile (`BILLING_GL_PROFILES`), Cr charges,
-        Cr tax. A credit note books the mirror entry. Ledger, accounts and amounts come
-        from the profile and the stored document, never from the request; the ledger key
+        (billed gross), Cr revenue per line account, Cr 2400, Cr charges, Cr tax. The invoice
+        lines, the receivable and the tax keep the contractual price; the split of the
+        lines between revenue and 2400 is the revrec allocation of the order's contract
+        (ASC 606, BR-29.1), read at posting time: the lines of a product share its allocated
+        amount, and the part that is not a POINT_IN_TIME obligation goes to 2400. An invoice
+        with a line on a deferred revenue account of the entity's GL posting profile
+        (`BILLING_GL_PROFILES`) is not booked while revrec has no unique contract for its
+        order or does not answer: it is listed under `failed` with BIL-0207 and backed off,
+        never booked at its billed amounts and never parked for it. The allocated amounts
+        must add up to the billed nets, because the PRD names no contract asset or liability
+        account for a difference: otherwise (or for a deferred line the allocation does not
+        cover) the document is parked with BIL-0208. A credit note books the mirror entry in
+        the proportions of its original. Ledger, accounts and amounts come
+        from the profile, the stored document and revrec, never from the request; the ledger key
         (`billing-invoice-<id>`, `billing-credit-note-<id>`) makes a retry return the same
         entry. A document the ledger refuses is listed under `failed`, retried later with
-        backoff and parked with its reason code after five attempts (`retryParked` offers
+        backoff and parked with its reason code after five refusals (`retryParked` offers
         parked documents again); it never holds up the documents behind it. A credit note
         is held until its original has its entry and is parked with BIL-0206 while the
         original is parked. A ledger failure without a verdict (502 BIL-0201) is recorded
-        on the document the same way, so one document that always fails is skipped by the
-        next call. At most 200
+        on the document with a backoff but does not count toward parking, so one document that
+        always fails is skipped by the next call and an outage never parks it. At most 200
         documents per call; `more` says that due documents remain. 503 BIL-0200 without
         `LEDGER_URL`, 422 BIL-0202 for an entity with no profile, 422 BIL-0203 when the
         profile's ledger belongs to another entity, 502 BIL-0201 when the ledger does not

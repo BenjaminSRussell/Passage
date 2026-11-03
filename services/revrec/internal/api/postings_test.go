@@ -166,12 +166,12 @@ func billedBundle(t *testing.T) (gross, deferred decimal.Decimal) {
 	for _, l := range testkit.BundleInvoiceLines {
 		net := decimal.RequireFromString(l.UnitPrice).Mul(decimal.RequireFromString(l.Qty)).Mul(hundred.Sub(decimal.RequireFromString(l.DiscountPct))).Div(hundred)
 		gross = gross.Add(net)
-		if l.RevenueAccount == "4100" {
-			deferred = deferred.Add(net)
+		if l.Method != "POINT_IN_TIME" {
+			deferred = deferred.Add(decimal.RequireFromString(l.Allocated))
 		}
 	}
 	if gross.StringFixed(2) != testkit.BundleInvoiceGross || deferred.StringFixed(2) != testkit.BundleInvoiceDeferred {
-		t.Fatalf("bundle invoice computes %s gross and %s deferred, want %s and %s", gross, deferred, testkit.BundleInvoiceGross, testkit.BundleInvoiceDeferred)
+		t.Fatalf("bundle invoice bills %s and its allocation defers %s, want %s and %s", gross, deferred, testkit.BundleInvoiceGross, testkit.BundleInvoiceDeferred)
 	}
 	return gross, deferred
 }

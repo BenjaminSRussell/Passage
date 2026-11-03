@@ -19,6 +19,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/billing/internal/revrec"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/store"
 )
 
@@ -30,18 +31,26 @@ const (
 	CodeJournalImbalance    = "BIL-0204"
 	CodeLedgerRefused       = "BIL-0205"
 
+	CodeAllocationUnavailable = "BIL-0207"
+	CodeAllocationMismatch    = "BIL-0208"
+
 	defaultGLBatch = 200
 )
 
 type GLBooks interface {
 	DueGLDocuments(ctx context.Context, legalEntityID string, now time.Time, limit int) ([]store.GLDocument, bool, error)
-	MarkGLBooked(ctx context.Context, id, entryID string) (bool, error)
-	RecordGLRefusal(ctx context.Context, id, code string, now time.Time, park bool) (bool, error)
+	MarkGLBooked(ctx context.Context, id, entryID string, shares map[int]store.GLShare) (bool, error)
+	RecordGLRefusal(ctx context.Context, id, code string, now time.Time, outcome store.GLOutcome) (bool, error)
 	UnparkGL(ctx context.Context, legalEntityID string) (int64, error)
 }
 
 func (a *API) WithLedger(ledger ledgerclient.Ledger, books GLBooks, profiles map[string]store.GLProfile) *API {
 	a.ledger, a.glBooks, a.profiles = ledger, books, profiles
+	return a
+}
+
+func (a *API) WithAllocations(reader revrec.Reader) *API {
+	a.allocations = reader
 	return a
 }
 
@@ -91,7 +100,118 @@ type glFailedOut struct {
 	Parked     bool   `json:"parked"`
 }
 
-func glEntry(p store.GLProfile, d store.GLDocument) (ledgerclient.Entry, string) {
+func onDeferredAccount(p store.GLProfile, l store.GLLine) bool {
+	return slices.Contains(p.DeferredRevenueAccounts, l.Account)
+}
+
+var errAllocationsNotConfigured = errors.New("revrec is not configured for this service")
+
+func (a *API) allocationsFor(ctx context.Context, le string, p store.GLProfile, d store.GLDocument) (map[string]revrec.Allocation, error) {
+	if d.CreditNote || !slices.ContainsFunc(d.Lines, func(l store.GLLine) bool { return onDeferredAccount(p, l) }) {
+		return nil, nil
+	}
+	out := map[string]revrec.Allocation{}
+	for _, l := range d.Lines {
+		if _, done := out[l.OrderID]; done || l.OrderID == "" {
+			continue
+		}
+		if a.allocations == nil {
+			return nil, errAllocationsNotConfigured
+		}
+		alloc, err := a.allocations.Allocation(ctx, le, l.OrderID)
+		if errors.Is(err, revrec.ErrNoContract) && !slices.ContainsFunc(d.Lines, func(o store.GLLine) bool { return o.OrderID == l.OrderID && onDeferredAccount(p, o) }) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out[l.OrderID] = alloc
+	}
+	return out, nil
+}
+
+type orderProduct struct{ order, product string }
+
+func portion(whole, part, of decimal.Decimal, places int32) decimal.Decimal {
+	if part.Equal(of) {
+		return whole
+	}
+	return whole.Mul(part).DivRound(of, 12).Round(places)
+}
+
+func glSplit(p store.GLProfile, d store.GLDocument, allocs map[string]revrec.Allocation) (map[int]store.GLShare, string) {
+	places := money.MinorUnits(d.Currency)
+	shares := make(map[int]store.GLShare, len(d.Lines))
+	billed := map[orderProduct][]store.GLLine{}
+	for _, l := range d.Lines {
+		alloc, covered := allocs[l.OrderID]
+		_, inContract := allocatedFor(alloc, l.ProductID)
+		switch {
+		case d.CreditNote && l.Original != nil:
+			o := l.Original
+			if o.Net.IsZero() {
+				shares[l.No] = store.GLShare{}
+			} else {
+				shares[l.No] = store.GLShare{Allocated: portion(l.Net, o.Share.Allocated, o.Net, places), Deferred: portion(l.Net, o.Share.Deferred, o.Net, places)}
+			}
+		case !d.CreditNote && covered && l.ProductID != "" && inContract:
+			if alloc.Currency != d.Currency {
+				return nil, CodeAllocationMismatch
+			}
+			key := orderProduct{l.OrderID, l.ProductID}
+			billed[key] = append(billed[key], l)
+		case onDeferredAccount(p, l):
+			return nil, CodeAllocationMismatch
+		default:
+			shares[l.No] = store.GLShare{Allocated: l.Net}
+		}
+	}
+	for key, lines := range billed {
+		total := decimal.Zero
+		for _, l := range lines {
+			total = total.Add(l.Net)
+		}
+		if !total.IsPositive() {
+			return nil, CodeAllocationMismatch
+		}
+		allocated, _ := allocatedFor(allocs[key.order], key.product)
+		deferred := decimal.Zero
+		for _, o := range allocs[key.order].Obligations {
+			if o.ProductID == key.product && o.Method != revrec.MethodPoint {
+				deferred = deferred.Add(o.Allocated)
+			}
+		}
+		leftA, leftD := allocated, deferred
+		for i, l := range lines {
+			s := store.GLShare{Allocated: leftA, Deferred: leftD}
+			if i < len(lines)-1 {
+				s = store.GLShare{Allocated: portion(allocated, l.Net, total, places), Deferred: portion(deferred, l.Net, total, places)}
+			}
+			leftA, leftD = leftA.Sub(s.Allocated), leftD.Sub(s.Deferred)
+			shares[l.No] = s
+		}
+	}
+	allocatedTotal, billedTotal := decimal.Zero, decimal.Zero
+	for _, l := range d.Lines {
+		allocatedTotal, billedTotal = allocatedTotal.Add(shares[l.No].Allocated), billedTotal.Add(l.Net)
+	}
+	if !allocatedTotal.Equal(billedTotal) {
+		return nil, CodeAllocationMismatch
+	}
+	return shares, ""
+}
+
+func allocatedFor(alloc revrec.Allocation, productID string) (decimal.Decimal, bool) {
+	total, found := decimal.Zero, false
+	for _, o := range alloc.Obligations {
+		if o.ProductID == productID {
+			total, found = total.Add(o.Allocated), true
+		}
+	}
+	return total, found
+}
+
+func glEntry(p store.GLProfile, d store.GLDocument, shares map[int]store.GLShare) (ledgerclient.Entry, string) {
 	kind, key, source := "invoice", "billing-invoice-", "billing_invoice"
 	if d.CreditNote {
 		kind, key, source = "credit_note", "billing-credit-note-", "billing_credit_note"
@@ -113,11 +233,9 @@ func glEntry(p store.GLProfile, d store.GLDocument) (ledgerclient.Entry, string)
 		e.Lines = append(e.Lines, ledgerclient.Line{Account: account, Credit: !d.CreditNote, Amount: amount, Text: text})
 	}
 	for _, l := range d.Lines {
-		account := l.Account
-		if slices.Contains(p.DeferredRevenueAccounts, account) {
-			account = store.DeferredGL
-		}
-		add(account, l.Net)
+		s := shares[l.No]
+		add(l.Account, s.Allocated.Sub(s.Deferred))
+		add(store.DeferredGL, s.Deferred)
 	}
 	add(p.ChargeAccount, d.Charges)
 	add(p.TaxAccount, d.Tax)
@@ -127,13 +245,15 @@ func glEntry(p store.GLProfile, d store.GLDocument) (ledgerclient.Entry, string)
 	return e, ""
 }
 
-// postGL books the invoice journal (FR-29.3) of every posted invoice and credit note not yet booked: Dr receivable for the gross,
-// Cr revenue per line account, Cr 2400 for lines on the profile's deferred revenue accounts, Cr charges, Cr tax; a credit note books the
-// mirror. Ledger, accounts and amounts come from the profile and the stored document, never the request, and the ledger key is derived
-// from the document id, so a retry after a lost answer returns the same entry. A document the ledger refuses is recorded with a
-// backed-off next attempt and parked after store.MaxGLAttempts, so it cannot hold up the documents behind it; a call the ledger fails
-// without a verdict is recorded the same way and ends the run, so one document that always fails is skipped by the next call.
-// A credit note waits for the entry of its original (store.DueGLDocuments).
+// postGL books the invoice journal (FR-29.3) of every posted invoice and credit note not yet booked: Dr receivable for the billed
+// gross, Cr revenue per line account and Cr 2400 for the deferred part (glSplit: the revrec allocation, not the invoice price, when
+// a line is on a deferred revenue account), Cr charges, Cr tax; a credit note books the mirror. Ledger, accounts and amounts come from
+// the profile, the stored document and revrec, never the request, and the ledger key is derived from the document id, so a retry
+// after a lost answer returns the same entry. A document the ledger refuses is recorded with a backed-off next attempt and parked
+// after store.MaxGLAttempts refusals, so it cannot hold up the documents behind it. A document whose allocation revrec cannot give
+// is backed off without being booked and without counting toward parking; a call the ledger fails without a verdict is recorded the
+// same way and ends the run, so one document that always fails is skipped by the next call. A credit note waits for the entry of
+// its original (store.DueGLDocuments).
 func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
 	if a.ledger == nil || a.glBooks == nil {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, CodeLedgerNotConfigured, "the general ledger is not configured for this service"))
@@ -186,20 +306,34 @@ func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
 	items, failed := make([]glBookedOut, 0, len(pending)), []glFailedOut{}
 	for _, d := range pending {
 		err = nil
-		entry, imbalance := glEntry(profile, d)
+		allocs, aerr := a.allocationsFor(ctx, le, profile, d)
+		if aerr != nil {
+			slog.ErrorContext(ctx, "revrec allocation not available; invoice not booked", "documentId", d.ID, "err", aerr, "correlationId", cid)
+			if _, rerr := a.glBooks.RecordGLRefusal(ctx, d.ID, CodeAllocationUnavailable, now, store.GLNoVerdict); rerr != nil && !errors.Is(rerr, store.ErrGLAlreadyBooked) {
+				httpx.Fail(w, r, rerr)
+				return
+			}
+			failed = append(failed, glFailedOut{DocumentID: d.ID, Number: d.Number, LedgerCode: CodeAllocationUnavailable})
+			continue
+		}
+		shares, imbalance := glSplit(profile, d, allocs)
+		var entry ledgerclient.Entry
+		if imbalance == "" {
+			entry, imbalance = glEntry(profile, d, shares)
+		}
 		var entryID string
 		if imbalance == "" {
 			entryID, err = a.ledger.Post(ctx, entry)
 		}
 		if imbalance != "" || ledgerclient.Rejected(err) {
-			code := imbalance
+			code, outcome := imbalance, store.GLPark
 			if code == "" {
-				code = ledgerclient.CodeOf(err)
+				code, outcome = ledgerclient.CodeOf(err), store.GLRefused
 			}
 			if code == "" {
 				code = CodeLedgerRefused
 			}
-			parked, rerr := a.glBooks.RecordGLRefusal(ctx, d.ID, code, now, imbalance != "")
+			parked, rerr := a.glBooks.RecordGLRefusal(ctx, d.ID, code, now, outcome)
 			if errors.Is(rerr, store.ErrGLAlreadyBooked) {
 				continue
 			}
@@ -213,7 +347,7 @@ func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			slog.ErrorContext(ctx, "general ledger call failed", "op", "post", "documentId", d.ID, "ledgerCode", ledgerclient.CodeOf(err), "err", err, "correlationId", cid)
-			if _, rerr := a.glBooks.RecordGLRefusal(ctx, d.ID, CodeLedgerUnavailable, now, false); rerr != nil && !errors.Is(rerr, store.ErrGLAlreadyBooked) {
+			if _, rerr := a.glBooks.RecordGLRefusal(ctx, d.ID, CodeLedgerUnavailable, now, store.GLNoVerdict); rerr != nil && !errors.Is(rerr, store.ErrGLAlreadyBooked) {
 				slog.ErrorContext(ctx, "general ledger failure not recorded", "documentId", d.ID, "err", rerr, "correlationId", cid)
 			}
 			p := httpx.NewProblem(http.StatusBadGateway, CodeLedgerUnavailable, "the general ledger did not answer")
@@ -221,7 +355,7 @@ func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
 			httpx.Fail(w, r, p)
 			return
 		}
-		if newly, err := a.glBooks.MarkGLBooked(ctx, d.ID, entryID); err != nil {
+		if newly, err := a.glBooks.MarkGLBooked(ctx, d.ID, entryID, shares); err != nil {
 			httpx.Fail(w, r, err)
 			return
 		} else if newly {

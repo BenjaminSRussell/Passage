@@ -388,6 +388,13 @@ func TestContracts_CompleteListAndIsolation(t *testing.T) {
 	if err != nil || len(byCustomer.Items) != 1 || byCustomer.Items[0].ID != bundle.ID {
 		t.Errorf("customer filter %+v err %v", byCustomer, err)
 	}
+	byOrder, err := s.ListContracts(ctx, ContractFilter{OrderID: bundle.OrderID, Limit: 10})
+	if err != nil || len(byOrder.Items) != 1 || byOrder.Items[0].ID != bundle.ID {
+		t.Errorf("order filter %+v err %v, want the bundle only", byOrder, err)
+	}
+	if none, err := s.ListContracts(ctx, ContractFilter{OrderID: ids.New(), Limit: 10}); err != nil || len(none.Items) != 0 {
+		t.Errorf("another order's filter %+v err %v, want none", none, err)
+	}
 	open, err := s.ListContracts(ctx, ContractFilter{Status: domain.ContractOpen, Limit: 10})
 	if err != nil || len(open.Items) != 0 {
 		t.Errorf("open filter %+v err %v, want none", open, err)

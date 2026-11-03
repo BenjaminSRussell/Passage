@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
+	"github.com/BenjaminSRussell/passage/services/billing/internal/revrec"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/store"
 	"github.com/BenjaminSRussell/passage/services/billing/migrations"
 )
@@ -40,15 +42,74 @@ func (l *refusingLedger) Post(ctx context.Context, e ledgerclient.Entry) (string
 	return l.Fake.Post(ctx, e)
 }
 
+type fakeAllocations struct {
+	byOrder map[string]revrec.Allocation
+	err     error
+	reads   int
+}
+
+func (f *fakeAllocations) Allocation(_ context.Context, _, orderID string) (revrec.Allocation, error) {
+	f.reads++
+	if f.err != nil {
+		return revrec.Allocation{}, f.err
+	}
+	a, ok := f.byOrder[orderID]
+	if !ok {
+		return revrec.Allocation{}, revrec.ErrNoContract
+	}
+	return a, nil
+}
+
 type glRig struct {
 	handler  http.Handler
 	api      *API
 	admin    *pgxpool.Pool
 	fake     *ledgerclient.Fake
 	ledger   *refusingLedger
+	allocs   *fakeAllocations
 	ledgerID string
 	clock    time.Time
 	seq      int
+}
+
+func (g *glRig) shipLine(t *testing.T, invoiceID string, lineNo int, orderID, productID string) {
+	t.Helper()
+	if _, err := g.admin.Exec(context.Background(), `update invoice_line set order_id = $3::uuid, product_id = $4::uuid, order_line_id = $5::uuid,
+		packing_slip_id = $5::uuid, packing_slip_line_id = $5::uuid, packing_slip_date = '2027-03-08'
+		where invoice_id = $1::uuid and line_no = $2`, invoiceID, lineNo, orderID, productID, ids.New()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (g *glRig) allocate(orderID string, obligations ...revrec.Obligation) {
+	g.allocs.byOrder[orderID] = revrec.Allocation{Currency: "USD", Obligations: obligations}
+}
+
+func (g *glRig) deferredInvoice(t *testing.T, price string) string {
+	t.Helper()
+	id := g.invoice(t, gridLine{price, "4100", "", ""})
+	order, product := ids.New(), ids.New()
+	g.shipLine(t, id, 1, order, product)
+	g.allocate(order, revrec.Obligation{ProductID: product, Allocated: decimal.RequireFromString(price), Method: "RATABLE"})
+	return id
+}
+
+func (g *glRig) bundleInvoice(t *testing.T) string {
+	t.Helper()
+	var lines []gridLine
+	for _, l := range testkit.BundleInvoiceLines {
+		lines = append(lines, gridLine{l.UnitPrice, l.RevenueAccount, "", l.DiscountPct})
+	}
+	id := g.invoice(t, lines...)
+	order := ids.New()
+	var obligations []revrec.Obligation
+	for i, l := range testkit.BundleInvoiceLines {
+		product := ids.New()
+		g.shipLine(t, id, i+1, order, product)
+		obligations = append(obligations, revrec.Obligation{ProductID: product, Allocated: decimal.RequireFromString(l.Allocated), Method: l.Method})
+	}
+	g.allocate(order, obligations...)
+	return id
 }
 
 func newGLRig(t *testing.T, configured bool) *glRig {
@@ -59,13 +120,13 @@ func newGLRig(t *testing.T, configured bool) *glRig {
 	}
 	st := store.New(app)
 	fake := ledgerclient.NewFake()
-	g := &glRig{admin: admin, fake: fake, ledger: &refusingLedger{Fake: fake, refuse: map[string]error{}}, ledgerID: ids.New(), clock: time.Date(2027, 3, 12, 15, 4, 0, 0, time.UTC)}
+	g := &glRig{admin: admin, fake: fake, allocs: &fakeAllocations{byOrder: map[string]revrec.Allocation{}}, ledger: &refusingLedger{Fake: fake, refuse: map[string]error{}}, ledgerID: ids.New(), clock: time.Date(2027, 3, 12, 15, 4, 0, 0, time.UTC)}
 	fake.AddLedger(g.ledgerID, leID)
 	tax, err := ParseTaxRates("EXEMPT=0,DE19=19")
 	if err != nil {
 		t.Fatal(err)
 	}
-	g.api = New(st, tax, 2000)
+	g.api = New(st, tax, 2000).WithAllocations(g.allocs)
 	if configured {
 		g.api.WithLedger(g.ledger, st, map[string]store.GLProfile{leID: {
 			LegalEntityID: leID, LedgerID: g.ledgerID, ReceivableAccount: "1200", TaxAccount: "2300", ChargeAccount: "4800", DeferredRevenueAccounts: []string{"4100"},
@@ -180,6 +241,9 @@ func sameAmounts(got, want map[string]string) bool {
 func TestGLPostings_InvoiceJournalIsOneBalancedEntryAndCreditNoteMirrorsIt(t *testing.T) {
 	g := newGLRig(t, true)
 	id := g.invoice(t, gridLine{"3000.00", "4100", "", ""}, gridLine{"500.00", "4000", "DE19", ""})
+	order, product := ids.New(), ids.New()
+	g.shipLine(t, id, 1, order, product)
+	g.allocate(order, revrec.Obligation{ProductID: product, Allocated: decimal.RequireFromString("3000.00"), Method: "RATABLE"})
 	zero := g.invoice(t, gridLine{"0", "4000", "", ""})
 
 	out := g.book(t, http.StatusOK, "")
@@ -216,24 +280,112 @@ func TestGLPostings_InvoiceJournalIsOneBalancedEntryAndCreditNoteMirrorsIt(t *te
 	}
 }
 
-func TestGLPostings_BundleInvoiceBooksTheAllocatedDeferredShare(t *testing.T) {
+func TestGLPostings_BundleInvoiceBooksTheAllocationNotTheContractualLinePrices(t *testing.T) {
 	g := newGLRig(t, true)
-	var lines []gridLine
-	for _, l := range testkit.BundleInvoiceLines {
-		lines = append(lines, gridLine{l.UnitPrice, l.RevenueAccount, "", l.DiscountPct})
-	}
-	id := g.invoice(t, lines...)
+	id := g.bundleInvoice(t)
 	g.book(t, http.StatusOK, "")
-	want := map[string]string{"Dr 1200": testkit.BundleInvoiceGross, "Cr 4000": "7200.00", "Cr 2400": testkit.BundleInvoiceDeferred}
+	want := map[string]string{"Dr 1200": testkit.BundleInvoiceGross, "Cr 4000": testkit.BundleInvoiceRevenue, "Cr 2400": testkit.BundleInvoiceDeferred}
 	if got := lineAmounts(g.entryFor(t, id)); !sameAmounts(got, want) {
-		t.Errorf("bundle entry %v, want %v (BR-29.1: Cr 4000 7,200.00, Cr 2400 3,600.00)", got, want)
+		t.Fatalf("bundle entry %v, want %v (BR-29.1: Cr 4000 7,200.00, Cr 2400 3,600.00 although the lines bill 8,000.00 / 1,350.00 / 1,450.00)", got, want)
+	}
+	rows, err := g.admin.Query(context.Background(), `select line_net::text from invoice_line where invoice_id = $1::uuid order by line_no`, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nets, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil || len(nets) != 3 {
+		t.Fatalf("invoice lines %v, err %v", nets, err)
+	}
+	for i, want := range []string{"8000", "1350", "1450"} {
+		if !decimal.RequireFromString(nets[i]).Equal(decimal.RequireFromString(want)) {
+			t.Errorf("line %d bills %s, want the contractual %s", i+1, nets[i], want)
+		}
+	}
+
+	for _, recognized := range []string{"1350.00", "2250.00"} {
+		if _, err := g.fake.Post(context.Background(), ledgerclient.Entry{LegalEntityID: leID, LedgerID: g.ledgerID, DocumentID: ids.New(), PostingDate: "2027-04-30", Currency: "USD",
+			IdempotencyKey: "recognize-" + recognized, SourceType: "revenue_recognition",
+			Lines: []ledgerclient.Line{{Account: "2400", Amount: decimal.RequireFromString(recognized)}, {Account: "4000", Credit: true, Amount: decimal.RequireFromString(recognized)}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if b := g.balance(t, "2400"); !b.Net().IsZero() || b.Credit.StringFixed(2) != testkit.BundleInvoiceDeferred {
+		t.Errorf("2400 holds credits %s and nets %s after the term, want 3,600.00 credited and 0.00 left", b.Credit, b.Net())
+	}
+
+	cn := g.creditNote(t, id)
+	if out := g.book(t, http.StatusOK, ""); len(out.Items) != 1 || out.Items[0].DocumentID != cn {
+		t.Fatalf("credit note call %+v, want the note booked", out)
+	}
+	wantMirror := map[string]string{"Cr 1200": testkit.BundleInvoiceGross, "Dr 4000": testkit.BundleInvoiceRevenue, "Dr 2400": testkit.BundleInvoiceDeferred}
+	if got := lineAmounts(g.entryFor(t, cn)); !sameAmounts(got, wantMirror) {
+		t.Errorf("credit note entry %v, want the allocation mirrored %v", got, wantMirror)
+	}
+}
+
+func TestGLPostings_InvoiceWhoseBilledNetsDifferFromTheAllocationIsParkedNotBooked(t *testing.T) {
+	g := newGLRig(t, true)
+	id := g.invoice(t, gridLine{"1450.00", "4100", "", ""})
+	order, product := ids.New(), ids.New()
+	g.shipLine(t, id, 1, order, product)
+	g.allocate(order, revrec.Obligation{ProductID: product, Allocated: decimal.RequireFromString("2250.00"), Method: "RATABLE"})
+	free := g.invoice(t, gridLine{"300.00", "4100", "", ""})
+
+	out := g.book(t, http.StatusOK, "")
+	if len(out.Items) != 0 || len(out.Failed) != 2 || len(g.fake.Entries()) != 0 {
+		t.Fatalf("booked %+v with %d entries, want both refused locally and nothing in the ledger", out, len(g.fake.Entries()))
+	}
+	for _, doc := range []string{id, free} {
+		if g.parkedCode(t, doc) != CodeAllocationMismatch {
+			t.Errorf("document %s parked %q, want %s (billed 1,450.00 against 2,250.00 allocated; a deferred line with no obligation)", doc, g.parkedCode(t, doc), CodeAllocationMismatch)
+		}
+	}
+}
+
+func TestGLPostings_AllocationNotAvailableBacksOffAndNeverBooksTheBilledAmounts(t *testing.T) {
+	g := newGLRig(t, true)
+	id := g.deferredInvoice(t, "900.00")
+	ok := g.invoice(t, gridLine{"40.00", "4000", "", ""})
+	for name, err := range map[string]error{"no contract": revrec.ErrNoContract, "revrec down": errors.New("status 503"), "two contracts": revrec.ErrAmbiguous} {
+		g.allocs.err = err
+		for attempt := 0; attempt < store.MaxGLAttempts+2; attempt++ {
+			g.clock = g.clock.AddDate(0, 0, 2)
+			out := g.book(t, http.StatusOK, "")
+			if len(out.Failed) != 1 || out.Failed[0].DocumentID != id || out.Failed[0].LedgerCode != CodeAllocationUnavailable || out.Failed[0].Parked {
+				t.Fatalf("%s attempt %d: %+v, want the deferred invoice backed off with %s and never parked", name, attempt, out, CodeAllocationUnavailable)
+			}
+			if attempt == 0 && name == "no contract" {
+				g.entryFor(t, ok)
+			}
+		}
+		if g.parkedCode(t, id) != "" || len(g.fake.Entries()) != 1 {
+			t.Fatalf("%s: parked %q with %d entries, want an unparked invoice and only the invoice without deferral booked", name, g.parkedCode(t, id), len(g.fake.Entries()))
+		}
+	}
+	g.allocs.err = nil
+	g.clock = g.clock.AddDate(0, 0, 2)
+	if out := g.book(t, http.StatusOK, ""); len(out.Items) != 1 || out.Items[0].DocumentID != id {
+		t.Fatalf("once revrec answers %+v, want the invoice booked", out)
+	}
+	if b := g.balance(t, "2400"); b.Credit.StringFixed(2) != "900.00" {
+		t.Errorf("2400 credited %s, want 900.00", b.Credit)
+	}
+}
+
+func TestGLPostings_RevrecNotConfiguredHoldsDeferredInvoices(t *testing.T) {
+	g := newGLRig(t, true)
+	g.api.allocations = nil
+	id := g.invoice(t, gridLine{"900.00", "4100", "", ""})
+	g.shipLine(t, id, 1, ids.New(), ids.New())
+	if out := g.book(t, http.StatusOK, ""); len(out.Failed) != 1 || out.Failed[0].LedgerCode != CodeAllocationUnavailable || len(g.fake.Entries()) != 0 {
+		t.Errorf("without revrec %+v with %d entries, want the invoice held with %s", out, len(g.fake.Entries()), CodeAllocationUnavailable)
 	}
 }
 
 func TestGLPostings_LostLedgerAnswerNeverBooksADocumentTwice(t *testing.T) {
 	g := newGLRig(t, true)
-	g.invoice(t, gridLine{"1000.00", "4100", "", ""})
-	g.invoice(t, gridLine{"250.00", "4100", "", ""})
+	g.deferredInvoice(t, "1000.00")
+	g.deferredInvoice(t, "250.00")
 	g.fake.LoseAnswers(errors.New("timeout"))
 	if g.book(t, http.StatusBadGateway, ""); len(g.fake.Entries()) != 1 {
 		t.Fatalf("%d entries after the lost answer, want the one the ledger accepted", len(g.fake.Entries()))
@@ -370,12 +522,17 @@ func TestGLPostings_ProfileLedgerMustBelongToTheEntity(t *testing.T) {
 
 func TestGLEntry_UnbalancedDocumentIsNamedNotPosted(t *testing.T) {
 	p := store.GLProfile{LegalEntityID: leID, LedgerID: ids.New(), ReceivableAccount: "1200", TaxAccount: "2300", ChargeAccount: "4800", DeferredRevenueAccounts: []string{"4100"}}
-	d := store.GLDocument{ID: ids.New(), Currency: "USD", PostingDate: "2027-03-12", Gross: decimal.NewFromInt(100), Lines: []store.GLLine{{Account: "4000", Net: decimal.NewFromInt(90)}}}
-	if _, code := glEntry(p, d); code != CodeJournalImbalance {
+	d := store.GLDocument{ID: ids.New(), Currency: "USD", PostingDate: "2027-03-12", Gross: decimal.NewFromInt(100), Lines: []store.GLLine{{No: 1, Account: "4000", Net: decimal.NewFromInt(90)}}}
+	shares, code := glSplit(p, d, nil)
+	if code != "" {
+		t.Fatalf("split code %q", code)
+	}
+	if _, code := glEntry(p, d, shares); code != CodeJournalImbalance {
 		t.Errorf("code %q, want %s for a gross that is not lines plus charges plus tax", code, CodeJournalImbalance)
 	}
 	d.Lines[0].Net = decimal.NewFromInt(100)
-	if e, code := glEntry(p, d); code != "" || len(e.Lines) != 2 {
+	shares, _ = glSplit(p, d, nil)
+	if e, code := glEntry(p, d, shares); code != "" || len(e.Lines) != 2 {
 		t.Errorf("balanced document: code %q lines %d, want an entry of two lines", code, len(e.Lines))
 	}
 }
@@ -432,7 +589,7 @@ func (g *glRig) creditNote(t *testing.T, original string) string {
 
 func TestGLPostings_CreditNoteWaitsForItsOriginalAndIsParkedWithIt(t *testing.T) {
 	g := newGLRig(t, true)
-	original := g.invoice(t, gridLine{"1000.00", "4100", "", ""})
+	original := g.deferredInvoice(t, "1000.00")
 	refused := &ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: ledgerclient.CodePeriodClosed}
 	g.ledger.refuse[original] = refused
 	cn := g.creditNote(t, original)
@@ -475,6 +632,25 @@ func TestGLPostings_LedgerFailureWithoutVerdictIsRecordedAndSkippedNextCall(t *t
 	}
 	if out := g.book(t, http.StatusOK, ""); len(out.Items) != 1 || out.Items[0].DocumentID != good {
 		t.Fatalf("second call %+v, want the failing document backed off and the good one booked", out)
+	}
+}
+
+func TestGLPostings_AnOutageWithoutVerdictNeverParksADocumentOrItsCreditNotes(t *testing.T) {
+	g := newGLRig(t, true)
+	original := g.invoice(t, gridLine{"10.00", "4000", "", ""})
+	cn := g.creditNote(t, original)
+	g.ledger.refuse[original] = &ledgerclient.Error{Op: "post", Status: http.StatusServiceUnavailable}
+	for attempt := 0; attempt < store.MaxGLAttempts+3; attempt++ {
+		g.clock = g.clock.AddDate(0, 0, 2)
+		g.book(t, http.StatusBadGateway, "")
+	}
+	if g.parkedCode(t, original) != "" || g.parkedCode(t, cn) != "" {
+		t.Fatalf("original parked %q and credit note %q after an outage, want neither parked", g.parkedCode(t, original), g.parkedCode(t, cn))
+	}
+	delete(g.ledger.refuse, original)
+	g.clock = g.clock.AddDate(0, 0, 2)
+	if out := g.book(t, http.StatusOK, ""); len(out.Items) != 1 || out.Items[0].DocumentID != original {
+		t.Fatalf("after the outage %+v, want the original booked", out)
 	}
 }
 

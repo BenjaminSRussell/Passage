@@ -32,6 +32,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/billing/internal/revrec"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/store"
 )
 
@@ -96,6 +97,7 @@ type API struct {
 	glBooks       GLBooks
 	glBatch       int
 	profiles      map[string]store.GLProfile
+	allocations   revrec.Reader
 
 	proposalsCreated   atomic.Int64
 	invoicesPosted     atomic.Int64

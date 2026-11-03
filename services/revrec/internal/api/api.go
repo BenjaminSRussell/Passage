@@ -31,12 +31,13 @@ const (
 	// Duties (§5.29.17): RevRecView reads (preview, contracts, runs,
 	// roll-forward); RevRecMaintain creates contracts and satisfies milestones;
 	// RevRecPost runs the period recognition.
-	dutyView         = "revrec.view"
-	dutyMaintain     = "revrec.maintain"
-	dutyPost         = "revrec.post"
-	validationDetail = "request failed validation"
-	dateLayout       = "2006-01-02"
-	readyTimeout     = 500 * time.Millisecond
+	dutyView           = "revrec.view"
+	dutyAllocationRead = "revrec.allocation.read"
+	dutyMaintain       = "revrec.maintain"
+	dutyPost           = "revrec.post"
+	validationDetail   = "request failed validation"
+	dateLayout         = "2006-01-02"
+	readyTimeout       = 500 * time.Millisecond
 )
 
 var (
@@ -67,8 +68,8 @@ func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyView)).Post("/v1/revrec/allocations:preview", a.preview)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/revrec/contracts", a.createContract)
-	r.With(authz.RequireDuty(dutyView)).Get("/v1/revrec/contracts", a.listContracts)
-	r.With(authz.RequireDuty(dutyView)).Get("/v1/revrec/contracts/{id}", a.getContract)
+	r.With(authz.RequireAnyDuty(dutyView, dutyAllocationRead)).Get("/v1/revrec/contracts", a.listContracts)
+	r.With(authz.RequireAnyDuty(dutyView, dutyAllocationRead)).Get("/v1/revrec/contracts/{id}", a.getContract)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/revrec/milestones/{id}:satisfy", a.satisfyMilestone)
 	r.With(authz.RequireDuty(dutyPost)).Post("/v1/revrec/recognition-runs", a.runRecognition)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/revrec/recognition-runs", a.listRuns)

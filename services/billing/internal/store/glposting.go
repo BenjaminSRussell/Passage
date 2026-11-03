@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -29,9 +31,31 @@ type GLProfile struct {
 	DeferredRevenueAccounts []string `json:"deferredRevenueAccounts"`
 }
 
+type GLShare struct {
+	Allocated decimal.Decimal `json:"allocated"`
+	Deferred  decimal.Decimal `json:"deferred"`
+}
+
+type GLOutcome int
+
+const (
+	GLNoVerdict GLOutcome = iota
+	GLRefused
+	GLPark
+)
+
 type GLLine struct {
-	Account string
-	Net     decimal.Decimal
+	No        int
+	Account   string
+	Net       decimal.Decimal
+	OrderID   string
+	ProductID string
+	Original  *GLOriginal
+}
+
+type GLOriginal struct {
+	Net   decimal.Decimal
+	Share GLShare
 }
 
 type GLDocument struct {
@@ -84,8 +108,21 @@ func (s *Postgres) DueGLDocuments(ctx context.Context, legalEntityID string, now
 			}
 			d := GLDocument{ID: inv.ID, Number: inv.Number, CreditNote: inv.Type == domain.TypeCreditNote, Currency: inv.Currency,
 				PostingDate: inv.PostingDate.Format(dateLayout), Gross: inv.Totals.Gross, Charges: inv.Totals.Charges, Tax: inv.Totals.Tax}
+			var original map[int]GLShare
+			var originalLines []Line
+			if d.CreditNote {
+				if original, originalLines, err = loadBookedOriginal(ctx, tx, inv.OriginalInvoiceID); err != nil {
+					return err
+				}
+			}
 			for _, l := range lines {
-				d.Lines = append(d.Lines, GLLine{Account: l.RevenueAccount, Net: l.Net})
+				gl := GLLine{No: l.No, Account: l.RevenueAccount, Net: l.Net, OrderID: l.Source.OrderID, ProductID: l.Source.ProductID}
+				if share, ok := original[l.OriginalLineNo]; ok {
+					if i := slices.IndexFunc(originalLines, func(o Line) bool { return o.No == l.OriginalLineNo }); i >= 0 {
+						gl.Original = &GLOriginal{Net: originalLines[i].Net, Share: share}
+					}
+				}
+				d.Lines = append(d.Lines, gl)
 			}
 			out = append(out, d)
 		}
@@ -101,26 +138,52 @@ func (s *Postgres) DueGLDocuments(ctx context.Context, legalEntityID string, now
 	return out, more, nil
 }
 
-// MarkGLBooked stores the ledger entry of a document and reports whether this call was the one that did; a second call changes nothing.
-func (s *Postgres) MarkGLBooked(ctx context.Context, id, entryID string) (bool, error) {
+func loadBookedOriginal(ctx context.Context, tx pgx.Tx, originalID string) (map[int]GLShare, []Line, error) {
+	var raw []byte
+	if err := tx.QueryRow(ctx, `select gl_split from invoice where id = $1::uuid`, originalID).Scan(&raw); err != nil {
+		return nil, nil, err
+	}
+	if raw == nil {
+		return nil, nil, nil
+	}
+	var shares map[int]GLShare
+	if err := json.Unmarshal(raw, &shares); err != nil {
+		return nil, nil, err
+	}
+	lines, err := loadLines(ctx, tx, originalID)
+	return shares, lines, err
+}
+
+// MarkGLBooked stores the ledger entry of a document, and the shares an allocation booked per line number (nil when the document
+// was booked at its billed nets), and reports whether this call was the one that did; a second call changes nothing.
+func (s *Postgres) MarkGLBooked(ctx context.Context, id, entryID string, shares map[int]GLShare) (bool, error) {
+	var split []byte
+	if len(shares) > 0 {
+		var err error
+		if split, err = json.Marshal(shares); err != nil {
+			return false, err
+		}
+	}
 	var done bool
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `update invoice set journal_posting_id = $2::uuid, gl_last_error = null, gl_next_attempt_at = null
-			where id = $1::uuid and journal_posting_id is null`, id, entryID)
+		tag, err := tx.Exec(ctx, `update invoice set journal_posting_id = $2::uuid, gl_split = $3::jsonb, gl_last_error = null, gl_next_attempt_at = null
+			where id = $1::uuid and journal_posting_id is null`, id, entryID, split)
 		done = err == nil && tag.RowsAffected() > 0
 		return err
 	})
 	return done, err
 }
 
-// RecordGLRefusal counts a refused attempt, schedules the next one with exponential backoff (5 minutes, doubling, at most a day) and
-// parks the document with code once MaxGLAttempts is reached or when park is set; ErrGLAlreadyBooked says a concurrent call booked it.
-func (s *Postgres) RecordGLRefusal(ctx context.Context, id, code string, now time.Time, park bool) (parked bool, err error) {
+// RecordGLRefusal schedules the next attempt with exponential backoff (5 minutes, doubling, at most a day) and records code. A
+// GLRefused outcome, the ledger's verdict, counts toward MaxGLAttempts and parks the document with code when it is reached; GLPark
+// parks at once; GLNoVerdict (an outage, a missing allocation) never parks. ErrGLAlreadyBooked says a concurrent call booked it.
+func (s *Postgres) RecordGLRefusal(ctx context.Context, id, code string, now time.Time, outcome GLOutcome) (parked bool, err error) {
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		err := tx.QueryRow(ctx, `update invoice set gl_attempt_count = gl_attempt_count + 1, gl_last_error = $2,
+			gl_refusal_count = gl_refusal_count + case when $4::int = 1 then 1 else 0 end,
 			gl_next_attempt_at = $3::timestamptz + (5 * least(2 ^ gl_attempt_count, 288)) * interval '1 minute',
-			gl_parked_code = case when $4 or gl_attempt_count + 1 >= $5 then $2 end
-			where id = $1::uuid and journal_posting_id is null returning gl_parked_code is not null`, id, code, now, park, MaxGLAttempts).Scan(&parked)
+			gl_parked_code = case when $4::int = 2 or ($4::int = 1 and gl_refusal_count + 1 >= $5) then $2 end
+			where id = $1::uuid and journal_posting_id is null returning gl_parked_code is not null`, id, code, now, int(outcome), MaxGLAttempts).Scan(&parked)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrGLAlreadyBooked
 		}
@@ -133,7 +196,7 @@ func (s *Postgres) RecordGLRefusal(ctx context.Context, id, code string, now tim
 func (s *Postgres) UnparkGL(ctx context.Context, legalEntityID string) (int64, error) {
 	var n int64
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `update invoice set gl_parked_code = null, gl_attempt_count = 0, gl_next_attempt_at = null
+		tag, err := tx.Exec(ctx, `update invoice set gl_parked_code = null, gl_attempt_count = 0, gl_refusal_count = 0, gl_next_attempt_at = null
 			where legal_entity_id = $1::uuid and gl_parked_code is not null and journal_posting_id is null`, legalEntityID)
 		n = tag.RowsAffected()
 		return err
