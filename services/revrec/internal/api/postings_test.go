@@ -167,6 +167,67 @@ func TestGLReconciliation_ClosingBalanceTiesInvoiceDeferralsToRecognition(t *tes
 	}
 }
 
+func billedBundle(t *testing.T) (gross, deferred decimal.Decimal) {
+	t.Helper()
+	hundred := decimal.NewFromInt(100)
+	for _, l := range testkit.BundleInvoiceLines {
+		net := decimal.RequireFromString(l.UnitPrice).Mul(decimal.RequireFromString(l.Qty)).Mul(hundred.Sub(decimal.RequireFromString(l.DiscountPct))).Div(hundred)
+		gross = gross.Add(net)
+		if l.RevenueAccount == "4100" {
+			deferred = deferred.Add(net)
+		}
+	}
+	if gross.StringFixed(2) != testkit.BundleInvoiceGross || deferred.StringFixed(2) != testkit.BundleInvoiceDeferred {
+		t.Fatalf("bundle invoice computes %s gross and %s deferred, want %s and %s", gross, deferred, testkit.BundleInvoiceGross, testkit.BundleInvoiceDeferred)
+	}
+	return gross, deferred
+}
+
+func (g *ledgerRig) billInvoice(t *testing.T, gross, deferred decimal.Decimal, date string) {
+	t.Helper()
+	invoiceID := ids.New()
+	if _, err := g.ledger.Post(context.Background(), ledgerclient.Entry{
+		LegalEntityID: entityID, LedgerID: g.ledgerID, DocumentID: invoiceID, PostingDate: date, Currency: "USD",
+		IdempotencyKey: "billing-invoice-" + invoiceID, SourceType: "billing_invoice",
+		Lines: []ledgerclient.Line{
+			{Account: "1200", Amount: gross},
+			{Account: "4000", Credit: true, Amount: gross.Sub(deferred)},
+			{Account: store.DeferredAccount, Credit: true, Amount: deferred},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// BR-29.1: the bundle is billed 10,800.00 with 2,800.00 on the deferred lines (billing's own line nets) while the SSP allocation puts
+// 3,600.00 on the deferred obligations. Additions come from what billing booked, so the closing balance ties at every month end and the
+// revenue recognized beyond the billing is reported as a contract asset instead of a difference.
+func TestGLReconciliation_BundleDiscountClosingBalanceTiesToWhatBillingBooked(t *testing.T) {
+	g := newLedgerRig(t)
+	gross, deferred := billedBundle(t)
+	g.billInvoice(t, gross, deferred, "2027-03-10")
+	body := strings.Replace(bundleContract, `"transactionPrice": "10800.00",`, `"transactionPrice": "10800.00", "billedDeferred": "`+deferred.StringFixed(2)+`",`, 1)
+	created := decodeContract(t, call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", body, map[string]string{idempotencyKey: idemKey}))
+	if rec := call(t, g.handler, http.MethodPost, "/v1/revrec/milestones/"+created.Obligations[1].ID+":satisfy", `{"satisfiedOn":"2027-03-25"}`, nil); rec.Code != http.StatusOK {
+		t.Fatalf("satisfy: %d %s", rec.Code, rec.Body)
+	}
+	g.run(t, "2027-03-31")
+	g.post(t, http.StatusOK)
+	march := g.reconcile(t, "2027-03")
+	if !march.Reconciled || march.ClosingDiff != "0.00" || march.ContractAsset != "0.00" || march.GLCredit != "2800.00" ||
+		march.Deferred != fixed(deferred.Sub(decimal.RequireFromString(march.Recognized)), "USD") {
+		t.Fatalf("March %+v, want the closing balance tied to the billed 2800.00 less recognition", march)
+	}
+
+	*g.clock = time.Date(2028, 4, 2, 9, 0, 0, 0, time.UTC)
+	g.run(t, "2028-03-31")
+	g.post(t, http.StatusOK)
+	last := g.reconcile(t, "2028-03")
+	if !last.Reconciled || last.ClosingDiff != "0.00" || last.Recognized != "3600.00" || last.Deferred != "-800.00" || last.GLClosing != "-800.00" || last.ContractAsset != "800.00" {
+		t.Errorf("after the full term %+v, want recognized 3600.00 against billed 2800.00: closing -800.00 on both sides and a contract asset of 800.00", last)
+	}
+}
+
 func TestGLReconciliation_MissingInvoiceDeferralBreaksTheClosingBalanceOnly(t *testing.T) {
 	g := newLedgerRig(t)
 	g.bill(t, "2000.00", "2027-03-10")
@@ -190,8 +251,8 @@ func TestJournalPostings_LedgerFailureRetriesWithoutDoublePosting(t *testing.T) 
 	if p := decodeProblem(t, rec); rec.Code != http.StatusBadGateway || p.Code != CodeLedgerRefused || len(g.revenueEntries()) != 0 {
 		t.Fatalf("failed post %d %s with %d entries, want 502 %s and none", rec.Code, p.Code, len(g.revenueEntries()), CodeLedgerRefused)
 	}
-	if rec := g.reconcile(t, "2027-03"); rec.Reconciled {
-		t.Errorf("reconciled %+v after a refused post, want a difference", rec)
+	if rec := g.reconcile(t, "2027-03"); rec.Reconciled || rec.Difference == "0.00" {
+		t.Errorf("%+v after a refused post, want the unposted revenue as the difference", rec)
 	}
 
 	g.ledger.FailPosts(nil)

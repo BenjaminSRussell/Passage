@@ -305,10 +305,11 @@ paths:
         Compares the cumulative revenue recognized by the roll-forward through
         the month end with the ledger's 2400 debit total through the same
         period (`difference`: recognized revenue the ledger does not hold yet), and
-        the roll-forward's closing deferred balance with the ledger's closing 2400
-        balance, credits less debits (`closingDifference`). The credits are the
-        deferred share billing books when it posts invoices. `reconciled` needs both
-        differences to be zero.
+        the roll-forward's closing deferred balance (what billing booked to 2400 for
+        the contracts, `billedDeferred`, less revenue recognized) with the ledger's
+        closing 2400 balance, credits less debits (`closingDifference`). `reconciled`
+        needs both differences to be zero. `contractAsset` reports revenue recognized
+        beyond what was billed, which the closing balances already net.
       parameters:
         - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
         - { name: currency, in: query, required: true, schema: { type: string, pattern: "^[A-Z]{3}$" } }
@@ -412,6 +413,7 @@ components:
         customerId: { type: string, format: uuid }
         currency: { type: string, pattern: "^[A-Z]{3}$" }
         transactionPrice: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$" }
+        billedDeferred: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "What billing booked to 2400 for the contract; the roll-forward adds it to the deferred balance. Defaults to the allocated deferred amounts." }
         residualRule: { type: string, enum: [LARGEST, FIRST, LAST], default: LARGEST }
         ratableBasis: { type: string, enum: [DAILY, MONTHLY], default: DAILY, description: "§5.29.13 ratable_basis. DAILY weighs each month by the days the term covers; MONTHLY gives every month the term touches an equal share. The residual is on the last line." }
         contractDate: { type: string, format: date, description: "The invoice date that opens the deferral." }
@@ -578,7 +580,7 @@ components:
               journalEntryId: { type: string }
     GLReconciliation:
       type: object
-      required: [legalEntityId, ledgerId, currency, period, account, recognized, glDebit, difference, deferred, glCredit, glClosing, closingDifference, reconciled]
+      required: [legalEntityId, ledgerId, currency, period, account, recognized, glDebit, difference, deferred, glCredit, glClosing, closingDifference, contractAsset, reconciled]
       properties:
         legalEntityId: { type: string, format: uuid }
         ledgerId: { type: string, format: uuid }
@@ -592,6 +594,7 @@ components:
         glCredit: { type: string }
         glClosing: { type: string }
         closingDifference: { type: string }
+        contractAsset: { type: string, description: "Revenue recognized beyond what billing booked for the contract (allocation above billing); informational, already part of the closing balances." }
         reconciled: { type: boolean }
     Problem:
       type: object

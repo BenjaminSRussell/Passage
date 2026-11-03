@@ -63,6 +63,7 @@ type contractRequest struct {
 	CustomerID       string                  `json:"customerId"`
 	Currency         string                  `json:"currency"`
 	TransactionPrice string                  `json:"transactionPrice"`
+	BilledDeferred   *string                 `json:"billedDeferred,omitempty"`
 	ResidualRule     string                  `json:"residualRule,omitempty"`
 	RatableBasis     string                  `json:"ratableBasis,omitempty"`
 	ContractDate     string                  `json:"contractDate"`
@@ -502,6 +503,9 @@ func buildContract(req contractRequest, fields map[string]string) (store.Contrac
 	if !domain.ValidResidualRule(req.ResidualRule) {
 		fields["residualRule"] = "must be LARGEST, FIRST or LAST"
 	}
+	if req.BilledDeferred != nil && !decimalText.MatchString(*req.BilledDeferred) {
+		fields["billedDeferred"] = "must be a non-negative decimal with at most 6 fraction digits"
+	}
 	contractDate, err := time.Parse(dateLayout, req.ContractDate)
 	if err != nil {
 		fields["contractDate"] = "must be a date as YYYY-MM-DD"
@@ -549,6 +553,10 @@ func buildContract(req contractRequest, fields map[string]string) (store.Contrac
 		ID: ids.New(), LegalEntityID: req.LegalEntityID, OrderID: req.OrderID, CustomerID: req.CustomerID,
 		Currency: req.Currency, TransactionPrice: price.Value, ResidualRule: req.ResidualRule, RatableBasis: basis,
 		ContractDate: contractDate,
+	}
+	if req.BilledDeferred != nil {
+		billed := money.Amount{Value: decimal.RequireFromString(*req.BilledDeferred), Currency: req.Currency}.Round().Value
+		c.BilledDeferred = &billed
 	}
 	for i, o := range allocated {
 		ob := store.Obligation{

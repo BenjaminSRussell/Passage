@@ -122,6 +122,26 @@ func claimLines(ctx context.Context, tx pgx.Tx, legalEntityID string, through ti
 	return groups, order, rows.Err()
 }
 
+// ContractAsset is the revenue contracts recognized through end beyond what billing booked for them: the part the 2400 balance
+// cannot cover because the allocation put more on the deferred obligations than the invoice billed.
+func (s *Postgres) ContractAsset(ctx context.Context, legalEntityID, currency string, end time.Time) (decimal.Decimal, error) {
+	var raw string
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select coalesce(sum(greatest(r.recognized - `+billedDeferredOf+`, 0)), 0)::text
+			from revenue_contract c
+			cross join lateral (select coalesce(sum(s.amount), 0) as recognized from revenue_schedule s
+				join performance_obligation o on o.tenant_id = s.tenant_id and o.id = s.obligation_id
+				where o.tenant_id = c.tenant_id and o.contract_id = c.id and o.method = any($5::text[]) and s.status = 'RECOGNIZED'
+				  and s.recognized_on <= $3::date) r
+			where c.legal_entity_id = $1::uuid and c.currency = $2 and c.contract_date <= $3::date and $4::text = ''`,
+			legalEntityID, currency, end.Format(dateLayout), "", domain.DeferredMethods()).Scan(&raw)
+	})
+	if err != nil {
+		return decimal.Zero, err
+	}
+	return decimal.NewFromString(raw)
+}
+
 type Completion struct {
 	Reattached   bool
 	Superseded   []string

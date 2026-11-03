@@ -295,20 +295,25 @@ paths:
           $ref: "#/components/responses/Problem"
         "503":
           $ref: "#/components/responses/Problem"
-  /v1/billing/deferral-postings:
+  /v1/billing/gl-postings:
     post:
-      operationId: postDeferrals
-      summary: Book the deferred revenue share of posted invoices in the general ledger (Dr receivable / Cr 2400).
+      operationId: postGL
+      summary: Book the invoice journal (FR-29.3) of posted invoices and credit notes in the general ledger.
       x-passage-duty: billing.invoice.post (InvoicePost)
       description: >
-        Books, per posted invoice not yet booked, the net of its lines on the deferred
-        revenue accounts of the entity's GL posting profile (`BILLING_GL_PROFILES`) as
-        one balanced entry. Ledger, accounts and amounts come from the profile and the
-        stored invoice, never from the request. The ledger idempotency key is derived
-        from the invoice id, so a retry never books an invoice twice. An entry the
-        ledger refuses is listed under `failed` and offered again by the next call.
-        Credit notes are not booked. 503 BIL-0200 without `LEDGER_URL`, 422 BIL-0202
-        for an entity with no profile, 502 BIL-0201 when the ledger does not answer.
+        Books one balanced entry per posted invoice not yet booked: Dr receivable
+        (gross), Cr revenue per line account, Cr 2400 for lines on the deferred revenue
+        accounts of the entity's GL posting profile (`BILLING_GL_PROFILES`), Cr charges,
+        Cr tax. A credit note books the mirror entry. Ledger, accounts and amounts come
+        from the profile and the stored document, never from the request; the ledger key
+        (`billing-invoice-<id>`, `billing-credit-note-<id>`) makes a retry return the same
+        entry. A document the ledger refuses is listed under `failed`, retried later with
+        backoff and parked with its reason code after five attempts (`retryParked` offers
+        parked documents again); it never holds up the documents behind it. At most 200
+        documents per call; `more` says that due documents remain. 503 BIL-0200 without
+        `LEDGER_URL`, 422 BIL-0202 for an entity with no profile, 422 BIL-0203 when the
+        profile's ledger belongs to another entity, 502 BIL-0201 when the ledger does not
+        answer (`errors.booked` lists the documents booked before the failure).
       requestBody:
         required: true
         content:
@@ -318,9 +323,10 @@ paths:
               required: [legalEntityId]
               properties:
                 legalEntityId: { type: string, format: uuid }
+                retryParked: { type: boolean }
       responses:
         "200":
-          description: The entries booked by this call and the invoices the ledger refused.
+          description: The entries booked by this call and the documents the ledger refused.
           content:
             application/json:
               schema:
@@ -331,8 +337,9 @@ paths:
                     items:
                       type: object
                       properties:
-                        invoiceId: { type: string, format: uuid }
+                        documentId: { type: string, format: uuid }
                         number: { type: string }
+                        kind: { type: string, enum: [invoice, credit_note] }
                         currency: { type: string }
                         postingDate: { type: string, format: date }
                         amount: { type: string }
@@ -342,9 +349,11 @@ paths:
                     items:
                       type: object
                       properties:
-                        invoiceId: { type: string, format: uuid }
+                        documentId: { type: string, format: uuid }
                         number: { type: string }
                         ledgerCode: { type: string }
+                        parked: { type: boolean }
+                  more: { type: boolean }
         "400":
           $ref: "#/components/responses/Problem"
         "401":

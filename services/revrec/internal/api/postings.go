@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -29,6 +30,7 @@ type PostingStore interface {
 	ClaimPostings(ctx context.Context, legalEntityID, ledgerID string, through time.Time, retryRejected bool) ([]store.Posting, []store.Posting, error)
 	CompletePosting(ctx context.Context, postingID, entryID string) (store.Completion, error)
 	RejectPosting(ctx context.Context, postingID, code string) error
+	ContractAsset(ctx context.Context, legalEntityID, currency string, end time.Time) (decimal.Decimal, error)
 }
 
 func (a *API) WithLedger(ledger ledgerclient.Ledger, postings PostingStore, ledgerIDs map[string]string) *API {
@@ -213,6 +215,7 @@ type glReconciliationOut struct {
 	GLCredit      string `json:"glCredit"`
 	GLClosing     string `json:"glClosing"`
 	ClosingDiff   string `json:"closingDifference"`
+	ContractAsset string `json:"contractAsset"`
 	Reconciled    bool   `json:"reconciled"`
 }
 
@@ -261,13 +264,18 @@ func (a *API) glReconciliation(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadGateway, CodeLedgerRefused, "the ledger reports "+bal.Currency+", not "+cur))
 		return
 	}
+	asset, err := a.postings.ContractAsset(r.Context(), le, cur, start.AddDate(0, 1, -1))
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
 	diff := rf.Recognized.Sub(bal.Debit)
 	glClosing := bal.Credit.Sub(bal.Debit)
 	closingDiff := rf.Closing.Sub(glClosing)
 	httpx.JSON(w, http.StatusOK, glReconciliationOut{
 		LegalEntityID: le, LedgerID: ledgerID, Currency: cur, Period: period, Account: store.DeferredAccount,
 		Recognized: fixed(rf.Recognized, cur), GLDebit: fixed(bal.Debit, cur), Difference: fixed(diff, cur),
-		Deferred: fixed(rf.Closing, cur), GLCredit: fixed(bal.Credit, cur), GLClosing: fixed(glClosing, cur), ClosingDiff: fixed(closingDiff, cur),
+		Deferred: fixed(rf.Closing, cur), GLCredit: fixed(bal.Credit, cur), GLClosing: fixed(glClosing, cur), ClosingDiff: fixed(closingDiff, cur), ContractAsset: fixed(asset, cur),
 		Reconciled: diff.IsZero() && closingDiff.IsZero(),
 	})
 }

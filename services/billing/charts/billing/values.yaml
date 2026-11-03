@@ -21,9 +21,9 @@ serviceIdentity:
   publicKeys: ""
   signingKeySecret: ""
   keyId: ""
-# Unset, the deferral postings answer 503 BIL-0200. When set, glProfiles (rendered as
+# Unset, the journal postings answer 503 BIL-0200. When set, glProfiles (rendered as
 # BILLING_GL_PROFILES) lists per legal entity: legalEntityId, ledgerId, receivableAccount,
-# deferredAccount and deferredRevenueAccounts.
+# taxAccount, chargeAccount and deferredRevenueAccounts.
 ledgerUrl: ""
 glProfiles: []
 resources:

@@ -1627,7 +1627,7 @@
       {"resource": "/v1/billing/subscriptions/*:change-plan", "methods": ["POST"]}
     ]},
     "billing.invoice.post": {"permissions": [
-      {"resource": "/v1/billing/deferral-postings", "methods": ["POST"]},
+      {"resource": "/v1/billing/gl-postings", "methods": ["POST"]},
       {"resource": "/v1/billing/invoices/*:post", "methods": ["POST"]}
     ]},
     "billing.invoice.view": {"permissions": [
