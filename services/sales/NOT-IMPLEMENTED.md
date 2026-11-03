@@ -452,6 +452,43 @@ still open) and a card with the reports plus delivered and invoiced columns on
 the order page. The OpenAPI and AsyncAPI documents pass the doc gates with no FAIL
 lines.
 
+Slice 23 adds `POST /orders/{id}:cancel-remainder` (BR-27.5), the close of a
+partly shipped order. Only a PARTIALLY_SHIPPED order takes it (`SLS-0025`
+otherwise; `If-Match`, duty `sales.order.write`, which the PRD duty catalog
+gives `:cancel-remainder` under SalesOrderMaintain; optional reason up to 500
+characters). Every line with nothing delivered, still OPEN or
+RESERVED, becomes CANCELLED; a line delivered in part keeps what was delivered
+(its quantity and net become the delivered quantity and the net at the same
+price and discount, status DELIVERED or INVOICED when all of it was invoiced);
+a line delivered in full is left. The order's net total is recomputed, so its
+open exposure (BR-27.3) falls to what was delivered and the "credit exposure of a
+partly delivered order" row below is answered for the case a remainder is
+closed. The order ends SHIPPED, or INVOICED when everything delivered was
+invoiced, and can still take invoice reports. In the same transaction: the
+allocation quota drawn by a cancelled line is returned and a cut line's draw is
+lowered to what it keeps (`allocation.returned` for each), the agreement quantity
+of the release that opened the order goes back for the closed quantity of its
+non-supplementary lines (at most the release quantity, once, `agreement.returned`
+with `returned_qty`), the line's open schedule lines are CANCELLED, a version
+with the field-level diff (quantity, line status, status, net total) is written
+and `order.remaindercancelled.v1` is queued with the legal entity and the
+cancelled and kept quantity of each closed line. Holds are not touched (unlike
+`:cancel`): the order lives on to be invoiced, a hold is released only through
+`holds/{h}:release` by its own duty and never by the user who applied it, and
+fulfillment keeps its copy of each hold from `orderhold.applied` / `released`
+and refuses a packing slip while one is active (FUL-0001), which also stops a
+slip for the closed remainder that was in flight. A delivery reported after the
+close is refused with `SLS-0058` ("nothing is left to deliver ... its remainder
+was cancelled"); invoice reports for the delivered quantity are still taken.
+There is no `Idempotency-Key` replay (as for `:confirm` and `:cancel`): the
+If-Match version makes a retry safe, so a retried close gets `412 SLS-0006` and
+never closes twice; the client reloads and sees the order SHIPPED. No migration and no new table:
+`allocation_consumption` and `sales_order_line` are already updated by the
+store. The web order page gains a "Cancel the remainder" card for a partly
+shipped order, shown to a user with `sales.order.write`, with a required
+confirmation box, a note that active holds stay, and the service's refusals. The OpenAPI and AsyncAPI documents
+pass the doc gates with no FAIL lines.
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
@@ -478,7 +515,7 @@ lines.
 | 4 | Temporal release workflow with approvers by duty and 2-business-day SLA timer (FR-27.8, AC E2E "SLA timer fires") | later slice of PSG-27; handoff for the Temporal namespace `sales` (deployment-cicd) | Release is a synchronous API call. The SLA due time is computed per legal entity (slice 11) and shown on the queue, but no workflow, no timer that fires and no escalation exist. |
 | 4 | Release validity re-trigger on amount increase > 5% (BR-27.4) | implemented | A CREDIT release covers its own order only while it is valid (7 days) and the amount is within the released amount plus 5% (`domain.ReleaseCovers`). At confirm, and when a PATCH raises a CONFIRMED order's total, a failing credit check that no valid release covers places a CREDIT hold. |
 | 4 | MANUAL / PRICE_REVIEW blocking warehouse release (BR-27.4) | handoff (w28) | The holds are placed and listed on the order; warehouse release belongs to fulfillment. |
-| 4 | Change management: PATCH with If-Match, version per change, field-level diff, selective re-pricing/ATP/credit, `order.changed` and `order.cancelled` events, optional approval per customer (FR-27.9, AC-27.7) | implemented in part | Built: PATCH, `:cancel`, version history and both events. Re-pricing recomputes the changed lines' nets from the entered price (the w26 price resolver is not called; see "Order entry grid" under Web). Re-promise sets a changed line's confirmed date to its requested date, the delivery date control confirm uses until the ATP projection exists. Slice 13 adds the optional approval per customer: see the slice 13 note above and the FR-27.9 change approval row below. Not built: `/lines/{l}:cancel-remainder` (`delivered_qty` exists since slice 22, the endpoint does not) and adding or removing lines by PATCH. PATCH changes DRAFT, OPEN and CONFIRMED orders only, so the undelivered lines of a PARTIALLY_SHIPPED order cannot be changed (they can still be promised and run); whether PATCH should reach them is a decision to confirm. |
+| 4 | Change management: PATCH with If-Match, version per change, field-level diff, selective re-pricing/ATP/credit, `order.changed` and `order.cancelled` events, optional approval per customer (FR-27.9, AC-27.7) | implemented in part | Built: PATCH, `:cancel`, version history and both events. Re-pricing recomputes the changed lines' nets from the entered price (the w26 price resolver is not called; see "Order entry grid" under Web). Re-promise sets a changed line's confirmed date to its requested date, the delivery date control confirm uses until the ATP projection exists. Slice 13 adds the optional approval per customer: see the slice 13 note above and the FR-27.9 change approval row below. Slice 23 adds `POST /orders/{id}:cancel-remainder` for the whole order (see the slice 23 note above); closing the remainder of a single line is not built, and neither is adding or removing lines by PATCH. PATCH changes DRAFT, OPEN and CONFIRMED orders only, so the undelivered lines of a PARTIALLY_SHIPPED order cannot be changed (they can still be promised and run); whether PATCH should reach them is a decision to confirm. |
 | 4 | Line-level status machine beyond confirm (RESERVED / PICKED / DELIVERED / INVOICED) and order status derivation (BR-27.5) | implemented in part (slice 22) | Built: PICKED (delivered in part), DELIVERED and INVOICED lines and the derived PARTIALLY_SHIPPED, SHIPPED and INVOICED order statuses, driven by `:record-progress`. Not built: RESERVED (set when the w16 reservation exists), CLOSED (needs the w30 payment signal), the automatic caller (fulfillment and billing do not call `:record-progress` yet, see the handoff row), reversal of a delivery or invoice (returns are w30) and the over-delivery tolerance (`overdelivery_pct` is 0: a delivery above the ordered quantity is `SLS-0059`). |
 | 4 | Order status CANCELLED path | implemented | `:cancel` from DRAFT, OPEN or CONFIRMED when no line is past RESERVED (BR-27.5); ACTIVE holds move to `CLEARED`. Reservations are not released because none exist yet (BR-27.7, w16). |
 | 5 | Customer portal order entry and status | handoff | Wave 30 (portal UI). The intake API it will use exists. |
@@ -591,6 +628,12 @@ consumers depend on it.
 | Invoice may not pass delivery (slice 22) | decision to confirm | An INVOICED report is refused (`SLS-0059`) beyond the line's delivered quantity. The PRD has billing invoice from posted packing slips, drop-ship lines get their slip from the vendor confirmation (FR-28.7) and down payments are open items, not line invoices (FR-30.21), so these all fit. Two PRD cases do not: order lines for non-stocked items invoiced without a slip (FR-29.1), for which billing reports DELIVERED under the invoice number first (two calls, each idempotent), and milestone billing (w29 revrec), which invoices amounts rather than line quantities and is not reported here. Alternative to confirm: let an INVOICED report deliver the non-stocked remainder in the same call (AX posts the physical update with the invoice). |
 | SUBSCRIPTION and RETURNED orders take no invoice report (slice 22) | decision to confirm | A SUBSCRIPTION order is invoiced per billing period by its w29 billing subscription (FR-29.10), so a per-period invoice cannot be counted against the line quantity (the second period would be refused and the first would mark the order INVOICED): INVOICED on a SUBSCRIPTION order is `SLS-0058`, DELIVERED is accepted, and such an order ends at SHIPPED. A RETURNED order receives goods and is credited (w30 RMA, receipt and credit note), so it takes neither report. |
 | Credit exposure of a partly delivered order (slice 22) | decision to confirm | An order counts its whole net total as open exposure while it is CONFIRMED or PARTIALLY_SHIPPED (BR-27.3) and nothing once it is SHIPPED; the undelivered remainder of a partly delivered order is not computed separately, so exposure is overstated by the delivered part until billing posts the invoice (w29 owns open AR). |
+| Authz seed for `:cancel-remainder` (slice 23) | handoff (authz seed, #313) | No new duty: the action uses the existing `sales.order.write`. One route row is needed under `sales.order.write` in `policies/authz/data.json`: `{"resource": "/v1/sales/orders/*:cancel-remainder", "methods": ["POST"]}`, so the gateway lets the call through. |
+| Fulfillment must react to `order.remaindercancelled` (slice 23) | handoff (fulfillment, wave 28) | Sales cannot see shipments, so it does not refuse a close while a release, pick or pack for the remainder is in flight; fulfillment owns that side. The `fulfillment-order` consumer should follow `dev.passage.sales.order.remaindercancelled.v1` on `passage.sales.order` (ordered by `version`, like `order.confirmed`). For each entry of `lines` (`line_id`, `kept_qty`, `cancelled_qty`; `kept_qty` 0 and `line_status` CANCELLED for a line closed with nothing delivered), it should cancel or close the shipment lines and pick work of that sales line that are not yet on a posted packing slip, beyond `kept_qty` less what was already posted. It should release their reservations (FR-28.2) and stop releasing the line again. It should refuse a packing slip post for that quantity with a FUL code naming the closed remainder, so the post fails before the goods leave. If a slip was already posted for the remainder before the event arrived (the race), the slip's `:record-progress` DELIVERED report is refused by sales with `422 SLS-0058` ("nothing is left to deliver ... its remainder was cancelled"). Fulfillment must not retry that report. It should raise it as an exception for the order desk: the goods are off the order and need a return (w30) or a new order. |
+| Cancelling the remainder of one line (slice 23) | later slice of PSG-27 | The action closes every undelivered line of the order; a per-line close (`/lines/{n}:cancel-remainder`) is not built. |
+| Duty for `:cancel-remainder` (slice 23) | decision to confirm | The PRD has two answers: the API table puts `:confirm, :cancel; /lines/{l}:cancel-remainder` under SalesOrderConfirm, and the duty catalog (and the Backorders screen) puts `:cancel-remainder` under SalesOrderMaintain, with SalesOrderConfirm only for `:confirm`. The route takes `sales.order.write` (SalesOrderMaintain), as the catalog says, while `:cancel` keeps `sales.order.confirm`. Alternative: `sales.order.confirm`, like `:cancel`. |
+| Holds at a remainder close (slice 23) | decision to confirm | ACTIVE holds stay on the closed order and are released by their owners (see the slice 23 note). Alternative: clear a CREDIT hold at the close, because the exposure it guarded is gone, emitting `orderhold.released` so fulfillment's copy follows. FRAUD and MANUAL holds would still stay. |
+| Remainder close needs no approval (slice 23) | decision to confirm | FR-27.9 change approval applies to CONFIRMED orders. A close of a PARTIALLY_SHIPPED order keeps the delivered quantity and is allowed to a holder of `sales.order.confirm`, without an approver or a change request. |
 | Jobs: ATP rebuild 01:00, credit review daily, order auto-close, intake DLQ replay | later slice of PSG-27 | No jobs built. |
 | SLO alerts (lag > 120 s, hold queue age, intake 5xx) and runbooks | handoff (deployment-cicd) | Alert rules live in deploy/ (outside owned paths). |
 

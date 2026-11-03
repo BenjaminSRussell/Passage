@@ -2,8 +2,9 @@ import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
-import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, StatusPill, Textarea, type DataTableColumn } from "../../shell/ui";
 import {
+  cancelOrderRemainder,
   describeProblem,
   getOrder,
   listOrderProgress,
@@ -13,8 +14,10 @@ import {
   type OrderProgress,
   type OrderProgressFilter,
   type OrderType,
+  type Order,
   type Problem,
   type ProgressKind,
+  type Versioned,
 } from "./api/client";
 import { dash, DECIMAL, formatDateTime, sentence, shortId, subtractDecimal, UUID } from "./format";
 import styles from "./pages.module.css";
@@ -28,6 +31,10 @@ import { useLoad } from "./useLoad";
  */
 export const DUTY_RECORD_DELIVERY = "sales.order.record-delivery";
 export const DUTY_RECORD_INVOICE = "sales.order.record-invoice";
+
+/** Closing the remainder of a partly shipped order is an order change (SalesOrderMaintain in the PRD duty catalog). */
+export const DUTY_CANCEL_REMAINDER = "sales.order.write";
+const REASON_MAX = 500;
 
 const kindDuty: Record<ProgressKind, string> = { DELIVERED: DUTY_RECORD_DELIVERY, INVOICED: DUTY_RECORD_INVOICE };
 
@@ -356,5 +363,72 @@ export function NewOrderProgressPage() {
         </form>
       </Card>
     </div>
+  );
+}
+
+/**
+ * Closes the undelivered remainder of a partly shipped order (BR-27.5): what
+ * shipped stays, the rest of every line is cancelled and the order becomes
+ * shipped. Holds are left for their owners to release. Shown only to a user
+ * who holds the order write duty.
+ */
+export function CancelRemainderCard({ order, etag, onDone }: { order: Order; etag: string; onDone: (res: Versioned<Order>) => void }) {
+  const duties = usePrincipalDuties();
+  const [reason, setReason] = useState("");
+  const [sure, setSure] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+  const [failure, setFailure] = useState<Problem | null>(null);
+  if (order.status !== "PARTIALLY_SHIPPED" || !holdsDuty(duties, DUTY_CANCEL_REMAINDER)) return null;
+  const open = order.lines.filter((l) => l.lineStatus !== "CANCELLED" && Number(subtractDecimal(l.quantity, l.deliveredQty ?? "0")) > 0);
+  const held = order.holds.some((h) => h.status === "ACTIVE");
+
+  async function submit() {
+    setFailure(null);
+    if (reason.length > REASON_MAX) {
+      setError(`Keep the reason to ${REASON_MAX} characters.`);
+      return;
+    }
+    setError(undefined);
+    setBusy(true);
+    try {
+      const res = await cancelOrderRemainder(order.id, etag, reason.trim());
+      setSure(false);
+      onDone(res);
+    } catch (e) {
+      setFailure(describeProblem(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Cancel the remainder">
+      <div className={styles.form}>
+        <p className={styles.note}>
+          What was delivered stays on the order. {open.length > 0 ? `Line ${open.map((l) => l.lineNo).join(", ")} still ${open.length === 1 ? "has" : "have"} quantity to deliver; ` : ""}closing the remainder cancels it, lowers the order total and the credit exposure to what was delivered, returns allocation quota and agreement quantity, and ends the order as shipped.
+          {held ? " Its active holds stay until they are released." : ""}
+        </p>
+        {failure ? (
+          <Alert tone="danger" title="The remainder was not cancelled" live="alert">
+            {failure.message} ({failure.code})
+          </Alert>
+        ) : null}
+        <FormField id="remainder-reason" label="Reason" optional error={error}>
+          {(control) => <Textarea {...control} rows={2} maxLength={REASON_MAX} value={reason} onChange={(e) => setReason(e.target.value)} invalid={Boolean(error)} />}
+        </FormField>
+        <div className={styles.formActions}>
+          <span className={styles.check}>
+            <Input id="remainder-sure" type="checkbox" checked={sure} onChange={(e) => setSure(e.target.checked)} />
+            <label htmlFor="remainder-sure">Cancel everything not yet delivered on this order</label>
+          </span>
+        </div>
+        <div className={styles.formActions}>
+          <Button variant="danger" loading={busy} disabled={!sure} onClick={submit}>
+            Cancel remainder
+          </Button>
+        </div>
+      </div>
+    </Card>
   );
 }

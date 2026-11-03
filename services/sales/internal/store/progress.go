@@ -148,6 +148,13 @@ func (s *Postgres) RecordProgress(ctx context.Context, in NewProgress, now time.
 		case o.OrderType == domain.OrderTypeSubscription && in.Kind == domain.ProgressInvoiced:
 			return problem(http.StatusUnprocessableEntity, CodeNotProgressable, "a SUBSCRIPTION order is invoiced per billing period by its billing subscription (FR-29.10), not against the line quantity")
 		}
+		if in.Kind == domain.ProgressDelivered && (o.Status == domain.OrderShipped || o.Status == domain.OrderInvoiced) {
+			// Also where fulfillment posts a slip for a remainder that sales
+			// closed before order.remaindercancelled reached it: the goods are not
+			// on the order any more and need a return or a new order.
+			return problem(http.StatusUnprocessableEntity, CodeNotProgressable, fmt.Sprintf(
+				"order is %s: nothing is left to deliver; every line is delivered in full or its remainder was cancelled", o.Status))
+		}
 		if !progressable(o.Status, in.Kind) {
 			return problem(http.StatusUnprocessableEntity, CodeNotProgressable, fmt.Sprintf("order is %s; %s cannot be recorded", o.Status, in.Kind))
 		}

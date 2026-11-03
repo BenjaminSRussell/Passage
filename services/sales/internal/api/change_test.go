@@ -156,3 +156,45 @@ func TestListOrderVersions(t *testing.T) {
 		t.Fatalf("malformed id: %d", rec.Code)
 	}
 }
+
+// remainderStore records the :cancel-remainder call.
+type remainderStore struct {
+	fakeStore
+	version int
+	reason  *string
+	actor   string
+}
+
+func (c *remainderStore) CancelRemainder(_ context.Context, _ string, version int, reason, actor string, _ time.Time) (store.Order, error) {
+	c.version, c.reason, c.actor = version, &reason, actor
+	return store.Order{Version: version + 1, Status: "SHIPPED", Lines: []store.Line{}, Holds: []store.Hold{}}, nil
+}
+
+// TestCancelRemainder_DutyAndBody checks that :cancel-remainder needs
+// sales.order.write (SalesOrderMaintain in the PRD duty catalog, not the
+// confirm duty) and If-Match, takes an optional reason and answers the order at
+// its new version.
+func TestCancelRemainder_DutyAndBody(t *testing.T) {
+	c := &remainderStore{}
+	id := ids.New()
+	path := orders + "/" + id + ":cancel-remainder"
+	rec := serveBody(t, c, http.MethodPost, path, `{"reason":"short shipped"}`, principal(dutyWrite), map[string]string{"If-Match": `"5"`})
+	if rec.Code != http.StatusOK || c.version != 5 || c.reason == nil || *c.reason != "short shipped" || c.actor == "" || rec.Header().Get("ETag") != `"6"` {
+		t.Fatalf("status %d version %d reason %v actor %q etag %s: %s", rec.Code, c.version, c.reason, c.actor, rec.Header().Get("ETag"), rec.Body.String())
+	}
+	c.reason = nil
+	if rec := serveBody(t, c, http.MethodPost, path, "", principal(dutyWrite), map[string]string{"If-Match": `"5"`}); rec.Code != http.StatusOK || c.reason == nil || *c.reason != "" {
+		t.Fatalf("without a body: %d", rec.Code)
+	}
+	c.reason = nil
+	if rec := serveBody(t, c, http.MethodPost, path, "", principal(dutyConfirm), map[string]string{"If-Match": `"5"`}); rec.Code != http.StatusForbidden || c.reason != nil {
+		t.Fatalf("with only the confirm duty: %d", rec.Code)
+	}
+	if rec := serveBody(t, c, http.MethodPost, path, "", principal(dutyWrite), nil); rec.Code != http.StatusPreconditionRequired || c.reason != nil {
+		t.Fatalf("without If-Match: %d", rec.Code)
+	}
+	long := `{"reason":"` + strings.Repeat("x", 501) + `"}`
+	if rec := serveBody(t, c, http.MethodPost, path, long, principal(dutyWrite), map[string]string{"If-Match": `"5"`}); rec.Code != http.StatusBadRequest || c.reason != nil {
+		t.Fatalf("a 501 character reason: %d", rec.Code)
+	}
+}

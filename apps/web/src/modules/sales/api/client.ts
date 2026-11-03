@@ -650,6 +650,11 @@ export function cancelOrder(id: string, etag: string, reason: string): Promise<V
   return versioned<Order>(`/orders/${encodeURIComponent(id)}:cancel`, { method: "POST", body: JSON.stringify({ reason }), headers: { "If-Match": etag } });
 }
 
+/** Closes what a partly shipped order has not delivered (BR-27.5); the order becomes shipped. */
+export function cancelOrderRemainder(id: string, etag: string, reason: string): Promise<Versioned<Order>> {
+  return versioned<Order>(`/orders/${encodeURIComponent(id)}:cancel-remainder`, { method: "POST", body: JSON.stringify({ reason }), headers: { "If-Match": etag } });
+}
+
 /** The order's change history, newest first. */
 export async function listOrderVersions(id: string, signal?: AbortSignal): Promise<OrderVersion[]> {
   const body = await json<{ items?: OrderVersion[] }>(`/orders/${encodeURIComponent(id)}/versions`, {}, signal);

@@ -70,3 +70,33 @@ func TestOrderStatusFor(t *testing.T) {
 		}
 	}
 }
+
+func TestCancelRemainder(t *testing.T) {
+	n := decimal.NewFromInt
+	cases := []struct {
+		name   string
+		in     LineProgress
+		status string
+		qty    int64
+		gave   int64
+		err    bool
+	}{
+		{"undelivered open line is cancelled", LineProgress{Status: LineOpen, Quantity: n(10)}, LineCancelled, 10, 10, false},
+		{"undelivered reserved line is cancelled", LineProgress{Status: LineReserved, Quantity: n(10)}, LineCancelled, 10, 10, false},
+		{"partly delivered line is closed at the delivered quantity", LineProgress{Status: LinePicked, Quantity: n(10), Delivered: n(4)}, LineDelivered, 4, 6, false},
+		{"delivered and invoiced part ends invoiced", LineProgress{Status: LinePicked, Quantity: n(10), Delivered: n(4), Invoiced: n(4)}, LineInvoiced, 4, 6, false},
+		{"delivered in part, invoiced less", LineProgress{Status: LinePicked, Quantity: n(10), Delivered: n(4), Invoiced: n(1)}, LineDelivered, 4, 6, false},
+		{"fully delivered line is left", LineProgress{Status: LineDelivered, Quantity: n(10), Delivered: n(10)}, LineDelivered, 10, 0, false},
+		{"cancelled line is left", LineProgress{Status: LineCancelled, Quantity: n(10)}, LineCancelled, 10, 0, false},
+		{"nothing delivered on a picked line is refused", LineProgress{Status: LinePicked, Quantity: n(10)}, LinePicked, 10, 0, true},
+	}
+	for _, c := range cases {
+		got, gave, err := CancelRemainder(c.in)
+		if (err != nil) != c.err {
+			t.Fatalf("%s: err %v", c.name, err)
+		}
+		if got.Status != c.status || !got.Quantity.Equal(n(c.qty)) || !gave.Equal(n(c.gave)) {
+			t.Fatalf("%s: got %s qty %s gave %s", c.name, got.Status, got.Quantity, gave)
+		}
+	}
+}

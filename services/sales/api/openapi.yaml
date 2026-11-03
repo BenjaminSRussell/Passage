@@ -1133,6 +1133,52 @@ paths:
         "412": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/orders/{id}:cancel-remainder:
+    post:
+      summary: >-
+        Close what a partly shipped order has not delivered (BR-27.5). An undelivered OPEN or RESERVED
+        line is CANCELLED; a line delivered in part keeps the delivered quantity and is closed at it.
+        The net total falls to what was delivered (so the credit exposure does), allocation quota and
+        agreement quantity held by the closed quantity are returned and remaining schedule lines are
+        cancelled. ACTIVE holds stay until released through the holds API. The order becomes SHIPPED,
+        or INVOICED when all that was delivered is invoiced. A new version is written and
+        order.remaindercancelled is emitted. A retry with the old If-Match gets 412 and never closes
+        twice; a delivery reported afterwards is refused with SLS-0058.
+      operationId: cancelOrderRemainder
+      x-passage-duty: sales.order.write
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: {type: string, maxLength: 500}
+      responses:
+        "200":
+          description: the order at its new version, with the closed lines
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Order"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412":
+          description: SLS-0006 the If-Match version is not the order's current version (also a retry of a close that already happened)
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "422":
+          description: SLS-0025 the order is not PARTIALLY_SHIPPED, or a line cannot be closed
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
   /v1/sales/orders/{id}/versions:
     get:
       summary: An order's change history, newest first, with the field-level diff of each version (FR-27.9)

@@ -46,6 +46,8 @@ var (
 	DeliveryTermsChanged = events.Type(Context, "deliveryterms", "changed", 1)
 
 	OrderProgressRecorded = events.Type(Context, "orderprogress", "recorded", 1)
+
+	OrderRemainderCancelled = events.Type(Context, "order", "remaindercancelled", 1)
 )
 
 // All lists every event type this service publishes.
@@ -55,7 +57,7 @@ func All() []string {
 		QuotationConverted, QuotationExpired, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
 		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted, ParametersChanged, IntakeErrorRecorded, IntakeErrorResolved,
 		OrderChangeRequested, OrderChangeApproved, OrderChangeRejected, OrderChangeWithdrawn, ChangePolicyChanged,
-		DeliveryTermsCreated, DeliveryTermsChanged, OrderProgressRecorded}
+		DeliveryTermsCreated, DeliveryTermsChanged, OrderProgressRecorded, OrderRemainderCancelled}
 }
 
 // PromisedSlice is one schedule line of an ATP promise.
@@ -231,6 +233,29 @@ type OrderCancelledData struct {
 	LineIDs []string `json:"line_ids"`
 	Reason  string   `json:"reason"`
 	Actor   string   `json:"actor"`
+}
+
+// RemainderLine is one line closed by order.remaindercancelled.v1: the quantity
+// the line gave up and the quantity it keeps (zero when the line was cancelled).
+type RemainderLine struct {
+	LineID       string `json:"line_id"`
+	LineNo       int    `json:"line_no"`
+	ProductID    string `json:"product_id"`
+	CancelledQty string `json:"cancelled_qty"`
+	KeptQty      string `json:"kept_qty"`
+	LineStatus   string `json:"line_status"`
+}
+
+// OrderRemainderCancelledData is the data member of order.remaindercancelled.v1:
+// the undelivered remainder of a partly shipped order was closed.
+type OrderRemainderCancelledData struct {
+	OrderID       string          `json:"order_id"`
+	LegalEntityID string          `json:"legal_entity_id"`
+	Version       int             `json:"version"`
+	Status        string          `json:"status"`
+	Lines         []RemainderLine `json:"lines"`
+	Reason        string          `json:"reason"`
+	Actor         string          `json:"actor"`
 }
 
 // ConfirmedLine is one line of order.confirmed.

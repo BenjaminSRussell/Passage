@@ -115,3 +115,31 @@ func OrderStatusFor(lines []LineProgress) string {
 	}
 	return OrderConfirmed
 }
+
+// CancelRemainder closes what has not been delivered on a line of a partly
+// shipped order (BR-27.5) and returns the line after it with the quantity it
+// gave up. A line nothing was delivered on, still OPEN or RESERVED, is
+// CANCELLED. A line delivered in part keeps what was delivered: its quantity
+// becomes the delivered quantity and it is DELIVERED, or INVOICED once all of
+// that was invoiced. A line already delivered in full, or cancelled, is left as
+// it is. A line with nothing delivered in any other status cannot be closed.
+func CancelRemainder(l LineProgress) (LineProgress, decimal.Decimal, error) {
+	switch {
+	case l.Status == LineCancelled, l.Delivered.GreaterThanOrEqual(l.Quantity):
+		return l, decimal.Zero, nil
+	case !l.Delivered.IsPositive():
+		if !LineChangeable(l.Status) {
+			return l, decimal.Zero, &ProgressRefusal{fmt.Sprintf("the line is %s and nothing was delivered on it", l.Status)}
+		}
+		gave := l.Quantity
+		l.Status = LineCancelled
+		return l, gave, nil
+	}
+	gave := l.Quantity.Sub(l.Delivered)
+	l.Quantity = l.Delivered
+	l.Status = LineDelivered
+	if l.Invoiced.Equal(l.Quantity) {
+		l.Status = LineInvoiced
+	}
+	return l, gave, nil
+}

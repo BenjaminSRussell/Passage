@@ -477,7 +477,7 @@ func cancelOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, rea
 	if _, err := tx.Exec(ctx, `update order_hold set status = 'CLEARED' where tenant_id = $1 and order_id = $2 and status = 'ACTIVE'`, tenantID, id); err != nil {
 		return Order{}, err
 	}
-	if err := returnAgreementTx(ctx, tx, tenantID, o, actor, now); err != nil {
+	if err := returnAgreementTx(ctx, tx, tenantID, o, actor, now, nil); err != nil {
 		return Order{}, err
 	}
 	next := o.Version + 1

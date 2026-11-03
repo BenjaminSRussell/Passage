@@ -161,6 +161,39 @@ func (a *API) cancelOrder(w http.ResponseWriter, r *http.Request) {
 	})(w, r)
 }
 
+// cancelRemainder closes what a partly shipped order has not delivered
+// (BR-27.5). The duty is sales.order.write (SalesOrderMaintain, which the PRD
+// duty catalog gives :cancel-remainder); an approver is not needed because the
+// delivered quantity stays and nothing is undone.
+func (a *API) cancelRemainder(w http.ResponseWriter, r *http.Request) {
+	orderRoute(func(w http.ResponseWriter, r *http.Request, id string) {
+		version, ok := ifMatch(w, r)
+		if !ok {
+			return
+		}
+		var req cancelOrderRequest
+		if r.ContentLength != 0 {
+			if err := httpx.Decode(r, &req); err != nil {
+				httpx.Fail(w, r, err)
+				return
+			}
+		}
+		if len(req.Reason) > maxChangeReason {
+			validationFailed(w, r, map[string]string{"reason": "must be at most 500 characters"})
+			return
+		}
+		p, _ := tenant.FromContext(r.Context())
+		order, err := a.store.CancelRemainder(r.Context(), id, version, req.Reason, p.UserID, a.now())
+		if err != nil {
+			a.fail(w, r, "cancel remainder", err)
+			return
+		}
+		a.canceled.Add(1)
+		setETag(w, order.Version)
+		httpx.JSON(w, http.StatusOK, order)
+	})(w, r)
+}
+
 // listOrderVersions returns the order's change history, newest first (FR-27.9,
 // PRD §5.27.14 "Order change history").
 func (a *API) listOrderVersions(w http.ResponseWriter, r *http.Request) {

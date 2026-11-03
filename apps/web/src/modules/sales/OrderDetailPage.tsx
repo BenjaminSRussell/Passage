@@ -21,7 +21,7 @@ import {
 } from "./api/client";
 import { dash, formatDateTime, money, sentence } from "./format";
 import { OrderHistory } from "./OrderHistory";
-import { OrderProgressCard } from "./OrderProgressPages";
+import { CancelRemainderCard, OrderProgressCard } from "./OrderProgressPages";
 import { OrderSchedule } from "./OrderSchedule";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -302,6 +302,15 @@ export function OrderDetailPage() {
       <DataTable label="Order lines" columns={lineColumns} rows={order.lines} getRowKey={(l) => l.id} empty={{ title: "No lines" }} />
       {order.status === "CONFIRMED" || order.status === "PARTIALLY_SHIPPED" ? <OrderSchedule order={order} /> : null}
       {["CONFIRMED", "PARTIALLY_SHIPPED", "SHIPPED", "INVOICED"].includes(order.status) ? <OrderProgressCard orderId={order.id} version={order.version} status={order.status} orderType={order.orderType} /> : null}
+      <CancelRemainderCard
+        order={order}
+        etag={etag}
+        onDone={(res) => {
+          setLatest(res);
+          setFailure(null);
+          setOutcome({ tone: "success", text: `The remainder of order ${res.value.orderNumber} is cancelled; it is ${sentence(res.value.status).toLowerCase()} with a total of ${money(res.value.netTotal, res.value.currency)}.` });
+        }}
+      />
       <Card title="Holds">
         {order.holds.length === 0 ? (
           <EmptyState compact headingLevel={3} title="No holds" description="Holds placed by the credit check or by a sales manager appear here." />

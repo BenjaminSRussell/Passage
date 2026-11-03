@@ -42,6 +42,11 @@ channels:
     messages:
       orderCancelled:
         $ref: "#/components/messages/OrderCancelled"
+  orderRemainderCancelled:
+    address: passage.sales.order
+    messages:
+      orderRemainderCancelled:
+        $ref: "#/components/messages/OrderRemainderCancelled"
   agreementReleased:
     address: passage.sales.agreement
     messages:
@@ -293,6 +298,12 @@ operations:
     summary: An order was cancelled; its open lines are CANCELLED and its active holds CLEARED. Consumers - fulfillment, planning, portal.
     messages:
       - {$ref: "#/channels/orderCancelled/messages/orderCancelled"}
+  publishOrderRemainderCancelled:
+    action: send
+    channel: {$ref: "#/channels/orderRemainderCancelled"}
+    summary: The undelivered remainder of a partly shipped order was closed; lines are CANCELLED or cut to what was delivered and the net total falls. Holds are not changed. Consumers - fulfillment (cancel the open shipment and pick quantity beyond kept_qty and release its reservation; a slip already posted for it is refused by sales with SLS-0058), billing, credit exposure, portal.
+    messages:
+      - {$ref: "#/channels/orderRemainderCancelled/messages/orderRemainderCancelled"}
   publishOrderConfirmed:
     action: send
     channel: {$ref: "#/channels/orderConfirmed"}
@@ -521,6 +532,14 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/OrderCancelledData"
+    OrderRemainderCancelled:
+      name: dev.passage.sales.order.remaindercancelled.v1
+      title: Remainder of a partly shipped order cancelled
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/OrderRemainderCancelledData"
     AllocationQuotaCreated:
       name: dev.passage.sales.allocationquota.created.v1
       title: Allocation quota created
@@ -878,6 +897,29 @@ components:
           type: array
           description: the lines this cancellation moved to CANCELLED
           items: {type: string, format: uuid}
+        reason: {type: string, maxLength: 500}
+        actor: {type: string}
+    OrderRemainderCancelledData:
+      type: object
+      required: [order_id, legal_entity_id, version, status, lines, reason, actor]
+      properties:
+        order_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        version: {type: integer}
+        status: {type: string, enum: [SHIPPED, INVOICED], description: the order status after the remainder was closed}
+        lines:
+          type: array
+          description: the lines that gave up quantity
+          items:
+            type: object
+            required: [line_id, line_no, product_id, cancelled_qty, kept_qty, line_status]
+            properties:
+              line_id: {type: string, format: uuid}
+              line_no: {type: integer}
+              product_id: {type: string, format: uuid}
+              cancelled_qty: {type: string, description: decimal quantity the line gave up}
+              kept_qty: {type: string, description: decimal quantity the line keeps, 0 when the line was cancelled}
+              line_status: {type: string, enum: [CANCELLED, DELIVERED, INVOICED]}
         reason: {type: string, maxLength: 500}
         actor: {type: string}
     OrderHoldData:

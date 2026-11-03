@@ -265,6 +265,7 @@ type Store interface {
 	ReleaseHold(ctx context.Context, orderID, holdID string, version int, actor string, now time.Time) (ConfirmResult, error)
 	ChangeOrder(ctx context.Context, id string, version int, req ChangeRequest, actor string, now time.Time) (Order, error)
 	CancelOrderAs(ctx context.Context, id string, version int, reason, actor string, approver bool, now time.Time) (Order, error)
+	CancelRemainder(ctx context.Context, id string, version int, reason, actor string, now time.Time) (Order, error)
 	ListOrderVersions(ctx context.Context, id string) ([]OrderVersion, error)
 	GetCreditProfile(ctx context.Context, legalEntityID, customerID string) (CreditProfile, error)
 	ListCreditProfiles(ctx context.Context, legalEntityID string, limit int) ([]CreditProfile, error)

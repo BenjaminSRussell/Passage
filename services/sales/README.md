@@ -15,7 +15,7 @@ a stateless evaluation at line commit and recorded acceptance. Wave 27, slices
 
 Out of these slices (see `NOT-IMPLEMENTED.md`): amount-based agreements and
 scheduling releases driven by w28 shipments and EDI, the ATP projection and reservations,
-change approval and `:cancel-remainder`, the committed backorder run,
+the per-line `:cancel-remainder`, the committed backorder run,
 allocation, consignment, OPTIONAL supplementary items prompted in an order-entry
 grid, w8 related products as a proposal source, the hourly scheduler for quotation expiry, the quotation PDF, the intake dedup window beyond the
 order's own key, and the Temporal release workflow.
@@ -103,6 +103,7 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | PATCH | `/v1/sales/orders/{id}` | `sales.order.write` | `If-Match`; header and OPEN/RESERVED line edits; new version with a field-level diff; re-promises changed quantities/dates of a CONFIRMED order and re-runs credit when its total rises; emits `order.changed` |
 | POST | `/v1/sales/orders/{id}:plan-production` | `sales.order.plan-production` | creates, for each configured line of a CONFIRMED order, the production order built to the line's saved configuration (origin `SalesOrderLine`) through the production service and links it to the line in `order_line_production`; idempotent per line; a line's `configurationId` is checked against the product service on order create |
 | POST | `/v1/sales/orders/{id}:cancel` | `sales.order.confirm` | `If-Match`; optional `reason`; cancels OPEN/RESERVED lines, clears ACTIVE holds; emits `order.cancelled`. For a customer whose changes need approval, a caller without `sales.order.approve` gets 202 and a stored request of kind `CANCEL` instead (`SLS-0043` if one already waits) |
+| POST | `/v1/sales/orders/{id}:cancel-remainder` | `sales.order.write` | `If-Match`; optional `reason`; on a PARTIALLY_SHIPPED order cancels undelivered lines and closes part-delivered lines at the delivered quantity, lowers the net total, returns quota and agreement quantity, leaves holds as they are; the order becomes SHIPPED (INVOICED when all delivered was invoiced); emits `order.remaindercancelled` (`SLS-0025` on any other status) |
 | GET | `/v1/sales/orders/{id}/versions` | `sales.order.read` | Change history, newest first, with each version's diff |
 | POST | `/v1/sales/orders/{id}/holds` | `sales.order.hold` | `If-Match`; MANUAL, FRAUD or PRICE_REVIEW with a reason code; emits `orderhold.applied` |
 | GET / POST | `/v1/sales/product-listings` | `sales.order.read` / `sales.listing.maintain` | Listing inquiry (`legalEntityId`, `productId`, `scopeKey`, `limit`); add an ALLOW or DENY entry per customer or group |

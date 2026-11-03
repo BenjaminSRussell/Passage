@@ -197,7 +197,9 @@ func (s *Postgres) ListAgreementVersions(ctx context.Context, id string) ([]Agre
 // locks the agreement first but creates a new order nobody else holds, so the
 // two cannot deadlock). The agreement is ACTIVE again unless it was closed, the
 // return is recorded once per release, and agreement.returned.v1 is queued.
-func returnAgreementTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, actor string, now time.Time) error {
+// A limit gives back at most that quantity (the remainder of a partly shipped
+// order); nil gives back the whole release.
+func returnAgreementTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, actor string, now time.Time, limit *decimal.Decimal) error {
 	type pending struct{ releaseID, agreementID, qty string }
 	var todo []pending
 	rows, err := tx.Query(ctx, `select r.id::text, r.agreement_id::text, r.quantity::text from agreement_release r
@@ -225,6 +227,17 @@ func returnAgreementTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order,
 			return err
 		}
 		qty := decimal.RequireFromString(t.qty)
+		if limit != nil {
+			if limit.LessThan(qty) {
+				qty = *limit
+			}
+			left := limit.Sub(qty)
+			limit = &left
+		}
+		if !qty.IsPositive() {
+			continue
+		}
+		t.qty = qty.String()
 		next, status, err := domain.ReturnToAgreement(a.Commitment, a.Released, qty, a.Status)
 		if err != nil {
 			return problem(http.StatusInternalServerError, "COM-0500", err.Error())
@@ -243,6 +256,9 @@ func returnAgreementTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order,
 			diff = append(diff, domain.FieldChange{Field: "status", Old: a.Status, New: status})
 		}
 		reason := "order " + o.OrderNumber + " cancelled"
+		if limit != nil {
+			reason = "remainder of order " + o.OrderNumber + " cancelled"
+		}
 		if err := insertAgreementVersion(ctx, tx, tenantID, a, v, "RETURNED", actor, reason, diff, now); err != nil {
 			return err
 		}
