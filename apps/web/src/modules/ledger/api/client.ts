@@ -46,6 +46,9 @@ export const entryLineSchema = z.object({
   debitCredit: z.enum(["D", "C"]),
   amount: z.string(),
   text: z.string().optional(),
+  /** Statistical quantity and its unit (BR-11.2); absent on an ordinary line. */
+  quantity: z.string().optional(),
+  unit: z.string().optional(),
   reversalOfLineId: z.string().optional(),
   negativePosting: z.boolean().optional(),
   /** Derivation steps that filled dimensions on the line (FR-11.22). */
@@ -497,6 +500,8 @@ export const batchLineSchema = z.object({
   currency: z.string(),
   text: z.string().optional(),
   sourceLineRef: z.string().optional(),
+  quantity: z.string().optional(),
+  unit: z.string().optional(),
 });
 export type BatchLine = z.infer<typeof batchLineSchema>;
 
@@ -541,6 +546,9 @@ export interface BatchLineInput {
   debitCredit: "D" | "C";
   amount: { currency: string; value: string };
   text?: string;
+  /** Statistical quantity and unit (BR-11.2), sent together. */
+  quantity?: string;
+  unit?: string;
 }
 
 /** Body of POST /api/v1/ledger/journal-batches. */
@@ -681,6 +689,8 @@ export const journalLineSchema = z.object({
   sourceId: z.string(),
   sourceUri: z.string().optional(),
   sourceLineRef: z.string().optional(),
+  quantity: z.string().optional(),
+  unit: z.string().optional(),
   reversalOfEntryId: z.string().optional(),
   isRealignment: z.boolean().optional(),
   traceId: z.string(),

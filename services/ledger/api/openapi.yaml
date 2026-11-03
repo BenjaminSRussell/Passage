@@ -141,6 +141,8 @@ components:
         amount: { $ref: "#/components/schemas/Amount" }
         text: { type: string, maxLength: 255 }
         sourceLineRef: { type: string, maxLength: 200 }
+        quantity: { type: string, pattern: '^[0-9]{1,12}(\.[0-9]{1,6})?$', description: "Statistical quantity (BR-11.2), up to 6 decimals and greater than zero (0 or absent means none). Unsigned like the amount; the debitCredit side carries its sign, so a reversal swaps the side and keeps the quantity. Needs unit. A line with amount 0 and a quantity is a statistical posting." }
+        unit: { type: string, pattern: '^[A-Z0-9]{1,10}$', description: Unit of measure of quantity; required with quantity and refused without it. }
     PostEntryRequest:
       type: object
       required: [ledgerId, documentId, postingDate, source]
@@ -149,8 +151,8 @@ components:
         is rejected with 400 (field lines). POST /validate requires lines and rejects ledgerLines with 400.
         ledgerLines on this single-ledger post accepts one group, for ledgerId itself; its lines are added to lines.
         A group for any other ledger is rejected with 422 LEDGER_LINES_OWN_LEDGER_ONLY (use the ledger set to post
-        other ledgers). A ledger entry left with no lines, or only zero-amount lines without text, is rejected with
-        422 LEDGER_LINE_EMPTY.
+        other ledgers). A ledger entry left with no lines, or only zero-amount lines without text or quantity, is rejected with
+        422 LEDGER_LINE_EMPTY. A bad statistical quantity or unit is 422 LEDGER_QUANTITY_INVALID (BR-11.2).
       properties:
         ledgerId: { type: string, format: uuid }
         documentId: { type: string, format: uuid, description: Groups entries across ledgers and split documents }
@@ -175,7 +177,7 @@ components:
         ledgerLines add lines to single ledgers of the set (BR-12.6 ledger_lines): they are posted to that ledger
         only, in that ledger's own accounts, with no mapping. lines may be omitted or empty when ledgerLines is present;
         a request with neither is rejected with 400 (field lines). A ledger whose entry ends up with no lines, or only
-        zero-amount lines without text, is rejected with 422 LEDGER_LINE_EMPTY. The idempotency payload hash orders
+        zero-amount lines without text or quantity, is rejected with 422 LEDGER_LINE_EMPTY. The idempotency payload hash orders
         ledgerLines groups by ledger id, so group order does not matter on a retry.
         A member ledger kept in another currency than the leading ledger gets the common lines translated at the
         spot rate of the posting date (services/fx, rounded to the member's minor units; any difference between the
@@ -232,6 +234,8 @@ components:
         amount: { type: string }
         text: { type: string }
         sourceLineRef: { type: string }
+        quantity: { type: string, description: Statistical quantity at scale 6; absent when the line has none (BR-11.2) }
+        unit: { type: string, description: Unit of measure of quantity }
         reversalOfLineId: { type: string, format: uuid }
         negativePosting: { type: boolean, description: Storno line; the projection reduces the original side (BR-11.16) }
         derivedByStepIds: { type: array, items: { type: string, format: uuid }, description: Derivation steps that filled dimensions on the line (FR-11.22) }
@@ -264,6 +268,8 @@ components:
         sourceId: { type: string }
         sourceUri: { type: string }
         sourceLineRef: { type: string }
+        quantity: { type: string, description: Statistical quantity at scale 6; absent when the line has none (BR-11.2) }
+        unit: { type: string, description: Unit of measure of quantity }
         reversalOfEntryId: { type: string, format: uuid, description: Set on the lines of a reversing entry }
         isRealignment: { type: boolean, description: The line belongs to a dimension realignment entry or its reversal (FR-11.24) }
         traceId: { type: string, description: W3C trace id of the posting request }
@@ -702,6 +708,8 @@ components:
         amount: { $ref: "#/components/schemas/Amount" }
         text: { type: string, maxLength: 255, description: Omitted text is filled from the default description template at posting (FR-11.17). }
         sourceLineRef: { type: string, maxLength: 200 }
+        quantity: { type: string, pattern: '^[0-9]{1,12}(\.[0-9]{1,6})?$', description: "Statistical quantity (BR-11.2), up to 6 decimals and greater than zero (0 or absent means none). Unsigned like the amount; the debitCredit side carries its sign, so a reversal swaps the side and keeps the quantity. Needs unit. A line with amount 0 and a quantity is a statistical posting." }
+        unit: { type: string, pattern: '^[A-Z0-9]{1,10}$', description: Unit of measure of quantity; required with quantity and refused without it. }
     JournalBatchBody:
       type: object
       required: [ledgerId, journalName, postingDate, lines]
@@ -743,6 +751,8 @@ components:
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         text: { type: string }
         sourceLineRef: { type: string }
+        quantity: { type: string, description: Statistical quantity at scale 6; absent when the line has none (BR-11.2) }
+        unit: { type: string, description: Unit of measure of quantity }
     RecurringLine:
       type: object
       required: [lineNumber, account, debitCredit, amountKind, amount, currency]

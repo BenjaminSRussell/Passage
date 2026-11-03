@@ -498,3 +498,30 @@ func TestPostgres_JournalNameCRUD(t *testing.T) {
 		t.Fatalf("unknown: %v", err)
 	}
 }
+
+func TestPostgres_BatchStatisticalLinePostsWithQuantity(t *testing.T) {
+	e, _ := setup(t)
+	putName(t, e, "GJ", JournalName{Active: true})
+	in := batchOf(e, "GJ", "5.00")
+	in.Lines = append(in.Lines,
+		BatchLine{Account: "6010", DebitCredit: "D", Amount: "0", Currency: "USD", Dimensions: map[string]string{"DEPT": "D100"}, Quantity: "40.000000", Unit: "HR"},
+		BatchLine{Account: "6010", DebitCredit: "C", Amount: "0", Currency: "USD", Dimensions: map[string]string{"DEPT": "D100"}, Quantity: "40.000000", Unit: "HR"})
+	b, err := e.store.CreateBatch(e.ctx, in)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := e.store.GetBatch(e.ctx, b.ID)
+	if err != nil || got.Lines[2].Quantity != "40.000000" || got.Lines[2].Unit != "HR" || got.Lines[0].Quantity != "" {
+		t.Fatalf("batch lines read back: %+v %v", got.Lines, err)
+	}
+	if b, err = e.store.SubmitBatch(e.ctx, b.ID, 0, testToday); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	res, err := postBatch(e, e.ctx, b, "STAT-B1", true)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	if l := res.Entries[0].Lines[2]; l.Quantity != "40.000000" || l.Unit != "HR" {
+		t.Fatalf("posted statistical line: %+v", l)
+	}
+}

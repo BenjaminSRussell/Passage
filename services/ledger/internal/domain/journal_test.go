@@ -84,6 +84,13 @@ func TestValidateEntry_Table(t *testing.T) {
 		{"valid dimensions", openRules, pd, []LineInput{{Account: "1000", Side: "D", Amount: dec("1"), Currency: "USD", Dimensions: map[string]string{"DEPT": "D100", "CC": "C200"}}, line("2000", "C", "1")}, "", -1},
 		{"closed period before first open date", closedRules, pastDate.AddDate(0, -2, 0), []LineInput{line("1000", "D", "1"), line("2000", "C", "1")}, "LEDGER_PERIOD_CLOSED", -1},
 		{"date too far ahead", openRules, farFuture, []LineInput{line("1000", "D", "1"), line("2000", "C", "1")}, "LEDGER_DATE_INVALID", -1},
+		{"statistical zero line with quantity and unit", openRules, pd, []LineInput{{Account: "1000", Side: "D", Amount: dec("0"), Currency: "USD", Quantity: dec("12.5"), Unit: "KG"}, {Account: "2000", Side: "C", Amount: dec("0"), Currency: "USD", Quantity: dec("12.5"), Unit: "KG"}}, "", -1},
+		{"quantity without unit", openRules, pd, []LineInput{{Account: "1000", Side: "D", Amount: dec("1"), Currency: "USD", Quantity: dec("2")}, line("2000", "C", "1")}, CodeQuantityInvalid, 0},
+		{"unit without quantity", openRules, pd, []LineInput{{Account: "1000", Side: "D", Amount: dec("1"), Currency: "USD", Unit: "KG"}, line("2000", "C", "1")}, CodeQuantityInvalid, 0},
+		{"bad unit code", openRules, pd, []LineInput{{Account: "1000", Side: "D", Amount: dec("1"), Currency: "USD", Quantity: dec("2"), Unit: "kg"}, line("2000", "C", "1")}, CodeQuantityInvalid, 0},
+		{"negative quantity", openRules, pd, []LineInput{{Account: "1000", Side: "D", Amount: dec("1"), Currency: "USD", Quantity: dec("-2"), Unit: "KG"}, line("2000", "C", "1")}, CodeQuantityInvalid, 0},
+		{"quantity with seven decimals", openRules, pd, []LineInput{{Account: "1000", Side: "D", Amount: dec("1"), Currency: "USD", Quantity: dec("2.0000001"), Unit: "KG"}, line("2000", "C", "1")}, CodeQuantityInvalid, 0},
+		{"quantity too large", openRules, pd, []LineInput{{Account: "1000", Side: "D", Amount: dec("1"), Currency: "USD", Quantity: dec("1000000000000"), Unit: "KG"}, line("2000", "C", "1")}, CodeQuantityInvalid, 0},
 		{"text-only zero line is allowed", openRules, pd, []LineInput{{Account: "1000", Side: "D", Amount: dec("0"), Currency: "USD", Text: "memo"}, {Account: "2000", Side: "C", Amount: dec("0"), Currency: "USD", Text: "memo"}}, "", -1},
 	}
 	for _, tc := range tests {

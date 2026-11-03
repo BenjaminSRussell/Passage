@@ -301,8 +301,11 @@ type Line struct {
 	Amount                 string            `json:"amount"`
 	Text                   string            `json:"text,omitempty"`
 	SourceLineRef          string            `json:"sourceLineRef,omitempty"`
-	ReversalOfLineID       *string           `json:"reversalOfLineId,omitempty"`
-	NegativePosting        bool              `json:"negativePosting,omitempty"`
+	// Quantity and Unit are the statistical quantity of the line (BR-11.2).
+	Quantity         string  `json:"quantity,omitempty"`
+	Unit             string  `json:"unit,omitempty"`
+	ReversalOfLineID *string `json:"reversalOfLineId,omitempty"`
+	NegativePosting  bool    `json:"negativePosting,omitempty"`
 	// DerivedByStepIDs names the derivation steps that filled dimensions on the line (FR-11.22).
 	DerivedByStepIDs []string `json:"derivedByStepIds,omitempty"`
 	// RoundingAdjustment marks the line that absorbed a currency translation rounding difference (BR-12.4).

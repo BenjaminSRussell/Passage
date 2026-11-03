@@ -36,6 +36,21 @@ const (
 
 var dimValueRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,20}$`)
 
+// unitRe is a unit of measure code on a statistical line (BR-11.2).
+var unitRe = regexp.MustCompile(`^[A-Z0-9]{1,10}$`)
+
+// ValidUnit reports whether u is a well-formed unit of measure code.
+func ValidUnit(u string) bool { return unitRe.MatchString(u) }
+
+// MaxQuantity keeps a quantity inside numeric(18,6) (PRD §2.11 line quantity).
+var MaxQuantity = decimal.New(1, 12)
+
+// QuantityScale is the number of decimals a line quantity keeps (numeric(18,6)).
+const QuantityScale = 6
+
+// CodeQuantityInvalid is the violation code for a bad statistical quantity or unit (BR-11.2).
+const CodeQuantityInvalid = "LEDGER_QUANTITY_INVALID"
+
 // Violation is one rule failure. Codes are the BR-11.9 catalogue; LineIndex is
 // nil for entry-level violations.
 type Violation struct {
@@ -99,6 +114,10 @@ type LineInput struct {
 	Currency      string
 	Text          string
 	SourceLineRef string
+	// Quantity and Unit are the statistical quantity of the line (BR-11.2);
+	// a zero Quantity means none, and then Unit must be empty.
+	Quantity decimal.Decimal
+	Unit     string
 	// DerivedBy lists the derivation step ids that filled dimensions (FR-11.22).
 	DerivedBy []string
 	// RoundingAdjustment marks the line that absorbed a currency translation rounding difference (BR-12.4).
@@ -114,6 +133,9 @@ type ValidLine struct {
 	Amount        decimal.Decimal
 	Text          string
 	SourceLineRef string
+	// Quantity and Unit are the statistical quantity of the line (BR-11.2).
+	Quantity      decimal.Decimal
+	Unit          string
 	CombinationID []byte
 	DisplayName   string
 	// StructureID is the account structure version that validated the line.
@@ -217,8 +239,26 @@ func ValidateEntry(r Rules, accounts map[string]Account, postingDate, today time
 			fail("LEDGER_AMOUNT_SCALE", "lines.amount.value", fmt.Sprintf("amount %s has more decimals than %s allows (%d)", in.Amount.String(), r.Currency, minor))
 			ok = false
 		}
-		if in.Amount.IsZero() && in.Text == "" {
-			fail("LEDGER_LINE_EMPTY", "lines.amount.value", "line has no amount and no text")
+		if in.Amount.IsZero() && in.Text == "" && in.Quantity.IsZero() {
+			fail("LEDGER_LINE_EMPTY", "lines.amount.value", "line has no amount, no quantity and no text")
+			ok = false
+		}
+		// Statistical quantity (BR-11.2): quantity and unit come together.
+		switch {
+		case in.Quantity.IsNegative():
+			fail(CodeQuantityInvalid, "lines.quantity", "quantity must be greater than zero")
+			ok = false
+		case in.Quantity.GreaterThanOrEqual(MaxQuantity):
+			fail(CodeQuantityInvalid, "lines.quantity", "quantity is too large")
+			ok = false
+		case !in.Quantity.IsZero() && !unitRe.MatchString(in.Unit):
+			fail(CodeQuantityInvalid, "lines.unit", "a quantity needs a unit of 1 to 10 characters of A-Z or 0-9")
+			ok = false
+		case in.Quantity.IsZero() && in.Unit != "":
+			fail(CodeQuantityInvalid, "lines.quantity", "a unit needs a quantity greater than zero")
+			ok = false
+		case !in.Quantity.Equal(in.Quantity.Round(QuantityScale)):
+			fail(CodeQuantityInvalid, "lines.quantity", fmt.Sprintf("quantity %s has more than %d decimals", in.Quantity.String(), QuantityScale))
 			ok = false
 		}
 		// An empty value means "blank" and is dropped so the stored dimensions
@@ -279,7 +319,7 @@ func ValidateEntry(r Rules, accounts map[string]Account, postingDate, today time
 		}
 		id, display := CombinationIDFor(structureID, r.DimensionAttributes, r.ChartCode, acct.Number, dims)
 		res.Lines = append(res.Lines, ValidLine{Index: idx, Account: acct, Dimensions: dims, Side: in.Side,
-			Amount: in.Amount, Text: in.Text, SourceLineRef: in.SourceLineRef, CombinationID: id, DisplayName: display,
+			Amount: in.Amount, Text: in.Text, SourceLineRef: in.SourceLineRef, Quantity: in.Quantity, Unit: in.Unit, CombinationID: id, DisplayName: display,
 			StructureID: structureID, DerivedBy: in.DerivedBy, RoundingAdjustment: in.RoundingAdjustment})
 	}
 	if !res.Debit.Equal(res.Credit) {

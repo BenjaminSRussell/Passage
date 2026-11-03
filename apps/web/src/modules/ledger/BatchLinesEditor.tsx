@@ -10,6 +10,9 @@ export interface LineDraft {
   side: "D" | "C";
   amount: string;
   text: string;
+  /** Statistical quantity (BR-11.2) and its unit of measure; both empty for an ordinary line. */
+  quantity: string;
+  unit: string;
 }
 
 let nextKey = 0;
@@ -19,7 +22,7 @@ function newLineKey(): string {
 }
 
 export function emptyLine(side: "D" | "C" = "D"): LineDraft {
-  return { key: newLineKey(), account: "", dimensions: "", side, amount: "", text: "" };
+  return { key: newLineKey(), account: "", dimensions: "", side, amount: "", text: "", quantity: "", unit: "" };
 }
 
 /** Drafts for the lines a batch already has. */
@@ -33,12 +36,16 @@ export function linesToDrafts(lines: BatchLine[]): LineDraft[] {
     side: l.debitCredit,
     amount: l.amount,
     text: l.text ?? "",
+    quantity: l.quantity ?? "",
+    unit: l.unit ?? "",
   }));
 }
 
 const ACCOUNT = /^[A-Za-z0-9._-]{1,20}$/;
 const ATTRIBUTE = /^[A-Z][A-Z0-9_]{0,19}$/;
 const AMOUNT = /^\d{1,14}(\.\d{1,6})?$/;
+const QUANTITY = /^\d{1,12}(\.\d{1,6})?$/;
+const UNIT = /^[A-Z0-9]{1,10}$/;
 const MICROS = 1_000_000n;
 
 function parsePairs(text: string, allowEmpty: boolean): Record<string, string> | null {
@@ -100,6 +107,13 @@ export function validateLines(lines: LineDraft[]): Record<string, string> {
     if (toMicros(l.amount) === null) errors[`lines.${i}.amount`] = `Line ${n}: enter a non-negative amount such as 125.00.`;
     if (parseDimensions(l.dimensions) === null) errors[`lines.${i}.dimensions`] = `Line ${n}: write dimensions as DEPT=D100, CC=C200.`;
     if (l.text.length > 255) errors[`lines.${i}.text`] = `Line ${n}: text is at most 255 characters.`;
+    const quantity = l.quantity.trim();
+    const unit = l.unit.trim();
+    const hasQuantity = quantity !== "" && !/^0+(\.0+)?$/.test(quantity);
+    if (quantity !== "" && !QUANTITY.test(quantity)) errors[`lines.${i}.quantity`] = `Line ${n}: enter a quantity such as 12.5 with at most 6 decimals.`;
+    else if (hasQuantity && unit === "") errors[`lines.${i}.unit`] = `Line ${n}: a quantity needs a unit.`;
+    else if (!hasQuantity && unit !== "") errors[`lines.${i}.unit`] = `Line ${n}: a unit needs a quantity above zero.`;
+    else if (unit !== "" && !UNIT.test(unit)) errors[`lines.${i}.unit`] = `Line ${n}: a unit is 1 to 10 capital letters or digits.`;
   });
   return errors;
 }
@@ -111,6 +125,10 @@ export function toLineInputs(lines: LineDraft[], currency: string): BatchLineInp
     const input: BatchLineInput = { account: l.account.trim(), debitCredit: l.side, amount: { currency, value: l.amount.trim() } };
     if (Object.keys(dimensions).length > 0) input.dimensions = dimensions;
     if (l.text.trim() !== "") input.text = l.text.trim();
+    if (l.quantity.trim() !== "" && l.unit.trim() !== "") {
+      input.quantity = l.quantity.trim();
+      input.unit = l.unit.trim();
+    }
     return input;
   });
 }
@@ -175,6 +193,20 @@ export function BatchLinesEditor({ lines, currency, onChange, scale = 2 }: Batch
       header: `Amount (${currency})`,
       render: (l) => (
         <Input aria-label={`Line ${number(l)} amount`} className={styles.amount} inputMode="decimal" value={l.amount} onChange={(e) => update(l.key, { amount: e.target.value })} />
+      ),
+    },
+    {
+      key: "quantity",
+      header: "Quantity",
+      render: (l) => (
+        <Input aria-label={`Line ${number(l)} quantity`} className={styles.amount} inputMode="decimal" value={l.quantity} onChange={(e) => update(l.key, { quantity: e.target.value })} />
+      ),
+    },
+    {
+      key: "unit",
+      header: "Unit",
+      render: (l) => (
+        <Input aria-label={`Line ${number(l)} unit`} className={styles.mono} maxLength={10} value={l.unit} onChange={(e) => update(l.key, { unit: e.target.value.toUpperCase() })} />
       ),
     },
     {

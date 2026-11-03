@@ -249,6 +249,7 @@ const lineColumns: DataTableColumn<BatchLine>[] = [
   },
   { key: "debitCredit", header: "D/C" },
   { key: "amount", header: "Amount", align: "end" },
+  { key: "quantity", header: "Quantity", align: "end", render: (l) => (l.quantity ? `${l.quantity} ${l.unit ?? ""}`.trim() : "") },
   { key: "text", header: "Text", render: (l) => l.text ?? "" },
 ];
 

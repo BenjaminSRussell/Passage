@@ -39,6 +39,15 @@ func TestCheckBatchLines_TableDriven(t *testing.T) {
 		{"bad currency", func(l *batchLineDTO) { l.Amount.Currency = "us" }, "lines[0].amount.currency"},
 		{"bad dimension attribute", func(l *batchLineDTO) { l.Dimensions = map[string]string{"dept": "D1"} }, "lines[0].dimensions"},
 		{"empty dimension value", func(l *batchLineDTO) { l.Dimensions = map[string]string{"DEPT": ""} }, "lines[0].dimensions"},
+		{"statistical quantity with unit", func(l *batchLineDTO) { l.Quantity, l.Unit = "12.5", "KG" }, ""},
+		{"quantity without unit", func(l *batchLineDTO) { l.Quantity = "12.5" }, "lines[0].unit"},
+		{"unit without quantity", func(l *batchLineDTO) { l.Unit = "KG" }, "lines[0].unit"},
+		{"lower case unit", func(l *batchLineDTO) { l.Quantity, l.Unit = "1", "kg" }, "lines[0].unit"},
+		{"negative quantity", func(l *batchLineDTO) { l.Quantity, l.Unit = "-1", "KG" }, "lines[0].quantity"},
+		{"quantity not a number", func(l *batchLineDTO) { l.Quantity, l.Unit = "many", "KG" }, "lines[0].quantity"},
+		{"quantity with seven decimals", func(l *batchLineDTO) { l.Quantity, l.Unit = "1.0000001", "KG" }, "lines[0].quantity"},
+		{"quantity too large", func(l *batchLineDTO) { l.Quantity, l.Unit = "1000000000000", "KG" }, "lines[0].quantity"},
+		{"zero quantity without unit is no quantity", func(l *batchLineDTO) { l.Quantity = "0" }, ""},
 		{"text too long", func(l *batchLineDTO) { l.Text = strings.Repeat("é", 256) }, "lines[0].text"},
 	}
 	for _, tt := range tests {

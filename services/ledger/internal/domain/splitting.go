@@ -231,10 +231,16 @@ func ApplySplitting(rule SplittingRule, currency string, lines []LineInput) ([]L
 				Amount: l.Amount.StringFixed(minor)})
 			continue
 		}
-		shares := proportion(l.Amount, keys, weights, minor)
+		shares := proportion(l.Amount, keys, weights, minor, minor)
+		// A statistical quantity (BR-11.2) is divided in the same proportions,
+		// so the parts add up to the line's quantity instead of repeating it.
+		var qtyShares []decimal.Decimal
+		if !l.Quantity.IsZero() {
+			qtyShares = proportion(l.Quantity, keys, weights, QuantityScale, minor)
+		}
 		first := true
 		for j, k := range keys {
-			if shares[j].IsZero() {
+			if shares[j].IsZero() && (qtyShares == nil || qtyShares[j].IsZero()) {
 				continue
 			}
 			part := l
@@ -243,6 +249,12 @@ func ApplySplitting(rule SplittingRule, currency string, lines []LineInput) ([]L
 				part.Dimensions[d] = v
 			}
 			part.Amount = shares[j]
+			if qtyShares != nil {
+				part.Quantity = qtyShares[j]
+				if part.Quantity.IsZero() {
+					part.Unit = ""
+				}
+			}
 			idx := i
 			if first {
 				out[i] = part
@@ -291,14 +303,15 @@ func ApplySplitting(rule SplittingRule, currency string, lines []LineInput) ([]L
 	return out, traces, nil
 }
 
-// proportion divides amount over keys in proportion to weights, in whole minor units; the
-// units left by rounding down go to the keys with the largest remainders (ties by key order).
-func proportion(amount decimal.Decimal, keys []string, weights map[string]decimal.Decimal, minor int32) []decimal.Decimal {
-	units := amount.Shift(minor).BigInt()
+// proportion divides amount over keys in proportion to weights, in whole units of 10^-scale;
+// the units left by rounding down go to the keys with the largest remainders (ties by key
+// order). Weights are amounts with at most weightScale decimals.
+func proportion(amount decimal.Decimal, keys []string, weights map[string]decimal.Decimal, scale, weightScale int32) []decimal.Decimal {
+	units := amount.Shift(scale).BigInt()
 	wi := make([]*big.Int, len(keys))
 	sum := new(big.Int)
 	for i, k := range keys {
-		wi[i] = weights[k].Shift(minor).BigInt()
+		wi[i] = weights[k].Shift(weightScale).BigInt()
 		sum.Add(sum, wi[i])
 	}
 	shares := make([]*big.Int, len(keys))
@@ -320,7 +333,7 @@ func proportion(amount decimal.Decimal, keys []string, weights map[string]decima
 	}
 	out := make([]decimal.Decimal, len(keys))
 	for i := range keys {
-		out[i] = decimal.NewFromBigInt(shares[i], -minor)
+		out[i] = decimal.NewFromBigInt(shares[i], -scale)
 	}
 	return out
 }

@@ -353,7 +353,8 @@ today:
 | `LEDGER_DERIVATION_INVALID` | A derivation strategy has a shape or reference problem (BR-11.14) |
 | `LEDGER_LOOKUP_TABLE_INVALID` | A lookup table definition or row is invalid for the ledger |
 | `LEDGER_UNBALANCED` | Debits do not equal credits in the ledger currency (BR-11.1) |
-| `LEDGER_LINE_EMPTY` | Entry has no lines, or a zero-amount line without text (BR-11.2) |
+| `LEDGER_LINE_EMPTY` | Entry has no lines, or a zero-amount line without text or quantity (BR-11.2) |
+| `LEDGER_QUANTITY_INVALID` | Statistical `quantity` is negative, over 6 decimals or too large, or `quantity` and `unit` (A-Z, 0-9, up to 10) are not set together (BR-11.2) |
 | `LEDGER_LINE_LIMIT` | More than 10,000 lines (FR-11.5); 422 problem: more batch lines than the journal name's `linesLimit` (FR-11.9) |
 | `LEDGER_AMOUNT_SCALE` | Amount has more decimals than the currency allows (BR-11.3) |
 | `LEDGER_CURRENCY_MISMATCH` | Line currency differs from the ledger currency |

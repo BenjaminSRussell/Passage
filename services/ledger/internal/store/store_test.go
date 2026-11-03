@@ -540,3 +540,46 @@ func TestPostgres_TrialBalanceByDimension(t *testing.T) {
 		t.Fatalf("out-of-scope caller: %v", err)
 	}
 }
+
+func TestPostgres_StatisticalQuantityRoundTrips(t *testing.T) {
+	e, _ := setup(t)
+	in := vendorInvoice(e.ledger.ID, "STAT-1", "100.00")
+	in.Lines = append(in.Lines,
+		domain.LineInput{Account: "6010", Side: domain.SideDebit, Amount: decimal.Zero, Currency: "USD", Dimensions: map[string]string{"DEPT": "D100"},
+			Quantity: decimal.RequireFromString("12.5"), Unit: "KG"},
+		domain.LineInput{Account: "6010", Side: domain.SideCredit, Amount: decimal.Zero, Currency: "USD", Dimensions: map[string]string{"DEPT": "D100"},
+			Quantity: decimal.RequireFromString("12.5"), Unit: "KG"})
+	out, err := e.store.PostEntry(e.ctx, in)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	lines := out.Entries[0].Lines
+	if len(lines) != 4 || lines[2].Quantity != "12.500000" || lines[2].Unit != "KG" || lines[0].Quantity != "" {
+		t.Fatalf("posted lines: %+v", lines)
+	}
+	got, err := e.store.GetEntry(e.ctx, out.Entries[0].ID)
+	if err != nil || got.Lines[2].Quantity != "12.500000" || got.Lines[2].Unit != "KG" {
+		t.Fatalf("read back: %+v %v", got.Lines, err)
+	}
+	hash, _ := domain.HashPayload("reverse stat")
+	rev, err := e.store.ReverseEntry(e.ctx, ReverseInput{EntryID: out.Entries[0].ID, Key: "REV-STAT", Hash: hash, Actor: "test-user", TraceID: testTrace, Today: testToday})
+	if err != nil {
+		t.Fatalf("reverse: %v", err)
+	}
+	if rl := rev.Entries[0].Lines[2]; rl.Quantity != "12.500000" || rl.Unit != "KG" || rl.DebitCredit != domain.SideCredit {
+		t.Fatalf("reversing statistical line: %+v", rl)
+	}
+	page, err := e.store.ListLines(e.ctx, LineFilter{LedgerID: e.ledger.ID, Limit: 50})
+	if err != nil {
+		t.Fatalf("inquiry: %v", err)
+	}
+	n := 0
+	for _, l := range page.Items {
+		if l.Quantity == "12.500000" && l.Unit == "KG" {
+			n++
+		}
+	}
+	if n != 4 {
+		t.Fatalf("inquiry shows %d statistical lines, want 4", n)
+	}
+}

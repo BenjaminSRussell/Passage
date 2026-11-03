@@ -2,7 +2,7 @@ import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { JournalBatch, JournalName } from "./api/client";
-import { formatMicros, lineTotals, parseDimensions, toMicros, validateLines, emptyLine } from "./BatchLinesEditor";
+import { formatMicros, lineTotals, parseDimensions, toLineInputs, toMicros, validateLines, emptyLine } from "./BatchLinesEditor";
 import { availableActions, currencyScale } from "./JournalBatchPage";
 import { emptyJournalName, toJournalNameInput, validateJournalName } from "./JournalNameFormPage";
 import { idempotencyKey, json, pageViolations, renderAt, server, useFakeServer } from "./testServer";
@@ -88,6 +88,22 @@ describe("batch line arithmetic", () => {
     const errors = validateLines([{ ...emptyLine("D"), account: "60 10", amount: "ten", dimensions: "DEPT" }]);
     expect(Object.keys(errors).sort()).toEqual(["lines.0.account", "lines.0.amount", "lines.0.dimensions"]);
     expect(validateLines([])).toEqual({ lines: "Add at least one line." });
+  });
+
+  it("checks and sends the statistical quantity and unit together (BR-11.2)", () => {
+    const stat = { ...emptyLine("D"), account: "6010", amount: "0", quantity: "12.5", unit: "KG" };
+    expect(validateLines([stat])).toEqual({});
+    expect(toLineInputs([stat], "USD")[0]).toMatchObject({ amount: { currency: "USD", value: "0" }, quantity: "12.5", unit: "KG" });
+    expect(toLineInputs([{ ...stat, quantity: "", unit: "" }], "USD")[0]).not.toHaveProperty("quantity");
+    const bad = (patch: Partial<typeof stat>) => Object.keys(validateLines([{ ...stat, ...patch }]));
+    expect(bad({ unit: "" })).toEqual(["lines.0.unit"]);
+    expect(bad({ quantity: "", unit: "KG" })).toEqual(["lines.0.unit"]);
+    expect(bad({ quantity: "0", unit: "KG" })).toEqual(["lines.0.unit"]);
+    expect(bad({ unit: "kg" })).toEqual(["lines.0.unit"]);
+    expect(bad({ quantity: "1.0000001" })).toEqual(["lines.0.quantity"]);
+    expect(bad({ quantity: "1000000000000" })).toEqual(["lines.0.quantity"]);
+    expect(validateLines([{ ...stat, quantity: "1.000001" }])).toEqual({});
+    expect(bad({ quantity: "-1" })).toEqual(["lines.0.quantity"]);
   });
 
   it("offers only the BR-11.10 actions of the batch status", () => {

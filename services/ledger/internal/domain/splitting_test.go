@@ -202,3 +202,38 @@ func TestValidateSplittingRule(t *testing.T) {
 		}
 	}
 }
+
+// BR-11.2: a split line's statistical quantity is divided like its amount, so
+// the parts add up to the original quantity instead of each repeating it.
+func TestSplittingDividesStatisticalQuantity(t *testing.T) {
+	rule := SplittingRule{SplittingDimensions: []string{"PC"}, ZeroBalanceClearingAccount: "199999"}
+	freight := sl("211000", "C", "1000.00", nil)
+	freight.Quantity, freight.Unit = decimal.RequireFromString("10"), "KG"
+	in := []LineInput{
+		sl("600000", "D", "666.67", map[string]string{"PC": "PC1"}),
+		sl("600000", "D", "333.33", map[string]string{"PC": "PC2"}),
+		freight,
+	}
+	out, _, viol := ApplySplitting(rule, "USD", in)
+	if len(viol) != 0 {
+		t.Fatalf("violations: %v", viol)
+	}
+	total := decimal.Zero
+	got := map[string]string{}
+	for _, l := range out {
+		if l.Account != "211000" {
+			continue
+		}
+		if l.Unit != "KG" {
+			t.Errorf("part %v lost its unit", l.Dimensions)
+		}
+		total = total.Add(l.Quantity)
+		got[l.Dimensions["PC"]] = l.Quantity.StringFixed(QuantityScale)
+	}
+	if !total.Equal(decimal.RequireFromString("10")) {
+		t.Errorf("split quantities add up to %s, want 10 (%v)", total, got)
+	}
+	if got["PC1"] != "6.666700" || got["PC2"] != "3.333300" {
+		t.Errorf("quantity shares = %v, want PC1 6.666700 and PC2 3.333300", got)
+	}
+}

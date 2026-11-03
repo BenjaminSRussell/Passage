@@ -93,7 +93,7 @@ describe("Ledger transactions page", () => {
 
   it("searches with the filters, lists the lines and drills to the entry", async () => {
     server.handler = (url) =>
-      url.pathname === "/api/v1/ledger/journal-lines" ? json(200, { items: [line(1), line(2, { debitCredit: "C", account: "2100", displayName: "2100", dimensions: undefined, negativePosting: true })] }) : undefined;
+      url.pathname === "/api/v1/ledger/journal-lines" ? json(200, { items: [line(1, { quantity: "12.500000", unit: "KG" }), line(2, { debitCredit: "C", account: "2100", displayName: "2100", dimensions: undefined, negativePosting: true })] }) : undefined;
     renderAt("/ledger/transactions");
     fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
     fireEvent.change(screen.getByLabelText(/Account from/), { target: { value: "2000" } });
@@ -111,6 +111,7 @@ describe("Ledger transactions page", () => {
     expect(call.url.searchParams.get("limit")).toBe(String(LINES_PAGE_SIZE));
     expect(within(table).getByText("Storno")).toBeInTheDocument();
     expect(within(table).getAllByText("125.00 USD")).toHaveLength(2);
+    expect(within(table).getByText("12.500000 KG")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Load more lines" })).not.toBeInTheDocument();
     expect(pageViolations(document.body)).toEqual([]);
 
@@ -189,5 +190,26 @@ describe("trial balance drill-down", () => {
     const linesCall = server.calls.find((c) => c.url.pathname === "/api/v1/ledger/journal-lines");
     expect(linesCall?.url.searchParams.get("account_from")).toBe("6010");
     expect(linesCall?.url.searchParams.get("account_to")).toBe("6010");
+  });
+});
+
+describe("Statistical lines on the entry screen (BR-11.2)", () => {
+  it("shows the quantity and unit of a zero-amount statistical line", async () => {
+    server.handler = (url) => {
+      if (url.pathname === "/api/v1/ledger/reason-codes") return json(200, { items: [] });
+      if (url.pathname !== `/api/v1/ledger/journal-entries/${ENTRY}`) return undefined;
+      return json(200, {
+        id: ENTRY, ledgerId: LEDGER, voucher: "GL-000009", postingSequence: 9, postingDate: "2026-03-10", periodKey: "2026-03",
+        description: "Hours", traceId: "a".repeat(32), totals: { currency: "USD", debit: "0.00", credit: "0.00" },
+        lines: [
+          { id: "l1", lineNumber: 1, account: "9010", displayName: "9010", debitCredit: "D", amount: "0.00", quantity: "40.000000", unit: "HR" },
+          { id: "l2", lineNumber: 2, account: "9020", displayName: "9020", debitCredit: "C", amount: "0.00", text: "Memo" },
+        ],
+      });
+    };
+    renderAt(`/ledger/entries/${ENTRY}`);
+    const cell = await screen.findByText("40.000000 HR");
+    expect((cell.closest("tr") as HTMLElement).textContent).toContain("9010");
+    expect((screen.getByText("Memo").closest("tr") as HTMLElement).textContent).not.toContain("HR");
   });
 });

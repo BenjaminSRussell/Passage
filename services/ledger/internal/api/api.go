@@ -553,6 +553,8 @@ type lineDTO struct {
 	Amount        amountDTO         `json:"amount"`
 	Text          string            `json:"text"`
 	SourceLineRef string            `json:"sourceLineRef"`
+	Quantity      string            `json:"quantity,omitempty"`
+	Unit          string            `json:"unit,omitempty"`
 }
 
 type postEntryRequest struct {
@@ -635,8 +637,12 @@ func lineInput(prefix string, l lineDTO, fields map[string]string) domain.LineIn
 	if utf8.RuneCountInString(l.SourceLineRef) > maxSourceRefLength {
 		fields[prefix+".sourceLineRef"] = fmt.Sprintf("must be at most %d characters", maxSourceRefLength)
 	}
+	qty, ok := parseQuantity(l.Quantity)
+	if !ok {
+		fields[prefix+".quantity"] = "must be a decimal string"
+	}
 	return domain.LineInput{Account: l.Account, Dimensions: l.Dimensions, Side: l.DebitCredit,
-		Amount: amount, Currency: l.Amount.Currency, Text: l.Text, SourceLineRef: l.SourceLineRef}
+		Amount: amount, Currency: l.Amount.Currency, Text: l.Text, SourceLineRef: l.SourceLineRef, Quantity: qty, Unit: l.Unit}
 }
 
 func (a *API) postEntry(w http.ResponseWriter, r *http.Request) {
@@ -914,4 +920,14 @@ func (a *API) rebuildBalances(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, res)
+}
+
+// parseQuantity reads an optional statistical quantity (BR-11.2). An absent
+// quantity is zero; the domain checks sign, scale and the unit.
+func parseQuantity(v string) (decimal.Decimal, bool) {
+	if v == "" {
+		return decimal.Zero, true
+	}
+	q, err := decimal.NewFromString(v)
+	return q, err == nil
 }

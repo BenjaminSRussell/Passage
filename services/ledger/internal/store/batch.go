@@ -46,6 +46,8 @@ type BatchLine struct {
 	Currency      string            `json:"currency"`
 	Text          string            `json:"text,omitempty"`
 	SourceLineRef string            `json:"sourceLineRef,omitempty"`
+	Quantity      string            `json:"quantity,omitempty"`
+	Unit          string            `json:"unit,omitempty"`
 }
 
 // Batch is a manual journal batch with its side totals; Lines is set on
@@ -188,8 +190,14 @@ func toLineInputs(lines []BatchLine) ([]domain.LineInput, error) {
 		if err != nil {
 			return nil, err
 		}
+		var qty decimal.Decimal
+		if l.Quantity != "" {
+			if qty, err = decimal.NewFromString(l.Quantity); err != nil {
+				return nil, err
+			}
+		}
 		out = append(out, domain.LineInput{Account: l.Account, Dimensions: l.Dimensions, Side: l.DebitCredit,
-			Amount: amount, Currency: l.Currency, Text: l.Text, SourceLineRef: l.SourceLineRef})
+			Amount: amount, Currency: l.Currency, Text: l.Text, SourceLineRef: l.SourceLineRef, Quantity: qty, Unit: l.Unit})
 	}
 	return out, nil
 }
@@ -203,16 +211,16 @@ func insertBatchLines(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, b
 			dims = map[string]string{}
 		}
 		batch.Queue(`insert into journal_batch_line (tenant_id, batch_id, line_number, legal_entity_id, account, dimensions,
-				debit_credit, amount, currency, line_text, source_line_ref)
-			values ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9, nullif($10, ''), nullif($11, ''))`,
-			tenantID, batchID, i+1, legalEntityID, l.Account, dims, l.DebitCredit, l.Amount, l.Currency, l.Text, l.SourceLineRef)
+				debit_credit, amount, currency, line_text, source_line_ref, quantity, unit)
+			values ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9, nullif($10, ''), nullif($11, ''), nullif($12, '')::numeric, nullif($13, ''))`,
+			tenantID, batchID, i+1, legalEntityID, l.Account, dims, l.DebitCredit, l.Amount, l.Currency, l.Text, l.SourceLineRef, l.Quantity, l.Unit)
 	}
 	return execBatch(ctx, tx, batch)
 }
 
 func loadBatchLines(ctx context.Context, tx pgx.Tx, tenantID, batchID string) ([]BatchLine, error) {
 	rows, err := tx.Query(ctx, `select line_number, account, dimensions, debit_credit::text, amount::text, currency::text,
-			coalesce(line_text, ''), coalesce(source_line_ref, '')
+			coalesce(line_text, ''), coalesce(source_line_ref, ''), coalesce(quantity::text, ''), coalesce(unit, '')
 		from journal_batch_line where tenant_id = $1 and batch_id = $2 order by line_number`, tenantID, batchID)
 	if err != nil {
 		return nil, err
@@ -221,7 +229,7 @@ func loadBatchLines(ctx context.Context, tx pgx.Tx, tenantID, batchID string) ([
 	out := []BatchLine{}
 	for rows.Next() {
 		var l BatchLine
-		if err := rows.Scan(&l.LineNumber, &l.Account, &l.Dimensions, &l.DebitCredit, &l.Amount, &l.Currency, &l.Text, &l.SourceLineRef); err != nil {
+		if err := rows.Scan(&l.LineNumber, &l.Account, &l.Dimensions, &l.DebitCredit, &l.Amount, &l.Currency, &l.Text, &l.SourceLineRef, &l.Quantity, &l.Unit); err != nil {
 			return nil, err
 		}
 		if len(l.Dimensions) == 0 {
