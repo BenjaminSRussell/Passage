@@ -236,7 +236,11 @@ func TestSQL_ListsSchemasTablesAndColumnsThroughTheGuard(t *testing.T) {
 	}
 	cc := isolatedDatabase(t, url)
 	local := net.JoinHostPort(cc.Host, strconv.Itoa(int(cc.Port)))
-	target := probe.Target{Kind: domain.ConnSQL, Secret: "pw", Config: map[string]any{
+	secret := cc.Password
+	if secret == "" {
+		secret = "pw"
+	}
+	target := probe.Target{Kind: domain.ConnSQL, Secret: secret, Config: map[string]any{
 		"driver": "postgres", "host": "erp.acme.test", "port": float64(cc.Port), "database": cc.Database, "user": cc.User, "sslmode": "disable"}}
 
 	if r := (&probe.Prober{Guard: pretend(t, "", "10.20.30.40", local)}).Probe(context.Background(), target); r.OK || r.Failure.Code != probe.CodeEgressDenied {
