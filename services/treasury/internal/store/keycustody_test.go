@@ -6,9 +6,12 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
+	"errors"
 	"fmt"
+	"io"
+	"log"
 	"log/slog"
 	"net"
 	"net/http"
@@ -83,6 +86,13 @@ func startSFTPServer(t *testing.T, allowed ssh.PublicKey) (addr, hostPrint strin
 	return ln.Addr().String(), ssh.FingerprintSHA256(host.PublicKey())
 }
 
+type ambiguousTransport struct{}
+
+func (ambiguousTransport) Protocol() string { return bankconnect.ProtocolSFTP }
+func (ambiguousTransport) Send(context.Context, bankconnect.File, bankconnect.Signature) (bankconnect.Receipt, error) {
+	return bankconnect.Receipt{}, fmt.Errorf("rename: %w", bankconnect.ErrAmbiguous)
+}
+
 func TestKeyCustody_NoKeyBytesReachLogsOrTheDatabaseAcrossAFullSend(t *testing.T) {
 	s, admin := newStore(t)
 	le := ids.New()
@@ -93,11 +103,6 @@ func TestKeyCustody_NoKeyBytesReachLogsOrTheDatabaseAcrossAFullSend(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	block, err := ssh.MarshalPrivateKey(priv, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	pemKey := string(pem.EncodeToMemory(block))
 	signer, err := ssh.NewSignerFromKey(priv)
 	if err != nil {
 		t.Fatal(err)
@@ -109,8 +114,13 @@ func TestKeyCustody_NoKeyBytesReachLogsOrTheDatabaseAcrossAFullSend(t *testing.T
 			return
 		}
 		switch r.URL.Path {
-		case "/v1/secret/data/treasury/sftp":
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"data": map[string]string{"private_key": pemKey}}})
+		case "/v1/transit/keys/sftp-ed":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"type": "ed25519", "latest_version": 1, "keys": map[string]any{"1": map[string]string{"public_key": base64.StdEncoding.EncodeToString(priv.Public().(ed25519.PublicKey))}}}})
+		case "/v1/transit/sign/sftp-ed":
+			var in struct{ Input string }
+			_ = json.NewDecoder(r.Body).Decode(&in)
+			data, _ := base64.StdEncoding.DecodeString(in.Input)
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"signature": "vault:v1:" + base64.StdEncoding.EncodeToString(ed25519.Sign(priv, data))}})
 		case "/v1/transit/sign/bank-a/sha2-256":
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"signature": "vault:v2:" + base64.StdEncoding.EncodeToString([]byte("detached")), "key_version": 2}})
 		default:
@@ -120,50 +130,77 @@ func TestKeyCustody_NoKeyBytesReachLogsOrTheDatabaseAcrossAFullSend(t *testing.T
 	t.Cleanup(vault.Close)
 
 	var logs bytes.Buffer
-	prev := slog.Default()
+	prevSlog, prevLog, prevErr := slog.Default(), log.Writer(), os.Stderr
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	log.SetOutput(&logs)
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = pw
+	stderrDone := make(chan string)
+	go func() { b, _ := io.ReadAll(pr); stderrDone <- string(b) }()
+	restore := func() {
+		slog.SetDefault(prevSlog)
+		log.SetOutput(prevLog)
+		os.Stderr = prevErr
+	}
+	t.Cleanup(restore)
 
 	cfg, err := bankconnect.LoadVaultConfig(func(k string) string {
-		return map[string]string{"VAULT_ADDR": vault.URL, "VAULT_TOKEN": token, "TREASURY_SIGNING_KEY_NAME": "bank-a", "TREASURY_SFTP_KEY_PATH": "secret/treasury/sftp"}[k]
+		return map[string]string{"VAULT_ADDR": vault.URL, "VAULT_TOKEN": token, "TREASURY_SIGNING_KEY_NAMES": "bank-a", "TREASURY_SFTP_KEY_NAME": "sftp-ed", "TREASURY_BANK_CHANNELS": "sftp"}[k]
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	transit, err := cfg.Transit(ctx)
+	v := bankconnect.NewVault(cfg)
+	clientKey, err := v.SFTPSigner(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	clientKey, err := cfg.SFTPSigner(ctx)
-	if err != nil {
-		t.Fatal(err)
+	if string(clientKey.PublicKey().Marshal()) != string(signer.PublicKey().Marshal()) {
+		t.Fatal("the signer does not carry the transit public key")
 	}
 	addr, hostPrint := startSFTPServer(t, signer.PublicKey())
 	conn, err := bankconnect.DialSSH(ctx, bankconnect.SSHConfig{Addr: addr, User: "bank", HostKeyFingerprint: hostPrint, Signer: clientKey, Timeout: 5 * time.Second})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("login through a transit-backed key: %v", err)
 	}
 	defer conn.Close()
 
+	var errorText strings.Builder
 	dir := t.TempDir()
-	file := bankconnect.File{LegalEntityID: le, BankAccountID: acct.ID, Name: "pain001.xml", OrderType: "CCT", KeyName: cfg.SigningKeyName, Data: []byte("<Document/>")}
-	if _, err := (bankconnect.Sender{Signer: transit, Transport: bankconnect.SFTP{Dir: dir, Client: conn}, Audit: s}).Send(ctx, file); err != nil {
+	file := bankconnect.File{LegalEntityID: le, BankAccountID: acct.ID, Name: "pain001.xml", OrderType: "CCT", KeyName: "bank-a", Data: []byte("<Document/>")}
+	if _, err := (bankconnect.Sender{Signer: v.Signer(), Transport: bankconnect.SFTP{Dir: dir, Client: conn}, Audit: s}).Send(ctx, file); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "pain001.xml")); err != nil {
 		t.Fatalf("file not delivered: %v", err)
 	}
+	refused := file
+	refused.KeyName = "not-allowed"
+	_, err = (bankconnect.Sender{Signer: v.Signer(), Transport: bankconnect.SFTP{Dir: dir, Client: conn}, Audit: s}).Send(ctx, refused)
+	if err == nil {
+		t.Fatal("a key name off the allow-list was signed with")
+	}
+	errorText.WriteString(err.Error())
+	_, err = (bankconnect.Sender{Signer: v.Signer(), Transport: ambiguousTransport{}, Audit: s}).Send(ctx, file)
+	if !errors.Is(err, bankconnect.ErrAmbiguous) {
+		t.Fatalf("ambiguous send: %v", err)
+	}
+	errorText.WriteString(err.Error())
+	restore()
+	_ = pw.Close()
+	stderr := <-stderrDone
 
-	needles := []string{token, base64.StdEncoding.EncodeToString(priv.Seed()), base64.StdEncoding.EncodeToString(priv)}
-	for _, line := range strings.Split(strings.TrimSpace(pemKey), "\n") {
-		if len(line) >= 20 && !strings.HasPrefix(line, "-----") {
-			needles = append(needles, line)
-		}
+	seed := priv.Seed()
+	needles := []string{token, base64.StdEncoding.EncodeToString(seed), base64.StdEncoding.EncodeToString(priv), base64.RawStdEncoding.EncodeToString(seed), hex.EncodeToString(seed), hex.EncodeToString(priv)}
+	if !strings.Contains(logs.String(), "bound to vault transit") {
+		t.Fatal("the key binding was not logged, so the log scan proves nothing")
 	}
-	if !strings.Contains(logs.String(), "sftp client key loaded") {
-		t.Fatal("the key load was not logged, so the log scan proves nothing")
-	}
-	assertNoNeedles(t, "slog output", logs.String(), needles)
+	assertNoNeedles(t, "slog and log output", logs.String(), needles)
+	assertNoNeedles(t, "stderr", stderr, needles)
+	assertNoNeedles(t, "error strings", errorText.String(), needles)
 
 	tables, err := admin.Query(context.Background(), `select tablename from pg_tables where schemaname = current_schema()`)
 	if err != nil {
@@ -188,9 +225,19 @@ func TestKeyCustody_NoKeyBytesReachLogsOrTheDatabaseAcrossAFullSend(t *testing.T
 		}
 		assertNoNeedles(t, "table "+n, dump, needles)
 	}
-	var audited int
-	if err := admin.QueryRow(context.Background(), `select count(*) from bank_file_audit where key_name = 'bank-a' and event in ('prepared','sent')`).Scan(&audited); err != nil || audited != 2 {
-		t.Fatalf("audit rows = %d, %v; want prepared and sent", audited, err)
+	rows, err := admin.Query(context.Background(), `select event from bank_file_audit`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	for rows.Next() {
+		var e string
+		_ = rows.Scan(&e)
+		counts[e]++
+	}
+	rows.Close()
+	if counts["prepared"] != 3 || counts["sent"] != 1 || counts["failed"] != 1 || counts["unknown"] != 1 {
+		t.Fatalf("audit events = %v; want 3 prepared, 1 sent, 1 failed, 1 unknown", counts)
 	}
 }
 

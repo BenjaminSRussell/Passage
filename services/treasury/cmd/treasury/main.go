@@ -45,12 +45,20 @@ func run() error {
 		}
 		maxMB = n
 	}
-	vault, err := bankconnect.LoadVaultConfig(os.Getenv)
+	vaultCfg, err := bankconnect.LoadVaultConfig(os.Getenv)
 	if err != nil {
 		return err
 	}
-	if vault.Enabled() {
-		slog.Info("bank connectivity keys come from vault", "addr", vault.Addr, "signingKey", vault.SigningKeyName, "sftpKeyPath", vault.SFTPKeyPath)
+	if vaultCfg.Enabled() {
+		vault := bankconnect.NewVault(vaultCfg)
+		defer func() {
+			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := vault.Close(closeCtx); err != nil {
+				slog.Error("vault token revoke failed", "err", err)
+			}
+		}()
+		slog.Info("bank connectivity keys stay in vault transit", "addr", vaultCfg.Addr, "signingKeys", vaultCfg.SigningKeyNames, "sftpKey", vaultCfg.SFTPKeyName, "channels", vaultCfg.BankChannels)
 	}
 	pool, err := dbx.Connect(ctx, dsn)
 	if err != nil {

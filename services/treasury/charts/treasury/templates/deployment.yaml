@@ -14,6 +14,7 @@ spec:
       labels:
         app.kubernetes.io/name: treasury
     spec:
+      serviceAccountName: {{ .Release.Name }}
       securityContext:
         runAsNonRoot: true
         seccompProfile:
@@ -53,12 +54,12 @@ spec:
             - name: VAULT_K8S_AUTH_MOUNT
               value: {{ .k8sMount | quote }}
             {{- end }}
-            - name: TREASURY_SIGNING_KEY_NAME
-              value: {{ .signingKeyName | quote }}
-            - name: TREASURY_SFTP_KEY_PATH
-              value: {{ .sftpKeyPath | quote }}
-            - name: TREASURY_SFTP_KEY_FIELD
-              value: {{ .sftpKeyField | quote }}
+            - name: TREASURY_SIGNING_KEY_NAMES
+              value: {{ join "," .signingKeyNames | quote }}
+            - name: TREASURY_SFTP_KEY_NAME
+              value: {{ .sftpKeyName | quote }}
+            - name: TREASURY_BANK_CHANNELS
+              value: {{ join "," .bankChannels | quote }}
             {{- end }}
             {{- end }}
           ports:
