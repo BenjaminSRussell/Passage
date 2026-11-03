@@ -136,7 +136,7 @@ export function PromiseLinePage() {
           </Link>
         }
       />
-      {order.status !== "CONFIRMED" ? (
+      {order.status !== "CONFIRMED" && order.status !== "PARTIALLY_SHIPPED" ? (
         <Alert tone="warning" title="Only a confirmed order can be promised">
           This order is {sentence(order.status)}. Confirm it first.
         </Alert>

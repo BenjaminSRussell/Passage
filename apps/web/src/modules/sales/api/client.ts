@@ -86,6 +86,10 @@ export interface OrderLine {
   /** The control the line was entered with; absent when the legal entity default applies. */
   deliveryDateControl?: DeliveryDateControl;
   lineStatus: string;
+  /** Quantity covered by delivery reports; the line is PICKED while it is below quantity (BR-27.5). */
+  deliveredQty?: Decimal;
+  /** Quantity covered by invoice reports, never above deliveredQty. */
+  invoicedQty?: Decimal;
   /** Parent line id of a MANDATORY supplementary line added at commit (FR-27.14). */
   supplementaryOf?: string;
   /** Line number of that parent; the line follows it (BR-27.14). */
@@ -1694,4 +1698,62 @@ export function getIntakeError(id: string, signal?: AbortSignal): Promise<Versio
 /** Closes an OPEN intake error at its ETag with a note (1 to 500 characters). */
 export function resolveIntakeError(id: string, etag: string, note: string): Promise<Versioned<IntakeError>> {
   return versioned<IntakeError>(`/intake-errors/${encodeURIComponent(id)}:resolve`, { method: "POST", body: JSON.stringify({ note }), headers: { "If-Match": etag } });
+}
+
+export const PROGRESS_KINDS = ["DELIVERED", "INVOICED"] as const;
+export type ProgressKind = (typeof PROGRESS_KINDS)[number];
+
+/** One line of a stored delivery or invoice report: what it covered and the line after it. */
+export interface OrderProgressLine {
+  lineId: string;
+  lineNo: number;
+  quantity: Decimal;
+  deliveredQty: Decimal;
+  invoicedQty: Decimal;
+  lineStatus: string;
+}
+
+/** A delivery or invoice recorded on an order (BR-27.5). */
+export interface OrderProgress {
+  id: string;
+  legalEntityId: string;
+  orderId: string;
+  orderNumber: string;
+  kind: ProgressKind;
+  sourceRef: string;
+  lines: OrderProgressLine[];
+  orderStatus: string;
+  orderVersion: number;
+  recordedBy: string;
+  recordedAt: string;
+}
+
+export interface OrderProgressFilter {
+  legalEntityId?: string;
+  orderId?: string;
+  kind?: ProgressKind;
+}
+
+export interface RecordProgressInput {
+  kind: ProgressKind;
+  sourceRef: string;
+  lines: { lineNo: number; quantity: Decimal }[];
+}
+
+export async function listOrderProgress(filter: OrderProgressFilter = {}, signal?: AbortSignal): Promise<OrderProgress[]> {
+  const body = await json<{ items?: OrderProgress[] }>(
+    `/order-progress${query({ legalEntityId: filter.legalEntityId, orderId: filter.orderId, kind: filter.kind })}`,
+    {},
+    signal,
+  );
+  return body.items ?? [];
+}
+
+/** Records a delivery or an invoice; the quantities are what this report covers, not cumulative. */
+export function recordOrderProgress(orderId: string, input: RecordProgressInput, key: string = newKey()): Promise<OrderProgress> {
+  return json<OrderProgress>(`/orders/${encodeURIComponent(orderId)}:record-progress`, {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "Idempotency-Key": key },
+  });
 }

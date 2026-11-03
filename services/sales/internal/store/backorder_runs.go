@@ -166,8 +166,9 @@ func runLock(ctx context.Context, tx pgx.Tx, tenantID, productID, siteID, wareho
 }
 
 // openRunLines reads the open lines of the product at the site and warehouse
-// from the CONFIRMED orders (JOURNAL orders, supplementary lines and lines past
-// RESERVED are left out), with Before the quantity their schedule lines
+// from the CONFIRMED and PARTIALLY_SHIPPED orders (JOURNAL orders,
+// supplementary lines and lines past RESERVED, which a delivery has reached,
+// are left out), with Before the quantity their schedule lines
 // promise a date for, in (order id, line number) order. It reads at most
 // MaxBackorderRunLines+1 lines so a caller can refuse a run that is too large.
 func openRunLines(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, productID, siteID, warehouseID string) ([]BackorderRunLine, error) {
@@ -177,7 +178,7 @@ func openRunLines(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, produ
 				and sl.status in ('CONFIRMED', 'BACKORDER')), 0)::text
 		from sales_order_line l join sales_order o on o.tenant_id = l.tenant_id and o.id = l.order_id
 		where l.tenant_id = $1 and o.legal_entity_id = $2 and l.product_id = $3 and l.site_id = $4 and l.warehouse_id = $5
-			and o.status = 'CONFIRMED' and o.order_type <> 'JOURNAL' and l.line_status in ('OPEN', 'RESERVED') and l.supplementary_of is null
+			and o.status in ('CONFIRMED', 'PARTIALLY_SHIPPED') and o.order_type <> 'JOURNAL' and l.line_status in ('OPEN', 'RESERVED') and l.supplementary_of is null
 		order by o.id, l.line_no limit $6`,
 		tenantID, legalEntityID, productID, siteID, warehouseID, MaxBackorderRunLines+1)
 	if err != nil {
@@ -199,8 +200,8 @@ func openRunLines(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, produ
 }
 
 // CreateBackorderRun reads the open lines of the product at the site and
-// warehouse from the CONFIRMED orders (JOURNAL orders, supplementary lines and
-// lines past RESERVED are left out), plans the strategy over the supply and
+// warehouse from the CONFIRMED and PARTIALLY_SHIPPED orders (JOURNAL orders,
+// supplementary lines and lines past RESERVED are left out), plans the strategy over the supply and
 // stores the result as a PREVIEW run. A line's confirmed quantity is what its
 // schedule lines promise a date for. A repeat of the same Idempotency-Key and
 // body returns the stored run with created=false. A line that gains quantity
@@ -239,7 +240,7 @@ func (s *Postgres) CreateBackorderRun(ctx context.Context, in NewBackorderRun, n
 			}
 		}
 		if len(lines) == 0 {
-			return problem(http.StatusUnprocessableEntity, CodeBackorderRunRefused, "no open line of a CONFIRMED order is waiting for this product, site and warehouse")
+			return problem(http.StatusUnprocessableEntity, CodeBackorderRunRefused, "no open line of a CONFIRMED or PARTIALLY_SHIPPED order is waiting for this product, site and warehouse")
 		}
 		if len(lines) > MaxBackorderRunLines {
 			return problem(http.StatusUnprocessableEntity, CodeBackorderRunRefused, fmt.Sprintf("more than %d open lines; run fewer", MaxBackorderRunLines))
@@ -410,7 +411,7 @@ func entriesOf(lines []ScheduleLine) []domain.ScheduleEntry {
 // each order gets a new version with the diff, order.changed, and
 // atp.promised for every changed line; backorderrun.committed closes the run.
 // An order that changed since the preview (its version moved, it is no longer
-// CONFIRMED or the line is past RESERVED) refuses the whole commit with 409
+// CONFIRMED or PARTIALLY_SHIPPED, or the line is past RESERVED) refuses the whole commit with 409
 // SLS-0042 and nothing is applied, so run a new preview.
 func (s *Postgres) CommitBackorderRun(ctx context.Context, id string, version int, actor string, now time.Time) (BackorderRun, error) {
 	p, _ := tenant.FromContext(ctx)
@@ -455,7 +456,7 @@ func (s *Postgres) CommitBackorderRun(ctx context.Context, id string, version in
 				return err
 			}
 			first := byOrder[orderID][0]
-			if o.Version != first.OrderVersion || o.Status != domain.OrderConfirmed {
+			if o.Version != first.OrderVersion || !domain.Promisable(o.Status) {
 				return stale(first, "changed")
 			}
 			active, err := activeSchedule(ctx, tx, p.TenantID, orderID)

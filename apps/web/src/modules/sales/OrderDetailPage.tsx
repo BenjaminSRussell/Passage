@@ -21,6 +21,7 @@ import {
 } from "./api/client";
 import { dash, formatDateTime, money, sentence } from "./format";
 import { OrderHistory } from "./OrderHistory";
+import { OrderProgressCard } from "./OrderProgressPages";
 import { OrderSchedule } from "./OrderSchedule";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -167,6 +168,8 @@ export function OrderDetailPage() {
     { key: "confirmedShipDate", header: "Confirmed ship", mono: true, render: (l) => l.confirmedShipDate ?? dash },
     { key: "confirmedReceiptDate", header: "Confirmed receipt", mono: true, render: (l) => l.confirmedReceiptDate ?? dash },
     { key: "deliveryDateControl", header: "Date control", render: (l) => (l.deliveryDateControl ? sentence(l.deliveryDateControl) : "Default") },
+    { key: "deliveredQty", header: "Delivered", align: "end", render: (l) => l.deliveredQty ?? "0" },
+    { key: "invoicedQty", header: "Invoiced", align: "end", render: (l) => l.invoicedQty ?? "0" },
     { key: "lineStatus", header: "Status", render: (l) => <StatusPill status={l.lineStatus} /> },
     {
       key: "parentLineNo",
@@ -297,7 +300,8 @@ export function OrderDetailPage() {
         </Card>
       ) : null}
       <DataTable label="Order lines" columns={lineColumns} rows={order.lines} getRowKey={(l) => l.id} empty={{ title: "No lines" }} />
-      {order.status === "CONFIRMED" ? <OrderSchedule order={order} /> : null}
+      {order.status === "CONFIRMED" || order.status === "PARTIALLY_SHIPPED" ? <OrderSchedule order={order} /> : null}
+      {["CONFIRMED", "PARTIALLY_SHIPPED", "SHIPPED", "INVOICED"].includes(order.status) ? <OrderProgressCard orderId={order.id} version={order.version} status={order.status} orderType={order.orderType} /> : null}
       <Card title="Holds">
         {order.holds.length === 0 ? (
           <EmptyState compact headingLevel={3} title="No holds" description="Holds placed by the credit check or by a sales manager appear here." />

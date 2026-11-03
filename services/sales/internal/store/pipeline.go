@@ -169,7 +169,7 @@ func (s *Postgres) Summary(ctx context.Context, f SummaryFilter) (Summary, error
 		if err := tx.QueryRow(ctx, `select count(*) from order_schedule_line sl
 			join sales_order_line l on l.tenant_id = sl.tenant_id and l.id = sl.line_id
 			join sales_order o on o.tenant_id = sl.tenant_id and o.id = sl.order_id
-			where sl.tenant_id = $1 and sl.status in ('BACKORDER', 'UNPROMISED') and o.status = 'CONFIRMED' and l.line_status <> 'CANCELLED'
+			where sl.tenant_id = $1 and sl.status in ('BACKORDER', 'UNPROMISED') and o.status in ('CONFIRMED', 'PARTIALLY_SHIPPED') and l.line_status not in ('CANCELLED', 'DELIVERED', 'INVOICED')
 				and ($2 = '' or sl.legal_entity_id::text = $2)`, p.TenantID, f.LegalEntityID).Scan(&out.BackorderLines); err != nil {
 			return err
 		}

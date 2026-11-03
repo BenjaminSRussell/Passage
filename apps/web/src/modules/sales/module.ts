@@ -17,6 +17,7 @@ import { DeliveryTermsDetailPage, DeliveryTermsListPage, NewDeliveryTermsPage } 
 import { CreditProfilePage, NewCreditProfilePage } from "./CreditProfileFormPage";
 import { CreditProfilesPage } from "./CreditProfilesPage";
 import { NewOrderPage } from "./NewOrderPage";
+import { NewOrderProgressPage, OrderProgressListPage } from "./OrderProgressPages";
 import { OrderDetailPage } from "./OrderDetailPage";
 import { IntakeErrorDetailPage } from "./IntakeErrorDetailPage";
 import { IntakeErrorsPage } from "./IntakeErrorsPage";
@@ -39,7 +40,7 @@ const sales: PassageModule = {
   id: "sales",
   title: "Sales",
   description:
-    "See the sales workspace and quotation pipeline, expire lapsed quotations, quote and convert to orders, enter, confirm, change and cancel sales orders, approve or reject changes of customers that need change approval, apply holds and work the release queue, maintain credit profiles, the per legal entity sales parameters, product listings, customer delivery terms, supplementary items, product proposals, allocation quotas and sales agreements, check available-to-promise, reconcile scheduling releases and store them against sales agreements, preview backorder runs and plan and commit them over the open order lines.",
+    "See the sales workspace and quotation pipeline, expire lapsed quotations, quote and convert to orders, enter, confirm, change and cancel sales orders, approve or reject changes of customers that need change approval, apply holds and work the release queue, maintain credit profiles, the per legal entity sales parameters, product listings, customer delivery terms, supplementary items, product proposals, allocation quotas and sales agreements, record deliveries and invoices against orders, check available-to-promise, reconcile scheduling releases and store them against sales agreements, preview backorder runs and plan and commit them over the open order lines.",
   routes: [
     { path: "/sales", element: createElement(OrdersPage), handle: { title: "Sales orders", duty: "sales.order.read" } },
     { path: "/sales/workspace", element: createElement(SalesWorkspacePage), handle: { title: "Sales workspace", duty: "sales.order.read" } },
@@ -47,7 +48,9 @@ const sales: PassageModule = {
     { path: "/sales/orders/new", element: createElement(NewOrderPage), handle: { title: "New sales order" } },
     { path: "/sales/orders/:id", element: createElement(OrderDetailPage), handle: { title: "Sales order" } },
     { path: "/sales/orders/:id/change", element: createElement(ChangeOrderPage), handle: { title: "Change sales order" } },
+    { path: "/sales/orders/:id/progress/new", element: createElement(NewOrderProgressPage), handle: { title: "Record delivery or invoice" } },
     { path: "/sales/orders/:id/promise", element: createElement(PromiseLinePage), handle: { title: "Promise order line" } },
+    { path: "/sales/order-progress", element: createElement(OrderProgressListPage), handle: { title: "Deliveries and invoices", duty: "sales.order.read" } },
     { path: "/sales/change-requests", element: createElement(ChangeRequestsPage) },
     { path: "/sales/change-requests/:id", element: createElement(ChangeRequestDetailPage), handle: { title: "Change request" } },
     { path: "/sales/change-policy", element: createElement(ChangePolicyPage), handle: { title: "Customer change approval", duty: "sales.order.read" } },
@@ -93,6 +96,7 @@ const sales: PassageModule = {
     { label: "Sales workspace", to: "/sales/workspace", duty: "sales.order.read" },
     { label: "Sales orders", to: "/sales/orders", duty: "sales.order.read" },
     { label: "New order", to: "/sales/orders/new", duty: "sales.order.write" },
+    { label: "Deliveries and invoices", to: "/sales/order-progress", duty: "sales.order.read" },
     { label: "Change requests", to: "/sales/change-requests", duty: "sales.order.read" },
     { label: "Quotations", to: "/sales/quotations", duty: "sales.order.read" },
     { label: "Credit release queue", to: "/sales/credit-holds", duty: "sales.credit.release" },

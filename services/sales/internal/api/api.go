@@ -120,6 +120,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyConfirm)).Post(orders+"/{id}:cancel", a.cancelOrder)
 	r.With(authz.RequireDuty(dutyPlanProduction)).Post(orders+"/{id}:plan-production", a.planProduction)
 	r.With(authz.RequireDuty(dutyRead)).Get(orders+"/{id}/versions", a.listOrderVersions)
+	r.With(authz.RequireAnyDuty(dutyRecordDelivery, dutyRecordInvoice)).Post(orders+"/{id}:record-progress", a.recordProgress)
+	r.With(authz.RequireDuty(dutyRead)).Get(orderProgress, a.listProgress)
 	r.With(authz.RequireDuty(dutyWrite)).Post(orders+"/{id}/lines/{lineNo}:promise", a.promiseLine)
 	r.With(authz.RequireDuty(dutyRead)).Get(orders+"/{id}/schedule-lines", a.listScheduleLines)
 	r.With(authz.RequireDuty(dutyRead)).Get(backorders, a.listBackorders)

@@ -229,7 +229,7 @@ func allocationFloor(ctx context.Context, tx pgx.Tx, tenantID, lineID string) (s
 	return *floor, nil
 }
 
-// PromiseLine places one line of a CONFIRMED order against the given ATP
+// PromiseLine places one open line of a CONFIRMED or PARTIALLY_SHIPPED order against the given ATP
 // buckets (BR-27.1) and stores the result as schedule lines: the part that
 // can ship by the requested date stays CONFIRMED, supply that arrives later
 // becomes BACKORDER lines and quantity no supply covers an UNPROMISED line
@@ -248,8 +248,8 @@ func (s *Postgres) PromiseLine(ctx context.Context, orderID string, version int,
 		if o.Version != version {
 			return versionConflict()
 		}
-		if o.Status != domain.OrderConfirmed {
-			return problem(http.StatusUnprocessableEntity, CodeNotPromisable, fmt.Sprintf("order is %s; only a CONFIRMED order can be promised", o.Status))
+		if !domain.Promisable(o.Status) {
+			return problem(http.StatusUnprocessableEntity, CodeNotPromisable, fmt.Sprintf("order is %s; only a CONFIRMED or PARTIALLY_SHIPPED order can be promised", o.Status))
 		}
 		if o.OrderType == domain.OrderTypeJournal {
 			return problem(http.StatusUnprocessableEntity, CodeNotPromisable, "a JOURNAL order never consumes ATP and cannot be promised (BR-27.7)")
@@ -428,7 +428,7 @@ func (s *Postgres) ListBackorders(ctx context.Context, f BackorderFilter) ([]Bac
 			from order_schedule_line sl
 			join sales_order_line l on l.tenant_id = sl.tenant_id and l.id = sl.line_id
 			join sales_order o on o.tenant_id = sl.tenant_id and o.id = sl.order_id
-			where sl.tenant_id = $1 and sl.status in ('BACKORDER', 'UNPROMISED') and o.status = 'CONFIRMED' and l.line_status <> 'CANCELLED'
+			where sl.tenant_id = $1 and sl.status in ('BACKORDER', 'UNPROMISED') and o.status in ('CONFIRMED', 'PARTIALLY_SHIPPED') and l.line_status not in ('CANCELLED', 'DELIVERED', 'INVOICED')
 				and ($2 = '' or sl.legal_entity_id::text = $2) and ($3 = '' or l.product_id::text = $3) and ($4 = '' or o.customer_id::text = $4)
 				and ($5 = '' or sl.delivery_date is null or sl.delivery_date <= nullif($5, '')::date)
 			order by sl.delivery_date nulls last, o.order_number, l.line_no, sl.seq limit $6`,

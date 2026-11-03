@@ -1156,7 +1156,7 @@ paths:
         "404": {$ref: "#/components/responses/Problem"}
   /v1/sales/orders/{id}/lines/{lineNo}:promise:
     post:
-      summary: Promise one line of a confirmed order against ATP buckets and store its schedule lines (FR-27.6, BR-27.1, AC-27.8)
+      summary: Promise one open line of a confirmed or partly shipped order against ATP buckets and store its schedule lines (FR-27.6, BR-27.1, AC-27.8)
       description: >-
         Places the line quantity against the supplied buckets. The part that can ship by the requested date stays CONFIRMED, supply that
         arrives later becomes BACKORDER lines and quantity no bucket covers an UNPROMISED line. The line's confirmed ship date becomes the
@@ -1245,7 +1245,7 @@ paths:
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
       responses:
         "200":
-          description: backorder lines of CONFIRMED orders, earliest promised date first, undated lines last
+          description: backorder lines of CONFIRMED and PARTIALLY_SHIPPED orders (lines not yet wholly delivered), earliest promised date first, undated lines last
           content:
             application/json:
               schema:
@@ -1369,7 +1369,7 @@ paths:
     post:
       summary: >-
         Plan a backorder processing run over the open lines of one product at a site and warehouse, read from
-        the CONFIRMED orders, and store it as a PREVIEW; no order changes until it is committed (FR-27.17, BR-27.11)
+        the CONFIRMED and PARTIALLY_SHIPPED orders, and store it as a PREVIEW; no order changes until it is committed (FR-27.17, BR-27.11)
       operationId: createBackorderRun
       x-passage-duty: sales.backorder.run
       parameters:
@@ -2165,6 +2165,83 @@ paths:
               schema: {$ref: "#/components/schemas/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/orders/{id}:record-progress:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      summary: >-
+        Record goods delivered or an invoice issued on an order: the line quantities, line statuses (PICKED in part,
+        DELIVERED, INVOICED) and the derived order status (PARTIALLY_SHIPPED, SHIPPED, INVOICED) follow (BR-27.5, FR-28.8)
+      operationId: recordOrderProgress
+      x-passage-duty: sales.order.record-delivery | sales.order.record-invoice
+      description: >-
+        Called by fulfillment when a packing slip posts (kind DELIVERED, duty sales.order.record-delivery, the
+        quantities of that shipment, never cumulative) and by billing when an invoice posts (kind INVOICED, duty
+        sales.order.record-invoice); a report of a kind whose duty the caller lacks is 403. An invoice may not pass what
+        was delivered, so billing reports a non-stocked line it invoices without a packing slip (FR-29.1) as DELIVERED
+        under the invoice number first. Quantities are positive: returns and credit notes are not recorded here. Takes
+        the order's row lock and writes an order version with the field-level diff and orderprogress.recorded in the
+        same transaction. The same sourceRef of a kind is applied once per order: a repeat with the same lines and
+        quantities (in any order) is answered with the stored report, with other lines it is 409 SLS-0060.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RecordProgressRequest"}
+      responses:
+        "200":
+          description: the stored report of an earlier request with the same Idempotency-Key (or the same source and lines)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OrderProgress"}
+        "201":
+          description: the report was applied
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OrderProgress"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: SLS-0060 the source was already recorded on this order with other lines or quantities
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "422":
+          description: >-
+            SLS-0058 the order cannot take it (not CONFIRMED or PARTIALLY_SHIPPED, SHIPPED for an invoice; a JOURNAL or
+            RETURNED order; an invoice on a SUBSCRIPTION order, which billing invoices per period),
+            SLS-0059 the quantity passes the ordered quantity (delivery) or the delivered quantity (invoice), or the
+            Idempotency-Key was used with another body
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+  /v1/sales/order-progress:
+    get:
+      summary: Delivery and invoice reports recorded on orders, newest first
+      operationId: listOrderProgress
+      x-passage-duty: sales.order.read
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: orderId, in: query, description: only this order, schema: {type: string, format: uuid}}
+        - {name: kind, in: query, schema: {type: string, enum: [DELIVERED, INVOICED]}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: reports, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/OrderProgress"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
   /v1/sales/alternative-item-rules:
     get:
       summary: Alternative item rules in the caller's scope, by ordered product and priority (FR-27.13)
@@ -2386,7 +2463,7 @@ components:
       required: [activeHolds, backorderLines, quotationsExpiring, quotationsLapsed, openIntakeErrors, pipeline, windowDays, won, lost, expired]
       properties:
         activeHolds: {type: integer, description: ACTIVE order holds of every type}
-        backorderLines: {type: integer, description: BACKORDER and UNPROMISED schedule lines of CONFIRMED orders}
+        backorderLines: {type: integer, description: BACKORDER and UNPROMISED schedule lines of CONFIRMED and PARTIALLY_SHIPPED orders, as GET /backorders lists them}
         quotationsExpiring: {type: integer, description: open quotations whose last valid day is today or one of the next 6 days}
         quotationsLapsed: {type: integer, description: open quotations already past their validity that no expiry run has closed}
         openIntakeErrors: {type: integer, description: OPEN intake errors - channel orders refused at intake that nobody has closed}
@@ -2836,6 +2913,8 @@ components:
         requestedShipDate: {type: string, format: date}
         confirmedShipDate: {type: string, format: date}
         lineStatus: {type: string, enum: [OPEN, RESERVED, PICKED, DELIVERED, INVOICED, CANCELLED]}
+        deliveredQty: {$ref: "#/components/schemas/Money", description: "quantity covered by DELIVERED reports (:record-progress); PICKED means delivered in part"}
+        invoicedQty: {$ref: "#/components/schemas/Money", description: quantity covered by INVOICED reports, never above deliveredQty}
         supplementaryOf: {type: string, format: uuid, description: "id of the parent line a MANDATORY supplementary line was added for (FR-27.14); absent on ordinary lines"}
         parentLineNo: {type: integer, description: line number of the parent line; set with supplementaryOf}
         supplementaryRuleId: {type: string, format: uuid, description: the supplementary item rule that added the line}
@@ -3490,3 +3569,45 @@ components:
         quantity: {$ref: "#/components/schemas/Money"}
         unitPrice: {$ref: "#/components/schemas/Money", description: zero for FREE items}
         supplementaryOf: {type: string, format: uuid, description: the parent product}
+    RecordProgressRequest:
+      type: object
+      required: [kind, sourceRef, lines]
+      properties:
+        kind: {type: string, enum: [DELIVERED, INVOICED]}
+        sourceRef: {type: string, minLength: 1, maxLength: 100, description: the packing slip, shipment or invoice number}
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 2000
+          items:
+            type: object
+            required: [lineNo, quantity]
+            properties:
+              lineNo: {type: integer, minimum: 1, description: once per report}
+              quantity: {$ref: "#/components/schemas/Money", description: "what this report covers (positive, at most 6 places), not the cumulative quantity"}
+    OrderProgress:
+      type: object
+      required: [id, legalEntityId, orderId, orderNumber, kind, sourceRef, lines, orderStatus, orderVersion, recordedBy, recordedAt]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        orderId: {type: string, format: uuid}
+        orderNumber: {type: string}
+        kind: {type: string, enum: [DELIVERED, INVOICED]}
+        sourceRef: {type: string}
+        lines:
+          type: array
+          items:
+            type: object
+            required: [lineId, lineNo, quantity, deliveredQty, invoicedQty, lineStatus]
+            properties:
+              lineId: {type: string, format: uuid}
+              lineNo: {type: integer}
+              quantity: {$ref: "#/components/schemas/Money", description: what the report covered}
+              deliveredQty: {$ref: "#/components/schemas/Money", description: the line's delivered quantity after the report}
+              invoicedQty: {$ref: "#/components/schemas/Money", description: the line's invoiced quantity after the report}
+              lineStatus: {type: string, enum: [OPEN, RESERVED, PICKED, DELIVERED, INVOICED, CANCELLED]}
+        orderStatus: {type: string, enum: [CONFIRMED, PARTIALLY_SHIPPED, SHIPPED, INVOICED], description: the order status after the report}
+        orderVersion: {type: integer, description: the order version the report produced}
+        recordedBy: {type: string}
+        recordedAt: {type: string, format: date-time}

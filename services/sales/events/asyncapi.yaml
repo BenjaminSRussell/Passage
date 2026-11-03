@@ -142,6 +142,11 @@ channels:
     messages:
       deliveryTermsChanged:
         $ref: "#/components/messages/DeliveryTermsChanged"
+  orderProgressRecorded:
+    address: passage.sales.orderprogress
+    messages:
+      orderProgressRecorded:
+        $ref: "#/components/messages/OrderProgressRecorded"
   allocationQuotaCreated:
     address: passage.sales.allocationquota
     messages:
@@ -328,6 +333,12 @@ operations:
     summary: A customer's transport days or receiving weekdays changed (FR-27.3, BR-27.2); they date orders confirmed afterwards, while confirmed orders keep the terms they were confirmed with. Consumers - fulfillment, customer portal, analytics.
     messages:
       - {$ref: "#/channels/deliveryTermsChanged/messages/deliveryTermsChanged"}
+  publishOrderProgressRecorded:
+    action: send
+    channel: {$ref: "#/channels/orderProgressRecorded"}
+    summary: A delivery or an invoice was recorded on an order, moving its lines and its status (BR-27.5). Consumers - billing, customer portal, credit exposure, analytics.
+    messages:
+      - {$ref: "#/channels/orderProgressRecorded/messages/orderProgressRecorded"}
   publishAllocationQuotaCreated:
     action: send
     channel: {$ref: "#/channels/allocationQuotaCreated"}
@@ -582,6 +593,14 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/DeliveryTermsData"
+    OrderProgressRecorded:
+      name: dev.passage.sales.orderprogress.recorded.v1
+      title: Order delivery or invoice recorded
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/OrderProgressData"
     AllocationQuotaChanged:
       name: dev.passage.sales.allocationquota.changed.v1
       title: Allocation quota changed
@@ -704,6 +723,31 @@ components:
         sales_lead_time_days: {type: integer, minimum: 0, maximum: 365, description: days SALES_LEAD_TIME adds to today}
         actor: {type: string}
         version: {type: integer, description: version after the change}
+    OrderProgressData:
+      type: object
+      required: [progress_id, order_id, legal_entity_id, kind, source_ref, lines, previous_status, order_status, actor, version]
+      properties:
+        progress_id: {type: string, format: uuid}
+        order_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        kind: {type: string, enum: [DELIVERED, INVOICED]}
+        source_ref: {type: string, description: the packing slip, shipment or invoice number the report came with}
+        lines:
+          type: array
+          items:
+            type: object
+            required: [line_id, line_no, quantity, delivered_qty, invoiced_qty, line_status]
+            properties:
+              line_id: {type: string, format: uuid}
+              line_no: {type: integer}
+              quantity: {type: string, description: what this report covered}
+              delivered_qty: {type: string, description: the line's delivered quantity after the report}
+              invoiced_qty: {type: string, description: the line's invoiced quantity after the report}
+              line_status: {type: string, enum: [OPEN, RESERVED, PICKED, DELIVERED, INVOICED, CANCELLED]}
+        previous_status: {type: string}
+        order_status: {type: string, enum: [CONFIRMED, PARTIALLY_SHIPPED, SHIPPED, INVOICED]}
+        actor: {type: string}
+        version: {type: integer, description: the order version the report produced}
     DeliveryTermsData:
       type: object
       required: [terms_id, legal_entity_id, customer_id, transport_days, receiving_days, actor, version]
@@ -774,7 +818,7 @@ components:
           type: array
           items:
             type: object
-            required: [line_id, product_id, quantity, site_id, warehouse_id, confirmed_ship_date]
+            required: [line_id, product_id, quantity, atp_qty, site_id, warehouse_id, confirmed_ship_date]
             properties:
               line_id: {type: string, format: uuid}
               product_id: {type: string, format: uuid}
@@ -783,6 +827,7 @@ components:
               warehouse_id: {type: string, format: uuid}
               confirmed_ship_date: {type: string, format: date}
               confirmed_receipt_date: {type: string, format: date, description: "confirmed_ship_date plus the customer's transport days, rolled to its next receiving weekday (BR-27.2)"}
+              atp_qty: {type: string, description: "quantity of the line whose schedule lines are CONFIRMED (promised by the requested date); a release caller sends it as atpQty on POST /v1/fulfillment/releases:run"}
               configuration_id: {type: string, format: uuid, description: the saved configuration of a configured line; production builds the line to it (absent on ordinary lines)}
         net_total: {type: string}
         version: {type: integer}

@@ -44,6 +44,8 @@ var (
 
 	DeliveryTermsCreated = events.Type(Context, "deliveryterms", "created", 1)
 	DeliveryTermsChanged = events.Type(Context, "deliveryterms", "changed", 1)
+
+	OrderProgressRecorded = events.Type(Context, "orderprogress", "recorded", 1)
 )
 
 // All lists every event type this service publishes.
@@ -53,7 +55,7 @@ func All() []string {
 		QuotationConverted, QuotationExpired, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
 		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted, ParametersChanged, IntakeErrorRecorded, IntakeErrorResolved,
 		OrderChangeRequested, OrderChangeApproved, OrderChangeRejected, OrderChangeWithdrawn, ChangePolicyChanged,
-		DeliveryTermsCreated, DeliveryTermsChanged}
+		DeliveryTermsCreated, DeliveryTermsChanged, OrderProgressRecorded}
 }
 
 // PromisedSlice is one schedule line of an ATP promise.
@@ -242,6 +244,10 @@ type ConfirmedLine struct {
 	// ConfirmedReceiptDate is the ship date plus the customer's transport days
 	// rolled to its next receiving day (BR-27.2).
 	ConfirmedReceiptDate string `json:"confirmed_receipt_date,omitempty"`
+	// AtpQty is the quantity of the line whose schedule lines are CONFIRMED
+	// (promised by the requested date). A release caller sends it as the
+	// fulfillment release line's atpQty.
+	AtpQty string `json:"atp_qty"`
 	// ConfigurationID is the saved configuration of a configured line; absent otherwise.
 	ConfigurationID *string `json:"configuration_id,omitempty"`
 }
@@ -439,4 +445,28 @@ type DeliveryTermsData struct {
 	PreviousReceivingDays []int  `json:"previous_receiving_days,omitempty"`
 	Actor                 string `json:"actor"`
 	Version               int    `json:"version"`
+}
+
+// ProgressLine is one line touched by an order progress record.
+type ProgressLine struct {
+	LineID       string `json:"line_id"`
+	LineNo       int    `json:"line_no"`
+	Quantity     string `json:"quantity"`
+	DeliveredQty string `json:"delivered_qty"`
+	InvoicedQty  string `json:"invoiced_qty"`
+	LineStatus   string `json:"line_status"`
+}
+
+// OrderProgressData is the data member of orderprogress.recorded.v1.
+type OrderProgressData struct {
+	ProgressID     string         `json:"progress_id"`
+	OrderID        string         `json:"order_id"`
+	LegalEntityID  string         `json:"legal_entity_id"`
+	Kind           string         `json:"kind"`
+	SourceRef      string         `json:"source_ref"`
+	Lines          []ProgressLine `json:"lines"`
+	PreviousStatus string         `json:"previous_status"`
+	OrderStatus    string         `json:"order_status"`
+	Actor          string         `json:"actor"`
+	Version        int            `json:"version"`
 }

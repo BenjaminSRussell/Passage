@@ -70,6 +70,10 @@ type Line struct {
 	RequestedShipDate string          `json:"requestedShipDate"`
 	ConfirmedShipDate *string         `json:"confirmedShipDate,omitempty"`
 	LineStatus        string          `json:"lineStatus"`
+	// DeliveredQty and InvoicedQty are what the packing slips and invoices
+	// recorded through POST /orders/{id}:record-progress have covered (BR-27.5).
+	DeliveredQty decimal.Decimal `json:"deliveredQty"`
+	InvoicedQty  decimal.Decimal `json:"invoicedQty"`
 
 	// DeliveryDateControl is the line's own delivery date control (FR-27.3);
 	// absent, the legal entity's default applies at confirm. ConfirmedReceiptDate
@@ -309,6 +313,8 @@ type Store interface {
 	ListDeliveryTerms(ctx context.Context, f DeliveryTermsFilter) ([]DeliveryTerms, error)
 	GetDeliveryTerms(ctx context.Context, id string) (DeliveryTerms, error)
 	ReplaceDeliveryTerms(ctx context.Context, id string, version int, terms domain.DeliveryTerms, actor string, now time.Time) (DeliveryTerms, error)
+	RecordProgress(ctx context.Context, in NewProgress, now time.Time) (OrderProgress, bool, error)
+	ListProgress(ctx context.Context, f ProgressFilter) ([]OrderProgress, error)
 	PromiseLine(ctx context.Context, orderID string, version int, req PromiseRequest, actor string, now time.Time) (PromiseResult, error)
 	ListScheduleLines(ctx context.Context, orderID string) ([]ScheduleLine, error)
 	ListBackorders(ctx context.Context, f BackorderFilter) ([]BackorderItem, error)
@@ -611,7 +617,7 @@ func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 	lineRows, err := tx.Query(ctx, `select id::text, line_no, product_id::text, quantity::text, unit, site_id::text, warehouse_id::text,
 			unit_price::text, disc_pct::text, line_net::text, requested_ship_date::text, confirmed_ship_date::text, line_status,
 			supplementary_of::text, supplementary_rule_id::text, coalesce(supplementary_base_qty, 0)::text, coalesce(supplementary_qty_per_base, 0)::text,
-			configuration_id::text, delivery_date_control,
+			configuration_id::text, delivery_date_control, delivered_qty::text, invoiced_qty::text,
 			(select p.production_order_id::text from order_line_production p where p.tenant_id = l.tenant_id and p.line_id = l.id)
 		from sales_order_line l where l.tenant_id = $1 and l.order_id = $2 order by l.line_no`, tenantID, id)
 	if err != nil {
@@ -621,12 +627,13 @@ func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 	o.Lines = []Line{}
 	for lineRows.Next() {
 		var l Line
-		var qty, price, disc, net, base, perBase string
+		var qty, price, disc, net, base, perBase, delivered, invoiced string
 		if err := lineRows.Scan(&l.ID, &l.LineNo, &l.ProductID, &qty, &l.Unit, &l.SiteID, &l.WarehouseID, &price, &disc, &net,
-			&l.RequestedShipDate, &l.ConfirmedShipDate, &l.LineStatus, &l.SupplementaryOf, &l.SupplementaryRuleID, &base, &perBase, &l.ConfigurationID, &l.DeliveryDateControl, &l.ProductionOrderID); err != nil {
+			&l.RequestedShipDate, &l.ConfirmedShipDate, &l.LineStatus, &l.SupplementaryOf, &l.SupplementaryRuleID, &base, &perBase, &l.ConfigurationID, &l.DeliveryDateControl, &delivered, &invoiced, &l.ProductionOrderID); err != nil {
 			return Order{}, err
 		}
 		l.Quantity, l.UnitPrice = decimal.RequireFromString(qty), decimal.RequireFromString(price)
+		l.DeliveredQty, l.InvoicedQty = decimal.RequireFromString(delivered), decimal.RequireFromString(invoiced)
 		l.DiscPct, l.LineNet = decimal.RequireFromString(disc), decimal.RequireFromString(net)
 		l.suppBase, l.suppPerBase = decimal.RequireFromString(base), decimal.RequireFromString(perBase)
 		o.Lines = append(o.Lines, l)
@@ -898,12 +905,22 @@ func confirmOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, no
 		return Order{}, err
 	}
 	confirmed.Warnings = append(dateNotices, alloc.Notices...)
+	sched, err := activeSchedule(ctx, tx, tenantID, o.ID)
+	if err != nil {
+		return Order{}, err
+	}
 	lines := make([]salesevents.ConfirmedLine, 0, len(confirmed.Lines))
 	for _, l := range confirmed.Lines {
 		if l.ConfirmedShipDate == nil {
 			continue
 		}
-		line := salesevents.ConfirmedLine{LineID: l.ID, ProductID: l.ProductID, Quantity: l.Quantity.String(),
+		atp := decimal.Zero
+		for _, sl := range sched[l.ID] {
+			if sl.Status == domain.SchedConfirmed {
+				atp = atp.Add(sl.Quantity)
+			}
+		}
+		line := salesevents.ConfirmedLine{LineID: l.ID, ProductID: l.ProductID, Quantity: l.Quantity.String(), AtpQty: atp.String(),
 			SiteID: l.SiteID, WarehouseID: l.WarehouseID, ConfirmedShipDate: *l.ConfirmedShipDate, ConfigurationID: l.ConfigurationID}
 		if l.ConfirmedReceiptDate != nil {
 			line.ConfirmedReceiptDate = *l.ConfirmedReceiptDate
