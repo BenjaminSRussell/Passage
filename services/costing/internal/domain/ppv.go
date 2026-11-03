@@ -17,15 +17,17 @@ func CheckPPVInputs(qty decimal.Decimal, units ...decimal.Decimal) error {
 }
 
 // ReceiptPPV is the purchase price variance at goods receipt of a STANDARD
-// item: (PO unit price − standard unit cost) × qty, rounded half-even to the
-// minor unit. A positive result is a debit (unfavourable) to the PPV account
-// and a negative result a credit (AC-20.4).
+// item: the GR/IR amount round(qty × PO price) less the inventory at standard
+// round(qty × standard cost), each rounded half-even to the minor unit, so the
+// inventory is exactly the standard. A positive result is a debit
+// (unfavourable) to the PPV account and a negative result a credit (AC-20.4).
 func ReceiptPPV(qty, poUnit, standardUnit decimal.Decimal, scale int32) decimal.Decimal {
-	return qty.Mul(poUnit.Sub(standardUnit)).RoundBank(scale)
+	return qty.Mul(poUnit).RoundBank(scale).Sub(qty.Mul(standardUnit).RoundBank(scale))
 }
 
-// InvoicePPV is the purchase price variance at invoice: (invoice unit price −
-// PO unit price) × qty, with the same sign convention as ReceiptPPV.
+// InvoicePPV is the purchase price variance at invoice: the payable
+// round(qty × invoice price) less the GR/IR amount round(qty × PO price) it
+// clears, with the same sign convention as ReceiptPPV.
 func InvoicePPV(qty, invoiceUnit, poUnit decimal.Decimal, scale int32) decimal.Decimal {
-	return qty.Mul(invoiceUnit.Sub(poUnit)).RoundBank(scale)
+	return qty.Mul(invoiceUnit).RoundBank(scale).Sub(qty.Mul(poUnit).RoundBank(scale))
 }

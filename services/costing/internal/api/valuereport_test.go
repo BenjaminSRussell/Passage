@@ -43,6 +43,11 @@ func (f *slice5) RecordCostTransactions(_ context.Context, in []store.CostTransa
 	return n, nil
 }
 
+func (f *slice5) CostTransactionRecorded(_ context.Context, sourceKey string) (bool, error) {
+	_, ok := f.costTxns[sourceKey]
+	return ok, nil
+}
+
 func (f *slice5) ValueBalances(_ context.Context, q store.BalanceQuery) ([]domain.Balance, error) {
 	f.balanceQuery = q
 	return f.balances, nil

@@ -594,7 +594,8 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-        "422": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem", description: "CST-COST-001 no stored standard cost for a recorded receipt" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-PPV-001 a recorded receipt whose standardUnitCost or currency differs from the stored ACTIVE item cost" }
   /v1/costing/value-report:
     get:
       operationId: getValueReport
@@ -909,6 +910,167 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem", description: "CST-REC-002 not found" }
+  /v1/costing/posting-profiles:
+    get:
+      operationId: getPostingProfile
+      summary: The legal entity's posting profile (general ledger and accounts of the PPV and close vouchers)
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - $ref: "#/components/parameters/LegalEntityFilter"
+      responses:
+        "200":
+          description: the profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PostingProfile" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem", description: "CST-GL-002 no posting profile" }
+    post:
+      operationId: savePostingProfile
+      summary: Create or replace the posting profile; parked vouchers of the entity are retried afterwards
+      description: >-
+        The ledger must belong to the legal entity (checked with the ledger service, 409 CST-GL-005 otherwise).
+        Saving unparks the entity's parked vouchers, which are then derived again from the new profile.
+      x-passage-duty: costing.posting-profile.write
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PostingProfileRequest" }
+      responses:
+        "200":
+          description: the stored profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PostingProfile" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem", description: "CST-GL-005 the ledger belongs to another legal entity" }
+        "503": { $ref: "#/components/responses/Problem", description: "CST-GL-003 no general ledger configured" }
+  /v1/costing/gl-postings:
+    post:
+      operationId: postCostVouchers
+      summary: Book the receipt and invoice PPV vouchers of the legal entity in the general ledger (FR-20.7)
+      description: >-
+        One voucher per PPV cost transaction, idempotent per transaction. At receipt Dr inventory at standard,
+        Dr or Cr PPV, Cr GR/IR. At invoice Dr GR/IR, Dr or Cr PPV, Cr accounts payable. Amounts come from the
+        stored cost transactions, accounts and ledger from the posting profile; the body names the entity only.
+        Only due vouchers are tried: a failing voucher backs off and is parked after five attempts, so it does not
+        hold back newer ones. At most 200 per call; more=true asks for another call.
+      x-passage-duty: costing.gl.post
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+      responses:
+        "200":
+          description: booked and failed vouchers
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GLPostResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem", description: "CST-GL-002 no posting profile; CST-GL-005 foreign ledger" }
+        "503": { $ref: "#/components/responses/Problem", description: "CST-GL-003 no general ledger configured" }
+  /v1/costing/closes:
+    get:
+      operationId: listCloses
+      summary: Inventory closes of a legal entity, newest period first
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - $ref: "#/components/parameters/LegalEntityFilter"
+      responses:
+        "200":
+          description: the closes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Close" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: runClose
+      summary: Close the primary valuation of a legal entity through a period end (FR-20.2)
+      description: >-
+        Locks the period (later cost transactions dated on or before it are refused with CST-CLS-001), settles
+        every product's issues against its receipts under the primary valuation ledger's method (FIFO without
+        one), appends one SETTLEMENT_ADJ cost transaction per adjusted product, site and valuation type, and
+        books their net on the profile's inventory and adjustment accounts. Running it again resumes a close
+        that stopped and returns a completed one unchanged. A close cannot precede an earlier-dated one (CST-CLS-002).
+      x-passage-duty: costing.close.run
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, periodEnd]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                periodEnd: { type: string, format: date }
+      responses:
+        "200":
+          description: the completed close
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Close" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem", description: "CST-CLS-002, CST-CLS-003, CST-GL-002, CST-GL-004 voucher parked, CST-GL-005" }
+        "503": { $ref: "#/components/responses/Problem", description: "CST-GL-003 no general ledger configured" }
+  /v1/costing/value-report:ledger-tie-out:
+    get:
+      operationId: ledgerTieOut
+      summary: Tie the inventory value to the ledger balance of the profile's inventory account
+      description: >-
+        Reads the balance itself through the ledger by calendar month, so asOf must be a month end. ties is true only when the difference is zero and no PPV
+        voucher is unposted or parked; bookedByCosting is the net this service booked on the account, shown for
+        explanation and not compared with the whole-account balance.
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - $ref: "#/components/parameters/LegalEntityFilter"
+        - { name: asOf, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: the tie-out
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LedgerTieOut" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem", description: "CST-GL-002 no posting profile; CST-GL-005 foreign ledger" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-GL-008 asOf is not a month end" }
+        "502": { $ref: "#/components/responses/Problem", description: "CST-GL-007 the ledger refused the request" }
+        "503": { $ref: "#/components/responses/Problem", description: "CST-GL-003 no general ledger configured" }
 components:
   parameters:
     TenantHeader:
@@ -981,6 +1143,76 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
   schemas:
+    PostingProfileRequest:
+      type: object
+      required: [legalEntityId, ledgerId, inventoryAccount, grirAccount, apAccount, ppvAccount, adjustmentAccount]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        inventoryAccount: { type: string, maxLength: 40 }
+        grirAccount: { type: string, maxLength: 40 }
+        apAccount: { type: string, maxLength: 40 }
+        ppvAccount: { type: string, maxLength: 40 }
+        adjustmentAccount: { type: string, maxLength: 40 }
+    PostingProfile:
+      allOf:
+        - $ref: "#/components/schemas/PostingProfileRequest"
+        - type: object
+          properties:
+            version: { type: integer }
+            updatedBy: { type: string }
+            updatedAt: { type: string, format: date-time }
+    GLPostResult:
+      type: object
+      properties:
+        booked:
+          type: array
+          items:
+            type: object
+            properties:
+              costTransactionId: { type: string, format: uuid }
+              entryId: { type: string }
+              lines: { type: integer }
+        failed:
+          type: array
+          items:
+            type: object
+            properties:
+              costTransactionId: { type: string, format: uuid }
+              code: { type: string }
+        more: { type: boolean }
+        parked: { type: integer, description: "vouchers of the entity parked after repeated failures" }
+    Close:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        periodEnd: { type: string, format: date }
+        method: { type: string }
+        currency: { type: string }
+        status: { type: string, enum: [RUNNING, COMPLETED] }
+        groups: { type: integer, description: "product, site and valuation type groups settled" }
+        adjustedGroups: { type: integer }
+        adjustmentTotal: { type: string }
+        journalEntryId: { type: string }
+        createdBy: { type: string }
+        startedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }
+    LedgerTieOut:
+      type: object
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        asOf: { type: string, format: date }
+        currency: { type: string }
+        account: { type: string }
+        inventory: { type: string }
+        ledger: { type: string }
+        difference: { type: string, description: "ledger - inventory" }
+        bookedByCosting: { type: string }
+        unpostedPpvVouchers: { type: integer }
+        parkedVouchers: { type: integer }
+        parkedReasons: { type: object, additionalProperties: { type: integer } }
+        ties: { type: boolean }
     Status:
       type: object
       required: [status]

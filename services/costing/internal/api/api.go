@@ -23,6 +23,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/costing/internal/domain"
@@ -70,6 +71,9 @@ type API struct {
 	adjustmentsPosted   atomic.Int64
 	reconciliations     atomic.Int64
 	reconciliationDiffs atomic.Int64
+	vouchersPosted      atomic.Int64
+	closesCompleted     atomic.Int64
+	ledger              ledgerclient.Ledger
 }
 
 // New returns an API over s.
@@ -111,6 +115,12 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/reconciliations", a.listReconciliations)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/reconciliations/{id}", a.getReconciliation)
 	r.With(authz.RequireDuty(dutyPPVPost)).Post("/internal/v1/costing/ppv", a.postPPV)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/posting-profiles", a.getPostingProfile)
+	r.With(authz.RequireDuty(dutyPostingProfileWrite)).Post("/v1/costing/posting-profiles", a.savePostingProfile)
+	r.With(authz.RequireDuty(dutyGLPost)).Post("/v1/costing/gl-postings", a.postGL)
+	r.With(authz.RequireDuty(dutyCloseRun)).Post("/v1/costing/closes", a.runClose)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/closes", a.listCloses)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/value-report:ledger-tie-out", a.ledgerTieOut)
 }
 
 // Metrics serves Prometheus text for the admin port.
@@ -130,6 +140,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP costing_adjustments_posted_total Manual cost adjustments posted; idempotent replays are not counted.\n# TYPE costing_adjustments_posted_total counter\ncosting_adjustments_posted_total %d\n", a.adjustmentsPosted.Load())
 		fmt.Fprintf(w, "# HELP costing_reconciliations_total Reconciliation runs stored; idempotent replays are not counted.\n# TYPE costing_reconciliations_total counter\ncosting_reconciliations_total %d\n", a.reconciliations.Load())
 		fmt.Fprintf(w, "# HELP costing_reconciliation_diffs_total Differing groups of stored reconciliation runs (one reconciliation.diff event each).\n# TYPE costing_reconciliation_diffs_total counter\ncosting_reconciliation_diffs_total %d\n", a.reconciliationDiffs.Load())
+		fmt.Fprintf(w, "# HELP costing_gl_vouchers_posted_total PPV vouchers confirmed by the ledger.\n# TYPE costing_gl_vouchers_posted_total counter\ncosting_gl_vouchers_posted_total %d\n", a.vouchersPosted.Load())
+		fmt.Fprintf(w, "# HELP costing_closes_completed_total Inventory closes completed.\n# TYPE costing_closes_completed_total counter\ncosting_closes_completed_total %d\n", a.closesCompleted.Load())
 	})
 }
 
@@ -539,6 +551,22 @@ type ppvResponse struct {
 	Recorded         bool   `json:"recorded"`
 }
 
+// standardMatches refuses (422) a recorded receipt whose standard cost or currency is not the one the stored ACTIVE item cost
+// carries on the financial date: the voucher books inventory at that standard, so it never comes from the caller.
+func (a *API) standardMatches(w http.ResponseWriter, r *http.Request, row store.CostTransaction, std decimal.Decimal, currency string) bool {
+	cur, err := a.store.CurrentCost(r.Context(), row.ProductID, row.SiteID, row.FinancialDate)
+	if err != nil {
+		a.fail(w, r, "ppv standard cost", err)
+		return false
+	}
+	stored, err := decimal.NewFromString(cur.UnitCost)
+	if err != nil || !stored.Equal(std) || cur.Currency != currency {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodePPVStandard, "standardUnitCost and currency must equal the stored standard cost in force on financialDate"))
+		return false
+	}
+	return true
+}
+
 // postPPV calculates the purchase price variance for a STANDARD item at receipt
 // (PO price against standard) or at invoice (invoice price against PO price).
 // A positive amount is a debit. With legalEntityId, productId, siteId,
@@ -566,10 +594,10 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 	}
 	qty := parseDecimal(fields, "qty", req.Qty, false)
 	po := parseDecimal(fields, "poUnitPrice", req.PoUnitPrice, true)
-	var amount decimal.Decimal
+	var amount, std decimal.Decimal
 	scale := money.MinorUnits(req.Currency)
 	if req.Kind == "RECEIPT" {
-		std := parseDecimal(fields, "standardUnitCost", req.StandardUnitCost, true)
+		std = parseDecimal(fields, "standardUnitCost", req.StandardUnitCost, true)
 		if len(fields) == 0 {
 			if err := domain.CheckPPVInputs(qty, po, std); err != nil {
 				a.fail(w, r, "ppv", err)
@@ -587,6 +615,7 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 		}
 		amount = domain.InvoicePPV(qty, inv, po, scale)
 	}
+	grir := qty.Mul(po).RoundBank(scale)
 	persist := req.SourceLineID != "" || req.LegalEntityID != "" || req.ProductID != "" || req.SiteID != "" || req.FinancialDate != ""
 	var row store.CostTransaction
 	if persist {
@@ -609,6 +638,7 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 			SourceKey:     strings.Join([]string{"ppv", req.Kind, strings.ToLower(req.LegalEntityID), req.SourceDocumentID, req.SourceLineID}, ":"),
 			LegalEntityID: req.LegalEntityID, ProductID: req.ProductID, SiteID: req.SiteID, Kind: domain.KindPPV, Qty: ppvQty,
 			Amount: amount.StringFixed(scale), Currency: req.Currency, FinancialDate: req.FinancialDate})
+		row.GrirAmount = grir.StringFixed(scale)
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
@@ -618,6 +648,16 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 		if p, _ := tenant.FromContext(r.Context()); !tenant.InLegalEntityScope(p, row.LegalEntityID) {
 			httpx.Fail(w, r, outOfScope())
 			return
+		}
+		if req.Kind == "RECEIPT" {
+			recorded, err := a.store.CostTransactionRecorded(r.Context(), row.SourceKey)
+			if err != nil {
+				a.fail(w, r, "ppv replay lookup", err)
+				return
+			}
+			if !recorded && !a.standardMatches(w, r, row, std, req.Currency) {
+				return
+			}
 		}
 		inserted, err := a.store.RecordCostTransactions(r.Context(), []store.CostTransaction{row})
 		if err != nil {
