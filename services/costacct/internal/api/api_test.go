@@ -12,6 +12,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/costacct/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/costacct/internal/store"
@@ -114,6 +115,11 @@ func serve(t *testing.T, st Store, method, path, body, duties, key string) *http
 
 func serveAPI(t *testing.T, a *API, method, path, body, duties, key string) *httptest.ResponseRecorder {
 	t.Helper()
+	return serveScoped(t, a, entityID, method, path, body, duties, key)
+}
+
+func serveScoped(t *testing.T, a *API, scope, method, path, body, duties, key string) *httptest.ResponseRecorder {
+	t.Helper()
 	r := chi.NewRouter()
 	a.Register(r)
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -122,7 +128,10 @@ func serveAPI(t *testing.T, a *API, method, path, body, duties, key string) *htt
 		req.Header.Set(idempotencyKey, key)
 	}
 	// httpx.NewRouter's tenant middleware is skipped here; the principal is attached directly.
-	req = req.WithContext(testkit.Ctx(tenantID, strings.Split(duties, ",")...))
+	ctx := testkit.Ctx(tenantID, strings.Split(duties, ",")...)
+	p, _ := tenant.FromContext(ctx)
+	p.LegalEntityID = scope
+	req = req.WithContext(tenant.With(ctx, p))
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	return rec
@@ -300,6 +309,17 @@ func TestReconcile_ReadsTheLedgerAndRejectsSuppliedBalances(t *testing.T) {
 	want := store.GLReconcileRequest{LegalEntityID: entityID, LedgerID: ledgerID, Period: "2026-09", Currency: "USD"}
 	if rec.Code != http.StatusOK || st.recon != want || st.reconGL != store.GLBalances(gl) {
 		t.Fatalf("status %d recon %+v gl %v", rec.Code, st.recon, st.reconGL)
+	}
+}
+
+func TestReconcile_OtherLegalEntityScopeIsForbidden(t *testing.T) {
+	const otherEntity = "0196a6a4-0000-7000-8000-0000000000ff"
+	st := &fakeStore{}
+	a := New(st).WithLedger(ledgerclient.NewFake(), map[string]string{entityID: "0196a6a4-0000-7000-8000-000000000020"})
+	body := `{"legalEntityId":"` + strings.ToUpper(entityID) + `","period":"2026-09","currency":"USD"}`
+	rec := serveScoped(t, a, otherEntity, http.MethodPost, "/v1/controlling/reconciliations", body, DutyView, "")
+	if rec.Code != http.StatusForbidden || problemCode(t, rec) != "AUTH-0003" || st.calls != 0 {
+		t.Fatalf("status %d code %s, %d store calls; want 403 AUTH-0003 before the ledger is read", rec.Code, problemCode(t, rec), st.calls)
 	}
 }
 
