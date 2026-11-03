@@ -263,9 +263,13 @@ func TestReconcileStatement_TwoThousandByTwoThousandWithTwentyRulesFinishesQuick
 		start := time.Now()
 		out := reconcile(t, lines, items, twentyRules(), DefaultThresholds)
 		elapsed := time.Since(start)
+		budget := time.Second
+		if raceDetector {
+			budget *= 10
+		}
 		t.Logf("%s: 2000 lines x 2000 items x 20 rules in %s, %d matches", name, elapsed, len(out.Matches))
-		if elapsed > 5*time.Second {
-			t.Errorf("%s: run took %s; want under 5s", name, elapsed)
+		if elapsed > budget {
+			t.Errorf("%s: run took %s; want under %s", name, elapsed, budget)
 		}
 	}
 }
