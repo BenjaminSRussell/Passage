@@ -28,6 +28,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/domain"
@@ -91,6 +92,9 @@ type API struct {
 	tax           TaxEngine
 	maxLines      int
 	now           func() time.Time
+	ledger        ledgerclient.Ledger
+	deferrals     DeferralBooks
+	profiles      map[string]store.DeferralProfile
 
 	proposalsCreated   atomic.Int64
 	invoicesPosted     atomic.Int64
@@ -101,6 +105,7 @@ type API struct {
 
 	subscriptionsCreated atomic.Int64
 	subscriptionInvoices atomic.Int64
+	deferralPostings     atomic.Int64
 }
 
 // New returns the handlers. maxLines bounds a proposal (BILLING_MAX_LINES).
@@ -117,6 +122,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireAnyDuty(dutyView, "billing.invoice.read")).Get("/v1/billing/invoices/{id}", a.getInvoice)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/billing/invoices/{id}/trace", a.invoiceTrace)
 	r.With(authz.RequireDuty(dutyPost)).Post("/v1/billing/invoices/{id}:post", a.postInvoice)
+	r.With(authz.RequireDuty(dutyPost)).Post("/v1/billing/deferral-postings", a.postDeferrals)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/credit-notes", a.createCreditNote)
 	r.With(authz.RequireDuty(dutyCreditPost)).Post("/v1/billing/credit-notes/{id}:post", a.postCreditNote)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions", a.createSubscription)
@@ -138,6 +144,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP billing_shipment_proposals_created_total Shipment and consolidated invoice proposals created from packing slips; replays are not counted.\n# TYPE billing_shipment_proposals_created_total counter\nbilling_shipment_proposals_created_total %d\n", a.shipmentProposals.Load())
 		fmt.Fprintf(w, "# HELP billing_subscriptions_created_total Subscriptions created; idempotent replays are not counted.\n# TYPE billing_subscriptions_created_total counter\nbilling_subscriptions_created_total %d\n", a.subscriptionsCreated.Load())
 		fmt.Fprintf(w, "# HELP billing_subscription_invoices_created_total Prorated subscription invoice proposals created; replays are not counted.\n# TYPE billing_subscription_invoices_created_total counter\nbilling_subscription_invoices_created_total %d\n", a.subscriptionInvoices.Load())
+		fmt.Fprintf(w, "# HELP billing_deferral_postings_total Invoice deferrals booked to the general ledger.\n# TYPE billing_deferral_postings_total counter\nbilling_deferral_postings_total %d\n", a.deferralPostings.Load())
 	})
 }
 

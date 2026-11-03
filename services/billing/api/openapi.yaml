@@ -295,6 +295,68 @@ paths:
           $ref: "#/components/responses/Problem"
         "503":
           $ref: "#/components/responses/Problem"
+  /v1/billing/deferral-postings:
+    post:
+      operationId: postDeferrals
+      summary: Book the deferred revenue share of posted invoices in the general ledger (Dr receivable / Cr 2400).
+      x-passage-duty: billing.invoice.post (InvoicePost)
+      description: >
+        Books, per posted invoice not yet booked, the net of its lines on the deferred
+        revenue accounts of the entity's GL posting profile (`BILLING_GL_PROFILES`) as
+        one balanced entry. Ledger, accounts and amounts come from the profile and the
+        stored invoice, never from the request. The ledger idempotency key is derived
+        from the invoice id, so a retry never books an invoice twice. An entry the
+        ledger refuses is listed under `failed` and offered again by the next call.
+        Credit notes are not booked. 503 BIL-0200 without `LEDGER_URL`, 422 BIL-0202
+        for an entity with no profile, 502 BIL-0201 when the ledger does not answer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The entries booked by this call and the invoices the ledger refused.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        invoiceId: { type: string, format: uuid }
+                        number: { type: string }
+                        currency: { type: string }
+                        postingDate: { type: string, format: date }
+                        amount: { type: string }
+                        journalEntryId: { type: string }
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        invoiceId: { type: string, format: uuid }
+                        number: { type: string }
+                        ledgerCode: { type: string }
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "502":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
   /v1/billing/credit-notes:
     post:
       operationId: createCreditNote

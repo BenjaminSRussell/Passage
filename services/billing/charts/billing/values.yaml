@@ -19,6 +19,13 @@ taxRates: ""
 # keys, formatted name=base64-public-key and comma separated.
 serviceIdentity:
   publicKeys: ""
+  signingKeySecret: ""
+  keyId: ""
+# Unset, the deferral postings answer 503 BIL-0200. When set, glProfiles (rendered as
+# BILLING_GL_PROFILES) lists per legal entity: legalEntityId, ledgerId, receivableAccount,
+# deferredAccount and deferredRevenueAccounts.
+ledgerUrl: ""
+glProfiles: []
 resources:
   requests: { cpu: 100m, memory: 128Mi }
   limits: { cpu: 500m, memory: 256Mi }

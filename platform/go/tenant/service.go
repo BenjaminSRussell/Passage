@@ -56,7 +56,8 @@ var (
 // policies/authz/data.json "service_grants" mirrors it and a test keeps them equal.
 var serviceGrants = map[string]map[string][]string{
 	"billing": {
-		"sales": {"sales.order.record-invoice", "sales.order.record-delivery"},
+		"ledger": {"ledger.entry.post"},
+		"sales":  {"sales.order.record-invoice", "sales.order.record-delivery"},
 	},
 	"fulfillment": {
 		"sales": {"sales.order.record-delivery"},
