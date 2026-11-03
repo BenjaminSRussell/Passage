@@ -4,7 +4,7 @@ Module folder: `apps/web/src/modules/assets/`. Discovered by the shell through
 `module.ts` (`id: "assets"`). Pages use the shell primitives from
 `src/shell/ui` and `pages.module.css` tokens only (docs/design-system.md).
 
-## Screens (slices 1 to 5)
+## Screens (slices 1 to 6)
 
 | Route | Page | Duty (nav) | What it does |
 |---|---|---|---|
@@ -26,7 +26,9 @@ Module folder: `apps/web/src/modules/assets/`. Discovered by the shell through
 | `/assets/mid-quarter-test` | `MidQuarterPage` | AssetDepreciate | BR-37.5 test for a legal entity, tax book and year: basis per quarter, the Q4 share, whether mid-quarter applies (AST-0511) and the books whose convention to review (slice 4) |
 | `/assets/leases` | `LeasesPage` | LeaseMaintain | Leases with liability, IBR and status |
 | `/assets/leases/new` | `NewLeasePage` | LeaseMaintain | Recognize an IFRS 16 lease, with the nominal or effective periodic rate |
-| `/assets/leases/:id` | `LeaseDetailPage` | LeaseMaintain | Recognized liability and ROU asset, the terms in force, the remeasurements and the liability / ROU schedule with the remeasurement column |
+| `/assets/leases/:id` | `LeaseDetailPage` | LeaseMaintain | Recognized liability and ROU asset, the terms in force, the remeasurements, the ledger postings (slice 6: which journals are booked, with a link to post) and the liability / ROU schedule with the remeasurement column |
+| `/assets/leases/posting` | `LeasePostingPage` | AssetPostJournal | Slice 6: book the lease recognition and every ended schedule period in the general ledger (legal entity, ledger, post-through date, optional lease; prefilled from the lease page); lists the journals booked and those the ledger refused, with the placeholder-account warning |
+| `/assets/leases/posting-profile` | `LeaseProfilePage` | LeaseMaintain (save: AssetConfigure) | Slice 6: the ledger accounts of the lease journals per legal entity; shows the placeholders until a profile is saved, creates it, and replaces it under its ETag |
 | `/assets/leases/:id/modify` | `ModifyLeasePage` | LeaseMaintain | Remeasure from an effective period: a payment change at the lease's rate, or a scope change (revised term and rate); sent with the lease ETag as If-Match; shows the AST-0516 message and any amount sent to profit or loss |
 | `/assets/count-sessions` | `CountSessionsPage` | AssetCount | Physical inventory sessions, newest first, with expected / found / missing / unknown counts |
 | `/assets/count-sessions/new` | `NewCountSessionPage` | AssetCount | Record a count: legal entity, location, date and the scanned barcodes (one per line) |

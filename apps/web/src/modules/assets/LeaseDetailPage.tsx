@@ -4,12 +4,14 @@ import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, Page
 import {
   describeProblem,
   getLease,
+  getLeasePostings,
   modifyLease,
   newKey,
   type Lease,
   type LeaseLine,
   type LeaseModification,
   type LeaseModificationResult,
+  type LeasePostings,
   type ModifyLeaseInput,
   type Problem,
 } from "./api/client";
@@ -39,7 +41,7 @@ const columns: DataTableColumn<LeaseLine>[] = [
 
 function modificationColumns(currency: string): DataTableColumn<LeaseModification>[] {
   return [
-    { key: "effectivePeriod", header: "From period", align: "end" },
+    { key: "effectivePeriod", header: "From period", align: "end", render: (m) => (m.superseded ? `${m.effectivePeriod} (superseded)` : String(m.effectivePeriod)) },
     { key: "paymentAmount", header: "Payment", align: "end", render: (m) => money(m.paymentAmount, currency) },
     { key: "termMonths", header: "Term (months)", align: "end" },
     { key: "ibrRate", header: "Rate", align: "end", render: (m) => `${percent(m.ibrRate)}${m.scopeChange ? " (revised)" : ""}` },
@@ -48,6 +50,58 @@ function modificationColumns(currency: string): DataTableColumn<LeaseModificatio
     { key: "rouAfter", header: "ROU after", align: "end", render: (m) => money(m.rouAfter, currency) },
     { key: "profitLossExcess", header: "To profit or loss", align: "end", render: (m) => (isZero(m.profitLossExcess) ? "" : money(m.profitLossExcess, currency)) },
   ];
+}
+
+type PostingRow = { key: string; label: string; date: string; journalId: string | null };
+
+const postingColumns: DataTableColumn<PostingRow>[] = [
+  { key: "label", header: "Journal" },
+  { key: "date", header: "Posting date", mono: true },
+  { key: "journalId", header: "Ledger entry", mono: true, render: (r) => (r.journalId ? r.journalId : "Not booked") },
+];
+
+/** Which journals of the lease are in the general ledger (D4d). */
+function LedgerCard({ lease }: { lease: Lease }) {
+  const state = useLoad((signal) => getLeasePostings(lease.id, signal), `${lease.id}:${lease.version}`);
+  const link = `/assets/leases/posting?legalEntityId=${lease.legalEntityId}&leaseId=${lease.id}`;
+  const action = (
+    <Link className={buttonClassName("ghost", "sm")} to={link}>
+      Post to the ledger
+    </Link>
+  );
+  if (state.error) {
+    return (
+      <Card title="Ledger postings" actions={action}>
+        <Alert tone="danger" title="Could not load the ledger postings" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
+          {state.error.message} ({state.error.code})
+        </Alert>
+      </Card>
+    );
+  }
+  if (!state.data) {
+    return (
+      <Card title="Ledger postings" actions={action}>
+        <div aria-busy="true">
+          <span className="visually-hidden">Loading the ledger postings…</span>
+          <Skeleton height="tile" />
+        </div>
+      </Card>
+    );
+  }
+  const postings: LeasePostings = state.data;
+  const rows: PostingRow[] = [
+    { key: "0", label: "Recognition", date: lease.commencementDate, journalId: postings.recognitionJournalId },
+    ...postings.periods.map((p) => ({ key: String(p.periodNo), label: `Period ${p.periodNo}`, date: p.periodEnd, journalId: p.postedJournalId })),
+  ];
+  const booked = rows.filter((r) => r.journalId).length;
+  return (
+    <Card title="Ledger postings" actions={action}>
+      <div className={styles.stack}>
+        <p className={styles.note}>{`${booked} of ${rows.length} journals are in the ledger. A period that is booked cannot be remeasured.`}</p>
+        <DataTable label="Ledger postings" columns={postingColumns} rows={rows} getRowKey={(r) => r.key} empty={{ title: "No journals" }} />
+      </div>
+    </Card>
+  );
 }
 
 export const canModify = (lease: Lease) => lease.status === "Active" || lease.status === "Modified";
@@ -123,6 +177,7 @@ export function LeaseDetailPage() {
           <DataTable label="Remeasurements" columns={modificationColumns(lease.currency)} rows={modifications} getRowKey={(m) => m.id} empty={{ title: "No remeasurements" }} />
         </Card>
       ) : null}
+      <LedgerCard lease={lease} />
       <Card title="Liability and ROU schedule">
         <div className={styles.stack}>
           {last ? <p className={styles.note}>The final period closes the liability at {money(last.closing, lease.currency)}.</p> : null}

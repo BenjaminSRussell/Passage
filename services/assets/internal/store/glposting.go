@@ -32,6 +32,11 @@ type GLBooks interface {
 	ReconcileGL(ctx context.Context, ledger ledgerclient.Ledger, in GLReconcileRequest) (GLReconciliation, error)
 	ListPostingProfiles(ctx context.Context, legalEntityID string) ([]PostingProfile, error)
 	SavePostingProfile(ctx context.Context, in PostingProfile, ifMatch int, actor string) (PostingProfile, bool, error)
+	// IFRS 16 lease journals (D4d).
+	PostLeasesToGL(ctx context.Context, ledger ledgerclient.Ledger, in LeaseGLPostRequest) (LeaseGLPostResult, error)
+	GetLeasePostings(ctx context.Context, leaseID string) (LeasePostings, error)
+	GetLeasePostingProfile(ctx context.Context, legalEntityID string) (LeasePostingProfile, error)
+	SaveLeasePostingProfile(ctx context.Context, in LeasePostingProfile, ifMatch int, actor string) (LeasePostingProfile, bool, error)
 }
 
 var _ GLBooks = (*Postgres)(nil)

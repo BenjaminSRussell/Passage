@@ -20,6 +20,11 @@ var (
 	// is not in the PRD event table and is added so the ledger and analytics
 	// see every change of the lease liability and ROU asset.
 	LeaseRemeasured = events.Type(Context, "lease", "remeasured", 1)
+	// LeasePosted is published for every lease journal the ledger accepted: the
+	// recognition at commencement and each schedule period (D4d). It is not in the
+	// PRD event table; it tells the ledger's consumers and analytics which entry
+	// carries which period of the liability and ROU asset.
+	LeasePosted = events.Type(Context, "lease", "posted", 1)
 	// CapexApproved is published when a capex request is approved (FR-37.17);
 	// budget (wave 38) and the depreciation forecast consume it.
 	CapexApproved = events.Type(Context, "capexrequest", "approved", 1)
@@ -160,4 +165,24 @@ type LeaseRecognizedData struct {
 	Currency   string `json:"currency"`
 	TermMonths int    `json:"termMonths"`
 	Rate       string `json:"rate"`
+}
+
+// LeasePostedData is the payload of LeasePosted. Kind is Recognition (period 0:
+// Liability and ROUAsset are set) or Period (Interest, Payment, ROUDepreciation
+// and Remeasurement are set). Amounts are decimal strings in Currency.
+type LeasePostedData struct {
+	LeaseID         string `json:"leaseId"`
+	LegalEntityID   string `json:"legalEntityId"`
+	Kind            string `json:"kind"`
+	Period          int    `json:"period"`
+	PostingDate     string `json:"postingDate"`
+	JournalEntryID  string `json:"journalEntryId"`
+	LedgerID        string `json:"ledgerId"`
+	Currency        string `json:"currency"`
+	Liability       string `json:"liability,omitempty"`
+	ROUAsset        string `json:"rouAsset,omitempty"`
+	Interest        string `json:"interest,omitempty"`
+	Payment         string `json:"payment,omitempty"`
+	ROUDepreciation string `json:"rouDepreciation,omitempty"`
+	Remeasurement   string `json:"remeasurement,omitempty"`
 }

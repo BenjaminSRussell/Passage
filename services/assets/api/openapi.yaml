@@ -1309,6 +1309,164 @@ paths:
           $ref: "#/components/responses/Problem"
         "428":
           $ref: "#/components/responses/Problem"
+  /v1/leases/gl-postings:
+    post:
+      summary: Book lease recognition and schedule periods in the general ledger (D4d)
+      operationId: postLeasesToGL
+      x-passage-duty: AssetPostJournal
+      description: |
+        Books the IFRS 16 journals of the leases of a legal entity (or of one lease) that are not in the general ledger yet and are dated on or
+        before postThrough. The recognition journal is dated at commencement (debit the ROU asset, credit the lease liability); each schedule
+        period gets one journal dated on its last day (commencement plus the period's months, less one day): interest expense against the
+        liability, the payment against the payment clearing account, ROU depreciation against accumulated depreciation, and on the period a
+        modification takes effect the remeasurement (debit or credit the ROU asset against the liability, the part beyond the ROU carrying
+        amount to the remeasurement gain account). Accounts come from the legal entity's lease posting profile or the documented placeholder.
+        Journals go in period order; a lease whose journal the ledger refuses (a closed period, for one) stops there and is listed under failed
+        with the ledger's problem code, and the next request retries it. A retry resends the stored journal, so nothing is booked twice.
+        At most 200 journals per request (more is true when others wait). Publishes dev.passage.assets.lease.posted.v1 per journal.
+        Signs only ledger.entry.post. Without a configured ledger the route answers 503 AST-0602.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, ledgerId, postThrough]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                ledgerId: { type: string, format: uuid }
+                leaseId: { type: string, format: uuid, description: Book only this lease; all leases of the legal entity when omitted. }
+                postThrough: { type: string, format: date, description: Book journals dated on or before this day. }
+      responses:
+        "200":
+          description: What was booked and what the ledger refused
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [booked, failed, more]
+                properties:
+                  booked:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        leaseId: { type: string, format: uuid }
+                        leaseNumber: { type: string }
+                        period: { type: integer, description: "0 is the recognition journal, otherwise the schedule period." }
+                        entryId: { type: string, format: uuid }
+                        lines: { type: integer }
+                        placeholderProfile: { type: boolean }
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        leaseId: { type: string, format: uuid }
+                        leaseNumber: { type: string }
+                        period: { type: integer }
+                        code: { type: string, description: "The ledger's problem code, AST-0601, or AST-0610 when a line's remeasurement does not agree with its modifications." }
+                  more: { type: boolean }
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /v1/leases/posting-profile:
+    get:
+      summary: Lease posting profile of a legal entity
+      operationId: getLeasePostingProfile
+      x-passage-duty: LeaseMaintain
+      description: |
+        The accounts the lease journals of a legal entity use. With no profile the response is the built-in placeholder (ROU asset 1700,
+        accumulated depreciation 1790, liability 2400, interest expense 7200, depreciation expense 6820, payment clearing 2110,
+        remeasurement gain 7120) with placeholder true, to be replaced by the accountant. AssetConfigure also reads it.
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The profile or the placeholder
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LeasePostingProfile" }
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+    put:
+      summary: Create or replace the lease posting profile
+      operationId: saveLeasePostingProfile
+      x-passage-duty: AssetConfigure
+      description: Creates the profile (no If-Match) or replaces it (If-Match with the version) for a legal entity. Journals already booked keep their accounts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LeasePostingProfile" }
+      responses:
+        "200":
+          description: Replaced
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LeasePostingProfile" }
+        "201":
+          description: Created
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LeasePostingProfile" }
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /v1/leases/{id}/gl-postings:
+    get:
+      summary: Which journals of a lease are in the general ledger
+      operationId: getLeasePostings
+      x-passage-duty: LeaseMaintain
+      description: The ledger entry of the recognition journal and of every period of the schedule in force; null means not booked yet.
+      parameters:
+        - $ref: "#/components/parameters/LeaseId"
+      responses:
+        "200":
+          description: Booking state of the lease
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [leaseId, recognitionJournalId, periods]
+                properties:
+                  leaseId: { type: string, format: uuid }
+                  recognitionJournalId: { type: string, format: uuid, nullable: true }
+                  periods:
+                    type: array
+                    items:
+                      type: object
+                      required: [periodNo, periodEnd, postedJournalId]
+                      properties:
+                        periodNo: { type: integer }
+                        periodEnd: { type: string, format: date, description: The posting date of the period's journal. }
+                        postedJournalId: { type: string, format: uuid, nullable: true }
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
   /v1/assets/gl-postings:
     post:
       summary: Book asset transactions and depreciation runs in the general ledger (D2j)
@@ -1530,6 +1688,22 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
   schemas:
+    LeasePostingProfile:
+      type: object
+      required: [legalEntityId, rouAssetAccount, rouAccumulatedDepreciationAccount, liabilityAccount, interestExpenseAccount, depreciationExpenseAccount, paymentClearingAccount, remeasurementGainAccount]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        rouAssetAccount: { type: string, description: Debited on recognition and on an upward remeasurement. }
+        rouAccumulatedDepreciationAccount: { type: string }
+        liabilityAccount: { type: string }
+        interestExpenseAccount: { type: string }
+        depreciationExpenseAccount: { type: string }
+        paymentClearingAccount: { type: string, description: Credited by the lease payment of each period (cash or payables clearing). }
+        remeasurementGainAccount: { type: string, description: Credited with the part of a downward remeasurement beyond the ROU carrying amount. }
+        version: { type: integer, readOnly: true }
+        updatedBy: { type: string, readOnly: true }
+        updatedAt: { type: string, format: date-time, readOnly: true }
+        placeholder: { type: boolean, readOnly: true, description: True when the legal entity has no profile and the built-in defaults apply. }
     AssetPostingProfile:
       type: object
       required: [costAccount, accumulatedDepreciationAccount, depreciationExpenseAccount, impairmentAccount, revaluationAccount, acquisitionClearingAccount, proceedsAccount, gainAccount, lossAccount, transferClearingAccount]
@@ -1753,11 +1927,12 @@ components:
         liabilityBefore: { type: string, description: "Carrying liability at the start of the effective period" }
         liabilityAfter: { type: string, description: "Present value of the remaining payments under the revised terms" }
         adjustment: { type: string, description: "liabilityAfter - liabilityBefore" }
-        rouBefore: { type: string }
+        rouBefore: { type: string, description: "ROU carrying amount at the start of the effective period, without the adjustments of modifications this one supersedes" }
         rouAfter: { type: string, description: "Never negative" }
         rouAdjustment: { type: string, description: "rouAfter - rouBefore; equals adjustment unless the ROU reached zero" }
         profitLossExcess: { type: string, description: "Part of a negative adjustment beyond the ROU carrying amount, recognized in P&L" }
         createdAt: { type: string, format: date-time }
+        superseded: { type: boolean, description: "True when a later modification taking effect in an earlier period replaced the schedule this one produced; its adjustments are no longer applied or booked. Omitted when false" }
     LeaseModificationResult:
       type: object
       required: [modification, lease, messages]

@@ -365,7 +365,12 @@ describe("dispose", () => {
 
 describe("leases", () => {
   it("lists leases and opens the schedule", async () => {
-    handler = (url) => (url.pathname === "/api/v1/leases" ? { status: 200, body: { items: [lease] } } : { status: 200, body: { ...lease, schedule: leaseSchedule } });
+    handler = (url) =>
+      url.pathname === "/api/v1/leases"
+        ? { status: 200, body: { items: [lease] } }
+        : url.pathname.endsWith("/gl-postings")
+          ? { status: 200, body: { leaseId: lease.id, recognitionJournalId: null, periods: [] } }
+          : { status: 200, body: { ...lease, schedule: leaseSchedule } };
     const { container } = renderAt("/assets/leases");
     const table = await findTable({ name: "Leases" });
     await waitFor(() => expect(within(table).getByText("43294.77 USD")).toBeInTheDocument());
@@ -390,7 +395,12 @@ describe("leases", () => {
   });
 
   it("recognizes a lease and opens it", async () => {
-    handler = (_url, init) => (init.method === "POST" ? { status: 201, body: { ...lease, schedule: leaseSchedule } } : { status: 200, body: { ...lease, schedule: leaseSchedule } });
+    handler = (url, init) =>
+      url.pathname.endsWith("/gl-postings")
+        ? { status: 200, body: { leaseId: lease.id, recognitionJournalId: null, periods: [] } }
+        : init.method === "POST"
+          ? { status: 201, body: { ...lease, schedule: leaseSchedule } }
+          : { status: 200, body: { ...lease, schedule: leaseSchedule } };
     const { container } = renderAt("/assets/leases/new");
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
