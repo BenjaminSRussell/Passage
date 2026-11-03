@@ -8,12 +8,14 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/planning/internal/api"
 	"github.com/BenjaminSRussell/passage/services/planning/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/planning/internal/forecastclient"
 	"github.com/BenjaminSRussell/passage/services/planning/internal/store"
 	"github.com/BenjaminSRussell/passage/services/planning/migrations"
 )
@@ -62,6 +64,18 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	slog.Info("feature flags", "enabled", flags)
+	// The flags are per deployment (the platform has no tenant flag service
+	// yet), so a missing or malformed FORECAST_URL with the flag on is a
+	// configuration error of the whole process, refused before connecting.
+	var forecaster *forecastclient.Client
+	if slices.Contains(flags, flagStatisticalForecast) {
+		if getenv("FORECAST_URL") == "" {
+			return errors.New("FORECAST_URL is required while planning.statistical-forecast is enabled")
+		}
+		if forecaster, err = forecastclient.New(getenv("FORECAST_URL")); err != nil {
+			return fmt.Errorf("FORECAST_URL: %w", err)
+		}
+	}
 	pool, err := dbx.Connect(ctx, databaseURL)
 	if err != nil {
 		return fmt.Errorf("connect database: %w", err)
@@ -73,6 +87,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 		}
 	}
 	a := api.New(store.New(pool).WithMaxVersions(maxVersions)).WithHorizon(horizon)
+	if forecaster != nil {
+		a = a.WithStatisticalForecast(forecaster)
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

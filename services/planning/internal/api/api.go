@@ -68,6 +68,10 @@ type API struct {
 
 	// horizonDays is the default planning horizon (0: none), see WithHorizon.
 	horizonDays int
+
+	// generator is the statistical forecast service; nil while the
+	// planning.statistical-forecast flag is off.
+	generator ForecastGenerator
 }
 
 // New returns an API over st.
@@ -94,6 +98,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/forecasts/{modelCode}/lines", a.getForecastLines)
 	r.With(authz.RequireDuty(dutyMaintainForecast)).Put("/v1/planning/forecasts/{modelCode}/lines", a.putForecastLines)
 	r.With(authz.RequireDuty(dutyMaintainForecast)).Post("/v1/planning/forecasts/{modelCode}:submit", a.submitForecast)
+	r.With(authz.RequireDuty(dutyMaintainForecast)).Post("/v1/planning/forecasts/{modelCode}:generate", a.generateForecast)
 	r.With(authz.RequireDuty(dutyApproveForecast)).Post("/v1/planning/forecasts/{modelCode}:publish", a.publishForecast)
 	r.With(authz.RequireDuty(dutyApproveForecast)).Post("/v1/planning/forecasts/{modelCode}:reject", a.rejectForecast)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/coverage-groups", a.listCoverageGroups)

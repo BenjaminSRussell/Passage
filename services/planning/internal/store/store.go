@@ -64,6 +64,7 @@ type Store interface {
 	DeletePlannedOrder(ctx context.Context, id string, expectedVersion int) error
 	FirmPlannedOrders(ctx context.Context, req FirmRequest) (FirmBatch, bool, error)
 	UpsertForecastLines(ctx context.Context, modelCode, legalEntityID string, expectedVersion int, spec *ModelSpec, cells []ForecastCellInput) (ForecastModel, error)
+	GenerateStatisticalCells(ctx context.Context, modelCode, legalEntityID string, expectedVersion int, cells []ForecastCellInput) (GenerateOutcome, error)
 	ListForecastLines(ctx context.Context, modelCode, itemID, siteID string, limit int) (ForecastModel, []ForecastLine, error)
 	ForecastDemand(ctx context.Context, modelCode, siteID string, from time.Time) ([]ForecastDemandLine, error)
 	SubmitForecastConsensus(ctx context.Context, modelCode string, expectedVersion int) (ForecastModel, error)

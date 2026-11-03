@@ -16,8 +16,8 @@ const (
 )
 
 // featureFlags returns the enabled flags, sorted and without duplicates. An empty
-// value enables none. Nothing reads the set yet: the dynamic plan kind, the
-// statistical forecast call and the MPS scope it will gate are not built.
+// value enables none. planning.statistical-forecast gates the generate route (it
+// needs FORECAST_URL); the dynamic plan kind and the MPS scope are not built.
 func featureFlags(raw string) ([]string, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, nil

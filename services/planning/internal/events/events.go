@@ -25,6 +25,10 @@ var MessageRaised = events.Type(Context, "message", "raised", 1)
 // forecast consensus (FR-22.9), in the publishing transaction.
 var ForecastPublished = events.Type(Context, "forecast", "published", 1)
 
+// ForecastGenerated is published when a statistical forecast generation wrote
+// cells into a model (FR-22.9), in the writing transaction.
+var ForecastGenerated = events.Type(Context, "forecast", "generated", 1)
+
 // ScenarioSimulated is published when a simulation run finishes (FR-22.15,
 // BR-22.14). It is a separate type from plan.completed.v1 so that consumers of
 // the operational plan never see a simulation: no messages, firmed orders or
@@ -33,7 +37,7 @@ var ScenarioSimulated = events.Type(Context, "scenario", "simulated", 1)
 
 // All lists the event types this service publishes.
 func All() []string {
-	return []string{PlanStarted, PlanCompleted, PlannedOrderFirmed, MessageRaised, ForecastPublished, ScenarioSimulated}
+	return []string{PlanStarted, PlanCompleted, PlannedOrderFirmed, MessageRaised, ForecastPublished, ForecastGenerated, ScenarioSimulated}
 }
 
 // ScenarioSimulatedData is the data member of scenario.simulated.v1. The
@@ -68,6 +72,21 @@ type ForecastPublishedData struct {
 	PeriodTo       string `json:"period_to"`
 	SubmittedBy    string `json:"submitted_by"`
 	ApprovedBy     string `json:"approved_by"`
+}
+
+// ForecastGeneratedData is the data member of forecast.generated.v1. CellsKept
+// counts the cells of the request that already held a manual or consensus value
+// and were left as they were.
+type ForecastGeneratedData struct {
+	ModelID      string `json:"model_id"`
+	ModelCode    string `json:"model_code"`
+	Version      int    `json:"version"`
+	Series       int    `json:"series"`
+	CellsWritten int    `json:"cells_written"`
+	CellsKept    int    `json:"cells_kept"`
+	PeriodFrom   string `json:"period_from"`
+	PeriodTo     string `json:"period_to"`
+	GeneratedBy  string `json:"generated_by"`
 }
 
 // PlanStartedData is the data member of plan.started.v1. Kind is static until

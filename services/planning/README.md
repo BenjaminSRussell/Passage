@@ -40,6 +40,7 @@ internal/domain/       pure engine: low-level codes, lot sizing, netting, peggin
 internal/store/        Postgres repository (pgx); a plan run is one transaction with its outbox events
 internal/api/          HTTP handlers under /v1/planning, RFC 9457 problems, /readyz with a database ping
 internal/events/       plan.started.v1, plan.completed.v1, message.raised.v1, plannedorder.firmed.v1 and forecast.published.v1 types and payloads
+internal/forecastclient/ HTTP client of forecast-py for POST /forecasts/{modelCode}:generate (slice 28, FORECAST_URL, flag planning.statistical-forecast); forecast.generated.v1
 migrations/            0001_init.sql (plan, plan_version, planned_order, pegging, action_message, outbox; RLS on all)
                        0002_forecast_and_maintenance.sql (planned_order version/vendor/deleted, forecast_model, forecast_line; RLS)
                        0003_firming.sql (firming_batch with RLS, firmed target on planned_order, cancel/decrease actions)

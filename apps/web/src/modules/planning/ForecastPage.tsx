@@ -27,6 +27,7 @@ import {
   type ForecastModel,
   type ForecastWrite,
 } from "./api/client";
+import { GenerateCard } from "./ForecastGenerate";
 import { describeError, PLAN_CODE, useLoad, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
 
@@ -440,6 +441,17 @@ export function ForecastPage() {
         />
       ) : null}
       {state.data && !state.loading ? <ConsensusCard key={`consensus-${state.data.model.code}-${state.data.model.version}`} model={state.data.model} onDone={onConsensus} /> : null}
+      {current && !state.loading && writable ? (
+        <GenerateCard
+          key={`generate-${current.code}`}
+          model={current}
+          onDone={(message) => {
+            setSaved(message);
+            setDraft(null);
+            setReload((n) => n + 1);
+          }}
+        />
+      ) : null}
       {current && form && !state.loading && writable ? (
         <CellForm key={`${current.code}-${current.version}`} model={current} draft={form} setDraft={setDraft} onSaved={onSaved} />
       ) : null}

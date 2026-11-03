@@ -86,6 +86,7 @@ func TestOpenAPI_MatchesRoutes(t *testing.T) {
 		"GET /v1/planning/forecasts/{modelCode}/lines":        dutyRead,
 		"PUT /v1/planning/forecasts/{modelCode}/lines":        dutyMaintainForecast,
 		"POST /v1/planning/forecasts/{modelCode}:submit":      dutyMaintainForecast,
+		"POST /v1/planning/forecasts/{modelCode}:generate":    dutyMaintainForecast,
 		"POST /v1/planning/forecasts/{modelCode}:publish":     dutyApproveForecast,
 		"POST /v1/planning/forecasts/{modelCode}:reject":      dutyApproveForecast,
 		"POST /v1/planning/ddmrp/buffers:evaluate":            dutyRead,

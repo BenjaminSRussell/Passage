@@ -8,6 +8,9 @@ horizonDays: 365
 # PLANNING_FEATURE_FLAGS: comma-separated planning.dynamic, planning.statistical-forecast,
 # planning.mps-scope; an unknown name stops the service at startup.
 featureFlags: ""
+# FORECAST_URL: base URL of the forecast service (services/forecast-py); required while
+# planning.statistical-forecast is enabled.
+forecastUrl: ""
 replicaCount: 2
 resources:
   requests: { cpu: 500m, memory: 1Gi }

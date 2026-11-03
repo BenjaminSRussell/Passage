@@ -41,6 +41,10 @@ spec:
               value: {{ .Values.horizonDays | quote }}
             - name: PLANNING_FEATURE_FLAGS
               value: {{ .Values.featureFlags | quote }}
+            {{- if .Values.forecastUrl }}
+            - name: FORECAST_URL
+              value: {{ .Values.forecastUrl | quote }}
+            {{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

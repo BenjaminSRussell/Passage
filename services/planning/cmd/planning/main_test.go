@@ -39,3 +39,15 @@ func TestRun_RefusesHorizonOutOfRangeBeforeConnecting(t *testing.T) {
 		}
 	}
 }
+
+func TestRun_StatisticalForecastNeedsForecastURL(t *testing.T) {
+	env := map[string]string{"DATABASE_URL": "postgres://unused.invalid/db", "PLANNING_FEATURE_FLAGS": "planning.statistical-forecast"}
+	err := run(context.Background(), func(k string) string { return env[k] })
+	if err == nil || !strings.Contains(err.Error(), "FORECAST_URL") {
+		t.Fatalf("run = %v; want FORECAST_URL required", err)
+	}
+	env["FORECAST_URL"] = "forecast:8080"
+	if err := run(context.Background(), func(k string) string { return env[k] }); err == nil || !strings.Contains(err.Error(), "absolute http") {
+		t.Fatalf("run with a URL without scheme = %v; want it refused", err)
+	}
+}

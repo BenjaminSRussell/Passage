@@ -24,6 +24,8 @@ channels:
     messages:
       forecastPublishedV1:
         $ref: '#/components/messages/ForecastPublishedV1'
+      forecastGeneratedV1:
+        $ref: '#/components/messages/ForecastGeneratedV1'
   scenario:
     address: passage.planning.scenario
     messages:
@@ -63,6 +65,13 @@ operations:
     messages:
       - $ref: '#/channels/forecast/messages/forecastPublishedV1'
     summary: An approver published a submitted forecast consensus (FR-22.9). Written in the publishing transaction; the model's cells are locked from then on.
+  publishForecastGenerated:
+    action: send
+    channel:
+      $ref: '#/channels/forecast'
+    messages:
+      - $ref: '#/channels/forecast/messages/forecastGeneratedV1'
+    summary: A statistical forecast generation wrote cells into a model (FR-22.9). Written in the generating transaction; manual and consensus cells are never overwritten and are counted in cells_kept.
   publishScenarioSimulated:
     action: send
     channel:
@@ -107,6 +116,13 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/ForecastPublishedData'
+    ForecastGeneratedV1:
+      name: dev.passage.planning.forecast.generated.v1
+      title: A statistical forecast was generated
+      summary: A statistical forecast was generated into a model (CloudEvent dev.passage.planning.forecast.generated.v1).
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ForecastGeneratedData'
     ScenarioSimulatedV1:
       name: dev.passage.planning.scenario.simulated.v1
       title: A scenario simulation finished
@@ -209,6 +225,19 @@ components:
         delivery_date: {type: string, format: date}
         quota_arrangement_id: {type: [string, 'null'], format: uuid, description: Quota arrangement the plan run applied to the order (FR-22.17); null when none}
         quota_source_id: {type: [string, 'null'], format: uuid, description: Quota source the order was allocated to; the owning context keeps it on the target order}
+    ForecastGeneratedData:
+      type: object
+      required: [model_id, model_code, version, series, cells_written, cells_kept, period_from, period_to, generated_by]
+      properties:
+        model_id: {type: string, format: uuid}
+        model_code: {type: string}
+        version: {type: integer, description: The model's version (ETag) after the generation}
+        series: {type: integer, description: Item and site series in the request}
+        cells_written: {type: integer, description: Statistical cells written}
+        cells_kept: {type: integer, description: Cells left alone because a manual or consensus value holds the month}
+        period_from: {type: string, format: date, description: First period start}
+        period_to: {type: string, format: date, description: Last period end}
+        generated_by: {type: string, description: User who ran the generation}
     ForecastPublishedData:
       type: object
       required: [model_id, model_code, version, items, horizon_periods, period_from, period_to, submitted_by, approved_by]

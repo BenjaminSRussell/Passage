@@ -40,9 +40,11 @@ type fakeStore struct {
 	orderStatus  string
 	lastPatch    store.OrderPatch
 	// Forecast models by code and the forecast demand a run reads.
-	models   map[string]store.ForecastModel
-	demand   []store.ForecastDemandLine
-	demandAt string
+	models    map[string]store.ForecastModel
+	generated []store.ForecastCellInput // cells of the last statistical generation
+	keptCells int                       // cells that generation reports as kept
+	demand    []store.ForecastDemandLine
+	demandAt  string
 	// Firming batches by Idempotency-Key and the planned orders firmed so far
 	// (firm_test.go).
 	firms    map[string]fakeFirm

@@ -537,6 +537,57 @@ export async function putForecastLines(modelCode: string, version: number, body:
   return out.model;
 }
 
+export type GenerateModel = "auto" | "ets" | "croston" | "tsb" | "naive";
+
+export interface GenerateSeriesWrite {
+  itemId: string;
+  siteId: string;
+  /** One quantity per calendar month, oldest first, ending the month before `firstPeriodStart`. */
+  history: string[];
+  model?: GenerateModel;
+  autoSeason?: boolean;
+}
+
+export interface GenerateForecastWrite {
+  firstPeriodStart: string;
+  horizonPeriods?: number;
+  historyMonths?: number;
+  series: GenerateSeriesWrite[];
+}
+
+const GenerateForecastResult = z.object({
+  model: ForecastModel,
+  cellsWritten: z.number().int(),
+  cellsKept: z.number().int(),
+  generated: z.array(
+    z.object({
+      itemId: z.string(),
+      siteId: z.string(),
+      model: z.string(),
+      seasonLength: z.number().int(),
+      shortHistory: z.boolean(),
+      mape: z.number().nullable(),
+      wmape: z.number().nullable(),
+      warnings: z.array(z.string()),
+    }),
+  ),
+});
+export type GenerateForecastResult = z.infer<typeof GenerateForecastResult>;
+
+/**
+ * Generates a statistical forecast from monthly histories into a model under
+ * If-Match on its version (FR-22.9). Manual and consensus cells stay. 409
+ * `PLAN-FEATURE-OFF` means the statistical forecast feature is not enabled,
+ * 502 `PLAN-FORECAST-UNAVAILABLE` that the forecast service did not answer.
+ */
+export async function generateStatisticalForecast(modelCode: string, version: number, body: GenerateForecastWrite): Promise<GenerateForecastResult> {
+  return request(`/forecasts/${encodeURIComponent(modelCode)}:generate`, GenerateForecastResult, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "If-Match": ifMatch(version) },
+    body: JSON.stringify(body),
+  });
+}
+
 export const ForecastPublication = z.object({
   items: z.number().int(),
   horizonPeriods: z.number().int(),

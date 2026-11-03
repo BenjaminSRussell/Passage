@@ -242,3 +242,26 @@ func TestConsensus_DutiesAndInput(t *testing.T) {
 		})
 	}
 }
+
+// GenerateStatisticalCells mirrors the store's locking and versioning; it keeps
+// the cells it was given in generated so tests can read them.
+func (f *fakeStore) GenerateStatisticalCells(ctx context.Context, code, _ string, expected int, cells []store.ForecastCellInput) (store.GenerateOutcome, error) {
+	if f.models == nil {
+		f.models = map[string]store.ForecastModel{}
+	}
+	m, ok := f.models[code]
+	if !ok {
+		m = store.ForecastModel{Code: code, ReductionPrinciple: domain.ReductionTransactions, ReductionPercent: "0", Status: domain.ConsensusDraft}
+	}
+	if m.Version != expected {
+		return store.GenerateOutcome{}, httpx.NewProblem(http.StatusPreconditionFailed, store.CodeVersionConflict, "stale")
+	}
+	if !domain.ConsensusWritable(statusOf(m)) {
+		return store.GenerateOutcome{}, httpx.NewProblem(http.StatusConflict, store.CodeForecastLocked, "locked")
+	}
+	f.recordEditor(ctx, code)
+	m.Version++
+	f.models[code] = m
+	f.generated = cells
+	return store.GenerateOutcome{Model: m, CellsWritten: len(cells) - f.keptCells, CellsKept: f.keptCells}, nil
+}
