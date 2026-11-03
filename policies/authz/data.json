@@ -339,7 +339,9 @@
     "inventory.transfer.write": {"permissions": [
       {"resource": "/v1/inventory/transfer-orders", "methods": ["POST"]},
       {"resource": "/v1/inventory/transfer-orders/*:cancel", "methods": ["POST"]},
-      {"resource": "/v1/inventory/transfer-orders/*", "methods": ["PATCH"]}
+      {"resource": "/v1/inventory/transfer-orders/*", "methods": ["PATCH"]},
+      {"resource": "/v1/inventory/transfer-orders/*:confirm", "methods": ["POST"]},
+      {"resource": "/v1/inventory/transfer-orders/*", "methods": ["DELETE"]}
     ]},
     "inventory.transfer.post": {"permissions": [
       {"resource": "/v1/inventory/transfer-orders/*:ship", "methods": ["POST"]},
