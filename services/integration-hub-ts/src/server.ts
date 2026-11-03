@@ -10,6 +10,16 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingHttpHeaders, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
+import {
+  ClientIdTakenError,
+  ClientRevokedError,
+  ClientStore,
+  quotaDefaults,
+  validateClientId,
+  validateOwner,
+  validateScopes,
+  type ApiClientPatch,
+} from "./clients.ts";
 import { parseEvent } from "./consumer.ts";
 import { REPLAY_MAX_EVENTS } from "./dispatch.ts";
 import { validatePattern } from "./filter.ts";
@@ -29,6 +39,10 @@ import { UnsafeWebhookUrlError, validateWebhookUrl, type GuardOptions } from "./
 
 export const DUTY_SUBSCRIPTION_WRITE = "hub.subscription.write";
 export const DUTY_DELIVERY_READ = "hub.delivery.read";
+/** Register, change and revoke API clients (new duty; enforced here, seeded by the main session). */
+export const DUTY_CLIENT_WRITE = "hub.client.write";
+/** Spend a client's quota: a service-only duty (never a person or role); no caller holds it until the edge quota check is built. */
+export const DUTY_CLIENT_CONSUME = "hub.client.consume";
 
 export const MAX_BODY_BYTES = 64 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -93,6 +107,8 @@ export interface HubApiDeps {
   metrics?: Metrics;
   /** Guard options for validateWebhookUrl (resolver, http allowance); production uses the defaults. */
   guard?: GuardOptions;
+  /** The API client registry; defaults to one over `store`. */
+  clients?: ClientStore;
   /** Pushes rest-push subscriptions; without it creating one answers 501 HUB-0502. */
   rest?: RestPusher;
   /** Total events one replay may enqueue (BR-35.9); defaults to 1,000,000. */
@@ -146,7 +162,7 @@ function send(res: ServerResponse, status: number, body: unknown, extra: Record<
 
 const TITLES: Record<number, string> = {
   400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 405: "Method Not Allowed",
-  409: "Conflict", 413: "Content Too Large", 422: "Unprocessable Content", 500: "Internal Server Error", 501: "Not Implemented",
+  409: "Conflict", 429: "Too Many Requests", 413: "Content Too Large", 422: "Unprocessable Content", 500: "Internal Server Error", 501: "Not Implemented",
   503: "Service Unavailable",
 };
 
@@ -189,6 +205,34 @@ function requireString(body: Record<string, unknown>, key: string, max: number):
   return v.trim();
 }
 
+function scopesOf(v: unknown): string[] {
+  if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) {
+    throw new ApiError(400, "HUB-0400", "scopes must be an array of 1 to 50 duty keys");
+  }
+  const scopes = [...new Set(v as string[])];
+  validateScopes(scopes);
+  return scopes;
+}
+
+/** An optional integer field; RangeError (400) for anything else. */
+function intOf(body: Record<string, unknown>, key: string): number | undefined {
+  const v = body[key];
+  if (v === undefined) return undefined;
+  if (typeof v !== "number" || !Number.isInteger(v)) {
+    throw new ApiError(400, "HUB-0400", `${key} must be an integer`);
+  }
+  return v;
+}
+
+/** The sandbox tenant (FR-35.8): a UUID other than the caller's own tenant; null clears it. */
+function sandboxOf(v: unknown, tenantId: string): string | null | undefined {
+  if (v === undefined || v === null) return v as null | undefined;
+  if (typeof v !== "string" || !UUID.test(v) || v === NIL_UUID || v.toLowerCase() === tenantId) {
+    throw new ApiError(400, "HUB-0400", "sandboxTenantId must be a tenant id other than your own");
+  }
+  return v.toLowerCase();
+}
+
 function patternsOf(body: Record<string, unknown>): string[] {
   const v = body["patterns"];
   if (!Array.isArray(v) || v.length < 1 || v.length > 50 || v.some((p) => typeof p !== "string")) {
@@ -205,10 +249,13 @@ function patternsOf(body: Record<string, unknown>): string[] {
 
 const SUBSCRIPTIONS = "/v1/hub/subscriptions";
 const ONE = new RegExp(`^${SUBSCRIPTIONS}/([0-9a-fA-F-]{36})(?::(resume|replay|test))?$`);
+const CLIENTS = "/v1/hub/clients";
+const CLIENT_ONE = new RegExp(`^${CLIENTS}/([0-9a-fA-F-]{36})(?::(revoke)|/(usage))?$`);
 const DELIVERY_REPLAY = /^\/v1\/hub\/deliveries\/([0-9a-fA-F-]{36}):replay$/;
 
 export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   const { store, metrics } = deps;
+  const clients = deps.clients ?? new ClientStore(store);
   const clock = deps.clock ?? (() => Date.now() / 1000);
 
   const checkUrl = async (url: string): Promise<void> => {
@@ -239,6 +286,139 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
         throw new ApiError(503, "HUB-0503", "the database is not reachable");
       }
       return { name: "readyz", status: 200, body: { status: "ready" } };
+    }
+
+    if (path === `${CLIENTS}:consume`) {
+      if (method !== "POST") {
+        return allow("POST");
+      }
+      const p = principalFromHeaders(req.headers);
+      requireDuty(p, DUTY_CLIENT_CONSUME);
+      const body = object(await readBody(req), ["clientId", "cost"]);
+      const clientId = requireString(body, "clientId", 64);
+      const cost = body["cost"] === undefined ? 1 : body["cost"];
+      if (typeof cost !== "number" || !Number.isInteger(cost) || cost < 1 || cost > 100_000) {
+        throw new ApiError(400, "HUB-0400", "cost must be an integer in 1..100000");
+      }
+      const out = await clients.consume(p.tenantId, clientId, cost, clock() * 1000);
+      switch (out.outcome) {
+        case "unknown":
+          throw new ApiError(404, "HUB-0404", "no such API client");
+        case "revoked":
+          throw new ApiError(403, "HUB-0403", "the API client is revoked");
+        case "too_costly":
+          throw new ApiError(422, "HUB-0422", `the request costs more than the client's burst of ${out.burst}`);
+        case "throttled":
+          throw new ApiError(429, "HUB-0113", `Quota exceeded; retry after ${out.retryAfterSeconds} s.`, {
+            "retry-after": String(out.retryAfterSeconds), "ratelimit-limit": String(out.limitPerMin), "ratelimit-remaining": "0",
+          });
+        case "allowed":
+          return {
+            name: "consumeClientQuota", status: 200, body: { allowed: true, remaining: out.remaining, limitPerMin: out.limitPerMin, burst: out.burst },
+            headers: { "ratelimit-limit": String(out.limitPerMin), "ratelimit-remaining": String(out.remaining) },
+          };
+      }
+    }
+
+    if (path === CLIENTS) {
+      if (method === "POST") {
+        const p = principalFromHeaders(req.headers);
+        requireDuty(p, DUTY_CLIENT_WRITE);
+        const key = header(req.headers, "idempotency-key")?.trim();
+        if (key !== undefined && key.length > 200) {
+          throw new ApiError(400, "HUB-0400", "Idempotency-Key must be at most 200 characters");
+        }
+        const body = object(await readBody(req), ["clientId", "name", "scopes", "quotaPerMin", "burst", "sandboxTenantId", "ownerContact"]);
+        const clientId = requireString(body, "clientId", 64);
+        validateClientId(clientId);
+        const scopes = scopesOf(body["scopes"]);
+        const ownerContact = requireString(body, "ownerContact", 320);
+        validateOwner(ownerContact);
+        const { created, client } = await clients.create(p.tenantId, {
+          clientId, name: requireString(body, "name", 200), scopes, ownerContact,
+          quotaPerMin: intOf(body, "quotaPerMin") ?? quotaDefaults.quotaPerMin,
+          burst: intOf(body, "burst") ?? quotaDefaults.burst,
+          sandboxTenantId: sandboxOf(body["sandboxTenantId"], p.tenantId) ?? null,
+          createdBy: p.userId, idempotencyKey: key === undefined || key === "" ? null : key,
+        });
+        return { name: "registerClient", status: created ? 201 : 200, body: client };
+      }
+      if (method === "GET") {
+        const p = principalFromHeaders(req.headers);
+        requireDuty(p, DUTY_DELIVERY_READ);
+        return { name: "listClients", status: 200, body: await clients.list(p.tenantId, limitParam(url.searchParams), url.searchParams.get("cursor")) };
+      }
+      return allow("GET, POST");
+    }
+
+    const client = CLIENT_ONE.exec(path);
+    if (client !== null) {
+      const id = (client[1] as string).toLowerCase();
+      if (client[3] !== undefined) {
+        if (method !== "GET") {
+          return allow("GET");
+        }
+        const p = principalFromHeaders(req.headers);
+        requireDuty(p, DUTY_DELIVERY_READ);
+        const raw = url.searchParams.get("minutes");
+        const minutes = raw === null ? 60 : Number(raw);
+        if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
+          throw new ApiError(400, "HUB-0400", "minutes must be an integer in 1..1440");
+        }
+        const rows = await clients.usage(p.tenantId, id, minutes, clock() * 1000);
+        if (rows === null) {
+          throw new ApiError(404, "HUB-0404", "no such API client");
+        }
+        return { name: "getClientUsage", status: 200, body: { minutes: rows } };
+      }
+      if (client[2] !== undefined) {
+        if (method !== "POST") {
+          return allow("POST");
+        }
+        const p = principalFromHeaders(req.headers);
+        requireDuty(p, DUTY_CLIENT_WRITE);
+        const revoked = await clients.revoke(p.tenantId, id, p.userId);
+        if (revoked === null) {
+          throw new ApiError(404, "HUB-0404", "no such API client");
+        }
+        return { name: "revokeClient", status: 200, body: revoked };
+      }
+      if (method === "GET") {
+        const p = principalFromHeaders(req.headers);
+        requireDuty(p, DUTY_DELIVERY_READ);
+        const found = await clients.get(p.tenantId, id);
+        if (found === null) {
+          throw new ApiError(404, "HUB-0404", "no such API client");
+        }
+        return { name: "getClient", status: 200, body: found };
+      }
+      if (method === "PATCH") {
+        const p = principalFromHeaders(req.headers);
+        requireDuty(p, DUTY_CLIENT_WRITE);
+        const body = object(await readBody(req), ["version", "name", "scopes", "quotaPerMin", "burst", "sandboxTenantId", "ownerContact"]);
+        const version = body["version"];
+        if (typeof version !== "number" || !Number.isInteger(version) || version < 1) {
+          throw new ApiError(400, "HUB-0400", "version must be the client's current version");
+        }
+        const patch: ApiClientPatch = { version };
+        if (body["name"] !== undefined) patch.name = requireString(body, "name", 200);
+        if (body["scopes"] !== undefined) patch.scopes = scopesOf(body["scopes"]);
+        const rate = intOf(body, "quotaPerMin");
+        if (rate !== undefined) patch.quotaPerMin = rate;
+        const burst = intOf(body, "burst");
+        if (burst !== undefined) patch.burst = burst;
+        if (body["sandboxTenantId"] !== undefined) patch.sandboxTenantId = sandboxOf(body["sandboxTenantId"], p.tenantId) ?? null;
+        if (body["ownerContact"] !== undefined) {
+          patch.ownerContact = requireString(body, "ownerContact", 320);
+          validateOwner(patch.ownerContact);
+        }
+        const updated = await clients.patch(p.tenantId, id, patch, p.userId);
+        if (updated === null) {
+          throw new ApiError(404, "HUB-0404", "no such API client");
+        }
+        return { name: "updateClient", status: 200, body: updated };
+      }
+      return allow("GET, PATCH");
     }
 
     if (path === SUBSCRIPTIONS) {
@@ -359,7 +539,7 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
             if (patch.url !== undefined) await checkUrl(patch.url);
           }
           if (body["patterns"] !== undefined) patch.patterns = patternsOf(body);
-          const sub = await store.patchSubscription(p.tenantId, id, patch);
+          const sub = await store.patchSubscription(p.tenantId, id, patch, p.userId);
           if (sub === null) {
             throw new ApiError(404, "HUB-0404", "no such subscription");
           }
@@ -368,7 +548,7 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
         if (method === "DELETE") {
           const p = principalFromHeaders(req.headers);
           requireDuty(p, DUTY_SUBSCRIPTION_WRITE);
-          if (!(await store.deleteSubscription(p.tenantId, id))) {
+          if (!(await store.deleteSubscription(p.tenantId, id, p.userId))) {
             throw new ApiError(404, "HUB-0404", "no such subscription");
           }
           return { name: "deleteSubscription", status: 204, body: null };
@@ -382,7 +562,7 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
       const p = principalFromHeaders(req.headers);
       requireDuty(p, DUTY_SUBSCRIPTION_WRITE);
       if (action === "resume") {
-        const sub = await store.resumeSubscription(p.tenantId, id);
+        const sub = await store.resumeSubscription(p.tenantId, id, p.userId);
         if (sub === null) {
           throw new ApiError(404, "HUB-0404", "no such subscription");
         }
@@ -514,7 +694,7 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
       let apiErr: ApiError;
       if (err instanceof ApiError) {
         apiErr = err;
-      } else if (err instanceof VersionConflictError) {
+      } else if (err instanceof VersionConflictError || err instanceof ClientIdTakenError || err instanceof ClientRevokedError) {
         apiErr = new ApiError(409, "HUB-0409", err.message);
       } else if (err instanceof RestConfigError || err instanceof WrongKindError) {
         apiErr = new ApiError(err instanceof WrongKindError ? 409 : 400, err instanceof WrongKindError ? "HUB-0409" : "HUB-0400", err.message);

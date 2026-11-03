@@ -15,6 +15,7 @@ import pg from "pg";
 
 import type { FieldKeys } from "./crypt.ts";
 import type { DeadLetter, DeliveryStore, HubEvent, PendingDelivery } from "./dispatcher.ts";
+import { enqueue } from "./events.ts";
 import { matchesAny } from "./filter.ts";
 import type { RestConfig, RestCredentials, RestTarget } from "./restPush.ts";
 
@@ -220,16 +221,30 @@ function toDelivery(r: DeliveryRow): DeliveryRecord {
 }
 
 // created_at has microsecond precision, which a JS Date cannot hold: the cursor carries Postgres's own text.
-function encodeCursor(createdAt: string, id: string): string {
+export function encodeCursor(createdAt: string, id: string): string {
   return Buffer.from(`${createdAt}|${id}`).toString("base64url");
 }
 
-function decodeCursor(cursor: string): { createdAt: string; id: string } {
+export function decodeCursor(cursor: string): { createdAt: string; id: string } {
   const [createdAt, id] = Buffer.from(cursor, "base64url").toString("utf8").split("|");
   if (createdAt === undefined || id === undefined || !/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(\.\d{1,6})?[+-]\d\d(:\d\d)?$/.test(createdAt) || !/^[0-9a-f-]{36}$/.test(id)) {
     throw new BadCursorError();
   }
   return { createdAt, id };
+}
+
+/**
+ * Delivering one of the hub's own outcome events (webhook.delivered or webhook.deadlettered,
+ * when the hub consumes passage.hub.webhook and a subscription matches it) writes no outcome
+ * event of its own: otherwise every delivery would feed the next one without end.
+ */
+function isOutcomeEvent(type: string): boolean {
+  return type.startsWith("dev.passage.hub.webhook.");
+}
+
+/** The subscription event payload: identity and shape only; the URL, secret and credentials never leave the store. */
+function subscriptionData(s: SubscriptionRecord): Record<string, unknown> {
+  return { subscription_id: s.id, kind: s.kind, name: s.name, patterns: s.patterns, status: s.status, paused_reason: s.pausedReason, version: s.version };
 }
 
 export interface NewSubscription {
@@ -357,7 +372,12 @@ export class HubStore {
          input.rest === undefined ? null : JSON.stringify(input.rest.config), credentials, input.patterns, input.createdBy, input.idempotencyKey],
       );
       if (res.rows[0] !== undefined) {
-        return { subscription: toSubscription(res.rows[0]), created: true };
+        const subscription = toSubscription(res.rows[0]);
+        await enqueue(c, tenantId, {
+          type: "dev.passage.hub.subscription.created.v1", aggregateId: subscription.id,
+          actor: input.createdBy, data: subscriptionData(subscription),
+        });
+        return { subscription, created: true };
       }
       const existing = await c.query<SubRow>(`select ${COLUMNS_SUB} from hub_subscription where idempotency_key = $1`, [input.idempotencyKey]);
       return { subscription: toSubscription(existing.rows[0] as SubRow), created: false };
@@ -390,7 +410,7 @@ export class HubStore {
   }
 
   /** Optimistic update: VersionConflictError when `version` is stale, null when the subscription does not exist. */
-  async patchSubscription(tenantId: string, id: string, patch: SubscriptionPatch): Promise<SubscriptionRecord | null> {
+  async patchSubscription(tenantId: string, id: string, patch: SubscriptionPatch, actor: string | null = null): Promise<SubscriptionRecord | null> {
     if (patch.rest?.credentials !== undefined && this.#keys === null) {
       throw new FieldKeysMissingError();
     }
@@ -415,16 +435,22 @@ export class HubStore {
          patch.rest === undefined ? null : JSON.stringify(patch.rest.config), credentials],
       );
       if (res.rows[0] !== undefined) {
-        return toSubscription(res.rows[0]);
+        const subscription = toSubscription(res.rows[0]);
+        await enqueue(c, tenantId, { type: "dev.passage.hub.subscription.updated.v1", aggregateId: id, actor, data: subscriptionData(subscription) });
+        return subscription;
       }
       throw new VersionConflictError();
     });
   }
 
-  async deleteSubscription(tenantId: string, id: string): Promise<boolean> {
+  async deleteSubscription(tenantId: string, id: string, actor: string | null = null): Promise<boolean> {
     return this.withTenant(tenantId, async (c) => {
-      const res = await c.query("delete from hub_subscription where id = $1", [id]);
-      return (res.rowCount ?? 0) > 0;
+      const res = await c.query<SubRow>(`delete from hub_subscription where id = $1 returning ${COLUMNS_SUB}`, [id]);
+      if (res.rows[0] === undefined) {
+        return false;
+      }
+      await enqueue(c, tenantId, { type: "dev.passage.hub.subscription.deleted.v1", aggregateId: id, actor, data: subscriptionData(toSubscription(res.rows[0])) });
+      return true;
     });
   }
 
@@ -594,13 +620,18 @@ export class HubStore {
   }
 
   /** Clears a 410 pause (HUB-0114); null when the subscription does not exist. Resuming an active subscription changes nothing. */
-  async resumeSubscription(tenantId: string, id: string): Promise<SubscriptionRecord | null> {
+  async resumeSubscription(tenantId: string, id: string, actor: string | null = null): Promise<SubscriptionRecord | null> {
     return this.withTenant(tenantId, async (c) => {
-      await c.query(
+      const resumed = await c.query<SubRow>(
         `update hub_subscription set status = 'active', paused_reason = null, paused_at = null, version = version + 1, updated_at = now()
-          where id = $1 and status = 'paused'`,
+          where id = $1 and status = 'paused' returning ${COLUMNS_SUB}`,
         [id],
       );
+      if (resumed.rows[0] !== undefined) {
+        const subscription = toSubscription(resumed.rows[0]);
+        await enqueue(c, tenantId, { type: "dev.passage.hub.subscription.resumed.v1", aggregateId: id, actor, data: subscriptionData(subscription) });
+        return subscription;
+      }
       const res = await c.query<SubRow>(`select ${COLUMNS_SUB} from hub_subscription where id = $1`, [id]);
       return res.rows[0] === undefined ? null : toSubscription(res.rows[0]);
     });
@@ -779,27 +810,50 @@ export class PgDeliveryStore implements DeliveryStore {
         );
         return;
       }
-      case "remove":
-        await c.query(
-          "update hub_delivery set status = 'delivered', updated_at = now() where subscription_id = $1 and event_id = $2 and status = 'pending'",
+      case "remove": {
+        const done = await c.query<{ attempts: number; event_type: string }>(
+          "update hub_delivery set status = 'delivered', updated_at = now() where subscription_id = $1 and event_id = $2 and status = 'pending' returning attempts, event_type",
           [sub, op.eventId],
         );
+        const row = done.rows[0];
+        if (row !== undefined && !isOutcomeEvent(row.event_type)) {
+          await enqueue(c, this.#tenantId, {
+            type: "dev.passage.hub.webhook.delivered.v1", aggregateId: sub, actor: null,
+            data: { subscription_id: sub, event_id: op.eventId, attempts: row.attempts },
+          });
+        }
         return;
-      case "dead":
-        await c.query(
+      }
+      case "dead": {
+        const dead = await c.query<{ event_type: string }>(
           `update hub_delivery set status = 'dead_letter', dead_letter_code = $3, attempts = $4, last_status = $5, updated_at = now()
-            where subscription_id = $1 and event_id = $2 and status = 'pending'`,
+            where subscription_id = $1 and event_id = $2 and status = 'pending' returning event_type`,
           [sub, op.letter.event.eventId, op.letter.code, op.letter.attempts, op.letter.lastStatus],
         );
+        const row = dead.rows[0];
+        if (row !== undefined && !isOutcomeEvent(row.event_type)) {
+          await enqueue(c, this.#tenantId, {
+            type: "dev.passage.hub.webhook.deadlettered.v1", aggregateId: sub, actor: null,
+            data: { subscription_id: sub, event_id: op.letter.event.eventId, attempts: op.letter.attempts, code: op.letter.code, last_status: op.letter.lastStatus },
+          });
+        }
         return;
-      case "paused":
-        await c.query(
+      }
+      case "paused": {
+        const moved = await c.query<SubRow>(
           `update hub_subscription
               set status = $2, paused_reason = $3, paused_at = $4, version = version + 1, updated_at = now()
-            where id = $1 and status <> $2`,
+            where id = $1 and status <> $2 returning ${COLUMNS_SUB}`,
           [sub, op.paused ? "paused" : "active", op.paused ? "HUB-0114" : null, op.paused ? new Date() : null],
         );
+        if (moved.rows[0] !== undefined) {
+          await enqueue(c, this.#tenantId, {
+            type: op.paused ? "dev.passage.hub.subscription.paused.v1" : "dev.passage.hub.subscription.resumed.v1",
+            aggregateId: sub, actor: null, data: subscriptionData(toSubscription(moved.rows[0])),
+          });
+        }
         return;
+      }
       case "attempt":
         await c.query(
           `with d as (
