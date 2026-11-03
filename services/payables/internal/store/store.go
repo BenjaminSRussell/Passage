@@ -62,6 +62,7 @@ type OpenItem struct {
 	Status          string          `json:"status"`
 	Version         int             `json:"version"`
 	PaymentHold     bool            `json:"paymentHold"`
+	PayeeUnverified bool            `json:"-"`
 }
 
 type Filter struct {
@@ -145,12 +146,12 @@ func (s *Postgres) CreateFromInvoice(ctx context.Context, in OpenItem) (OpenItem
 	created := false
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `insert into ap_open_item (tenant_id, id, legal_entity_id, vendor_id, source_invoice_id, invoice_number,
-			invoice_date, due_date, due_date_source, currency, amount, open_amount, discount_date, discount_amount, status, vendor_group_id)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $13, $9, $10, $10, $11, $12, 'OPEN', $14::uuid)
+			invoice_date, due_date, due_date_source, currency, amount, open_amount, discount_date, discount_amount, status, vendor_group_id, payee_unverified)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $13, $9, $10, $10, $11, $12, 'OPEN', $14::uuid, $15)
 			on conflict (tenant_id, source_invoice_id) do nothing
 			returning `+columns,
 			p.TenantID, ids.New(), in.LegalEntityID, in.VendorID, in.SourceInvoiceID, in.InvoiceNumber, in.InvoiceDate, in.DueDate,
-			in.Currency, in.Amount.String(), in.DiscountDate, in.DiscountAmount.String(), dueSource, nullable(in.VendorGroupID))
+			in.Currency, in.Amount.String(), in.DiscountDate, in.DiscountAmount.String(), dueSource, nullable(in.VendorGroupID), in.PayeeUnverified)
 		var err error
 		out, err = scan(row)
 		if err == nil {
@@ -164,7 +165,7 @@ func (s *Postgres) CreateFromInvoice(ctx context.Context, in OpenItem) (OpenItem
 		if err != nil {
 			return err
 		}
-		if !out.Amount.Equal(in.Amount) || out.VendorID != in.VendorID || out.Currency != in.Currency {
+		if !out.Amount.Equal(in.Amount) || out.VendorID != in.VendorID || out.LegalEntityID != in.LegalEntityID || out.Currency != in.Currency {
 			return ErrConflictingReplay
 		}
 		if in.VendorGroupID == "" || out.VendorGroupID != "" {

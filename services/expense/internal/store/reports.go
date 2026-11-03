@@ -63,6 +63,7 @@ type Report struct {
 	Version       int
 	CreatedAt     time.Time
 	SubmittedAt   *time.Time
+	CreatedBy     string
 	SubmittedBy   string
 	APOpenItemID  string
 	ReimbursedAt  *time.Time
@@ -99,7 +100,7 @@ func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 const reportColumns = `id::text, legal_entity_id::text, worker_id::text, purpose, currency::text, status,
   total_amount::text, reimbursable_amount::text, company_paid_amount::text, version, created_at, submitted_at,
-  submitted_by, coalesce(ap_open_item_id::text, ''), reimbursed_at`
+  created_by, submitted_by, coalesce(ap_open_item_id::text, ''), reimbursed_at`
 
 const lineColumns = `id::text, report_id::text, line_no, category, txn_date, amount::text, merchant,
   attendees, has_receipt, justification, paid_by, policy_results`
@@ -119,9 +120,9 @@ func (s *Store) CreateReport(ctx context.Context, key, hash string, in NewReport
 	replayed := false
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var id string
-		err := tx.QueryRow(ctx, `insert into expense_report(tenant_id, id, legal_entity_id, worker_id, purpose, currency, create_key, request_hash)
-			values($1,$2,$3,$4,$5,$6,$7,$8) on conflict (tenant_id, create_key) do nothing returning id::text`,
-			p.TenantID, ids.New(), in.LegalEntityID, in.WorkerID, in.Purpose, in.Currency, key, hash).Scan(&id)
+		err := tx.QueryRow(ctx, `insert into expense_report(tenant_id, id, legal_entity_id, worker_id, purpose, currency, create_key, request_hash, created_by)
+			values($1,$2,$3,$4,$5,$6,$7,$8,$9) on conflict (tenant_id, create_key) do nothing returning id::text`,
+			p.TenantID, ids.New(), in.LegalEntityID, in.WorkerID, in.Purpose, in.Currency, key, hash, p.UserID).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			var stored string
 			if err := tx.QueryRow(ctx, `select id::text, request_hash from expense_report where tenant_id=$1 and create_key=$2`,
@@ -486,7 +487,7 @@ func scanReport(r pgx.Row) (Report, error) {
 	var total, reimbursable, companyPaid string
 	if err := r.Scan(&rep.ID, &rep.LegalEntityID, &rep.WorkerID, &rep.Purpose, &rep.Currency, &rep.Status,
 		&total, &reimbursable, &companyPaid, &rep.Version, &rep.CreatedAt, &rep.SubmittedAt,
-		&rep.SubmittedBy, &rep.APOpenItemID, &rep.ReimbursedAt); err != nil {
+		&rep.CreatedBy, &rep.SubmittedBy, &rep.APOpenItemID, &rep.ReimbursedAt); err != nil {
 		return Report{}, err
 	}
 	var err error

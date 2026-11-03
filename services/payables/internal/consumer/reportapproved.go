@@ -40,7 +40,7 @@ func HandleExpenseReportApproved(ctx context.Context, items *store.Postgres, evt
 	ctx = tenant.With(ctx, tenant.Principal{TenantID: evt.TenantID, LegalEntityID: d.LegalEntityID, UserID: "system:expense.report.approved"})
 	_, _, err = items.CreateFromInvoice(ctx, store.OpenItem{
 		LegalEntityID: d.LegalEntityID, VendorID: d.WorkerID, SourceInvoiceID: d.ReportID, InvoiceNumber: reimbursement.InvoicePrefix + d.ReportID[:8],
-		InvoiceDate: d.ApprovedOn, DueDate: d.ApprovedOn, DueDateSource: store.DueDateDefaulted, Currency: d.Currency, Amount: amount, DiscountAmount: decimal.Zero,
+		InvoiceDate: d.ApprovedOn, DueDate: d.ApprovedOn, DueDateSource: store.DueDateDefaulted, Currency: d.Currency, Amount: amount, DiscountAmount: decimal.Zero, PayeeUnverified: true,
 	})
 	return err
 }

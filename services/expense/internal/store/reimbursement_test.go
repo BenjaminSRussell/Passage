@@ -150,9 +150,10 @@ func TestMarkReimbursed_PaysOnlyWhatTheApprovedReportAsksFor(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, mutate := range map[string]func(*reimbursement.OpenItemSettled){
-		"other payee":  func(d *reimbursement.OpenItemSettled) { d.VendorID = ids.New() },
-		"other amount": func(d *reimbursement.OpenItemSettled) { d.SettledAmount = "79.99" },
-		"other money":  func(d *reimbursement.OpenItemSettled) { d.Currency = "EUR" },
+		"other payee":             func(d *reimbursement.OpenItemSettled) { d.VendorID = ids.New() },
+		"overpaid":                func(d *reimbursement.OpenItemSettled) { d.OpenAmount = "-0.01" },
+		"more open than approved": func(d *reimbursement.OpenItemSettled) { d.OpenAmount = "80.01" },
+		"other money":             func(d *reimbursement.OpenItemSettled) { d.Currency = "EUR" },
 	} {
 		bad := settled
 		mutate(&bad)
@@ -169,6 +170,11 @@ func TestMarkReimbursed_PaysOnlyWhatTheApprovedReportAsksFor(t *testing.T) {
 		t.Fatalf("status after refused events = %s; want APPROVED", got.Status)
 	}
 
+	partial := settled
+	partial.Status, partial.OpenAmount, partial.SettledAmount = "PARTIALLY_SETTLED", "30", "50"
+	if marked, err := s.MarkReimbursed(ctx, partial); marked || err != nil {
+		t.Fatalf("partial settlement = %v, %v; want no change", marked, err)
+	}
 	for pass := 1; pass <= 2; pass++ {
 		marked, err := s.MarkReimbursed(ctx, settled)
 		if err != nil || marked != (pass == 1) {
@@ -197,5 +203,38 @@ func TestMarkReimbursed_IsIsolatedByTenant(t *testing.T) {
 	}
 	if got, _ := s.GetReport(ctx, rep.ID); got.Status != "APPROVED" {
 		t.Fatalf("status = %s; want APPROVED", got.Status)
+	}
+}
+
+func TestDecideReport_RefusesTheCreatorAndAnyReportWithoutARecordedSubmitter(t *testing.T) {
+	s, ctx, le, _ := setup(t, 26)
+	cora, sam, dana := asUser(ctx, "cora"), asUser(ctx, "sam"), asUser(ctx, "dana")
+	l := line("TRAVEL", "Hotel", 80)
+	l.HasReceipt = true
+
+	rep := newReport(t, s, cora, le, "by-cora")
+	rep, _, err := s.AddLine(cora, rep.ID, "line-1", "h1", l, commitDay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep, _, err = s.SubmitReport(sam, rep.ID, "submit-1", "hs", 0, commitDay); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.DecideReport(cora, rep.ID, true, commitDay, store.Command{Key: "creator", Hash: "h"}); problemOf(t, err).Code != store.CodeOwnDecision {
+		t.Fatalf("creator deciding must be %s, got %v", store.CodeOwnDecision, err)
+	}
+
+	anonymous := newReport(t, s, ctx, le, "anonymous")
+	if anonymous, _, err = s.AddLine(ctx, anonymous.ID, "line-2", "h2", domain.Line{ID: ids.New(), Category: "TRAVEL", TxnDate: businessDay, Amount: decimal.NewFromInt(80), Merchant: "Hotel", HasReceipt: true}, commitDay); err != nil {
+		t.Fatal(err)
+	}
+	if anonymous, _, err = s.SubmitReport(ctx, anonymous.ID, "submit-2", "hs2", 0, commitDay); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.DecideReport(dana, anonymous.ID, true, commitDay, store.Command{Key: "anon", Hash: "h"}); problemOf(t, err).Code != store.CodeOwnDecision {
+		t.Fatalf("a report with no recorded creator or submitter must be refused with %s, got %v", store.CodeOwnDecision, err)
+	}
+	if got, _ := s.GetReport(dana, anonymous.ID); got.Status != "SUBMITTED" {
+		t.Fatalf("status = %s; want SUBMITTED", got.Status)
 	}
 }

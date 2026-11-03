@@ -27,6 +27,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/fx"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/party"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/store"
 )
 
@@ -432,6 +433,9 @@ func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {
 		a.fault(w, r, "payment proposal candidates failed", err)
 		return
 	}
+	if candidates, ok = a.knownPayees(w, r, le, candidates); !ok {
+		return
+	}
 	rateDate := runDate
 	if today := a.today(); runDate.After(today) {
 		rateDate = today
@@ -665,4 +669,34 @@ func (a *API) writeProposalMetrics(w http.ResponseWriter) {
 	fmt.Fprintf(w, "# HELP payables_payment_holds_total Payment hold and vendor block commands by outcome.\n# TYPE payables_payment_holds_total counter\npayables_payment_holds_total{outcome=\"held\"} %d\npayables_payment_holds_total{outcome=\"released\"} %d\npayables_payment_holds_total{outcome=\"vendor_blocked\"} %d\npayables_payment_holds_total{outcome=\"vendor_unblocked\"} %d\n",
 		a.proposals.holds.held.Load(), a.proposals.holds.released.Load(), a.proposals.holds.blocked.Load(), a.proposals.holds.unblocked.Load())
 	fmt.Fprintf(w, "# HELP payables_fx_rate_faults_total Exchange rate lookups that failed on a server or transport fault.\n# TYPE payables_fx_rate_faults_total counter\npayables_fx_rate_faults_total %d\n", a.proposals.rateFaults.Load())
+}
+
+// knownPayees drops open items whose payee is not yet in the party vendor master (expense
+// reimbursements to employees) so that one of them cannot make approval refuse the whole
+// proposal. Items of other payees are left to the bank binding at approval.
+func (a *API) knownPayees(w http.ResponseWriter, r *http.Request, le string, in []domain.ProposalCandidate) ([]domain.ProposalCandidate, bool) {
+	if a.runs == nil || a.runs.banks == nil {
+		return in, true
+	}
+	known := map[string]bool{}
+	out := make([]domain.ProposalCandidate, 0, len(in))
+	for _, c := range in {
+		if c.PayeeUnverified {
+			ok, seen := known[c.VendorID]
+			if !seen {
+				_, err := a.runs.banks.BankAccounts(r.Context(), le, c.VendorID)
+				if err != nil && !errors.Is(err, party.ErrVendorNotFound) {
+					a.partyUnavailable(w, r, err)
+					return nil, false
+				}
+				ok = err == nil
+				known[c.VendorID] = ok
+			}
+			if !ok {
+				continue
+			}
+		}
+		out = append(out, c)
+	}
+	return out, true
 }

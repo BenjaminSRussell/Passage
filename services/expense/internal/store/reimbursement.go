@@ -55,7 +55,10 @@ func (s *Store) DecideReport(ctx context.Context, id string, approve bool, decid
 		if cur.Status != string(domain.ReportSubmitted) {
 			return httpx.NewProblem(http.StatusConflict, CodeReportState, "report is "+cur.Status+" and cannot be decided")
 		}
-		if cur.SubmittedBy != "" && cur.SubmittedBy == p.UserID {
+		if cur.SubmittedBy == "" || cur.CreatedBy == "" {
+			return httpx.NewProblem(http.StatusForbidden, CodeOwnDecision, "the report does not record who created and submitted it, so it cannot be decided")
+		}
+		if p.UserID == cur.SubmittedBy || p.UserID == cur.CreatedBy {
 			return ownDecision("report")
 		}
 		target := domain.ReportRejected
@@ -98,7 +101,7 @@ func (s *Store) DecideReport(ctx context.Context, id string, approve bool, decid
 // MarkReimbursed marks the APPROVED report that d's source document names as PAID once
 // payables has settled its open item in full. An event for a document that is not an
 // expense report, or for a report already PAID, changes nothing; an event that
-// disagrees with the stored report on worker, legal entity, currency or amount is refused.
+// disagrees with the stored report on worker, legal entity or currency, or leaves a negative or larger-than-reimbursable open amount, is refused; a partial settlement (open amount above zero) waits for the rest.
 func (s *Store) MarkReimbursed(ctx context.Context, d reimbursement.OpenItemSettled) (bool, error) {
 	p, err := principal(ctx)
 	if err != nil {
@@ -116,10 +119,13 @@ func (s *Store) MarkReimbursed(ctx context.Context, d reimbursement.OpenItemSett
 		if cur.Status == string(domain.ReportPaid) {
 			return nil
 		}
-		settled, err := decimal.NewFromString(d.SettledAmount)
+		open, err := decimal.NewFromString(d.OpenAmount)
 		if err != nil || cur.Status != string(domain.ReportApproved) || cur.WorkerID != d.VendorID || cur.LegalEntityID != d.LegalEntityID ||
-			cur.Currency != d.Currency || !settled.Equal(cur.Reimbursable) {
+			cur.Currency != d.Currency || open.IsNegative() || open.GreaterThan(cur.Reimbursable) {
 			return ErrSettlementMismatch
+		}
+		if open.IsPositive() {
+			return nil
 		}
 		marked = true
 		_, err = tx.Exec(ctx, `update expense_report set status=$3, ap_open_item_id=$4::uuid, reimbursed_at=now(), updated_at=now(), version=version+1
