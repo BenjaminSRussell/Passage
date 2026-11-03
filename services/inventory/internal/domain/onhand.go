@@ -10,6 +10,9 @@ import (
 const (
 	CodeNegativePhysical  = "INV-NEG-001"
 	CodeNegativeFinancial = "INV-NEG-002"
+	// CodeQualityHold is an issue or transfer that would move held quantity
+	// (wave 33 AC2 / AC-33.3).
+	CodeQualityHold = "QUALITY_HOLD"
 )
 
 // OnHand is the projection row for one product and dimension set. Bucket
@@ -109,14 +112,14 @@ func (e *NegativeError) Error() string {
 // while the policy allowed it) is therefore never rejected. Callers run it
 // after applying all deltas to the row, under the row lock (FR-16.4, BR-16.4).
 func (o OnHand) CheckNegative(before OnHand, p NegativePolicy) error {
+	if pi := o.PhysicalInvent(); o.HeldPhysical.Sign() > 0 && pi.LessThan(o.HeldPhysical) && pi.LessThan(before.PhysicalInvent()) {
+		return &NegativeError{Code: CodeQualityHold, Shortfall: o.HeldPhysical.Sub(pi)}
+	}
 	if ap := o.AvailPhysical(); !p.PhysicalAllowed && ap.Sign() < 0 && ap.LessThan(before.AvailPhysical()) {
 		return &NegativeError{Code: CodeNegativePhysical, Shortfall: ap.Neg()}
 	}
 	if ao := o.AvailOrdered(); !p.FinancialAllowed && ao.Sign() < 0 && ao.LessThan(before.AvailOrdered()) {
 		return &NegativeError{Code: CodeNegativeFinancial, Shortfall: ao.Neg()}
-	}
-	if pi := o.PhysicalInvent(); o.HeldPhysical.Sign() > 0 && pi.LessThan(o.HeldPhysical) && pi.LessThan(before.PhysicalInvent()) {
-		return &NegativeError{Code: CodeNegativePhysical, Shortfall: o.HeldPhysical.Sub(pi)}
 	}
 	return nil
 }

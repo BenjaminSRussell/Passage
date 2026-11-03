@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -94,8 +95,9 @@ func TestHeldQuantityNeverExceedsPhysicalEvenWhenNegativeStockIsAllowed(t *testi
 	after := before
 	after.PostedQty = decimal.NewFromInt(5)
 	allow := NegativePolicy{PhysicalAllowed: true, FinancialAllowed: true}
-	if after.CheckNegative(before, allow) == nil {
-		t.Fatal("an issue that leaves less physical stock than is held must be refused under any policy")
+	var ne *NegativeError
+	if err := after.CheckNegative(before, allow); !errors.As(err, &ne) || ne.Code != CodeQualityHold {
+		t.Fatalf("an issue that leaves less physical stock than is held must be QUALITY_HOLD, got %v", err)
 	}
 	after.PostedQty = decimal.NewFromInt(8)
 	if err := after.CheckNegative(before, allow); err != nil {

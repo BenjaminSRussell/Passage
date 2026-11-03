@@ -160,7 +160,10 @@ releases nothing more) end holds; `GET /holds` is the inquiry. `hold.placed` / `
 (`HELD_PHYSICAL`) go through the outbox; the rebuild-and-compare counts active holds. The duty `inventory.hold.write` is for
 people; the service-only `inventory.hold.apply` (granted to `quality`) reaches place and release-source only. The property
 test `TestHoldProperty_AvailablePlusHeldIsOnHandAndNeverNegative` proves available + held + reserved = on-hand and no negative
-availability under random place, whole-lot, release, release-by-source and issue sequences. Not built: a hold on a whole lot
+availability under random place, whole-lot, release, release-by-source and issue sequences. An issue or transfer that would
+leave physical below held returns `QUALITY_HOLD` before `INV-NEG-001` (`CheckNegative`, `TestCheckNegative_HeldQuantityIsQualityHold`),
+even when negative stock is allowed. Warehouse pick, fulfillment packing-slip post and production consume refuse the same
+held quantity by reading this on-hand. Not built: a hold on a whole lot
 does not follow later receipts into the lot, holds are not shown on the web on-hand page, and holds do not freeze count sheets.
 
 PSG-1615 (wave 16 slice 15) adds partial shipments and a planned receipt date on transfer orders (FR-16.15, BR-16.13). `POST

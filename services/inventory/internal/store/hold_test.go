@@ -65,8 +65,8 @@ func TestHoldLeavesStockOutOfAvailabilityAndIssues(t *testing.T) {
 	if !row.physical.Equal(dec("100")) || !row.avail.Equal(dec("70")) || !row.held.Equal(dec("30")) {
 		t.Fatalf("physical %s avail %s held %s, want 100 / 70 / 30", row.physical, row.avail, row.held)
 	}
-	if err := issue(ctx, s, product, "80", dims("batch", "B1")); problemCode(err) != domain.CodeNegativePhysical {
-		t.Fatalf("issuing into the held quantity: %v, want %s", err, domain.CodeNegativePhysical)
+	if err := issue(ctx, s, product, "80", dims("batch", "B1")); problemCode(err) != domain.CodeQualityHold {
+		t.Fatalf("issuing into the held quantity: %v, want %s", err, domain.CodeQualityHold)
 	}
 	if err := issue(ctx, s, product, "70", dims("batch", "B1")); err != nil {
 		t.Fatalf("issuing the available quantity: %v", err)
@@ -349,8 +349,8 @@ func TestHoldProperty_AvailablePlusHeldIsOnHandAndNeverNegative(t *testing.T) {
 					rt.Fatalf("issue %d from %s available: %v", qty, avail, err)
 				} else if err == nil {
 					physical[row] = physical[row].Sub(decimal.NewFromInt(int64(qty)))
-				} else if problemCode(err) != domain.CodeNegativePhysical {
-					rt.Fatalf("issue %d refused with %v, want %s", qty, err, domain.CodeNegativePhysical)
+				} else if code := problemCode(err); code != domain.CodeNegativePhysical && code != domain.CodeQualityHold {
+					rt.Fatalf("issue %d refused with %v, want %s or %s", qty, err, domain.CodeNegativePhysical, domain.CodeQualityHold)
 				}
 			}
 			check(fmt.Sprintf("step %d", i))
