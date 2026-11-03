@@ -62,7 +62,7 @@ type OpenItem struct {
 	Status          string          `json:"status"`
 	Version         int             `json:"version"`
 	PaymentHold     bool            `json:"paymentHold"`
-	PayeeUnverified bool            `json:"-"`
+	PayeeUnverified bool            `json:"payeeUnverified,omitempty"`
 }
 
 type Filter struct {
@@ -90,7 +90,7 @@ func (s *Postgres) WithFieldCrypt(k *fieldcrypt.Keys) *Postgres {
 func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 
 const columns = `id, legal_entity_id, vendor_id, coalesce(vendor_group_id::text, ''), source_invoice_id, invoice_number, invoice_date::text, due_date::text, due_date_source, currency,
-	amount::text, open_amount::text, discount_date::text, discount_amount::text, status, version, payment_hold`
+	amount::text, open_amount::text, discount_date::text, discount_amount::text, status, version, payment_hold, payee_unverified`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -98,7 +98,7 @@ func scan(row rowScanner) (OpenItem, error) {
 	var o OpenItem
 	var amount, open, discount string
 	if err := row.Scan(&o.ID, &o.LegalEntityID, &o.VendorID, &o.VendorGroupID, &o.SourceInvoiceID, &o.InvoiceNumber, &o.InvoiceDate, &o.DueDate, &o.DueDateSource,
-		&o.Currency, &amount, &open, &o.DiscountDate, &discount, &o.Status, &o.Version, &o.PaymentHold); err != nil {
+		&o.Currency, &amount, &open, &o.DiscountDate, &discount, &o.Status, &o.Version, &o.PaymentHold, &o.PayeeUnverified); err != nil {
 		return OpenItem{}, err
 	}
 	var err error

@@ -78,7 +78,16 @@ type Proposal struct {
 	Groups              []domain.ProposalGroup     `json:"groups"`
 	TotalValued         decimal.Decimal            `json:"totalValued"`
 	TotalWithheld       map[string]decimal.Decimal `json:"totalWithheld"`
+	ExcludedItems       []ExcludedItem             `json:"excludedItems,omitempty"`
 	RequestHash         string                     `json:"-"`
+}
+
+const ReasonPayeeUnverified = "PAYEE_UNVERIFIED"
+
+type ExcludedItem struct {
+	ItemID   string `json:"itemId"`
+	VendorID string `json:"vendorId"`
+	Reason   string `json:"reason"`
 }
 
 type NewProposal struct {

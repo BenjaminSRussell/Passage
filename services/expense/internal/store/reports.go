@@ -33,6 +33,7 @@ const (
 	CodeReportState      = "EXP-REP-002"
 	CodeReportEmpty      = "EXP-REP-003"
 	CodeVersionConflict  = "EXP-REP-004"
+	CodeDeciderUnknown   = "EXP-REP-005"
 	CodeLineExists       = "EXP-LINE-001"
 	CodeLineNotFound     = "EXP-LINE-002"
 	CodeLineLimit        = "EXP-LINE-003"

@@ -56,7 +56,7 @@ func (s *Store) DecideReport(ctx context.Context, id string, approve bool, decid
 			return httpx.NewProblem(http.StatusConflict, CodeReportState, "report is "+cur.Status+" and cannot be decided")
 		}
 		if cur.SubmittedBy == "" || cur.CreatedBy == "" {
-			return httpx.NewProblem(http.StatusForbidden, CodeOwnDecision, "the report does not record who created and submitted it, so it cannot be decided")
+			return httpx.NewProblem(http.StatusForbidden, CodeDeciderUnknown, "the report does not record who created and submitted it, so it cannot be decided")
 		}
 		if p.UserID == cur.SubmittedBy || p.UserID == cur.CreatedBy {
 			return ownDecision("report")
@@ -101,7 +101,7 @@ func (s *Store) DecideReport(ctx context.Context, id string, approve bool, decid
 // MarkReimbursed marks the APPROVED report that d's source document names as PAID once
 // payables has settled its open item in full. An event for a document that is not an
 // expense report, or for a report already PAID, changes nothing; an event that
-// disagrees with the stored report on worker, legal entity or currency, or leaves a negative or larger-than-reimbursable open amount, is refused; a partial settlement (open amount above zero) waits for the rest.
+// disagrees with the stored report on worker, legal entity or currency, reports a fully paid item that is not SETTLED, or leaves a negative or larger-than-reimbursable open amount, is refused; a partial settlement (open amount above zero) waits for the rest.
 func (s *Store) MarkReimbursed(ctx context.Context, d reimbursement.OpenItemSettled) (bool, error) {
 	p, err := principal(ctx)
 	if err != nil {
@@ -126,6 +126,9 @@ func (s *Store) MarkReimbursed(ctx context.Context, d reimbursement.OpenItemSett
 		}
 		if open.IsPositive() {
 			return nil
+		}
+		if d.Status != reimbursement.StatusSettled {
+			return ErrSettlementMismatch
 		}
 		marked = true
 		_, err = tx.Exec(ctx, `update expense_report set status=$3, ap_open_item_id=$4::uuid, reimbursed_at=now(), updated_at=now(), version=version+1

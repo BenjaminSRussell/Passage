@@ -64,6 +64,11 @@ func TestHandleOpenItemSettled_ReimbursesTheApprovedReportOnceAndIgnoresTheRest(
 	if got, _ := s.GetReport(as("sam"), rep.ID); got.Status != "APPROVED" {
 		t.Fatalf("after a partial settlement status = %s; want APPROVED", got.Status)
 	}
+	otherPayee := settled
+	otherPayee.VendorID = ids.New()
+	if err := consumer.HandleOpenItemSettled(context.Background(), s, settledEvent(t, testkit.TenantID(31), otherPayee)); !errors.Is(err, consumer.ErrInvalidEvent) {
+		t.Fatalf("an event naming another payee = %v; want ErrInvalidEvent so it is not retried", err)
+	}
 	for range 2 {
 		if err := consumer.HandleOpenItemSettled(context.Background(), s, settledEvent(t, testkit.TenantID(31), settled)); err != nil {
 			t.Fatal(err)

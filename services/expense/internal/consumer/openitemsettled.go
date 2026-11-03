@@ -10,6 +10,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/reimbursement"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/expense/internal/store"
 )
 
 var ErrInvalidEvent = errors.New("invalid payables.openitem.settled event")
@@ -35,5 +36,8 @@ func HandleOpenItemSettled(ctx context.Context, reports reportStore, evt events.
 	}
 	ctx = tenant.With(ctx, tenant.Principal{TenantID: evt.TenantID, LegalEntityID: d.LegalEntityID, UserID: "system:payables.openitem.settled"})
 	_, err := reports.MarkReimbursed(ctx, d)
+	if errors.Is(err, store.ErrSettlementMismatch) {
+		return fmt.Errorf("%w: %v", ErrInvalidEvent, err)
+	}
 	return err
 }

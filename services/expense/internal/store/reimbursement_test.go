@@ -154,6 +154,7 @@ func TestMarkReimbursed_PaysOnlyWhatTheApprovedReportAsksFor(t *testing.T) {
 		"overpaid":                func(d *reimbursement.OpenItemSettled) { d.OpenAmount = "-0.01" },
 		"more open than approved": func(d *reimbursement.OpenItemSettled) { d.OpenAmount = "80.01" },
 		"other money":             func(d *reimbursement.OpenItemSettled) { d.Currency = "EUR" },
+		"fully paid not settled":  func(d *reimbursement.OpenItemSettled) { d.Status = "OPEN" },
 	} {
 		bad := settled
 		mutate(&bad)
@@ -231,8 +232,8 @@ func TestDecideReport_RefusesTheCreatorAndAnyReportWithoutARecordedSubmitter(t *
 	if anonymous, _, err = s.SubmitReport(ctx, anonymous.ID, "submit-2", "hs2", 0, commitDay); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.DecideReport(dana, anonymous.ID, true, commitDay, store.Command{Key: "anon", Hash: "h"}); problemOf(t, err).Code != store.CodeOwnDecision {
-		t.Fatalf("a report with no recorded creator or submitter must be refused with %s, got %v", store.CodeOwnDecision, err)
+	if _, _, err := s.DecideReport(dana, anonymous.ID, true, commitDay, store.Command{Key: "anon", Hash: "h"}); problemOf(t, err).Code != store.CodeDeciderUnknown {
+		t.Fatalf("a report with no recorded creator or submitter must be refused with %s, got %v", store.CodeDeciderUnknown, err)
 	}
 	if got, _ := s.GetReport(dana, anonymous.ID); got.Status != "SUBMITTED" {
 		t.Fatalf("status = %s; want SUBMITTED", got.Status)

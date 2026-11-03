@@ -211,6 +211,7 @@ type fixtureOptions struct {
 
 	withholdingCodes     map[string]string
 	skipProposal         bool
+	noSeedItems          bool
 	noTax                bool
 	noWithholdingAccount bool
 }
@@ -315,13 +316,16 @@ func newRunFixture(t *testing.T, opts fixtureOptions) *runFixture {
 		}
 		return o
 	}
-	itemA := seed(itemOne, vendorOne, "2026-01-05", "USD", "100.00", "2.00")
-	seed(itemTwo, vendorOne, "2026-01-06", "USD", "50.00", "0")
-	third := "USD"
-	if opts.foreign {
-		third = "EUR"
+	var itemA store.OpenItem
+	if !opts.noSeedItems {
+		itemA = seed(itemOne, vendorOne, "2026-01-05", "USD", "100.00", "2.00")
+		seed(itemTwo, vendorOne, "2026-01-06", "USD", "50.00", "0")
+		third := "USD"
+		if opts.foreign {
+			third = "EUR"
+		}
+		seed(itemThree, vendorTwo, "2026-01-08", third, "200.00", "0")
 	}
-	seed(itemThree, vendorTwo, "2026-01-08", third, "200.00", "0")
 
 	fl := &fakeJournalLedger{entries: map[string]string{}, entity: entityA, inflight: map[string]bool{}, entered: make(chan struct{}, 4)}
 	srv := httptest.NewServer(fl)
