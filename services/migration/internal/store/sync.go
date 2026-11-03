@@ -25,6 +25,7 @@ import (
 
 const (
 	CodeSyncClaimLost   = "MIG-SYNC-CLAIM-LOST"
+	CodeSyncNoProject   = "MIG-SYNC-NO-PROJECT"
 	CodeConflictClosed  = "MIG-CONFLICT-RESOLVED"
 	CodeConflictMissing = "AUTH-0404"
 
@@ -36,13 +37,18 @@ const (
 // project that names its connection profile) and what the scheduler has recorded. A binding that was never
 // scheduled has Version 0 and no times.
 type SyncState struct {
-	BindingID           string     `json:"bindingId"`
-	Entity              string     `json:"entity"`
-	ConnectionProfileID string     `json:"connectionProfileId"`
-	ProfileName         string     `json:"connectionProfileName"`
-	BindingStatus       string     `json:"bindingStatus"`
-	ProjectID           string     `json:"projectId,omitempty"`
-	ScheduleCron        string     `json:"scheduleCron,omitempty"`
+	BindingID           string `json:"bindingId"`
+	Entity              string `json:"entity"`
+	ConnectionProfileID string `json:"connectionProfileId"`
+	ProfileName         string `json:"connectionProfileName"`
+	BindingStatus       string `json:"bindingStatus"`
+	ProjectID           string `json:"projectId,omitempty"`
+	ScheduleCron        string `json:"scheduleCron,omitempty"`
+	// ScheduleOverride is the binding's own cron; when set it wins over the project's scheduleCron (which is the default).
+	ScheduleOverride string `json:"scheduleOverride,omitempty"`
+	// ProjectScheduleCron is the default the binding falls back to without an override: the cron of the lowest-id
+	// active scheduled migrate project on its profile. Empty when there is none, so clearing the override stops the binding.
+	ProjectScheduleCron string     `json:"projectScheduleCron,omitempty"`
 	SourceOfTruth       string     `json:"sourceOfTruth"`
 	Paused              bool       `json:"paused"`
 	Watermark           string     `json:"watermark"`
@@ -96,7 +102,9 @@ type SyncFilter struct {
 
 // SyncEdit is what an operator changes on a binding's sync: pause or resume, which system wins, and a run now.
 type SyncEdit struct {
-	Paused        *bool
+	Paused *bool
+	// ScheduleCron sets the binding's own cron ("" clears it and the project's cron applies again); nil leaves it.
+	ScheduleCron  *string
 	SourceOfTruth *string
 	KeyCheckHours *int
 	// KeyCheckNow makes the next run a full read that looks for deleted rows, whatever the period.
@@ -134,9 +142,13 @@ type SyncFinish struct {
 	BindingVersion                    int // the binding version Watermark was read under
 	Extracted, Loaded, Rejected       int
 	NextCron                          time.Time
-	BackoffSecs                       float64
-	Failures                          int // consecutive failures after this run
-	Conflicts                         []domain.Conflict
+	// Cron is the schedule the claim ran under (SyncState.ScheduleCron). NextCron is its next slot; when the stored
+	// schedule changed while the run read the source (an override set or cleared, the project's cron edited), the
+	// scheduler has already re-seeded next_due_at from the new cron and that is kept. Empty means NextCron applies.
+	Cron        string
+	BackoffSecs float64
+	Failures    int // consecutive failures after this run
+	Conflicts   []domain.Conflict
 	// FullRead is set when the run read the whole source and did not fail: Absent (possibly empty) is then the
 	// complete list of loaded keys the source no longer has, and replaces the stored list.
 	FullRead bool
@@ -229,24 +241,25 @@ func IsSyncClaimLost(err error) bool {
 }
 
 const syncSelect = `select b.id::text, b.entity, b.connection_profile_id::text, cp.name, b.status,
-	coalesce(s.project_id::text, ''), coalesce(sched.schedule_cron, ''), coalesce(s.source_of_truth, 'legacy'), coalesce(s.paused, false), coalesce(s.watermark, ''),
-	case when sched.schedule_cron is null then null else s.next_due_at end, coalesce(s.claim_id is not null, false), coalesce(s.last_run_id::text, ''), s.last_run_at, s.last_success_at,
+	coalesce(s.project_id::text, ''), coalesce(sched.cron, ''), coalesce(s.source_of_truth, 'legacy'), coalesce(s.paused, false), coalesce(s.watermark, ''),
+	case when sched.cron is null then null else s.next_due_at end, coalesce(s.claim_id is not null, false), coalesce(s.last_run_id::text, ''), s.last_run_at, s.last_success_at,
 	coalesce(s.last_status, ''), coalesce(s.last_error, ''), coalesce(s.consecutive_failures, 0), coalesce(s.rows_loaded, 0), coalesce(s.rows_rejected, 0),
 	(select count(*) from migration.sync_conflict c where c.tenant_id = b.tenant_id and c.binding_id = b.id and c.status = 'open')::int, coalesce(s.version, 0),
 	s.watermark_binding_version, coalesce(s.keycheck_hours, 24), s.last_keycheck_at, coalesce(s.keycheck_error, ''), coalesce(s.absent_count, 0),
-	s.keycheck_attempt_at, coalesce(s.keycheck_force, false), coalesce(s.keycheck_accept_large, false), coalesce(s.keycheck_since, now())
+	s.keycheck_attempt_at, coalesce(s.keycheck_force, false), coalesce(s.keycheck_accept_large, false), coalesce(s.keycheck_since, now()), coalesce(s.schedule_override, ''), coalesce(sched.project_cron, '')
 	from migration.entity_binding b
 	join migration.connection_profile cp on cp.tenant_id = b.tenant_id and cp.id = b.connection_profile_id
 	left join migration.sync_state s on s.tenant_id = b.tenant_id and s.binding_id = b.id
-	left join lateral (select p.schedule_cron from migration.project p where p.tenant_id = b.tenant_id and p.connection_profile_id = b.connection_profile_id
-		and p.project_type = 'migrate' and p.status = 'active' and p.schedule_cron is not null and p.schedule_cron <> '' order by p.id limit 1) sched on true`
+	left join lateral (select coalesce(nullif(s.schedule_override, ''), p.schedule_cron) as cron, nullif(p.schedule_cron, '') as project_cron from migration.project p
+		where p.tenant_id = b.tenant_id and p.connection_profile_id = b.connection_profile_id and p.project_type = 'migrate' and p.status = 'active'
+		and (coalesce(s.schedule_override, '') <> '' or coalesce(p.schedule_cron, '') <> '') order by (coalesce(p.schedule_cron, '') = ''), p.id limit 1) sched on true`
 
 func scanSync(row pgx.Row) (SyncState, error) {
 	var x SyncState
 	var attempt *time.Time
 	var since time.Time
 	err := row.Scan(&x.BindingID, &x.Entity, &x.ConnectionProfileID, &x.ProfileName, &x.BindingStatus, &x.ProjectID, &x.ScheduleCron, &x.SourceOfTruth, &x.Paused, &x.Watermark,
-		&x.NextDueAt, &x.Running, &x.LastRunID, &x.LastRunAt, &x.LastSuccessAt, &x.LastStatus, &x.LastError, &x.ConsecutiveFailures, &x.RowsLoaded, &x.RowsRejected, &x.OpenConflicts, &x.Version, &x.WatermarkBindingVersion, &x.KeyCheckHours, &x.LastKeyCheckAt, &x.KeyCheckError, &x.AbsentCount, &attempt, &x.KeyCheckForce, &x.KeyCheckAcceptLarge, &since)
+		&x.NextDueAt, &x.Running, &x.LastRunID, &x.LastRunAt, &x.LastSuccessAt, &x.LastStatus, &x.LastError, &x.ConsecutiveFailures, &x.RowsLoaded, &x.RowsRejected, &x.OpenConflicts, &x.Version, &x.WatermarkBindingVersion, &x.KeyCheckHours, &x.LastKeyCheckAt, &x.KeyCheckError, &x.AbsentCount, &attempt, &x.KeyCheckForce, &x.KeyCheckAcceptLarge, &since, &x.ScheduleOverride, &x.ProjectScheduleCron)
 	x.KeyCheckDue = domain.KeyCheckState{BindingID: x.BindingID, Hours: x.KeyCheckHours, LastAttempt: attempt, Force: x.KeyCheckForce, Since: since}.Due(time.Now())
 	return x, err
 }
@@ -275,11 +288,14 @@ func (s *Postgres) SyncCanScan(ctx context.Context) (bool, error) {
 	return ok, err
 }
 
-// scheduleOf is the binding's schedule: the lowest-id active migrate project with a schedule on its profile.
-const scheduleOf = `select p.id::text, p.schedule_cron from migration.entity_binding b
+// scheduleOf is the binding's schedule: its own override, else the cron of the lowest-id active migrate project with a
+// schedule on its profile. The project it runs under is that one; a project without a schedule counts only when the
+// binding has its own.
+const scheduleOf = `select p.id::text, coalesce(nullif(s.schedule_override, ''), p.schedule_cron) from migration.entity_binding b
+	left join migration.sync_state s on s.tenant_id = b.tenant_id and s.binding_id = b.id
 	join migration.project p on p.tenant_id = b.tenant_id and p.connection_profile_id = b.connection_profile_id and p.project_type = 'migrate'
-		and p.status = 'active' and p.schedule_cron is not null and p.schedule_cron <> ''
-	where b.tenant_id = $1 and b.id = $2 order by p.id limit 1`
+		and p.status = 'active' and (coalesce(s.schedule_override, '') <> '' or coalesce(p.schedule_cron, '') <> '')
+	where b.tenant_id = $1 and b.id = $2 order by (coalesce(p.schedule_cron, '') = ''), p.id limit 1`
 
 func (s *Postgres) SeedSync(ctx context.Context, bindingID string, next func(cron string) (time.Time, bool)) error {
 	p, _ := tenant.FromContext(ctx)
@@ -324,7 +340,7 @@ func (s *Postgres) ClaimSync(ctx context.Context, bindingID, claimID string) (Sy
 			and (s.claim_id is null or s.claimed_at < now() - make_interval(secs => $4))
 			and exists (select 1 from migration.entity_binding b join migration.project p on p.tenant_id = b.tenant_id and p.connection_profile_id = b.connection_profile_id
 				where b.tenant_id = s.tenant_id and b.id = s.binding_id and b.status = 'active' and p.id = s.project_id and p.project_type = 'migrate'
-				and p.status = 'active' and p.schedule_cron = s.schedule_cron)`,
+				and p.status = 'active' and coalesce(nullif(s.schedule_override, ''), p.schedule_cron) = s.schedule_cron)`,
 			p.TenantID, bindingID, claimID, syncClaimStale.Seconds())
 		if err != nil || tag.RowsAffected() == 0 {
 			return err
@@ -358,9 +374,10 @@ func (s *Postgres) FinishSync(ctx context.Context, f SyncFinish) error {
 			last_success_at = case when $9 then last_success_at else now() end,
 			consecutive_failures = $10,
 			rows_loaded = rows_loaded + $11, rows_rejected = rows_rejected + $12,
-			next_due_at = greatest($13::timestamptz, now() + make_interval(secs => $14)), updated_at = now()
+			next_due_at = greatest(case when $16 = '' or schedule_cron is not distinct from $16 or next_due_at is null then $13::timestamptz else next_due_at end,
+				now() + make_interval(secs => $14)), updated_at = now()
 			where tenant_id = $1 and binding_id = $2 and claim_id = $3 returning next_due_at, watermark`,
-			p.TenantID, f.BindingID, f.ClaimID, f.Advance, f.Watermark, f.RunID, f.Status, f.Error, failed, f.Failures, f.Loaded, f.Rejected, f.NextCron, f.BackoffSecs, f.BindingVersion).Scan(&next, &stored)
+			p.TenantID, f.BindingID, f.ClaimID, f.Advance, f.Watermark, f.RunID, f.Status, f.Error, failed, f.Failures, f.Loaded, f.Rejected, f.NextCron, f.BackoffSecs, f.BindingVersion, f.Cron).Scan(&next, &stored)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return syncClaimLost()
 		}
@@ -619,7 +636,7 @@ func (s *Postgres) ListSync(ctx context.Context, f SyncFilter) ([]SyncState, err
 	}
 	var out []SyncState
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, syncSelect+` where b.tenant_id = $1 and (s.binding_id is not null or sched.schedule_cron is not null)
+		rows, err := tx.Query(ctx, syncSelect+` where b.tenant_id = $1 and (s.binding_id is not null or sched.cron is not null)
 			and ($2::boolean is null or coalesce(s.paused, false) = $2) and (not $3 or coalesce(s.consecutive_failures, 0) > 0)
 			and ($4 = '' or b.id = nullif($4, '')::uuid)
 			and ($5::boolean is false or (b.entity, b.id) > ($6, $7::uuid))
@@ -668,10 +685,23 @@ func (s *Postgres) UpdateSync(ctx context.Context, bindingID string, version int
 		if cur != version {
 			return versionConflict(cur)
 		}
+		if e.ScheduleCron != nil && *e.ScheduleCron != "" {
+			// The override sets when a run starts; the run itself still belongs to an active migrate project of the profile.
+			var ok bool
+			if err := tx.QueryRow(ctx, `select exists (select 1 from migration.entity_binding b join migration.project p on p.tenant_id = b.tenant_id
+				and p.connection_profile_id = b.connection_profile_id and p.project_type = 'migrate' and p.status = 'active'
+				where b.tenant_id = $1 and b.id = $2)`, p.TenantID, bindingID).Scan(&ok); err != nil {
+				return err
+			}
+			if !ok {
+				return httpx.NewProblem(http.StatusUnprocessableEntity, CodeSyncNoProject, "no active migrate project uses this binding's connection profile, so the binding has nothing to run under")
+			}
+		}
 		if _, err := tx.Exec(ctx, `update migration.sync_state set paused = coalesce($3, paused), source_of_truth = coalesce($4, source_of_truth),
 			keycheck_hours = coalesce($6::int, keycheck_hours), keycheck_force = keycheck_force or $7 or $8, keycheck_accept_large = keycheck_accept_large or $8,
+			schedule_override = case when $9::text is null then schedule_override else nullif($9::text, '') end,
 			next_due_at = case when $5 and schedule_cron is not null then now() else next_due_at end, version = version + 1, updated_at = now()
-			where tenant_id = $1 and binding_id = $2`, p.TenantID, bindingID, e.Paused, e.SourceOfTruth, e.RunNow, e.KeyCheckHours, e.KeyCheckNow, e.KeyCheckAcceptLarge); err != nil {
+			where tenant_id = $1 and binding_id = $2`, p.TenantID, bindingID, e.Paused, e.SourceOfTruth, e.RunNow, e.KeyCheckHours, e.KeyCheckNow, e.KeyCheckAcceptLarge, e.ScheduleCron); err != nil {
 			return err
 		}
 		out, err = scanSync(tx.QueryRow(ctx, syncSelect+` where b.tenant_id = $1 and b.id = $2`, p.TenantID, bindingID))
@@ -829,32 +859,47 @@ func (m *Mem) SyncEvents() []events.Event {
 // memTenant is the tenant the in-memory scheduler tests run as.
 const MemTenant = "00000000-0000-7000-8000-0000000000a1"
 
-func (m *Mem) memProjectFor(b EntityBinding) (Project, bool) {
+// memProjectFor is the project a binding runs under and its effective cron: the binding's override, else the cron of
+// the lowest-id active migrate project with a schedule on its profile. A project without a schedule counts only when
+// there is an override.
+func (m *Mem) memProjectFor(b EntityBinding) (Project, string, bool) {
+	override := ""
+	sy := m.sy()
+	sy.mu.Lock()
+	if row := sy.state[b.ID]; row != nil {
+		override = row.ScheduleOverride
+	}
+	sy.mu.Unlock()
 	st := m.pj()
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	var out Project
 	found := false
+	better := func(p Project) bool {
+		return !found || (p.ScheduleCron != "") && (out.ScheduleCron == "") || (p.ScheduleCron != "") == (out.ScheduleCron != "") && p.ID < out.ID
+	}
 	for _, p := range st.items {
-		if p.ConnectionProfileID == b.ConnectionProfileID && p.Type == domain.ProjectMigrate && p.Status == domain.ProjectActive && p.ScheduleCron != "" &&
-			(!found || p.ID < out.ID) {
+		if p.ConnectionProfileID == b.ConnectionProfileID && p.Type == domain.ProjectMigrate && p.Status == domain.ProjectActive && (p.ScheduleCron != "" || override != "") && better(p) {
 			out, found = p, true
 		}
 	}
-	return out, found
+	if override != "" {
+		return out, override, found
+	}
+	return out, out.ScheduleCron, found
 }
 
 func (m *Mem) SyncCandidates(_ context.Context, max int) ([]SyncCandidate, error) {
 	var out []SyncCandidate
 	for _, b := range m.allBindings() {
-		pr, ok := m.memProjectFor(b)
+		pr, cron, ok := m.memProjectFor(b)
 		if !ok || b.Status != domain.BindingActive {
 			continue
 		}
 		st := m.sy()
 		st.mu.Lock()
 		row := st.state[b.ID]
-		need := row == nil || row.cron != pr.ScheduleCron || row.project != pr.ID ||
+		need := row == nil || row.cron != cron || row.project != pr.ID ||
 			(!row.Paused && row.NextDueAt != nil && !row.NextDueAt.After(time.Now()) && (row.claim == "" || time.Since(row.claimAt) > syncClaimStale))
 		st.mu.Unlock()
 		if need {
@@ -876,7 +921,7 @@ func (m *Mem) view(b EntityBinding, row *memSyncRow) SyncState {
 	if cp, err := m.GetConnectionProfile(context.Background(), b.ConnectionProfileID); err == nil {
 		x.ProfileName = cp.Name
 	}
-	pr, scheduled := m.memProjectFor(b)
+	pr, cron, scheduled := m.memProjectFor(b)
 	if row != nil {
 		x = row.SyncState
 		x.Entity, x.ConnectionProfileID, x.BindingStatus, x.Running = b.Entity, b.ConnectionProfileID, b.Status, row.claim != ""
@@ -889,9 +934,9 @@ func (m *Mem) view(b EntityBinding, row *memSyncRow) SyncState {
 		k.LastAttempt, k.Force, k.Since = row.keyCheckAttemptAt, row.KeyCheckForce, row.keyCheckSince
 	}
 	x.KeyCheckDue = k.Due(time.Now())
-	x.ScheduleCron = ""
+	x.ScheduleCron, x.ProjectScheduleCron = "", ""
 	if scheduled {
-		x.ScheduleCron = pr.ScheduleCron
+		x.ScheduleCron, x.ProjectScheduleCron = cron, pr.ScheduleCron
 	} else {
 		x.NextDueAt = nil
 	}
@@ -910,13 +955,13 @@ func (m *Mem) SeedSync(ctx context.Context, bindingID string, next func(cron str
 	if err != nil {
 		return err
 	}
-	pr, ok := m.memProjectFor(b)
+	pr, cron, ok := m.memProjectFor(b)
 	if !ok {
 		return nil
 	}
-	due, ok := next(pr.ScheduleCron)
+	due, ok := next(cron)
 	if !ok {
-		return fmt.Errorf("schedule %q of project %s has no next firing", pr.ScheduleCron, pr.ID)
+		return fmt.Errorf("schedule %q of project %s has no next firing", cron, pr.ID)
 	}
 	st := m.sy()
 	st.mu.Lock()
@@ -924,11 +969,11 @@ func (m *Mem) SeedSync(ctx context.Context, bindingID string, next func(cron str
 	row := st.state[bindingID]
 	if row == nil {
 		now := time.Now()
-		st.state[bindingID] = &memSyncRow{SyncState: SyncState{BindingID: bindingID, SourceOfTruth: domain.SourceLegacy, NextDueAt: &now, ProjectID: pr.ID, KeyCheckHours: domain.DefaultKeyCheckHours}, cron: pr.ScheduleCron, project: pr.ID, keyCheckSince: now}
+		st.state[bindingID] = &memSyncRow{SyncState: SyncState{BindingID: bindingID, SourceOfTruth: domain.SourceLegacy, NextDueAt: &now, ProjectID: pr.ID, KeyCheckHours: domain.DefaultKeyCheckHours}, cron: cron, project: pr.ID, keyCheckSince: now}
 		return nil
 	}
-	if row.cron != pr.ScheduleCron || row.project != pr.ID {
-		row.cron, row.project, row.ProjectID, row.NextDueAt = pr.ScheduleCron, pr.ID, pr.ID, &due
+	if row.cron != cron || row.project != pr.ID {
+		row.cron, row.project, row.ProjectID, row.NextDueAt = cron, pr.ID, pr.ID, &due
 	}
 	return nil
 }
@@ -938,11 +983,11 @@ func (m *Mem) ClaimSync(_ context.Context, bindingID, claimID string) (SyncState
 	if err != nil {
 		return SyncState{}, false, err
 	}
-	pr, scheduled := m.memProjectFor(b)
+	_, cron, scheduled := m.memProjectFor(b)
 	st := m.sy()
 	st.mu.Lock()
 	row := st.state[bindingID]
-	if row == nil || !scheduled || b.Status != domain.BindingActive || row.cron != pr.ScheduleCron || row.Paused || row.NextDueAt == nil || row.NextDueAt.After(time.Now()) ||
+	if row == nil || !scheduled || b.Status != domain.BindingActive || row.cron != cron || row.Paused || row.NextDueAt == nil || row.NextDueAt.After(time.Now()) ||
 		(row.claim != "" && time.Since(row.claimAt) <= syncClaimStale) {
 		st.mu.Unlock()
 		return SyncState{}, false, nil
@@ -991,6 +1036,9 @@ func (m *Mem) FinishSync(ctx context.Context, f SyncFinish) error {
 	row.RowsLoaded += int64(f.Loaded)
 	row.RowsRejected += int64(f.Rejected)
 	next := f.NextCron
+	if f.Cron != "" && row.cron != f.Cron && row.NextDueAt != nil {
+		next = *row.NextDueAt // re-seeded from a schedule changed during the run
+	}
 	if after := now.Add(time.Duration(f.BackoffSecs * float64(time.Second))); after.After(next) {
 		next = after
 	}
@@ -1047,7 +1095,7 @@ func (m *Mem) absentScope(ctx context.Context, f SyncFinish) memAbsentScope {
 	if err != nil {
 		return out
 	}
-	pr, ok := m.memProjectFor(b)
+	pr, _, ok := m.memProjectFor(b)
 	if !ok {
 		return out
 	}
@@ -1185,7 +1233,7 @@ func (m *Mem) ListSync(_ context.Context, f SyncFilter) ([]SyncState, error) {
 		row := st.state[b.ID]
 		st.mu.Unlock()
 		x := m.view(b, row)
-		_, scheduled := m.memProjectFor(b)
+		_, _, scheduled := m.memProjectFor(b)
 		if row == nil && !scheduled {
 			continue
 		}
@@ -1217,6 +1265,22 @@ func (m *Mem) UpdateSync(ctx context.Context, bindingID string, version int, e S
 		}
 		st.mu.Unlock()
 		return SyncState{}, versionConflict(cur)
+	}
+	if e.ScheduleCron != nil && *e.ScheduleCron != "" {
+		ok := false
+		pj := m.pj()
+		pj.mu.Lock()
+		for _, p := range pj.items {
+			ok = ok || p.ConnectionProfileID == b.ConnectionProfileID && p.Type == domain.ProjectMigrate && p.Status == domain.ProjectActive
+		}
+		pj.mu.Unlock()
+		if !ok {
+			st.mu.Unlock()
+			return SyncState{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeSyncNoProject, "no active migrate project uses this binding's connection profile, so the binding has nothing to run under")
+		}
+	}
+	if e.ScheduleCron != nil {
+		row.ScheduleOverride = *e.ScheduleCron
 	}
 	if e.Paused != nil {
 		row.Paused = *e.Paused

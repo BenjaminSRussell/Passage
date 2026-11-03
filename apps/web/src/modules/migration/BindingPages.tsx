@@ -372,6 +372,9 @@ export function BindingDetailPage() {
         actions={
           <>
             <StatusPill status={binding.status} />
+            <Link className={buttonClassName("ghost")} to={`/migration/sync/${binding.id}`}>
+              Delta sync and schedule
+            </Link>
             {canWrite ? (
               <Button loading={busy} onClick={() => toggle(binding)}>
                 {binding.status === "active" ? "Disable" : "Enable"}

@@ -86,14 +86,23 @@ func ValidateProject(p Project, isID func(string) bool) map[string]string {
 	if p.Status != ProjectActive && p.Status != ProjectArchived {
 		bad["status"] = "must be active or archived"
 	}
-	if p.ScheduleCron != "" {
-		if gap, ok := CronMinInterval(p.ScheduleCron); !ok {
-			bad["scheduleCron"] = "must be a five-field cron expression (minute hour day month weekday) of at most 100 characters"
-		} else if gap < MinScheduleMinutes {
-			bad["scheduleCron"] = "must leave at least 15 minutes between runs"
-		}
+	if msg := ScheduleCronProblem(p.ScheduleCron); msg != "" {
+		bad["scheduleCron"] = msg
 	}
 	return bad
+}
+
+// ScheduleCronProblem says why expr cannot schedule runs ("" when it can, or when it is empty: no schedule).
+func ScheduleCronProblem(expr string) string {
+	if expr == "" {
+		return ""
+	}
+	if gap, ok := CronMinInterval(expr); !ok {
+		return "must be a five-field cron expression (minute hour day month weekday) of at most 100 characters"
+	} else if gap < MinScheduleMinutes {
+		return "must leave at least 15 minutes between runs"
+	}
+	return ""
 }
 
 var cronBounds = [5][2]int{{0, 59}, {0, 23}, {1, 31}, {1, 12}, {0, 7}}

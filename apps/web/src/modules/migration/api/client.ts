@@ -549,8 +549,12 @@ export interface SyncStatus {
   connectionProfileName: string;
   bindingStatus: "active" | "disabled";
   projectId?: string;
-  /** Empty when no active migrate project on the profile has a schedule. */
+  /** The cron the binding runs on (UTC): its own override, else the migrate project's; empty when neither exists. */
   scheduleCron?: string;
+  /** The binding's own cron; empty when it follows the project's schedule. */
+  scheduleOverride?: string;
+  /** The project's cron the binding falls back to without an override; empty when no project on the profile has one. */
+  projectScheduleCron?: string;
   sourceOfTruth: SourceOfTruth;
   paused: boolean;
   watermark: string;
@@ -611,8 +615,8 @@ export const listSync = (filter: { paused?: string; failing?: string; cursor?: s
 
 export const getSync = (bindingId: string, signal?: AbortSignal) => send<SyncStatus>(`/sync-status/${encodeURIComponent(bindingId)}`, {}, signal);
 
-/** Pauses or resumes a schedule, sets the source of truth or makes the binding due now, under the status's version. */
-export const updateSync = (bindingId: string, version: number, edit: { paused?: boolean; sourceOfTruth?: SourceOfTruth; keyCheckHours?: number; keyCheckNow?: boolean; keyCheckAcceptLarge?: boolean; runNow?: boolean }) =>
+/** Pauses or resumes a schedule, sets the binding's own cron ("" clears it), sets the source of truth or makes the binding due now, under the status's version. */
+export const updateSync = (bindingId: string, version: number, edit: { paused?: boolean; scheduleCron?: string; sourceOfTruth?: SourceOfTruth; keyCheckHours?: number; keyCheckNow?: boolean; keyCheckAcceptLarge?: boolean; runNow?: boolean }) =>
   send<SyncStatus>(`/sync-status/${encodeURIComponent(bindingId)}`, { method: "PATCH", body: JSON.stringify({ version, ...edit }) });
 
 export const listAbsent = (bindingId: string, filter: { cursor?: string; limit?: string }, signal?: AbortSignal) =>

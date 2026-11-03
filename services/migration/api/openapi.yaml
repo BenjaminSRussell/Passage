@@ -673,7 +673,7 @@ paths:
     patch:
       operationId: updateSyncStatus
       summary: Pause, resume or configure the delta sync of an entity binding
-      description: Pauses or resumes the schedule, sets which system wins when both changed a record (sourceOfTruth legacy or passage), sets how often a binding with a cursor is read in full to find rows the legacy system deleted (keyCheckHours), asks for the next run to be a full read that looks for deleted rows (keyCheckNow), accepts once a full read that would list more than half of the loaded keys still present as newly absent (keyCheckAcceptLarge; refused with keyCheckError otherwise), or makes the binding due now (runNow; the scheduler starts it on its next pass). Master data flows legacy to Passage (decision B4); with passage as the source of truth a legacy row that differs from the loaded record is held as a conflict and not applied. Needs the version from the status (0 for a binding never scheduled). A paused binding is skipped, keeps its watermark and resumes where it stopped.
+      description: Pauses or resumes the schedule, gives the binding its own cron (scheduleCron; the project's scheduleCron stays the default for bindings without one), sets which system wins when both changed a record (sourceOfTruth legacy or passage), sets how often a binding with a cursor is read in full to find rows the legacy system deleted (keyCheckHours), asks for the next run to be a full read that looks for deleted rows (keyCheckNow), accepts once a full read that would list more than half of the loaded keys still present as newly absent (keyCheckAcceptLarge; refused with keyCheckError otherwise), or makes the binding due now (runNow; the scheduler starts it on its next pass). Master data flows legacy to Passage (decision B4); with passage as the source of truth a legacy row that differs from the loaded record is held as a conflict and not applied. Needs the version from the status (0 for a binding never scheduled). A paused binding is skipped, keeps its watermark and resumes where it stopped.
       x-passage-duty: migration.project.write
       requestBody:
         required: true
@@ -683,13 +683,16 @@ paths:
           description: The updated status with its new version.
           content: { application/json: { schema: { $ref: '#/components/schemas/SyncStatus' } } }
         '400':
-          description: COM-0001, the version is missing, sourceOfTruth is not legacy or passage, keyCheckHours is outside 0 to 8760, or nothing to change was sent.
+          description: COM-0001, the version is missing, sourceOfTruth is not legacy or passage, scheduleCron is not a five-field cron with at least 15 minutes between runs or is sent with runNow, keyCheckHours is outside 0 to 8760, or nothing to change was sent.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '404':
           description: AUTH-0404, no entity binding with this id.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '409':
           description: MIG-VERSION-CONFLICT, the version is stale.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-SYNC-NO-PROJECT, scheduleCron was set but no active migrate project uses the binding's connection profile, so there is nothing to run the binding under.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/integration/sync-status/{id}/absent:
@@ -1718,8 +1721,10 @@ components:
         connectionProfileId: { type: string, format: uuid }
         connectionProfileName: { type: string }
         bindingStatus: { type: string, enum: [active, disabled] }
-        projectId: { type: string, format: uuid, description: The migrate project whose scheduleCron drives the binding. }
-        scheduleCron: { type: string, description: "Five-field cron in UTC, at least 15 minutes between runs. Empty when no active migrate project on the profile has a schedule." }
+        projectId: { type: string, format: uuid, description: The active migrate project the binding runs under (the lowest id with a schedule; one without a schedule only when the binding has its own). }
+        scheduleCron: { type: string, description: "The cron the binding runs on: five fields in UTC, at least 15 minutes between runs. It is scheduleOverride when that is set, otherwise the scheduleCron of the migrate project; empty when neither exists." }
+        scheduleOverride: { type: string, description: "The binding's own cron, set with updateSyncStatus. Empty when the binding follows the project's scheduleCron." }
+        projectScheduleCron: { type: string, description: "The default the binding falls back to without scheduleOverride: the scheduleCron of the lowest-id active migrate project with a schedule on its profile. Empty when there is none; clearing scheduleOverride then leaves the binding unscheduled (scheduleCron and nextDueAt empty) until a project gets a schedule or the binding its own." }
         sourceOfTruth: { type: string, enum: [legacy, passage] }
         paused: { type: boolean }
         watermark: { type: string, description: "The high-water mark of the last run that did not fail. The next run reads from a little before it (5 minutes for a timestamp cursor, the value itself for an integer or row version) so rows committed late with the same or a slightly earlier cursor are not skipped; rows read again are unchanged and not loaded. Empty before the first run, or without a cursor on the binding (every run is then a full read); editing the entity binding discards it." }
@@ -1756,6 +1761,7 @@ components:
       properties:
         version: { type: integer, minimum: 0 }
         paused: { type: boolean }
+        scheduleCron: { type: string, maxLength: 100, description: "The binding's own cron: five fields in UTC, at least 15 minutes between runs. It replaces the project's scheduleCron for this binding only and does not reset the watermark. An empty string clears it so the project's cron applies again. Not allowed together with runNow. Needs an active migrate project on the profile." }
         sourceOfTruth: { type: string, enum: [legacy, passage] }
         keyCheckHours: { type: integer, minimum: 0, maximum: 8760, description: Period in hours of the full read that finds deleted legacy rows; 0 turns it off. }
         keyCheckNow: { type: boolean, description: "Makes the next run a full read that looks for deleted legacy rows, whatever the period (also after a failed one); combine with runNow to start it at once." }

@@ -6,7 +6,7 @@ import { PrincipalProvider } from "../../shell/principal";
 import { findTable } from "../../test-utils";
 import type { MigrationRun, SyncAbsent, SyncConflict, SyncStatus } from "./api/client";
 import migration from "./module";
-import { summarize, syncHealth } from "./SyncPages";
+import { cronProblem, summarize, syncHealth } from "./SyncPages";
 
 type Reply = { status: number; body: unknown };
 let handler: (url: URL, init: RequestInit) => Reply | undefined;
@@ -335,6 +335,76 @@ describe("delta sync detail", () => {
     handler = () => json(404, { code: "AUTH-0404", detail: "entity binding not found" });
     renderAt(`/migration/sync/${BINDING}`);
     expect(await screen.findByText(/Could not load this binding's sync/)).toBeInTheDocument();
+  });
+});
+
+describe("binding schedule", () => {
+  it("checks the cron has five fields", () => {
+    expect(cronProblem("0 3 * * *")).toBe("");
+    expect(cronProblem(" 0 3 * * * ")).toBe("");
+    expect(cronProblem("0 3 *")).toMatch(/five fields/);
+    expect(cronProblem("")).toMatch(/five fields/);
+    expect(cronProblem(`0 3 * * ${"1".repeat(100)}`)).toMatch(/100/);
+  });
+
+  it("says the binding follows its project and gives it its own cron under the status version", async () => {
+    detailHandler();
+    const { container } = renderAt(`/migration/sync/${BINDING}`);
+    expect(await screen.findByText(/follows the schedule of its migration project, \*\/15 \* \* \* \* \(UTC\)/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use the project schedule" })).not.toBeInTheDocument();
+    const save = screen.getByRole("button", { name: "Save schedule" });
+    expect(save).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Own schedule (cron, UTC)"), { target: { value: "0 3 *" } });
+    expect(await screen.findByText(/Enter five fields/)).toBeInTheDocument();
+    expect(save).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Own schedule (cron, UTC)"), { target: { value: " 0 3 * * * " } });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ version: 2, scheduleCron: "0 3 * * *" }));
+    expect(violations(container)).toEqual([]);
+  });
+
+  it("shows an own schedule and returns to the project's", async () => {
+    detailHandler({ ...healthy, scheduleCron: "0 3 * * *", scheduleOverride: "0 3 * * *", projectScheduleCron: "*/15 * * * *" });
+    renderAt(`/migration/sync/${BINDING}`);
+    expect(await screen.findByText(/runs on its own schedule, 0 3 \* \* \* \(UTC\); the project's is \*\/15/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Own schedule (cron, UTC)")).toHaveValue("0 3 * * *");
+    fireEvent.click(screen.getByRole("button", { name: "Use the project schedule" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ version: 2, scheduleCron: "" }));
+  });
+
+  it("asks before removing the only schedule a binding has", async () => {
+    detailHandler({ ...healthy, scheduleCron: "0 3 * * *", scheduleOverride: "0 3 * * *" });
+    const { container } = renderAt(`/migration/sync/${BINDING}`);
+    expect(await screen.findByText(/its migration project has none/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Use the project schedule" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Stop scheduling this binding?" });
+    expect(dialog).toHaveTextContent(/stops running until a project gets one/);
+    expect(violations(container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Use the project schedule" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Remove own schedule" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ version: 2, scheduleCron: "" }));
+  });
+
+  it("is read-only without migration.project.write and shows the service's refusal", async () => {
+    detailHandler();
+    renderAt(`/migration/sync/${BINDING}`, ["migration.run"]);
+    await screen.findByRole("heading", { name: "customer sync" });
+    expect(screen.getByLabelText("Own schedule (cron, UTC)")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save schedule" })).not.toBeInTheDocument();
+  });
+
+  it("shows the refusal when the service cannot schedule the binding", async () => {
+    detailHandler();
+    const base = handler;
+    handler = (url, init) => (init.method === "PATCH" ? json(422, { code: "MIG-SYNC-NO-PROJECT", detail: "no active migrate project uses this binding's connection profile" }) : base(url, init));
+    renderAt(`/migration/sync/${BINDING}`);
+    fireEvent.change(await screen.findByLabelText("Own schedule (cron, UTC)"), { target: { value: "0 3 * * *" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save schedule" }));
+    expect(await screen.findByText(/MIG-SYNC-NO-PROJECT/)).toBeInTheDocument();
   });
 });
 

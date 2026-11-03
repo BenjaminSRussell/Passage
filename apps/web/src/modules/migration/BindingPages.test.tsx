@@ -279,6 +279,12 @@ describe("binding detail", () => {
     expect(screen.queryByRole("button", { name: "Preview rows" })).not.toBeInTheDocument();
   });
 
+  it("links to the binding's delta sync, where it gets its own schedule", async () => {
+    routes(() => undefined);
+    renderAt(`/migration/bindings/${BIND}`);
+    expect(await screen.findByRole("link", { name: "Delta sync and schedule" })).toHaveAttribute("href", `/migration/sync/${BIND}`);
+  });
+
   it("is read-only without the write duty and says so on a missing binding", async () => {
     routes();
     renderAt(`/migration/bindings/${BIND}`, ["migration.run"]);

@@ -22,6 +22,7 @@ type syncBody struct {
 	BindingID           string `json:"bindingId"`
 	Entity              string `json:"entity"`
 	ScheduleCron        string `json:"scheduleCron"`
+	ScheduleOverride    string `json:"scheduleOverride"`
 	SourceOfTruth       string `json:"sourceOfTruth"`
 	Paused              bool   `json:"paused"`
 	Watermark           string `json:"watermark"`
@@ -460,3 +461,44 @@ func TestSync_AKeyCheckReadsACursorBindingInFullAndListsKeysTheLegacySystemDelet
 }
 
 const ids00 = "00000000-0000-7000-8000-000000000099"
+
+func TestSync_ABindingCanCarryItsOwnScheduleAndTheProjectsCronStaysTheDefault(t *testing.T) {
+	s := newSyncRig(t)
+	s.sched.Tick(context.Background())
+	cur := s.status()
+	if cur.ScheduleCron != "*/15 * * * *" || cur.ScheduleOverride != "" {
+		t.Fatalf("default = %+v", cur)
+	}
+	for _, bad := range []string{`"* * * * *"`, `"*/5 * * * *"`, `"nightly"`, `"0 3 * *"`} {
+		if rec := s.patch(`{"version":` + itoa(cur.Version) + `,"scheduleCron":` + bad + `}`); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "scheduleCron") {
+			t.Fatalf("scheduleCron %s = %d %s", bad, rec.Code, rec.Body)
+		}
+	}
+	if rec := s.patch(`{"version":` + itoa(cur.Version) + `,"scheduleCron":"0 3 * * *","runNow":true}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("scheduleCron with runNow = %d", rec.Code)
+	}
+	if rec := do(s.r, http.MethodPatch, syncPath+"/"+s.binding, `{"version":`+itoa(cur.Version)+`,"scheduleCron":"0 3 * * *"}`, "migration.run,tenant.administer", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("schedule edit without migration.project.write = %d", rec.Code)
+	}
+	if rec := s.patch(`{"version":` + itoa(cur.Version) + `,"scheduleCron":"0 3 * * *"}`); rec.Code != http.StatusOK {
+		t.Fatalf("set override = %d %s", rec.Code, rec.Body)
+	}
+	// The next scheduler pass moves the binding to the next 03:00 UTC instead of its quarter-hour slot.
+	s.sched.Tick(context.Background())
+	got := s.status()
+	due, err := time.Parse(time.RFC3339, got.NextDueAt)
+	if err != nil || got.ScheduleCron != "0 3 * * *" || got.ScheduleOverride != "0 3 * * *" || due.UTC().Hour() != 3 || due.UTC().Minute() != 0 {
+		t.Fatalf("with an override = %+v (%v)", got, err)
+	}
+	// The project's own schedule is untouched and a schedule change keeps the watermark.
+	if got.Watermark != cur.Watermark {
+		t.Fatalf("watermark moved from %q to %q", cur.Watermark, got.Watermark)
+	}
+	if rec := s.patch(`{"version":` + itoa(got.Version) + `,"scheduleCron":""}`); rec.Code != http.StatusOK {
+		t.Fatalf("clear override = %d %s", rec.Code, rec.Body)
+	}
+	s.sched.Tick(context.Background())
+	if back := s.status(); back.ScheduleCron != "*/15 * * * *" || back.ScheduleOverride != "" {
+		t.Fatalf("after clearing = %+v", back)
+	}
+}

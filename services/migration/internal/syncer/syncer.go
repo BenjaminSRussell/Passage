@@ -277,7 +277,7 @@ func (s *Scheduler) finish(st store.SyncState, claimID, runID string, res Result
 	if !ok {
 		next = s.now().Add(time.Hour)
 	}
-	f.NextCron = next
+	f.NextCron, f.Cron = next, st.ScheduleCron
 	// Only a complete read that did not fail says which keys are gone: a failed run may not have seen every row. A
 	// full read that failed still counts as the period's attempt, so the runs after it are deltas again.
 	f.FullRead = res.FullRead && runErr == nil && f.Status != domain.SyncFailed

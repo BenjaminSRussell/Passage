@@ -39,7 +39,9 @@ type updateSyncRequest struct {
 	Paused        *bool   `json:"paused"`
 	SourceOfTruth *string `json:"sourceOfTruth"`
 	KeyCheckHours *int    `json:"keyCheckHours"`
-	KeyCheckNow   bool    `json:"keyCheckNow"`
+	// ScheduleCron is the binding's own cron; "" clears it so the project's scheduleCron applies again.
+	ScheduleCron *string `json:"scheduleCron"`
+	KeyCheckNow  bool    `json:"keyCheckNow"`
 	// KeyCheckAcceptLarge accepts once a full read that lists more than half of the loaded keys as newly absent.
 	KeyCheckAcceptLarge bool `json:"keyCheckAcceptLarge"`
 	RunNow              bool `json:"runNow"`
@@ -131,14 +133,21 @@ func (a *API) updateSync(w http.ResponseWriter, r *http.Request) {
 	if req.KeyCheckHours != nil && !domain.ValidKeyCheckHours(*req.KeyCheckHours) {
 		bad["keyCheckHours"] = fmt.Sprintf("must be between 0 (off) and %d", domain.MaxKeyCheckHours)
 	}
-	if req.Paused == nil && req.SourceOfTruth == nil && req.KeyCheckHours == nil && !req.KeyCheckNow && !req.KeyCheckAcceptLarge && !req.RunNow {
-		bad["paused"] = "send paused, sourceOfTruth, keyCheckHours, keyCheckNow, keyCheckAcceptLarge or runNow"
+	if req.ScheduleCron != nil {
+		if msg := domain.ScheduleCronProblem(*req.ScheduleCron); msg != "" {
+			bad["scheduleCron"] = msg
+		} else if req.RunNow {
+			bad["runNow"] = "cannot be sent with scheduleCron: change the schedule first, then ask for a run"
+		}
+	}
+	if req.Paused == nil && req.SourceOfTruth == nil && req.KeyCheckHours == nil && req.ScheduleCron == nil && !req.KeyCheckNow && !req.KeyCheckAcceptLarge && !req.RunNow {
+		bad["paused"] = "send paused, sourceOfTruth, scheduleCron, keyCheckHours, keyCheckNow, keyCheckAcceptLarge or runNow"
 	}
 	if len(bad) > 0 {
 		fail(w, r, validation(bad))
 		return
 	}
-	st, err := a.store.UpdateSync(r.Context(), chi.URLParam(r, "id"), *req.Version, store.SyncEdit{Paused: req.Paused, SourceOfTruth: req.SourceOfTruth, KeyCheckHours: req.KeyCheckHours, KeyCheckNow: req.KeyCheckNow, KeyCheckAcceptLarge: req.KeyCheckAcceptLarge, RunNow: req.RunNow})
+	st, err := a.store.UpdateSync(r.Context(), chi.URLParam(r, "id"), *req.Version, store.SyncEdit{Paused: req.Paused, ScheduleCron: req.ScheduleCron, SourceOfTruth: req.SourceOfTruth, KeyCheckHours: req.KeyCheckHours, KeyCheckNow: req.KeyCheckNow, KeyCheckAcceptLarge: req.KeyCheckAcceptLarge, RunNow: req.RunNow})
 	if err != nil {
 		a.logFailure(r, "update sync failed", err)
 		fail(w, r, err)

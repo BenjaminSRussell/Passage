@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
-import { Alert, Badge, Button, buttonClassName, Card, ConfirmDialog, DataTable, FormField, PageHeader, Select, StatGroup, StatTile, StatusPill, type BadgeTone, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, Button, buttonClassName, Card, ConfirmDialog, DataTable, FormField, Input, PageHeader, Select, StatGroup, StatTile, StatusPill, type BadgeTone, type DataTableColumn } from "../../shell/ui";
 import {
   describeProblem,
   getRun,
@@ -176,7 +176,7 @@ export function SyncDetailPage() {
     );
   }
 
-  async function edit(current: SyncStatus, change: { paused?: boolean; sourceOfTruth?: SourceOfTruth; keyCheckHours?: number; keyCheckNow?: boolean; keyCheckAcceptLarge?: boolean; runNow?: boolean }) {
+  async function edit(current: SyncStatus, change: { paused?: boolean; scheduleCron?: string; sourceOfTruth?: SourceOfTruth; keyCheckHours?: number; keyCheckNow?: boolean; keyCheckAcceptLarge?: boolean; runNow?: boolean }) {
     setBusy(true);
     setFailure(null);
     try {
@@ -194,7 +194,7 @@ export function SyncDetailPage() {
     <div className={styles.stack}>
       <PageHeader
         title={`${sync.entity} sync`}
-        description={`From ${sync.connectionProfileName}. ${scheduled ? `Runs on the schedule ${sync.scheduleCron} (UTC).` : "Not scheduled: no active migration project on this connection has a schedule."}`}
+        description={`From ${sync.connectionProfileName}. ${scheduled ? `Runs on the schedule ${sync.scheduleCron} (UTC).` : "Not scheduled: the binding has no schedule of its own and no active migration project on this connection has one."}`}
         actions={
           <>
             <Badge tone={health.tone}>{health.label}</Badge>
@@ -236,6 +236,7 @@ export function SyncDetailPage() {
           <Entry term="Open conflicts">{sync.openConflicts}</Entry>
         </dl>
       </Card>
+      <ScheduleCard sync={sync} canEdit={canEdit} busy={busy} onChange={(cron) => edit(sync, { scheduleCron: cron })} />
       <SourceOfTruthCard sync={sync} canEdit={canEdit} busy={busy} onChange={(value) => edit(sync, { sourceOfTruth: value })} />
       <DeletedRowsCard sync={sync} canEdit={canEdit && scheduled} busy={busy} onChange={(change) => edit(sync, change)} />
       <RecentRunsCard sync={sync} />
@@ -245,6 +246,72 @@ export function SyncDetailPage() {
         Back to delta sync
       </Link>
     </div>
+  );
+}
+
+/** Reports why a cron cannot schedule runs, or "" when it can (the service also checks the 15-minute spacing). */
+export function cronProblem(value: string): string {
+  const cron = value.trim();
+  if (cron.split(/\s+/).length !== 5) return "Enter five fields: minute hour day month weekday.";
+  if (cron.length > 100) return "Use at most 100 characters.";
+  return "";
+}
+
+/**
+ * Each binding can run on its own clock; without one it follows the schedule of the migration project on its
+ * connection. Saving a schedule does not reset the watermark.
+ */
+function ScheduleCard({ sync, canEdit, busy, onChange }: { sync: SyncStatus; canEdit: boolean; busy: boolean; onChange(cron: string): void }) {
+  const own = sync.scheduleOverride ?? "";
+  const fallback = sync.projectScheduleCron ?? "";
+  const [draft, setDraft] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const clear = () => {
+    setConfirmClear(false);
+    onChange("");
+    setDraft(null);
+  };
+  const value = draft ?? own;
+  const error = draft !== null && draft.trim() !== "" ? cronProblem(draft) : "";
+  const save = draft !== null && draft.trim() !== "" && !error && draft.trim() !== own;
+  return (
+    <Card title="Schedule">
+      <div className={styles.stack}>
+        <p className={styles.note}>
+          {own
+            ? `This binding runs on its own schedule, ${own} (UTC); ${fallback ? `the project's is ${fallback}.` : "its migration project has none."}`
+            : sync.scheduleCron
+              ? `This binding follows the schedule of its migration project, ${sync.scheduleCron} (UTC).`
+              : "This binding has no schedule: its migration project has none either."}{" "}
+          Give it its own five-field cron (for example 0 3 * * * for every night at 03:00 UTC, at least 15 minutes apart) when this table needs a different rhythm than the project. Changing it does not reset the watermark.
+        </p>
+        <FormField id="sync-cron" label="Own schedule (cron, UTC)" error={error || undefined} hint="Leave empty to follow the project.">
+          {(control) => <Input {...control} value={value} invalid={Boolean(error)} disabled={!canEdit || busy} onChange={(event) => setDraft(event.target.value)} />}
+        </FormField>
+        {canEdit ? (
+          <div>
+            <Button loading={busy} disabled={!save} onClick={() => { onChange(draft!.trim()); setDraft(null); }}>
+              Save schedule
+            </Button>{" "}
+            {own ? (
+              <Button loading={busy} onClick={() => (fallback ? clear() : setConfirmClear(true))}>
+                Use the project schedule
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      {confirmClear ? (
+        <ConfirmDialog
+          title="Stop scheduling this binding?"
+          description="No active migration project on this connection has a schedule, so without its own cron the binding stops running until a project gets one. Its watermark is kept. To stop it for a while, pause the schedule instead."
+          confirmLabel="Remove own schedule"
+          cancelLabel="Cancel"
+          onConfirm={clear}
+          onCancel={() => setConfirmClear(false)}
+        />
+      ) : null}
+    </Card>
   );
 }
 
