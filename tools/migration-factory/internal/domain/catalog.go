@@ -10,7 +10,7 @@ type CatalogEntry struct {
 }
 
 // availablePacks are the packs the service validates, loads and reconciles today.
-var availablePacks = map[Pack]bool{PackOpenItems: true, PackGLBalances: true, PackProjectWIP: true}
+var availablePacks = map[Pack]bool{PackOpenItems: true, PackGLBalances: true, PackProjectWIP: true, PackOnhand: true}
 
 // PackAvailable reports whether a pack run can be started in this release.
 func PackAvailable(p Pack) bool { return availablePacks[p] }

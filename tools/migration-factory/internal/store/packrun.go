@@ -144,12 +144,16 @@ func storeNewRun(ctx context.Context, tx pgx.Tx, run *domain.PackRun, startedBy 
 	if run.OpenItemsRunID != "" {
 		openItemsRun = &run.OpenItemsRunID
 	}
+	var glRun *string
+	if run.GLRunID != "" {
+		glRun = &run.GLRunID
+	}
 	run.Version = 1
 	if err := tx.QueryRow(ctx, `insert into pack_run (tenant_id, run_id, pack, source_system, source_company, cutoff_ts, input_hash, status,
-		records_in, records_loaded, records_quarantined, already_present, started_by, parties, open_items_run_id)
-		values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) returning created_at`,
+		records_in, records_loaded, records_quarantined, already_present, started_by, parties, open_items_run_id, gl_run_id)
+		values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) returning created_at`,
 		run.RunID, string(run.Pack), string(run.SourceSystem), run.SourceCompany, run.CutoffTS, run.InputHash, string(run.Status),
-		run.RecordsIn, run.RecordsLoaded, run.RecordsQuarantined, run.AlreadyPresent, startedBy, parties, openItemsRun).Scan(&run.CreatedAt); err != nil {
+		run.RecordsIn, run.RecordsLoaded, run.RecordsQuarantined, run.AlreadyPresent, startedBy, parties, openItemsRun, glRun).Scan(&run.CreatedAt); err != nil {
 		return fmt.Errorf("insert pack_run: %w", err)
 	}
 	return nil
@@ -211,13 +215,13 @@ func recordJSON(r domain.Record) quarantinedRecord {
 }
 
 const runColumns = `run_id::text, pack, source_system, source_company, cutoff_ts, input_hash, status, records_in, records_loaded,
-	records_quarantined, already_present, parties, coalesce(open_items_run_id::text, ''), version, created_at`
+	records_quarantined, already_present, parties, coalesce(open_items_run_id::text, ''), coalesce(gl_run_id::text, ''), version, created_at`
 
 func scanRun(row pgx.Row) (domain.PackRun, error) {
 	var r domain.PackRun
 	var pack, sys, status string
 	if err := row.Scan(&r.RunID, &pack, &sys, &r.SourceCompany, &r.CutoffTS, &r.InputHash, &status, &r.RecordsIn, &r.RecordsLoaded,
-		&r.RecordsQuarantined, &r.AlreadyPresent, &r.Parties, &r.OpenItemsRunID, &r.Version, &r.CreatedAt); err != nil {
+		&r.RecordsQuarantined, &r.AlreadyPresent, &r.Parties, &r.OpenItemsRunID, &r.GLRunID, &r.Version, &r.CreatedAt); err != nil {
 		return domain.PackRun{}, err
 	}
 	r.Pack, r.SourceSystem, r.Status = domain.Pack(pack), domain.SourceSystem(sys), domain.RunStatus(status)

@@ -61,8 +61,9 @@ export function PackRunDetailPage() {
     { key: "legacyId", header: "Record", mono: true },
     { key: "rule", header: "Rule failed" },
     { key: "reason", header: "Reason" },
-    { key: "dimensions", header: run?.pack === "gl_balances" ? "Account and dimensions" : "Party and account", render: (row) => (run?.pack === "gl_balances" ? [row.account, row.dimensions] : [row.party, row.account]).filter(Boolean).join(" / ") || dash },
-    { key: "amount", header: "Amount", align: "end", mono: true, render: (row) => `${money(row.amount)} ${row.currency ?? ""}`.trim() },
+    { key: "dimensions", header: run?.pack === "gl_balances" ? "Account and dimensions" : run?.pack === "onhand" ? "Item and dimension" : "Party and account", render: (row) => (run?.pack === "gl_balances" || run?.pack === "onhand" ? [row.account, row.dimensions] : [row.party, row.account]).filter(Boolean).join(" / ") || dash },
+    // An onhand line's amount is its quantity in the line's unit, not money in its currency.
+    { key: "amount", header: run?.pack === "onhand" ? "Quantity" : "Amount", align: "end", mono: true, render: (row) => (run?.pack === "onhand" ? row.amount : `${money(row.amount)} ${row.currency ?? ""}`.trim()) },
     { key: "status", header: "Status", render: (row) => <StatusPill status={row.status} /> },
     {
       key: "action",
@@ -166,8 +167,14 @@ export function PackRunDetailPage() {
               {run.message}
             </Alert>
           ) : null}
+          {run.pack === "onhand" ? (
+            <Alert tone="warning" title="Staged, not posted to inventory">
+              This run holds the opening stock in the migration factory and reconciles it with the extract. Nothing is posted to the inventory ledger
+              yet, so the cutover go/no-go keeps the packs item open for a plan that includes on-hand stock (H-S9-1).
+            </Alert>
+          ) : null}
           {run.mismatchMessages && run.mismatchMessages.length > 0 ? (
-            <Alert tone="danger" title="Open items differ from the GL">
+            <Alert tone="danger" title={run.pack === "onhand" ? "Inventory account differs from the loaded stock" : "Open items differ from the GL"}>
               <ul className={styles.plainList}>
                 {run.mismatchMessages.map((m) => (
                   <li key={m}>{m}</li>
@@ -202,6 +209,14 @@ export function PackRunDetailPage() {
                   <dt className={styles.term}>Reconciled with open items</dt>
                   <dd className={`${styles.value} ${styles.mono}`}>
                     <Link to={`/migration-factory/runs/${run.openItemsRunId}`}>{run.openItemsRunId}</Link>
+                  </dd>
+                </div>
+              ) : null}
+              {run.glRunId ? (
+                <div className={styles.entry}>
+                  <dt className={styles.term}>Reconciled with GL balances</dt>
+                  <dd className={`${styles.value} ${styles.mono}`}>
+                    <Link to={`/migration-factory/runs/${run.glRunId}`}>{run.glRunId}</Link>
                   </dd>
                 </div>
               ) : null}

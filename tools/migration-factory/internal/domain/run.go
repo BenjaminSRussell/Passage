@@ -32,6 +32,9 @@ type PackRun struct {
 	// OpenItemsRunID is the open_items run a gl_balances run reconciled its control accounts
 	// with (BR-49.2), or "".
 	OpenItemsRunID string
+	// GLRunID is the gl_balances run an onhand run reconciled the inventory account with
+	// (BR-49.3), or "".
+	GLRunID string
 	// Version counts the run's writes; a release bumps it (optimistic concurrency).
 	Version   int
 	CreatedAt time.Time

@@ -9,6 +9,7 @@ import { useLoad } from "./useLoad";
 const startPath: Partial<Record<Pack, string>> = {
   open_items: "/migration-factory/runs/new",
   gl_balances: "/migration-factory/runs/new-gl",
+  onhand: "/migration-factory/runs/new-onhand",
   project_wip: "/migration-factory/runs/new-project",
 };
 

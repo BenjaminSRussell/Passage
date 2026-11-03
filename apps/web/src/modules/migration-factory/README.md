@@ -8,6 +8,9 @@ call the service at `tools/migration-factory` through `api/client.ts` (paths fro
 - `/migration-factory/packs`: the nine transactional packs from the service catalog, the legacy
   systems and control totals of each, and a start link for the packs that run today.
 - `/migration-factory/runs/new`: start an open_items run from a pasted extract.
+- `/migration-factory/runs/new-onhand`: load on-hand stock (onhand) from a pasted extract with the
+  item master, optionally reconciled with a gl_balances run and its inventory account (BR-49.3). The run page
+  marks an onhand run as staged: nothing is posted to the inventory ledger yet (H-S9-1).
 - `/migration-factory/runs/new-gl`: load GL balances (gl_balances) from a pasted extract with the
   chart of accounts, optionally reconciled with an open_items run of the same company (BR-49.2).
   The form refuses a paste whose debits and credits differ in a currency, summed exactly.

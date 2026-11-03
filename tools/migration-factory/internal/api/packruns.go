@@ -101,12 +101,14 @@ type runDTO struct {
 	AlreadyPresent     int       `json:"alreadyPresent"`
 	Message            string    `json:"message,omitempty"`
 	OpenItemsRunID     string    `json:"openItemsRunId,omitempty"`
+	GLRunID            string    `json:"glRunId,omitempty"`
 	Version            int       `json:"version"`
 	CreatedAt          time.Time `json:"createdAt"`
 }
 
 // runDetailDTO is a run with its control totals and quarantined records. MismatchMessages holds
-// MIG-1506 for every control account whose open items differ from the migrated GL balance.
+// MIG-1506 for every control account whose open items differ from the migrated GL balance, and
+// MIG-1502 for an inventory account that differs from the loaded on-hand value.
 type runDetailDTO struct {
 	runDTO
 	ControlTotals    []totalDTO      `json:"controlTotals"`
@@ -126,7 +128,7 @@ func toRunSummary(run domain.PackRun) runDTO {
 		RunID: run.RunID, Pack: string(run.Pack), SourceSystem: string(run.SourceSystem), SourceCompany: run.SourceCompany,
 		CutoffTS: run.CutoffTS, InputHash: run.InputHash, Status: string(run.Status), RecordsIn: run.RecordsIn,
 		RecordsLoaded: run.RecordsLoaded, RecordsQuarantined: run.RecordsQuarantined, AlreadyPresent: run.AlreadyPresent,
-		Message: run.Message(), OpenItemsRunID: run.OpenItemsRunID, Version: run.Version, CreatedAt: run.CreatedAt,
+		Message: run.Message(), OpenItemsRunID: run.OpenItemsRunID, GLRunID: run.GLRunID, Version: run.Version, CreatedAt: run.CreatedAt,
 	}
 }
 
@@ -151,6 +153,9 @@ func toRunDTO(run domain.PackRun) runDetailDTO {
 		out.ControlTotals = append(out.ControlTotals, toTotalDTO(t))
 		if t.Name == domain.ControlAccountName && t.Status == domain.StatusMismatch {
 			out.MismatchMessages = append(out.MismatchMessages, domain.ControlAccountMessage(t))
+		}
+		if t.Name == domain.OnhandAccountName && t.Status == domain.StatusMismatch {
+			out.MismatchMessages = append(out.MismatchMessages, domain.OnhandAccountMessage(t))
 		}
 	}
 	for _, q := range run.Quarantined {
@@ -210,7 +215,7 @@ func (s *Server) startPackRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !domain.PackAvailable(pack) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeUnsupported, "pack "+string(pack)+" is not available yet; open_items, gl_balances and project_wip run"))
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeUnsupported, "pack "+string(pack)+" is not available yet; open_items, gl_balances, onhand and project_wip run"))
 		return
 	}
 	switch pack {
@@ -219,6 +224,9 @@ func (s *Server) startPackRun(w http.ResponseWriter, r *http.Request) {
 		return
 	case domain.PackGLBalances:
 		s.startGLRun(w, r)
+		return
+	case domain.PackOnhand:
+		s.startOnhandRun(w, r)
 		return
 	}
 	var req packRunRequest

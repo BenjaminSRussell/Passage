@@ -36,6 +36,12 @@ const insertXrefForLine = `with r as (insert into pack_run (tenant_id, run_id, p
 	insert into legacy_xref (tenant_id, run_id, xref_id, source_system, source_company, source_table, source_id, passage_entity, passage_id, amount, currency)
 	select $1, run_id, $3::uuid, 'AX2012', 'USMF', 'project_wip', $3::text, 'project_opening_line', $3::uuid, 10, 'USD' from r`
 
+// insertXrefForOnhand creates the onhand run and the xref row an opening stock line references; $3 is the xref id.
+const insertXrefForOnhand = `with r as (insert into pack_run (tenant_id, run_id, pack, source_system, source_company, cutoff_ts, input_hash, status,
+	records_in, records_loaded, records_quarantined) values ($1, $2, 'onhand', 'AX2012', 'USMF', now(), 'h', 'LOADED', 1, 1, 0) returning run_id)
+	insert into legacy_xref (tenant_id, run_id, xref_id, source_system, source_company, source_table, source_id, passage_entity, passage_id, amount, currency)
+	select $1, run_id, $3::uuid, 'AX2012', 'USMF', 'onhand', $3::text, 'onhand_opening_balance', $3::uuid, 10, 'USD' from r`
+
 // insertXrefForBalance creates the gl_balances run and the xref row an opening balance references; $3 is the xref id.
 const insertXrefForBalance = `with r as (insert into pack_run (tenant_id, run_id, pack, source_system, source_company, cutoff_ts, input_hash, status,
 	records_in, records_loaded, records_quarantined) values ($1, $2, 'gl_balances', 'AX2012', 'USMF', now(), 'h', 'LOADED', 1, 1, 0) returning run_id)
@@ -103,6 +109,15 @@ func TestAppRole_CrossTenantRLS(t *testing.T) {
 			NoUpdate: true,
 		},
 		{
+			Table:  "onhand_opening_balance",
+			Before: insertXrefForOnhand,
+			Insert: `insert into onhand_opening_balance (tenant_id, run_id, legacy_xref_id, balance_id, source_system, source_company, legacy_id, item,
+				site, warehouse, unit, quantity, value, currency)
+				values ($1, $2, $3::uuid, $3::uuid, 'AX2012', 'USMF', 'OH-1', 'BOLT-10', 'S1', 'W1', 'EA', 5, 10, 'USD')`,
+			Args:     func(tenantID, _ string) []any { return []any{tenantID, ids.New(), ids.New()} },
+			NoUpdate: true,
+		},
+		{
 			Table:  "gl_opening_balance",
 			Before: insertXrefForBalance,
 			Insert: `insert into gl_opening_balance (tenant_id, run_id, legacy_xref_id, balance_id, source_system, source_company, legacy_id, account,
@@ -158,7 +173,7 @@ func TestAppRole_CrossTenantRLS(t *testing.T) {
 	})
 }
 
-// legacy_xref, project opening lines, GL opening balances and re-keying lines are append-only
+// legacy_xref, project opening lines, GL opening balances, opening stock and re-keying lines are append-only
 // (9.49.4, FR-49.12, FR-49.1, FR-49.9): the application role cannot change or delete a row, and it deletes nothing else
 // either.
 func TestAppRole_LegacyXrefIsAppendOnly(t *testing.T) {
@@ -186,7 +201,8 @@ func TestAppRole_LegacyXrefIsAppendOnly(t *testing.T) {
 		`delete from control_total`, `delete from pack_quarantine`, `update rekey_line set amount = 0`, `delete from rekey_line`, `update cutover_decision set reason = 'x'`, `delete from cutover_decision`,
 		`update cutover_go_approval set approver = 'x'`, `delete from cutover_go_approval`,
 		`update cutover_rollback_approval set approver = 'x'`, `delete from cutover_rollback_approval`,
-		`update gl_opening_balance set balance = 0`, `delete from gl_opening_balance`} {
+		`update gl_opening_balance set balance = 0`, `delete from gl_opening_balance`,
+		`update onhand_opening_balance set quantity = 1`, `delete from onhand_opening_balance`} {
 		err := inTenant(func(tx pgx.Tx) error { _, err := tx.Exec(ctx, stmt); return err })
 		var pgErr *pgconn.PgError
 		if !errors.As(err, &pgErr) || pgErr.Code != "42501" {

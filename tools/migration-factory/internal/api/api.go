@@ -1,4 +1,4 @@
-// Package api exposes the migration-factory HTTP surface: open_items, gl_balances and project_wip
+// Package api exposes the migration-factory HTTP surface: open_items, gl_balances, onhand and project_wip
 // pack runs with their control totals and quarantine release, the legacy cross-reference lookup, the
 // parallel-run review, project opening balances, and the cutover runbook with its rollback
 // re-keying export. Handlers decode and validate the request, read the principal from the tenant
@@ -75,6 +75,7 @@ type Store interface {
 	SignOffParallelRun(ctx context.Context, idem store.Idem, so store.SignOff) (domain.ParallelRun, bool, error)
 	RunProjectWIP(ctx context.Context, idem store.Idem, in store.ProjectWIPRun) (domain.PackRun, bool, error)
 	RunGLBalances(ctx context.Context, idem store.Idem, in store.GLBalancesRun) (domain.PackRun, bool, error)
+	RunOnhand(ctx context.Context, idem store.Idem, in store.OnhandRun) (domain.PackRun, bool, error)
 	GetProjectOpening(ctx context.Context, f store.OpeningFilter) (store.ProjectOpening, error)
 	GetTargetLoad(ctx context.Context, runID string) (domain.TargetLoad, error)
 	ListTargetRows(ctx context.Context, runID string, f store.TargetRowFilter) ([]domain.TargetRowView, error)

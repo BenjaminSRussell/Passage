@@ -52,10 +52,10 @@ paths:
   /api/v1/migration/packs/{pack}/runs:
     post:
       operationId: startPackRun
-      summary: Validate, load and reconcile a pack extract (open_items, gl_balances or project_wip)
+      summary: Validate, load and reconcile a pack extract (open_items, gl_balances, onhand or project_wip)
       description: |
-        open_items takes a PackRunRequest, gl_balances a GLRunRequest and project_wip a
-        ProjectRunRequest (FR-49.12: opening lines per project and category, reconciled per
+        open_items takes a PackRunRequest, gl_balances a GLRunRequest, onhand an OnhandRunRequest
+        and project_wip a ProjectRunRequest (FR-49.12: opening lines per project and category, reconciled per
         project to the legacy category totals; a project that does not reconcile is
         OPENING_MISMATCH and opening lines never post to the GL). Other packs return MIG-0005.
         gl_balances (FR-49.1, FR-49.2) refuses an extract whose debits differ from its credits in
@@ -65,6 +65,16 @@ paths:
         of non-zero combinations and the trial balance per currency. With openItemsRunId it also
         compares the open items per control account with the migrated GL balance of that account
         (BR-49.2, gl_balances.control_account, MIG-1506 in mismatchMessages).
+        onhand (FR-49.1, FR-49.2, BR-49.3) validates each line (item in the item master, a site
+        and warehouse, a positive quantity, a non-negative value at legacy cost, a serial of
+        exactly one, once per item), refuses one that names an item and inventory dimension, or a
+        serial of an item at any dimension, that the company already holds under another legacy
+        id, loads each line as opening stock with its legacy
+        reference and compares the quantity per item and dimension, the value per item and site,
+        and the value per company and currency. With glRunId and inventoryAccount it also compares
+        the migrated balance of that GL account with the loaded value (onhand.inventory_account,
+        MIG-1502 in mismatchMessages). Nothing posts to the inventory ledger, so the cutover
+        go/no-go keeps packs_reconciled open for a plan that includes onhand.
         Records failing the referential, domain or uniqueness rules are quarantined (FR-49.11);
         the run is rejected with MIG-1504 when they exceed quarantineMaxPct. Accepted records
         that legacy_xref already holds by (system, company, table, id) are not loaded again
@@ -90,6 +100,7 @@ paths:
               oneOf:
                 - $ref: "#/components/schemas/PackRunRequest"
                 - $ref: "#/components/schemas/GLRunRequest"
+                - $ref: "#/components/schemas/OnhandRunRequest"
                 - $ref: "#/components/schemas/ProjectRunRequest"
       responses:
         "201":
@@ -1331,6 +1342,82 @@ components:
           minItems: 1
           items:
             $ref: "#/components/schemas/GLBalance"
+    OnhandLine:
+      type: object
+      required: [legacyId, item, site, warehouse, unit, currency, quantity, value]
+      additionalProperties: false
+      properties:
+        legacyId:
+          type: string
+          description: The legacy row id (AX InventSum RecId, SAP material and storage key); unique in the extract and in legacy_xref.
+        item:
+          type: string
+          description: Item number; one missing from items is a REFERENTIAL failure.
+        site:
+          type: string
+        warehouse:
+          type: string
+        location:
+          type: string
+          description: Bin or location; blank for none.
+        batch:
+          type: string
+          description: Batch number; blank when the item is not batch tracked.
+        serial:
+          type: string
+          description: Serial number; blank when not serial tracked. A serial line holds quantity 1.
+        unit:
+          type: string
+          description: Inventory unit of measure of the quantity.
+        currency:
+          type: string
+          description: ISO 4217 code of the value; an unknown code is a DOMAIN failure.
+        quantity:
+          type: string
+          description: Decimal string greater than zero, at most 6 decimal places. Never a float.
+        value:
+          type: string
+          description: Total value of the quantity at legacy cost (BR-49.3), a decimal string not below zero, at most 6 decimal places.
+    OnhandRunRequest:
+      type: object
+      required: [sourceSystem, sourceCompany, cutoffTs, freezeTs, items, records]
+      additionalProperties: false
+      properties:
+        sourceSystem:
+          type: string
+          enum: [AX2012, D365FO, SAPECC, S4HANA]
+        sourceCompany:
+          type: string
+          minLength: 1
+          description: DataAreaId (AX) or company code (SAP).
+        cutoffTs:
+          type: string
+          format: date-time
+          description: Must not be after freezeTs (MIG-1501).
+        freezeTs:
+          type: string
+          format: date-time
+        quarantineMaxPct:
+          type: string
+          description: Decimal percent from 0 to 10; defaults to 1.0 (migration.quarantine_max_pct).
+        items:
+          type: array
+          minItems: 1
+          description: The item master the lines are checked against (referential rule).
+          items:
+            type: string
+        glRunId:
+          type: string
+          format: uuid
+          description: A LOADED or RECONCILED gl_balances run of the same system and company whose inventory account must equal the loaded value (BR-49.3). Goes with inventoryAccount.
+        inventoryAccount:
+          type: string
+          description: The inventory GL account compared with the loaded on-hand value, per currency. Goes with glRunId.
+        records:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/OnhandLine"
     ControlTotal:
       type: object
       required: [name, key, source, target, delta, tolerance, status]
@@ -1338,7 +1425,7 @@ components:
         name:
           type: string
           enum: [open_items.amount, open_items.amount_by_account, open_items.count, gl_balances.balance, gl_balances.nonzero_count,
-            gl_balances.trial_balance, gl_balances.control_account, project_wip.cost, project_wip.sales, project_wip.wip_cost, project_wip.wip_sales,
+            gl_balances.trial_balance, gl_balances.control_account, onhand.quantity, onhand.value, onhand.value_entity, onhand.inventory_account, project_wip.cost, project_wip.sales, project_wip.wip_cost, project_wip.wip_sales,
             target.receivables.item_count, target.receivables.debit_open, target.receivables.credit_open, target.receivables.net_open]
         key:
           type: object
@@ -1434,6 +1521,10 @@ components:
           type: string
           format: uuid
           description: The open_items run a gl_balances run reconciled its control accounts with (BR-49.2).
+        glRunId:
+          type: string
+          format: uuid
+          description: The gl_balances run an onhand run reconciled its inventory account with (BR-49.3).
         version:
           type: integer
           minimum: 1
@@ -1457,7 +1548,7 @@ components:
                 $ref: "#/components/schemas/Quarantined"
             mismatchMessages:
               type: array
-              description: MIG-1506 text for every gl_balances.control_account total that is MISMATCH.
+              description: MIG-1506 text for every gl_balances.control_account total that is MISMATCH, and MIG-1502 text for an onhand.inventory_account total that is MISMATCH.
               items:
                 type: string
             targetLoad:

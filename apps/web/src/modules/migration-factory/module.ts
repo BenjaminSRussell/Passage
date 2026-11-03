@@ -5,6 +5,7 @@ import { CutoverPlanDetailPage } from "./CutoverPlanDetailPage";
 import { CutoverPlansPage } from "./CutoverPlansPage";
 import { NewCutoverPlanPage } from "./NewCutoverPlanPage";
 import { NewGLRunPage } from "./NewGLRunPage";
+import { NewOnhandRunPage } from "./NewOnhandRunPage";
 import { NewPackRunPage } from "./NewPackRunPage";
 import { NewParallelRunPage } from "./NewParallelRunPage";
 import { NewProjectRunPage } from "./NewProjectRunPage";
@@ -20,12 +21,13 @@ const migrationFactory: PassageModule = {
   id: "migration-factory",
   title: "Migration factory",
   description:
-    "Move a customer off AX or SAP: the pack catalog, pack runs with control totals and quarantine release, GL opening balances reconciled with open items, project beginning balances, parallel-run review, legacy references and the timed cutover runbook with its rollback plan.",
+    "Move a customer off AX or SAP: the pack catalog, pack runs with control totals and quarantine release, GL opening balances reconciled with open items, on-hand stock reconciled with the inventory account, project beginning balances, parallel-run review, legacy references and the timed cutover runbook with its rollback plan.",
   routes: [
     { path: "/migration-factory", element: createElement(PackRunsPage), handle: { title: "Pack runs" } },
     { path: "/migration-factory/packs", element: createElement(PackCatalogPage), handle: { title: "Transactional packs" } },
     { path: "/migration-factory/runs/new", element: createElement(NewPackRunPage), handle: { title: "Start pack run" } },
     { path: "/migration-factory/runs/new-gl", element: createElement(NewGLRunPage), handle: { title: "Load GL balances" } },
+    { path: "/migration-factory/runs/new-onhand", element: createElement(NewOnhandRunPage), handle: { title: "Load on-hand stock" } },
     { path: "/migration-factory/runs/new-project", element: createElement(NewProjectRunPage), handle: { title: "Load project beginning balances" } },
     { path: "/migration-factory/runs/:id", element: createElement(PackRunDetailPage), handle: { title: "Pack run" } },
     { path: "/migration-factory/runs/:id/projects/:project", element: createElement(ProjectOpeningPage), handle: { title: "Project opening balance" } },

@@ -199,7 +199,9 @@ func checklistItem(code string) (ChecklistItem, bool) {
 
 // packsReconciled is met when, for every pack of the plan and every entity of the plan, the latest
 // run of that company is RECONCILED and was started at or after the legacy freeze. Runs are matched
-// to entities by their source company (the plan's entities are legacy company codes).
+// to entities by their source company (the plan's entities are legacy company codes). A pack whose
+// load is staged in the factory and not posted to its ledger (NotPosted) stays open even when
+// RECONCILED: the plan cannot go live as if that stock were loaded.
 func packsReconciled(f ReadinessFacts) (status, detail string, refs []string) {
 	latest := map[string]PackFact{}
 	for _, pf := range f.Packs {
@@ -218,6 +220,9 @@ func packsReconciled(f ReadinessFacts) (status, detail string, refs []string) {
 				refs = append(refs, pf.RunID)
 			case pf.Status != StatusReconciled:
 				notReconciled = append(notReconciled, fmt.Sprintf("%s/%s is %s", pk, e, pf.Status))
+				refs = append(refs, pf.RunID)
+			case NotPosted(pk) != "":
+				notReconciled = append(notReconciled, fmt.Sprintf("%s/%s is RECONCILED but %s", pk, e, NotPosted(pk)))
 				refs = append(refs, pf.RunID)
 			default:
 				refs = append(refs, pf.RunID)

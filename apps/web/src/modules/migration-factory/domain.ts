@@ -4,6 +4,7 @@ import type {
   Category,
   BillingStatus,
   GLBalanceRecord,
+  OnhandLineRecord,
   LegacyCategoryTotal,
   OpeningLine,
   OpenItemRecord,
@@ -312,6 +313,37 @@ export function parseGLBalances(text: string): { records: GLBalanceRecord[]; err
     if (!DECIMAL.test(balance)) return `Line ${n}: balance "${balance}" is not a decimal such as -1250.00.`;
     const record: GLBalanceRecord = { legacyId, account, currency: cur, balance };
     if (dimensions) record.dimensions = dimensions;
+    records.push(record);
+    return undefined;
+  });
+  return { records, errors };
+}
+
+const ONHAND_HEADER = ["legacyId", "item", "site", "warehouse", "location", "batch", "serial", "unit", "currency", "quantity", "value"];
+
+/**
+ * Parses a pasted onhand extract, one line per row: legacyId, item, site, warehouse, location,
+ * batch, serial, unit, currency, quantity, value. Location, batch and serial may be blank. The
+ * quantity is above zero, the value (the total at legacy cost) is not negative, and a serial holds
+ * quantity 1. Both stay decimal strings. The service applies the FR-49.11 rules; this checks the shape.
+ */
+export function parseOnhandLines(text: string): { records: OnhandLineRecord[]; errors: string[] } {
+  const records: OnhandLineRecord[] = [];
+  const errors = rows(text, ONHAND_HEADER, ([legacyId, item, site, warehouse, location, batch, serial, unit, currency, quantity, value], n) => {
+    if (!legacyId || !item) return `Line ${n}: the legacy id and item are required.`;
+    if (!site || !warehouse) return `Line ${n}: the site and warehouse are required.`;
+    if (!unit) return `Line ${n}: the unit of measure is required.`;
+    const cur = currency.toUpperCase();
+    if (!CURRENCY.test(cur)) return `Line ${n}: currency "${currency}" is not a three-letter code.`;
+    const qty = toMicro(quantity);
+    if (qty === null || qty <= BigInt(0)) return `Line ${n}: quantity "${quantity}" must be a decimal above zero such as 12.5.`;
+    const val = toMicro(value);
+    if (val === null || val < BigInt(0)) return `Line ${n}: value "${value}" must be a decimal of zero or more such as 250.50.`;
+    if (serial && qty !== BigInt(1_000_000)) return `Line ${n}: serial "${serial}" holds quantity ${quantity}; a serial is exactly one.`;
+    const record: OnhandLineRecord = { legacyId, item, site, warehouse, unit, currency: cur, quantity, value };
+    if (location) record.location = location;
+    if (batch) record.batch = batch;
+    if (serial) record.serial = serial;
     records.push(record);
     return undefined;
   });

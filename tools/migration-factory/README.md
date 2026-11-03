@@ -18,7 +18,7 @@ Built and tested:
 - **Validation and quarantine** (`validate.go`): referential (party in master data), domain
   (ISO 4217 currency, control account present), and uniqueness rules, plus the
   `quarantine_max_pct` gate (0-10, default 1; MIG-1504). An amount with more than six decimal
-  places (the stored `numeric(28,6)` scale) rejects the open_items, gl_balances or project_wip
+  places (the stored `numeric(28,6)` scale) rejects the open_items, gl_balances, onhand or project_wip
   request, so a run never reconciles a value Passage stores rounded.
 - **Idempotent loading** (`loader.go`, `internal/store`): records already in `legacy_xref` by natural
   key `(system, company, table, id)` are skipped, so a re-run loads zero records (MIG-1505). Runs of
@@ -57,6 +57,16 @@ Built and tested:
   count of non-zero combinations and the trial balance per currency. A run that names an
   open_items run of the same company also compares the open items per control account with the
   GL balance of that account (BR-49.2, MIG-1506).
+- **On-hand stock** (`onhand.go`, `internal/store/onhand.go`): the onhand pack quarantines lines by
+  uniqueness (legacy id and (item, site, warehouse, location, batch, serial)), referential (the
+  item master given with the run) and domain (site, warehouse and unit present, quantity above
+  zero, value not negative, a serial of exactly one, ISO 4217) rules, loads the rest write-once
+  into `onhand_opening_balance` at legacy cost with their `legacy_xref` rows (nothing posts to
+  the inventory ledger) and compares the quantity per item and dimension, the value per item and
+  site and the value per company and currency. A run that names a gl_balances run of the same
+  company and an inventory account also compares that account's migrated balance with the loaded
+  value (BR-49.3, `onhand.inventory_account`). A serial opens once per item and company whatever its dimension. Nothing is
+  posted, so the go/no-go `packs_reconciled` item stays open for a plan that includes onhand.
 - **Load of open AR into receivables** (`internal/target`, `internal/store/targetload.go`,
   `internal/api/targetload.go`, integration track S8): a run started with a `load` object
   (`target: receivables`, the legal entity, an optional import source and a legacy party to Passage

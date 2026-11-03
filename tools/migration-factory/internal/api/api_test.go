@@ -118,6 +118,10 @@ func (u unreachableStore) RunGLBalances(context.Context, store.Idem, store.GLBal
 	u.fail()
 	return domain.PackRun{}, false, nil
 }
+func (u unreachableStore) RunOnhand(context.Context, store.Idem, store.OnhandRun) (domain.PackRun, bool, error) {
+	u.fail()
+	return domain.PackRun{}, false, nil
+}
 func (u unreachableStore) GetProjectOpening(context.Context, store.OpeningFilter) (store.ProjectOpening, error) {
 	u.fail()
 	return store.ProjectOpening{}, nil
@@ -189,7 +193,7 @@ func TestRequestsRejectedBeforeTheStore(t *testing.T) {
 		{"pack run needs MigrationRun", request{method: "POST", path: runsPath, tenant: tenantA, duties: "MigrationView", body: openItemsBody(1)}, 403, "AUTH-0003", ""},
 		{"no tenant", request{method: "POST", path: runsPath, duties: allDuties, body: openItemsBody(1)}, 401, "", ""},
 		{"late cutoff MIG-1501", request{method: "POST", path: runsPath, tenant: tenantA, duties: allDuties, body: late}, 422, CodeInvalid, "MIG-1501"},
-		{"pack not built yet", request{method: "POST", path: "/api/v1/migration/packs/onhand/runs", tenant: tenantA, duties: allDuties, body: openItemsBody(1)}, 422, CodeUnsupported, ""},
+		{"pack not built yet", request{method: "POST", path: "/api/v1/migration/packs/open_orders/runs", tenant: tenantA, duties: allDuties, body: openItemsBody(1)}, 422, CodeUnsupported, ""},
 		{"unknown pack", request{method: "POST", path: "/api/v1/migration/packs/nonsense/runs", tenant: tenantA, duties: allDuties, body: openItemsBody(1)}, 422, CodeUnsupported, ""},
 		{"unknown source system", request{method: "POST", path: runsPath, tenant: tenantA, duties: allDuties, body: strings.Replace(openItemsBody(1), "AX2012", "AX4", 1)}, 422, CodeInvalid, ""},
 		{"blank company", request{method: "POST", path: runsPath, tenant: tenantA, duties: allDuties, body: strings.Replace(openItemsBody(1), `"USMF"`, `" "`, 1)}, 422, CodeInvalid, "sourceCompany"},

@@ -58,6 +58,8 @@ export interface PackRun {
   message?: string;
   /** The open_items run a gl_balances run reconciled its control accounts with (BR-49.2). */
   openItemsRunId?: string;
+  /** The gl_balances run an onhand run reconciled its inventory account with (BR-49.3). */
+  glRunId?: string;
   /** Bumped by every release; a release sends the version the user saw. */
   version: number;
   createdAt: string;
@@ -66,7 +68,7 @@ export interface PackRun {
 export interface PackRunDetail extends PackRun {
   controlTotals: ControlTotal[];
   quarantined: QuarantinedRecord[];
-  /** MIG-1506 text for every control account whose open items differ from the GL balance. */
+  /** MIG-1506 text for every control account whose open items differ from the GL balance, and MIG-1502 text for an inventory account that differs from the loaded on-hand value. */
   mismatchMessages?: string[];
   /** Set when the run was started with a load object: where its rows went and how they came out. */
   targetLoad?: TargetLoad;
@@ -179,6 +181,35 @@ export interface GLRunRequest {
   /** An open_items run of the same company to reconcile the control accounts with (BR-49.2). */
   openItemsRunId?: string;
   records: GLBalanceRecord[];
+}
+
+/** One legacy on-hand line at (item, inventory dimension). Quantity and value are decimal strings at legacy cost. */
+export interface OnhandLineRecord {
+  legacyId: string;
+  item: string;
+  site: string;
+  warehouse: string;
+  location?: string;
+  batch?: string;
+  serial?: string;
+  unit: string;
+  currency: string;
+  quantity: string;
+  value: string;
+}
+
+export interface OnhandRunRequest {
+  sourceSystem: SourceSystem;
+  sourceCompany: string;
+  cutoffTs: string;
+  freezeTs: string;
+  quarantineMaxPct?: string;
+  /** The item master the lines are checked against. */
+  items: string[];
+  /** A gl_balances run of the same company and the inventory account to compare with the loaded value (BR-49.3); they go together. */
+  glRunId?: string;
+  inventoryAccount?: string;
+  records: OnhandLineRecord[];
 }
 
 /** A correction to a quarantined open item (FR-49.11). Blank fields keep the extracted value. */
@@ -570,6 +601,11 @@ export function getTargetLoad(runId: string, signal?: AbortSignal): Promise<Targ
 /** GET /migration/runs/{id}/target-rows. */
 export function listTargetRows(runId: string, filter: { status?: TargetRowStatus; after?: number; limit?: number } = {}, signal?: AbortSignal): Promise<TargetRow[]> {
   return items(`/migration/runs/${encodeURIComponent(runId)}/target-rows${query(filter)}`, signal);
+}
+
+/** POST /migration/packs/onhand/runs: opening stock at legacy cost (FR-49.1, BR-49.3). */
+export function startOnhandRun(body: OnhandRunRequest, key: string = newKey()): Promise<PackRunDetail> {
+  return post("/migration/packs/onhand/runs", body, key);
 }
 
 /** POST /migration/packs/gl_balances/runs: GL opening balances (FR-49.1, BR-49.2). */
