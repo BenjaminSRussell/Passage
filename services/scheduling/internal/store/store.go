@@ -105,6 +105,10 @@ type Operation struct {
 	NetworkID            *string           `json:"networkId"`
 	Status               string            `json:"status"`
 	CreatedAt            time.Time         `json:"createdAt"`
+	// Version starts at 1 and rises with every change; PATCH and DELETE need it
+	// in If-Match.
+	Version   int        `json:"version"`
+	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
 }
 
 // RunWarning is a finding about a placed operation that did not stop the run
@@ -260,6 +264,7 @@ type Store interface {
 	ResourceCapacity(ctx context.Context, id string, from, to time.Time) ([]domain.Interval, error)
 	CreateOperation(ctx context.Context, in Operation, idem Idem) (Operation, bool, error)
 	ListOperations(ctx context.Context, f OperationFilter) ([]Operation, error)
+	OperationStore
 	RunSchedule(ctx context.Context, req RunRequest, idem Idem) (Run, bool, error)
 	GetRun(ctx context.Context, id string) (Run, error)
 	ListRuns(ctx context.Context, limit int) ([]Run, error)

@@ -174,6 +174,11 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/resources/{id}/capacity", a.resourceCapacity)
 	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/operations", a.createOperation)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/operations", a.listOperations)
+	// Slice 23: operation maintenance and taking an order off the schedule.
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/operations/{id}", a.getOperation)
+	r.With(authz.RequireDuty(dutySchedule)).Patch("/v1/scheduling/operations/{id}", a.updateOperation)
+	r.With(authz.RequireDuty(dutySchedule)).Delete("/v1/scheduling/operations/{id}", a.deleteOperation)
+	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/orders/{orderId}:unschedule", a.unscheduleOrder)
 	r.With(authz.RequireDuty(dutyRun)).Post("/v1/scheduling/runs", a.createRun)
 	r.With(authz.RequireDuty(dutyRun)).Post("/v1/scheduling/orders/{orderId}:schedule", a.scheduleOrder)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/runs", a.listRuns)

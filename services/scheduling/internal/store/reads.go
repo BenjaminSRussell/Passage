@@ -18,7 +18,7 @@ import (
 
 const (
 	resourceCols = "id::text, code, name, finite, time_zone, shifts, version, created_at, engineering_resource_id::text, efficiency_pct"
-	opCols       = "id::text, order_id::text, oper_number, minutes, due_at, ready_at, priority, candidate_resource_ids::text[], secondary_resource_ids::text[], setup_group, setup_minutes, attributes, network_id::text, status, created_at"
+	opCols       = "id::text, order_id::text, oper_number, minutes, due_at, ready_at, priority, candidate_resource_ids::text[], secondary_resource_ids::text[], setup_group, setup_minutes, attributes, network_id::text, status, created_at, version, updated_at"
 	runCols      = "id::text, scope, mode, direction, finite, algorithm, status, operations_count, makespan_minutes, total_lateness_minutes, solver_status, messages, warnings, created_at"
 )
 
@@ -152,7 +152,7 @@ func scanOperation(row pgx.Row, fp *string) (Operation, error) {
 	var due, ready *time.Time
 	var attrs []byte
 	dest := []any{&o.ID, &o.OrderID, &o.OperNumber, &o.Minutes, &due, &ready, &o.Priority, &o.ResourceIDs, &o.SecondaryResourceIDs,
-		&o.SetupGroup, &o.SetupMinutes, &attrs, &o.NetworkID, &o.Status, &o.CreatedAt}
+		&o.SetupGroup, &o.SetupMinutes, &attrs, &o.NetworkID, &o.Status, &o.CreatedAt, &o.Version, &o.UpdatedAt}
 	if fp != nil {
 		dest = append([]any{fp}, dest...)
 	}

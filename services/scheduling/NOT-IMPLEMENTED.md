@@ -563,6 +563,47 @@ on the production order page. No migration (the scope check already allowed
 | `policies/authz/data.json`: resource row `/v1/scheduling/orders/*:schedule` (POST) under `scheduling.run` (an existing duty) | handoff - main session (authz seed) | The route uses the existing duty of `POST /v1/scheduling/runs`; only the route row is new. Until it is seeded the gateway refuses the button on the production order page with 403. |
 | Per-order run started automatically by production's `:schedule` transition (FR-23.11 "on `:schedule`") | open - product decision, later slice of PSG-23 | The order intake registers the operations on `order.scheduled.v1` but does not run the heuristic for them; whether every production `:schedule` should place the order at once (and with which direction and finite setting) is not settled by the PRD. Today a planner presses "Schedule this order" (or starts a run). |
 
+Slice 23 builds operation maintenance and taking an order off the schedule
+(FR-23.4, FR-23.11). Until now an operation could only be created, so a wrong
+duration, due date or candidate list meant editing the database.
+`GET /v1/scheduling/operations/{id}` (ETag with the version),
+`PATCH /operations/{id}` (`minutes`, `dueAt`, `readyAt`, `priority`,
+`setupMinutes`, `resourceIds`; Idempotency-Key and If-Match, stale 412
+SCHED-0137, an unknown candidate 422 SCHED-0107, a candidate that is also a
+secondary 422 SCHED-0139) and `DELETE /operations/{id}` (If-Match; answers 200
+with `jobsRemoved`) take duty `scheduling.schedule.write`, the duty of
+`POST /operations`. Any change but the priority takes the operation's non-firmed
+jobs (and secondary bookings) off the schedule and opens it again
+(`jobsRemoved`); a priority change only orders the next run. An operation a
+firmed job holds cannot be changed or deleted (409 SCHED-0138); only its
+priority can. `POST /orders/{orderId}:unschedule` (no body, Idempotency-Key,
+same duty) removes the non-firmed jobs of every operation of the order and opens
+them again, keeps firmed operations and lists them (`keptFirmed`), 404
+SCHED-0135 for an order with no operations. Replays answer with the stored
+result, also after the operation is gone. Events through the outbox:
+`operation.updated`, `operation.deleted`, `order.unscheduled` (AsyncAPI
+documents all three). Migration `0017_operation_version.sql` adds `version`
+(default 1) and `updated_at` to `scheduling_operation` (no new table, the grants
+of 0001 apply); every operation read now carries `version`, and an order import
+that changes an operation moves its version too, so a planner's change based on
+the values before the import is refused as stale (412) instead of overwriting
+them. Web: an operation
+detail page (`/scheduling/operations/:id`, linked from the operations list)
+with the facts, a change form (stale-version message with a reload of the
+latest version), a confirmed delete and a confirmed "take the order off the
+schedule". Not built: clearing a due or ready date, changing the secondary
+resources, setup group, network or attributes of an existing operation (delete
+and create instead), and keeping a planner's change when the production order is
+imported again (the next `order.scheduled.v1` or `:reimport` of an operation
+registered from a production order overwrites the change, as a re-date does).
+The OpenAPI and AsyncAPI specs have no FAIL lines on the doc gates.
+
+| Item | Status | Reason |
+|---|---|---|
+| `policies/authz/data.json`: resource rows `/v1/scheduling/operations/*` GET under `scheduling.read`, PATCH and DELETE under `scheduling.schedule.write` | handoff - main session (authz seed) | Existing duties; only the route rows are new. Until seeded the gateway answers 403 for the operation detail page, its save and delete. |
+| `policies/authz/data.json`: resource row `/v1/scheduling/orders/*:unschedule` (POST) under `scheduling.schedule.write` | handoff - main session (authz seed) | Existing duty; only the route row is new. Until seeded the "Take the order off the schedule" button gets 403. The duty is Maintain schedule (like `:move`, `:firm` and `:reimport`, which also take jobs off the schedule), not Run scheduling of the per-order `:schedule`: placing an order is a run, removing its placements is schedule maintenance. Product decision open for Ben. |
+| Event `order.unscheduled` / `operation.updated` consumers (production dates cleared when an order is taken off the schedule) | handoff - wave 21 | Production keeps the dates of the last `job.scheduled` / `orderdates.changed` until it reads these events; nothing in this wave clears them. The outbox aggregate types are the new `operation` and `order`; deploy/kafka has no scheduling outbox connector yet, so the topics `passage.scheduling.operation` and `passage.scheduling.order` follow whenever that connector is added (deploy owner). |
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |

@@ -27,11 +27,15 @@ var (
 	NetworkUpdated       = events.Type(Context, "network", "updated", 1)
 
 	OrderImportRecorded = events.Type(Context, "orderimport", "recorded", 1)
+
+	OperationUpdated = events.Type(Context, "operation", "updated", 1)
+	OperationDeleted = events.Type(Context, "operation", "deleted", 1)
+	OrderUnscheduled = events.Type(Context, "order", "unscheduled", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CampaignCompleted, CampaignCancelled, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated, CapacityBlockUpdated, NetworkUpdated, OrderImportRecorded}
+	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CampaignCompleted, CampaignCancelled, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated, CapacityBlockUpdated, NetworkUpdated, OrderImportRecorded, OperationUpdated, OperationDeleted, OrderUnscheduled}
 }
 
 type RunCompletedData struct {
@@ -224,4 +228,39 @@ type OrderImportRecordedData struct {
 	// WithdrawnTo is the status production moved the order to when status is
 	// withdrawn (reason withdraw); empty otherwise.
 	WithdrawnTo string `json:"withdrawnTo,omitempty"`
+}
+
+// OperationUpdatedData announces a changed operation. JobsRemoved is true when
+// the change took the operation's non-firmed jobs off the schedule: the
+// operation is open again and the next run places it (consumers holding its
+// dates from job.scheduled drop them).
+type OperationUpdatedData struct {
+	OperationID string   `json:"operationId"`
+	OrderID     string   `json:"orderId"`
+	OperNumber  int      `json:"operNumber"`
+	Minutes     int      `json:"minutes"`
+	DueAt       *string  `json:"dueAt"`
+	ReadyAt     *string  `json:"readyAt"`
+	Priority    int      `json:"priority"`
+	ResourceIDs []string `json:"resourceIds"`
+	Version     int      `json:"version"`
+	JobsRemoved bool     `json:"jobsRemoved"`
+}
+
+// OperationDeletedData announces a removed operation and whether its jobs left
+// the schedule with it.
+type OperationDeletedData struct {
+	OperationID string `json:"operationId"`
+	OrderID     string `json:"orderId"`
+	OperNumber  int    `json:"operNumber"`
+	JobsRemoved bool   `json:"jobsRemoved"`
+}
+
+// OrderUnscheduledData announces an order taken off the schedule: the listed
+// operations lost their non-firmed jobs and are open again; KeptFirmed are the
+// operation numbers a firmed job holds, which stay where they are.
+type OrderUnscheduledData struct {
+	OrderID    string `json:"orderId"`
+	Operations []int  `json:"operations"`
+	KeptFirmed []int  `json:"keptFirmed"`
 }

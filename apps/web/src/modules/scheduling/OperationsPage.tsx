@@ -36,7 +36,7 @@ export function OperationsPage() {
 
   const columns: DataTableColumn<Operation>[] = [
     { key: "orderId", header: "Order", mono: true, render: (row) => shortId(row.orderId) },
-    { key: "operNumber", header: "Operation", align: "end" },
+    { key: "operNumber", header: "Operation", align: "end", render: (row) => <Link to={`/scheduling/operations/${row.id}`} aria-label={`Operation ${row.operNumber} of order ${shortId(row.orderId)}`}>{row.operNumber}</Link> },
     { key: "minutes", header: "Duration", align: "end", render: (row) => formatMinutes(row.minutes) },
     { key: "dueAt", header: "Due", render: (row) => (row.dueAt ? formatDateTime(row.dueAt) : dash) },
     { key: "priority", header: "Priority", align: "end" },
