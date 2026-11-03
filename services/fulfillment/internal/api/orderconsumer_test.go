@@ -39,9 +39,15 @@ func (f *fakeStore) HeldOrders(_ context.Context, orderIDs []string) (map[string
 }
 
 type fakeOrders struct {
-	got   []store.OrderConfirmedIn
-	holds []store.OrderHoldIn
-	err   error
+	got       []store.OrderConfirmedIn
+	holds     []store.OrderHoldIn
+	remainder []store.RemainderCancelledIn
+	err       error
+}
+
+func (f *fakeOrders) ApplyOrderRemainderCancelled(_ context.Context, _ pgx.Tx, in store.RemainderCancelledIn) (store.RemainderCancelledResult, error) {
+	f.remainder = append(f.remainder, in)
+	return store.RemainderCancelledResult{LinesApplied: len(in.Lines)}, f.err
 }
 
 func (f *fakeOrders) ApplyOrderHold(_ context.Context, _ pgx.Tx, in store.OrderHoldIn) (bool, error) {

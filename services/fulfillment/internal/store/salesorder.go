@@ -89,6 +89,26 @@ func heldOrders(ctx context.Context, tx pgx.Tx, orderIDs []string) (map[string]b
 	return out, rows.Err()
 }
 
+// checkWorkable is checkShippable plus the order hold: pick, pack and auto-pack are refused (FUL-0001)
+// while sales holds the order, so no work is started on goods that cannot ship.
+func checkWorkable(ctx context.Context, tx pgx.Tx, sh Shipment) error {
+	if err := checkShippable(sh); err != nil {
+		return err
+	}
+	return checkNotHeld(ctx, tx, sh.OrderID)
+}
+
+func checkNotHeld(ctx context.Context, tx pgx.Tx, orderID string) error {
+	held, err := heldOrders(ctx, tx, []string{orderID})
+	if err != nil {
+		return err
+	}
+	if held[strings.ToLower(orderID)] {
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeOrderHeld, "FUL-0001: the order has an active hold; release the hold before picking or packing")
+	}
+	return nil
+}
+
 // checkSalesOrder refuses a post for an order sales holds (FUL-0001) or confirmed as JOURNAL
 // (FUL-0065), as fulfillment knows them from sales' events.
 func checkSalesOrder(ctx context.Context, tx pgx.Tx, orderID string) error {

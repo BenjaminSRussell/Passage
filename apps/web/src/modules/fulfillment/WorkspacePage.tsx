@@ -16,6 +16,7 @@ const links = [
   { to: "/fulfillment/workbench", title: "Picking workbench", text: "Group released shipments into pick waves, preview and create them." },
   { to: "/fulfillment/shipments", title: "Shipments", text: "Pick, pack into containers with SSCCs, post the packing slip and track the carrier." },
   { to: "/fulfillment/packing-slips", title: "Packing slips", text: "Posted delivery notes with their cost journal; cancel before invoicing." },
+  { to: "/fulfillment/exceptions", title: "Warehouse exceptions", text: "Cases sales cancelling an order remainder left for the supervisor: goods already shipped or packed beyond what the order keeps." },
   { to: "/fulfillment/delivered-not-invoiced", title: "Delivered not invoiced", text: "Shipped cost not yet invoiced: the GL 1405 balance per legal entity and its slips." },
   { to: "/fulfillment/backorders", title: "Short picks and backorders", text: "Lines picked below plan and the remainder still owed until it is re-picked." },
   { to: "/fulfillment/returnable-aging", title: "Returnable packaging aging", text: "Pallets and crates customers still hold, how long, and which are due to be charged." },

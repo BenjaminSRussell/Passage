@@ -313,6 +313,7 @@ type Store interface {
 	// ListBackorders is the short picks and backorders report (FR-28.2, backorders.go).
 	ListBackorders(ctx context.Context, f BackorderFilter) ([]BackorderRow, error)
 	SalesOrderStore
+	ExceptionStore
 	PackingStore
 	WorkbenchStore
 	WavePickStore
@@ -882,7 +883,7 @@ func (s *Postgres) ConfirmPick(ctx context.Context, id string, version int, pick
 			if err != nil {
 				return sh, err
 			}
-			if err := checkShippable(sh); err != nil {
+			if err := checkWorkable(ctx, tx, sh); err != nil {
 				return sh, err
 			}
 			if err := checkVersion(sh, version); err != nil {
@@ -994,7 +995,7 @@ func (s *Postgres) PackContainer(ctx context.Context, id string, version int, co
 			if err := checkVersion(sh, version); err != nil {
 				return PackResult{}, err
 			}
-			if err := checkShippable(sh); err != nil {
+			if err := checkWorkable(ctx, tx, sh); err != nil {
 				return PackResult{}, err
 			}
 			if sh.Status != domain.StatusPicked && sh.Status != domain.StatusPacked {
@@ -1106,6 +1107,10 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 			}
 			if len(slip.Lines) == 0 {
 				return PackingSlip{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeNothingToShip, "no packed quantity is waiting to ship on this shipment")
+			}
+			// Sales cancelled the remainder of the order line: shipping more than it keeps is refused (FUL-0066).
+			if err := checkKeptQty(ctx, tx, slip.Lines); err != nil {
+				return PackingSlip{}, err
 			}
 			journal, err := domain.PackingSlipPosting(postLines, in.CogsAtShipment, in.Currency)
 			if err != nil {

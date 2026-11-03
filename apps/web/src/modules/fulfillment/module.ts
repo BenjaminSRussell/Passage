@@ -3,6 +3,8 @@ import type { PassageModule } from "../registry";
 import { BackordersPage } from "./BackordersPage";
 import { ContainerTypesPage } from "./ContainerTypesPage";
 import { DeliveredNotInvoicedPage } from "./DeliveredNotInvoicedPage";
+import { ExceptionDetailPage } from "./ExceptionDetailPage";
+import { ExceptionsPage } from "./ExceptionsPage";
 import { DropShipDetailPage } from "./DropShipDetailPage";
 import { DropShipsPage } from "./DropShipsPage";
 import { LegalEntitySettingsPage } from "./LegalEntitySettingsPage";
@@ -41,6 +43,8 @@ const fulfillment: PassageModule = {
     { path: "/fulfillment/packing-slips/:id", element: createElement(PackingSlipDetailPage), handle: { title: "Packing slip" } },
     { path: "/fulfillment/drop-ships", element: createElement(DropShipsPage), handle: { title: "Drop-ships" } },
     { path: "/fulfillment/drop-ships/:id", element: createElement(DropShipDetailPage), handle: { title: "Drop-ship" } },
+    { path: "/fulfillment/exceptions", element: createElement(ExceptionsPage), handle: { title: "Warehouse exceptions" } },
+    { path: "/fulfillment/exceptions/:id", element: createElement(ExceptionDetailPage), handle: { title: "Warehouse exception" } },
     { path: "/fulfillment/delivered-not-invoiced", element: createElement(DeliveredNotInvoicedPage), handle: { title: "Delivered not invoiced" } },
     { path: "/fulfillment/backorders", element: createElement(BackordersPage), handle: { title: "Short picks and backorders" } },
     { path: "/fulfillment/sscc-register", element: createElement(SsccRegisterPage), handle: { title: "SSCC register" } },
@@ -63,6 +67,7 @@ const fulfillment: PassageModule = {
     { label: "Shipments", to: "/fulfillment/shipments", duty: "WarehouseView" },
     { label: "Packing slips", to: "/fulfillment/packing-slips", duty: "WarehouseView" },
     { label: "Drop-ships", to: "/fulfillment/drop-ships", duty: "WarehouseView" },
+    { label: "Exceptions", to: "/fulfillment/exceptions", duty: "WarehouseView" },
     { label: "Delivered not invoiced", to: "/fulfillment/delivered-not-invoiced", duty: "WarehouseView" },
     { label: "Short picks and backorders", to: "/fulfillment/backorders", duty: "WarehouseView" },
     { label: "SSCC register", to: "/fulfillment/sscc-register", duty: "WarehouseView" },

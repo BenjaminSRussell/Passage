@@ -172,6 +172,33 @@ components:
         shortPickAction: { $ref: "#/components/schemas/ShortPickAction" }
         version: { type: integer, minimum: 0, description: "0 when no setting is saved." }
         updatedAt: { type: [string, "null"], format: date-time }
+    Exception:
+      type: object
+      required: [id, legalEntityId, kind, status, orderId, orderLineId, shipmentId, packingSlipId, qty, keptQty, detail, version, createdAt, resolvedAt, resolvedBy, resolutionNote]
+      description: >
+        A case fulfillment cannot fix alone, on the warehouse supervisor's list. It is raised
+        when sales cancels the remainder of an order (order.remaindercancelled.v1) and a packing
+        slip was posted beyond what the order line keeps, or packed quantity is left beyond it.
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        kind:
+          type: string
+          enum: [SLIP_POSTED_BEYOND_KEPT, PACKED_BEYOND_KEPT]
+          description: "SLIP_POSTED_BEYOND_KEPT: the goods left before the cancellation arrived; return them (wave 30) or raise a new order. PACKED_BEYOND_KEPT: packed and not posted; the post is refused (FUL-0066), unpack (which cuts the quantity above the kept one) and put the goods back."
+        status: { type: string, enum: [OPEN, RESOLVED] }
+        orderId: { type: string, format: uuid }
+        orderLineId: { type: string, format: uuid }
+        shipmentId: { type: [string, "null"], format: uuid }
+        packingSlipId: { type: [string, "null"], format: uuid, description: "The latest posted slip of the order line for SLIP_POSTED_BEYOND_KEPT." }
+        qty: { type: string, description: "The quantity beyond what the order line keeps." }
+        keptQty: { type: string, description: "The quantity the order line keeps." }
+        detail: { type: string }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        resolvedAt: { type: [string, "null"], format: date-time }
+        resolvedBy: { type: [string, "null"] }
+        resolutionNote: { type: [string, "null"] }
     ReleaseRule:
       type: object
       required: [warehouseId, legalEntityId, horizonDays, requireFullAtp, waveMaxLines, waveMaxOrders, version]
@@ -777,7 +804,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: FUL-0020, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0001 not PACKED or the order has an active hold (sales orderhold.applied.v1 without its release), FUL-0065 a JOURNAL order (the shipment's type or the type stored from sales' order.confirmed.v1), FUL-0006 a tracking-required line's open batch and serial entries do not cover exactly the quantity it ships, FUL-0014 packaging fee rate missing for a shipped material, FUL-0042 cost missing, FUL-0044 nothing to ship, FUL-0059 cogsAtShipment contradicts the legal entity's cogs_at_shipment policy, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 not PACKED or the order has an active hold (sales orderhold.applied.v1 without its release), FUL-0065 a JOURNAL order (the shipment's type or the type stored from sales' order.confirmed.v1), FUL-0066 the post would ship more of an order line than sales kept when it cancelled the remainder (order.remaindercancelled.v1), FUL-0006 a tracking-required line's open batch and serial entries do not cover exactly the quantity it ships, FUL-0014 packaging fee rate missing for a shipped material, FUL-0042 cost missing, FUL-0044 nothing to ship, FUL-0059 cogsAtShipment contradicts the legal entity's cogs_at_shipment policy, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/packing-slips/{id}:cancel:
     post:
@@ -1514,6 +1541,82 @@ paths:
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: "FUL-0057 the warehouse belongs to another legal entity, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/exceptions:
+    get:
+      operationId: listExceptions
+      summary: Warehouse exceptions to handle
+      description: >
+        The supervisor's list: cases raised when sales cancelled the remainder of an order
+        (order.remaindercancelled.v1) and fulfillment could not undo what had already been
+        packed or posted. Open ones first, newest first.
+      x-passage-duty: WarehouseView
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [OPEN, RESOLVED] }, description: Only exceptions in this status. }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        "200":
+          description: Exceptions, open first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Exception" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/fulfillment/exceptions/{id}:
+    get:
+      operationId: getException
+      summary: Read one warehouse exception
+      x-passage-duty: WarehouseView
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The exception; ETag carries its version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Exception" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: FUL-0067 exception not found, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/exceptions/{id}:resolve:
+    post:
+      operationId: resolveException
+      summary: Resolve a warehouse exception with a note
+      description: >
+        The supervisor records what was done (a return through wave 30, a new order, the goods
+        unpacked). If-Match carries the version read. Publishes exception.resolved.
+      x-passage-duty: WarehouseRelease
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [note]
+              properties:
+                note: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        "200":
+          description: The resolved exception; ETag carries the new version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Exception" }
+        "400": { description: "FUL-0050 validation (If-Match, note), FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: FUL-0067 exception not found, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: FUL-0068 the exception is already resolved, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/release-rules:
     get:
       operationId: listReleaseRules
@@ -1679,7 +1782,10 @@ paths:
         CLOSED (not on a posted slip). The container's packed quantities return to the
         unpacked pool; a PACKED shipment goes back to PICKED so it can be repacked or,
         once it holds no container, cancelled. The SSCC stays issued and is never
-        reused (BR-28.5). Publishes container.unpacked.
+        reused (BR-28.5). Publishes container.unpacked. When sales cancelled the remainder of
+        an order line (order.remaindercancelled.v1) while it was packed, the unpacked quantity
+        above what the line keeps is cut from the plan and shipment.closed (reason
+        order_remainder_cancelled) is published, so the kept quantity can be repacked and posted.
       x-passage-duty: WarehousePack
       parameters:
         - { $ref: "#/components/parameters/ShipmentId" }

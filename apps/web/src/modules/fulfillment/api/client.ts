@@ -981,3 +981,41 @@ export function closeDropShipRemainder(id: string, version: number, key: string)
 export function cancelDropShip(id: string, version: number, key: string): Promise<DropShip> {
   return command<DropShip>(`/drop-ships/${encodeURIComponent(id)}:cancel`, undefined, key, version);
 }
+
+export type ExceptionKind = "SLIP_POSTED_BEYOND_KEPT" | "PACKED_BEYOND_KEPT";
+export type ExceptionStatus = "OPEN" | "RESOLVED";
+
+/** A case on the warehouse supervisor's list (sales cancelled the remainder of an order). */
+export interface WarehouseException {
+  id: string;
+  legalEntityId: string;
+  kind: ExceptionKind;
+  status: ExceptionStatus;
+  orderId: string;
+  orderLineId: string;
+  shipmentId: string | null;
+  packingSlipId: string | null;
+  /** The quantity beyond what the order line keeps. */
+  qty: string;
+  /** The quantity the order line keeps. */
+  keptQty: string;
+  detail: string;
+  version: number;
+  createdAt: string;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+  resolutionNote: string | null;
+}
+
+export function listExceptions(filter: { status?: ExceptionStatus | ""; limit?: number } = {}, signal?: AbortSignal): Promise<WarehouseException[]> {
+  return items<WarehouseException>(`/exceptions${query(filter)}`, signal);
+}
+
+export function getException(id: string, signal?: AbortSignal): Promise<WarehouseException> {
+  return send<WarehouseException>(`/exceptions/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Closes an exception with the supervisor's note (WarehouseRelease); version is the one read. */
+export function resolveException(id: string, version: number, note: string, key: string): Promise<WarehouseException> {
+  return command<WarehouseException>(`/exceptions/${encodeURIComponent(id)}:resolve`, { note }, key, version);
+}

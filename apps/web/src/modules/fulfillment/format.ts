@@ -166,3 +166,8 @@ export const SHORT_PICK_REASONS: Record<string, string> = {
   QUALITY_HOLD: "Quality hold",
   OTHER: "Other",
 };
+
+export const EXCEPTION_KIND_LABELS: Record<string, string> = {
+  SLIP_POSTED_BEYOND_KEPT: "Shipped beyond the kept quantity",
+  PACKED_BEYOND_KEPT: "Packed beyond the kept quantity",
+};
