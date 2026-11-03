@@ -9,6 +9,7 @@ import {
   QUALITY_GRANT,
   SERVICE_NAME,
   serviceTokenSignerFromEnv,
+  TRANSPORT_GRANT,
 } from "../src/serviceToken.js";
 
 const vector = JSON.parse(
@@ -35,6 +36,7 @@ describe("service token", () => {
       payables: [...PAYABLES_GRANT],
       engineering: [...ENGINEERING_GRANT],
       quality: [...QUALITY_GRANT],
+      transport: [...TRANSPORT_GRANT],
     });
   });
 
@@ -44,6 +46,7 @@ describe("service token", () => {
     const claims = (token: string) => JSON.parse(Buffer.from(token.split(".")[0]!, "base64url").toString()) as { aud: string; duties: string[]; iss: string };
     expect(claims(signer.mintForEngineering(subject))).toMatchObject({ iss: SERVICE_NAME, aud: "engineering", duties: ["engineering.eco.workflow"] });
     expect(claims(signer.mintForQuality(subject))).toMatchObject({ iss: SERVICE_NAME, aud: "quality", duties: ["quality.capa.execute"] });
+    expect(claims(signer.mintForTransport(subject))).toMatchObject({ iss: SERVICE_NAME, aud: "transport", duties: ["transport.tender.execute"] });
     expect(claims(signer.mintForPayables(subject))).toMatchObject({ aud: "payables", duties: ["payment-run.execute"] });
   });
 

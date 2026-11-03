@@ -42,6 +42,9 @@ serviceMonitor:
 optimizer:
   url: ""
 
+serviceIdentity:
+  publicKeys: ""
+
 features:
   tmsEnabled: true
   landedCost: false

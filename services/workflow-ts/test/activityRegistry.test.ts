@@ -4,21 +4,21 @@ import { buildActivities } from "../src/activityRegistry.js";
 const seed = Buffer.alloc(32, 7).toString("base64");
 
 describe("worker activity registry", () => {
-  it("keeps the party activity and warns instead of crashing when no signing key is configured", () => {
+  it("registers nothing and warns instead of crashing when no signing key is configured", () => {
     const warn = vi.fn();
     const activities = buildActivities({}, () => "", warn);
-    expect(Object.keys(activities).sort()).toEqual(["decidePartyChange", "getTender", "startTender", "sweepExpiredTenders"]);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("not registered"), { reason: expect.stringContaining("required") });
+    expect(Object.keys(activities)).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("no activities are registered"), { reason: expect.stringContaining("required") });
   });
 
-  it("warns and keeps the party activity when the key is malformed", () => {
+  it("warns and registers nothing when the key is malformed", () => {
     const warn = vi.fn();
     const activities = buildActivities({ PASSAGE_SERVICE_SIGNING_KEY: "AAAA" }, () => "", warn);
-    expect(Object.keys(activities).sort()).toEqual(["decidePartyChange", "getTender", "startTender", "sweepExpiredTenders"]);
+    expect(Object.keys(activities)).toEqual([]);
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
-  it("registers the payment run, ECO and CAPA activities and tender activities next to the party one when a key is present", () => {
+  it("registers the payment run, ECO and CAPA and tender activities, and never the party decision, when a key is present", () => {
     const warn = vi.fn();
     const activities = buildActivities({ PASSAGE_SERVICE_SIGNING_KEY: seed }, () => "", warn);
     expect(Object.keys(activities).sort()).toEqual(
@@ -28,7 +28,6 @@ describe("worker activity registry", () => {
         "checkEffectiveness",
         "completePaymentRun",
         "completeStep",
-        "decidePartyChange",
         "failPaymentRun",
         "generatePaymentFile",
         "getTender",
@@ -42,6 +41,7 @@ describe("worker activity registry", () => {
         "sweepExpiredTenders",
       ],
     );
+    expect(activities).not.toHaveProperty("decidePartyChange");
     expect(warn).not.toHaveBeenCalled();
   });
 

@@ -17,6 +17,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/transport/internal/api"
 	"github.com/BenjaminSRussell/passage/services/transport/internal/optimizer"
 	"github.com/BenjaminSRussell/passage/services/transport/internal/store"
@@ -61,6 +62,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 		if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 			return fmt.Errorf("migrate: %w", err)
 		}
+	}
+	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
+		return err
 	}
 	a := api.New(store.New(pool))
 	if u := getenv("TMS_OPTIMIZER_URL"); u != "" {

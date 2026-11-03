@@ -42,6 +42,8 @@ const (
 	DutyApprove     = "TMS_RECONCILE_APPROVE"
 	DutyPlan        = "TMS_PLAN"
 	DutyTender      = "TMS_TENDER"
+	DutyTenderExec  = "transport.tender.execute"
+	workflowService = "workflow-ts"
 	DutyRespond     = "TMS_CARRIER_RESPOND"
 	DutyTrackIngest = "TMS_TRACK_INGEST"
 	DutyLandedCost  = "TMS_LANDED_COST"
@@ -55,6 +57,17 @@ const (
 	maxBody          = 4 << 20
 	prefix           = "/v1/transport"
 )
+
+func requireTenderOrWorkflow(next http.Handler) http.Handler {
+	human := authz.RequireDuty(DutyTender)(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if p, ok := tenant.FromContext(r.Context()); ok && p.Service == workflowService && p.HasDuty(DutyTenderExec) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		human.ServeHTTP(w, r)
+	})
+}
 
 // uuidRe accepts only the canonical lower-case form, so filters and keys
 // compare as stored.
@@ -152,10 +165,10 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyPlan)).Post(prefix+"/loads/{id}:dg-check", a.checkLoadDG)
 	r.With(authz.RequireDuty(DutyPlan)).Post(prefix+"/loads/{id}:screen", a.screenLoad)
 	r.With(authz.RequireDuty(DutyView)).Get(prefix+"/transfer-rules/{incoterm}", a.transferRule)
-	r.With(authz.RequireDuty(DutyTender)).Post(prefix+"/loads/{id}:tender", a.startTender)
+	r.With(requireTenderOrWorkflow).Post(prefix+"/loads/{id}:tender", a.startTender)
 	r.With(authz.RequireDuty(DutyTender)).Get(prefix+"/tenders", a.listTenders)
-	r.With(authz.RequireDuty(DutyTender)).Post(prefix+"/tenders:expire", a.expireTenders)
-	r.With(authz.RequireDuty(DutyTender)).Get(prefix+"/tenders/{id}", a.getTender)
+	r.With(requireTenderOrWorkflow).Post(prefix+"/tenders:expire", a.expireTenders)
+	r.With(requireTenderOrWorkflow).Get(prefix+"/tenders/{id}", a.getTender)
 	r.With(authz.RequireDuty(DutyRespond)).Post(prefix+"/tenders/{id}:respond", a.respondTender)
 	r.With(authz.RequireDuty(DutyTrackIngest)).Post(prefix+"/tracking-events", a.ingestTracking)
 	r.With(authz.RequireDuty(DutyView)).Get(prefix+"/tracking-events", a.listTracking)

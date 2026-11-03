@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/transport/internal/api"
 	"github.com/BenjaminSRussell/passage/services/transport/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/transport/internal/store"
@@ -272,6 +275,54 @@ func TestTenderRoutes_Duties(t *testing.T) {
 	for _, tc := range cases {
 		if rec := do(t, h, tc.method, tc.path, `{}`, tc.duty); rec.Code != http.StatusForbidden {
 			t.Fatalf("%s %s with %s = %d, want 403", tc.method, tc.path, tc.duty, rec.Code)
+		}
+	}
+}
+
+func doIssuedBy(t *testing.T, h http.Handler, issuer, method, path string, duties ...string) *httptest.ResponseRecorder {
+	t.Helper()
+	granted := map[string]struct{}{}
+	for _, d := range duties {
+		granted[d] = struct{}{}
+	}
+	principal := tenant.Principal{TenantID: "00000000-0000-0000-0000-000000000001", LegalEntityID: "00000000-0000-0000-0000-0000000000e1", UserID: "user-test", Duties: granted, Service: issuer}
+	req := httptest.NewRequest(method, path, strings.NewReader(`{}`)).WithContext(tenant.With(context.Background(), principal))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestTenderServiceDuty_ReachesOnlyTheWorkflowRoutes(t *testing.T) {
+	tender, _ := domain.NewTender(loadID, []string{carrierA}, 2*time.Hour)
+	tender.ID = tenderID
+	tender.Send(t0)
+	h := router(&fakeStore{tender: tender})
+	reach := []struct{ method, path string }{
+		{http.MethodPost, base + "/loads/" + loadID + ":tender"},
+		{http.MethodGet, base + "/tenders/" + tenderID},
+		{http.MethodPost, base + "/tenders:expire"},
+	}
+	for _, tc := range reach {
+		if rec := doIssuedBy(t, h, "workflow-ts", tc.method, tc.path, api.DutyTenderExec); rec.Code == http.StatusForbidden {
+			t.Fatalf("%s %s with the service duty = 403", tc.method, tc.path)
+		}
+		if rec := doIssuedBy(t, h, "", tc.method, tc.path, api.DutyTenderExec); rec.Code != http.StatusForbidden {
+			t.Fatalf("%s %s with the service duty and no workflow-ts issuer = %d, want 403", tc.method, tc.path, rec.Code)
+		}
+		if rec := doIssuedBy(t, h, "payables", tc.method, tc.path, api.DutyTenderExec); rec.Code != http.StatusForbidden {
+			t.Fatalf("%s %s with the service duty from another issuer = %d, want 403", tc.method, tc.path, rec.Code)
+		}
+	}
+	refuse := []struct{ method, path string }{
+		{http.MethodGet, base + "/tenders"},
+		{http.MethodPost, base + "/tenders/" + tenderID + ":respond"},
+		{http.MethodPost, base + "/tracking-events"},
+		{http.MethodPost, base + "/freight-bills"},
+	}
+	for _, tc := range refuse {
+		if rec := doIssuedBy(t, h, "workflow-ts", tc.method, tc.path, api.DutyTenderExec); rec.Code != http.StatusForbidden {
+			t.Fatalf("%s %s with the service duty = %d, want 403", tc.method, tc.path, rec.Code)
 		}
 	}
 }
