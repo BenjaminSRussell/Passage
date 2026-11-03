@@ -79,6 +79,7 @@ type BalanceQuery struct {
 	LegalEntityID string
 	LedgerID      string
 	Account       string
+	AccountTo     string
 	PeriodFrom    string
 	PeriodTo      string
 }
@@ -90,6 +91,19 @@ type Balance struct {
 }
 
 func (b Balance) Net() decimal.Decimal { return b.Debit.Sub(b.Credit) }
+
+type AccountBalance struct {
+	Account string
+	Debit   decimal.Decimal
+	Credit  decimal.Decimal
+}
+
+func (b AccountBalance) Net() decimal.Decimal { return b.Debit.Sub(b.Credit) }
+
+type AccountBalances struct {
+	Currency string
+	Rows     []AccountBalance
+}
 
 type Ledger interface {
 	Post(ctx context.Context, e Entry) (string, error)
@@ -341,7 +355,27 @@ func (c *Client) Reverse(ctx context.Context, r Reversal) (string, error) {
 }
 
 func (c *Client) Balance(ctx context.Context, q BalanceQuery) (Balance, error) {
-	query := url.Values{"ledger": {q.LedgerID}, "account_from": {q.Account}, "account_to": {q.Account}}
+	q.AccountTo = q.Account
+	set, err := c.Balances(ctx, q)
+	if err != nil {
+		return Balance{}, err
+	}
+	out := Balance{Currency: set.Currency}
+	for _, r := range set.Rows {
+		if r.Account == q.Account {
+			out.Debit, out.Credit = out.Debit.Add(r.Debit), out.Credit.Add(r.Credit)
+		}
+	}
+	return out, nil
+}
+
+// Balances returns one row per account from Account to AccountTo (Account alone when AccountTo is empty).
+func (c *Client) Balances(ctx context.Context, q BalanceQuery) (AccountBalances, error) {
+	to := q.AccountTo
+	if to == "" {
+		to = q.Account
+	}
+	query := url.Values{"ledger": {q.LedgerID}, "account_from": {q.Account}, "account_to": {to}}
 	if q.PeriodFrom != "" {
 		query.Set("period_from", q.PeriodFrom)
 	}
@@ -350,25 +384,22 @@ func (c *Client) Balance(ctx context.Context, q BalanceQuery) (Balance, error) {
 	}
 	raw, err := c.do(ctx, "balance", q.Account, http.MethodGet, balancesPath, query, nil, "", q.LegalEntityID, DutyBalanceRead)
 	if err != nil {
-		return Balance{}, err
+		return AccountBalances{}, err
 	}
 	var body balancesBody
 	if err := json.Unmarshal(raw, &body); err != nil || body.Currency == "" {
 		slog.ErrorContext(ctx, "ledger balance response unusable", "account", q.Account, "err", err, "correlationId", middleware.GetReqID(ctx))
-		return Balance{}, errors.New("ledger balance: response has no currency")
+		return AccountBalances{}, errors.New("ledger balance: response has no currency")
 	}
-	out := Balance{Currency: body.Currency}
+	out := AccountBalances{Currency: body.Currency}
 	for _, r := range body.Rows {
-		if r.Account != q.Account {
-			continue
-		}
 		d, derr := decimal.NewFromString(r.Debit)
 		cr, cerr := decimal.NewFromString(r.Credit)
 		if err := errors.Join(derr, cerr); err != nil {
-			slog.ErrorContext(ctx, "ledger balance amount unusable", "account", q.Account, "err", err, "correlationId", middleware.GetReqID(ctx))
-			return Balance{}, fmt.Errorf("ledger balance: %w", err)
+			slog.ErrorContext(ctx, "ledger balance amount unusable", "account", r.Account, "err", err, "correlationId", middleware.GetReqID(ctx))
+			return AccountBalances{}, fmt.Errorf("ledger balance: %w", err)
 		}
-		out.Debit, out.Credit = out.Debit.Add(d), out.Credit.Add(cr)
+		out.Rows = append(out.Rows, AccountBalance{Account: r.Account, Debit: d, Credit: cr})
 	}
 	return out, nil
 }

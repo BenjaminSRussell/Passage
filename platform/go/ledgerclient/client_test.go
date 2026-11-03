@@ -237,6 +237,22 @@ func TestBalance_SumsTheRequestedAccountOnly(t *testing.T) {
 	}
 }
 
+func TestBalances_ReturnsOneRowPerAccountOfTheRange(t *testing.T) {
+	var query map[string][]string
+	c, _ := newClientAs(t, "payables", func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.Query()
+		_, _ = w.Write([]byte(`{"currency":"EUR","rows":[{"account":"600100","debit":"100.00","credit":"40.25"},{"account":"600200","debit":"8","credit":"0"}]}`))
+	})
+	set, err := c.Balances(principalCtx(), ledgerclient.BalanceQuery{LegalEntityID: entityID, LedgerID: ledgerID, Account: "600000", AccountTo: "609999", PeriodFrom: "2026-09", PeriodTo: "2026-09"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if set.Currency != "EUR" || len(set.Rows) != 2 || !set.Rows[0].Net().Equal(decimal.RequireFromString("59.75")) || set.Rows[1].Account != "600200" ||
+		query["account_from"][0] != "600000" || query["account_to"][0] != "609999" {
+		t.Fatalf("balances %+v query %v", set, query)
+	}
+}
+
 func TestBalance_RejectsAnUnusableBody(t *testing.T) {
 	c, _ := newClientAs(t, "payables", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"currency":"USD","rows":[{"account":"1400","debit":"x","credit":"0"}]}`))

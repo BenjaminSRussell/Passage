@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/shopspring/decimal"
@@ -189,5 +190,47 @@ func (f *Fake) Balance(_ context.Context, q BalanceQuery) (Balance, error) {
 		out.Currency = "USD"
 		out.Debit, out.Credit = decimal.Zero, decimal.Zero
 	}
+	return out, nil
+}
+
+// Balances sums the posted lines of each account from q.Account to q.AccountTo (string order, as the ledger compares) per period range.
+func (f *Fake) Balances(_ context.Context, q BalanceQuery) (AccountBalances, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	to := q.AccountTo
+	if to == "" {
+		to = q.Account
+	}
+	sums := map[string]*AccountBalance{}
+	out := AccountBalances{}
+	for _, s := range f.entries {
+		period := s.PostingDate[:min(len(s.PostingDate), len("2006-01"))]
+		if s.LedgerID != q.LedgerID || (q.PeriodTo != "" && period > q.PeriodTo) || (q.PeriodFrom != "" && period < q.PeriodFrom) {
+			continue
+		}
+		out.Currency = s.Currency
+		for _, l := range s.Lines {
+			if l.Account < q.Account || l.Account > to {
+				continue
+			}
+			b := sums[l.Account]
+			if b == nil {
+				b = &AccountBalance{Account: l.Account}
+				sums[l.Account] = b
+			}
+			if l.Credit {
+				b.Credit = b.Credit.Add(l.Amount)
+			} else {
+				b.Debit = b.Debit.Add(l.Amount)
+			}
+		}
+	}
+	if out.Currency == "" {
+		out.Currency = "USD"
+	}
+	for _, b := range sums {
+		out.Rows = append(out.Rows, *b)
+	}
+	slices.SortFunc(out.Rows, func(a, b AccountBalance) int { return strings.Compare(a.Account, b.Account) })
 	return out, nil
 }

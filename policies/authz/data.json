@@ -2892,6 +2892,9 @@
     "revrec": {
       "ledger": ["ledger.entry.post", "ledger.balance.read"]
     },
+    "costacct": {
+      "ledger": ["ledger.balance.read"]
+    },
     "assets": {
       "ledger": ["ledger.entry.post", "ledger.balance.read"]
     },
