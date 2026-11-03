@@ -253,48 +253,29 @@ func TestBalances_ReturnsOneRowPerAccountOfTheRange(t *testing.T) {
 	}
 }
 
-func TestSourceBalances_WalksEveryPageAndSumsPerAccount(t *testing.T) {
-	var queries []map[string][]string
-	var duties []string
-	var verifier *tenant.ServiceVerifier
-	c, v := newClientAs(t, "costacct", func(w http.ResponseWriter, r *http.Request) {
-		claims, _ := verifier.Verify(r.Header.Get(tenant.HeaderServiceToken))
-		duties = claims.Duties
-		queries = append(queries, r.URL.Query())
-		if r.URL.Query().Get("cursor") == "" {
-			_, _ = w.Write([]byte(`{"items":[{"account":"600100","debitCredit":"C","amountAcct":"100.00"},{"account":"600100","debitCredit":"C","amountAcct":"5.50"}],"nextCursor":"7.2"}`))
-			return
+func TestBalances_ExcludeYearEndClosingSendsTheOptionAndNeedsTheEcho(t *testing.T) {
+	var query map[string][]string
+	echoed := true
+	c, _ := newClientAs(t, "costacct", func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.Query()
+		body := `{"currency":"USD","excludesYearEndClosing":true,"rows":[{"account":"600100","debit":"7.00","credit":"0"}]}`
+		if !echoed {
+			body = `{"currency":"USD","rows":[{"account":"600100","debit":"7.00","credit":"0"}]}`
 		}
-		_, _ = w.Write([]byte(`{"items":[{"account":"600100","debitCredit":"D","amountAcct":"1.00"},{"account":"300000","debitCredit":"D","amountAcct":"104.50"}]}`))
+		_, _ = w.Write([]byte(body))
 	})
-	verifier = v
-	rows, err := c.SourceBalances(principalCtx(), ledgerclient.SourceQuery{LegalEntityID: entityID, LedgerID: ledgerID, SourceType: "year_end_closing",
-		AccountFrom: "600000", AccountTo: "609999", DateFrom: "2026-12-01", DateTo: "2026-12-31"})
-	if err != nil {
-		t.Fatal(err)
+	q := ledgerclient.BalanceQuery{LegalEntityID: entityID, LedgerID: ledgerID, Account: "600000", AccountTo: "609999", ExcludeYearEndClosing: true}
+	set, err := c.Balances(principalCtx(), q)
+	if err != nil || !set.ExcludedYearEndClosing || query["exclude_year_end_closing"][0] != "true" {
+		t.Fatalf("balances %+v query %v err %v", set, query, err)
 	}
-	slices.SortFunc(rows, func(a, b ledgerclient.AccountBalance) int { return strings.Compare(a.Account, b.Account) })
-	if len(rows) != 2 || rows[1].Account != "600100" || !rows[1].Net().Equal(decimal.RequireFromString("-104.50")) || !rows[0].Net().Equal(decimal.RequireFromString("104.50")) {
-		t.Fatalf("rows %+v", rows)
+	echoed = false
+	if _, err := c.Balances(principalCtx(), q); !errors.Is(err, ledgerclient.ErrExclusionNotApplied) {
+		t.Fatalf("an old ledger that ignores the option must fail closed, got %v", err)
 	}
-	if len(queries) != 2 || queries[1]["cursor"][0] != "7.2" || queries[0]["source_type"][0] != "year_end_closing" || queries[0]["date_from"][0] != "2026-12-01" ||
-		queries[0]["account_to"][0] != "609999" || !slices.Equal(duties, []string{ledgerclient.DutyEntryLookup}) {
-		t.Fatalf("queries %v duties %v", queries, duties)
-	}
-}
-
-func TestSourceBalances_FailsInsteadOfReturningAPartialSum(t *testing.T) {
-	endless, _ := newClientAs(t, "costacct", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"items":[{"account":"600100","debitCredit":"C","amountAcct":"1.00"}],"nextCursor":"1.1"}`))
-	})
-	if _, err := endless.SourceBalances(principalCtx(), ledgerclient.SourceQuery{LegalEntityID: entityID, LedgerID: ledgerID, SourceType: "year_end_closing"}); err == nil {
-		t.Fatal("an endless result must fail")
-	}
-	bad, _ := newClientAs(t, "costacct", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"items":[{"account":"600100","debitCredit":"X","amountAcct":"1.00"}]}`))
-	})
-	if _, err := bad.SourceBalances(principalCtx(), ledgerclient.SourceQuery{LegalEntityID: entityID, LedgerID: ledgerID, SourceType: "year_end_closing"}); err == nil {
-		t.Fatal("an unusable line must fail")
+	q.ExcludeYearEndClosing = false
+	if _, err := c.Balances(principalCtx(), q); err != nil || query["exclude_year_end_closing"] != nil {
+		t.Fatalf("without the option nothing is sent or needed: %v %v", query, err)
 	}
 }
 

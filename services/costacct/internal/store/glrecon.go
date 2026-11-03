@@ -8,7 +8,6 @@ import (
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5"
-	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/costacct/internal/domain"
@@ -20,14 +19,11 @@ const (
 	CodeLedgerUnavailable = "CST-0031"
 	CodeLedgerNotMapped   = "CST-0032"
 	CodeLedgerForeign     = "CST-0033"
-
-	YearEndClosingSource = "year_end_closing"
 )
 
-// GLBalances reads account balances, the year-end closing lines and the ledger owner from the general ledger.
+// GLBalances reads account balances and the ledger owner from the general ledger.
 type GLBalances interface {
 	Balances(ctx context.Context, q ledgerclient.BalanceQuery) (ledgerclient.AccountBalances, error)
-	SourceBalances(ctx context.Context, q ledgerclient.SourceQuery) ([]ledgerclient.AccountBalance, error)
 	LegalEntity(ctx context.Context, legalEntityID, ledgerID string) (string, error)
 }
 
@@ -42,6 +38,9 @@ type GLReconcileRequest struct {
 // ReconcileToGL reads the period's balance of every primary element's account range from the general ledger and compares it
 // with Σ primary cost entries per element (FR-38.11, AC-38.6). The journal side comes from the ledger only.
 func (s *Postgres) ReconcileToGL(ctx context.Context, gl GLBalances, in GLReconcileRequest) (domain.Reconciliation, error) {
+	if _, err := time.Parse("2006-01", in.Period); err != nil {
+		return domain.Reconciliation{}, problem(http.StatusBadRequest, "COM-0001", "period must be YYYY-MM")
+	}
 	var ranges []domain.AccountRange
 	err := s.read(ctx, func(tx pgx.Tx, tenantID string) error {
 		var err error
@@ -78,38 +77,29 @@ func checkLedgerOwner(ctx context.Context, gl GLBalances, legalEntityID, ledgerI
 	return nil
 }
 
-// ledgerJournal reads one balance call over the span of the primary ranges and takes the year-end closing lines out of it, so a
-// fiscal year-end month compares the period's own movements and not the entry that closes the profit and loss accounts. Accounts
-// the ranges do not map stay in the result for Reconcile to list.
+// ledgerJournal reads one balance call over the span of the primary ranges and asks the ledger to leave out the year-end closing
+// entries its close service posted and their reversals, so a fiscal year-end month compares the period's own movements. The
+// client fails when the ledger does not confirm it applied the option. Accounts the ranges do not map stay in the result for
+// Reconcile to list.
 func ledgerJournal(ctx context.Context, gl GLBalances, in GLReconcileRequest, ranges []domain.AccountRange) ([]domain.JournalBalance, string, error) {
 	from, to := ranges[0].From, ranges[0].To
 	for _, r := range ranges {
 		from, to = min(from, r.From), max(to, r.To)
 	}
 	set, err := gl.Balances(ctx, ledgerclient.BalanceQuery{LegalEntityID: in.LegalEntityID, LedgerID: in.LedgerID,
-		Account: from, AccountTo: to, PeriodFrom: in.Period, PeriodTo: in.Period})
+		Account: from, AccountTo: to, PeriodFrom: in.Period, PeriodTo: in.Period, ExcludeYearEndClosing: true})
 	if err != nil {
 		return nil, "", ledgerProblem(ctx, err)
+	}
+	if !set.ExcludedYearEndClosing {
+		return nil, "", ledgerProblem(ctx, ledgerclient.ErrExclusionNotApplied)
 	}
 	if in.Currency != "" && set.Currency != in.Currency {
 		return nil, "", problem(http.StatusUnprocessableEntity, CodeLedgerCurrency, "the ledger reports "+set.Currency+", not "+in.Currency)
 	}
-	first, err := time.Parse("2006-01", in.Period)
-	if err != nil {
-		return nil, "", problem(http.StatusBadRequest, "COM-0001", "period must be YYYY-MM")
-	}
-	closing, err := gl.SourceBalances(ctx, ledgerclient.SourceQuery{LegalEntityID: in.LegalEntityID, LedgerID: in.LedgerID, SourceType: YearEndClosingSource,
-		AccountFrom: from, AccountTo: to, DateFrom: first.Format(time.DateOnly), DateTo: first.AddDate(0, 1, -1).Format(time.DateOnly)})
-	if err != nil {
-		return nil, "", ledgerProblem(ctx, err)
-	}
-	closed := map[string]decimal.Decimal{}
-	for _, c := range closing {
-		closed[c.Account] = closed[c.Account].Add(c.Net())
-	}
 	journal := make([]domain.JournalBalance, 0, len(set.Rows))
 	for _, row := range set.Rows {
-		journal = append(journal, domain.JournalBalance{MainAccount: row.Account, Amount: row.Net().Sub(closed[row.Account])})
+		journal = append(journal, domain.JournalBalance{MainAccount: row.Account, Amount: row.Net()})
 	}
 	return journal, set.Currency, nil
 }

@@ -28,26 +28,27 @@ const (
 	DutyBalanceRead = "ledger.balance.read"
 	DutyLedgerRead  = "ledger.ledger.lookup"
 	DutyPostClosed  = "ledger.period.postclosed"
-	DutyEntryLookup = "ledger.entry.lookup"
 
-	audience        = "ledger"
-	linesPath       = "/v1/ledger/journal-lines"
-	sourcePageSize  = 200
-	maxSourcePages  = 50
-	ledgersPath     = "/v1/ledger/ledgers/"
-	entriesPath     = "/v1/ledger/journal-entries"
-	balancesPath    = "/v1/ledger/balances"
-	maxResponseSize = 1 << 20
-	sideDebit       = "D"
-	sideCredit      = "C"
+	audience = "ledger"
+
+	CloseService               = "close"
+	YearEndClosingSourceType   = "year_end_closing"
+	excludeYearEndClosingParam = "exclude_year_end_closing"
+	ledgersPath                = "/v1/ledger/ledgers/"
+	entriesPath                = "/v1/ledger/journal-entries"
+	balancesPath               = "/v1/ledger/balances"
+	maxResponseSize            = 1 << 20
+	sideDebit                  = "D"
+	sideCredit                 = "C"
 )
 
 var (
-	ErrUnsigned    = errors.New("ledger: posting needs a service signing key; the end user's headers are never forwarded for a journal")
-	ErrNoPrincipal = errors.New("ledger: no principal in context")
-	ErrNoDuty      = errors.New("ledger: a request must name the duties it is signed with; an empty list would sign the whole grant")
-	ErrUnbalanced  = errors.New("ledger: entry lines do not balance")
-	ErrEmptyEntry  = errors.New("ledger: entry needs at least two lines with positive amounts, an account and a currency")
+	ErrUnsigned            = errors.New("ledger: posting needs a service signing key; the end user's headers are never forwarded for a journal")
+	ErrNoPrincipal         = errors.New("ledger: no principal in context")
+	ErrNoDuty              = errors.New("ledger: a request must name the duties it is signed with; an empty list would sign the whole grant")
+	ErrUnbalanced          = errors.New("ledger: entry lines do not balance")
+	ErrExclusionNotApplied = errors.New("ledger balance: the ledger did not confirm excluding the year-end closing entries")
+	ErrEmptyEntry          = errors.New("ledger: entry needs at least two lines with positive amounts, an account and a currency")
 )
 
 type Line struct {
@@ -86,6 +87,9 @@ type BalanceQuery struct {
 	AccountTo     string
 	PeriodFrom    string
 	PeriodTo      string
+	// ExcludeYearEndClosing asks the ledger to leave out the year-end closing entries posted by the close service and their
+	// reversals; Balances fails when the ledger does not confirm it applied the option.
+	ExcludeYearEndClosing bool
 }
 
 type Balance struct {
@@ -105,8 +109,9 @@ type AccountBalance struct {
 func (b AccountBalance) Net() decimal.Decimal { return b.Debit.Sub(b.Credit) }
 
 type AccountBalances struct {
-	Currency string
-	Rows     []AccountBalance
+	Currency               string
+	ExcludedYearEndClosing bool
+	Rows                   []AccountBalance
 }
 
 type Ledger interface {
@@ -248,8 +253,9 @@ func (r entryResult) id() string {
 }
 
 type balancesBody struct {
-	Currency string `json:"currency"`
-	Rows     []struct {
+	Currency               string `json:"currency"`
+	ExcludesYearEndClosing bool   `json:"excludesYearEndClosing"`
+	Rows                   []struct {
 		Account string `json:"account"`
 		Debit   string `json:"debit"`
 		Credit  string `json:"credit"`
@@ -386,6 +392,9 @@ func (c *Client) Balances(ctx context.Context, q BalanceQuery) (AccountBalances,
 	if q.PeriodTo != "" {
 		query.Set("period_to", q.PeriodTo)
 	}
+	if q.ExcludeYearEndClosing {
+		query.Set(excludeYearEndClosingParam, "true")
+	}
 	raw, err := c.do(ctx, "balance", q.Account, http.MethodGet, balancesPath, query, nil, "", q.LegalEntityID, DutyBalanceRead)
 	if err != nil {
 		return AccountBalances{}, err
@@ -395,7 +404,11 @@ func (c *Client) Balances(ctx context.Context, q BalanceQuery) (AccountBalances,
 		slog.ErrorContext(ctx, "ledger balance response unusable", "account", q.Account, "err", err, "correlationId", middleware.GetReqID(ctx))
 		return AccountBalances{}, errors.New("ledger balance: response has no currency")
 	}
-	out := AccountBalances{Currency: body.Currency}
+	if q.ExcludeYearEndClosing && !body.ExcludesYearEndClosing {
+		slog.ErrorContext(ctx, "ledger did not apply excludeYearEndClosing", "account", q.Account, "correlationId", middleware.GetReqID(ctx))
+		return AccountBalances{}, ErrExclusionNotApplied
+	}
+	out := AccountBalances{Currency: body.Currency, ExcludedYearEndClosing: body.ExcludesYearEndClosing}
 	for _, r := range body.Rows {
 		d, derr := decimal.NewFromString(r.Debit)
 		cr, cerr := decimal.NewFromString(r.Credit)
@@ -404,79 +417,6 @@ func (c *Client) Balances(ctx context.Context, q BalanceQuery) (AccountBalances,
 			return AccountBalances{}, fmt.Errorf("ledger balance: %w", err)
 		}
 		out.Rows = append(out.Rows, AccountBalance{Account: r.Account, Debit: d, Credit: cr})
-	}
-	return out, nil
-}
-
-// SourceQuery selects the posted lines of one source type (for example year_end_closing) in an account range and a posting date range.
-type SourceQuery struct {
-	LegalEntityID string
-	LedgerID      string
-	SourceType    string
-	AccountFrom   string
-	AccountTo     string
-	DateFrom      string
-	DateTo        string
-}
-
-type linesBody struct {
-	Items []struct {
-		Account     string `json:"account"`
-		DebitCredit string `json:"debitCredit"`
-		AmountAcct  string `json:"amountAcct"`
-	} `json:"items"`
-	NextCursor string `json:"nextCursor"`
-}
-
-// SourceBalances sums, per account, the lines of one source type in the query's ranges. It walks every page and fails when
-// the result passes maxSourcePages pages, so a partial sum is never returned.
-func (c *Client) SourceBalances(ctx context.Context, q SourceQuery) ([]AccountBalance, error) {
-	sums := map[string]*AccountBalance{}
-	cursor := ""
-	for page := 0; ; page++ {
-		if page == maxSourcePages {
-			return nil, fmt.Errorf("ledger lines: more than %d pages of %s lines", maxSourcePages, q.SourceType)
-		}
-		query := url.Values{"ledger": {q.LedgerID}, "source_type": {q.SourceType}, "limit": {fmt.Sprint(sourcePageSize)}}
-		for key, v := range map[string]string{"account_from": q.AccountFrom, "account_to": q.AccountTo, "date_from": q.DateFrom, "date_to": q.DateTo, "cursor": cursor} {
-			if v != "" {
-				query.Set(key, v)
-			}
-		}
-		raw, err := c.do(ctx, "lines", q.SourceType, http.MethodGet, linesPath, query, nil, "", q.LegalEntityID, DutyEntryLookup)
-		if err != nil {
-			return nil, err
-		}
-		var body linesBody
-		if err := json.Unmarshal(raw, &body); err != nil {
-			slog.ErrorContext(ctx, "ledger lines response unusable", "err", err, "correlationId", middleware.GetReqID(ctx))
-			return nil, errors.New("ledger lines: response unusable")
-		}
-		for _, l := range body.Items {
-			amount, err := decimal.NewFromString(l.AmountAcct)
-			if err != nil || (l.DebitCredit != sideDebit && l.DebitCredit != sideCredit) {
-				slog.ErrorContext(ctx, "ledger line unusable", "account", l.Account, "err", err, "correlationId", middleware.GetReqID(ctx))
-				return nil, errors.New("ledger lines: line unusable")
-			}
-			b := sums[l.Account]
-			if b == nil {
-				b = &AccountBalance{Account: l.Account}
-				sums[l.Account] = b
-			}
-			if l.DebitCredit == sideDebit {
-				b.Debit = b.Debit.Add(amount)
-			} else {
-				b.Credit = b.Credit.Add(amount)
-			}
-		}
-		if body.NextCursor == "" {
-			break
-		}
-		cursor = body.NextCursor
-	}
-	out := make([]AccountBalance, 0, len(sums))
-	for _, b := range sums {
-		out = append(out, *b)
 	}
 	return out, nil
 }

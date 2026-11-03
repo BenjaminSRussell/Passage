@@ -366,6 +366,12 @@ func voucherOf(ledgerCode string, seq int64) string {
 	return fmt.Sprintf("%s-%07d", ledgerCode, seq)
 }
 
+// postingService is the verified issuer of the service token the posting came with; empty for an end user.
+func postingService(ctx context.Context) string {
+	p, _ := principalOf(ctx)
+	return p.Service
+}
+
 // writeEntry inserts an entry, its lines, new dimension combinations and the
 // balance projection deltas, and enqueues journal.posted. It runs inside the
 // caller's transaction, after the ledger row lock.
@@ -385,12 +391,12 @@ func writeEntry(ctx context.Context, tx pgx.Tx, tenantID string, ne newEntry) (E
 	}
 	if _, err := tx.Exec(ctx, `insert into journal_entry (tenant_id, id, legal_entity_id, ledger_id, document_id, voucher, posting_sequence, posting_date, period_key,
 			document_date, description, source_system, source_type, source_id, source_uri, idempotency_key, payload_hash, reversal_of_entry_id, posted_by, trace_id,
-			reason_code, reason_comment, is_realignment, realignment_run_id)
+			reason_code, reason_comment, is_realignment, realignment_run_id, posted_by_service)
 		values ($1, $2, $3, $4, $5, $6, $7, $8::text::date, $9, nullif($10::text, '')::date, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-			nullif($21::text, ''), nullif($22::text, ''), $23::text <> '', nullif($23::text, '')::uuid)`,
+			nullif($21::text, ''), nullif($22::text, ''), $23::text <> '', nullif($23::text, '')::uuid, nullif($24::text, ''))`,
 		tenantID, entryID, l.LegalEntityID, l.ID, ne.documentID, voucher, seq, postingDate, period, docDate, ne.description,
 		ne.source.System, ne.source.Type, ne.source.ID, ne.source.URI, ne.key, ne.hash, ne.reversalOf, ne.actor, ne.traceID,
-		ne.reasonCode, ne.reasonComment, ne.realignmentRunID); err != nil {
+		ne.reasonCode, ne.reasonComment, ne.realignmentRunID, postingService(ctx)); err != nil {
 		return Entry{}, err
 	}
 

@@ -40,11 +40,18 @@ func (s *Postgres) TrialBalance(ctx context.Context, f BalanceFilter) (TrialBala
 			return err
 		}
 		out.Currency = l.Currency
+		out.ExcludesYearEndClosing = f.ExcludeYearEndClosing
 		if err := tx.QueryRow(ctx, `select quantity_rebuild_pending from ledger where tenant_id = $1 and id = $2`,
 			p.TenantID, f.LedgerID).Scan(&out.QuantitiesPending); err != nil {
 			return err
 		}
 		args := []any{p.TenantID, f.LedgerID, f.PeriodFrom, f.PeriodTo, f.AccountFrom, f.AccountTo}
+		var closing map[string]closingTotals
+		if f.ExcludeYearEndClosing {
+			if closing, err = yearEndClosingTotals(ctx, tx, args); err != nil {
+				return err
+			}
+		}
 		arg := func(v any) string {
 			args = append(args, v)
 			return "$" + strconv.Itoa(len(args))
@@ -101,6 +108,9 @@ func (s *Postgres) TrialBalance(ctx context.Context, f BalanceFilter) (TrialBala
 				}
 			}
 			dv, cv, nv := decimal.RequireFromString(d), decimal.RequireFromString(c), decimal.RequireFromString(n)
+			if x, ok := closing[r.Account]; ok {
+				dv, cv, nv, r.LineCount = dv.Sub(x.debit), cv.Sub(x.credit), nv.Sub(x.debit).Add(x.credit), r.LineCount-x.lines
+			}
 			debit, credit, net = debit.Add(dv), credit.Add(cv), net.Add(nv)
 			r.Debit, r.Credit, r.Net = dv.StringFixed(minor), cv.StringFixed(minor), nv.StringFixed(minor)
 			out.Rows = append(out.Rows, r)
@@ -117,6 +127,46 @@ func (s *Postgres) TrialBalance(ctx context.Context, f BalanceFilter) (TrialBala
 		return nil
 	})
 	return out, err
+}
+
+type closingTotals struct {
+	debit, credit decimal.Decimal
+	lines         int64
+}
+
+// yearEndClosingTotals sums per account the lines of the entries the close service posted as year-end closings and of the
+// entries that reverse them, within the period and account range args[2:6]. The service is the verified token issuer
+// recorded in posted_by_service, so an entry another caller tags year_end_closing is not left out.
+func yearEndClosingTotals(ctx context.Context, tx pgx.Tx, args []any) (map[string]closingTotals, error) {
+	rows, err := tx.Query(ctx, `select a.account_number,
+			coalesce(sum(case when l.debit_credit = 'D' and not l.negative_posting then l.amount_acct
+				when l.debit_credit = 'C' and l.negative_posting then -l.amount_acct else 0 end), 0)::text,
+			coalesce(sum(case when l.debit_credit = 'C' and not l.negative_posting then l.amount_acct
+				when l.debit_credit = 'D' and l.negative_posting then -l.amount_acct else 0 end), 0)::text,
+			count(*)
+		from journal_line l join journal_entry e on e.tenant_id = l.tenant_id and e.id = l.entry_id
+			join main_account a on a.tenant_id = l.tenant_id and a.id = l.main_account_id
+		where l.tenant_id = $1 and e.ledger_id = $2
+			and ($3::text = '' or e.period_key >= $3::text) and ($4::text = '' or e.period_key <= $4::text)
+			and ($5::text = '' or a.account_number >= $5::text) and ($6::text = '' or a.account_number <= $6::text)
+			and (e.id in (select c.id from journal_entry c where c.tenant_id = $1 and c.ledger_id = $2 and c.posted_by_service = $7 and c.source_type = $8)
+				or e.reversal_of_entry_id in (select c.id from journal_entry c where c.tenant_id = $1 and c.ledger_id = $2 and c.posted_by_service = $7 and c.source_type = $8))
+		group by a.account_number`, append(args[:6:6], ClosePostingService, YearEndClosingSourceType)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]closingTotals{}
+	for rows.Next() {
+		var account, d, c string
+		var t closingTotals
+		if err := rows.Scan(&account, &d, &c, &t.lines); err != nil {
+			return nil, err
+		}
+		t.debit, t.credit = decimal.RequireFromString(d), decimal.RequireFromString(c)
+		out[account] = t
+	}
+	return out, rows.Err()
 }
 
 // attachQuantities adds the statistical quantity totals (BR-11.2) to the trial balance rows and
