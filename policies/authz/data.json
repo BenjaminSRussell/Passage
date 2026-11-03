@@ -34,6 +34,7 @@
     "Send notifications": {"permissions": [{"resource": "/v1/notify/messages{,/**}", "methods": ["POST"]}]},
     "View number sequences": {"permissions": [{"resource": "/v1/numbering{,/**}", "methods": ["GET"]}]},
     "Maintain number sequences": {"permissions": [{"resource": "/v1/numbering{,/**}", "methods": ["GET", "POST"]}]},
+    "fulfillment.order.sync": {"flag": true, "permissions": []},
     "numbering.write": {"permissions": [
       {"resource": "/v1/numbering/sequences", "methods": ["POST"]},
       {"resource": "/v1/numbering/sequences/*/next", "methods": ["POST"]}
@@ -2888,6 +2889,7 @@
     }
   },
   "service_principals": {
+    "fulfillment-order": ["fulfillment.order.sync"],
     "integration-hub": ["migration.outbound.render", "migration.xref.record"],
     "migration-loader": ["party.import.write", "product.import.write", "receivables.import.write"],
     "receiving-erasure": ["compliance.legal_hold.check"],
