@@ -223,6 +223,13 @@ type RegistrationPostedData struct {
 	// a clock-out the auto clock-out sweep wrote (D2h), production-finished on a job-stop the server
 	// wrote when production finished the job's operation (FR-25.3).
 	Flags []string `json:"flags"`
+	// OrderRef and OperationRef are the job's production order id and operation
+	// number (text, no leading zeros) when the registration names a known job.
+	OrderRef     string `json:"orderRef,omitempty"`
+	OperationRef string `json:"operationRef,omitempty"`
+	// CostRate is the worker's hourly rate when it is greater than zero; the
+	// w21 job-card consumer uses it over the resource labor rate (BR-25.9).
+	CostRate *decimal.Decimal `json:"costRate,omitempty"`
 }
 
 // PayLineData is one pay line inside a payday approval.

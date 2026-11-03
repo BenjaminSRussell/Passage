@@ -147,6 +147,9 @@ type PostRequest struct {
 	Actor               string
 	TraceID             string
 	IdempotencyKey      string
+	// LaborRate, when positive, values hours lines instead of the operation's
+	// resource rate (BR-25.9: the shop-floor worker's costRate).
+	LaborRate *decimal.Decimal
 }
 
 // CostSummary is the cost read of an order (FR-21.11): planned rows from the
@@ -562,7 +565,7 @@ func (s *Postgres) PostJournal(ctx context.Context, r PostRequest) (Journal, boo
 			}
 			h.status = domain.Started
 		}
-		opts := postOptions{overDuty: r.OverConsumptionDuty, overPct: prm.OverConsumptionPct, rafTolerancePct: prm.RAFTolerancePct, actor: r.Actor, key: r.IdempotencyKey}
+		opts := postOptions{overDuty: r.OverConsumptionDuty, overPct: prm.OverConsumptionPct, rafTolerancePct: prm.RAFTolerancePct, actor: r.Actor, key: r.IdempotencyKey, laborRate: r.LaborRate}
 		if err := postJournal(ctx, tx, p.TenantID, &h, &j, opts); err != nil {
 			return err
 		}
@@ -603,6 +606,7 @@ type postOptions struct {
 	rafTolerancePct decimal.Decimal
 	actor           string
 	key             string
+	laborRate       *decimal.Decimal
 }
 
 // postJournal posts j on the locked order h: it checks the posting date
@@ -689,8 +693,12 @@ func postJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, 
 					return err
 				}
 			}
-			l.UnitCost = op.LaborRate
-			l.Amount = domain.RoundMoney(l.Qty.Mul(op.LaborRate), h.currency)
+			labor := op.LaborRate
+			if o.laborRate != nil && o.laborRate.IsPositive() {
+				labor = *o.laborRate
+			}
+			l.UnitCost = labor
+			l.Amount = domain.RoundMoney(l.Qty.Mul(labor), h.currency)
 			l.OverheadAmount = domain.RoundMoney(l.Qty.Mul(op.OverheadRate), h.currency)
 			postings = append(postings, domain.HoursPostings(profile, l.Amount, l.OverheadAmount)...)
 		case KindReceipt:

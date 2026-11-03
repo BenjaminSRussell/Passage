@@ -143,6 +143,24 @@ func enqueue(ctx context.Context, tx pgx.Tx, aggregateType, aggregateID, eventTy
 	return outbox.Enqueue(ctx, tx, aggregateType, aggregateID, evt)
 }
 
+// enqueuePosted writes registration.posted with the job's order and the worker's
+// cost rate when those rows exist, so w21 can post the job-card (FR-25.4, BR-25.9).
+func enqueuePosted(ctx context.Context, tx pgx.Tx, tenantID string, data sfevents.RegistrationPostedData) error {
+	var rate string
+	if err := tx.QueryRow(ctx, `select cost_rate::text from worker where tenant_id = $1 and id = $2`, tenantID, data.WorkerID).Scan(&rate); err == nil {
+		if r, err := decimal.NewFromString(rate); err == nil && r.IsPositive() {
+			data.CostRate = &r
+		}
+	}
+	if data.JobID != nil {
+		var orderRef, opRef string
+		if err := tx.QueryRow(ctx, `select order_ref, operation_ref from shop_job where tenant_id = $1 and id = $2`, tenantID, *data.JobID).Scan(&orderRef, &opRef); err == nil {
+			data.OrderRef, data.OperationRef = orderRef, opRef
+		}
+	}
+	return enqueue(ctx, tx, "registration", data.RegistrationID, sfevents.RegistrationPosted, tenantID, data)
+}
+
 func workerNotFound() error {
 	return httpx.NewProblem(http.StatusUnprocessableEntity, CodeWorkerNotFound, "worker not found")
 }
@@ -230,7 +248,7 @@ func (s *Postgres) CreateRegistrations(ctx context.Context, items []Registration
 				return mapForeignKey(err)
 			}
 			res := newResult(in.ID, StatusAccepted, flags)
-			if err := enqueue(ctx, tx, "registration", in.ID, sfevents.RegistrationPosted, p.TenantID, sfevents.RegistrationPostedData{
+			if err := enqueuePosted(ctx, tx, p.TenantID, sfevents.RegistrationPostedData{
 				RegistrationID: in.ID, WorkerID: in.WorkerID, Kind: in.Kind, JobID: in.JobID, BundleID: in.BundleID, AbsenceCodeID: in.AbsenceCodeID, Hours: in.Hours,
 				QtyGood: in.QtyGood, QtyScrap: in.QtyScrap, Offline: in.Offline, Flags: flags,
 			}); err != nil {

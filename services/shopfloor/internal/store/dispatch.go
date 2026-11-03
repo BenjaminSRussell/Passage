@@ -461,7 +461,7 @@ func insertServerStop(ctx context.Context, tx pgx.Tx, tenantID, workerID string,
 		return AutoStop{}, err
 	}
 	jobID := m.JobID
-	return stop, enqueue(ctx, tx, "registration", stop.RegistrationID, sfevents.RegistrationPosted, tenantID, sfevents.RegistrationPostedData{
+	return stop, enqueuePosted(ctx, tx, tenantID, sfevents.RegistrationPostedData{
 		RegistrationID: stop.RegistrationID, WorkerID: workerID, Kind: KindJobStop, JobID: &jobID, BundleID: stop.BundleID,
 		Hours: &hours, QtyGood: decimal.Zero, QtyScrap: decimal.Zero, Flags: stop.Flags,
 	})

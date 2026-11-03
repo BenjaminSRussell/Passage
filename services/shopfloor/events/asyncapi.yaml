@@ -808,6 +808,18 @@ components:
             operation while the start (or a start of its bundle) was open, with
             `job-finished-conflict` too when the start began after the finish.
             Empty otherwise.
+        orderRef:
+          type: string
+          description: The job's production order id when the registration names a known job (FR-25.4). Omitted on punches.
+        operationRef:
+          type: string
+          description: The job's operation number as stored when the registration names a known job.
+        costRate:
+          type: string
+          description: The worker's hourly cost rate when greater than zero; the w21 job-card consumer uses it over the resource labor rate (BR-25.9).
+        costRateCurrency:
+          type: string
+          description: Currency of costRate (the worker's currency); the consumer uses costRate only when it equals the order currency.
     RegistrationCorrectedData:
       type: object
       required: [registrationId, workerId, kind, jobId, oldStartedAt, oldStoppedAt, newStartedAt, newStoppedAt, hours, reason, correctedBy]
