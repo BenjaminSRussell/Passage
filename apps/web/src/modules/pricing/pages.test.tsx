@@ -489,10 +489,11 @@ describe("form validation", () => {
   });
 
   it("mirrors the resolve validation for simulations", () => {
-    const header = { legalEntityId: LE, customerId: "C1", customerGroupId: "", currency: "USD", pricingDate: "2027-03-10" };
+    const header = { legalEntityId: LE, customerId: "C1", customerGroupId: "", currency: "USD", pricingDate: "2027-03-10", salesChannel: "", procedure: "" };
     expect(validateSimulation(header, [{ productId: "P1", productGroupId: "", unit: "EA", quantity: "2.5" }])).toEqual({});
     expect(Object.keys(validateSimulation({ ...header, legalEntityId: "x", currency: "us" }, [{ productId: "", productGroupId: "", unit: "", quantity: "-1" }])).sort()).toEqual(
       ["currency", "legalEntityId", "lines[0].productId", "lines[0].quantity", "lines[0].unit"],
     );
+    expect(Object.keys(validateSimulation({ ...header, salesChannel: "web", procedure: "ax std" }, [{ productId: "P1", productGroupId: "", unit: "EA", quantity: "1" }])).sort()).toEqual(["procedure", "salesChannel"]);
   });
 });

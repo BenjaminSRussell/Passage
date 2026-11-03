@@ -37,7 +37,22 @@ const (
 	ContractClaimApproved = "dev.passage.pricing.contractclaim.approved.v1"
 	// Pricing parameters (PRD 5.26.13): a legal entity's parameters were changed.
 	ParametersChanged = "dev.passage.pricing.parameters.changed.v1"
+	// Procedure determination (PRD 5.26.13): the procedure a legal entity and sales channel
+	// price with was set or cleared.
+	ProcedureAssignmentChanged = "dev.passage.pricing.procedureassignment.changed.v1"
 )
+
+// ProcedureAssignmentChangedData is the payload of procedureassignment.changed. Cleared is
+// true when the assignment was removed (the channel falls back to the legal entity's default,
+// or to the reference order when there is none).
+type ProcedureAssignmentChangedData struct {
+	LegalEntityID string `json:"legal_entity_id"`
+	SalesChannel  string `json:"sales_channel"`
+	ProcedureName string `json:"procedure_name"`
+	Cleared       bool   `json:"cleared"`
+	Version       int    `json:"version"`
+	UpdatedBy     string `json:"updated_by"`
+}
 
 // ParametersChangedData is the payload of parameters.changed.
 type ParametersChangedData struct {

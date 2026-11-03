@@ -26,6 +26,22 @@ type Applied struct {
 	Type     ConditionType `json:"type"`
 	RecordID string        `json:"recordId"`
 	Access   int           `json:"access"`
+	// StepNo, AccountKey and Statistical come from the procedure step that applied the
+	// condition (FR-26.1); all are empty under the reference order. A statistical step is
+	// computed and reported with its Amount (the change it would make to the net: negative
+	// for a discount), but does not change the net.
+	StepNo      int              `json:"stepNo,omitempty"`
+	AccountKey  string           `json:"accountKey,omitempty"`
+	Statistical bool             `json:"statistical,omitempty"`
+	Amount      *decimal.Decimal `json:"amount,omitempty"`
+}
+
+// ProcedureRef names the procedure version a result was priced with (FR-26.4). It is part
+// of the explain content address, so the same request under another version never shares a reference.
+type ProcedureRef struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Version int    `json:"version"`
 }
 
 // TraceAccess is one access of an access sequence as evaluated for a condition.
@@ -43,6 +59,10 @@ type TraceStep struct {
 	Condition ConditionType `json:"condition"`
 	Accesses  []TraceAccess `json:"accesses"`
 	Selected  string        `json:"selected,omitempty"`
+	// StepNo is the procedure step (0 under the reference order). Reason says why a step
+	// that found a record did not apply: an exclusion group chose another member (FR-26.8).
+	StepNo int    `json:"stepNo,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // LineResult is the priced line. Error is set (and the amounts are zero) when no price exists.
@@ -73,25 +93,29 @@ type Result struct {
 	OrderNet  decimal.Decimal `json:"orderNet"`
 	Applied   []Applied       `json:"applied"`
 	Trace     []TraceStep     `json:"trace"`
+	// Procedure is the procedure version that drove the resolution; nil under the reference order.
+	Procedure *ProcedureRef `json:"procedure,omitempty"`
 }
 
 // Resolve prices every line and then the order. It is a pure function of its input.
 // The total discount applies to the lines no exclusive winner protected; protected
-// lines keep their net (BR-26.1 step 8).
+// lines keep their net (BR-26.1 step 8). Under a procedure (Input.Procedure) the steps run
+// in step order with their exclusion groups and statistical flags (FR-26.1, FR-26.8);
+// without one they run in the reference order.
 func Resolve(in Input) Result {
-	steps := in.Steps
-	if len(steps) == 0 {
-		steps = DefaultSteps()
-	}
+	plan := in.plan()
 	recs := in.Set.index()
 	if in.Set == nil {
 		recs = bucket(in.Records)
 	}
 	groups := groupQuantities(in.Lines)
 	res := Result{Currency: in.Header.Currency, Lines: make([]LineResult, 0, len(in.Lines)), Applied: []Applied{}, Trace: []TraceStep{}}
+	if in.Procedure != nil && len(in.Procedure.Steps) > 0 {
+		res.Procedure = &ProcedureRef{ID: in.Procedure.ID, Name: in.Procedure.Name, Version: in.Procedure.Version}
+	}
 	sum, base, qty, allQty := decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero
 	for _, line := range in.Lines {
-		lr := resolveLine(in.Header, line, recs, steps, groups[groupKey(line)])
+		lr := resolveLine(in.Header, line, recs, plan, groups[groupKey(line)])
 		res.Lines = append(res.Lines, lr)
 		if lr.Error != "" {
 			continue
@@ -104,30 +128,78 @@ func Resolve(in Input) Result {
 		}
 	}
 	res.Subtotal, res.OrderNet = sum, sum
-	if hasStep(steps, TypeTotalDisc) && base.IsPositive() {
-		rec, value, access, step := evaluate(TypeTotalDisc, in.Header, Line{Quantity: qty}, recs, base)
-		res.Trace = append(res.Trace, step)
-		if rec != nil {
-			discounted := roundMinor(value, in.Header.Currency)
-			res.TotalDiscount = base.Sub(discounted)
-			res.OrderNet = sum.Sub(res.TotalDiscount)
-			res.Applied = append(res.Applied, Applied{Type: TypeTotalDisc, RecordID: rec.ID, Access: access})
+	// Order-level steps run in step order, each type once. The total discount applies to the
+	// summed nets of the unprotected lines; the small-order surcharge (FR-26.6) is a separate
+	// condition, reported on its own (Surcharge) so the caller can post it to its revenue
+	// account, and added to OrderNet unless the step is statistical.
+	seen := map[ConditionType]bool{}
+	for _, st := range plan {
+		t := st.ConditionType
+		if !orderLevel(t) || seen[t] {
+			continue
 		}
-	}
-	// Small-order surcharge (FR-26.6): a separate order-level condition, applied when the
-	// subtotal of priced lines is positive and below the threshold. It is reported on its
-	// own (Surcharge) so the caller can post it to its revenue account, and added to OrderNet.
-	if hasStep(steps, TypeSurcharge) && in.SmallOrderThreshold.IsPositive() && sum.IsPositive() && sum.LessThan(in.SmallOrderThreshold) {
-		rec, value, access, step := evaluate(TypeSurcharge, in.Header, Line{Quantity: allQty}, recs, res.OrderNet)
-		res.Trace = append(res.Trace, step)
-		if rec != nil {
+		seen[t] = true
+		switch t {
+		case TypeTotalDisc:
+			if !base.IsPositive() {
+				continue
+			}
+			rec, value, access, step := evaluate(t, in.Header, Line{Quantity: qty}, recs, base)
+			step.StepNo = st.StepNo
+			res.Trace = append(res.Trace, step)
+			if rec == nil {
+				continue
+			}
+			discounted := roundMinor(value, in.Header.Currency)
+			ap := Applied{Type: t, RecordID: rec.ID, Access: access, StepNo: st.StepNo, AccountKey: st.AccountKey}
+			if st.Statistical {
+				change := discounted.Sub(base)
+				ap.Statistical, ap.Amount = true, &change
+			} else {
+				res.TotalDiscount = base.Sub(discounted)
+				res.OrderNet = res.OrderNet.Sub(res.TotalDiscount)
+			}
+			res.Applied = append(res.Applied, ap)
+		case TypeSurcharge:
+			if !in.SmallOrderThreshold.IsPositive() || !sum.IsPositive() || !sum.LessThan(in.SmallOrderThreshold) {
+				continue
+			}
+			rec, value, access, step := evaluate(t, in.Header, Line{Quantity: allQty}, recs, res.OrderNet)
+			step.StepNo = st.StepNo
+			res.Trace = append(res.Trace, step)
+			if rec == nil {
+				continue
+			}
 			surcharged := roundMinor(value, in.Header.Currency)
-			res.Surcharge = surcharged.Sub(res.OrderNet)
-			res.OrderNet = surcharged
-			res.Applied = append(res.Applied, Applied{Type: TypeSurcharge, RecordID: rec.ID, Access: access})
+			ap := Applied{Type: t, RecordID: rec.ID, Access: access, StepNo: st.StepNo, AccountKey: st.AccountKey}
+			change := surcharged.Sub(res.OrderNet)
+			if st.Statistical {
+				ap.Statistical, ap.Amount = true, &change
+			} else {
+				res.Surcharge = change
+				res.OrderNet = surcharged
+			}
+			res.Applied = append(res.Applied, ap)
 		}
 	}
 	return res
+}
+
+// plan is the ordered steps a resolve runs: the procedure's, or the reference order (Steps,
+// default DefaultSteps) as steps with no number, group or flag.
+func (in Input) plan() []ProcedureStep {
+	if in.Procedure != nil && len(in.Procedure.Steps) > 0 {
+		return in.Procedure.Steps
+	}
+	types := in.Steps
+	if len(types) == 0 {
+		types = DefaultSteps()
+	}
+	out := make([]ProcedureStep, len(types))
+	for i, t := range types {
+		out[i] = ProcedureStep{ConditionType: t}
+	}
+	return out
 }
 
 // orderLevel reports whether t prices the whole order rather than one line.
@@ -162,40 +234,135 @@ func SmallOrderThreshold(currency string) decimal.Decimal {
 	return decimal.Zero
 }
 
-func resolveLine(h Header, line Line, recs index, steps []ConditionType, groupQty decimal.Decimal) LineResult {
+// lineEvaluable reports whether the engine prices a step of type t on one line. The other
+// types a procedure may sequence (FREIGHT, REBATE_ACCRUAL, ROUNDING, FREE_GOODS) have no
+// records yet and change no price here.
+func lineEvaluable(t ConditionType) bool { return t == TypeLineDisc || t == TypeMultiline }
+
+// stepCandidate is one member of an exclusion group as evaluated on a line.
+type stepCandidate struct {
+	st     ProcedureStep
+	rec    *Record
+	value  decimal.Decimal
+	access int
+	trace  TraceStep
+}
+
+func resolveLine(h Header, line Line, recs index, plan []ProcedureStep, groupQty decimal.Decimal) LineResult {
 	lr := LineResult{No: line.No, Unit: line.Unit, Quantity: line.ChargedQuantity(), Applied: []Applied{}, Trace: []TraceStep{}}
 	rec, value, access, step := evaluate(TypePrice, h, line, recs, decimal.Zero)
+	var priceStep ProcedureStep
+	for _, st := range plan {
+		if st.ConditionType == TypePrice {
+			priceStep = st
+			break
+		}
+	}
+	step.StepNo = priceStep.StepNo
 	lr.Trace = append(lr.Trace, step)
 	if rec == nil {
 		lr.Error = CodePriceNotFound
 		lr.ErrorDetail = fmt.Sprintf("no price for product %s on %s", line.ProductID, dayOf(h.PricingDate))
 		return lr
 	}
-	lr.Applied = append(lr.Applied, Applied{Type: TypePrice, RecordID: rec.ID, Access: access})
+	// The PRICE step's account key names the revenue account the caller posts the price to.
+	lr.Applied = append(lr.Applied, Applied{Type: TypePrice, RecordID: rec.ID, Access: access, StepNo: priceStep.StepNo, AccountKey: priceStep.AccountKey})
 	lr.UnitPrice = value
 	net, suppressed := value, rec.Exclusive
-	for _, t := range steps {
-		if t == TypePrice || t == TypeTotalDisc || t == TypeSurcharge || suppressed {
-			continue
-		}
+	try := func(st ProcedureStep, from decimal.Decimal) stepCandidate {
 		l := line
-		if t == TypeMultiline && line.ProductGroupID != "" {
+		if st.ConditionType == TypeMultiline && line.ProductGroupID != "" {
 			// Multiline records match on the summed group quantity, not the line quantity.
 			l.Quantity = groupQty
 		}
-		rec, v, access, step := evaluate(t, h, l, recs, net)
-		lr.Trace = append(lr.Trace, step)
-		if rec == nil {
+		r, v, a, tr := evaluate(st.ConditionType, h, l, recs, from)
+		tr.StepNo = st.StepNo
+		return stepCandidate{st: st, rec: r, value: v, access: a, trace: tr}
+	}
+	// Each line-level condition type prices once (ValidateSteps refuses a repeated type; a
+	// procedure stored before that rule must not apply the same record twice).
+	handled, seen := map[string]bool{}, map[ConditionType]bool{}
+	for i, st := range plan {
+		if !lineEvaluable(st.ConditionType) || suppressed || seen[st.ConditionType] {
 			continue
 		}
-		net = v
-		suppressed = rec.Exclusive
-		lr.Applied = append(lr.Applied, Applied{Type: t, RecordID: rec.ID, Access: access})
+		if st.ExclusionGroup == "" || st.Statistical {
+			seen[st.ConditionType] = true
+		}
+		if st.Statistical {
+			// A statistical step is computed from the running net and reported; it changes nothing.
+			c := try(st, net)
+			lr.Trace = append(lr.Trace, c.trace)
+			if c.rec != nil {
+				change := roundMinor(line.ChargedQuantity().Mul(c.value.Sub(net)), h.Currency)
+				lr.Applied = append(lr.Applied, Applied{Type: st.ConditionType, RecordID: c.rec.ID, Access: c.access,
+					StepNo: st.StepNo, AccountKey: st.AccountKey, Statistical: true, Amount: &change})
+			}
+			continue
+		}
+		var chosen stepCandidate
+		if st.ExclusionGroup == "" {
+			chosen = try(st, net)
+			lr.Trace = append(lr.Trace, chosen.trace)
+		} else {
+			if handled[st.ExclusionGroup] {
+				continue
+			}
+			handled[st.ExclusionGroup] = true
+			chosen = chooseFromGroup(plan[i:], st.ExclusionGroup, net, try, &lr, seen)
+		}
+		if chosen.rec == nil {
+			continue
+		}
+		net = chosen.value
+		suppressed = chosen.rec.Exclusive
+		lr.Applied = append(lr.Applied, Applied{Type: chosen.st.ConditionType, RecordID: chosen.rec.ID, Access: chosen.access,
+			StepNo: chosen.st.StepNo, AccountKey: chosen.st.AccountKey})
 	}
 	lr.NetUnit = net
 	lr.LineNet = roundMinor(line.ChargedQuantity().Mul(net), h.Currency)
 	lr.Exclusive = suppressed
 	return lr
+}
+
+// chooseFromGroup evaluates every member of an exclusion group from the same running net
+// and keeps one (FR-26.8): BEST the member with the lowest resulting net (the lower step on
+// a tie), FIRST the member with the lowest step number that found a record. The others
+// stay in the trace with the reason they did not apply. rest starts at the first member.
+func chooseFromGroup(rest []ProcedureStep, group string, net decimal.Decimal, try func(ProcedureStep, decimal.Decimal) stepCandidate, lr *LineResult, seen map[ConditionType]bool) stepCandidate {
+	var members []stepCandidate
+	for _, st := range rest {
+		if st.ExclusionGroup == group && lineEvaluable(st.ConditionType) && !st.Statistical && !seen[st.ConditionType] {
+			seen[st.ConditionType] = true
+			members = append(members, try(st, net))
+		}
+	}
+	mode := rest[0].ExclusionMode
+	win := -1
+	for i, m := range members {
+		switch {
+		case m.rec == nil:
+		case win < 0:
+			win = i
+		case mode == ExclusionBest && m.value.LessThan(members[win].value):
+			win = i
+		}
+	}
+	for i := range members {
+		tr := members[i].trace
+		switch {
+		case members[i].rec == nil:
+		case i == win:
+			tr.Reason = fmt.Sprintf("selected: %s of exclusion group %s", mode, group)
+		default:
+			tr.Reason = fmt.Sprintf("excluded: %s of exclusion group %s kept step %d", mode, group, members[win].st.StepNo)
+		}
+		lr.Trace = append(lr.Trace, tr)
+	}
+	if win < 0 {
+		return stepCandidate{}
+	}
+	return members[win]
 }
 
 // evaluate runs one condition type through the access sequence (BR-26.1 steps 2-6).
@@ -421,23 +588,15 @@ func validityOverlaps(a, b Record) bool {
 // (FR-26.4). Identical results always yield identical bytes and reference.
 func ExplainTrace(r Result) ([]byte, string, error) {
 	body, err := json.Marshal(struct {
-		Lines []LineResult `json:"lines"`
-		Trace []TraceStep  `json:"trace"`
-	}{r.Lines, r.Trace})
+		Procedure *ProcedureRef `json:"procedure,omitempty"`
+		Lines     []LineResult  `json:"lines"`
+		Trace     []TraceStep   `json:"trace"`
+	}{r.Procedure, r.Lines, r.Trace})
 	if err != nil {
 		return nil, "", err
 	}
 	sum := sha256.Sum256(body)
 	return body, "sha256:" + hex.EncodeToString(sum[:]), nil
-}
-
-func hasStep(steps []ConditionType, t ConditionType) bool {
-	for _, s := range steps {
-		if s == t {
-			return true
-		}
-	}
-	return false
 }
 
 func roundMinor(d decimal.Decimal, currency string) decimal.Decimal {

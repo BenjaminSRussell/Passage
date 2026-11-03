@@ -92,6 +92,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyMaintain)).Post(recordsPath+"/{id}:withdraw", a.withdrawRecord)
 	a.registerJournalRoutes(r)
 	a.registerParameterRoutes(r)
+	a.registerAssignmentRoutes(r)
 	a.registerRebateRoutes(r)
 	a.registerBrokerRoyaltyRoutes(r)
 	a.registerRetroRoutes(r)
@@ -151,12 +152,16 @@ type lineDTO struct {
 }
 
 type resolveRequest struct {
-	LegalEntityID   string    `json:"legalEntityId"`
-	CustomerID      string    `json:"customerId"`
-	CustomerGroupID string    `json:"customerGroupId"`
-	Currency        string    `json:"currency"`
-	PricingDate     string    `json:"pricingDate"`
-	Lines           []lineDTO `json:"lines"`
+	LegalEntityID   string `json:"legalEntityId"`
+	CustomerID      string `json:"customerId"`
+	CustomerGroupID string `json:"customerGroupId"`
+	Currency        string `json:"currency"`
+	PricingDate     string `json:"pricingDate"`
+	// SalesChannel selects the channel's procedure assignment (PRD 5.26.13); Procedure names
+	// a procedure to price with instead of the assigned one.
+	SalesChannel string    `json:"salesChannel"`
+	Procedure    string    `json:"procedure"`
+	Lines        []lineDTO `json:"lines"`
 }
 
 type simulateRequest struct {
@@ -171,16 +176,18 @@ type lineView struct {
 }
 
 type resolveResponse struct {
-	Currency        string             `json:"currency"`
-	Lines           []lineView         `json:"lines"`
-	Subtotal        decimal.Decimal    `json:"subtotal"`
-	TotalDiscount   decimal.Decimal    `json:"totalDiscount"`
-	Surcharge       decimal.Decimal    `json:"surcharge"`
-	OrderNet        decimal.Decimal    `json:"orderNet"`
-	Applied         []domain.Applied   `json:"applied"`
-	ExplainRef      string             `json:"explainRef"`
-	ExplainTruncate bool               `json:"explainTruncated,omitempty"`
-	Trace           []domain.TraceStep `json:"trace,omitempty"`
+	Currency      string           `json:"currency"`
+	Lines         []lineView       `json:"lines"`
+	Subtotal      decimal.Decimal  `json:"subtotal"`
+	TotalDiscount decimal.Decimal  `json:"totalDiscount"`
+	Surcharge     decimal.Decimal  `json:"surcharge"`
+	OrderNet      decimal.Decimal  `json:"orderNet"`
+	Applied       []domain.Applied `json:"applied"`
+	// Procedure names the procedure version the prices came from; absent under the reference order.
+	Procedure       *domain.ProcedureRef `json:"procedure,omitempty"`
+	ExplainRef      string               `json:"explainRef"`
+	ExplainTruncate bool                 `json:"explainTruncated,omitempty"`
+	Trace           []domain.TraceStep   `json:"trace,omitempty"`
 	// FreeGoods lists the zero-priced supplementary line proposals (FR-26.22) for w27.
 	FreeGoods []domain.FreeGoodsProposal `json:"freeGoods"`
 }
@@ -220,9 +227,15 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	proc, err := a.store.DetermineProcedure(r.Context(), req.LegalEntityID, req.SalesChannel, req.Procedure)
+	if err != nil {
+		slog.Error("determine procedure failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
 	a.resolves.Add(1)
 	a.linesPriced.Add(int64(len(lines)))
-	in.Header, in.Lines, in.SmallOrderThreshold = header, lines, domain.SmallOrderThreshold(header.Currency)
+	in.Header, in.Lines, in.SmallOrderThreshold, in.Procedure = header, lines, domain.SmallOrderThreshold(header.Currency), proc
 	res, free := domain.ResolveWithFreeGoods(in, rules)
 	a.respond(w, r, res, free, r.URL.Query().Get("explain") == "true")
 }
@@ -272,7 +285,21 @@ func (a *API) simulate(w http.ResponseWriter, r *http.Request) {
 		}
 		records = append(records, rec)
 	}
-	res := domain.Resolve(domain.Input{Header: header, Lines: lines, Records: records,
+	// A simulation names a legal entity only to choose the procedure it prices with.
+	var proc *domain.Procedure
+	if req.LegalEntityID != "" || req.Procedure != "" {
+		if !ids.Valid(req.LegalEntityID) {
+			validationFailed(w, r, map[string]string{"legalEntityId": "must be a UUID"})
+			return
+		}
+		var err error
+		if proc, err = a.store.DetermineProcedure(r.Context(), req.LegalEntityID, req.SalesChannel, req.Procedure); err != nil {
+			slog.Error("determine procedure failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+			httpx.Fail(w, r, err)
+			return
+		}
+	}
+	res := domain.Resolve(domain.Input{Header: header, Lines: lines, Records: records, Procedure: proc,
 		SmallOrderThreshold: domain.SmallOrderThreshold(header.Currency)})
 	a.respond(w, r, res, nil, r.URL.Query().Get("explain") != "false")
 }
@@ -295,6 +322,14 @@ func (a *API) buildInput(req resolveRequest) (domain.Header, []domain.Line, *htt
 	}
 	if len(req.Lines) == 0 {
 		fields["lines"] = "at least one line is required"
+	}
+	if msg := domain.ValidateSalesChannel(req.SalesChannel); msg != "" {
+		fields["salesChannel"] = msg
+	}
+	if req.Procedure != "" {
+		if msg := domain.ValidateProcedureName(req.Procedure); msg != "" {
+			fields["procedure"] = msg
+		}
 	}
 	lines := make([]domain.Line, 0, len(req.Lines))
 	for i, l := range req.Lines {
@@ -323,7 +358,7 @@ func (a *API) respond(w http.ResponseWriter, r *http.Request, res domain.Result,
 		return
 	}
 	out := resolveResponse{Currency: res.Currency, Lines: make([]lineView, len(res.Lines)), Subtotal: res.Subtotal,
-		TotalDiscount: res.TotalDiscount, Surcharge: res.Surcharge, OrderNet: res.OrderNet, Applied: res.Applied, ExplainRef: ref, FreeGoods: free}
+		TotalDiscount: res.TotalDiscount, Surcharge: res.Surcharge, OrderNet: res.OrderNet, Applied: res.Applied, Procedure: res.Procedure, ExplainRef: ref, FreeGoods: free}
 	if out.FreeGoods == nil {
 		out.FreeGoods = []domain.FreeGoodsProposal{}
 	}

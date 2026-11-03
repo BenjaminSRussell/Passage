@@ -20,7 +20,23 @@ const (
 	CodeProcedureImmutable = "PRC-0008"
 	// CodeProcedureNotFound is raised for an unknown procedure id.
 	CodeProcedureNotFound = "PRC-0042"
+	// CodeProcedureNotActive: a named or assigned procedure has no ACTIVE version.
+	CodeProcedureNotActive = "PRC-0063"
 )
+
+// maxSalesChannel bounds a sales channel key (procedure determination, §5.26.13).
+const maxSalesChannel = 32
+
+var salesChannelPattern = regexp.MustCompile(`^[A-Z0-9][A-Z0-9_\-]*$`)
+
+// ValidateSalesChannel returns a field error for a sales channel, or "". The empty channel
+// is valid: it is the legal entity's default.
+func ValidateSalesChannel(c string) string {
+	if c == "" || (len(c) <= maxSalesChannel && salesChannelPattern.MatchString(c)) {
+		return ""
+	}
+	return fmt.Sprintf("must be empty or 1 to %d upper-case letters, digits, '_' or '-', such as WEB", maxSalesChannel)
+}
 
 // Procedure step bounds (FR-26.1: steps 10–990, requirement ≤ 512 characters) and size limits.
 const (
@@ -96,8 +112,9 @@ func ValidateProcedureName(name string) string {
 }
 
 // ValidateSteps returns field errors for a procedure's steps; an empty map means valid.
-// Steps are strictly increasing within 10–990 and include exactly one PRICE step. Every
-// step of one exclusion group uses the same mode.
+// Steps are strictly increasing within 10–990 and include exactly one PRICE step. A condition
+// type appears at most once: records are keyed by type, so a repeated type would apply the
+// same record twice. Every step of one exclusion group uses the same mode.
 func ValidateSteps(steps []ProcedureStep) map[string]string {
 	fields := map[string]string{}
 	switch {
@@ -110,6 +127,7 @@ func ValidateSteps(steps []ProcedureStep) map[string]string {
 	}
 	prev, prices := 0, 0
 	modes := map[string]string{}
+	typeAt := map[ConditionType]int{}
 	for i, s := range steps {
 		key := fmt.Sprintf("steps[%d]", i)
 		switch {
@@ -124,6 +142,10 @@ func ValidateSteps(steps []ProcedureStep) map[string]string {
 		}
 		if s.ConditionType == TypePrice {
 			prices++
+		} else if first, ok := typeAt[s.ConditionType]; ok && ValidStepType(s.ConditionType) {
+			fields[key+".conditionType"] = fmt.Sprintf("%s is already step %d; a condition type appears once", s.ConditionType, first)
+		} else {
+			typeAt[s.ConditionType] = s.StepNo
 		}
 		if len(s.RequirementCEL) > MaxRequirementLength {
 			fields[key+".requirementCel"] = fmt.Sprintf("must be at most %d characters", MaxRequirementLength)

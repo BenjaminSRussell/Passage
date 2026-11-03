@@ -131,6 +131,10 @@ type Store interface {
 	ListProcedures(ctx context.Context, legalEntityID string, limit int) ([]domain.Procedure, error)
 	ReviseProcedure(ctx context.Context, id string, revision int, steps []domain.ProcedureStep, idempotencyKey string) (domain.Procedure, error)
 	ActivateProcedure(ctx context.Context, id string, idempotencyKey string) (domain.Procedure, error)
+	SetProcedureAssignment(ctx context.Context, in ProcedureAssignment, version int, idempotencyKey string) (ProcedureAssignment, error)
+	ListProcedureAssignments(ctx context.Context, legalEntityID string) ([]ProcedureAssignment, error)
+	ClearProcedureAssignment(ctx context.Context, legalEntityID, salesChannel string, version int, idempotencyKey string) error
+	DetermineProcedure(ctx context.Context, legalEntityID, salesChannel, name string) (*domain.Procedure, error)
 	CreateFreeGoodsRule(ctx context.Context, r domain.FreeGoodsDef, idempotencyKey string) (domain.FreeGoodsDef, error)
 	GetFreeGoodsRule(ctx context.Context, id string) (domain.FreeGoodsDef, error)
 	ListFreeGoodsRules(ctx context.Context, legalEntityID, productID string, limit int) ([]domain.FreeGoodsDef, error)

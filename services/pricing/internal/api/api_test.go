@@ -44,6 +44,7 @@ type fakeStore struct {
 	free       freeGoodsState
 	comd       commodityState
 	params     map[string]store.Parameters
+	assigns    map[string]store.ProcedureAssignment
 	brk        brokerState
 }
 

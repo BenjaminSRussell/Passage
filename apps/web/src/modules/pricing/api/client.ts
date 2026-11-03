@@ -73,6 +73,10 @@ export interface ResolveRequest {
   customerGroupId?: string;
   currency: string;
   pricingDate: string;
+  /** Selects the channel's procedure assignment; empty uses the legal entity's default (PRD 5.26.13). */
+  salesChannel?: string;
+  /** Name of a procedure to price with instead of the assigned one. */
+  procedure?: string;
   lines: ResolveLineInput[];
 }
 
@@ -80,6 +84,12 @@ export interface AppliedCondition {
   type: ConditionType;
   recordId: string;
   access: number;
+  /** Procedure step that applied the condition; absent under the reference order. */
+  stepNo?: number;
+  accountKey?: string;
+  /** A statistical step is reported with amount and not added to the net. */
+  statistical?: boolean;
+  amount?: string;
 }
 
 export interface TraceAccess {
@@ -94,6 +104,9 @@ export interface TraceAccess {
 export interface TraceStep {
   condition: string;
   selected?: string;
+  stepNo?: number;
+  /** Why a condition that found a record did not apply: an exclusion group kept another member (FR-26.8). */
+  reason?: string;
   accesses: TraceAccess[];
 }
 
@@ -120,6 +133,8 @@ export interface ResolveResponse {
   surcharge: string;
   orderNet: string;
   applied: AppliedCondition[];
+  /** The procedure version the prices came from (FR-26.4); absent under the reference order. */
+  procedure?: { id: string; name: string; version: number };
   explainRef: string;
   explainTruncated?: boolean;
   trace?: TraceStep[];
@@ -1229,6 +1244,35 @@ export function getPricingParameters(legalEntityId: string, signal?: AbortSignal
 
 export function setPricingParameters(body: { legalEntityId: string; journalFourEyes: boolean; version: number }, key: string = newKey()): Promise<PricingParameters> {
   return send<PricingParameters>("/parameters", { method: "PUT", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) });
+}
+
+// ---- Procedure determination (PRD 5.26.13, reference_procedure): which procedure each sales channel prices with.
+
+export interface ProcedureAssignment {
+  legalEntityId: string;
+  /** Empty for the legal entity's default. */
+  salesChannel: string;
+  procedureName: string;
+  version: number;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export function listProcedureAssignments(legalEntityId: string, signal?: AbortSignal): Promise<ProcedureAssignment[]> {
+  return items<ProcedureAssignment>(`/procedure-assignments${query({ legalEntityId })}`, signal);
+}
+
+/** PUT /procedure-assignments - version is the one read, 0 when the channel has no assignment. */
+export function setProcedureAssignment(
+  body: { legalEntityId: string; salesChannel: string; procedureName: string; version: number },
+  key: string = newKey(),
+): Promise<ProcedureAssignment> {
+  return send<ProcedureAssignment>("/procedure-assignments", { method: "PUT", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) });
+}
+
+/** DELETE /procedure-assignments - removes the assignment at the version read (204). */
+export async function clearProcedureAssignment(legalEntityId: string, salesChannel: string, version: number, key: string = newKey()): Promise<void> {
+  await sendRaw(`/procedure-assignments${query({ legalEntityId, salesChannel, version })}`, { method: "DELETE", headers: { Accept: "application/json", "Idempotency-Key": key } });
 }
 
 // ---- Broker contracts and royalty agreements (FR-26.16, FR-26.17).

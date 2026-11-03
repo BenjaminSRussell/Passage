@@ -64,8 +64,17 @@ paths:
       summary: Resolve net prices and discounts for a document header and up to 500 lines.
       description: >
         Stateless with respect to the request. Loads ACTIVE condition records of the legal
-        entity valid on pricingDate for the currency, then applies the reference procedure
-        (PRICE, LINE_DISC, MULTILINE_DISC, TOTAL_DISC, SURCHARGE). MULTILINE_DISC matches on the
+        entity valid on pricingDate for the currency, then applies the pricing procedure: the
+        ACTIVE version of the procedure named in the request, else the one assigned to the
+        salesChannel, else the legal entity's default assignment (PRD 5.26.13
+        reference_procedure; see /v1/pricing/procedure-assignments). The result names the
+        procedure and version in procedure. Steps run in step order; the members of an exclusion
+        group keep one condition (BEST the lowest net, FIRST the lowest step, FR-26.8; a member
+        that lost carries the reason in the trace); a statistical step is reported in applied
+        with its amount and does not change the net. Step requirements (CEL) are stored but not
+        yet evaluated. Without any procedure the reference order runs (PRICE, LINE_DISC,
+        MULTILINE_DISC, TOTAL_DISC, SURCHARGE). A procedure the request names or the assignment
+        points to that has no ACTIVE version is 422 PRC-0063. MULTILINE_DISC matches on the
         summed quantity of the lines sharing a product group and unit (BR-26.4). SURCHARGE applies
         when the subtotal is below the small-order threshold (250 USD, 200 EUR; none for other
         currencies) and is reported in surcharge as well as added to orderNet. A line without a price carries errorCode PRC-0001 and
@@ -98,7 +107,10 @@ paths:
     post:
       operationId: simulatePrice
       summary: Price a tuple against inline condition records without storing anything.
-      description: Explains by default; pass ?explain=false to omit the trace.
+      description: >
+        Explains by default; pass ?explain=false to omit the trace. The body's legalEntityId (and
+        salesChannel or procedure) chooses the procedure exactly as resolve does, so a simulation
+        shows what the assigned procedure would do to the inline records.
       parameters:
         - name: explain
           in: query
@@ -408,6 +420,89 @@ paths:
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
         "409": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/procedure-assignments:
+    get:
+      operationId: listProcedureAssignments
+      summary: List which pricing procedure a legal entity uses per sales channel.
+      description: >
+        Procedure determination (PRD 5.26.13, reference_procedure). Returns the default
+        assignment (empty salesChannel) first, then the channel rows. A legal entity with none
+        prices in the reference order. A legal entity outside the caller's scope is 403 AUTH-0003.
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The assignments of the legal entity.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/ProcedureAssignment"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    put:
+      operationId: setProcedureAssignment
+      summary: Set the procedure a legal entity and sales channel price with.
+      description: >
+        version is the version read (0 when the channel has no assignment); a different stored
+        version is 412 conflict_version. The procedure must have an ACTIVE version (422
+        PRC-0063); later activations of a new version take effect without changing the
+        assignment. Writes dev.passage.pricing.procedureassignment.changed.v1 to the outbox in the
+        same transaction. A legal entity outside the caller's scope is 403 AUTH-0003. A retry with
+        the same Idempotency-Key replays the first response.
+      x-passage-duty: pricing.admin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, procedureName, version]
+              properties:
+                legalEntityId: {type: string, format: uuid}
+                salesChannel: {type: string, pattern: "^([A-Z0-9][A-Z0-9_-]{0,31})?$", description: "Empty for the legal entity's default."}
+                procedureName: {type: string, pattern: "^[A-Z0-9][A-Z0-9_-]*$", maxLength: 64}
+                version: {type: integer, minimum: 0}
+      responses:
+        "200":
+          description: The stored assignment.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProcedureAssignment"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    delete:
+      operationId: clearProcedureAssignment
+      summary: Remove the procedure assignment of a legal entity and sales channel.
+      description: >
+        version is the version read; a different or missing assignment is 412 conflict_version.
+        The channel then falls back to the legal entity's default assignment, or to the
+        reference order when there is none. Writes
+        dev.passage.pricing.procedureassignment.changed.v1 (cleared) to the outbox in the same
+        transaction. A retry with the same Idempotency-Key replays the first success.
+      x-passage-duty: pricing.admin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: salesChannel, in: query, required: false, schema: {type: string, pattern: "^([A-Z0-9][A-Z0-9_-]{0,31})?$"}, description: "Empty for the legal entity's default."}
+        - {name: version, in: query, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        "204":
+          description: The assignment was removed.
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/parameters:
     get:
       operationId: getPricingParameters
@@ -2435,7 +2530,7 @@ components:
       required: [stepNo, conditionType]
       properties:
         stepNo: {type: integer, minimum: 10, maximum: 990, description: "Strictly increasing within a procedure."}
-        conditionType: {type: string, enum: [PRICE, LINE_DISC, MULTILINE_DISC, TOTAL_DISC, SURCHARGE, FREIGHT, REBATE_ACCRUAL, ROUNDING, FREE_GOODS], description: "Exactly one PRICE step per procedure."}
+        conditionType: {type: string, enum: [PRICE, LINE_DISC, MULTILINE_DISC, TOTAL_DISC, SURCHARGE, FREIGHT, REBATE_ACCRUAL, ROUNDING, FREE_GOODS], description: "Exactly one PRICE step per procedure; every other condition type at most once."}
         requirementCel: {type: string, maxLength: 512, description: "CEL requirement; stored, not yet evaluated."}
         exclusionGroup: {type: string, maxLength: 64, description: "Exclusion group (FR-26.8); not allowed on the PRICE step."}
         exclusionMode: {type: string, enum: [BEST, FIRST], description: "Required with an exclusion group; the same for every step of one group."}
@@ -2607,6 +2702,8 @@ components:
         customerGroupId: {type: string, description: "Customer pricing group of the document, if any."}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
         pricingDate: {type: string, format: date}
+        salesChannel: {type: string, pattern: "^([A-Z0-9][A-Z0-9_-]{0,31})?$", description: "Selects the channel's procedure assignment; empty uses the legal entity's default (PRD 5.26.13)."}
+        procedure: {type: string, description: "Name of a procedure to price with; its ACTIVE version is used instead of the assigned one (422 PRC-0063 when it has none)."}
         lines:
           type: array
           minItems: 1
@@ -2859,6 +2956,14 @@ components:
         applied:
           type: array
           items: {$ref: "#/components/schemas/Applied"}
+        procedure:
+          type: object
+          description: "The procedure version the prices came from (FR-26.4); absent under the reference order."
+          required: [id, name, version]
+          properties:
+            id: {type: string, format: uuid}
+            name: {type: string}
+            version: {type: integer, minimum: 1}
         explainRef: {type: string, pattern: "^sha256:[0-9a-f]{64}$"}
         explainTruncated: {type: boolean}
         freeGoods:
@@ -2875,12 +2980,18 @@ components:
         type: {type: string, enum: [PRICE, LINE_DISC, MULTILINE_DISC, TOTAL_DISC, SURCHARGE]}
         recordId: {type: string}
         access: {type: integer, description: "Access sequence number that produced the winner."}
+        stepNo: {type: integer, description: "Procedure step that applied the condition; absent under the reference order."}
+        accountKey: {type: string, description: "Account key of the procedure step."}
+        statistical: {type: boolean, description: "A statistical step: reported with amount, not added to the net."}
+        amount: {type: string, description: "Statistical steps only: the change the step would make to the line net (negative for a discount) or to the order net."}
     TraceStep:
       type: object
       required: [condition, accesses]
       properties:
         condition: {type: string}
         selected: {type: string}
+        stepNo: {type: integer, description: "Procedure step of the condition; absent under the reference order."}
+        reason: {type: string, description: "Why a condition that found a record did not apply: an exclusion group (FR-26.8) kept another member."}
         accesses:
           type: array
           items:
@@ -2922,6 +3033,16 @@ components:
         lineNo: {type: integer}
         code: {type: string}
         detail: {type: string}
+    ProcedureAssignment:
+      type: object
+      required: [legalEntityId, salesChannel, procedureName, version]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        salesChannel: {type: string, description: "Empty for the legal entity's default."}
+        procedureName: {type: string, description: "The ACTIVE version of this procedure is used at resolve time."}
+        version: {type: integer, minimum: 1}
+        updatedBy: {type: string}
+        updatedAt: {type: string, format: date-time}
     PricingParameters:
       type: object
       required: [legalEntityId, journalFourEyes, version]

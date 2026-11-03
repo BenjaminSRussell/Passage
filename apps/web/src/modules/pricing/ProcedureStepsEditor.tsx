@@ -23,7 +23,8 @@ export function referenceSteps(): ProcedureStep[] {
 
 /**
  * Client checks that mirror the service's step rules (FR-26.1, FR-26.8): steps 10–990 in
- * increasing order, exactly one PRICE step, requirement ≤ 512 characters, an exclusion group
+ * increasing order, exactly one PRICE step, every other condition type at most once,
+ * requirement ≤ 512 characters, an exclusion group
  * with a BEST or FIRST mode (one mode per group, never on PRICE). Keys match the service's
  * field names (steps[i].field), so service errors land on the same inputs.
  */
@@ -33,8 +34,14 @@ export function validateSteps(steps: ProcedureStep[]): Errors {
   if (steps.length > MAX_STEPS) return { steps: `Use at most ${MAX_STEPS} steps.` };
   let prev = 0;
   const modes = new Map<string, string>();
+  const typeAt = new Map<string, number>();
   steps.forEach((s, i) => {
     const key = `steps[${i}]`;
+    if (s.conditionType !== "PRICE") {
+      const first = typeAt.get(s.conditionType);
+      if (first !== undefined) errors[`${key}.conditionType`] = `This condition type is already step ${first}; use each type once.`;
+      else typeAt.set(s.conditionType, s.stepNo);
+    }
     if (!Number.isInteger(s.stepNo) || s.stepNo < 10 || s.stepNo > 990) errors[`${key}.stepNo`] = "Use a step number from 10 to 990.";
     else if (s.stepNo <= prev) errors[`${key}.stepNo`] = "Step numbers must increase.";
     prev = Number.isInteger(s.stepNo) ? s.stepNo : prev;
@@ -73,9 +80,11 @@ export function ProcedureStepsEditor({ idPrefix, steps, errors, onChange }: Prop
   }
   function add() {
     const last = steps.length > 0 ? steps[steps.length - 1].stepNo : 0;
+    // A condition type appears once per procedure, so a new step starts at the first type not used yet.
+    const conditionType = PROCEDURE_STEP_TYPES.find((t) => t !== "PRICE" && !steps.some((s) => s.conditionType === t)) ?? "LINE_DISC";
     onChange([
       ...steps,
-      { stepNo: Math.min(last + 10, 990), conditionType: "LINE_DISC", requirementCel: "", exclusionGroup: "", exclusionMode: "", statistical: false, accountKey: "" },
+      { stepNo: Math.min(last + 10, 990), conditionType, requirementCel: "", exclusionGroup: "", exclusionMode: "", statistical: false, accountKey: "" },
     ]);
   }
 

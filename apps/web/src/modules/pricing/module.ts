@@ -37,6 +37,7 @@ import { NewProcedurePage } from "./NewProcedurePage";
 import { NewPromotionPage } from "./NewPromotionPage";
 import { NewRebatePage } from "./NewRebatePage";
 import { NewSalesGroupPage } from "./NewSalesGroupPage";
+import { ProcedureAssignmentsPage } from "./ProcedureAssignmentsPage";
 import { ProcedureDetailPage } from "./ProcedureDetailPage";
 import { ProceduresPage } from "./ProceduresPage";
 import { PromotionDetailPage } from "./PromotionDetailPage";
@@ -75,6 +76,7 @@ const pricing: PassageModule = {
     { path: "/pricing/procedures", element: createElement(ProceduresPage), handle: { title: "Pricing procedures" } },
     { path: "/pricing/procedures/new", element: createElement(NewProcedurePage), handle: { title: "New pricing procedure" } },
     { path: "/pricing/procedures/:id", element: createElement(ProcedureDetailPage), handle: { title: "Pricing procedure" } },
+    { path: "/pricing/procedure-determination", element: createElement(ProcedureAssignmentsPage), handle: { title: "Procedure determination" } },
     { path: "/pricing/journals", element: createElement(JournalsPage), handle: { title: "Price journals" } },
     { path: "/pricing/journals/new", element: createElement(NewJournalPage), handle: { title: "New price journal" } },
     { path: "/pricing/journals/import", element: createElement(ImportJournalPage), handle: { title: "Import price journal" } },
@@ -114,6 +116,7 @@ const pricing: PassageModule = {
     { label: "Commodity prices", to: "/pricing/commodity/bases", duty: "pricing.view" },
     { label: "Price calculations", to: "/pricing/commodity/calculations", duty: "pricing.view" },
     { label: "Pricing procedures", to: "/pricing/procedures", duty: "pricing.view" },
+    { label: "Procedure determination", to: "/pricing/procedure-determination", duty: "pricing.view" },
     { label: "Price journals", to: "/pricing/journals", duty: "pricing.view" },
     { label: "Rebate agreements", to: "/pricing/rebates", duty: "pricing.rebate.view" },
     { label: "Vendor rebate claims", to: "/pricing/rebates/claims", duty: "pricing.rebate.view" },
