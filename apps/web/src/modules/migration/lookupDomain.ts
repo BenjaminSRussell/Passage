@@ -73,3 +73,24 @@ export function filterEntries(entries: Record<string, string>, text: string, lim
     .filter((key) => needle === "" || key.toLowerCase().includes(needle) || (entries[key] ?? "").toLowerCase().includes(needle));
   return { rows: all.slice(0, limit).map((key) => ({ key, value: entries[key] ?? "" })), total: all.length };
 }
+
+export const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
+
+export const IMPORT_HINTS: Record<LookupKind, string> = {
+  enum: "One entry per line: the Passage code, then the legacy code (kg,KGM).",
+  uom_conversion: "One entry per line: from unit, to unit, factor (LB,KG,0.45359237). Add the reverse line too.",
+  price_list: "One entry per line: the key parts in the order the mapping's keyPaths read them (item, or item and currency), then the price (SKU-1,EUR,12.50).",
+};
+
+/** Local checks before the file is sent; the service validates every line and names the ones that are wrong. */
+export function checkImportText(csv: string): string | undefined {
+  if (csv.trim() === "") return "Choose a CSV file or paste its lines.";
+  if (new Blob([csv]).size > MAX_IMPORT_BYTES) return "The file is larger than 2 MB; split it.";
+  return undefined;
+}
+
+export function importOutcome(result: { written: boolean; summary: { added: number; changed: number; unchanged: number; removed: number }; table: { version: number } }): string {
+  const { added, changed, unchanged, removed } = result.summary;
+  const counts = `${added} added, ${changed} changed, ${unchanged} unchanged, ${removed} removed`;
+  return result.written ? `Saved as version ${result.table.version}: ${counts}.` : `Nothing to save: every line already matches version ${result.table.version} (${counts}).`;
+}

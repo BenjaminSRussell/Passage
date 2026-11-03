@@ -822,3 +822,28 @@ export const createLookupTable = (input: { name: string; definition: LookupDefin
 
 export const updateLookupTable = (id: string, version: number, edit: LookupEdit) =>
   send<LookupTable>(`/lookup-tables/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ version, ...edit }) });
+
+export type LookupImportMode = "merge" | "replace";
+
+export interface LookupImportSummary {
+  rows: number;
+  added: number;
+  changed: number;
+  unchanged: number;
+  removed: number;
+}
+
+export interface LookupImportResult {
+  table: LookupTable;
+  summary: LookupImportSummary;
+  /** False when the file changed nothing: no version was saved. */
+  written: boolean;
+}
+
+/** Merge or replace the entries of a table from CSV text (key parts in the leading cells, the value last). */
+export const importLookupEntries = (id: string, input: { version: number; mode: LookupImportMode; hasHeader: boolean; csv: string }) =>
+  send<LookupImportResult>(`/lookup-tables/${encodeURIComponent(id)}:import`, { method: "POST", body: JSON.stringify(input) });
+
+/** The CSV download of a version (the current one when omitted); a plain link, the browser sends the session cookie. */
+export const lookupCsvUrl = (id: string, version?: number) =>
+  `/api/v1/integration/lookup-tables/${encodeURIComponent(id)}/entries.csv${query({ version: version ? String(version) : undefined })}`;

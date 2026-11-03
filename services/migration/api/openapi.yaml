@@ -1127,6 +1127,55 @@ paths:
           description: MIG-LOOKUP-NOT-FOUND.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/lookup-tables/{id}:import:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: importLookupTableEntries
+      summary: Import entries into a lookup table from CSV
+      description: "Reads a CSV file and writes the next version of the table under the caller's version (409 MIG-VERSION-CONFLICT when it is stale). One entry per line: the key parts in the leading cells (up to three) and the value in the last cell, for example from,to,factor for a unit table or item,currency,price for a price list; a key already joined with | reads the same. Mode merge keeps the entries the file does not mention, replace keeps only the file's. A line that is not valid for the table's kind, or a key that appears twice, is reported with its line (at most ten lines, MIG-LOOKUP-INVALID) and nothing is saved. A file that changes nothing writes no version (written is false). The table still holds at most 5000 entries after the import. An archived table is refused."
+      x-passage-duty: migration.project.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ImportLookupEntries' } } }
+      responses:
+        '200':
+          description: The table (at its new version when written is true) and what the import did to its entries.
+          content: { application/json: { schema: { $ref: '#/components/schemas/LookupImportResult' } } }
+        '400':
+          description: The version, mode or csv is missing or malformed.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: MIG-LOOKUP-NOT-FOUND.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: MIG-VERSION-CONFLICT or MIG-LOOKUP-ARCHIVED.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-LOOKUP-INVALID, the file has no entries, a line is not valid for the kind, or the result exceeds 5000 entries.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/lookup-tables/{id}/entries.csv:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: exportLookupTableEntries
+      summary: Export a lookup table as CSV
+      description: The entries of the current version, or of the version named in the query, as CSV in key order, one entry per line with the key parts in separate cells and the value last, no header line. A cell that a spreadsheet would run as a formula (starting with = + - @, a tab or a carriage return, after any apostrophes) is written with one more leading apostrophe, which the import removes again, so the file can be edited and imported back unchanged.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: version, in: query, description: A version to export instead of the current one., schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: The entries as an attachment named <table>-v<version>.csv.
+          content: { text/csv: { schema: { type: string } } }
+        '400':
+          description: The version is not a positive integer.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: MIG-LOOKUP-NOT-FOUND or MIG-LOOKUP-VERSION-NOT-FOUND.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/integration/parallel-run-diffs:
     post:
       operationId: createParallelRunDiff
@@ -1967,6 +2016,31 @@ components:
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    ImportLookupEntries:
+      type: object
+      additionalProperties: false
+      required: [version, mode, csv]
+      properties:
+        version: { type: integer, minimum: 1, description: The table version the import is based on. }
+        mode: { type: string, enum: [merge, replace], description: merge keeps the entries the file does not mention; replace keeps only the entries of the file. }
+        hasHeader: { type: boolean, description: Skip the first line of the file. }
+        csv: { type: string, description: "The file text, at most 2 MiB of UTF-8. Two to four cells per line: up to three key parts, then the value." }
+    LookupImportSummary:
+      type: object
+      required: [rows, added, changed, unchanged, removed]
+      properties:
+        rows: { type: integer, description: Entries read from the file. }
+        added: { type: integer, description: Entries new to the table. }
+        changed: { type: integer, description: Entries whose value changed. }
+        unchanged: { type: integer, description: Entries the file repeated with the same value. }
+        removed: { type: integer, description: Entries the file left out (replace mode only). }
+    LookupImportResult:
+      type: object
+      required: [table, summary, written]
+      properties:
+        table: { $ref: '#/components/schemas/LookupTable' }
+        summary: { $ref: '#/components/schemas/LookupImportSummary' }
+        written: { type: boolean, description: False when the file changed nothing; no version was saved and table is the current one. }
     LookupVersion:
       type: object
       required: [version, entryCount, checksum, createdBy, createdAt]

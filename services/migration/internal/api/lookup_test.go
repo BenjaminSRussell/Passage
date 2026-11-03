@@ -269,3 +269,96 @@ func TestLookup_RenderMapsEveryOrderLine(t *testing.T) {
 		t.Fatalf("no lines = %d %s", rec.Code, rec.Body)
 	}
 }
+
+func TestLookup_ImportCSVMergeReplaceAndExport(t *testing.T) {
+	s := store.NewMem()
+	r := obRouter(s, hubPrincipal(1))
+	tbl := createLookup(t, r, "conv", `{"kind":"uom_conversion","entries":{"KG|LB":"2.2","KG|G":"1000"}}`)
+	imp := func(body string, duties string) *httptest.ResponseRecorder {
+		return do(r, http.MethodPost, lkPath+"/"+tbl.ID+":import", body, duties, true)
+	}
+	type resp struct {
+		Table   lkBody `json:"table"`
+		Written bool   `json:"written"`
+		Summary struct{ Rows, Added, Changed, Unchanged, Removed int }
+	}
+	read := func(rec *httptest.ResponseRecorder) resp {
+		var out resp
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return out
+	}
+
+	// Merge: LB|KG is new, KG|LB changes, KG|G stays because the file does not mention it.
+	rec := imp(`{"version":1,"mode":"merge","hasHeader":true,"csv":"from,to,factor\nLB,KG,0.45359237\nKG,LB,2.20462262185\n"}`, obWrite)
+	got := read(rec)
+	if rec.Code != http.StatusOK || !got.Written || got.Table.Version != 2 || got.Table.EntryCount != 3 || got.Summary.Added != 1 || got.Summary.Changed != 1 || got.Summary.Removed != 0 {
+		t.Fatalf("merge = %d %s", rec.Code, rec.Body)
+	}
+
+	// The same file again changes nothing: no version is written, and a stale version is still a conflict.
+	rec = imp(`{"version":2,"mode":"merge","hasHeader":true,"csv":"from,to,factor\nLB,KG,0.45359237\n"}`, obWrite)
+	got = read(rec)
+	if rec.Code != http.StatusOK || got.Written || got.Table.Version != 2 || got.Summary.Unchanged != 1 {
+		t.Fatalf("no-op import = %d %s", rec.Code, rec.Body)
+	}
+	if rec := imp(`{"version":1,"mode":"merge","csv":"LB,KG,0.45\n"}`, obWrite); rec.Code != http.StatusConflict {
+		t.Fatalf("stale import = %d %s", rec.Code, rec.Body)
+	}
+	if rec := imp(`{"version":1,"mode":"merge","csv":"KG,LB,2.2\n"}`, obWrite); rec.Code != http.StatusConflict {
+		t.Fatalf("stale no-op import = %d %s", rec.Code, rec.Body)
+	}
+
+	// Replace keeps only the file's entries.
+	rec = imp(`{"version":2,"mode":"replace","csv":"KG,LB,2.2\n"}`, obWrite)
+	got = read(rec)
+	if rec.Code != http.StatusOK || got.Table.Version != 3 || got.Table.EntryCount != 1 || got.Summary.Removed != 2 || got.Summary.Changed != 1 {
+		t.Fatalf("replace = %d %s", rec.Code, rec.Body)
+	}
+
+	// Problems name their lines; nothing is written; the duty and the request are checked.
+	rec = imp(`{"version":3,"mode":"merge","csv":"KG,LB,0\nKG,KG,1\n"}`, obWrite)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "MIG-LOOKUP-INVALID") || !strings.Contains(rec.Body.String(), "line 2") {
+		t.Fatalf("invalid csv = %d %s", rec.Code, rec.Body)
+	}
+	if rec := imp(`{"version":3,"mode":"merge","csv":"KG,LB,2\n"}`, obRead); rec.Code != http.StatusForbidden {
+		t.Fatalf("import with read duty = %d", rec.Code)
+	}
+	for _, body := range []string{`{"mode":"merge","csv":"a,b"}`, `{"version":3,"mode":"append","csv":"a,b"}`, `{"version":3,"mode":"merge","csv":" "}`} {
+		if rec := imp(body, obWrite); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s = %d", body, rec.Code)
+		}
+	}
+	if rec := do(r, http.MethodPost, lkPath+"/"+ids.New()+":import", `{"version":1,"mode":"merge","csv":"KG,LB,2"}`, obWrite, true); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown table = %d", rec.Code)
+	}
+
+	// Archived tables are not imported into.
+	arch := do(r, http.MethodPatch, lkPath+"/"+tbl.ID, `{"version":3,"status":"archived"}`, obWrite, true)
+	if arch.Code != http.StatusOK {
+		t.Fatalf("archive = %d", arch.Code)
+	}
+	if rec := imp(`{"version":4,"mode":"merge","csv":"KG,G,1000\n"}`, obWrite); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "MIG-LOOKUP-ARCHIVED") {
+		t.Fatalf("import into archived = %d %s", rec.Code, rec.Body)
+	}
+
+	// Export: current version, an older one, headers, and the duty.
+	ex := do(r, http.MethodGet, lkPath+"/"+tbl.ID+"/entries.csv", "", obRead, true)
+	if ex.Code != http.StatusOK || ex.Body.String() != "KG,LB,2.2\n" || !strings.HasPrefix(ex.Header().Get("Content-Type"), "text/csv") || !strings.Contains(ex.Header().Get("Content-Disposition"), `conv-v4.csv`) {
+		t.Fatalf("export = %d %q %v", ex.Code, ex.Body, ex.Header())
+	}
+	if old := do(r, http.MethodGet, lkPath+"/"+tbl.ID+"/entries.csv?version=1", "", obRead, true); old.Code != http.StatusOK || old.Body.String() != "KG,G,1000\nKG,LB,2.2\n" {
+		t.Fatalf("export v1 = %d %q", old.Code, old.Body)
+	}
+	for path, want := range map[string]int{
+		lkPath + "/" + tbl.ID + "/entries.csv?version=x": http.StatusBadRequest,
+		lkPath + "/" + tbl.ID + "/entries.csv?version=9": http.StatusNotFound,
+		lkPath + "/" + ids.New() + "/entries.csv":        http.StatusNotFound,
+	} {
+		if rec := do(r, http.MethodGet, path, "", obRead, true); rec.Code != want {
+			t.Errorf("%s = %d, want %d", path, rec.Code, want)
+		}
+	}
+	if rec := do(r, http.MethodGet, lkPath+"/"+tbl.ID+"/entries.csv", "", "nothing.useful", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("export without duty = %d", rec.Code)
+	}
+}
