@@ -27,6 +27,7 @@ const (
 	DutyReverse     = "ledger.journal.reverse"
 	DutyBalanceRead = "ledger.balance.read"
 	DutyLedgerRead  = "ledger.ledger.lookup"
+	DutyPostClosed  = "ledger.period.postclosed"
 
 	audience        = "ledger"
 	ledgersPath     = "/v1/ledger/ledgers/"
@@ -40,15 +41,17 @@ const (
 var (
 	ErrUnsigned    = errors.New("ledger: posting needs a service signing key; the end user's headers are never forwarded for a journal")
 	ErrNoPrincipal = errors.New("ledger: no principal in context")
+	ErrNoDuty      = errors.New("ledger: a request must name the duties it is signed with; an empty list would sign the whole grant")
 	ErrUnbalanced  = errors.New("ledger: entry lines do not balance")
 	ErrEmptyEntry  = errors.New("ledger: entry needs at least two lines with positive amounts, an account and a currency")
 )
 
 type Line struct {
-	Account string
-	Credit  bool
-	Amount  decimal.Decimal
-	Text    string
+	Account    string
+	Credit     bool
+	Amount     decimal.Decimal
+	Text       string
+	Dimensions map[string]string
 }
 
 type Entry struct {
@@ -59,6 +62,7 @@ type Entry struct {
 	Currency       string
 	IdempotencyKey string
 	SourceType     string
+	PostClosed     bool
 	Lines          []Line
 }
 
@@ -68,6 +72,7 @@ type Reversal struct {
 	PostingDate    string
 	Description    string
 	IdempotencyKey string
+	PostClosed     bool
 }
 
 type BalanceQuery struct {
@@ -181,10 +186,11 @@ type amountBody struct {
 }
 
 type lineBody struct {
-	Account     string     `json:"account"`
-	DebitCredit string     `json:"debitCredit"`
-	Amount      amountBody `json:"amount"`
-	Text        string     `json:"text,omitempty"`
+	Account     string            `json:"account"`
+	DebitCredit string            `json:"debitCredit"`
+	Amount      amountBody        `json:"amount"`
+	Text        string            `json:"text,omitempty"`
+	Dimensions  map[string]string `json:"dimensions,omitempty"`
 }
 
 type sourceBody struct {
@@ -232,7 +238,10 @@ type balancesBody struct {
 	} `json:"rows"`
 }
 
-func (c *Client) do(ctx context.Context, op, subject, method, path string, query url.Values, payload any, key, legalEntity, duty string) ([]byte, error) {
+func (c *Client) do(ctx context.Context, op, subject, method, path string, query url.Values, payload any, key, legalEntity string, duties ...string) ([]byte, error) {
+	if len(duties) == 0 {
+		return nil, ErrNoDuty
+	}
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
 		return nil, ErrNoPrincipal
@@ -259,7 +268,7 @@ func (c *Client) do(ctx context.Context, op, subject, method, path string, query
 	if key != "" {
 		req.Header.Set("Idempotency-Key", key)
 	}
-	if _, err := c.signer.ApplyDuties(req, principal, audience, legalEntity, []string{duty}); err != nil {
+	if _, err := c.signer.ApplyDuties(req, principal, audience, legalEntity, duties); err != nil {
 		return nil, fmt.Errorf("ledger %s: %w", op, err)
 	}
 	resp, err := c.http.Do(req)
@@ -284,6 +293,13 @@ func (c *Client) do(ctx context.Context, op, subject, method, path string, query
 	return raw, nil
 }
 
+func postDuties(duty string, postClosed bool) []string {
+	if postClosed {
+		return []string{duty, DutyPostClosed}
+	}
+	return []string{duty}
+}
+
 func entryID(ctx context.Context, op, subject string, raw []byte) (string, error) {
 	var out entryResult
 	if err := json.Unmarshal(raw, &out); err != nil || out.id() == "" {
@@ -305,10 +321,10 @@ func (c *Client) Post(ctx context.Context, e Entry) (string, error) {
 		if l.Credit {
 			side = sideCredit
 		}
-		body.Lines = append(body.Lines, lineBody{Account: l.Account, DebitCredit: side, Text: l.Text,
+		body.Lines = append(body.Lines, lineBody{Account: l.Account, DebitCredit: side, Text: l.Text, Dimensions: l.Dimensions,
 			Amount: amountBody{Currency: e.Currency, Value: l.Amount.StringFixed(money.MinorUnits(e.Currency))}})
 	}
-	raw, err := c.do(ctx, "post", e.IdempotencyKey, http.MethodPost, entriesPath, nil, body, e.IdempotencyKey, e.LegalEntityID, DutyPost)
+	raw, err := c.do(ctx, "post", e.IdempotencyKey, http.MethodPost, entriesPath, nil, body, e.IdempotencyKey, e.LegalEntityID, postDuties(DutyPost, e.PostClosed)...)
 	if err != nil {
 		return "", err
 	}
@@ -317,7 +333,7 @@ func (c *Client) Post(ctx context.Context, e Entry) (string, error) {
 
 func (c *Client) Reverse(ctx context.Context, r Reversal) (string, error) {
 	path := entriesPath + "/" + url.PathEscape(r.EntryID) + "/reverse"
-	raw, err := c.do(ctx, "reverse", r.EntryID, http.MethodPost, path, nil, reverseBody{PostingDate: r.PostingDate, Description: r.Description}, r.IdempotencyKey, r.LegalEntityID, DutyReverse)
+	raw, err := c.do(ctx, "reverse", r.EntryID, http.MethodPost, path, nil, reverseBody{PostingDate: r.PostingDate, Description: r.Description}, r.IdempotencyKey, r.LegalEntityID, postDuties(DutyReverse, r.PostClosed)...)
 	if err != nil {
 		return "", err
 	}

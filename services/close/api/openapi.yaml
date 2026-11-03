@@ -79,6 +79,56 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
+  /v1/close/year-end-runs:
+    post:
+      operationId: runYearEnd
+      x-passage-duty: close.yearend.run
+      description: Closes one fiscal year of a ledger and the caller's single legal entity. The request names only the ledger, year and retained-earnings account. Close verifies the ledger belongs to the caller's legal entity, requires the fiscal periods of the year to be contiguous, non-overlapping and to cover 1 January to 31 December, every module closed (general ledger may be on hold) and the last period not permanently closed, reads the balances per account and dimension from the ledger trial balance, takes account classes from the ledger's chart, derives the closing date (last period end) and the proposed opening date (the next day) from its periods, computes the closing and opening proposals, records the run, posts only the closing entry (profit and loss to retained earnings) with service credentials under a key derived from the run, then marks the run completed and queues dev.passage.close.yearend.completed.v1. No opening journal is posted: the ledger's balances are cumulative, so the opening proposal is kept on the run as a verification artifact. Proposals are derived again on a retry until the closing entry has posted. Repeating the same request, including a completed re-run, returns the stored run (200) and resumes an unfinished posting without duplicating entries. A ledger refusal while nothing has posted marks the run abandoned and frees the year. A completed year is redone only by naming that run in supersedesRunId, which reverses its closing entry and posts again from the ledger's current balances. A different request for the same ledger and year is 409 COM-0409; a posting the ledger is still processing is 409 CLOSE-0002 with Retry-After.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/YearEndRequest' }
+      responses:
+        '200':
+          description: The run already existed; completed now or earlier.
+          headers:
+            Location: { schema: { type: string }, description: The run resource. }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/YearEndRun' }
+        '201':
+          description: The run was created and completed.
+          headers:
+            Location: { schema: { type: string }, description: The run resource. }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/YearEndRun' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/close/year-end-runs/{runId}:
+    get:
+      operationId: getYearEndRun
+      x-passage-duty: close.yearend.read
+      description: Returns a stored year-end run with its proposals and posted journal ids.
+      parameters:
+        - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The run.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/YearEndRun' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
       operationId: liveness
@@ -135,6 +185,54 @@ components:
         endDate: { type: string, format: date }
         module: { type: string, enum: [all, gl, ap, ar, inventory, assets, cash, production, projects, tax, bank, payroll] }
         status: { type: string, enum: [open, on_hold, closed, permanently_closed, never_opened] }
+    YearEndEntry:
+      type: object
+      required: [kind, account, dimensions, amount]
+      properties:
+        kind: { type: string, enum: [closing, opening], description: An opening entry is a stored proposal only and is never posted. }
+        account: { type: string }
+        dimensions: { type: string }
+        amount: { type: string, description: Signed decimal, positive is a debit and negative a credit. }
+    YearEndRequest:
+      type: object
+      additionalProperties: false
+      description: Names what to close and where retained earnings go. Amounts, account classes, currency and dates are never accepted from the caller; close reads them from the ledger and its own fiscal periods.
+      required: [ledgerId, fiscalYear, retainedEarningsAccount]
+      properties:
+        ledgerId: { type: string, format: uuid }
+        fiscalYear: { type: string, pattern: '^[0-9]{4}$', description: Calendar year whose fiscal periods are all closed (the general ledger module may be on hold). }
+        retainedEarningsAccount: { type: string, maxLength: 20, description: A postable equity account of the ledger's chart. }
+        retainDimensions: { type: boolean, description: Carry each profit and loss dimension combination into retained earnings instead of combining them. }
+        supersedesRunId: { type: string, format: uuid, description: The latest completed run of this ledger and year; its closing entry is reversed before the new one posts. }
+    YearEndRun:
+      type: object
+      required: [id, legalEntityId, ledgerId, fiscalYear, sequence, status, currency, closingDate, openingDate, retainedEarningsAccount, retainDimensions, journals, createdBy]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        fiscalYear: { type: string }
+        sequence: { type: integer, minimum: 1 }
+        supersedesRunId: { type: string, format: uuid }
+        status: { type: string, enum: [pending, completed, abandoned], description: abandoned means a ledger refusal ended the run before any journal posted. }
+        currency: { type: string, description: The ledger's accounting currency. }
+        closingDate: { type: string, format: date, description: End of the last fiscal period of the year. }
+        openingDate: { type: string, format: date, description: The day after the closing date, when the stored opening proposal takes effect; nothing is posted on it. }
+        retainedEarningsAccount: { type: string }
+        retainDimensions: { type: boolean }
+        proposals:
+          type: object
+          required: [closing, opening]
+          properties:
+            closing: { type: array, items: { $ref: '#/components/schemas/YearEndEntry' } }
+            opening: { type: array, items: { $ref: '#/components/schemas/YearEndEntry' } }
+        journals:
+          type: object
+          description: Ledger journal entry ids by step.
+          properties:
+            closing: { type: string }
+            reverseClosing: { type: string }
+        createdBy: { type: string }
     Problem:
       type: object
       required: [type, title, status, code, serviceCode]
@@ -150,7 +248,7 @@ components:
         errors: { type: object, additionalProperties: { type: string } }
   responses:
     Problem:
-      description: RFC 9457 problem details (application/problem+json). 422 LEDGER-0013 period closed or never opened; 403 LEDGER-0014 period on hold; 400 CLOSE-0004 or COM-0001 validation; 404 CLOSE-0005 no fiscal period covers the date; 409 CLOSE-0006 several periods cover it.
+      description: RFC 9457 problem details (application/problem+json). 422 LEDGER-0013 period closed or never opened; 403 LEDGER-0014 period on hold; 400 CLOSE-0004 or COM-0001 validation; 404 CLOSE-0005 no fiscal period covers the date or the year's periods leave a gap; 404 CLOSE-0007 no such year-end run; 422 CLOSE-0008 the ledger rejected a year-end entry; 400 CLOSE-0009 the ledger's balances or chart cannot be closed; 409 CLOSE-0006 several periods cover it or overlap.
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }

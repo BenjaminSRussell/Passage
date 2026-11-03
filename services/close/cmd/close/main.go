@@ -13,6 +13,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/close/internal/api"
 	"github.com/BenjaminSRussell/passage/services/close/internal/ledger"
@@ -23,6 +24,7 @@ import (
 const (
 	defaultHTTPAddr  = ":8080"
 	defaultAdminAddr = ":9090"
+	ledgerSource     = "close"
 )
 
 func main() {
@@ -117,13 +119,19 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
 		return err
 	}
-	a := api.New(store.New(pool))
+	st := store.New(pool)
+	a := api.New(st)
 	if url := getenv("LEDGER_URL"); url != "" {
 		signer, err := tenant.ServiceSignerFromEnv(getenv)
 		if err != nil {
 			return err
 		}
 		a.WithLedgers(ledger.New(url, nil, signer))
+		postings, err := ledgerclient.New(url, ledgerSource, signer, nil)
+		if err != nil {
+			return err
+		}
+		a.WithYearEnd(st, postings)
 	}
 	router := httpx.NewRouter()
 	a.Register(router)

@@ -26,11 +26,17 @@ Store tests need `PASSAGE_TEST_DATABASE_URL` and `PASSAGE_TEST_APP_DATABASE_URL`
 
 `domain.Decide(rows, module, group)` implements BR-14.1. The module row wins, else the `all` row, else the period is never opened. `open` allows. `on_hold` allows only the row's allowed group (LEDGER-0014). Everything else, including never opened, rejects (LEDGER-0013). `domain.ModuleForSource` maps `source.system` to a module; `manual` posts to `gl`; unknown or omitted systems are rejected if any module row is closed.
 
-The ledger (wave 11) enforces the rule inside its posting transaction by reading the rows with `store.PeriodRows` (`select ... for share`) and calling `Decide`, or by calling `POST /v1/close/period-statuses:check`. Reversal, migration and batch posts keep their original source system and use the same decision. `TestPostingPaths_ClosedRejected` is the closed-period contract test over every path.
+The ledger (wave 11) enforces the rule inside its posting transaction by reading the rows with `store.PeriodRows` (`select ... for share`) and calling `Decide`, or by calling `POST /v1/close/period-statuses:check`. Reversal, migration and batch posts keep their original source system and use the same decision. `TestPostingPaths_ClosedRejected` is the closed-period contract test over every path, and `period_contract_test.go` runs the same rule through the real HTTP routes for every source system the posting services send.
 
 ## API
 
 `POST /v1/close/period-statuses:check` and `GET /v1/close/periods:resolve?ledgerId=&postingDate=&sourceSystem=` (duty `period.check` for both; the resolver needs the caller's single legal entity and returns the fiscal period id, its dates and the module status, or 404 `CLOSE-0005` / 409 `CLOSE-0006`), `PUT /v1/close/periods/{fiscalPeriodId}` (duty `period.maintain`) registers a period's dates and opens the `all` module, only when the ledger service (`GET /v1/ledger/ledgers/{id}` with a signed `ledger.ledger.lookup` service token, `LEDGER_URL` plus the service signing key) says the ledger belongs to the caller's legal entity (403 otherwise, 503 when the ledger is unreachable or unconfigured); same dates replay with 200, moved or overlapping dates are 409 `CLOSE-0001`. `GET /healthz`, `GET /readyz` (database ping, 503 when down), `GET /metrics` on the admin port. Contract: `api/openapi.yaml`. The AsyncAPI file declares `dev.passage.close.period.statuschanged.v1` (the PRD spells the verb `status-changed`, which the kernel `events.ValidType` pattern rejects); nothing publishes it yet.
+
+Year-end close: `POST /v1/close/year-end-runs` (duty `close.yearend.run`) takes only `ledgerId`, a four digit `fiscalYear`, `retainedEarningsAccount`, optional `retainDimensions` and `supersedesRunId`; any other field (balances, class, currency, dates) is a 400. Close never accepts amounts, accounts or dates from the caller, because it holds `ledger.entry.post`: it confirms the ledger belongs to the caller's legal entity, reads the ledger's chart once (`ledger.account.lookup`; the retained earnings account must be a postable equity account) and requires the year's fiscal periods to be contiguous, non-overlapping and to cover 1 January to 31 December, every module closed (general ledger may be on hold) and the last period not permanently closed, because the closing entry posts into it (404 `CLOSE-0005` for a gap or a missing first or last day, 409 `CLOSE-0006` for an overlap, 409 `CLOSE-0001` for a status). It reads the balances per account and dimension from the ledger trial balance (`ledger.balance.read`; a trial balance in a currency other than the ledger's is a 422), takes each account's class from the chart and derives the closing date (last period end) and the proposed opening date (next day) from its own periods. `domain.CloseYear` computes the proposals; the run is stored in `year_end_run` with its proposals and each posted journal id (sequence per ledger and year).
+
+Only the closing entry (profit and loss to retained earnings, dated the last day of the year) is posted. The ledger's balances are cumulative from inception and it has no period 0 or opening flag, so an opening entry would double every balance sheet account; the opening proposal is stored on the run as a verification artifact (it equals the closing balance sheet per account and dimension, BR-14.8) and never posted. The entry goes through the shared `ledgerclient` with a signed `ledger.entry.post` token (source system `close`, document and idempotency key UUIDs derived from the run id), and the run is marked `completed` with `dev.passage.close.yearend.completed.v1` in the outbox in the same transaction. The last period is still closed or on hold in the close service, which the ledger refuses without `ledger.period.postclosed`. The ledger has no allowed-group forwarding to pass, so `close` is the only service whose grant to the ledger holds that flag duty (`policies/authz/data.json` `service_grants`, mirrored in `tenant.serviceGrants`), and `ledgerclient` signs it only for the closing entry and the reversals of a re-run.
+
+Proposals are derived from the ledger once and frozen, with the run's dispatched mark, before the first ledger write; a retry resends the frozen body under the same idempotency keys, so an entry the ledger accepted but never answered is replayed and recorded, not re-derived. Repeating a completed request returns the stored run (200) before preconditions are re-read, also for a completed re-run that names the same `supersedesRunId`; a different request for the same ledger and year is 409 `COM-0409`. A definite ledger refusal (400, 404, 422) or a validation failure on the call that first sends anything to the ledger marks the run `abandoned` and frees the year; any other failure, or a refusal after an earlier attempt, leaves it `pending` and only the same request resumes it. A completed year is redone by naming the latest completed run in `supersedesRunId`: close reverses its closing entry on its own date (`ledger.journal.reverse`, journal `reverseClosing`) and posts again from the ledger's current balances. A ledger refusal is 422 `CLOSE-0008` (including ledger 4xx answers such as 403, which a retry cannot fix); balances or a chart that cannot be closed are 400 `CLOSE-0009`; a posting the ledger is still processing is 409 `CLOSE-0002` with `Retry-After`; an unreachable ledger is 503 and the same request is safe to retry. `GET /v1/close/year-end-runs/{runId}` (duty `close.yearend.read`) returns the run. Both need `LEDGER_URL` and the service signing key, else 503.
 
 ## Error codes
 
@@ -39,9 +45,15 @@ The ledger (wave 11) enforces the rule inside its posting transaction by reading
 | LEDGER-0013 | 422 | period closed, permanently closed or never opened (contract slug `period_closed`) |
 | LEDGER-0014 | 403 | period on hold and the caller's group is not allowed |
 | CLOSE-0001 | domain | invalid period transition, or task not pending |
-| CLOSE-0002 | reserved | close busy (lock wait), used by the close run slice |
+| CLOSE-0002 | 409 | the ledger is still processing the same posting; retry the same request after `Retry-After` |
 | CLOSE-0003 | domain | task blocked by an open dependency |
 | CLOSE-0004 | 400 | invalid field or domain input |
+| CLOSE-0005 | 404 | no fiscal period covers the date, or the year's periods leave a gap or miss 1 January or 31 December |
+| CLOSE-0006 | 409 | several fiscal periods cover a date or overlap |
+| CLOSE-0007 | 404 | no such year-end run |
+| CLOSE-0008 | 422 | the ledger refused a year-end request, or its trial balance is not in the ledger's currency |
+| CLOSE-0009 | 400 | the ledger's balances or chart cannot be closed (account outside the chart, unclassifiable type, balances that do not sum to zero) |
+| COM-0409 | 409 | a different year-end request for a ledger and year that has an unfinished or completed run |
 | ALLOC-0001 | domain | reciprocal allocation did not converge within the iteration cap |
 | ALLOC-0002 | domain | allocation basis is zero for every destination |
 | COM-0001 | 400 | malformed body, unknown field or wrong JSON type |
@@ -53,11 +65,11 @@ The ledger (wave 11) enforces the rule inside its posting transaction by reading
 
 - `Allocate` splits an amount by basis with rounding to the currency scale and the residual on the largest share, ties to the first defined (BR-14.4).
 - `Reciprocal` solves reciprocal department allocation by Gauss-Seidel on unrounded decimals and rounds once; it fails with ALLOC-0001 at the iteration cap (BR-14.5).
-- `CloseYear` returns closing entries (P&L to retained earnings, per dimension combination when requested) and opening entries, and verifies opening equals closing per combination before returning (BR-14.8).
+- `CloseYear` returns closing entries (P&L to retained earnings, per dimension combination when requested) and opening proposals, and verifies opening equals closing per combination before returning (BR-14.8). Only the closing entries are posted.
 - `Instantiate`, `Eligible`, `Complete`, `Skip` run the checklist DAG; a dependency is satisfied when completed or skipped (BR-14.10).
 
-Engines return proposals; nothing here posts to the ledger.
+Engines return proposals; only the year-end run posts them, from balances the ledger reports.
 
 ## Metrics
 
-`close_period_checks_total`, `close_period_rejections_total`, `close_period_check_failures_total` (stdlib atomics rendered as text).
+`close_period_checks_total`, `close_period_rejections_total`, `close_period_check_failures_total`, `close_year_end_runs_completed_total` (stdlib atomics rendered as text).

@@ -25,7 +25,9 @@ type Fake struct {
 	byKey    map[string]int
 	reversed map[string]string
 	postErr  error
+	lostErr  error
 	ledgers  map[string]string
+	closedTo string
 }
 
 type Stored struct {
@@ -45,6 +47,25 @@ func (f *Fake) FailPosts(err error) {
 	f.postErr = err
 }
 
+// LoseAnswers makes every Post that the ledger accepts return err instead of the entry id until it is called with nil.
+func (f *Fake) LoseAnswers(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lostErr = err
+}
+
+// RefuseClosedThrough makes Post and Reverse refuse, with LEDGER_PERIOD_CLOSED, any entry dated on or before date (YYYY-MM-DD)
+// unless it carries PostClosed, the way the ledger refuses a closed period without duty ledger.period.postclosed.
+func (f *Fake) RefuseClosedThrough(date string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closedTo = date
+}
+
+func (f *Fake) refusesClosed(date string, postClosed bool) bool {
+	return f.closedTo != "" && date <= f.closedTo && !postClosed
+}
+
 func (f *Fake) Entries() []Stored {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -61,7 +82,14 @@ func (f *Fake) Post(_ context.Context, e Entry) (string, error) {
 	if f.postErr != nil {
 		return "", f.postErr
 	}
-	return f.store("post", e, "")
+	if f.refusesClosed(e.PostingDate, e.PostClosed) {
+		return "", &Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: CodePeriodClosed}
+	}
+	id, err := f.store("post", e, "")
+	if err == nil && f.lostErr != nil {
+		return "", f.lostErr
+	}
+	return id, err
 }
 
 func (f *Fake) store(op string, e Entry, reversalOf string) (string, error) {
@@ -100,9 +128,13 @@ func (f *Fake) Reverse(_ context.Context, r Reversal) (string, error) {
 	}
 	orig := f.entries[i].Entry
 	flipped := orig
+	flipped.PostClosed = r.PostClosed
 	flipped.IdempotencyKey = r.IdempotencyKey
 	if r.PostingDate != "" {
 		flipped.PostingDate = r.PostingDate
+	}
+	if f.refusesClosed(flipped.PostingDate, r.PostClosed) {
+		return "", &Error{Op: "reverse", Status: http.StatusUnprocessableEntity, Code: CodePeriodClosed}
 	}
 	flipped.Lines = make([]Line, len(orig.Lines))
 	for j, l := range orig.Lines {

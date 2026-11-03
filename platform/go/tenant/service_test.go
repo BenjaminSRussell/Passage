@@ -660,3 +660,33 @@ func TestMintDutiesCarriesOnlyTheIntersectionWithTheGrant(t *testing.T) {
 		t.Fatal("an empty duty list must not fall back to the whole grant")
 	}
 }
+
+func TestCloseMayMintOnlyItsYearEndLedgerDuties(t *testing.T) {
+	const other = "0190a5f2-7b1c-7d3e-8a4f-1234567890ad"
+	_, priv, _ := ed25519.GenerateKey(nil)
+	closer, _ := tenant.NewServiceSigner("close", priv)
+	user := tenant.Principal{TenantID: validTenant, LegalEntityID: validLE, UserID: "erin"}
+	for _, duty := range []string{"ledger.ledger.lookup", "ledger.account.lookup", "ledger.balance.read", "ledger.entry.post", "ledger.journal.reverse", "ledger.period.postclosed"} {
+		if _, err := closer.MintDuties("ledger", user, validLE, []string{duty}); err != nil {
+			t.Errorf("%s: %v", duty, err)
+		}
+	}
+	for _, duty := range []string{"ledger.journal.postdirect", "ledger.ledger.write", "ledger.setup.write", "ledger.journal.post"} {
+		if _, err := closer.MintDuties("ledger", user, validLE, []string{duty}); !errors.Is(err, tenant.ErrNoServiceGrant) {
+			t.Errorf("%s must not be grantable to close: %v", duty, err)
+		}
+	}
+	for _, caller := range []string{"receiving", "payables", "production", "eam", "assets"} {
+		signer, _ := tenant.NewServiceSigner(caller, priv)
+		if _, err := signer.MintDuties("ledger", user, validLE, []string{"ledger.period.postclosed"}); !errors.Is(err, tenant.ErrNoServiceGrant) {
+			t.Errorf("%s must not be able to post into a closed period: %v", caller, err)
+		}
+	}
+	allScope := tenant.Principal{TenantID: validTenant, UserID: "u", Duties: map[string]struct{}{tenant.DutyAllScope: {}}}
+	if _, err := closer.MintDuties("ledger", allScope, other, []string{"ledger.account.lookup"}); err != nil {
+		t.Errorf("chart lookup is a read duty an ALL-scope user may name an entity for: %v", err)
+	}
+	if _, err := closer.MintDuties("ledger", allScope, other, []string{"ledger.entry.post"}); err == nil {
+		t.Error("an ALL-scope user must not get a posting token")
+	}
+}

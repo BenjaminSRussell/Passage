@@ -23,15 +23,15 @@ type Balance struct {
 }
 
 type Entry struct {
-	Kind       string
-	Account    string
-	Dimensions string
-	Amount     decimal.Decimal
+	Kind       string          `json:"kind"`
+	Account    string          `json:"account"`
+	Dimensions string          `json:"dimensions"`
+	Amount     decimal.Decimal `json:"amount"`
 }
 
 type YearEnd struct {
-	Closing []Entry
-	Opening []Entry
+	Closing []Entry `json:"closing"`
+	Opening []Entry `json:"opening"`
 }
 
 type key struct{ account, dimensions string }
