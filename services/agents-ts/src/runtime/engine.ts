@@ -5,13 +5,9 @@ import {
 } from "../domain/audit.js";
 import { selfApprovalBlocked, canCallTool } from "../domain/authz.js";
 import {
-  addUsage,
-  assertCanStartRun,
   assertRunWithinCap,
-  budgetStatus,
   estimateTokens,
   type BudgetState,
-  type TokenBudget,
 } from "../domain/budget.js";
 import type { Money } from "../domain/money.js";
 import {
@@ -121,8 +117,7 @@ export interface BudgetRequest {
   month: string;
   tokensIn: number;
   tokensOut: number;
-  nowMs: number;
-  /** A hold older than this is swept: its worker died before settling. */
+  /** A hold older than this (by the database clock) is swept and charged in full: its worker died before settling. */
   ttlMs: number;
 }
 
@@ -132,10 +127,13 @@ export interface BudgetHold {
   month: string;
 }
 
-/** Persisted token budget (FR-47.11): reserve before the run, settle with the actual usage after it. */
+/**
+ * Persisted token budget (FR-47.11): reserve before the model call, settle with the actual usage
+ * right after it, so a hold never outlives the call it covers. Settle returns the month's state.
+ */
 export interface BudgetPort {
   reserve(req: BudgetRequest): Promise<BudgetHold>;
-  settle(hold: BudgetHold, actual: ModelUsage): Promise<void>;
+  settle(hold: BudgetHold, actual: ModelUsage): Promise<BudgetState>;
 }
 
 /**
@@ -171,7 +169,6 @@ export interface RunRequest {
   evalPassed: boolean;
   policy: ModePolicy;
   selfApprovalLimit: Money;
-  budget: TokenBudget;
   runTokenCap: number;
   prompt: string;
 }
@@ -188,7 +185,7 @@ export interface RunResult {
   budgetState: BudgetState;
   /** Real values, for the UI only. Never stored or sent back to a provider. */
   displayText: string;
-  /** Set when the run committed but the budget settle or the audit write then failed. */
+  /** Set when the run committed but the audit write then failed. */
   postCommitError?: string;
 }
 
@@ -216,20 +213,23 @@ export async function runAgent(
     month: deps.now().slice(0, 7),
     tokensIn: cap,
     tokensOut: cap,
-    nowMs: deps.nowMs(),
     ttlMs: RUN_TIMEOUT_MS,
   });
-  const release = (): Promise<void> =>
-    deps.budgets.settle(hold, { tokensIn: 0, tokensOut: 0 }).catch(() => undefined);
+  const release = (): Promise<BudgetState> =>
+    deps.budgets.settle(hold, { tokensIn: 0, tokensOut: 0 }).catch(() => "OK");
   try {
     await deps.audit.startRun(req);
   } catch (err) {
     await release();
     throw err;
   }
+  let charged: BudgetState | undefined;
+  const charge = async (usage: ModelUsage): Promise<void> => {
+    charged = await deps.budgets.settle(hold, usage);
+  };
   let result: RunResult;
   try {
-    result = await executeRun(deps, req);
+    result = await executeRun(deps, req, charge);
   } catch (err) {
     const failed: RunResult = {
       runId: req.runId,
@@ -240,34 +240,39 @@ export async function runAgent(
       tokensIn: 0,
       tokensOut: 0,
       estimated: false,
-      budgetState: budgetStatus(req.budget).state,
+      budgetState: "OK",
       displayText: "",
     };
     await deps.audit.finishRun(req, failed).catch(() => undefined);
-    await release();
+    if (charged === undefined) await release();
     throw err;
   }
-  const problems: Error[] = [];
-  const attempt = async (step: () => Promise<void>): Promise<void> => {
-    try {
-      await step();
-    } catch (err) {
-      problems.push(err instanceof Error ? err : new Error(String(err)));
-    }
-  };
-  await attempt(() =>
-    deps.budgets.settle(hold, { tokensIn: result.tokensIn, tokensOut: result.tokensOut }),
+  const budgetState = charged ?? (await release());
+  result = { ...result, budgetState };
+  try {
+    await deps.audit.finishRun(req, result);
+    return result;
+  } catch (err) {
+    if (result.status !== "COMMITTED") throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    logPostCommitFailure(req, "audit write failed after commit", message);
+    await deps.audit.finishRun(req, result, message).catch((retry: unknown) => {
+      logPostCommitFailure(req, "run left RUNNING after commit", String(retry));
+    });
+    return { ...result, postCommitError: message };
+  }
+}
+
+function logPostCommitFailure(req: RunRequest, message: string, error: string): void {
+  process.stderr.write(
+    `${JSON.stringify({ level: "error", message, service: "agents-ts", tenantId: req.tenantId, runId: req.runId, error })}\n`,
   );
-  const settleFailure = problems[0]?.message;
-  await attempt(() => deps.audit.finishRun(req, result, settleFailure));
-  if (problems.length === 0) return result;
-  if (result.status !== "COMMITTED") throw problems[0];
-  return { ...result, postCommitError: problems.map((p) => p.message).join("; ") };
 }
 
 async function executeRun(
   deps: RunDeps,
   req: RunRequest,
+  charge: (usage: ModelUsage) => Promise<void>,
 ): Promise<RunResult> {
   if (deps.killSwitch.isHalted(req.tenantId)) {
     throw new AgentError(
@@ -275,7 +280,6 @@ async function executeRun(
       "agent runs are halted by the kill switch",
     );
   }
-  assertCanStartRun(req.budget);
   if (!req.evalPassed) {
     throw new AgentError(
       "AGT-0204",
@@ -301,7 +305,6 @@ async function executeRun(
   let tokensIn = 0;
   let tokensOut = 0;
   let estimated = false;
-  let budget = req.budget;
   let seq = 0;
 
   const current = (): RunStatus => status;
@@ -318,7 +321,7 @@ async function executeRun(
     tokensIn,
     tokensOut,
     estimated,
-    budgetState: budgetStatus(budget).state,
+    budgetState: "OK",
     displayText,
   });
   const finish = (to: RunStatus, c?: string, why?: string): RunResult => {
@@ -407,12 +410,8 @@ async function executeRun(
     };
     tokensIn += usage.tokensIn;
     tokensOut += usage.tokensOut;
-    // Tokens spent count against the budget even when the run then breaks its cap.
-    budget = addUsage(budget, {
-      tokensIn: usage.tokensIn,
-      tokensOut: usage.tokensOut,
-      estimated,
-    });
+    // Tokens spent are charged at once, so they count even when the run then breaks its cap or waits for approval.
+    await charge(usage);
     assertRunWithinCap(tokensIn + tokensOut, req.runTokenCap);
     displayText = pseudo.restore(response.text);
     moveTo("ACTING");

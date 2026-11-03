@@ -17,7 +17,7 @@ import type {
 
 export const MIGRATIONS_DIR = new URL("../../migrations/", import.meta.url);
 
-/** Applies migrations/*.sql in order, each in its own transaction (the dbx.Migrate contract, as integration-hub-ts does). */
+/** Same contract as integration-hub-ts pgStore.migrate (dbx.Migrate); the two are separate npm packages with no shared TS library to import it from. */
 export async function migrate(pool: pg.Pool, dir: URL = MIGRATIONS_DIR): Promise<void> {
   await pool.query(
     "create table if not exists schema_migrations (name text primary key, applied_at timestamptz not null default now())",
@@ -225,14 +225,21 @@ export class PgAgentStore implements AuditPort, BudgetPort {
 
   /**
    * The row lock serializes concurrent runs of a tenant. Expired holds (a worker that died before settling)
-   * are swept first; the hold lands only while used plus live holds plus this hold fit both limits (AGT-0202).
+   * are swept first, charged in full and judged by the database clock; the hold lands only while used plus live holds plus this hold fit both limits (AGT-0202).
    */
   async reserve(r: BudgetRequest): Promise<BudgetHold> {
     assertTokens("tokensIn", r.tokensIn, 1);
     assertTokens("tokensOut", r.tokensOut, 1);
     return this.withTenant(r.tenantId, async (c) => {
-      const row = await this.lockBudget(c, r.tenantId, r.month);
-      await c.query("delete from budget_hold where tenant_id = $1 and expires_at <= to_timestamp($2::float8 / 1000)", [r.tenantId, r.nowMs]);
+      await this.lockBudget(c, r.tenantId, r.month);
+      await c.query(
+        `with swept as (delete from budget_hold where tenant_id = $1 and expires_at <= now() returning month, tokens_in, tokens_out),
+              spent as (select month, sum(tokens_in) as tokens_in, sum(tokens_out) as tokens_out from swept group by month)
+         update token_budget b set used_in = b.used_in + spent.tokens_in, used_out = b.used_out + spent.tokens_out, updated_at = now()
+           from spent where b.tenant_id = $1 and b.month = spent.month`,
+        [r.tenantId],
+      );
+      const row = (await c.query<BudgetRow>("select * from token_budget where tenant_id = $1 and month = $2", [r.tenantId, r.month])).rows[0]!;
       const held = (
         await c.query<{ held_in: string; held_out: string }>(
           "select coalesce(sum(tokens_in), 0) as held_in, coalesce(sum(tokens_out), 0) as held_out from budget_hold where tenant_id = $1 and month = $2",
@@ -245,36 +252,39 @@ export class PgAgentStore implements AuditPort, BudgetPort {
       }
       const holdId = randomUUID();
       await c.query(
-        "insert into budget_hold (tenant_id, hold_id, month, agent_id, run_id, tokens_in, tokens_out, expires_at) values ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8::float8 / 1000))",
-        [r.tenantId, holdId, r.month, r.agentId, r.runId, r.tokensIn, r.tokensOut, r.nowMs + r.ttlMs],
+        "insert into budget_hold (tenant_id, hold_id, month, agent_id, run_id, tokens_in, tokens_out, expires_at) values ($1, $2, $3, $4, $5, $6, $7, now() + $8 * interval '1 millisecond')",
+        [r.tenantId, holdId, r.month, r.agentId, r.runId, r.tokensIn, r.tokensOut, r.ttlMs],
       );
       return { holdId, tenantId: r.tenantId, month: r.month };
     });
   }
 
-  /** Drops the hold, charges the actual usage, and writes `budget.threshold` to the outbox in the same transaction when the budget moves up into SOFT or HARD. */
-  async settle(hold: BudgetHold, actual: ModelUsage): Promise<void> {
+  /** Drops the hold and charges the actual usage (a hold already swept was charged in full, so nothing more), and writes `budget.threshold` to the outbox in the same transaction when the budget moves up into SOFT or HARD. */
+  async settle(hold: BudgetHold, actual: ModelUsage): Promise<BudgetState> {
     assertTokens("tokensIn", actual.tokensIn, 0);
     assertTokens("tokensOut", actual.tokensOut, 0);
-    await this.withTenant(hold.tenantId, async (c) => {
+    return this.withTenant(hold.tenantId, async (c) => {
+      const locked = await c.query("select 1 from token_budget where tenant_id = $1 and month = $2 for update", [hold.tenantId, hold.month]);
+      if (locked.rowCount === 0) throw new Error(`no token budget to settle for ${hold.month}`);
+      const dropped = await c.query("delete from budget_hold where tenant_id = $1 and hold_id = $2", [hold.tenantId, hold.holdId]);
+      const charge = dropped.rowCount === 0 ? { tokensIn: 0, tokensOut: 0 } : actual;
       const res = await c.query<BudgetRow>(
         `update token_budget
             set used_in = used_in + $3, used_out = used_out + $4, updated_at = now()
           where tenant_id = $1 and month = $2
       returning limit_in, limit_out, used_in, used_out, soft_pct, alert_state`,
-        [hold.tenantId, hold.month, actual.tokensIn, actual.tokensOut],
+        [hold.tenantId, hold.month, charge.tokensIn, charge.tokensOut],
       );
-      const row = res.rows[0];
-      if (row === undefined) throw new Error(`no token budget to settle for ${hold.month}`);
-      await c.query("delete from budget_hold where tenant_id = $1 and hold_id = $2", [hold.tenantId, hold.holdId]);
+      const row = res.rows[0]!;
       const current = budgetStatus(asTokenBudget(row));
       const event = budgetThresholdEvent({ tenantId: hold.tenantId, month: hold.month, previous: row.alert_state, current });
-      if (event === undefined) return;
+      if (event === undefined) return current.state;
       await c.query("update token_budget set alert_state = $3 where tenant_id = $1 and month = $2", [hold.tenantId, hold.month, event.data.state]);
       await c.query(
         "insert into outbox (id, tenant_id, aggregate_type, aggregate_id, type, payload) values ($1, $2, 'token_budget', $3, $4, $5::jsonb)",
         [randomUUID(), hold.tenantId, hold.month, event.type, JSON.stringify(event.data)],
       );
+      return current.state;
     });
   }
 }
@@ -287,8 +297,6 @@ export class PgAgentStore implements AuditPort, BudgetPort {
 export async function openAgentStore(env: Record<string, string | undefined>): Promise<{ pool: pg.Pool; store: PgAgentStore }> {
   const url = env["DATABASE_URL"];
   if (url === undefined || url === "") throw new Error("DATABASE_URL is required: agent runs are not audited or budgeted without the store");
-  const pool = new pg.Pool({ connectionString: url, max: Number(env["AGENTS_DB_POOL"] ?? 10) });
-  if (env["MIGRATE_ON_START"] === "true") await migrate(pool);
   const limit = (key: string, fallback: number): number => {
     const raw = env[key];
     if (raw === undefined || raw === "") return fallback;
@@ -296,6 +304,7 @@ export async function openAgentStore(env: Record<string, string | undefined>): P
     assertTokens(key, n, 1);
     return n;
   };
+  const max = limit("AGENTS_DB_POOL", 10);
   const defaults =
     env["AGENTS_BUDGET_DEFAULTS"] === "off"
       ? null
@@ -304,5 +313,7 @@ export async function openAgentStore(env: Record<string, string | undefined>): P
           limitOut: limit("AGENTS_BUDGET_DEFAULT_OUT", DEFAULT_BUDGET.limitOut),
           softPct: DEFAULT_BUDGET.softPct,
         };
+  const pool = new pg.Pool({ connectionString: url, max });
+  if (env["MIGRATE_ON_START"] === "true") await migrate(pool);
   return { pool, store: new PgAgentStore(pool, defaults) };
 }

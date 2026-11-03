@@ -34,6 +34,21 @@ CREATE POLICY agent_run_tenant_access ON agent_run AS PERMISSIVE
   USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
 
+CREATE OR REPLACE FUNCTION agent_run_guard() RETURNS trigger LANGUAGE plpgsql AS $guard$
+BEGIN
+  IF OLD.status <> 'RUNNING' THEN
+    RAISE EXCEPTION 'agent_run % is finished and cannot change', OLD.run_id;
+  END IF;
+  IF NEW.tenant_id <> OLD.tenant_id OR NEW.run_id <> OLD.run_id OR NEW.agent_id <> OLD.agent_id
+     OR NEW.agent_version <> OLD.agent_version OR NEW.invoker_user_id <> OLD.invoker_user_id THEN
+    RAISE EXCEPTION 'agent_run % identity cannot change', OLD.run_id;
+  END IF;
+  RETURN NEW;
+END
+$guard$;
+DROP TRIGGER IF EXISTS agent_run_guard ON agent_run;
+CREATE TRIGGER agent_run_guard BEFORE UPDATE ON agent_run FOR EACH ROW EXECUTE FUNCTION agent_run_guard();
+
 CREATE TABLE IF NOT EXISTS agent_action (
   tenant_id uuid NOT NULL,
   run_id text NOT NULL,
@@ -78,8 +93,9 @@ CREATE POLICY token_budget_tenant_access ON token_budget AS PERMISSIVE
   USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
 
--- A hold is the tokens a running run may still spend. reserved = the sum of live
--- holds; a hold whose worker died is swept once expires_at (start + run timeout) passes.
+-- A hold is the tokens a run may still spend on its model call. reserved = the sum of live
+-- holds; a run settles it right after the call, and a hold whose worker died is swept and
+-- charged in full once expires_at (database clock) passes.
 CREATE TABLE IF NOT EXISTS budget_hold (
   tenant_id uuid NOT NULL,
   hold_id text NOT NULL,

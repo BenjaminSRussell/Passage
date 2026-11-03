@@ -1,12 +1,11 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AgentError } from "../src/errors.js";
-import { runAgent, RUN_TIMEOUT_MS, type AuditPort, type BudgetPort, type BudgetRequest, type RunDeps } from "../src/runtime/engine.js";
+import { runAgent, RUN_TIMEOUT_MS, type AuditPort, type BudgetRequest, type RunDeps } from "../src/runtime/engine.js";
 import { openAgentStore, PgAgentStore } from "../src/store/pg.js";
 import { APPROVER, FakeApprovals, FakeTools, makeDeps, makeRequest, postDescriptor, proposal, ScriptedProvider, testAudit, testBudgets } from "./fakes.js";
 import { fixture, ownerUrl, type Fixture } from "./pgHelper.js";
 
 const tenant = (n: number): string => `00000000-0000-7000-8000-${String(n).padStart(12, "0")}`;
-const NOW = Date.UTC(2026, 9, 21);
 const ask = (tenantId: string, tokens: number, over: Partial<BudgetRequest> = {}): BudgetRequest => ({
   tenantId,
   agentId: "ap_coding",
@@ -14,7 +13,6 @@ const ask = (tenantId: string, tokens: number, over: Partial<BudgetRequest> = {}
   month: "2026-10",
   tokensIn: tokens,
   tokensOut: tokens,
-  nowMs: NOW,
   ttlMs: RUN_TIMEOUT_MS,
   ...over,
 });
@@ -53,7 +51,7 @@ describe("run start validation and post-commit failures (no database)", () => {
     const settled: Array<[number, number]> = [];
     const { deps, tools, provider } = committingRun({
       audit: { ...testAudit, startRun: async () => Promise.reject(new Error("duplicate key agent_run_pkey")) },
-      budgets: { ...testBudgets, settle: async (_h, u) => void settled.push([u.tokensIn, u.tokensOut]) },
+      budgets: { ...testBudgets, settle: async (_h, u) => (settled.push([u.tokensIn, u.tokensOut]), "OK") },
     });
     await expect(runAgent(deps, makeRequest())).rejects.toThrow("agent_run_pkey");
     expect(tools.calls).toHaveLength(0);
@@ -61,24 +59,52 @@ describe("run start validation and post-commit failures (no database)", () => {
     expect(settled).toEqual([[0, 0]]);
   });
 
-  it("a settle that fails after the commit keeps the COMMITTED result and audits it FAILED_AFTER_COMMIT", async () => {
+  it("usage is charged right after the model call, before the approval wait and the tool call", async () => {
+    const order: string[] = [];
+    const tools = new FakeTools({ "passage.ap.invoice.post": postDescriptor });
+    const base = makeDeps({ provider: new ScriptedProvider([proposal(0.8)]), tools, approvals: { request: async () => (order.push("approval"), { decision: "APPROVED", approverUserId: APPROVER }) } });
+    const deps = { ...base, budgets: { ...testBudgets, settle: async (_h: unknown, u: { tokensIn: number }) => (order.push(`settle ${u.tokensIn}`), "OK" as const) } };
+    await runAgent(deps, makeRequest());
+    expect(order).toEqual(["settle 1200", "approval"]);
+  });
+
+  it("a settle that fails during the run fails it before any tool call and still tries to release the hold", async () => {
+    const attempts: number[] = [];
+    const { deps, tools } = committingRun({ budgets: { ...testBudgets, settle: async (_h, u) => (attempts.push(u.tokensIn), Promise.reject(new Error("budget db down"))) } });
+    const result = await runAgent(deps, makeRequest());
+    expect(tools.calls).toHaveLength(0);
+    expect(result).toMatchObject({ status: "FAILED", reason: "budget db down" });
+    expect(attempts).toEqual([1200, 0]);
+  });
+
+  it("an audit write that fails after the commit is retried as FAILED_AFTER_COMMIT and the COMMITTED result is kept", async () => {
     const finished: Array<string | undefined> = [];
     const { deps, tools } = committingRun({
-      budgets: { ...testBudgets, settle: async () => Promise.reject(new Error("budget db down")) },
-      audit: { ...testAudit, finishRun: async (_r, _res, after) => void finished.push(after) },
+      audit: {
+        ...testAudit,
+        finishRun: async (_r, _res, after) => {
+          finished.push(after);
+          if (after === undefined) throw new Error("audit db down");
+        },
+      },
     });
     const result = await runAgent(deps, makeRequest());
     expect(tools.calls).toHaveLength(1);
-    expect(result).toMatchObject({ status: "COMMITTED", postCommitError: "budget db down" });
-    expect(result.actions).toHaveLength(1);
-    expect(finished).toEqual(["budget db down"]);
+    expect(result).toMatchObject({ status: "COMMITTED", postCommitError: "audit db down" });
+    expect(finished).toEqual([undefined, "audit db down"]);
   });
 
-  it("an audit write that fails after the commit keeps the COMMITTED result and reports the failure", async () => {
-    const { deps, tools } = committingRun({ audit: { ...testAudit, finishRun: async () => Promise.reject(new Error("audit db down")) } });
-    const result = await runAgent(deps, makeRequest());
-    expect(tools.calls).toHaveLength(1);
-    expect(result).toMatchObject({ status: "COMMITTED", postCommitError: "audit db down" });
+  it("an audit write that fails twice after the commit is logged, never thrown", async () => {
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => (written.push(String(chunk)), true));
+    try {
+      const { deps } = committingRun({ audit: { ...testAudit, finishRun: async () => Promise.reject(new Error("audit db down")) } });
+      const result = await runAgent(deps, makeRequest());
+      expect(result).toMatchObject({ status: "COMMITTED", postCommitError: "audit db down" });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(written.map((l) => JSON.parse(l).message)).toEqual(["audit write failed after commit", "run left RUNNING after commit"]);
   });
 
   it("an audit write that fails on a run that committed nothing is thrown, not swallowed", async () => {
@@ -156,14 +182,48 @@ describe.runIf(ownerUrl)("persisted audit and token budget in Postgres", () => {
     await expect(store.reserve(ask(t, 1))).rejects.toMatchObject({ code: "AGT-0202" });
   });
 
-  it("a hold left by a crashed worker is swept once its run timeout has passed", async () => {
+  it("a hold left by a crashed worker is swept by the database clock and its tokens are charged, not dropped", async () => {
     const t = tenant(14);
-    await store.setBudget(t, "2026-10", { limitIn: 1_000, limitOut: 1_000, softPct: 80 });
+    await store.setBudget(t, "2026-10", { limitIn: 2_000, limitOut: 2_000, softPct: 80 });
     await store.reserve(ask(t, 1_000, { runId: "crashed" }));
-    await expect(store.reserve(ask(t, 1, { nowMs: NOW + RUN_TIMEOUT_MS - 1 }))).rejects.toMatchObject({ code: "AGT-0202" });
-    await store.reserve(ask(t, 1_000, { runId: "after", nowMs: NOW + RUN_TIMEOUT_MS + 1 }));
+    await expect(store.reserve(ask(t, 1_001))).rejects.toMatchObject({ code: "AGT-0202" });
+    expect(await holds(t)).toBe(1);
+    await db.owner.query("update budget_hold set expires_at = now() - interval '1 second' where tenant_id = $1", [t]);
+    await store.reserve(ask(t, 1_000, { runId: "after" }));
     expect(await holds(t)).toBe(1);
     expect((await db.owner.query("select run_id from budget_hold where tenant_id = $1", [t])).rows).toEqual([{ run_id: "after" }]);
+    expect(await budgetRow(t)).toMatchObject({ used_in: 1_000, used_out: 1_000 });
+    await expect(store.reserve(ask(t, 1))).rejects.toMatchObject({ code: "AGT-0202" });
+  });
+
+  it("a settle after its hold was swept does not charge twice", async () => {
+    const t = tenant(25);
+    await store.setBudget(t, "2026-10", { limitIn: 5_000, limitOut: 5_000, softPct: 80 });
+    const hold = await store.reserve(ask(t, 1_000));
+    await db.owner.query("update budget_hold set expires_at = now() - interval '1 second' where tenant_id = $1", [t]);
+    await store.reserve(ask(t, 100, { runId: "other" }));
+    await store.settle(hold, { tokensIn: 900, tokensOut: 900 });
+    expect(await budgetRow(t)).toMatchObject({ used_in: 1_000, used_out: 1_000 });
+  });
+
+  it("a run's spent tokens survive a long approval wait: another run's sweep cannot free them", async () => {
+    const t = tenant(26);
+    await store.setBudget(t, "2026-10", { limitIn: 1_000, limitOut: 1_000, softPct: 80 });
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => (release = resolve));
+    const slow = committingRun({
+      budgets: store,
+      audit: store,
+      approvals: { request: async () => (await waiting, { decision: "APPROVED" as const, approverUserId: APPROVER }) },
+    });
+    const running = runAgent(slow.deps, makeRequest({ runId: "slow", tenantId: t, runTokenCap: 1_000 }));
+    await vi.waitFor(async () => expect(await budgetRow(t)).toMatchObject({ used_in: 1_200 }));
+    expect(await holds(t)).toBe(0);
+    await db.owner.query("update budget_hold set expires_at = now() - interval '1 day' where tenant_id = $1", [t]);
+    await expect(store.reserve(ask(t, 1, { runId: "b" }))).rejects.toMatchObject({ code: "AGT-0202" });
+    release();
+    await running;
+    expect(await budgetRow(t)).toMatchObject({ used_in: 1_200, used_out: 180 });
   });
 
   it("the budget is per tenant per month: two agents share it, and the month's row is created from the 50M/10M default", async () => {
@@ -254,25 +314,43 @@ describe.runIf(ownerUrl)("persisted audit and token budget in Postgres", () => {
     expect(await holds(t)).toBe(0);
   });
 
-  it("a failing settle after the commit leaves the run FAILED_AFTER_COMMIT with its action rows, and the hold expires later", async () => {
-    const t = tenant(23);
-    const budgets: BudgetPort = { reserve: (r) => store.reserve(r), settle: async () => Promise.reject(new Error("budget db down")) };
-    const run = committingRun({ budgets, audit: store });
-    const result = await runAgent(run.deps, makeRequest({ runId: "unsettled", tenantId: t, runTokenCap: 2_000 }));
-    expect(result).toMatchObject({ status: "COMMITTED", postCommitError: "budget db down" });
-    expect(run.tools.calls).toHaveLength(1);
-    expect(await runRow(t, "unsettled")).toMatchObject({ status: "FAILED_AFTER_COMMIT", post_commit_error: "budget db down" });
-    expect(await store.loadActions(t, "unsettled")).toEqual(result.actions);
-    expect(await holds(t)).toBe(1);
-  });
-
-  it("a failing audit write after the commit still returns the COMMITTED result and settles the budget", async () => {
+  it("a transient audit write failure after the commit leaves the run FAILED_AFTER_COMMIT, not RUNNING, with usage already charged", async () => {
     const t = tenant(24);
-    const audit: AuditPort = { startRun: (r) => store.startRun(r), finishRun: async () => Promise.reject(new Error("audit db down")) };
+    let first = true;
+    const audit: AuditPort = {
+      startRun: (r) => store.startRun(r),
+      finishRun: async (r, res, after) => {
+        if (first) {
+          first = false;
+          throw new Error("audit db down");
+        }
+        return store.finishRun(r, res, after);
+      },
+    };
     const run = committingRun({ budgets: store, audit });
-    const result = await runAgent(run.deps, makeRequest({ runId: "unaudited", tenantId: t, runTokenCap: 2_000 }));
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    let result;
+    try {
+      result = await runAgent(run.deps, makeRequest({ runId: "unaudited", tenantId: t, runTokenCap: 2_000 }));
+    } finally {
+      stderr.mockRestore();
+    }
     expect(result).toMatchObject({ status: "COMMITTED", postCommitError: "audit db down" });
     expect(await budgetRow(t)).toMatchObject({ used_in: 1_200, used_out: 180 });
-    expect(await runRow(t, "unaudited")).toMatchObject({ status: "RUNNING" });
+    expect(await runRow(t, "unaudited")).toMatchObject({ status: "FAILED_AFTER_COMMIT", post_commit_error: "audit db down" });
+    expect(await store.loadActions(t, "unaudited")).toEqual(result.actions);
+  });
+
+  it("the application role cannot change a finished agent_run row or rewrite a run's identity", async () => {
+    const t = tenant(27);
+    await runAgent(committingRun({ budgets: store, audit: store }).deps, makeRequest({ runId: "done", tenantId: t, runTokenCap: 2_000 }));
+    await expect(store.withTenant(t, (c) => c.query("update agent_run set status = 'FAILED', reason = 'tampered' where run_id = 'done'"))).rejects.toThrow(/finished/);
+    await store.startRun(makeRequest({ runId: "open", tenantId: t }));
+    await expect(store.withTenant(t, (c) => c.query("update agent_run set agent_id = 'other' where run_id = 'open'"))).rejects.toThrow(/identity/);
+    expect(await runRow(t, "done")).toMatchObject({ status: "COMMITTED" });
+  });
+
+  it.each(["abc", "0", "-3", "2.5"])("AGENTS_DB_POOL=%s is refused before a pool is built", async (value) => {
+    await expect(openAgentStore({ DATABASE_URL: ownerUrl ?? "postgres://x", AGENTS_DB_POOL: value })).rejects.toThrow(/AGENTS_DB_POOL/);
   });
 });
