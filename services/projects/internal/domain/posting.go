@@ -18,7 +18,12 @@ type PostingProfile struct {
 	AccruedRevenueAccount  string     `json:"accruedRevenueAccount"`
 	InvoicedRevenueAccount string     `json:"invoicedRevenueAccount"`
 	OnAccountAccount       string     `json:"onAccountAccount"`
-	Version                int        `json:"version"`
+	// The GL postings (D2b, D4c) also need these; an empty one makes the posting that uses it fail with PROJ-POST-002.
+	OffsetAccount        string `json:"offsetAccount,omitempty"`
+	CostOfSalesAccount   string `json:"costOfSalesAccount,omitempty"`
+	LossProvisionAccount string `json:"lossProvisionAccount,omitempty"`
+	LossExpenseAccount   string `json:"lossExpenseAccount,omitempty"`
+	Version              int    `json:"version"`
 }
 
 // Resolve finds the profile for key with the PRD fallback order: the exact

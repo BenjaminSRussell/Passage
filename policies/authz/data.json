@@ -854,7 +854,8 @@
       {"resource": "/v1/product-costing/rolls", "methods": ["POST"]},
       {"resource": "/v1/product-costing/sales-order-estimates", "methods": ["POST"]},
       {"resource": "/v1/product-costing/sales-order-estimates:freeze", "methods": ["POST"]},
-      {"resource": "/v1/product-costing/sales-order-estimates:refresh", "methods": ["POST"]}
+      {"resource": "/v1/product-costing/sales-order-estimates:refresh", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/versions/*/roll", "methods": ["POST"]}
     ]},
     "CostingMaintain": {"permissions": [
       {"resource": "/v1/product-costing/cost-components", "methods": ["POST"]},
@@ -1281,6 +1282,7 @@
       {"resource": "/v1/projects/change-orders/*/approve", "methods": ["POST"]},
       {"resource": "/v1/projects/change-orders/*/reject", "methods": ["POST"]}
     ]},
+    "ProjGlPost": {"permissions": [{"resource": "/v1/projects/gl-postings", "methods": ["POST"]}]},
     "ProjInquire": {"permissions": [
       {"resource": "/v1/projects/", "methods": ["GET"]},
       {"resource": "/v1/projects/*", "methods": ["GET"]},
@@ -1294,6 +1296,7 @@
       {"resource": "/v1/projects/categories", "methods": ["GET"]},
       {"resource": "/v1/projects/change-orders", "methods": ["GET"]},
       {"resource": "/v1/projects/change-orders/*", "methods": ["GET"]},
+      {"resource": "/v1/projects/gl-reconciliation", "methods": ["GET"]},
       {"resource": "/v1/projects/groups", "methods": ["GET"]},
       {"resource": "/v1/projects/invoice-proposals", "methods": ["GET"]},
       {"resource": "/v1/projects/invoice-proposals/*", "methods": ["GET"]},
@@ -1311,6 +1314,7 @@
     "ProjPlan": {"permissions": [
       {"resource": "/v1/projects/*/forecasts", "methods": ["POST"]},
       {"resource": "/v1/projects/*/forecasts/*", "methods": ["PUT"]},
+      {"resource": "/v1/projects/*/forecasts/*/activate", "methods": ["POST"]},
       {"resource": "/v1/projects/*/plans", "methods": ["POST"]},
       {"resource": "/v1/projects/*/plans/*/schedule", "methods": ["POST"]},
       {"resource": "/v1/projects/*/plans/*/transfer", "methods": ["POST"]},
@@ -1817,6 +1821,7 @@
     ]},
     "expense.approve": {"permissions": [
       {"resource": "/v1/expense/cash-advances/*/decide", "methods": ["POST"]},
+      {"resource": "/v1/expense/reports/*/decide", "methods": ["POST"]},
       {"resource": "/v1/expense/travel-requisitions/*/decide", "methods": ["POST"]}
     ]},
     "expense.card.import": {"permissions": [
@@ -2875,9 +2880,13 @@
     },
     "productcost": {
       "ledger": ["ledger.entry.post", "ledger.journal.reverse"],
-      "inventory": ["inventory.read"]
+      "inventory": ["inventory.read"],
+      "engineering": ["engineering.read"]
     },
     "eam": {
+      "ledger": ["ledger.entry.post", "ledger.balance.read"]
+    },
+    "projects": {
       "ledger": ["ledger.entry.post", "ledger.balance.read"]
     },
     "revrec": {
@@ -2921,7 +2930,8 @@
       "inventory": ["inventory.hold.apply"]
     },
     "hr": {
-      "numbering": ["numbering.sequence.allocate"]
+      "numbering": ["numbering.sequence.allocate"],
+      "compliance": ["compliance.legal_hold.check"]
     },
     "product": {
       "org": ["org.read"]

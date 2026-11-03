@@ -98,6 +98,15 @@ func (f *fakeReports) SubmitReport(_ context.Context, reportID, _, hash string, 
 	return rep, false, nil
 }
 
+func (f *fakeReports) DecideReport(_ context.Context, id string, approve bool, decidedOn time.Time, c store.Command) (store.Report, bool, error) {
+	f.lastDate, f.lastHash, f.lastIfMatch = decidedOn, c.Hash, c.ExpectedVersion
+	status := "REJECTED"
+	if approve {
+		status = "APPROVED"
+	}
+	return blank(id, status, 5), false, nil
+}
+
 var clock = time.Date(2025, 3, 4, 23, 30, 0, 0, time.FixedZone("EST", -5*3600))
 
 func reportRouter(s *fakeReports) http.Handler {
@@ -356,5 +365,25 @@ func TestDeleteLineValidatesIDsAndPassesIfMatch(t *testing.T) {
 	rec := send(t, h, http.MethodDelete, report+"/lines/"+ids.New(), "", nil, header{"If-Match", `W/"4"`})
 	if rec.Code != http.StatusOK || fake.lastIfMatch != 4 || rec.Header().Get("ETag") != `"5"` {
 		t.Fatalf("delete = %d if-match %d etag %q; want 200, 4 and ETag \"5\"", rec.Code, fake.lastIfMatch, rec.Header().Get("ETag"))
+	}
+}
+
+func TestDecideReportNeedsTheApproveDutyAndAValidDecision(t *testing.T) {
+	h := reportRouter(newFakeReports())
+	path := "/v1/expense/reports/" + ids.New() + "/decide"
+	if rec := send(t, h, http.MethodPost, path, "k", map[string]string{"decision": "APPROVE"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("decide with only %s = %d; want 403", dutyWrite, rec.Code)
+	}
+	approver := header{tenant.HeaderDuties, "expense.approve"}
+	if rec := send(t, h, http.MethodPost, path, "k", map[string]string{"decision": "MAYBE"}, approver); rec.Code != http.StatusBadRequest {
+		t.Fatalf("decision MAYBE = %d; want 400", rec.Code)
+	}
+	if rec := send(t, h, http.MethodPost, path, "", map[string]string{"decision": "APPROVE"}, approver); rec.Code != http.StatusBadRequest {
+		t.Fatalf("decide without Idempotency-Key = %d; want 400", rec.Code)
+	}
+	fake := newFakeReports()
+	rec := send(t, reportRouter(fake), http.MethodPost, path, "k", map[string]string{"decision": "APPROVE"}, approver, header{"If-Match", `"4"`})
+	if rec.Code != http.StatusOK || fake.lastIfMatch != 4 || !fake.lastDate.Equal(time.Date(2025, 3, 5, 0, 0, 0, 0, time.UTC)) || !strings.Contains(rec.Body.String(), `"status":"APPROVED"`) {
+		t.Fatalf("approve = %d %s ifMatch=%d date=%v; want 200 APPROVED at version 4 on the UTC day", rec.Code, rec.Body.String(), fake.lastIfMatch, fake.lastDate)
 	}
 }

@@ -171,22 +171,24 @@ components:
   schemas:
     OpenItemData:
       type: object
-      required: [open_item_id, legal_entity_id, vendor_id, currency, open_amount, status]
+      required: [open_item_id, legal_entity_id, vendor_id, source_invoice_id, currency, open_amount, status]
       properties:
         open_item_id: { type: string, format: uuid }
         legal_entity_id: { type: string, format: uuid }
         vendor_id: { type: string, format: uuid }
         vendor_group_id: { type: string, format: uuid, description: "vendor group the open item was created under; absent when unknown" }
+        source_invoice_id: { type: string, format: uuid, description: "id of the source document (a posted invoice, or an approved expense report) that created the open item" }
         currency: { type: string, pattern: "^[A-Z]{3}$" }
         open_amount: { type: string, description: "decimal string; the amount still open after this change" }
         status: { type: string, enum: [OPEN, PARTIALLY_SETTLED, SETTLED, REVERSED] }
     OpenItemSettledData:
       type: object
-      required: [open_item_id, legal_entity_id, vendor_id, currency, open_amount, status, settled_amount]
+      required: [open_item_id, legal_entity_id, vendor_id, source_invoice_id, currency, open_amount, status, settled_amount]
       properties:
         open_item_id: { type: string, format: uuid }
         legal_entity_id: { type: string, format: uuid }
         vendor_id: { type: string, format: uuid }
+        source_invoice_id: { type: string, format: uuid, description: "id of the source document (a posted invoice, or an approved expense report) that created the open item" }
         currency: { type: string, pattern: "^[A-Z]{3}$" }
         open_amount: { type: string, description: "decimal string; the amount still open after this settlement" }
         status: { type: string, enum: [PARTIALLY_SETTLED, SETTLED] }

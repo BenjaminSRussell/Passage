@@ -6,7 +6,24 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/BenjaminSRussell/passage/services/ledger/internal/store"
 )
+
+func TestConfigureIdempotencyTTL_RejectsShortOrMalformedValues(t *testing.T) {
+	t.Cleanup(func() { _ = store.SetIdempotencyTTLDays(store.MinIdempotencyTTLDays) })
+	with := func(v string) func(string) string { return func(string) string { return v } }
+	for _, bad := range []string{"399", "abc", "-5", "3651"} {
+		if err := configureIdempotencyTTL(with(bad)); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	for _, ok := range []string{"", "400", "730"} {
+		if err := configureIdempotencyTTL(with(ok)); err != nil {
+			t.Errorf("%q rejected: %v", ok, err)
+		}
+	}
+}
 
 func TestAddr_FallsBackWhenUnset(t *testing.T) {
 	none := func(string) string { return "" }

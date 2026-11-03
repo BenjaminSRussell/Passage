@@ -38,6 +38,7 @@ type ProposalCandidate struct {
 	DiscountAmount   decimal.Decimal
 	DiscountDate     *time.Time
 	PartiallySettled bool
+	PayeeUnverified  bool
 }
 
 type ProposalInput struct {

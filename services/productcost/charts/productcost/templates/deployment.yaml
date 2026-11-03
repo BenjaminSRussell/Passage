@@ -48,8 +48,12 @@ spec:
               value: {{ .Values.costing.rollWorkers | quote }}
             - name: PASSAGE_SERVICE_NAME
               value: productcost
+            - { name: PRODUCTCOST_LEDGER_IDEMPOTENCY_TTL_DAYS, value: {{ .Values.ledgerIdempotencyTtlDays | quote }} }
 {{- if .Values.ledgerUrl }}
             - { name: LEDGER_URL, value: {{ .Values.ledgerUrl | quote }} }
+{{- end }}
+{{- if .Values.engineeringUrl }}
+            - { name: ENGINEERING_URL, value: {{ .Values.engineeringUrl | quote }} }
 {{- end }}
 {{- if .Values.inventoryUrl }}
             - { name: INVENTORY_URL, value: {{ .Values.inventoryUrl | quote }} }

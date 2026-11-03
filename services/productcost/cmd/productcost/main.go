@@ -15,6 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/api"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/productcost/internal/engineering"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/store"
 	"github.com/BenjaminSRussell/passage/services/productcost/migrations"
@@ -68,12 +69,28 @@ func config(getenv func(string) string) (api.Config, error) {
 	return cfg, nil
 }
 
+func ledgerIdempotencyTTLDays(getenv func(string) string) (int, error) {
+	raw := getenv("PRODUCTCOST_LEDGER_IDEMPOTENCY_TTL_DAYS")
+	if raw == "" {
+		return domain.MinLedgerIdempotencyTTLDays, nil
+	}
+	days, err := strconv.Atoi(raw)
+	if err != nil || days < domain.MinLedgerIdempotencyTTLDays || days > domain.MaxLedgerIdempotencyTTLDays {
+		return 0, fmt.Errorf("PRODUCTCOST_LEDGER_IDEMPOTENCY_TTL_DAYS must be an integer from %d to %d, got %q", domain.MinLedgerIdempotencyTTLDays, domain.MaxLedgerIdempotencyTTLDays, raw)
+	}
+	return days, nil
+}
+
 func run(ctx context.Context, getenv func(string) string) error {
 	databaseURL := getenv("DATABASE_URL")
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")
 	}
 	cfg, err := config(getenv)
+	if err != nil {
+		return err
+	}
+	ttlDays, err := ledgerIdempotencyTTLDays(getenv)
 	if err != nil {
 		return err
 	}
@@ -87,13 +104,20 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(pool, cfg).WithStore(store.New(pool))
+	a := api.New(pool, cfg).WithStore(store.New(pool).WithLedgerIdempotencyTTLDays(ttlDays))
 	onHand, err := inventory.FromEnv(getenv)
 	if err != nil {
 		return fmt.Errorf("inventory client: %w", err)
 	}
 	if onHand != nil {
 		a.WithInventory(onHand)
+	}
+	design, err := engineering.FromEnv(getenv)
+	if err != nil {
+		return fmt.Errorf("engineering client: %w", err)
+	}
+	if design != nil {
+		a.WithEngineering(design)
 	}
 	ledger, err := ledgerclient.FromEnv(getenv, "productcost")
 	if err != nil {

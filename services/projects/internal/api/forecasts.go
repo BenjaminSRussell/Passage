@@ -44,6 +44,29 @@ func (a *API) registerForecasts(r chi.Router) {
 	r.With(authz.RequireDuty(DutyPlan)).Post("/{id}/forecasts", a.createForecast)
 	r.With(authz.RequireDuty(DutyInquire)).Get("/{id}/forecasts/{modelId}", a.getForecast)
 	r.With(authz.RequireDuty(DutyPlan)).Put("/{id}/forecasts/{modelId}", a.putForecast)
+	r.With(authz.RequireDuty(DutyPlan)).Post("/{id}/forecasts/{modelId}/activate", a.activateForecast)
+}
+
+// activateForecast designates the model that drives the GL estimate to complete (If-Match as for putForecast).
+func (a *API) activateForecast(w http.ResponseWriter, r *http.Request) {
+	if _, ok := principal(w, r); !ok {
+		return
+	}
+	id, ok := forecastID(w, r)
+	if !ok {
+		return
+	}
+	expected, ok := ifMatchVersion(w, r)
+	if !ok {
+		return
+	}
+	out, err := a.store.ActivateForecastModel(r.Context(), chi.URLParam(r, "id"), id, expected)
+	if err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	setETag(w, out.Version)
+	httpx.JSON(w, http.StatusOK, withLines(out))
 }
 
 // forecastID reads {modelId}; a malformed id is 404 like an unknown one.

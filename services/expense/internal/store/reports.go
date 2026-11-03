@@ -33,6 +33,7 @@ const (
 	CodeReportState      = "EXP-REP-002"
 	CodeReportEmpty      = "EXP-REP-003"
 	CodeVersionConflict  = "EXP-REP-004"
+	CodeDeciderUnknown   = "EXP-REP-005"
 	CodeLineExists       = "EXP-LINE-001"
 	CodeLineNotFound     = "EXP-LINE-002"
 	CodeLineLimit        = "EXP-LINE-003"
@@ -63,6 +64,10 @@ type Report struct {
 	Version       int
 	CreatedAt     time.Time
 	SubmittedAt   *time.Time
+	CreatedBy     string
+	SubmittedBy   string
+	APOpenItemID  string
+	ReimbursedAt  *time.Time
 	Lines         []ReportLine
 }
 
@@ -95,7 +100,8 @@ type Store struct{ pool *pgxpool.Pool }
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 const reportColumns = `id::text, legal_entity_id::text, worker_id::text, purpose, currency::text, status,
-  total_amount::text, reimbursable_amount::text, company_paid_amount::text, version, created_at, submitted_at`
+  total_amount::text, reimbursable_amount::text, company_paid_amount::text, version, created_at, submitted_at,
+  created_by, submitted_by, coalesce(ap_open_item_id::text, ''), reimbursed_at`
 
 const lineColumns = `id::text, report_id::text, line_no, category, txn_date, amount::text, merchant,
   attendees, has_receipt, justification, paid_by, policy_results`
@@ -115,9 +121,9 @@ func (s *Store) CreateReport(ctx context.Context, key, hash string, in NewReport
 	replayed := false
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var id string
-		err := tx.QueryRow(ctx, `insert into expense_report(tenant_id, id, legal_entity_id, worker_id, purpose, currency, create_key, request_hash)
-			values($1,$2,$3,$4,$5,$6,$7,$8) on conflict (tenant_id, create_key) do nothing returning id::text`,
-			p.TenantID, ids.New(), in.LegalEntityID, in.WorkerID, in.Purpose, in.Currency, key, hash).Scan(&id)
+		err := tx.QueryRow(ctx, `insert into expense_report(tenant_id, id, legal_entity_id, worker_id, purpose, currency, create_key, request_hash, created_by)
+			values($1,$2,$3,$4,$5,$6,$7,$8,$9) on conflict (tenant_id, create_key) do nothing returning id::text`,
+			p.TenantID, ids.New(), in.LegalEntityID, in.WorkerID, in.Purpose, in.Currency, key, hash, p.UserID).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			var stored string
 			if err := tx.QueryRow(ctx, `select id::text, request_hash from expense_report where tenant_id=$1 and create_key=$2`,
@@ -389,8 +395,8 @@ func (s *Store) SubmitReport(ctx context.Context, reportID, key, hash string, ex
 			refused = refusal(blockers)
 			return remember(ctx, tx, p.TenantID, key, hash, refused.Status, refused)
 		}
-		if _, err := tx.Exec(ctx, `update expense_report set status=$3, submitted_at=now(), updated_at=now(),
-			version=version+1 where tenant_id=$1 and id=$2`, p.TenantID, reportID, string(domain.ReportSubmitted)); err != nil {
+		if _, err := tx.Exec(ctx, `update expense_report set status=$3, submitted_at=now(), submitted_by=$4,
+			updated_at=now(), version=version+1 where tenant_id=$1 and id=$2`, p.TenantID, reportID, string(domain.ReportSubmitted), p.UserID); err != nil {
 			return err
 		}
 		if err := remember(ctx, tx, p.TenantID, key, hash, http.StatusOK, map[string]string{"reportId": reportID}); err != nil {
@@ -481,7 +487,8 @@ func scanReport(r pgx.Row) (Report, error) {
 	var rep Report
 	var total, reimbursable, companyPaid string
 	if err := r.Scan(&rep.ID, &rep.LegalEntityID, &rep.WorkerID, &rep.Purpose, &rep.Currency, &rep.Status,
-		&total, &reimbursable, &companyPaid, &rep.Version, &rep.CreatedAt, &rep.SubmittedAt); err != nil {
+		&total, &reimbursable, &companyPaid, &rep.Version, &rep.CreatedAt, &rep.SubmittedAt,
+		&rep.CreatedBy, &rep.SubmittedBy, &rep.APOpenItemID, &rep.ReimbursedAt); err != nil {
 		return Report{}, err
 	}
 	var err error

@@ -504,14 +504,20 @@ func (a *API) purgeCandidates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !a.purgeEnabled {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "HCM-RET-DISABLED", "the retention purge is disabled until legal holds exist (FR-48.11); set HR_RETENTION_PURGE_ENABLED=true to enable it"))
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "HCM-RET-DISABLED", "the retention purge is switched off (HR_RETENTION_PURGE_ENABLED=false)"))
 		return
 	}
-	n, err := a.store.PurgeCandidates(r.Context())
+	res, err := a.store.PurgeCandidates(r.Context(), a.holds)
+	if errors.Is(err, store.ErrNoCandidateHolds) || errors.Is(err, store.ErrHoldCheckFailed) {
+		logFailure(r, "purge candidates", err)
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "HCM-RET-HOLDS", "the compliance hold check is unavailable; no further candidates were erased"))
+		return
+	}
 	if err != nil {
 		a.fail(w, r, "purge candidates", err)
 		return
 	}
-	a.personnel.purged.Add(int64(n))
-	httpx.JSON(w, http.StatusOK, map[string]int{"erased": n})
+	a.personnel.purged.Add(int64(res.Erased))
+	a.personnel.purgeHeld.Add(int64(res.HeldCount))
+	httpx.JSON(w, http.StatusOK, res)
 }

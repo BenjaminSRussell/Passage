@@ -80,6 +80,7 @@ type API struct {
 	passes               atomic.Int64
 	personnel            personnelCounters
 	purgeEnabled         bool
+	holds                store.CandidateHolds
 	incidentsReported    atomic.Int64
 	incidentTransitions  atomic.Int64
 	oshaExtracts         atomic.Int64
@@ -101,7 +102,14 @@ type Sequencer interface {
 }
 
 // New builds the API over a store.
-func New(s *store.Postgres) *API { return &API{store: s, sequence: numbering.Unavailable{}} }
+func New(s *store.Postgres) *API {
+	return &API{store: s, sequence: numbering.Unavailable{}, purgeEnabled: true}
+}
+
+func (a *API) WithLegalHolds(h store.CandidateHolds) *API {
+	a.holds = h
+	return a
+}
 
 func (a *API) WithSequencer(s Sequencer) *API {
 	a.sequence = s

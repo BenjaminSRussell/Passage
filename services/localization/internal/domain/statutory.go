@@ -24,6 +24,9 @@ var statutoryValidators = map[string]statutoryValidator{
 	"IN_GSTR1":     func(_ string, raw []byte) []FieldError { return ValidateGSTR1(raw) },
 	"MX_CFDI40":    func(_ string, raw []byte) []FieldError { return ValidateCFDI40(raw) },
 	"CA_GST34":     func(_ string, raw []byte) []FieldError { return ValidateGST34(raw) },
+	"MX_DIOT":      func(_ string, raw []byte) []FieldError { return ValidateDIOT(raw) },
+	"FR_CA3":       func(_ string, raw []byte) []FieldError { return ValidateCA3(raw) },
+	"IN_26Q":       func(_ string, raw []byte) []FieldError { return ValidateForm26Q(raw) },
 }
 
 // StatutoryValidatorCodes lists the statutory report codes that have a validator.

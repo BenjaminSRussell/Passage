@@ -8,8 +8,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -473,9 +475,26 @@ func storeIdempotent(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, ke
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `insert into idempotency_keys (tenant_id, legal_entity_id, key, payload_hash, response_status, response_body)
-		values ($1, $2, $3, $4, 201, $5)`, tenantID, legalEntityID, key, hash, string(body))
+	_, err = tx.Exec(ctx, `insert into idempotency_keys (tenant_id, legal_entity_id, key, payload_hash, response_status, response_body, expires_at)
+		values ($1, $2, $3, $4, 201, $5, now() + make_interval(days => $6))`, tenantID, legalEntityID, key, hash, string(body), int32(idempotencyTTLDays.Load()))
 	return err
+}
+
+const (
+	MinIdempotencyTTLDays = 400
+	MaxIdempotencyTTLDays = 3650
+)
+
+var idempotencyTTLDays atomic.Int64
+
+func init() { idempotencyTTLDays.Store(MinIdempotencyTTLDays) }
+
+func SetIdempotencyTTLDays(days int) error {
+	if days < MinIdempotencyTTLDays || days > MaxIdempotencyTTLDays {
+		return fmt.Errorf("LEDGER_IDEMPOTENCY_TTL_DAYS must be from %d to %d, got %d", MinIdempotencyTTLDays, MaxIdempotencyTTLDays, days)
+	}
+	idempotencyTTLDays.Store(int64(days))
+	return nil
 }
 
 func loadLedger(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (Ledger, error) {

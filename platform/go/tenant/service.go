@@ -88,10 +88,14 @@ var serviceGrants = map[string]map[string][]string{
 		"ledger": {"ledger.entry.post", "ledger.balance.read"},
 	},
 	"productcost": {
-		"ledger":    {"ledger.entry.post", "ledger.journal.reverse"},
-		"inventory": {"inventory.read"},
+		"ledger":      {"ledger.entry.post", "ledger.journal.reverse"},
+		"inventory":   {"inventory.read"},
+		"engineering": {"engineering.read"},
 	},
 	"eam": {
+		"ledger": {"ledger.entry.post", "ledger.balance.read"},
+	},
+	"projects": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read"},
 	},
 	"revrec": {
@@ -126,7 +130,8 @@ var serviceGrants = map[string]map[string][]string{
 		"inventory": {"inventory.hold.apply"},
 	},
 	"hr": {
-		"numbering": {"numbering.sequence.allocate"},
+		"compliance": {"compliance.legal_hold.check"},
+		"numbering":  {"numbering.sequence.allocate"},
 	},
 	"product": {
 		"org": {"org.read"},
@@ -304,7 +309,7 @@ func (s *ServiceSigner) legalEntityFor(p Principal, explicit string, duties []st
 
 var readDuties = map[string]struct{}{
 	"ledger.balance.read": {}, "ledger.ledger.lookup": {}, "ledger.account.lookup": {}, "ledger.entry.lookup": {}, "procurement.purchase-order.lookup": {},
-	"inventory.ownership-change.read": {}, "fx.rate.lookup": {},
+	"inventory.ownership-change.read": {}, "fx.rate.lookup": {}, "compliance.legal_hold.check": {},
 }
 
 func onlyReads(duties []string) bool {

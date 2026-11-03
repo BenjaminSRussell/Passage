@@ -62,6 +62,7 @@ type OpenItem struct {
 	Status          string          `json:"status"`
 	Version         int             `json:"version"`
 	PaymentHold     bool            `json:"paymentHold"`
+	PayeeUnverified bool            `json:"payeeUnverified,omitempty"`
 }
 
 type Filter struct {
@@ -89,7 +90,7 @@ func (s *Postgres) WithFieldCrypt(k *fieldcrypt.Keys) *Postgres {
 func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 
 const columns = `id, legal_entity_id, vendor_id, coalesce(vendor_group_id::text, ''), source_invoice_id, invoice_number, invoice_date::text, due_date::text, due_date_source, currency,
-	amount::text, open_amount::text, discount_date::text, discount_amount::text, status, version, payment_hold`
+	amount::text, open_amount::text, discount_date::text, discount_amount::text, status, version, payment_hold, payee_unverified`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -97,7 +98,7 @@ func scan(row rowScanner) (OpenItem, error) {
 	var o OpenItem
 	var amount, open, discount string
 	if err := row.Scan(&o.ID, &o.LegalEntityID, &o.VendorID, &o.VendorGroupID, &o.SourceInvoiceID, &o.InvoiceNumber, &o.InvoiceDate, &o.DueDate, &o.DueDateSource,
-		&o.Currency, &amount, &open, &o.DiscountDate, &discount, &o.Status, &o.Version, &o.PaymentHold); err != nil {
+		&o.Currency, &amount, &open, &o.DiscountDate, &discount, &o.Status, &o.Version, &o.PaymentHold, &o.PayeeUnverified); err != nil {
 		return OpenItem{}, err
 	}
 	var err error
@@ -112,20 +113,21 @@ func scan(row rowScanner) (OpenItem, error) {
 }
 
 type openItemEvent struct {
-	OpenItemID    string `json:"open_item_id"`
-	LegalEntityID string `json:"legal_entity_id"`
-	VendorID      string `json:"vendor_id"`
-	VendorGroupID string `json:"vendor_group_id,omitempty"`
-	Currency      string `json:"currency"`
-	OpenAmount    string `json:"open_amount"`
-	Status        string `json:"status"`
-	SettledAmount string `json:"settled_amount,omitempty"`
-	SettlementID  string `json:"settlement_id,omitempty"`
+	OpenItemID      string `json:"open_item_id"`
+	LegalEntityID   string `json:"legal_entity_id"`
+	VendorID        string `json:"vendor_id"`
+	VendorGroupID   string `json:"vendor_group_id,omitempty"`
+	SourceInvoiceID string `json:"source_invoice_id"`
+	Currency        string `json:"currency"`
+	OpenAmount      string `json:"open_amount"`
+	Status          string `json:"status"`
+	SettledAmount   string `json:"settled_amount,omitempty"`
+	SettlementID    string `json:"settlement_id,omitempty"`
 }
 
 func enqueue(ctx context.Context, tx pgx.Tx, eventType string, o OpenItem, tenantID string, settled decimal.Decimal, settlementID string) error {
 	payload := openItemEvent{
-		OpenItemID: o.ID, LegalEntityID: o.LegalEntityID, VendorID: o.VendorID, VendorGroupID: o.VendorGroupID, Currency: o.Currency,
+		OpenItemID: o.ID, LegalEntityID: o.LegalEntityID, VendorID: o.VendorID, VendorGroupID: o.VendorGroupID, SourceInvoiceID: o.SourceInvoiceID, Currency: o.Currency,
 		OpenAmount: o.OpenAmount.String(), Status: o.Status, SettlementID: settlementID,
 	}
 	if eventType == OpenItemSettledType {
@@ -144,12 +146,12 @@ func (s *Postgres) CreateFromInvoice(ctx context.Context, in OpenItem) (OpenItem
 	created := false
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `insert into ap_open_item (tenant_id, id, legal_entity_id, vendor_id, source_invoice_id, invoice_number,
-			invoice_date, due_date, due_date_source, currency, amount, open_amount, discount_date, discount_amount, status, vendor_group_id)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $13, $9, $10, $10, $11, $12, 'OPEN', $14::uuid)
+			invoice_date, due_date, due_date_source, currency, amount, open_amount, discount_date, discount_amount, status, vendor_group_id, payee_unverified)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $13, $9, $10, $10, $11, $12, 'OPEN', $14::uuid, $15)
 			on conflict (tenant_id, source_invoice_id) do nothing
 			returning `+columns,
 			p.TenantID, ids.New(), in.LegalEntityID, in.VendorID, in.SourceInvoiceID, in.InvoiceNumber, in.InvoiceDate, in.DueDate,
-			in.Currency, in.Amount.String(), in.DiscountDate, in.DiscountAmount.String(), dueSource, nullable(in.VendorGroupID))
+			in.Currency, in.Amount.String(), in.DiscountDate, in.DiscountAmount.String(), dueSource, nullable(in.VendorGroupID), in.PayeeUnverified)
 		var err error
 		out, err = scan(row)
 		if err == nil {
@@ -163,7 +165,7 @@ func (s *Postgres) CreateFromInvoice(ctx context.Context, in OpenItem) (OpenItem
 		if err != nil {
 			return err
 		}
-		if !out.Amount.Equal(in.Amount) || out.VendorID != in.VendorID || out.Currency != in.Currency {
+		if !out.Amount.Equal(in.Amount) || out.VendorID != in.VendorID || out.LegalEntityID != in.LegalEntityID || out.Currency != in.Currency {
 			return ErrConflictingReplay
 		}
 		if in.VendorGroupID == "" || out.VendorGroupID != "" {

@@ -467,6 +467,7 @@ func TestAllScopeUserGetsOnlyReadLookupTokensForAnExplicitEntity(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(nil)
 	receiving, _ := tenant.NewServiceSigner("receiving", priv)
 	payables, _ := tenant.NewServiceSigner("payables", priv)
+	hr, _ := tenant.NewServiceSigner("hr", priv)
 	for _, read := range []struct {
 		signer      *tenant.ServiceSigner
 		aud, duty   string
@@ -475,6 +476,7 @@ func TestAllScopeUserGetsOnlyReadLookupTokensForAnExplicitEntity(t *testing.T) {
 		{receiving, "purchasing", "procurement.purchase-order.lookup", false},
 		{receiving, "inventory", "inventory.ownership-change.read", true},
 		{payables, "fx", "fx.rate.lookup", true},
+		{hr, "compliance", "compliance.legal_hold.check", true},
 	} {
 		if _, err := read.signer.MintDuties(read.aud, allScope, other, []string{read.duty}); err != nil {
 			t.Errorf("%s: an ALL-scope read token may name any entity: %v", read.duty, err)

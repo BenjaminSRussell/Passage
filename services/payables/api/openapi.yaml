@@ -658,6 +658,7 @@ components:
         status: { type: string, enum: [OPEN, PARTIALLY_SETTLED, SETTLED, REVERSED] }
         version: { type: integer }
         paymentHold: { type: boolean }
+        payeeUnverified: { type: boolean, description: "True for an item whose payee id (an employee worker id) is not yet verified against the vendor master; with bank bindings on it is left out of proposals until it resolves." }
         valuation:
           type: object
           description: Present when value_in is set. amount is openAmount times rate rounded to the minor unit of currency.
@@ -770,6 +771,16 @@ components:
         failedAt: { type: string, format: date-time }
         totalValued: { type: string, description: Sum of group valued amounts in legalEntityCurrency. }
         totalWithheld: { type: object, additionalProperties: { type: string }, description: Tax withheld per group currency; never summed across currencies. }
+        excludedItems:
+          type: array
+          description: Only on the 201 that created the proposal. Open items left out because their payee (for example an expense reimbursement to an employee) is not in the vendor master; reason PAYEE_UNVERIFIED. They stay open and are offered again once the payee resolves.
+          items:
+            type: object
+            required: [itemId, vendorId, reason]
+            properties:
+              itemId: { type: string, format: uuid }
+              vendorId: { type: string, format: uuid }
+              reason: { type: string, enum: [PAYEE_UNVERIFIED] }
         groups:
           type: array
           items:
