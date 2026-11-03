@@ -9,7 +9,8 @@ tenant in `outbox.tenant_id`. The Debezium `EventRouter` (with `table.expand.jso
 `tenant_id` on as the `tenantid` record header. This SMT runs after the router (`transforms: outbox,enrich`) and:
 
 - sets `specversion=1.0` and `datacontenttype=application/json`; sets `source` (default `passage`) and `dataschema`
-  (from a template, off by default) only when the event has none
+  (from `dataschema.template`, `{type}` substituted) only when the event has none. `connect.yaml` sets the template
+  to `https://schemas.passage.dev/{type}.json`
 - fills `tenantid` from the router header (the Go envelope always writes `tenantid`, possibly empty) and
   `legalentityid` from the payload's top-level `legalEntityId` / `legal_entity_id`, as `events.New` does
 - flattens an optional `headers` object in the event into string extension attributes (`correlationid`,
@@ -31,8 +32,7 @@ Config (`transforms.enrich.*`): `source.default`, `dataschema.template` (`{type}
 ## Build and test
 
 ```
-export JAVA_HOME=/opt/homebrew/opt/openjdk@21 PATH=$JAVA_HOME/bin:$PATH
-mvn -q verify        # Java 17 target, Kafka 4.0.0 (matches deploy/kafka/connect.yaml), JUnit 5
+mvn -q verify        # Java 17 target (JDK 17+), Kafka 4.0.0 (matches deploy/kafka/connect.yaml), JUnit 5
 ```
 
 `CloudEventsEnricherTest` covers the transform on its own; `EventRouterChainTest` feeds a Debezium outbox insert
@@ -55,6 +55,7 @@ every outbox connector chains it:
 transforms: outbox,enrich
 transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher
 transforms.enrich.source.default: passage
+transforms.enrich.dataschema.template: https://schemas.passage.dev/{type}.json
 ```
 
 Bumping the enricher or Debezium version means changing the `Dockerfile`, the image tag in `connect.yaml`, and (for

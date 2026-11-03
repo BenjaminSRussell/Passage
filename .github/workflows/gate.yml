@@ -23,7 +23,7 @@ jobs:
       warehouse: ${{ steps.filter.outputs.warehouse }}
       agents: ${{ steps.filter.outputs.agents }}
       connect: ${{ steps.filter.outputs.connect }}
-      run: ${{ steps.filter.outputs.go == 'true' || steps.filter.outputs.web == 'true' || steps.filter.outputs.py == 'true' || steps.filter.outputs.warehouse == 'true' || steps.filter.outputs.charts == 'true' || steps.filter.outputs.agents == 'true' }}
+      run: ${{ steps.filter.outputs.go == 'true' || steps.filter.outputs.web == 'true' || steps.filter.outputs.py == 'true' || steps.filter.outputs.warehouse == 'true' || steps.filter.outputs.charts == 'true' || steps.filter.outputs.agents == 'true' || steps.filter.outputs.connect == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - id: filter

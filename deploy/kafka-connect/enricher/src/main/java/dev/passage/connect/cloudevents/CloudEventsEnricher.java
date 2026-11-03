@@ -81,7 +81,7 @@ public class CloudEventsEnricher<R extends ConnectRecord<R>> implements Transfor
     /** Attributes copied to ce_* headers, in a stable order. */
     static final String[] HEADER_ATTRIBUTES = {
         "specversion", "id", "source", "type", "subject", "time", "datacontenttype", "dataschema",
-        "tenantid", "legalentityid", "correlationid", "causationid", "traceparent", "actor"
+        "tenantid", "legalentityid", "correlationid", "causationid", "traceparent", "actor", "sequence"
     };
     private static final Set<String> RESERVED = Set.of(
         "specversion", "id", "source", "type", "subject", "time", "datacontenttype", "dataschema", "data", "data_base64");

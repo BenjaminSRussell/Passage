@@ -12,6 +12,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.apache.kafka.common.config.ConfigException;
+import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.data.SchemaBuilder;
+import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.header.ConnectHeaders;
 import org.apache.kafka.connect.source.SourceRecord;
@@ -171,6 +174,35 @@ class CloudEventsEnricherTest {
         Map<String, Object> copy = new LinkedHashMap<>(e);
         smt.apply(record(e, TENANT));
         assertEquals(copy, e);
+    }
+
+    @Test
+    void enrichesEventRouterStructAndCopiesSequenceHeader() {
+        Schema dataSchema = SchemaBuilder.struct().field("legalEntityId", Schema.STRING_SCHEMA).build();
+        Schema inSchema = SchemaBuilder.struct()
+                .field("id", Schema.STRING_SCHEMA)
+                .field("source", Schema.STRING_SCHEMA)
+                .field("type", Schema.STRING_SCHEMA)
+                .field("time", Schema.STRING_SCHEMA)
+                .field("data", dataSchema)
+                .field("sequence", Schema.INT64_SCHEMA)
+                .build();
+        Struct value = new Struct(inSchema)
+                .put("id", "01JABCDEF")
+                .put("source", "/passage/receiving/receiving")
+                .put("type", "dev.passage.receiving.receipt.posted.v1")
+                .put("time", "2026-11-03T10:00:00Z")
+                .put("data", new Struct(dataSchema).put("legalEntityId", LE))
+                .put("sequence", 4L);
+        SourceRecord out = smt.apply(record(value, TENANT));
+        Struct v = (Struct) out.value();
+        assertEquals("1.0", v.get("specversion"));
+        assertEquals(TENANT, v.get("tenantid"));
+        assertEquals(LE, v.get("legalentityid"));
+        assertEquals(4L, v.get("sequence"));
+        assertEquals("https://schemas.passage.dev/dev.passage.receiving.receipt.posted.v1.json", v.get("dataschema"));
+        assertEquals("4", header(out, "ce_sequence"));
+        assertEquals("application/cloudevents+json", header(out, "content-type"));
     }
 
     @Test

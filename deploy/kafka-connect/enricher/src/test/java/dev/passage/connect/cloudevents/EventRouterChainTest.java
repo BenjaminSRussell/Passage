@@ -75,7 +75,9 @@ class EventRouterChainTest {
         cfg.put("table.fields.additional.placement", "tenant_id:header:tenantid");
         router.configure(cfg);
         enricher = new CloudEventsEnricher<>();
-        enricher.configure(Map.of("source.default", "passage"));
+        enricher.configure(Map.of(
+                "source.default", "passage",
+                "dataschema.template", "https://schemas.passage.dev/{type}.json"));
         values = new JsonConverter();
         values.configure(Map.of("schemas.enable", "false"), false);
         headers = new SimpleHeaderConverter();
@@ -142,6 +144,8 @@ class EventRouterChainTest {
         assertEquals(TENANT, v.get("tenantid").asText(), "empty tenantid in the payload is filled from outbox.tenant_id");
         assertEquals(LE, v.get("legalentityid").asText());
         assertEquals("2", v.get("data").get("lines").get(0).get("qty").asText(), "data passes through");
+        assertEquals("https://schemas.passage.dev/dev.passage.receiving.receipt.posted.v1.json",
+                v.get("dataschema").asText());
 
         assertEquals("application/cloudevents+json", wireHeader(out, "content-type"));
         assertEquals("dev.passage.receiving.receipt.posted.v1", wireHeader(out, "ce_type"), "raw UTF-8, not base64");

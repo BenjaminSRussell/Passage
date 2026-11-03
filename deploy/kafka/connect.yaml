@@ -130,6 +130,7 @@ spec:
     transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
     transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher
     transforms.enrich.source.default: passage
+    transforms.enrich.dataschema.template: https://schemas.passage.dev/{type}.json
     key.converter: org.apache.kafka.connect.storage.StringConverter
     value.converter: org.apache.kafka.connect.json.JsonConverter
     value.converter.schemas.enable: false
@@ -141,9 +142,9 @@ spec:
 # is also the AsyncAPI channel; PRD FR-4.1 and AC-4.5 use the same name.
 # Outbox payloads are complete CloudEvents (platform/go/outbox): table.expand.json.payload
 # emits the JSON object, the enrich SMT (deploy/kafka-connect/enricher) fills tenantid
-# from the tenantid header (outbox.tenant_id) and legalentityid from the payload when
-# absent, rejects a non-conforming envelope, and adds content-type and ce_* headers;
-# JsonConverter serializes it.
+# from the tenantid header (outbox.tenant_id), legalentityid from the payload, and
+# dataschema from the type when absent, rejects a non-conforming envelope, and adds
+# content-type and ce_* headers; JsonConverter serializes it.
 # Config keys: https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html
 # The key is aggregate_id (FR-4.1): pgoutput on PG16 does not replicate generated
 # columns such as batch's partition_key.
@@ -187,6 +188,7 @@ spec:
     transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
     transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher
     transforms.enrich.source.default: passage
+    transforms.enrich.dataschema.template: https://schemas.passage.dev/{type}.json
     key.converter: org.apache.kafka.connect.storage.StringConverter
     value.converter: org.apache.kafka.connect.json.JsonConverter
     value.converter.schemas.enable: false
@@ -237,6 +239,7 @@ spec:
     transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
     transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher
     transforms.enrich.source.default: passage
+    transforms.enrich.dataschema.template: https://schemas.passage.dev/{type}.json
     key.converter: org.apache.kafka.connect.storage.StringConverter
     value.converter: org.apache.kafka.connect.json.JsonConverter
     value.converter.schemas.enable: false
@@ -288,6 +291,7 @@ spec:
     transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
     transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher
     transforms.enrich.source.default: passage
+    transforms.enrich.dataschema.template: https://schemas.passage.dev/{type}.json
     key.converter: org.apache.kafka.connect.storage.StringConverter
     value.converter: org.apache.kafka.connect.json.JsonConverter
     value.converter.schemas.enable: false
