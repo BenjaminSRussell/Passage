@@ -16,10 +16,13 @@ import (
 // approved order of the current version counts too, since the next run firms
 // it (FR-22.11).
 type FirmedSupply struct {
-	OrderID      string
-	ItemID       string
+	OrderID string
+	ItemID  string
+	// WarehouseID is the warehouse scope the order supplies (FR-22.18); empty for the site scope.
+	WarehouseID  string
 	OrderType    string
 	Qty          decimal.Decimal
+	OrderDate    time.Time
 	DeliveryDate time.Time
 }
 
@@ -36,12 +39,12 @@ func (s *Postgres) FirmedSupply(ctx context.Context, planCode, siteID string, fr
 	p, _ := tenant.FromContext(ctx)
 	out := []FirmedSupply{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select o.id::text, o.item_id::text, o.order_type, o.qty::text, o.delivery_date
+		rows, err := tx.Query(ctx, `select o.id::text, o.item_id::text, coalesce(o.warehouse_id::text, ''), o.order_type, o.qty::text, o.order_date, o.delivery_date
 			from planned_order o join plan_version v on v.tenant_id = o.tenant_id and v.id = o.plan_version_id
 			join plan p on p.tenant_id = v.tenant_id and p.id = v.plan_id
 			where o.tenant_id = $1 and p.code = $2 and v.site_id = $3::uuid and v.kind <> 'simulation'
 			and (o.status = 'firmed' or (o.status = 'approved' and v.status = 'current')) and o.delivery_date >= $4::date
-			order by o.item_id, o.delivery_date, o.number, o.id`, p.TenantID, planCode, siteID, from.Format(dateLayout))
+			order by o.item_id, o.warehouse_id nulls first, o.delivery_date, o.number, o.id`, p.TenantID, planCode, siteID, from.Format(dateLayout))
 		if err != nil {
 			return err
 		}
@@ -49,7 +52,7 @@ func (s *Postgres) FirmedSupply(ctx context.Context, planCode, siteID string, fr
 		for rows.Next() {
 			var f FirmedSupply
 			var qty string
-			if err := rows.Scan(&f.OrderID, &f.ItemID, &f.OrderType, &qty, &f.DeliveryDate); err != nil {
+			if err := rows.Scan(&f.OrderID, &f.ItemID, &f.WarehouseID, &f.OrderType, &qty, &f.OrderDate, &f.DeliveryDate); err != nil {
 				return err
 			}
 			if f.Qty, err = decimal.NewFromString(qty); err != nil {

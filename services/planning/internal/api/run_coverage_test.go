@@ -34,6 +34,21 @@ func (f *fakeStore) RunCoverages(_ context.Context, site, planEntity string, ite
 	return out, nil
 }
 
+func (f *fakeStore) RunWarehouseCoverages(_ context.Context, site, _ string, itemIDs []string) (map[string]store.RunCoverage, error) {
+	out := map[string]store.RunCoverage{}
+	if site != siteID {
+		return out, nil
+	}
+	for k, c := range f.runWhCovs {
+		for _, id := range itemIDs {
+			if base, _ := domain.SplitWarehouseKey(k); base == id {
+				out[k] = c
+			}
+		}
+	}
+	return out, nil
+}
+
 // bareBody is runBody with coverage, order type and lead time left out, so
 // the run must take them from the stored item coverage (FR-22.2, FR-22.5).
 const bareBody = `{"asOf":"2026-11-02","siteId":"` + siteID + `","items":[

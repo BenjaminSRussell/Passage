@@ -43,6 +43,9 @@ export const PAGE_LIMIT = 500;
 
 const dash = "—";
 
+/** Planning scope of an order or message: the site, or the warehouse that is planned and netted on its own (FR-22.18). */
+const scopeLabel = (x: { warehouseId?: string | null }) => (x.warehouseId ? `Warehouse ${x.warehouseId}` : "Site");
+
 const ORDER_STATUSES = ["unprocessed", "approved", "firmed"] as const;
 const MESSAGE_ACTIONS = ["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone", "sales-on-top", "no-vendor"] as const;
 
@@ -277,6 +280,7 @@ export function PlannedOrdersPage() {
   const columns: DataTableColumn<PlannedOrder>[] = [
     { key: "number", header: "Number", mono: true },
     { key: "itemId", header: "Item", mono: true },
+    { key: "warehouseId", header: "Scope", mono: true, render: scopeLabel },
     { key: "orderType", header: "Type", render: (o) => <Badge tone="neutral">{orderTypeLabel[o.orderType]}</Badge> },
     { key: "qty", header: "Quantity", align: "end" },
     { key: "orderDate", header: "Order date" },
@@ -480,7 +484,10 @@ export function PlannedOrderPage() {
         actions={
           <>
             {o ? (
-              <Link className={buttonClassName("ghost")} to={`${withPlan("/planning/net-requirements", plan)}&item=${encodeURIComponent(o.itemId)}`}>
+              <Link
+                className={buttonClassName("ghost")}
+                to={`${withPlan("/planning/net-requirements", plan)}&item=${encodeURIComponent(o.itemId)}${o.warehouseId ? `&warehouse=${encodeURIComponent(o.warehouseId)}` : ""}`}
+              >
                 Net requirements of the item
               </Link>
             ) : null}
@@ -500,7 +507,8 @@ export function PlannedOrderPage() {
             entries={[
               ["Number", o.number, true],
               ["Item", o.itemId, true],
-              ["Type", orderTypeLabel[o.orderType]],
+              ["Scope", scopeLabel(o)],
+              ["Type", o.warehouseId && o.orderType === "transfer" ? "Transfer from the site" : orderTypeLabel[o.orderType]],
               ["Quantity", o.qty],
               ["Order date", o.orderDate],
               ["Delivery date", o.deliveryDate],
@@ -553,6 +561,7 @@ export function MessagesPage() {
     { key: "action", header: "Action", render: (m) => <Badge tone={actionTone[m.action]}>{sentence(m.action)}</Badge> },
     { key: "text", header: "Message", render: (m) => (m.text ? `${m.code ? `${m.code} ` : ""}${m.text}` : dash) },
     { key: "itemId", header: "Item", mono: true },
+    { key: "warehouseId", header: "Scope", mono: true, render: scopeLabel },
     { key: "supplyRef", header: "Supply", mono: true, render: (m) => m.supplyRef || dash },
     { key: "demandRef", header: "Demand", mono: true, render: (m) => m.demandRef || dash },
     { key: "suggestedDate", header: "Suggested date", render: (m) => m.suggestedDate || dash },

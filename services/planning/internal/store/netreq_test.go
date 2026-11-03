@@ -47,7 +47,7 @@ func TestRunPlan_NetRequirementsAndMessageEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rows, err := st.ListNetRequirements(ctx, "MAIN", item, 100)
+	rows, err := st.ListNetRequirements(ctx, "MAIN", item, "", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,11 +62,11 @@ func TestRunPlan_NetRequirementsAndMessageEvents(t *testing.T) {
 			t.Fatalf("row %d = %+v; engine %+v", i, got, n)
 		}
 	}
-	if limited, err := st.ListNetRequirements(ctx, "MAIN", item, 1); err != nil || len(limited) != 1 || limited[0].Date != rows[0].Date {
+	if limited, err := st.ListNetRequirements(ctx, "MAIN", item, "", 1); err != nil || len(limited) != 1 || limited[0].Date != rows[0].Date {
 		t.Fatalf("limit 1: %+v, %v", limited, err)
 	}
 	other := testkit.Ctx(testkit.TenantID(2), "planning.read")
-	if leaked, err := st.ListNetRequirements(other, "MAIN", item, 100); err != nil || len(leaked) != 0 {
+	if leaked, err := st.ListNetRequirements(other, "MAIN", item, "", 100); err != nil || len(leaked) != 0 {
 		t.Fatalf("tenant 2 sees %+v, %v", leaked, err)
 	}
 
@@ -75,7 +75,7 @@ func TestRunPlan_NetRequirementsAndMessageEvents(t *testing.T) {
 	if _, _, err := st.RunPlan(ctx, runRequest(res2, "n-2", "in-2")); err != nil {
 		t.Fatal(err)
 	}
-	if stale, err := st.ListNetRequirements(ctx, "MAIN", item, 100); err != nil || len(stale) != 0 {
+	if stale, err := st.ListNetRequirements(ctx, "MAIN", item, "", 100); err != nil || len(stale) != 0 {
 		t.Fatalf("superseded version still read: %+v, %v", stale, err)
 	}
 

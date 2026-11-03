@@ -165,6 +165,7 @@ components:
           description: 'Values are added within v1 only (PRD appendix: additive evolution); a consumer must ignore an action it does not know. no-vendor is PLAN-0008, a planned purchase of the item with no vendor (supply_ref its earliest such order, qty the item''s vendorless quantity)'
           x-passage-added-in: {red-zone: PSG-2220, sales-on-top: PSG-2223, no-vendor: PSG-2224}
         item_id: {type: string, format: uuid}
+        warehouse_id: {type: [string, 'null'], format: uuid, description: 'The warehouse planning scope the message is about (FR-22.18, added in PSG-2227); null for the site scope. A consumer that ignores it reads a warehouse message as a site one'}
         supply_ref: {type: string, description: Planned order number or receipt ref; empty for a shortage}
         demand_ref: {type: string, description: 'Demand the message is about (sales line, forecast, bom line); empty when none'}
         suggested_date: {type: string, format: date}
@@ -200,6 +201,7 @@ components:
         target_type: {type: string, enum: [purchase-order, production-order, transfer-order]}
         target_id: {type: string, format: uuid, description: Id of the order to create; planned orders of one group share it}
         item_id: {type: string, format: uuid}
+        warehouse_id: {type: [string, 'null'], format: uuid, description: 'Warehouse of a warehouse planning scope (FR-22.18, added in PSG-2227): for a planned transfer the to-warehouse, whose from-warehouse is the site (BR-22.7); null for an order of the site scope. The owning context creates the transfer order to this warehouse'}
         site_id: {type: string, format: uuid}
         vendor_id: {type: [string, 'null'], format: uuid}
         qty: {type: string, description: Decimal string in the inventory unit}

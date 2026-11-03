@@ -15,6 +15,8 @@ export const PlannedOrder = z.object({
   versionId: z.string(),
   number: z.string(),
   itemId: z.string(),
+  /** The warehouse planning scope of the order (FR-22.18); absent for the site scope. A transfer goes from the site to it (BR-22.7). */
+  warehouseId: z.string().nullish(),
   orderType: OrderType,
   qty: z.string(),
   orderDate: z.string(),
@@ -44,6 +46,8 @@ export const isOpen = (o: Pick<PlannedOrder, "status">) => o.status === "unproce
 export const Message = z.object({
   action: MessageAction,
   itemId: z.string(),
+  /** The warehouse planning scope the message is about (FR-22.18); null for the site scope. */
+  warehouseId: z.string().nullish(),
   supplyRef: z.string().nullish(),
   demandRef: z.string().nullish(),
   suggestedDate: z.string().nullish(),
@@ -143,6 +147,8 @@ export interface PlanScope {
 /** One day of the MD04-style net requirements view of an item (FR-22.12). Quantities are decimal strings. */
 export const NetRequirement = z.object({
   itemId: z.string(),
+  /** The warehouse planning scope of the row (FR-22.18); absent for the site scope. */
+  warehouseId: z.string().nullish(),
   date: z.string(),
   grossRequirements: z.string(),
   scheduledReceipts: z.string(),
@@ -234,6 +240,8 @@ export interface OrderQuery {
   planCode: string;
   status?: z.infer<typeof OrderStatus>;
   itemId?: string;
+  /** Only the orders of one warehouse planning scope (FR-22.18); without it, every scope. */
+  warehouseId?: string;
   /** A version number, e.g. a simulation; without it the current version is read. */
   version?: number;
   sort?: ListSort;
@@ -244,6 +252,7 @@ export async function listPlannedOrders(q: OrderQuery, init?: RequestInit): Prom
   const params = new URLSearchParams({ planCode: q.planCode });
   if (q.status) params.set("status", q.status);
   if (q.itemId) params.set("itemId", q.itemId);
+  if (q.warehouseId) params.set("warehouseId", q.warehouseId);
   if (q.version) params.set("version", String(q.version));
   if (q.sort) params.set("sort", q.sort);
   if (q.limit) params.set("limit", String(q.limit));
@@ -268,9 +277,13 @@ export async function listMessages(
   return body.items;
 }
 
-/** Net requirements of one item in the current version of a plan, in date order (empty when the plan did not plan it). */
-export async function listNetRequirements(planCode: string, itemId: string, init?: RequestInit): Promise<NetRequirement[]> {
+/**
+ * Net requirements of one item in the current version of a plan, in date order (empty when the plan did not plan it).
+ * Without `warehouseId` the item's site scope is read; with it, that warehouse's own scope (FR-22.18, AC-22.16).
+ */
+export async function listNetRequirements(planCode: string, itemId: string, init?: RequestInit, warehouseId?: string): Promise<NetRequirement[]> {
   const params = new URLSearchParams({ planCode, itemId });
+  if (warehouseId) params.set("warehouseId", warehouseId);
   const body = await request(`/net-requirements?${params.toString()}`, z.object({ items: z.array(NetRequirement) }), init);
   return body.items;
 }
@@ -361,6 +374,8 @@ export async function listVersions(planCode: string, limit = 50, init?: RequestI
 export const DiffOrder = z.object({
   number: z.string(),
   itemId: z.string(),
+  /** The warehouse planning scope of the order (FR-22.18); absent for the site scope. */
+  warehouseId: z.string().nullish(),
   orderType: OrderType,
   qty: z.string(),
   orderDate: z.string(),

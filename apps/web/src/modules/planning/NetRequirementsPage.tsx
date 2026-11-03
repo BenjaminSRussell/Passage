@@ -53,6 +53,7 @@ const columns: DataTableColumn<NetRequirement>[] = [
 
 const orderColumns: DataTableColumn<PlannedOrder>[] = [
   { key: "number", header: "Number", mono: true },
+  { key: "warehouseId", header: "Scope", mono: true, render: (o) => (o.warehouseId ? `Warehouse ${o.warehouseId}` : "Site") },
   { key: "qty", header: "Quantity", align: "end", render: (o) => trimQty(o.qty) },
   { key: "orderDate", header: "Order date" },
   { key: "deliveryDate", header: "Delivery date" },
@@ -68,36 +69,55 @@ function LoadAlert({ what, error }: { what: string; error: LoadError | null }) {
   );
 }
 
-/** The plan and item in view, kept in `?plan=` and `?item=` so links and reloads keep them. */
-function useSelection(): { plan: string; item: string; select: (plan: string, item: string) => void } {
+/**
+ * The plan, item and warehouse scope in view, kept in `?plan=`, `?item=` and `?warehouse=` so links and
+ * reloads keep them. No warehouse is the item's site scope.
+ */
+function useSelection(): { plan: string; item: string; warehouse: string; select: (plan: string, item: string, warehouse: string) => void } {
   const [params, setParams] = useSearchParams();
   const rawPlan = params.get("plan") ?? DEFAULT_PLAN_CODE;
   const plan = PLAN_CODE.test(rawPlan) ? rawPlan : DEFAULT_PLAN_CODE;
   const rawItem = params.get("item") ?? "";
   const item = UUID.test(rawItem) ? rawItem.toLowerCase() : "";
-  const select = (nextPlan: string, nextItem: string) => {
+  const rawWarehouse = params.get("warehouse") ?? "";
+  const warehouse = UUID.test(rawWarehouse) ? rawWarehouse.toLowerCase() : "";
+  const select = (nextPlan: string, nextItem: string, nextWarehouse: string) => {
     const next = new URLSearchParams(params);
     next.set("plan", nextPlan);
     next.set("item", nextItem);
+    if (nextWarehouse) next.set("warehouse", nextWarehouse);
+    else next.delete("warehouse");
     setParams(next);
   };
-  return { plan, item, select };
+  return { plan, item, warehouse, select };
 }
 
-function SelectionForm({ plan, item, onSelect }: { plan: string; item: string; onSelect: (plan: string, item: string) => void }) {
-  const [draft, setDraft] = useState({ plan, item });
-  const [errors, setErrors] = useState<{ plan?: string; item?: string }>({});
+function SelectionForm({
+  plan,
+  item,
+  warehouse,
+  onSelect,
+}: {
+  plan: string;
+  item: string;
+  warehouse: string;
+  onSelect: (plan: string, item: string, warehouse: string) => void;
+}) {
+  const [draft, setDraft] = useState({ plan, item, warehouse });
+  const [errors, setErrors] = useState<{ plan?: string; item?: string; warehouse?: string }>({});
   function submit(e: FormEvent) {
     e.preventDefault();
     const code = draft.plan.trim().toUpperCase();
     const id = draft.item.trim();
-    const found: { plan?: string; item?: string } = {};
+    const wh = draft.warehouse.trim();
+    const found: { plan?: string; item?: string; warehouse?: string } = {};
     if (!PLAN_CODE.test(code)) found.plan = "Use 2 to 20 capital letters, digits, _ or -.";
     if (!UUID.test(id)) found.item = "Enter the item id as a UUID.";
+    if (wh !== "" && !UUID.test(wh)) found.warehouse = "Enter the warehouse id as a UUID, or leave it empty for the site.";
     setErrors(found);
     if (Object.keys(found).length > 0) return;
-    setDraft({ plan: code, item: id });
-    onSelect(code, id.toLowerCase());
+    setDraft({ plan: code, item: id, warehouse: wh });
+    onSelect(code, id.toLowerCase(), wh.toLowerCase());
   }
   return (
     <form className={styles.toolbar} onSubmit={submit} noValidate aria-label="Choose plan and item">
@@ -113,15 +133,25 @@ function SelectionForm({ plan, item, onSelect }: { plan: string; item: string; o
           )}
         </FormField>
       </div>
+      <div className={styles.toolbarFieldWide}>
+        <FormField id="netreq-warehouse" label="Warehouse scope (empty: site)" error={errors.warehouse}>
+          {(a11y) => (
+            <Input {...a11y} className={styles.mono} value={draft.warehouse} onChange={(e) => setDraft((d) => ({ ...d, warehouse: e.target.value }))} />
+          )}
+        </FormField>
+      </div>
       <Button type="submit">Show net requirements</Button>
     </form>
   );
 }
 
-function ItemView({ plan, item }: { plan: string; item: string }) {
+function ItemView({ plan, item, warehouse }: { plan: string; item: string; warehouse: string }) {
   const navigate = useNavigate();
-  const rows = useLoad((signal) => listNetRequirements(plan, item, { signal }), [plan, item]);
-  const orders = useLoad((signal) => listPlannedOrders({ planCode: plan, itemId: item }, { signal }), [plan, item]);
+  const rows = useLoad((signal) => listNetRequirements(plan, item, { signal }, warehouse || undefined), [plan, item, warehouse]);
+  const orders = useLoad(
+    (signal) => listPlannedOrders({ planCode: plan, itemId: item, ...(warehouse ? { warehouseId: warehouse } : {}) }, { signal }),
+    [plan, item, warehouse],
+  );
   return (
     <>
       <LoadAlert what="net requirements" error={rows.error} />
@@ -134,11 +164,13 @@ function ItemView({ plan, item }: { plan: string; item: string }) {
           loading={rows.loading}
           empty={{
             title: "No net requirements",
-            description: `The current version of plan ${plan} has no demand or supply for this item. Check the item, or run the plan.`,
+            description: warehouse
+              ? `The current version of plan ${plan} has no demand or supply for this item in that warehouse. Check the warehouse, or run the plan with a warehouse scope for it.`
+              : `The current version of plan ${plan} has no demand or supply for this item. Check the item, or run the plan.`,
           }}
         />
       )}
-      <Card title="Planned orders of this item">
+      <Card title={warehouse ? "Planned orders of this item in the warehouse" : "Planned orders of this item"}>
         <p className={styles.summary}>Open an order to see the demand it is pegged to.</p>
         <LoadAlert what="planned orders" error={orders.error} />
         {orders.error ? null : (
@@ -162,16 +194,16 @@ function ItemView({ plan, item }: { plan: string; item: string }) {
  * current plan version, with the item's planned orders to drill into pegging.
  */
 export function NetRequirementsPage() {
-  const { plan, item, select } = useSelection();
+  const { plan, item, warehouse, select } = useSelection();
   return (
     <div className={styles.stack}>
       <PageHeader
         title="Net requirements"
-        description={`Gross requirements, receipts and projected available balance per day of one item in the current version of plan ${plan}.`}
+        description={`Gross requirements, receipts and projected available balance per day of one item in the current version of plan ${plan}. A warehouse planned in its own scope is netted apart from the site (FR-22.18).`}
       />
-      <SelectionForm key={`${plan}/${item}`} plan={plan} item={item} onSelect={select} />
+      <SelectionForm key={`${plan}/${item}/${warehouse}`} plan={plan} item={item} warehouse={warehouse} onSelect={select} />
       {item ? (
-        <ItemView plan={plan} item={item} />
+        <ItemView plan={plan} item={item} warehouse={warehouse} />
       ) : (
         <Card>
           <EmptyState

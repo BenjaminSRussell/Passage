@@ -125,13 +125,22 @@ func ApplyScope(res Result, items []Item, attrs map[string]ItemAttrs, s Scope) (
 	if s.Empty() {
 		return res, len(items), nil
 	}
-	llc, err := LowLevelCodes(items)
+	// A warehouse scope is judged like its item: the low-level code is that of the
+	// item in the BOM alone (the transfer link to the site item is not a BOM level).
+	siteItems := make([]Item, 0, len(items))
+	for _, it := range items {
+		if _, wh := SplitWarehouseKey(it.ID); wh == "" {
+			siteItems = append(siteItems, it)
+		}
+	}
+	llc, err := LowLevelCodes(siteItems)
 	if err != nil {
 		return Result{}, 0, err
 	}
 	in := map[string]bool{}
 	for _, it := range items {
-		if s.Matches(it.ID, attrs[it.ID], llc[it.ID]) {
+		base, _ := SplitWarehouseKey(it.ID)
+		if s.Matches(base, attrs[base], llc[base]) {
 			in[it.ID] = true
 		}
 	}

@@ -45,9 +45,9 @@ func (s *Postgres) ReadProjectionSource(ctx context.Context, planCode string, it
 		rows, err := tx.Query(ctx, `select n.item_id::text, to_char(n.day, 'YYYY-MM-DD'), n.gross_requirements::text,
 			n.scheduled_receipts::text, n.planned_receipts::text, n.pab::text, n.net_requirement::text
 			from net_requirement n join plan_version v on v.tenant_id = n.tenant_id and v.id = n.plan_version_id
-			where n.tenant_id = $1 and n.plan_version_id = $2::uuid and n.item_id = any($3::uuid[])
+			where n.tenant_id = $1 and n.plan_version_id = $2::uuid and n.item_id = any($3::uuid[]) and n.warehouse_id is null
 			  and (n.day <= v.as_of + $4::int or n.day = (select min(m.day) from net_requirement m
-			    where m.tenant_id = n.tenant_id and m.plan_version_id = n.plan_version_id and m.item_id = n.item_id))
+			    where m.tenant_id = n.tenant_id and m.plan_version_id = n.plan_version_id and m.item_id = n.item_id and m.warehouse_id is null))
 			order by n.item_id, n.day`, p.TenantID, versionID, itemIDs, windowDays)
 		if err != nil {
 			return err

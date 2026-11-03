@@ -8,6 +8,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/planning/internal/domain"
 )
 
 // RunCoverage is the stored site-scope coverage of one item with the settings
@@ -50,6 +51,18 @@ type RunCoverage struct {
 // scope (FR-22.18), not at site level. The scope key of item_coverage allows
 // at most one site-scope row per item and site. itemIDs must be UUIDs.
 func (s *Postgres) RunCoverages(ctx context.Context, siteID, planEntity string, itemIDs []string) (map[string]RunCoverage, error) {
+	return s.runCoverages(ctx, "site", siteID, planEntity, itemIDs)
+}
+
+// RunWarehouseCoverages returns the stored warehouse-scope coverage of the given
+// items at siteID, keyed by domain.WarehouseKey(item id, warehouse id); an item with
+// no warehouse coverage is absent (FR-22.18). It is read like RunCoverages, and the
+// item coverage's own warehouse (not the site) is the scope the plan nets apart.
+func (s *Postgres) RunWarehouseCoverages(ctx context.Context, siteID, planEntity string, itemIDs []string) (map[string]RunCoverage, error) {
+	return s.runCoverages(ctx, "warehouse", siteID, planEntity, itemIDs)
+}
+
+func (s *Postgres) runCoverages(ctx context.Context, scope, siteID, planEntity string, itemIDs []string) (map[string]RunCoverage, error) {
 	out := map[string]RunCoverage{}
 	if len(itemIDs) == 0 {
 		return out, nil
@@ -61,24 +74,24 @@ func (s *Postgres) RunCoverages(ctx context.Context, siteID, planEntity string, 
 			       g.positive_days, g.period_days, g.freeze_fence_days, g.action_fence_days,
 			       g.futures_fence_days, g.firming_fence_days, g.auto_firm, g.safety_stock_policy, c.min_qty::text, c.max_qty::text,
 			       c.safety_margin_receipt_days, c.lead_time_days, c.planned_order_type,
-			       c.safety_margin_issue_days, c.safety_margin_reorder_days, coalesce(c.vendor_id::text, '')
+			       c.safety_margin_issue_days, c.safety_margin_reorder_days, coalesce(c.vendor_id::text, ''), coalesce(c.warehouse_id::text, '')
 			from item_coverage c
 			join coverage_group g on g.tenant_id = c.tenant_id and g.id = c.coverage_group_id
-			where c.tenant_id = $1 and c.site_id = $2::uuid and c.planning_scope = 'site'
+			where c.tenant_id = $1 and c.site_id = $2::uuid and c.planning_scope = $5
 			  and c.item_id = any($3::uuid[])
 				  and ($4::text = '' or c.legal_entity_id::text = $4::text)`,
-			p.TenantID, siteID, itemIDs, planEntity)
+			p.TenantID, siteID, itemIDs, planEntity, scope)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var c RunCoverage
-			var minQty, maxQty string
+			var minQty, maxQty, warehouse string
 			if err := rows.Scan(&c.ItemID, &c.GroupCode, &c.CoverageCode, &c.CoverageFenceDays, &c.NegativeDays,
 				&c.PositiveDays, &c.PeriodDays, &c.FreezeFenceDays, &c.ActionFenceDays, &c.FuturesFenceDays,
 				&c.FirmingFenceDays, &c.AutoFirm, &c.SafetyStockPolicy, &minQty, &maxQty, &c.MarginDays, &c.LeadTimeDays,
-				&c.PlannedOrderType, &c.IssueMarginDays, &c.ReorderMarginDays, &c.VendorID); err != nil {
+				&c.PlannedOrderType, &c.IssueMarginDays, &c.ReorderMarginDays, &c.VendorID, &warehouse); err != nil {
 				return err
 			}
 			if c.MinQty, err = decimal.NewFromString(minQty); err != nil {
@@ -86,6 +99,10 @@ func (s *Postgres) RunCoverages(ctx context.Context, siteID, planEntity string, 
 			}
 			if c.MaxQty, err = decimal.NewFromString(maxQty); err != nil {
 				return err
+			}
+			if scope == "warehouse" {
+				out[domain.WarehouseKey(c.ItemID, warehouse)] = c
+				continue
 			}
 			out[c.ItemID] = c
 		}

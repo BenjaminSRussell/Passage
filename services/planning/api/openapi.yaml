@@ -221,6 +221,10 @@ paths:
         - name: itemId
           in: query
           schema: {type: string, format: uuid}
+        - name: warehouseId
+          in: query
+          description: Only the orders of this warehouse planning scope (FR-22.18); left out, every scope
+          schema: {type: string, format: uuid}
         - name: version
           in: query
           description: Read this version number instead of the current one, e.g. a simulation version (FR-22.15)
@@ -439,10 +443,14 @@ paths:
           in: query
           required: true
           schema: {type: string, format: uuid}
+        - name: warehouseId
+          in: query
+          description: Read the item's own scope in this warehouse (FR-22.18, AC-22.16); left out, the site scope, whose rows never include a warehouse's
+          schema: {type: string, format: uuid}
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
-          description: Days in date order; empty when the plan has no current version or did not plan the item
+          description: Days in date order; empty when the plan has no current version or did not plan the item in that scope
           content:
             application/json:
               schema:
@@ -1815,6 +1823,7 @@ components:
       properties:
         number: {type: string}
         itemId: {type: string, format: uuid}
+        warehouseId: {type: string, format: uuid, description: 'The warehouse planning scope of the order (FR-22.18); absent for the site scope. Orders match across versions on item, scope, order type and delivery date'}
         orderType: {type: string, enum: [purchase, production, transfer]}
         qty: {type: string, description: Decimal string}
         orderDate: {type: string, format: date}
@@ -2152,7 +2161,7 @@ components:
             autoFirm: {type: boolean, default: false, description: Needs firmingFenceDays of at least 1}
             safetyStockPolicy: {type: string, enum: [today, first-issue], description: 'BR-22.5 safety-stock policy. Left out, the run takes the policy of the stored coverage group, else today.'}
             strategy: {type: string, enum: [mts-net, mts-gross, mto, assemble-to-order-final, plan-without-final-assembly, subassembly], description: 'Planning strategy of the item (FR-22.19), with the windows of its stored setup or the PRD defaults. Left out, the run takes the strategy of the stored site-scope item coverage, and mts-net when the item has none. Only a run with a forecastModel applies it.'}
-        onHand: {type: string, description: Decimal string}
+        onHand: {type: string, description: 'Decimal string. The site scope''s stock: leave out the stock of every warehouse sent in warehouses, which is that scope''s own onHand, or it is counted twice (FR-22.18)'}
         safetyStock: {type: string, description: Decimal string}
         orderType: {type: string, enum: [purchase, production, transfer], description: Required unless the item has a stored site-scope item coverage}
         leadTimeDays: {type: integer, minimum: 0, maximum: 3650, description: 'Omitted: the stored item coverage''s lead-time override, else 0'}
@@ -2173,6 +2182,32 @@ components:
             properties:
               itemId: {type: string, format: uuid}
               qty: {type: string}
+        warehouses:
+          type: array
+          maxItems: 50
+          description: 'The item''s own warehouse planning scopes (FR-22.18, AC-22.16), each netted apart from the site, so a warehouse''s on-hand never covers site demand; the item''s demand, receipts and onHand are then those of the site without these warehouses. A scope whose order type is transfer is replenished from the site: every planned transfer creates demand for the item at the site on its order date, the delivery date less the lead time, counted on the run calendar (BR-22.7, BR-22.8); with carryForward a firmed transfer whose order date has not passed is still that demand. Purchase replenishes the warehouse directly; production does too and explodes the item''s components, which are demanded in their site scope. Quota arrangements, DDMRP buffers, forecast demand and scenario levers apply to the site scope only. At most 100000 scopes per run'
+          items: {$ref: '#/components/schemas/RunWarehouseScope'}
+    RunWarehouseScope:
+      type: object
+      required: [warehouseId]
+      description: One warehouse planning scope of a run item. Coverage, order type, lead time and vendor left out are taken from the item's stored warehouse-scope item coverage for that warehouse; a scope with neither is a 400
+      properties:
+        warehouseId: {type: string, format: uuid, description: Listed at most once per item}
+        vendorId: {type: string, format: uuid, description: Default vendor of the scope's planned purchase orders; left out, that of the stored warehouse-scope coverage}
+        coverage: {$ref: '#/components/schemas/RunItem/properties/coverage'}
+        onHand: {type: string, description: 'Decimal string; stock of this warehouse only'}
+        safetyStock: {type: string, description: Decimal string}
+        orderType: {type: string, enum: [purchase, production, transfer], description: 'transfer replenishes the warehouse from the site (BR-22.7). Required unless the warehouse has stored coverage'}
+        leadTimeDays: {type: integer, minimum: 0, maximum: 3650, description: 'For a transfer, the transfer lead time. Omitted: the stored coverage''s lead-time override, else 0'}
+        lot:
+          type: object
+          properties:
+            minOrderQty: {type: string}
+            multipleQty: {type: string}
+            maxOrderQty: {type: string}
+            standardQty: {type: string}
+        demand: {type: array, items: {$ref: '#/components/schemas/RunRequirement'}}
+        receipts: {type: array, items: {$ref: '#/components/schemas/RunRequirement'}}
     RunRequirement:
       type: object
       required: [ref, refType, date, qty]
@@ -2262,6 +2297,7 @@ components:
         versionId: {type: string, format: uuid}
         number: {type: string, description: 'PLN-nnnnnn; the parts of an order a split quota arrangement divided are numbered <number>-<n>'}
         itemId: {type: string, format: uuid}
+        warehouseId: {type: string, format: uuid, description: 'The warehouse planning scope the order belongs to (FR-22.18); absent for the site scope. For a transfer, the to-warehouse: it is issued from the site (BR-22.7)'}
         orderType: {type: string, enum: [purchase, production, transfer]}
         qty: {type: string}
         orderDate: {type: string, format: date}
@@ -2412,6 +2448,7 @@ components:
       required: [itemId, date, grossRequirements, scheduledReceipts, plannedReceipts, projectedAvailableBalance, netRequirement]
       properties:
         itemId: {type: string, format: uuid}
+        warehouseId: {type: string, format: uuid, description: The warehouse planning scope of the row (FR-22.18); absent for the site scope}
         date: {type: string, format: date}
         grossRequirements: {type: string, description: 'Decimal string in the inventory unit: demand, dependent demand and safety stock (at the as-of date) due that day'}
         scheduledReceipts: {type: string, description: Existing supply (open orders) due that day}
@@ -2470,6 +2507,7 @@ components:
       properties:
         action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor]}
         itemId: {type: string, format: uuid}
+        warehouseId: {type: string, format: uuid, nullable: true, description: The warehouse planning scope the message is about (FR-22.18); null for the site scope}
         supplyRef: {type: string, description: Planned order number or receipt ref; empty for a shortage}
         demandRef: {type: string, description: Demand the message is about; empty when none}
         suggestedDate: {type: string, format: date, description: 'delay: expected date; postpone/advance: suggested receipt date; shortage: demand date; cancel/decrease/increase: receipt date; red-zone: delivery date of the buffer replenishment order; sales-on-top: date of the sales line (PLAN-0015, qty is the excess over the forecast it could consume, demandRef the sales line); no-vendor: order date of the item''s earliest purchase without a vendor (PLAN-0008, supplyRef that order)'}

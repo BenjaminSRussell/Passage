@@ -75,6 +75,18 @@ describe("Compare plan versions", () => {
     expect(screen.queryByText("Showing the first orders of each list")).not.toBeInTheDocument();
   });
 
+  it("shows the planning scope of an added order (FR-22.18)", async () => {
+    const wh = "00000000-0000-0000-0000-0000000000c2";
+    stub([
+      ["/diff", () => json({ ...diff, added: [o("PLN-000009", "5.000000"), { ...o("PLN-000010", "3.000000"), orderType: "transfer", warehouseId: wh }] })],
+      ["/versions", () => json({ items: [version(2, "bbb"), version(1, "aaa")] })],
+    ]);
+    renderAt("/planning/runs/compare?plan=MAIN");
+    const added = await findTable({ name: "Added orders" });
+    expect(within(added).getByText("Site")).toBeInTheDocument();
+    expect(within(added).getByText("Warehouse 00000000")).toBeInTheDocument();
+  });
+
   it("compares a newest simulation with the current operational version, not the run before it", async () => {
     const sim = (n: number) => ({ ...version(n, "ccc"), status: "complete", kind: "simulation", scenarioCode: "UP20" });
     const f = stub([

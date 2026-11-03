@@ -13,8 +13,8 @@ import (
 )
 
 // ListNetRequirements serves two days of FG in plan MAIN and nothing else.
-func (f *fakeStore) ListNetRequirements(_ context.Context, code, itemID string, limit int) ([]store.NetRequirement, error) {
-	f.lastLimit = limit
+func (f *fakeStore) ListNetRequirements(_ context.Context, code, itemID, warehouseID string, limit int) ([]store.NetRequirement, error) {
+	f.lastLimit, f.lastWarehouse = limit, warehouseID
 	if code != "MAIN" || itemID != fgID {
 		return []store.NetRequirement{}, nil
 	}

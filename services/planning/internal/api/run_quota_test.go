@@ -13,7 +13,8 @@ import (
 	"github.com/BenjaminSRussell/passage/services/planning/internal/domain"
 )
 
-func (f *fakeStore) RunQuotas(_ context.Context, _, _ string, _ []string, _, _ time.Time) ([]domain.RunQuota, error) {
+func (f *fakeStore) RunQuotas(_ context.Context, _, _ string, itemIDs []string, _, _ time.Time) ([]domain.RunQuota, error) {
+	f.quotaItems = append(f.quotaItems, itemIDs...)
 	return f.runQuotas, f.runQuotasErr
 }
 

@@ -68,11 +68,12 @@ type Store interface {
 	ForecastDemand(ctx context.Context, modelCode, siteID string, from time.Time) ([]ForecastDemandLine, error)
 	SubmitForecastConsensus(ctx context.Context, modelCode string, expectedVersion int) (ForecastModel, error)
 	DecideForecastConsensus(ctx context.Context, modelCode string, expectedVersion int, approve bool) (ForecastModel, *ForecastPublication, error)
-	ListNetRequirements(ctx context.Context, planCode, itemID string, limit int) ([]NetRequirement, error)
+	ListNetRequirements(ctx context.Context, planCode, itemID, warehouseID string, limit int) ([]NetRequirement, error)
 	ReadProjectionSource(ctx context.Context, planCode string, itemIDs []string, windowDays int) (ProjectionSource, error)
 	PlanLegalEntity(ctx context.Context, planCode, requestedEntity string) (string, error)
 	FirmedSupply(ctx context.Context, planCode, siteID string, from time.Time) ([]FirmedSupply, error)
 	RunCoverages(ctx context.Context, siteID, planEntity string, itemIDs []string) (map[string]RunCoverage, error)
+	RunWarehouseCoverages(ctx context.Context, siteID, planEntity string, itemIDs []string) (map[string]RunCoverage, error)
 	RunQuotas(ctx context.Context, siteID, planEntity string, itemIDs []string, from, to time.Time) ([]domain.RunQuota, error)
 	RunBuffers(ctx context.Context, siteID, planEntity string, itemIDs []string) ([]domain.RunBuffer, error)
 	RunStrategies(ctx context.Context, siteID, planEntity string, itemIDs []string) (map[string]domain.StrategySpec, error)
@@ -173,10 +174,14 @@ type Version struct {
 // PlannedOrder is one planned order row of a plan version. Status is
 // unprocessed, approved, firmed or deleted.
 type PlannedOrder struct {
-	ID           string  `json:"id"`
-	VersionID    string  `json:"versionId"`
-	Number       string  `json:"number"`
-	ItemID       string  `json:"itemId"`
+	ID        string `json:"id"`
+	VersionID string `json:"versionId"`
+	Number    string `json:"number"`
+	ItemID    string `json:"itemId"`
+	// WarehouseID is the warehouse planning scope the order belongs to (FR-22.18);
+	// absent for the site scope. A transfer order of a warehouse scope moves the
+	// item from the site to this warehouse (BR-22.7).
+	WarehouseID  *string `json:"warehouseId,omitempty"`
 	OrderType    string  `json:"orderType"`
 	Qty          string  `json:"qty"`
 	OrderDate    string  `json:"orderDate"`
@@ -218,14 +223,16 @@ type Message struct {
 	Action string `json:"action"`
 	// Code and Text are the message catalog entry of the action (PRD 4.22.18); empty for an
 	// action without one.
-	Code          string `json:"code,omitempty"`
-	Text          string `json:"text,omitempty"`
-	ItemID        string `json:"itemId"`
-	SupplyRef     string `json:"supplyRef"`
-	DemandRef     string `json:"demandRef"`
-	SuggestedDate string `json:"suggestedDate"`
-	DelayDays     int    `json:"delayDays"`
-	Qty           string `json:"qty"`
+	Code   string `json:"code,omitempty"`
+	Text   string `json:"text,omitempty"`
+	ItemID string `json:"itemId"`
+	// WarehouseID is the warehouse planning scope the message is about; null for the site scope.
+	WarehouseID   *string `json:"warehouseId"`
+	SupplyRef     string  `json:"supplyRef"`
+	DemandRef     string  `json:"demandRef"`
+	SuggestedDate string  `json:"suggestedDate"`
+	DelayDays     int     `json:"delayDays"`
+	Qty           string  `json:"qty"`
 	// PlanningPriority and BufferZone are those of the planned order the message is about when that
 	// order replenishes a DDMRP buffer (FR-22.16); null otherwise.
 	PlanningPriority *string `json:"planningPriority"`
@@ -253,6 +260,8 @@ func priorityOrder(sortParam string) string {
 // OrderFilter narrows planned-order reads.
 type OrderFilter struct {
 	Status, ItemID string
+	// WarehouseID keeps the orders of one warehouse scope (FR-22.18); empty keeps every scope.
+	WarehouseID string
 	// Sort is "" (priority-based items by planning priority, then order number) or SortPriority.
 	Sort string
 	// Version selects a version by number (a simulation, FR-22.15); 0 reads the current one.
@@ -383,29 +392,29 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 				status, batchID, targetType, targetID = "firmed", &autoFirm.batch.ID, &g.TargetType, &g.TargetID
 			}
 			batch.Queue(`insert into planned_order (tenant_id, id, plan_version_id, number, item_id, order_type, qty, order_date, delivery_date, futures_date, delay_days, lot_rule,
-				status, firmed_batch_id, firmed_target_type, firmed_target_id, vendor_id, quota_arrangement_id, quota_source_id, planning_priority, buffer_zone)
+				status, firmed_batch_id, firmed_target_type, firmed_target_id, vendor_id, quota_arrangement_id, quota_source_id, planning_priority, buffer_zone, warehouse_id)
 				values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::date, $9::date, $10::date, $11, $12, $13, $14, $15, $16,
-				nullif($17, '')::uuid, nullif($18, '')::uuid, nullif($19, '')::uuid, $20::numeric, nullif($21, ''))`,
+				nullif($17, '')::uuid, nullif($18, '')::uuid, nullif($19, '')::uuid, $20::numeric, nullif($21, ''), nullif($22, '')::uuid)`,
 				p.TenantID, orderIDs[i], versionID, o.Number, o.ItemID, o.OrderType, o.Qty.String(), dayDate(req.AsOf, o.OrderDate), dayDate(req.AsOf, o.DeliveryDate), futures, o.DelayDays, o.LotRule,
-				status, batchID, targetType, targetID, o.VendorID, o.QuotaArrangementID, o.QuotaSourceID, priorityText(o.PlanningPriority), o.BufferZone)
+				status, batchID, targetType, targetID, o.VendorID, o.QuotaArrangementID, o.QuotaSourceID, priorityText(o.PlanningPriority), o.BufferZone, o.WarehouseID)
 		}
 		for _, pg := range r.Pegging {
-			batch.Queue(`insert into pegging (tenant_id, id, plan_version_id, item_id, supply_ref, demand_ref, demand_ref_type, demand_date, qty)
-				values ($1, $2, $3, $4, $5, $6, $7, $8::date, $9::numeric)`,
-				p.TenantID, ids.New(), versionID, pg.ItemID, pg.SupplyRef, pg.DemandRef, pg.DemandRefType, dayDate(req.AsOf, pg.DemandDate), pg.Qty.String())
+			batch.Queue(`insert into pegging (tenant_id, id, plan_version_id, item_id, supply_ref, demand_ref, demand_ref_type, demand_date, qty, warehouse_id)
+				values ($1, $2, $3, $4, $5, $6, $7, $8::date, $9::numeric, nullif($10, '')::uuid)`,
+				p.TenantID, ids.New(), versionID, pg.ItemID, pg.SupplyRef, pg.DemandRef, pg.DemandRefType, dayDate(req.AsOf, pg.DemandDate), pg.Qty.String(), pg.WarehouseID)
 		}
 		messageIDs := make([]string, len(r.Messages))
 		for i, m := range r.Messages {
 			messageIDs[i] = ids.New()
-			batch.Queue(`insert into action_message (tenant_id, id, plan_version_id, item_id, action, supply_ref, demand_ref, suggested_date, delay_days, qty)
-				values ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10::numeric)`,
-				p.TenantID, messageIDs[i], versionID, m.ItemID, m.Action, m.SupplyRef, m.DemandRef, dayDate(req.AsOf, m.SuggestedDate), m.DelayDays, m.Qty.String())
+			batch.Queue(`insert into action_message (tenant_id, id, plan_version_id, item_id, action, supply_ref, demand_ref, suggested_date, delay_days, qty, warehouse_id)
+				values ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10::numeric, nullif($11, '')::uuid)`,
+				p.TenantID, messageIDs[i], versionID, m.ItemID, m.Action, m.SupplyRef, m.DemandRef, dayDate(req.AsOf, m.SuggestedDate), m.DelayDays, m.Qty.String(), m.WarehouseID)
 		}
 		for _, n := range r.Net {
-			batch.Queue(`insert into net_requirement (tenant_id, id, plan_version_id, item_id, day, gross_requirements, scheduled_receipts, planned_receipts, pab, net_requirement)
-				values ($1, $2, $3, $4, $5::date, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric)`,
+			batch.Queue(`insert into net_requirement (tenant_id, id, plan_version_id, item_id, day, gross_requirements, scheduled_receipts, planned_receipts, pab, net_requirement, warehouse_id)
+				values ($1, $2, $3, $4, $5::date, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, nullif($11, '')::uuid)`,
 				p.TenantID, ids.New(), versionID, n.ItemID, dayDate(req.AsOf, n.Day), n.Gross.String(), n.ScheduledReceipts.String(),
-				n.PlannedReceipts.String(), n.PAB.String(), n.Net.String())
+				n.PlannedReceipts.String(), n.PAB.String(), n.Net.String(), n.WarehouseID)
 		}
 		if err := tx.SendBatch(ctx, batch).Close(); err != nil {
 			return err
@@ -415,7 +424,7 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 		for i, m := range r.Messages {
 			if err := enqueue(ctx, tx, planevents.MessageRaised, planID, p.TenantID, messageIDs[i], planevents.MessageRaisedData{
 				MessageID: messageIDs[i], PlanID: planID, PlanCode: req.PlanCode, VersionID: versionID, SiteID: req.SiteID,
-				Action: m.Action, ItemID: m.ItemID, SupplyRef: m.SupplyRef, DemandRef: m.DemandRef,
+				Action: m.Action, ItemID: m.ItemID, WarehouseID: optional(m.WarehouseID), SupplyRef: m.SupplyRef, DemandRef: m.DemandRef,
 				SuggestedDate: dayDate(req.AsOf, m.SuggestedDate), DelayDays: m.DelayDays, Qty: m.Qty.String(),
 			}); err != nil {
 				return err
@@ -442,7 +451,7 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 			}
 			evt, err := events.New(planevents.PlannedOrderFirmed, eventSource, orderIDs[i], p.TenantID, planevents.PlannedOrderFirmedData{
 				PlannedOrderID: orderIDs[i], PlanVersionID: versionID, BatchID: autoFirm.batch.ID, OrderType: g.OrderType,
-				TargetType: g.TargetType, TargetID: g.TargetID, ItemID: o.ItemID, SiteID: req.SiteID, VendorID: optional(o.VendorID), Qty: o.Qty.String(),
+				TargetType: g.TargetType, TargetID: g.TargetID, ItemID: o.ItemID, WarehouseID: optional(o.WarehouseID), SiteID: req.SiteID, VendorID: optional(o.VendorID), Qty: o.Qty.String(),
 				OrderDate: dayDate(req.AsOf, o.OrderDate), DeliveryDate: dayDate(req.AsOf, o.DeliveryDate),
 				QuotaArrangementID: quotaRefs[orderIDs[i]].arrangement(), QuotaSourceID: quotaRefs[orderIDs[i]].source(),
 			})
@@ -628,14 +637,14 @@ func (s *Postgres) ListVersions(ctx context.Context, planCode string, limit int)
 const orderSelect = `select o.id::text, v.id::text, o.number, o.item_id::text, o.order_type, o.qty::text,
 	to_char(o.order_date, 'YYYY-MM-DD'), to_char(o.delivery_date, 'YYYY-MM-DD'), to_char(o.futures_date, 'YYYY-MM-DD'),
 	o.delay_days, o.lot_rule, o.status, o.version, o.vendor_id::text, o.quota_arrangement_id::text, o.quota_source_id::text, o.firmed_target_type, o.firmed_target_id::text,
-	o.planning_priority::text, o.buffer_zone
+	o.planning_priority::text, o.buffer_zone, o.warehouse_id::text
 	from planned_order o join plan_version v on v.tenant_id = o.tenant_id and v.id = o.plan_version_id
 	join plan p on p.tenant_id = v.tenant_id and p.id = v.plan_id`
 
 func scanOrder(row pgx.Row) (PlannedOrder, error) {
 	var o PlannedOrder
 	err := row.Scan(&o.ID, &o.VersionID, &o.Number, &o.ItemID, &o.OrderType, &o.Qty, &o.OrderDate, &o.DeliveryDate, &o.FuturesDate, &o.DelayDays, &o.LotRule, &o.Status, &o.Version, &o.VendorID, &o.QuotaArrangementID, &o.QuotaSourceID,
-		&o.FirmedTargetType, &o.FirmedTargetID, &o.PlanningPriority, &o.BufferZone)
+		&o.FirmedTargetType, &o.FirmedTargetID, &o.PlanningPriority, &o.BufferZone, &o.WarehouseID)
 	return o, err
 }
 
@@ -646,8 +655,8 @@ func (s *Postgres) ListPlannedOrders(ctx context.Context, planCode string, f Ord
 	out := []PlannedOrder{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, orderSelect+` where o.tenant_id = $1 and p.code = $2 and (case when $6::int = 0 then v.status = 'current' else v.number = $6 end)
-			and (case when $3::text = '' then o.status <> 'deleted' else o.status = $3 end) and ($4::text = '' or o.item_id::text = $4)
-			order by `+priorityOrder("$7")+`, o.number limit $5`, p.TenantID, planCode, f.Status, f.ItemID, limit, f.Version, f.Sort)
+			and (case when $3::text = '' then o.status <> 'deleted' else o.status = $3 end) and ($4::text = '' or o.item_id::text = $4) and ($8::text = '' or o.warehouse_id = nullif($8, '')::uuid)
+			order by `+priorityOrder("$7")+`, o.number limit $5`, p.TenantID, planCode, f.Status, f.ItemID, limit, f.Version, f.Sort, f.WarehouseID)
 		if err != nil {
 			return err
 		}
@@ -714,7 +723,7 @@ func (s *Postgres) ListMessages(ctx context.Context, planCode, action, sort stri
 	p, _ := tenant.FromContext(ctx)
 	out := []Message{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select m.action, m.item_id::text, m.supply_ref, m.demand_ref, to_char(m.suggested_date, 'YYYY-MM-DD'), m.delay_days, m.qty::text,
+		rows, err := tx.Query(ctx, `select m.action, m.item_id::text, m.warehouse_id::text, m.supply_ref, m.demand_ref, to_char(m.suggested_date, 'YYYY-MM-DD'), m.delay_days, m.qty::text,
 				o.planning_priority::text, o.buffer_zone
 			from action_message m join plan_version v on v.tenant_id = m.tenant_id and v.id = m.plan_version_id
 			join plan p on p.tenant_id = v.tenant_id and p.id = v.plan_id
@@ -727,7 +736,7 @@ func (s *Postgres) ListMessages(ctx context.Context, planCode, action, sort stri
 		defer rows.Close()
 		for rows.Next() {
 			var m Message
-			if err := rows.Scan(&m.Action, &m.ItemID, &m.SupplyRef, &m.DemandRef, &m.SuggestedDate, &m.DelayDays, &m.Qty, &m.PlanningPriority, &m.BufferZone); err != nil {
+			if err := rows.Scan(&m.Action, &m.ItemID, &m.WarehouseID, &m.SupplyRef, &m.DemandRef, &m.SuggestedDate, &m.DelayDays, &m.Qty, &m.PlanningPriority, &m.BufferZone); err != nil {
 				return err
 			}
 			m.Code = domain.CatalogCode(m.Action)

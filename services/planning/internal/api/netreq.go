@@ -22,6 +22,10 @@ func (a *API) listNetRequirements(w http.ResponseWriter, r *http.Request) {
 	if !ids.Valid(itemID) {
 		fields["itemId"] = "is required and must be a UUID"
 	}
+	warehouseID := q.Get("warehouseId")
+	if warehouseID != "" && !ids.Valid(warehouseID) {
+		fields["warehouseId"] = "must be a UUID"
+	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
@@ -30,7 +34,7 @@ func (a *API) listNetRequirements(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := a.store.ListNetRequirements(r.Context(), code, itemID, limit)
+	rows, err := a.store.ListNetRequirements(r.Context(), code, itemID, warehouseID, limit)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return

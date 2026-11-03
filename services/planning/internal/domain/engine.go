@@ -149,6 +149,9 @@ type PlannedOrder struct {
 	// net-flow position over its top of green, and the zone it is in.
 	PlanningPriority *decimal.Decimal
 	BufferZone       string
+	// WarehouseID is set by SplitWarehouses on an order of a warehouse planning
+	// scope (FR-22.18); it is empty for an order of the site scope.
+	WarehouseID string
 }
 
 // Peg links one unit of supply to the demand it covers (ReqTransCov).
@@ -156,6 +159,8 @@ type Peg struct {
 	ItemID, SupplyRef, DemandRef, DemandRefType string
 	DemandDate                                  int
 	Qty                                         decimal.Decimal
+	// WarehouseID is the warehouse scope of ItemID, empty for the site scope.
+	WarehouseID string
 }
 
 // Message is an action or delay message for the planner.
@@ -163,6 +168,8 @@ type Message struct {
 	Action, ItemID, SupplyRef, DemandRef string
 	SuggestedDate, DelayDays             int
 	Qty                                  decimal.Decimal
+	// WarehouseID is the warehouse scope of ItemID, empty for the site scope.
+	WarehouseID string
 }
 
 // Result is the output of one run.
@@ -738,7 +745,11 @@ func (L *ledger) order(t int, need decimal.Decimal) error {
 		default:
 			L.pending = append(L.pending, supply)
 		}
-		if it.OrderType == OrderProduction {
+		// A production order issues its components at the order date. So does a
+		// planned transfer: a warehouse scope's transfer lists the site item as its
+		// only component, which is the demand at the from-warehouse at the delivery
+		// date less the transfer lead time (BR-22.7, FR-22.18).
+		if it.OrderType == OrderProduction || it.OrderType == OrderTransfer {
 			for _, c := range it.Components {
 				child := L.rs.index[c.ItemID]
 				child.Demand = append(child.Demand, Requirement{Ref: number + "/" + c.ItemID, RefType: RefBOM, Date: orderDate, Qty: c.Qty.Mul(q), Priority: PriorityDependent})

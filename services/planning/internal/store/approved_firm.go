@@ -20,6 +20,7 @@ const approvedFirmKeyPrefix = "plan-run-approved:"
 
 type approvedOrder struct {
 	id, itemID, siteID, orderType, vendorID, orderDate, deliveryDate string
+	warehouseID                                                      string
 	deliveryDay                                                      int
 	qty                                                              decimal.Decimal
 }
@@ -35,7 +36,7 @@ type approvedOrder struct {
 func firmApprovedOrders(ctx context.Context, tx pgx.Tx, tenantID, planID, planEntity, newVersionID, runHash string) (int, error) {
 	rows, err := tx.Query(ctx, `select o.id::text, o.plan_version_id::text, o.item_id::text, v.site_id::text, o.order_type,
 		coalesce(o.vendor_id::text, ''), o.qty::text, to_char(o.order_date, 'YYYY-MM-DD'), to_char(o.delivery_date, 'YYYY-MM-DD'),
-		(o.delivery_date - date '1970-01-01')
+		(o.delivery_date - date '1970-01-01'), coalesce(o.warehouse_id::text, '')
 		from planned_order o join plan_version v on v.tenant_id = o.tenant_id and v.id = o.plan_version_id
 		where o.tenant_id = $1 and v.plan_id = $2 and v.status = 'current' and v.kind <> 'simulation' and o.status = 'approved'
 		order by o.id for update of o`, tenantID, planID)
@@ -47,7 +48,7 @@ func firmApprovedOrders(ctx context.Context, tx pgx.Tx, tenantID, planID, planEn
 	for rows.Next() {
 		var o approvedOrder
 		var versionID, qty string
-		if err := rows.Scan(&o.id, &versionID, &o.itemID, &o.siteID, &o.orderType, &o.vendorID, &qty, &o.orderDate, &o.deliveryDate, &o.deliveryDay); err != nil {
+		if err := rows.Scan(&o.id, &versionID, &o.itemID, &o.siteID, &o.orderType, &o.vendorID, &qty, &o.orderDate, &o.deliveryDate, &o.deliveryDay, &o.warehouseID); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -106,7 +107,7 @@ func firmApprovedOrders(ctx context.Context, tx pgx.Tx, tenantID, planID, planEn
 			o := byID[id]
 			evt, err := events.New(planevents.PlannedOrderFirmed, eventSource, id, tenantID, planevents.PlannedOrderFirmedData{
 				PlannedOrderID: id, PlanVersionID: versionIDs[id], BatchID: batch.ID, OrderType: g.OrderType,
-				TargetType: g.TargetType, TargetID: g.TargetID, ItemID: o.itemID, SiteID: o.siteID,
+				TargetType: g.TargetType, TargetID: g.TargetID, ItemID: o.itemID, WarehouseID: optional(o.warehouseID), SiteID: o.siteID,
 				VendorID: optional(o.vendorID), Qty: o.qty.String(), OrderDate: o.orderDate, DeliveryDate: o.deliveryDate,
 				QuotaArrangementID: quotaRefs[id].arrangement(), QuotaSourceID: quotaRefs[id].source(),
 			})

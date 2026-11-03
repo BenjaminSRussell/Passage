@@ -16,8 +16,10 @@ import (
 
 // DiffOrder is one planned order in a version diff.
 type DiffOrder struct {
-	Number       string  `json:"number"`
-	ItemID       string  `json:"itemId"`
+	Number string `json:"number"`
+	ItemID string `json:"itemId"`
+	// WarehouseID is the warehouse planning scope of the order (FR-22.18); absent for the site scope.
+	WarehouseID  *string `json:"warehouseId,omitempty"`
 	OrderType    string  `json:"orderType"`
 	Qty          string  `json:"qty"`
 	OrderDate    string  `json:"orderDate"`
@@ -59,6 +61,10 @@ func toDiffOrder(o domain.VersionOrder) DiffOrder {
 		v := o.VendorID
 		d.VendorID = &v
 	}
+	if o.WarehouseID != "" {
+		w := o.WarehouseID
+		d.WarehouseID = &w
+	}
 	return d
 }
 
@@ -75,7 +81,7 @@ func (s *Postgres) DiffVersions(ctx context.Context, planCode string, from, to, 
 				return v, nil, err
 			}
 			rows, err := tx.Query(ctx, `select o.number, o.item_id::text, o.order_type, o.qty::text,
-				to_char(o.order_date, 'YYYY-MM-DD'), to_char(o.delivery_date, 'YYYY-MM-DD'), coalesce(o.vendor_id::text, '')
+				to_char(o.order_date, 'YYYY-MM-DD'), to_char(o.delivery_date, 'YYYY-MM-DD'), coalesce(o.vendor_id::text, ''), coalesce(o.warehouse_id::text, '')
 				from planned_order o where o.tenant_id = $1 and o.plan_version_id = $2 and o.status <> 'deleted'`, p.TenantID, v.ID)
 			if err != nil {
 				return v, nil, err
@@ -85,7 +91,7 @@ func (s *Postgres) DiffVersions(ctx context.Context, planCode string, from, to, 
 			for rows.Next() {
 				var o domain.VersionOrder
 				var qty string
-				if err := rows.Scan(&o.Number, &o.ItemID, &o.OrderType, &qty, &o.OrderDate, &o.DeliveryDate, &o.VendorID); err != nil {
+				if err := rows.Scan(&o.Number, &o.ItemID, &o.OrderType, &qty, &o.OrderDate, &o.DeliveryDate, &o.VendorID, &o.WarehouseID); err != nil {
 					return v, nil, err
 				}
 				if o.Qty, err = decimal.NewFromString(qty); err != nil {

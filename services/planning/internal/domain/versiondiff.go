@@ -8,10 +8,12 @@ import (
 
 // VersionOrder is a planned order as the version diff sees it. Dates are
 // ISO calendar days (YYYY-MM-DD) so they sort as text. VendorID is empty when
-// the order has no vendor.
+// the order has no vendor. WarehouseID is the warehouse planning scope of
+// the order (FR-22.18), empty for the site scope.
 type VersionOrder struct {
 	Number       string
 	ItemID       string
+	WarehouseID  string
 	OrderType    string
 	Qty          decimal.Decimal
 	OrderDate    string
@@ -38,7 +40,7 @@ type VersionDiff struct {
 	QtyDelta map[string]decimal.Decimal
 }
 
-type diffKey struct{ item, orderType, delivery string }
+type diffKey struct{ item, warehouse, orderType, delivery string }
 
 // cmpOrder orders planned orders by quantity, order date, vendor and number.
 func cmpOrder(a, b VersionOrder) int {
@@ -61,8 +63,8 @@ func cmpOrder(a, b VersionOrder) int {
 }
 
 // DiffVersions compares the planned orders of two versions. Order numbers
-// are per version and carry no identity, so orders match on item, order type
-// and delivery day. Within one key, orders equal in quantity, order date and
+// are per version and carry no identity, so orders match on item, planning
+// scope, order type and delivery day. Within one key, orders equal in quantity, order date and
 // vendor pair first and are unchanged; the rest pair up in quantity order and
 // are changed, and the leftovers are added or removed. The result does not
 // depend on the order of the inputs.
@@ -70,7 +72,7 @@ func DiffVersions(from, to []VersionOrder) VersionDiff {
 	group := func(os []VersionOrder) map[diffKey][]VersionOrder {
 		m := map[diffKey][]VersionOrder{}
 		for _, o := range os {
-			k := diffKey{o.ItemID, o.OrderType, o.DeliveryDate}
+			k := diffKey{o.ItemID, o.WarehouseID, o.OrderType, o.DeliveryDate}
 			m[k] = append(m[k], o)
 		}
 		for _, l := range m {
@@ -99,6 +101,9 @@ func DiffVersions(from, to []VersionOrder) VersionDiff {
 		x, y := ordered[a], ordered[b]
 		if x.item != y.item {
 			return x.item < y.item
+		}
+		if x.warehouse != y.warehouse {
+			return x.warehouse < y.warehouse
 		}
 		if x.orderType != y.orderType {
 			return x.orderType < y.orderType

@@ -89,18 +89,20 @@ type PlanStartedData struct {
 // shortage), DemandRef the demand (sales line, forecast, bom line) it affects.
 // Qty is a decimal string in the inventory unit.
 type MessageRaisedData struct {
-	MessageID     string `json:"message_id"`
-	PlanID        string `json:"plan_id"`
-	PlanCode      string `json:"plan_code"`
-	VersionID     string `json:"version_id"`
-	SiteID        string `json:"site_id"`
-	Action        string `json:"action"`
-	ItemID        string `json:"item_id"`
-	SupplyRef     string `json:"supply_ref"`
-	DemandRef     string `json:"demand_ref"`
-	SuggestedDate string `json:"suggested_date"`
-	DelayDays     int    `json:"delay_days"`
-	Qty           string `json:"qty"`
+	MessageID string `json:"message_id"`
+	PlanID    string `json:"plan_id"`
+	PlanCode  string `json:"plan_code"`
+	VersionID string `json:"version_id"`
+	SiteID    string `json:"site_id"`
+	Action    string `json:"action"`
+	ItemID    string `json:"item_id"`
+	// WarehouseID is the warehouse planning scope the message is about (FR-22.18); null for the site scope.
+	WarehouseID   *string `json:"warehouse_id"`
+	SupplyRef     string  `json:"supply_ref"`
+	DemandRef     string  `json:"demand_ref"`
+	SuggestedDate string  `json:"suggested_date"`
+	DelayDays     int     `json:"delay_days"`
+	Qty           string  `json:"qty"`
 }
 
 // PlannedOrderFirmedData is the data member of plannedorder.firmed.v1. The
@@ -108,18 +110,22 @@ type MessageRaisedData struct {
 // transfer orders) creates the target order with target_id; planned orders of
 // one group share it and become the lines of one purchase order.
 type PlannedOrderFirmedData struct {
-	PlannedOrderID string  `json:"planned_order_id"`
-	PlanVersionID  string  `json:"plan_version_id"`
-	BatchID        string  `json:"batch_id"`
-	OrderType      string  `json:"order_type"`
-	TargetType     string  `json:"target_type"`
-	TargetID       string  `json:"target_id"`
-	ItemID         string  `json:"item_id"`
-	SiteID         string  `json:"site_id"`
-	VendorID       *string `json:"vendor_id"`
-	Qty            string  `json:"qty"`
-	OrderDate      string  `json:"order_date"`
-	DeliveryDate   string  `json:"delivery_date"`
+	PlannedOrderID string `json:"planned_order_id"`
+	PlanVersionID  string `json:"plan_version_id"`
+	BatchID        string `json:"batch_id"`
+	OrderType      string `json:"order_type"`
+	TargetType     string `json:"target_type"`
+	TargetID       string `json:"target_id"`
+	ItemID         string `json:"item_id"`
+	// WarehouseID is the warehouse of a warehouse planning scope (FR-22.18): the
+	// to-warehouse of a planned transfer, whose from-warehouse is the site (BR-22.7);
+	// null for an order of the site scope.
+	WarehouseID  *string `json:"warehouse_id"`
+	SiteID       string  `json:"site_id"`
+	VendorID     *string `json:"vendor_id"`
+	Qty          string  `json:"qty"`
+	OrderDate    string  `json:"order_date"`
+	DeliveryDate string  `json:"delivery_date"`
 	// QuotaArrangementID and QuotaSourceID are set when a quota arrangement
 	// allocated the order (FR-22.17); the owning context stores them on the
 	// target order so allocated quantity can be traced.

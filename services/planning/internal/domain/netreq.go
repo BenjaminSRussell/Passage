@@ -12,7 +12,9 @@ import (
 // net requirement. Day is a plan day index. Only days with movement are
 // listed; PAB carries over the quiet days between them.
 type NetRow struct {
-	ItemID            string
+	ItemID string
+	// WarehouseID is the warehouse scope of ItemID, empty for the site scope.
+	WarehouseID       string
 	Day               int
 	Gross             decimal.Decimal
 	ScheduledReceipts decimal.Decimal

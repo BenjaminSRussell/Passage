@@ -266,7 +266,7 @@ func (a *API) runScenario(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result = domain.ApplyDefaultVendors(result, defaultVendors(req.Items))
-	result = domain.AddBufferResults(result, buffers)
+	result = domain.SplitWarehouses(domain.AddBufferResults(result, buffers))
 	v, replayed, err := a.store.RunSimulation(r.Context(), store.SimulationRequest{
 		ScenarioCode: code, LegalEntityID: req.LegalEntityID, SiteID: req.SiteID, AsOf: asOf, ItemsPlanned: planned,
 		DurationMs: a.now().Sub(started).Milliseconds(), InputHash: fmt.Sprintf("%x", sha256.Sum256(body)), IdempotencyKey: key, Result: result,

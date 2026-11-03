@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 
+	"github.com/BenjaminSRussell/passage/services/planning/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/planning/internal/store"
 )
 
@@ -15,6 +16,12 @@ import (
 // win. It returns one message per item that still has no coverage code or
 // order type, keyed like the request validation.
 func withStoredCoverage(items []itemDTO, stored map[string]store.RunCoverage) map[string]string {
+	return withStoredCoverageAt(items, stored, func(i int) string { return fmt.Sprintf("items[%d]", i) }, "site")
+}
+
+// withStoredCoverageAt is withStoredCoverage for any list of scopes: label names item i in
+// the field errors and scope ("site" or "warehouse") the planning scope of the stored coverage.
+func withStoredCoverageAt(items []itemDTO, stored map[string]store.RunCoverage, label func(int) string, scope string) map[string]string {
 	fields := map[string]string{}
 	for i := range items {
 		it := &items[i]
@@ -35,12 +42,12 @@ func withStoredCoverage(items []itemDTO, stored map[string]store.RunCoverage) ma
 				it.LeadTimeDays = &lead
 			}
 		}
-		prefix := fmt.Sprintf("items[%d]", i)
+		prefix := label(i)
 		if it.Coverage.Code == "" {
-			fields[prefix+".coverage.code"] = "is required when the item has no item coverage at the site"
+			fields[prefix+".coverage.code"] = "is required when the item has no " + scope + "-scope item coverage"
 		}
 		if it.OrderType == "" {
-			fields[prefix+".orderType"] = "is required when the item has no item coverage at the site"
+			fields[prefix+".orderType"] = "is required when the item has no " + scope + "-scope item coverage"
 		}
 	}
 	return fields
@@ -92,6 +99,11 @@ func defaultVendors(items []itemDTO) map[string]string {
 	for _, it := range items {
 		if it.VendorID != "" {
 			out[it.ItemID] = it.VendorID
+		}
+		for _, w := range it.Warehouses {
+			if w.VendorID != "" {
+				out[domain.WarehouseKey(it.ItemID, w.WarehouseID)] = w.VendorID
+			}
 		}
 	}
 	return out

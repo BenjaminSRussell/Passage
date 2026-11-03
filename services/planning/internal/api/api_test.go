@@ -80,9 +80,14 @@ type fakeStore struct {
 	quotaQuery  store.QuotaQuery
 	// Stored site-scope coverage by item that runs read (run_coverage_test.go)
 	// and the site of the last read.
-	runCovs      map[string]store.RunCoverage
-	runCovSite   string
-	runCovEntity string
+	runCovs map[string]store.RunCoverage
+	// runWhCovs is the stored warehouse-scope coverage by engine id (warehouse_test.go); lastWarehouse is the net requirements filter.
+	runWhCovs map[string]store.RunCoverage
+	// quotaItems are the item ids every RunQuotas call was sent (the store casts them to uuid).
+	quotaItems    []string
+	lastWarehouse string
+	runCovSite    string
+	runCovEntity  string
 	// Scenarios and simulation runs (scenario_test.go).
 	scenarios   []store.Scenario
 	scenarioKey map[string]string

@@ -115,3 +115,15 @@ func TestDiffVersions_DoesNotDependOnInputOrder(t *testing.T) {
 		t.Fatalf("removed not in item, type, delivery order: %v", got)
 	}
 }
+
+// Orders of one item, type and delivery day in two planning scopes never pair up
+// (FR-22.18): moving the order from the site to a warehouse is a removal and an addition.
+func TestDiffVersions_ScopesDoNotMatch(t *testing.T) {
+	site := vo("1", "a", "purchase", "10", "2026-01-01", "2026-01-08")
+	wh := vo("1", "a", "purchase", "10", "2026-01-01", "2026-01-08")
+	wh.WarehouseID = "w"
+	d := DiffVersions([]VersionOrder{site}, []VersionOrder{wh})
+	if len(d.Added) != 1 || len(d.Removed) != 1 || len(d.Changed) != 0 || d.Unchanged != 0 {
+		t.Fatalf("diff = %+v", d)
+	}
+}

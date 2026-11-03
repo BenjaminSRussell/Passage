@@ -22,6 +22,7 @@ function LoadAlert({ what, error }: { what: string; error: LoadError | null }) {
 const orderColumns: DataTableColumn<DiffOrder>[] = [
   { key: "number", header: "Number", mono: true },
   { key: "itemId", header: "Item", mono: true, render: (o) => o.itemId.slice(0, 8) },
+  { key: "warehouseId", header: "Scope", mono: true, render: (o) => (o.warehouseId ? `Warehouse ${o.warehouseId.slice(0, 8)}` : "Site") },
   { key: "orderType", header: "Type" },
   { key: "qty", header: "Quantity", align: "end", render: (o) => trimQty(o.qty) },
   { key: "orderDate", header: "Order date" },

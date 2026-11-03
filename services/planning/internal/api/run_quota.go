@@ -22,6 +22,11 @@ func (a *API) applyQuotaToRun(ctx context.Context, planCode string, req runReque
 	var itemIDs []string
 	first, last := res.Orders[0].DeliveryDate, res.Orders[0].DeliveryDate
 	for _, o := range res.Orders {
+		// Quota arrangements apply to the site scope only: a warehouse scope's
+		// engine id (item@warehouse, FR-22.18) is not an item id.
+		if _, wh := domain.SplitWarehouseKey(o.ItemID); wh != "" {
+			continue
+		}
 		if !seen[o.ItemID] {
 			seen[o.ItemID] = true
 			itemIDs = append(itemIDs, o.ItemID)

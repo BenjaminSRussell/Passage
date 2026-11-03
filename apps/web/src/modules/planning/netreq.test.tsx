@@ -128,6 +128,45 @@ describe("Net requirements page", () => {
     expect(link).toHaveAttribute("href", `/planning/net-requirements?plan=MAIN&item=${item}`);
   });
 
+  it("reads one warehouse scope apart from the site (FR-22.18, AC-22.16)", async () => {
+    const wh = "00000000-0000-0000-0000-0000000000c2";
+    const whOrder: PlannedOrder = { ...order, id: "00000000-0000-0000-0000-0000000000a6", number: "PLN-000006", orderType: "transfer", warehouseId: wh };
+    const fetchMock = stubApi(
+      ["/net-requirements", () => json({ items: rows.slice(0, 1).map((r) => ({ ...r, warehouseId: wh })) })],
+      ["/planned-orders", () => json({ items: [whOrder] })],
+    );
+    renderAt(`/planning/net-requirements?plan=MAIN&item=${item}&warehouse=${wh}`);
+    const table = await findTable({ name: "Net requirements" });
+    await waitFor(() => expect(within(table).getByText("2026-11-16")).toBeInTheDocument());
+    expect(fetchMock.mock.calls.some(([url]) => url === `/api/v1/planning/net-requirements?planCode=MAIN&itemId=${item}&warehouseId=${wh}`)).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) => url.includes(`/planned-orders?planCode=MAIN&itemId=${item}&warehouseId=${wh}`))).toBe(true);
+    expect(screen.getByRole("heading", { name: "Planned orders of this item in the warehouse" })).toBeInTheDocument();
+    const orders = await findTable({ name: "Planned orders of the item" });
+    expect(await within(orders).findByText(`Warehouse ${wh}`)).toBeInTheDocument();
+  });
+
+  it("rejects a warehouse that is not a UUID and keeps the site scope without one", async () => {
+    const fetchMock = stubApi(["/net-requirements", () => json({ items: [] })], ["/planned-orders", () => json({ items: [] })]);
+    renderAt(`/planning/net-requirements?plan=MAIN&item=${item}`);
+    await screen.findByRole("heading", { name: "No net requirements" });
+    expect(fetchMock.mock.calls.every(([url]) => !url.includes("warehouseId"))).toBe(true);
+    fireEvent.change(screen.getByLabelText("Warehouse scope (empty: site)"), { target: { value: "WH-2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Show net requirements" }));
+    expect(await screen.findByText("Enter the warehouse id as a UUID, or leave it empty for the site.")).toBeInTheDocument();
+  });
+
+  it("links a warehouse planned order to its own net requirements", async () => {
+    const wh = "00000000-0000-0000-0000-0000000000c2";
+    stubApi(
+      ["/pegging", () => json({ orderId: order.id, number: order.number, qty: "500", tree: { ref: order.number, refType: "planned-order", qty: "500", children: [] } })],
+      ["/planned-orders/", () => json({ ...order, orderType: "transfer", warehouseId: wh })],
+    );
+    renderAt(`/planning/planned-orders/${order.id}?plan=MAIN`);
+    const link = await screen.findByRole("link", { name: "Net requirements of the item" });
+    expect(link).toHaveAttribute("href", `/planning/net-requirements?plan=MAIN&item=${item}&warehouse=${wh}`);
+    expect(await screen.findByText("Transfer from the site")).toBeInTheDocument();
+  });
+
   it("trims decimal zeros without rounding", () => {
     expect(trimQty("400.000000")).toBe("400");
     expect(trimQty("0.000100")).toBe("0.0001");

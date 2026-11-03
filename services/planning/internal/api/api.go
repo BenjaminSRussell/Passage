@@ -236,6 +236,10 @@ type itemDTO struct {
 	Demand       []requirementDTO `json:"demand"`
 	Receipts     []requirementDTO `json:"receipts"`
 	Components   []bomDTO         `json:"components"`
+	// Warehouses are the item's own warehouse planning scopes (FR-22.18, AC-22.16),
+	// each netted apart from the site and replenished by planned transfers from it
+	// or directly, as its coverage says (BR-22.7).
+	Warehouses []warehouseDTO `json:"warehouses,omitempty"`
 }
 
 type coverageDTO struct {
@@ -314,59 +318,72 @@ func (req runRequest) validate() map[string]string {
 	if len(req.Items) == 0 || len(req.Items) > maxItems {
 		fields["items"] = fmt.Sprintf("must hold 1 to %d items", maxItems)
 	}
+	scopes := 0
 	for i, it := range req.Items {
 		prefix := fmt.Sprintf("items[%d]", i)
-		if !ids.Valid(it.ItemID) {
-			fields[prefix+".itemId"] = "must be a UUID"
-		}
-		if it.VendorID != "" && !ids.Valid(it.VendorID) {
-			fields[prefix+".vendorId"] = "must be a UUID"
-		}
-		if len(it.ItemGroup) > maxAttrLen || len(it.Planner) > maxAttrLen {
-			fields[prefix+".itemGroup"] = "itemGroup and planner must be at most 64 characters"
-		}
-		if it.LeadTimeDays != nil && (*it.LeadTimeDays < 0 || *it.LeadTimeDays > 3650) {
-			fields[prefix+".leadTimeDays"] = "must be 0 to 3650"
-		}
-		c := it.Coverage
-		if c.PeriodDays < 0 || c.PositiveDays < 0 || c.NegativeDays < 0 {
-			fields[prefix+".coverage"] = "periodDays, positiveDays and negativeDays must be 0 or more"
-		}
-		// Margins are stepped day by day over the working calendar, so they
-		// are bounded like the item coverage's margins (FR-22.5).
-		for name, days := range map[string]int{"marginDays": c.MarginDays, "issueMarginDays": c.IssueMarginDays, "reorderMarginDays": c.ReorderMarginDays} {
-			if days < 0 || days > maxMarginDays {
-				fields[prefix+".coverage."+name] = "must be 0 to 365"
-			}
-		}
-		for name, days := range map[string]int{"freezeFenceDays": c.FreezeFenceDays, "actionFenceDays": c.ActionFenceDays,
-			"futuresFenceDays": c.FuturesFenceDays, "coverageFenceDays": c.CoverageFenceDays, "firmingFenceDays": c.FirmingFenceDays} {
-			if days < 0 || days > 3650 {
-				fields[prefix+".coverage."+name] = "must be 0 to 3650"
-			}
-		}
-		if c.SafetyStockPolicy != "" && c.SafetyStockPolicy != domain.SafetyToday && c.SafetyStockPolicy != domain.SafetyFirstIssue {
-			fields[prefix+".coverage.safetyStockPolicy"] = "must be today or first-issue"
-		}
-		if c.Strategy != "" && !domain.ValidStrategy(c.Strategy) {
-			fields[prefix+".coverage.strategy"] = "must be mts-net, mts-gross, mto, assemble-to-order-final, plan-without-final-assembly or subassembly"
-		}
-		if c.AutoFirm && c.FirmingFenceDays < 1 {
-			fields[prefix+".coverage.autoFirm"] = "needs a firmingFenceDays of at least 1"
-		}
-		if c.ReorderMin.IsNegative() || c.ReorderMax.IsNegative() || it.OnHand.IsNegative() || it.SafetyStock.IsNegative() ||
-			it.Lot.MinOrderQty.IsNegative() || it.Lot.MultipleQty.IsNegative() || it.Lot.MaxOrderQty.IsNegative() || it.Lot.StandardQty.IsNegative() {
-			fields[prefix+".quantities"] = "on-hand, safety stock, min/max and lot quantities must be 0 or more"
-		}
-		validateRequirements(fields, prefix+".demand", it.Demand)
-		validateRequirements(fields, prefix+".receipts", it.Receipts)
-		for _, b := range it.Components {
-			if !ids.Valid(b.ItemID) || !b.Qty.IsPositive() {
-				fields[prefix+".components"] = "each component needs an itemId UUID and a positive qty"
-			}
-		}
+		validateItem(fields, prefix, it)
+		validateWarehouses(fields, prefix, it)
+		scopes += len(it.Warehouses)
+	}
+	// Every warehouse scope is netted as an item of its own, so the run's
+	// scopes are bounded like its items (FR-22.18).
+	if scopes > maxItems {
+		fields["items.warehouses"] = fmt.Sprintf("the run holds at most %d warehouse scopes", maxItems)
 	}
 	return fields
+}
+
+// validateItem checks one item of the snapshot, or one warehouse scope of it, under prefix.
+func validateItem(fields map[string]string, prefix string, it itemDTO) {
+	if !ids.Valid(it.ItemID) {
+		fields[prefix+".itemId"] = "must be a UUID"
+	}
+	if it.VendorID != "" && !ids.Valid(it.VendorID) {
+		fields[prefix+".vendorId"] = "must be a UUID"
+	}
+	if len(it.ItemGroup) > maxAttrLen || len(it.Planner) > maxAttrLen {
+		fields[prefix+".itemGroup"] = "itemGroup and planner must be at most 64 characters"
+	}
+	if it.LeadTimeDays != nil && (*it.LeadTimeDays < 0 || *it.LeadTimeDays > 3650) {
+		fields[prefix+".leadTimeDays"] = "must be 0 to 3650"
+	}
+	c := it.Coverage
+	if c.PeriodDays < 0 || c.PositiveDays < 0 || c.NegativeDays < 0 {
+		fields[prefix+".coverage"] = "periodDays, positiveDays and negativeDays must be 0 or more"
+	}
+	// Margins are stepped day by day over the working calendar, so they
+	// are bounded like the item coverage's margins (FR-22.5).
+	for name, days := range map[string]int{"marginDays": c.MarginDays, "issueMarginDays": c.IssueMarginDays, "reorderMarginDays": c.ReorderMarginDays} {
+		if days < 0 || days > maxMarginDays {
+			fields[prefix+".coverage."+name] = "must be 0 to 365"
+		}
+	}
+	for name, days := range map[string]int{"freezeFenceDays": c.FreezeFenceDays, "actionFenceDays": c.ActionFenceDays,
+		"futuresFenceDays": c.FuturesFenceDays, "coverageFenceDays": c.CoverageFenceDays, "firmingFenceDays": c.FirmingFenceDays} {
+		if days < 0 || days > 3650 {
+			fields[prefix+".coverage."+name] = "must be 0 to 3650"
+		}
+	}
+	if c.SafetyStockPolicy != "" && c.SafetyStockPolicy != domain.SafetyToday && c.SafetyStockPolicy != domain.SafetyFirstIssue {
+		fields[prefix+".coverage.safetyStockPolicy"] = "must be today or first-issue"
+	}
+	if c.Strategy != "" && !domain.ValidStrategy(c.Strategy) {
+		fields[prefix+".coverage.strategy"] = "must be mts-net, mts-gross, mto, assemble-to-order-final, plan-without-final-assembly or subassembly"
+	}
+	if c.AutoFirm && c.FirmingFenceDays < 1 {
+		fields[prefix+".coverage.autoFirm"] = "needs a firmingFenceDays of at least 1"
+	}
+	if c.ReorderMin.IsNegative() || c.ReorderMax.IsNegative() || it.OnHand.IsNegative() || it.SafetyStock.IsNegative() ||
+		it.Lot.MinOrderQty.IsNegative() || it.Lot.MultipleQty.IsNegative() || it.Lot.MaxOrderQty.IsNegative() || it.Lot.StandardQty.IsNegative() {
+		fields[prefix+".quantities"] = "on-hand, safety stock, min/max and lot quantities must be 0 or more"
+	}
+	validateRequirements(fields, prefix+".demand", it.Demand)
+	validateRequirements(fields, prefix+".receipts", it.Receipts)
+	for _, b := range it.Components {
+		if !ids.Valid(b.ItemID) || !b.Qty.IsPositive() {
+			fields[prefix+".components"] = "each component needs an itemId UUID and a positive qty"
+		}
+	}
 }
 
 func validateRequirements(fields map[string]string, prefix string, reqs []requirementDTO) {
@@ -378,6 +395,16 @@ func validateRequirements(fields map[string]string, prefix string, reqs []requir
 			fields[prefix+".date"] = "must be a date as YYYY-MM-DD"
 		}
 	}
+}
+
+// hasWarehouses reports whether any run item has a warehouse planning scope.
+func hasWarehouses(items []itemDTO) bool {
+	for _, it := range items {
+		if len(it.Warehouses) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // toDomain converts the request snapshot into engine items; day 0 is asOf.
@@ -494,6 +521,25 @@ func (a *API) buildSnapshot(w http.ResponseWriter, r *http.Request, code string,
 			return time.Time{}, nil, nil, false
 		}
 	}
+	if hasWarehouses(req.Items) {
+		whStored, err := a.store.RunWarehouseCoverages(r.Context(), req.SiteID, planEntity, itemIDsOf(req.Items))
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return time.Time{}, nil, nil, false
+		}
+		specs, fields, err := req.warehouseSpecs(whStored, asOf)
+		if err == nil && len(fields) == 0 {
+			items, err = domain.ExpandWarehouses(items, specs)
+		}
+		switch {
+		case len(fields) > 0:
+			validationFailed(w, r, fields)
+			return time.Time{}, nil, nil, false
+		case err != nil:
+			httpx.Fail(w, r, runProblem(err))
+			return time.Time{}, nil, nil, false
+		}
+	}
 	if req.CarryForward {
 		firmed, err := a.store.FirmedSupply(r.Context(), code, req.SiteID, asOf)
 		if err != nil {
@@ -557,7 +603,7 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result = domain.ApplyDefaultVendors(result, defaultVendors(req.Items))
-	result = domain.AddBufferResults(result, buffers)
+	result = domain.SplitWarehouses(domain.AddBufferResults(result, buffers))
 	elapsed := a.now().Sub(started).Milliseconds()
 	v, replayed, err := a.store.RunPlan(r.Context(), store.RunRequest{
 		PlanCode: code, SiteID: req.SiteID, LegalEntityID: req.LegalEntityID, ForecastModel: req.ForecastModel, AsOf: asOf, ItemsPlanned: planned, DurationMs: elapsed,
@@ -671,19 +717,33 @@ func addForecastDemand(items []domain.Item, model string, asOf time.Time, lines 
 
 // addFirmedSupply appends each firmed planned order that is still to be
 // delivered to the receipts of its item as a planned-order receipt on its
-// delivery day. Orders of items outside the snapshot are not planned.
+// delivery day. Orders of items outside the snapshot are not planned. A firmed
+// transfer of a warehouse scope is a receipt of that warehouse and, while its
+// order date has not passed, still an issue from the site on that date
+// (BR-22.7): the site's on-hand includes the stock until it ships, so without
+// the issue it would cover the site's own demand too. A transfer whose order
+// date has passed is taken as shipped.
 func addFirmedSupply(items []domain.Item, asOf time.Time, firmed []store.FirmedSupply) {
 	index := make(map[string]*domain.Item, len(items))
 	for i := range items {
 		index[items[i].ID] = &items[i]
 	}
 	for _, f := range firmed {
-		it := index[f.ItemID]
+		key := f.ItemID
+		if f.WarehouseID != "" {
+			key = domain.WarehouseKey(f.ItemID, f.WarehouseID)
+		}
+		it := index[key]
 		if it == nil {
 			continue
 		}
 		day := int(f.DeliveryDate.Sub(asOf) / (24 * time.Hour))
 		it.Receipts = append(it.Receipts, domain.Requirement{Ref: "FP:" + f.OrderID, RefType: domain.RefPlanned, Date: day, Qty: f.Qty})
+		if site := index[f.ItemID]; f.WarehouseID != "" && f.OrderType == domain.OrderTransfer && site != nil && !f.OrderDate.Before(asOf) {
+			issue := int(f.OrderDate.Sub(asOf) / (24 * time.Hour))
+			site.Demand = append(site.Demand, domain.Requirement{Ref: "FP:" + f.OrderID + "/" + f.ItemID, RefType: domain.RefBOM, Date: issue,
+				Qty: f.Qty, Priority: domain.PriorityDependent})
+		}
 	}
 }
 
@@ -764,8 +824,11 @@ func (a *API) listPlannedOrders(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	code := q.Get("planCode")
-	f := store.OrderFilter{Status: q.Get("status"), ItemID: q.Get("itemId"), Sort: q.Get("sort")}
+	f := store.OrderFilter{Status: q.Get("status"), ItemID: q.Get("itemId"), Sort: q.Get("sort"), WarehouseID: q.Get("warehouseId")}
 	fields := map[string]string{}
+	if f.WarehouseID != "" && !ids.Valid(f.WarehouseID) {
+		fields["warehouseId"] = "must be a UUID"
+	}
 	if f.Sort != "" && f.Sort != store.SortPriority {
 		fields["sort"] = "must be priority"
 	}

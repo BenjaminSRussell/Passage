@@ -126,26 +126,26 @@ func (s *Postgres) RunSimulation(ctx context.Context, req SimulationRequest) (Ve
 				counts.Transfer++
 			}
 			batch.Queue(`insert into planned_order (tenant_id, id, plan_version_id, number, item_id, order_type, qty, order_date, delivery_date, futures_date, delay_days, lot_rule,
-				planning_priority, buffer_zone)
-				values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::date, $9::date, $10::date, $11, $12, $13::numeric, nullif($14, ''))`,
+				planning_priority, buffer_zone, warehouse_id)
+				values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::date, $9::date, $10::date, $11, $12, $13::numeric, nullif($14, ''), nullif($15, '')::uuid)`,
 				p.TenantID, ids.New(), versionID, o.Number, o.ItemID, o.OrderType, o.Qty.String(), dayDate(req.AsOf, o.OrderDate), dayDate(req.AsOf, o.DeliveryDate), futures, o.DelayDays, o.LotRule,
-				priorityText(o.PlanningPriority), o.BufferZone)
+				priorityText(o.PlanningPriority), o.BufferZone, o.WarehouseID)
 		}
 		for _, pg := range r.Pegging {
-			batch.Queue(`insert into pegging (tenant_id, id, plan_version_id, item_id, supply_ref, demand_ref, demand_ref_type, demand_date, qty)
-				values ($1, $2, $3, $4, $5, $6, $7, $8::date, $9::numeric)`,
-				p.TenantID, ids.New(), versionID, pg.ItemID, pg.SupplyRef, pg.DemandRef, pg.DemandRefType, dayDate(req.AsOf, pg.DemandDate), pg.Qty.String())
+			batch.Queue(`insert into pegging (tenant_id, id, plan_version_id, item_id, supply_ref, demand_ref, demand_ref_type, demand_date, qty, warehouse_id)
+				values ($1, $2, $3, $4, $5, $6, $7, $8::date, $9::numeric, nullif($10, '')::uuid)`,
+				p.TenantID, ids.New(), versionID, pg.ItemID, pg.SupplyRef, pg.DemandRef, pg.DemandRefType, dayDate(req.AsOf, pg.DemandDate), pg.Qty.String(), pg.WarehouseID)
 		}
 		for _, m := range r.Messages {
-			batch.Queue(`insert into action_message (tenant_id, id, plan_version_id, item_id, action, supply_ref, demand_ref, suggested_date, delay_days, qty)
-				values ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10::numeric)`,
-				p.TenantID, ids.New(), versionID, m.ItemID, m.Action, m.SupplyRef, m.DemandRef, dayDate(req.AsOf, m.SuggestedDate), m.DelayDays, m.Qty.String())
+			batch.Queue(`insert into action_message (tenant_id, id, plan_version_id, item_id, action, supply_ref, demand_ref, suggested_date, delay_days, qty, warehouse_id)
+				values ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10::numeric, nullif($11, '')::uuid)`,
+				p.TenantID, ids.New(), versionID, m.ItemID, m.Action, m.SupplyRef, m.DemandRef, dayDate(req.AsOf, m.SuggestedDate), m.DelayDays, m.Qty.String(), m.WarehouseID)
 		}
 		for _, n := range r.Net {
-			batch.Queue(`insert into net_requirement (tenant_id, id, plan_version_id, item_id, day, gross_requirements, scheduled_receipts, planned_receipts, pab, net_requirement)
-				values ($1, $2, $3, $4, $5::date, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric)`,
+			batch.Queue(`insert into net_requirement (tenant_id, id, plan_version_id, item_id, day, gross_requirements, scheduled_receipts, planned_receipts, pab, net_requirement, warehouse_id)
+				values ($1, $2, $3, $4, $5::date, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, nullif($11, '')::uuid)`,
 				p.TenantID, ids.New(), versionID, n.ItemID, dayDate(req.AsOf, n.Day), n.Gross.String(), n.ScheduledReceipts.String(),
-				n.PlannedReceipts.String(), n.PAB.String(), n.Net.String())
+				n.PlannedReceipts.String(), n.PAB.String(), n.Net.String(), n.WarehouseID)
 		}
 		if err := tx.SendBatch(ctx, batch).Close(); err != nil {
 			return err
