@@ -202,6 +202,17 @@ describe("Who is clocked in", () => {
     expect(pageViolations(container)).toEqual([]);
   });
 
+  it("marks an open job whose operation production finished (a bundled start it left open)", async () => {
+    handler = (url) =>
+      url.pathname.endsWith("/clocked-in")
+        ? json(200, { items: [clocked({ jobs: [{ jobId: JOB, bundleId: BUNDLE, startedAt: "2026-10-21T07:30:00Z", productionFinishedAt: "2026-10-21T12:00:00Z" }] })] })
+        : undefined;
+    const { container } = renderAt("/shopfloor/clocked-in");
+    const table = await findTable({ name: "Clocked-in workers" });
+    await waitFor(() => expect(table).toHaveTextContent("Production finished 2026-10-21 12:00 UTC"));
+    expect(pageViolations(container)).toEqual([]);
+  });
+
   it("shows the empty board and the load error with a retry", async () => {
     let fail = true;
     handler = () => (fail ? json(503, { code: "COM-0503", detail: "Service unavailable" }) : json(200, { items: [] }));

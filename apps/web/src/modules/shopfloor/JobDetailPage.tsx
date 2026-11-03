@@ -194,8 +194,9 @@ export function JobDetailPage() {
           </Card>
           {job.productionFinishedAt ? (
             <Alert tone="warning" title="Production finished this operation">
-              Production finished it on {formatDateTime(job.productionFinishedAt)}. Starting work on this job is refused (SF-0157) until the planner reopens the
-              operation; a start replayed from an offline kiosk is kept and flagged for supervisor review.
+              Production finished it on {formatDateTime(job.productionFinishedAt)}. Starting work on this job (SF-0157) and reporting on it (SF-0161) are refused until the
+              planner reopens the operation; a start replayed from an offline kiosk is kept and flagged for supervisor review. Work that was still open
+              when production finished it was stopped at the finish.
             </Alert>
           ) : null}
           {job.status === "finished" && !canReopen ? (
@@ -212,7 +213,7 @@ export function JobDetailPage() {
                 reopenings.reload();
               }}
             />
-          ) : (
+          ) : job.productionFinishedAt ? null : (
             <FeedbackForm
               key={job.version}
               job={job}

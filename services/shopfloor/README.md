@@ -29,6 +29,22 @@ flagged `job-finished-conflict` (BR-25.7). It starts only once
 its service principal is seeded (see NOT-IMPLEMENTED.md). Migration `0017` adds the downtime reason code master
 (`downtime-reasons`); coding a downtime then takes an active reason and its category (SF-0158 to SF-0160).
 
+## Slice 18: production-closed jobs
+
+When production finishes an operation, the consumer also closes every worker's open `job-start` on the jobs of that
+operation in the same transaction: a `job-stop` from the start to the finish (zero hours for a start after the
+finish, 24 hours at most and then also `auto-stop-capped`), flagged `production-finished`, with `registration.posted`.
+These are job (labour) hours for the job-card journal; pay is calculated from clock punches and does not change.
+Starts of a bundle stay open, and so does a start dated before the finish but stored after it; both show
+`productionFinishedAt` on the kiosk session's `openJobs` and on `GET clocked-in`, where the supervisor's page marks
+them. A kiosk `job-stop` that arrives later for the same start supersedes the server's (`registration.corrected`, the
+server's stop becomes 0.00 h), so the hours are not counted twice; production's reopen does not reopen the closed start.
+A registration batch takes a shared transaction lock on each job it names before its worker locks, and the finish
+takes the same locks exclusively on the operation's jobs (migration `0018` indexes the lookup) before it reads the open
+starts, so a start or stop sent while the finish is applied is either seen by it or sees it. `POST jobs/{id}:feedback`
+on a job whose operation production finished is SF-0161 until production reopens it; a resend of stored feedback is
+still a duplicate.
+
 ## Slice 15: supervisor reopen of a finished job (FR-25.3)
 
 A finished job takes no feedback (SF-0122) and leaves the dispatch list. `POST jobs/{id}:reopen` (duty
@@ -602,6 +618,7 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0158` | 404 or 422 | The downtime reason does not exist (404 on a read or change; 422 when coding a downtime with an unknown code) |
 | `SF-0159` | 422 | The downtime reason is inactive |
 | `SF-0160` | 422 | The category sent when coding a downtime is not the reason's category |
+| `SF-0161` | 422 | Quantity feedback on a job whose operation production finished; reopen the operation in production |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Warnings on an accepted registration (`items[].warnings`, the request succeeds):

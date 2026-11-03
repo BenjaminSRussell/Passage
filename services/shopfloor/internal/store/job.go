@@ -26,6 +26,9 @@ const (
 	CodeFeedbackOther  = "SF-0124"
 	CodeCheckValue     = "SF-0125"
 	CodeMandatoryCheck = "SF-0005"
+	// CodeJobProductionClosed is SF-0161: quantity feedback on a job whose operation production
+	// finished (w21) and has not reopened.
+	CodeJobProductionClosed = "SF-0161"
 
 	JobReleased = "released"
 	JobStarted  = "started"
@@ -174,7 +177,9 @@ func (s *Postgres) ListJobs(ctx context.Context, f JobFilter) ([]Job, error) {
 // the outbox. A replay of the feedback id on the same job changes nothing; the id on
 // another job is SF-0124. A finish is refused with SF-0005 while a mandatory check has
 // no passing result, unless the posting carries a supervisor override; the refused
-// posting stores nothing, so the same id can be sent again with an override.
+// posting stores nothing, so the same id can be sent again with an override. A job whose
+// operation production finished is SF-0161 until production reopens it; a resend of stored
+// feedback is still a duplicate.
 func (s *Postgres) RecordFeedback(ctx context.Context, jobID string, in FeedbackInput) (FeedbackResult, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out FeedbackResult
@@ -196,6 +201,11 @@ func (s *Postgres) RecordFeedback(ctx context.Context, jobID string, in Feedback
 		}
 		if job.Status == JobFinished {
 			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeJobFinished, fmt.Sprintf("job %s %s is finished; a supervisor must reopen it", job.OrderRef, job.OperationRef))
+		}
+		if job.ProductionFinishedAt != nil {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeJobProductionClosed,
+				fmt.Sprintf("job %s %s: production finished its operation at %s; ask the planner to reopen the operation before reporting on it",
+					job.OrderRef, job.OperationRef, job.ProductionFinishedAt.UTC().Format(time.RFC3339)))
 		}
 
 		posted, results, err := evaluateChecks(job, in.Checks)

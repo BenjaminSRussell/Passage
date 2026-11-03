@@ -149,3 +149,40 @@ func apply(open []OpenStart, incoming OpenStart) []OpenStart {
 	}
 	return out
 }
+
+// FR-25.3: production's finish stops each open start at the finish, a start after the finish at its
+// own start (no hours), a start open for more than 24 hours at 24 hours (capped); a bundled start
+// is left open.
+func TestPlanProductionStop(t *testing.T) {
+	finish := shift.Add(4 * time.Hour)
+	open := []OpenStart{
+		startAt("a", "J1", "", 0),
+		startAt("late", "J1", "", 5*60),
+		startAt("b", "J1", "B1", 60),
+		{RegistrationID: "old", JobID: "J1", StartedAt: finish.Add(-30 * time.Hour)},
+	}
+	stops, bundled := PlanProductionStop(open, finish)
+	if len(bundled) != 1 || bundled[0].RegistrationID != "b" {
+		t.Fatalf("bundled = %+v", bundled)
+	}
+	if len(stops) != 3 {
+		t.Fatalf("stops = %+v", stops)
+	}
+	want := map[string]struct {
+		stop   time.Time
+		capped bool
+	}{
+		"a":    {finish, false},
+		"late": {open[1].StartedAt, false},
+		"old":  {open[3].StartedAt.Add(MaxJobHours), true},
+	}
+	for _, u := range stops {
+		w := want[u.Members[0].RegistrationID]
+		if !u.StoppedAt.Equal(w.stop) || u.Capped != w.capped {
+			t.Fatalf("stop of %s = %v capped %v, want %v capped %v", u.Members[0].RegistrationID, u.StoppedAt, u.Capped, w.stop, w.capped)
+		}
+	}
+	if !stops[0].StartedAt().Before(stops[1].StartedAt()) {
+		t.Fatalf("not in start order: %+v", stops)
+	}
+}

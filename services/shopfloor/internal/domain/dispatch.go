@@ -30,6 +30,9 @@ const (
 	// the stop is put at 24 hours after the start (the registration limit) and a
 	// supervisor reviews it.
 	FlagAutoStopCapped = "auto-stop-capped"
+	// FlagProductionFinished marks a job-stop the server wrote because production (w21)
+	// finished the operation while the worker's start was still open (FR-25.3).
+	FlagProductionFinished = "production-finished"
 )
 
 // MaxJobHours is the longest a single registration may run (hours ≤ 24.00).
@@ -171,4 +174,27 @@ func capped(u StopUnit) StopUnit {
 		u.StoppedAt, u.Capped = limit, true
 	}
 	return u
+}
+
+// PlanProductionStop returns the open starts production's finish of an operation closes
+// (FR-25.3): each start on the finished job is stopped at the finish, or at its own start when it
+// began after the finish (an offline replay or a start accepted while the finish was on its way),
+// so work after the finish adds no hours. A start open for more than MaxJobHours is stopped at its
+// start plus MaxJobHours and marked Capped. Starts that belong to a bundle are returned in
+// bundled, untouched: closing one member would change the split of the others (BR-25.1), so they
+// stay open for the worker's stop or a supervisor. Units come back in start order.
+func PlanProductionStop(open []OpenStart, finishedAt time.Time) (stops []StopUnit, bundled []OpenStart) {
+	for _, s := range open {
+		if s.BundleID != "" {
+			bundled = append(bundled, s)
+			continue
+		}
+		at := finishedAt
+		if s.StartedAt.After(at) {
+			at = s.StartedAt
+		}
+		stops = append(stops, capped(StopUnit{Members: []OpenStart{s}, StoppedAt: at}))
+	}
+	sort.SliceStable(stops, func(i, j int) bool { return stops[i].StartedAt().Before(stops[j].StartedAt()) })
+	return stops, bundled
 }

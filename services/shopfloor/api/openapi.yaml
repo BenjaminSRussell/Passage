@@ -1465,7 +1465,8 @@ paths:
         per check is kept. `finished: true` is refused with SF-0005 while a mandatory check
         has no passing result (AC-25.9), unless the posting carries `override.reason`,
         which needs the duty `shopfloor.check.override` and an authenticated user; a
-        refused posting stores nothing. A finished job takes no feedback (SF-0122). The
+        refused posting stores nothing. A finished job takes no feedback (SF-0122), and neither
+        does a job whose operation production (w21) finished and has not reopened (SF-0161). The
         client `feedbackId` is the idempotency key (offline replay): a resend returns 200
         with `duplicate: true` and changes nothing; the same id on another job is SF-0124.
         Each stored posting publishes `dev.passage.shopfloor.job.reported.v1`.
@@ -3368,8 +3369,8 @@ components:
           type: array
           items:
             type: string
-            enum: [job-finished-conflict, auto-stopped, auto-stop-capped, auto-clock-out]
-          description: Review flags (BR-25.7, FR-25.3); `auto-clock-out` marks a clock-out the auto clock-out sweep wrote.
+            enum: [job-finished-conflict, auto-stopped, auto-stop-capped, production-finished, auto-clock-out]
+          description: Review flags (BR-25.7, FR-25.3); `auto-clock-out` marks a clock-out the auto clock-out sweep wrote, `production-finished` a job-stop the server wrote when production finished the job's operation.
     WorkerDay:
       type: object
       required: [workerId, workerName, workDate, hours, flags, status, timeZone, calculatedAt, approvedBy, approvedAt, revision, revisedBy, revisedAt, payLines]
@@ -4134,7 +4135,7 @@ components:
           description: Site parameter "Kiosk idle timeout min" (default 10).
     CurrentJob:
       type: object
-      required: [jobId, bundleId, startedAt]
+      required: [jobId, bundleId, startedAt, productionFinishedAt]
       properties:
         jobId:
           type: string
@@ -4145,6 +4146,10 @@ components:
         startedAt:
           type: string
           format: date-time
+        productionFinishedAt:
+          type: [string, "null"]
+          format: date-time
+          description: When production (w21) finished the job's operation while this start is still open, null otherwise. Production's finish closes open starts itself except the starts of a bundle (and a start stored after it), so a supervisor or the worker stops these.
     JobCheck:
       type: object
       required: [code, name, kind, mandatory]

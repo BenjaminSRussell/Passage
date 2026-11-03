@@ -74,7 +74,10 @@ channels:
       Production's operation status (w21), consumed by the `shopfloor-production` consumer: an
       operation was finished (the finish command, or the last report as finished) or reopened. A
       finished operation stops new online job starts on its jobs (SF-0157) and flags offline ones
-      (`job-finished-conflict`) until it is reopened. The consumer keeps the latest status per order
+      (`job-finished-conflict`) and refuses quantity feedback on them (SF-0161) until it is reopened.
+      A finish newer than the stored status also closes, in the same transaction, every open
+      job-start on its jobs that is not part of a bundle, with a job-stop flagged
+      `production-finished` published as `registration.posted`. The consumer keeps the latest status per order
       and operation, ordered by `orderVersion` and then `occurredAt`, and refuses (dead-letters) an
       event whose CloudEvents `source` is not `production`.
     messages:
@@ -375,7 +378,7 @@ components:
       x-passage-type: dev.passage.production.operation.statuschanged.v1
       contentType: application/cloudevents+json
       summary: Production finished or reopened an operation (consumed)
-      description: Published by production (w21); the shop floor stores the status per order and operation. `to` finished stops new job starts on the operation's jobs; any other status lets them start again.
+      description: Published by production (w21); the shop floor stores the status per order and operation. `to` finished stops new job starts and feedback on the operation's jobs and closes their open job-starts (not those of a bundle); any other status lets them start and take feedback again. A reopen does not reopen the closed starts.
       payload:
         $ref: "#/components/schemas/OperationStatusChangedData"
     EdgeNodeSaved:
@@ -791,13 +794,15 @@ components:
           type: array
           items:
             type: string
-            enum: [job-finished-conflict, auto-stopped, auto-stop-capped, auto-clock-out]
+            enum: [job-finished-conflict, auto-stopped, auto-stop-capped, production-finished, auto-clock-out]
           description: |
             Review flags. `auto-clock-out` on a clock-out the auto clock-out
             sweep wrote (D2h). `job-finished-conflict` on a job-start for a job the
             server had already finished (BR-25.7); `auto-stopped` (and
             `auto-stop-capped` past 24 hours) on a closed job-stop the server
-            wrote when the worker started another job (FR-25.3). Empty otherwise.
+            wrote when the worker started another job (FR-25.3); `production-finished`
+            on a closed job-stop the server wrote when production finished the job's
+            operation while the start was open. Empty otherwise.
     RegistrationCorrectedData:
       type: object
       required: [registrationId, workerId, kind, jobId, oldStartedAt, oldStoppedAt, newStartedAt, newStoppedAt, hours, reason, correctedBy]

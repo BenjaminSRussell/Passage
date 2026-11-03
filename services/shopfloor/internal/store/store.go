@@ -176,6 +176,9 @@ func (s *Postgres) CreateRegistrations(ctx context.Context, items []Registration
 		if err := guardBundles(ctx, tx, p.TenantID, items); err != nil {
 			return err
 		}
+		if err := lockRegistrationJobs(ctx, tx, p.TenantID, items); err != nil {
+			return err
+		}
 		if err := lockJobWorkers(ctx, tx, p.TenantID, items); err != nil {
 			return err
 		}

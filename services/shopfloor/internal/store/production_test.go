@@ -121,3 +121,262 @@ func TestProductionFinish_StopsJobStartsUntilReopened(t *testing.T) {
 		t.Fatalf("start after the reopen = %+v", res)
 	}
 }
+
+// FR-25.3 through Postgres as passage_app: when production finishes an operation, the open
+// job-starts of every worker on its jobs are closed in the consumer's transaction by a job-stop
+// flagged production-finished (hours from the start to the finish, zero for a start after it),
+// with registration.posted; a bundled start, a start on another operation and a start that already
+// has its stop are left alone; a repeat of the event writes nothing; a kiosk stop that arrives
+// later for the same start supersedes the server's, so the hours count once. Feedback on the job
+// is SF-0161 while production's finish stands, a resend of stored feedback is still a duplicate,
+// and production's reopen lets the job take feedback again.
+func TestProductionFinish_ClosesOpenStartsAndRefusesFeedback(t *testing.T) {
+	s, app, admin := setup(t)
+	tenantID := testkit.TenantID(76)
+	ctx := testkit.Ctx(tenantID)
+	orderID := ids.New()
+	mk := func(op string) Job {
+		j, _, err := s.UpsertJob(ctx, Job{ID: ids.New(), OrderRef: orderID, OperationRef: op, ResourceID: ids.New(),
+			PlannedQty: decimal.NewFromInt(10), SequenceStart: day(6, 0)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return j
+	}
+	job, other := mk("20"), mk("30")
+	ana := mustWorker(t, s, ctx, "A-76", nil).ID
+	ben := mustWorker(t, s, ctx, "B-76", nil).ID
+	cy := mustWorker(t, s, ctx, "C-76", nil).ID
+	dee := mustWorker(t, s, ctx, "D-76", nil).ID
+	finishedAt := day(12, 0)
+	bundle := ids.New()
+	register(t, s, ctx, jobStart(ana, job.ID, day(8, 0), nil))
+	late := jobStart(ben, job.ID, finishedAt.Add(30*time.Minute), nil)
+	register(t, s, ctx, late)
+	register(t, s, ctx, jobStart(cy, job.ID, day(9, 0), &bundle))
+	register(t, s, ctx, jobStart(dee, other.ID, day(9, 0), nil))
+	fb := ids.New()
+	if _, err := s.RecordFeedback(ctx, job.ID, FeedbackInput{ID: fb, GoodQty: decimal.NewFromInt(3), RecordedBy: "op"}); err != nil {
+		t.Fatal(err)
+	}
+	apply := func(version int, finished bool, at time.Time) {
+		t.Helper()
+		status := "started"
+		if finished {
+			status = "finished"
+		}
+		if err := dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
+			_, err := s.ApplyOperationStatus(ctx, tx, OperationStatusIn{OrderID: orderID, OperNumber: 20, Status: status, Finished: finished, At: at,
+				OrderVersion: version, EventID: ids.New()})
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stopsOf := func(worker string) []RegistrationView {
+		t.Helper()
+		all, err := s.ListRegistrations(ctx, worker, day(0, 0), day(0, 0).AddDate(0, 0, 1), 50)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []RegistrationView
+		for _, r := range all {
+			if r.Kind == KindJobStop {
+				out = append(out, r)
+			}
+		}
+		return out
+	}
+	before := countEvents(t, admin, tenantID, "dev.passage.shopfloor.registration.posted.v1")
+	apply(5, true, finishedAt)
+	apply(5, true, finishedAt) // the same event again: stored status is not newer, nothing more is written
+
+	a := stopsOf(ana)
+	if len(a) != 1 || a[0].Hours == nil || a[0].Hours.String() != "4" || !slices.Equal(a[0].Flags, []string{domain.FlagProductionFinished}) ||
+		!a[0].StartedAt.Equal(day(8, 0)) || a[0].StoppedAt == nil || !a[0].StoppedAt.Equal(finishedAt) {
+		t.Fatalf("Ana's stop = %+v", a)
+	}
+	if b := stopsOf(ben); len(b) != 1 || b[0].Hours == nil || !b[0].Hours.IsZero() || !b[0].StoppedAt.Equal(late.StartedAt) {
+		t.Fatalf("Ben's start after the finish = %+v", b)
+	}
+	if c := stopsOf(cy); len(c) != 0 {
+		t.Fatalf("a bundled start was closed: %+v", c)
+	}
+	// The bundled start stays open, marked with production's finish for the worker and the supervisor.
+	sess, err := s.BadgeLogin(ctx, "C-76")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sess.OpenJobs) != 1 || sess.OpenJobs[0].ProductionFinishedAt == nil || !sess.OpenJobs[0].ProductionFinishedAt.Equal(finishedAt) {
+		t.Fatalf("Cy's open bundled job = %+v, want productionFinishedAt %v", sess.OpenJobs, finishedAt)
+	}
+	if sess, err := s.BadgeLogin(ctx, "D-76"); err != nil || len(sess.OpenJobs) != 1 || sess.OpenJobs[0].ProductionFinishedAt != nil {
+		t.Fatalf("Dee's open job on another operation = %+v, %v", sess.OpenJobs, err)
+	}
+	if d := stopsOf(dee); len(d) != 0 {
+		t.Fatalf("a start on another operation was closed: %+v", d)
+	}
+	if got := countEvents(t, admin, tenantID, "dev.passage.shopfloor.registration.posted.v1") - before; got != 2 {
+		t.Fatalf("registration.posted after the finish = %d, want 2", got)
+	}
+	register(t, s, ctx, Registration{ID: ids.New(), WorkerID: cy, Kind: "clock-in", StartedAt: day(7, 0)})
+	board, err := s.ClockedIn(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(board) != 1 || board[0].WorkerID != cy || len(board[0].Jobs) != 1 || board[0].Jobs[0].ProductionFinishedAt == nil ||
+		!board[0].Jobs[0].ProductionFinishedAt.Equal(finishedAt) {
+		t.Fatalf("clocked-in board = %+v, want Cy's bundled job marked finished by production", board)
+	}
+
+	// The kiosk's own stop for Ana's start, sent later, wins: the server's stop becomes zero length.
+	end, two := day(10, 0), decimal.NewFromInt(2)
+	own := Registration{ID: ids.New(), WorkerID: ana, Kind: KindJobStop, JobID: &job.ID, StartedAt: day(8, 0), StoppedAt: &end, Hours: &two}
+	register(t, s, ctx, own)
+	hours := decimal.Zero
+	for _, r := range stopsOf(ana) {
+		if r.Hours != nil {
+			hours = hours.Add(*r.Hours)
+		}
+	}
+	if !hours.Equal(decimal.NewFromInt(2)) {
+		t.Fatalf("Ana's hours after her own stop = %s, want 2 (the server's stop superseded)", hours)
+	}
+
+	// Feedback: refused while production's finish stands, a stored resend is a duplicate.
+	if _, err := s.RecordFeedback(ctx, job.ID, FeedbackInput{ID: ids.New(), GoodQty: decimal.NewFromInt(1), RecordedBy: "op"}); problemCode(err) != CodeJobProductionClosed {
+		t.Fatalf("feedback on a production-closed job = %v, want %s", err, CodeJobProductionClosed)
+	}
+	if res, err := s.RecordFeedback(ctx, job.ID, FeedbackInput{ID: fb, GoodQty: decimal.NewFromInt(3), RecordedBy: "op"}); err != nil || !res.Duplicate {
+		t.Fatalf("resend of stored feedback = %+v, %v", res, err)
+	}
+	if res, err := s.RecordFeedback(ctx, other.ID, FeedbackInput{ID: ids.New(), GoodQty: decimal.NewFromInt(1), RecordedBy: "op"}); err != nil || res.Duplicate {
+		t.Fatalf("feedback on another operation = %+v, %v", res, err)
+	}
+	apply(6, false, finishedAt.Add(time.Hour))
+	if res, err := s.RecordFeedback(ctx, job.ID, FeedbackInput{ID: ids.New(), GoodQty: decimal.NewFromInt(1), RecordedBy: "op"}); err != nil || res.Duplicate {
+		t.Fatalf("feedback after the reopen = %+v, %v", res, err)
+	}
+}
+
+// FR-25.3 through Postgres as passage_app, concurrently: production's finish and a kiosk batch on
+// the same job serialize, so the job's hours count once and no start stays open whichever commits
+// first. A finish still uncommitted makes the kiosk's stop wait, and the stop then supersedes the
+// server's (registration.corrected). A kiosk start still in flight makes the finish wait, and the
+// finish then closes it.
+func TestProductionFinish_SerializesWithKioskBatches(t *testing.T) {
+	s, app, _ := setup(t)
+	tenantID := testkit.TenantID(77)
+	ctx := testkit.Ctx(tenantID)
+	begin := func() pgx.Tx {
+		t.Helper()
+		tx, err := app.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(ctx, `select set_config('passage.tenant_id', $1, true)`, tenantID); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = tx.Rollback(ctx) })
+		return tx
+	}
+	blocked := func(done <-chan error) {
+		t.Helper()
+		select {
+		case err := <-done:
+			t.Fatalf("finished without waiting for the other transaction: %v", err)
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+	wait := func(done <-chan error) {
+		t.Helper()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("still waiting after the other transaction committed")
+		}
+	}
+	hoursOf := func(worker string) (decimal.Decimal, int) {
+		t.Helper()
+		all, err := s.ListRegistrations(ctx, worker, day(0, 0), day(0, 0).AddDate(0, 0, 1), 50)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sum, stops := decimal.Zero, 0
+		for _, r := range all {
+			if r.Kind == KindJobStop && r.Hours != nil {
+				sum, stops = sum.Add(*r.Hours), stops+1
+			}
+		}
+		return sum, stops
+	}
+	finish := func(tx pgx.Tx, orderID string, version int) error {
+		_, err := s.ApplyOperationStatus(ctx, tx, OperationStatusIn{OrderID: orderID, OperNumber: 20, Status: "finished", Finished: true,
+			At: day(12, 0), OrderVersion: version, EventID: ids.New()})
+		return err
+	}
+	mkJob := func(orderID string) string {
+		j, _, err := s.UpsertJob(ctx, Job{ID: ids.New(), OrderRef: orderID, OperationRef: "20", ResourceID: ids.New(),
+			PlannedQty: decimal.NewFromInt(10), SequenceStart: day(6, 0)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return j.ID
+	}
+	two, end := decimal.NewFromInt(2), day(10, 0)
+
+	// The finish holds the job: the kiosk's stop waits, then supersedes the server's 4-hour stop.
+	orderA := ids.New()
+	jobA := mkJob(orderA)
+	ana := mustWorker(t, s, ctx, "A-77", nil).ID
+	register(t, s, ctx, jobStart(ana, jobA, day(8, 0), nil))
+	consumer := begin()
+	if err := finish(consumer, orderA, 3); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.CreateRegistrations(ctx, []Registration{{ID: ids.New(), WorkerID: ana, Kind: KindJobStop, JobID: &jobA,
+			StartedAt: day(8, 0), StoppedAt: &end, Hours: &two}})
+		done <- err
+	}()
+	blocked(done)
+	if err := consumer.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wait(done)
+	if sum, stops := hoursOf(ana); !sum.Equal(two) || stops != 2 {
+		t.Fatalf("Ana's job hours = %s over %d stops, want 2 (the kiosk's stop; the server's superseded to 0)", sum, stops)
+	}
+
+	// A kiosk start is in flight when the finish arrives (it read the operation as open and waits on
+	// the job row, held here by another writer): the finish waits for the batch and closes the start.
+	orderB := ids.New()
+	jobB := mkJob(orderB)
+	ben := mustWorker(t, s, ctx, "B-77", nil).ID
+	holder := begin()
+	if _, err := holder.Exec(ctx, `select 1 from shop_job where tenant_id = $1 and id = $2 for update`, tenantID, jobB); err != nil {
+		t.Fatal(err)
+	}
+	kioskDone := make(chan error, 1)
+	go func() {
+		_, err := s.CreateRegistrations(ctx, []Registration{jobStart(ben, jobB, day(8, 0), nil)})
+		kioskDone <- err
+	}()
+	blocked(kioskDone)
+	go func() {
+		done <- dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error { return finish(tx, orderB, 3) })
+	}()
+	blocked(done)
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wait(kioskDone)
+	wait(done)
+	if sum, stops := hoursOf(ben); !sum.Equal(decimal.NewFromInt(4)) || stops != 1 {
+		t.Fatalf("Ben's job hours = %s over %d stops, want 4 from the server's stop at the finish", sum, stops)
+	}
+}

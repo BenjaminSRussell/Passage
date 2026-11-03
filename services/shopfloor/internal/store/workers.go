@@ -130,8 +130,8 @@ type RegistrationView struct {
 	Note             *string          `json:"note"`
 	// ClockOffsetSeconds is the device clock correction applied (BR-25.7).
 	ClockOffsetSeconds *int64 `json:"clockOffsetSeconds"`
-	// Flags are review flags: job-finished-conflict (BR-25.7), auto-stopped and
-	// auto-stop-capped (FR-25.3).
+	// Flags are review flags: job-finished-conflict (BR-25.7), auto-stopped,
+	// auto-stop-capped and production-finished (FR-25.3), auto-clock-out (D2h).
 	Flags []string `json:"flags"`
 }
 

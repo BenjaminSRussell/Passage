@@ -181,11 +181,13 @@ describe("Kiosk job actions", () => {
 
   it("stops an open bundle from the session with one job-stop per job sharing the interval", async () => {
     const open = [
-      { jobId: J1, bundleId: BUNDLE, startedAt: "2026-10-21T08:00:00Z" },
-      { jobId: J2, bundleId: BUNDLE, startedAt: "2026-10-21T08:00:00Z" },
+      { jobId: J1, bundleId: BUNDLE, startedAt: "2026-10-21T08:00:00Z", productionFinishedAt: "2026-10-21T10:00:00Z" },
+      { jobId: J2, bundleId: BUNDLE, startedAt: "2026-10-21T08:00:00Z", productionFinishedAt: null },
     ];
     await signIn(session({ openJobs: open }), [job(J1, "OP-10", { status: "started" })], (items) => json(200, { items: items.map((it) => accepted(String(it.id))) }));
     expect(await screen.findByRole("heading", { name: "Current bundle" })).toBeInTheDocument();
+    // Production finished J1's operation but left the bundled start open: the kiosk says so.
+    expect(screen.getAllByText("Production finished")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Stop bundle" }));
     expect(await screen.findByText("No job is running. Select one below to start it.")).toBeInTheDocument();
     const items = postedItems(0);

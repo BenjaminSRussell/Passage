@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -22,6 +23,9 @@ const (
 
 	autoStopNote   = "Stopped automatically when the worker started another job."
 	autoStopCapped = "Stopped automatically at 24 hours after its start; a supervisor reviews it."
+	// productionStopNote is the note on the job-stop the server writes when production finishes
+	// the job's operation while the worker's start is open.
+	productionStopNote = "Stopped automatically when production finished the operation."
 	// autoStopSupersededBy is correctedBy on the correction that cancels a server
 	// stop once the kiosk's own stop for the same start arrives (BR-25.7 replay).
 	autoStopSupersededBy = "system:offline-replay"
@@ -61,6 +65,41 @@ func lockJobWorkers(ctx context.Context, tx pgx.Tx, tenantID string, items []Reg
 	sort.Strings(workers)
 	for _, w := range workers {
 		if _, err := tx.Exec(ctx, `select 1 from worker where tenant_id = $1 and id = $2 for update`, tenantID, w); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// lockRegistrationJobs takes a shared transaction lock on every job the batch names, in one order
+// and before the worker locks. Production's finish of an operation takes the same locks exclusively
+// on the operation's jobs before it reads their open starts (stopOpenStartsOfFinishedOperation), so
+// a batch and the finish of one of its jobs serialize: a batch committed first is seen by the finish
+// (its stop already closes the start, or its start is closed by the server), and a batch that waited
+// sees the finish (SF-0157 or the conflict flag for a start, the server's stop to supersede for a
+// kiosk stop). Without it a start committed while the finish runs stays open on a finished job.
+// Shared locks do not block other batches; being advisory, the locks never meet the shop_job row
+// locks (a batch's status update, feedback, the schedule's upsert), and both sides take jobs before
+// workers, so they cannot deadlock.
+func lockRegistrationJobs(ctx context.Context, tx pgx.Tx, tenantID string, items []Registration) error {
+	seen := map[string]bool{}
+	var jobs []string
+	for _, in := range items {
+		if in.JobID != nil && !seen[strings.ToLower(*in.JobID)] {
+			seen[strings.ToLower(*in.JobID)] = true
+			jobs = append(jobs, strings.ToLower(*in.JobID))
+		}
+	}
+	return lockJobs(ctx, tx, tenantID, jobs, "pg_advisory_xact_lock_shared")
+}
+
+// lockJobs takes the job transaction locks (see lockRegistrationJobs) in job id order; fn is
+// pg_advisory_xact_lock_shared for a registration batch, pg_advisory_xact_lock for a finish. Job
+// ids are lower-case UUID text, so both sides use the same key and order.
+func lockJobs(ctx context.Context, tx pgx.Tx, tenantID string, jobs []string, fn string) error {
+	sort.Strings(jobs)
+	for _, j := range jobs {
+		if _, err := tx.Exec(ctx, `select `+fn+`(hashtextextended('shopfloor.job:' || $1 || ':' || $2, 0))`, tenantID, j); err != nil {
 			return err
 		}
 	}
@@ -267,10 +306,10 @@ func supersedeAutoStop(ctx context.Context, tx pgx.Tx, tenantID string, in Regis
 	}
 	rows, err := tx.Query(ctx, `select a.id::text, a.started_at, a.stopped_at, a.hours::text from time_registration a
 		where a.tenant_id = $1 and a.worker_id = $2 and a.kind = 'job-stop' and a.job_id = $3 and a.bundle_id is null
-		  and a.started_at = $4 and a.id <> $5 and $6 = any(a.flags)
+		  and a.started_at = $4 and a.id <> $5 and (a.flags && array[$6, $7]::text[])
 		  and not exists (select 1 from registration_correction c where c.tenant_id = a.tenant_id and c.registration_id = a.id)
 		order by a.id for update`,
-		tenantID, in.WorkerID, *in.JobID, *owner, in.ID, domain.FlagAutoStopped)
+		tenantID, in.WorkerID, *in.JobID, *owner, in.ID, domain.FlagAutoStopped, domain.FlagProductionFinished)
 	if err != nil {
 		return err
 	}
@@ -354,9 +393,14 @@ func openStarts(ctx context.Context, tx pgx.Tx, tenantID, workerID string) ([]do
 // own start to the unit's stop, with its hours (its share for a bundle), and
 // enqueues its registration.posted event in the same transaction.
 func insertAutoStop(ctx context.Context, tx pgx.Tx, tenantID, workerID string, m domain.OpenStart, unit domain.StopUnit, hours decimal.Decimal) (AutoStop, error) {
+	return insertServerStop(ctx, tx, tenantID, workerID, m, unit, hours, domain.FlagAutoStopped, autoStopNote)
+}
+
+// insertServerStop writes a server job-stop with its first flag and note; a capped unit adds
+// auto-stop-capped and the capped note.
+func insertServerStop(ctx context.Context, tx pgx.Tx, tenantID, workerID string, m domain.OpenStart, unit domain.StopUnit, hours decimal.Decimal, flag, note string) (AutoStop, error) {
 	stop := AutoStop{RegistrationID: ids.New(), JobID: m.JobID, StartedAt: m.StartedAt, StoppedAt: unit.StoppedAt, Hours: hours,
-		Flags: []string{domain.FlagAutoStopped}}
-	note := autoStopNote
+		Flags: []string{flag}}
 	if unit.Capped {
 		stop.Flags = append(stop.Flags, domain.FlagAutoStopCapped)
 		note = autoStopCapped

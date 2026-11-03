@@ -13,6 +13,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/domain"
 )
 
 // CodeOperationFinished is SF-0157: an online job-start names a job whose operation production
@@ -57,7 +58,83 @@ func (s *Postgres) ApplyOperationStatus(ctx context.Context, tx pgx.Tx, in Opera
 	if err != nil {
 		return false, err
 	}
-	return tag.RowsAffected() > 0, nil
+	if tag.RowsAffected() == 0 {
+		return false, nil
+	}
+	if in.Finished {
+		if err := stopOpenStartsOfFinishedOperation(ctx, tx, p.TenantID, in); err != nil {
+			return true, err
+		}
+	}
+	return true, nil
+}
+
+// stopOpenStartsOfFinishedOperation closes, in the consumer's transaction, the open job-starts of
+// every worker on the jobs of the operation production just finished (FR-25.3): a closed job-stop
+// from the start to the finish (see domain.PlanProductionStop) flagged production-finished, with
+// registration.posted, so the job's labour hours end at the finish and the worker's kiosk does not
+// keep a finished job open. Starts of a bundle stay open; the clocked-in inquiry and the kiosk
+// session show them with the job's productionFinishedAt. A stop the kiosk sends later for the same
+// start supersedes the server's (supersedeAutoStop), so the hours are not counted twice.
+//
+// The operation's jobs are locked exclusively first, then the workers in id order: a registration
+// batch takes the same job locks shared before its workers (lockRegistrationJobs, lockJobWorkers),
+// so a batch on these jobs either committed before this read of the open starts or waits for the
+// finish to commit, and the two lock orders cannot cross.
+func stopOpenStartsOfFinishedOperation(ctx context.Context, tx pgx.Tx, tenantID string, in OperationStatusIn) error {
+	jobs, err := collect(ctx, tx, `select id::text from shop_job where tenant_id = $1 and lower(order_ref) = $2 and operation_ref = $3`,
+		tenantID, strings.ToLower(in.OrderID), strconv.Itoa(in.OperNumber))
+	if err != nil || len(jobs) == 0 {
+		return err
+	}
+	if err := lockJobs(ctx, tx, tenantID, jobs, "pg_advisory_xact_lock"); err != nil {
+		return err
+	}
+	onOperation := make(map[string]bool, len(jobs))
+	for _, j := range jobs {
+		onOperation[j] = true
+	}
+	workers, err := collect(ctx, tx, `select distinct worker_id::text from time_registration
+		where tenant_id = $1 and job_id = any($2::uuid[]) and kind = 'job-start' and stopped_at is null
+		order by 1`, tenantID, jobs)
+	if err != nil {
+		return err
+	}
+	for _, w := range workers {
+		if _, err := tx.Exec(ctx, `select 1 from worker where tenant_id = $1 and id = $2 for update`, tenantID, w); err != nil {
+			return err
+		}
+		open, err := openStarts(ctx, tx, tenantID, w)
+		if err != nil {
+			return err
+		}
+		var onJob []domain.OpenStart
+		for _, o := range open {
+			if onOperation[o.JobID] {
+				onJob = append(onJob, o)
+			}
+		}
+		stops, _ := domain.PlanProductionStop(onJob, in.At)
+		for _, unit := range stops {
+			hours, err := unit.Hours()
+			if err != nil {
+				return err
+			}
+			if _, err := insertServerStop(ctx, tx, tenantID, w, unit.Members[0], unit, hours[0], domain.FlagProductionFinished, productionStopNote); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// collect runs a query of one text column and returns its values in row order.
+func collect(ctx context.Context, tx pgx.Tx, sql string, args ...any) ([]string, error) {
+	rows, err := tx.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 // productionFinishedStart applies production's finish to a new job-start (FR-25.3, BR-25.7). It

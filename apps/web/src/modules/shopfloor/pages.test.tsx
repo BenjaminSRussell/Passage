@@ -429,7 +429,7 @@ describe("Bundle detail", () => {
   });
 
   it("marks the job-stops the server wrote when the worker started another job (FR-25.3)", async () => {
-    const stopped = { ...job("0195f0a0-0000-7000-8000-0000000000d4", JOB1, "0", "24.00", null), flags: ["auto-stopped", "auto-stop-capped"] as Registration["flags"] };
+    const stopped = { ...job("0195f0a0-0000-7000-8000-0000000000d4", JOB1, "0", "24.00", null), flags: ["auto-stopped", "auto-stop-capped", "production-finished"] as Registration["flags"] };
     handler = (url) => {
       if (url.pathname.endsWith("/registrations")) return json(200, { items: [stopped] });
       if (url.pathname.endsWith(`/workers/${ANA}`)) return json(200, workers[0]);
@@ -438,6 +438,7 @@ describe("Bundle detail", () => {
     renderAt(`/shopfloor/bundles/${BUNDLE}`);
     const table = await findTable({ name: "Bundle jobs" });
     expect(table).toHaveTextContent("Auto-stopped");
+    expect(table).toHaveTextContent("Stopped by production");
     expect(table).toHaveTextContent("Capped at 24 h");
   });
 

@@ -145,6 +145,8 @@ describe("job detail", () => {
     const { container } = renderAt(`/shopfloor/jobs/${JOB}`);
     expect(await screen.findByText("Production finished this operation")).toBeInTheDocument();
     expect(screen.getByText(/SF-0157/)).toBeInTheDocument();
+    expect(screen.getByText(/SF-0161/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /report/i })).not.toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     cleanup();
     renderAt("/shopfloor/jobs");

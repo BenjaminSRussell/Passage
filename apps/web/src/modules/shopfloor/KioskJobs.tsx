@@ -209,6 +209,12 @@ export function KioskJobs({ workerId, homeResourceId = null, openJobs, onOpenJob
                       <Badge tone="info">Bundle</Badge>
                     </>
                   ) : null}
+                  {j.productionFinishedAt ? (
+                    <>
+                      {" "}
+                      <Badge tone="danger">Production finished</Badge>
+                    </>
+                  ) : null}
                 </li>
               ))}
             </ul>

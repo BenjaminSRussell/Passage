@@ -34,12 +34,22 @@ type KioskSession struct {
 	OpenJobs []CurrentJob `json:"openJobs"`
 }
 
-// CurrentJob is an open job registration of a clocked-in worker.
+// CurrentJob is an open job registration of a clocked-in worker. ProductionFinishedAt is set when
+// production (w21) finished the job's operation while the start stays open (a bundled start, which
+// production's finish does not close, or a start stored after it): a supervisor or the worker
+// stops it.
 type CurrentJob struct {
-	JobID     string    `json:"jobId"`
-	BundleID  *string   `json:"bundleId"`
-	StartedAt time.Time `json:"startedAt"`
+	JobID                string     `json:"jobId"`
+	BundleID             *string    `json:"bundleId"`
+	StartedAt            time.Time  `json:"startedAt"`
+	ProductionFinishedAt *time.Time `json:"productionFinishedAt"`
 }
+
+// productionFinishSQL is when production finished the operation of job s.job_id, null while it is
+// open, the job is not projected or production reopened it.
+const productionFinishSQL = `(select o.changed_at from shop_job j join operation_production_status o
+		on o.tenant_id = j.tenant_id and o.order_ref = lower(j.order_ref) and o.operation_ref = j.operation_ref
+	where j.tenant_id = s.tenant_id and j.id = s.job_id and o.finished)`
 
 // ClockedWorker is one row of the "Who is clocked in" inquiry (PRD 4.25.14,
 // FR-25.14): a worker whose latest clock punch is a clock-in, with the jobs
@@ -89,6 +99,10 @@ func (s *Postgres) BadgeLogin(ctx context.Context, badge string) (KioskSession, 
 				b := o.BundleID
 				job.BundleID = &b
 			}
+			if err := tx.QueryRow(ctx, `select `+productionFinishSQL+` from time_registration s where s.tenant_id = $1 and s.id = $2`,
+				p.TenantID, o.RegistrationID).Scan(&job.ProductionFinishedAt); err != nil {
+				return err
+			}
 			out.OpenJobs = append(out.OpenJobs, job)
 		}
 		return nil
@@ -107,7 +121,8 @@ func (s *Postgres) ClockedIn(ctx context.Context, limit int) ([]ClockedWorker, e
 			from worker w
 			cross join lateral (`+lastPunch+`) lp
 			cross join lateral (
-				select coalesce(json_agg(json_build_object('jobId', s.job_id, 'bundleId', s.bundle_id, 'startedAt', s.started_at)
+				select coalesce(json_agg(json_build_object('jobId', s.job_id, 'bundleId', s.bundle_id, 'startedAt', s.started_at,
+						'productionFinishedAt', `+productionFinishSQL+`)
 					order by s.started_at, s.job_id), '[]'::json) as jobs
 				from time_registration s
 				where s.tenant_id = w.tenant_id and s.worker_id = w.id and s.kind = 'job-start' and s.stopped_at is null

@@ -26,6 +26,12 @@ const columns: DataTableColumn<ClockedWorker>[] = [
             <span key={job.jobId} className={styles.mono}>
               {job.jobId}
               {job.bundleId ? " (bundle)" : ""}
+              {job.productionFinishedAt ? (
+                <>
+                  {" "}
+                  <Badge tone="danger">Production finished {formatDateTime(job.productionFinishedAt)}</Badge>
+                </>
+              ) : null}
             </span>
           ))}
         </span>
@@ -49,7 +55,7 @@ export function ClockedInPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Who is clocked in"
-        description="Workers whose last punch is a clock-in, longest present first, with the jobs they started since and have not stopped."
+        description="Workers whose last punch is a clock-in, longest present first, with the jobs they started since and have not stopped. A job marked production finished is still open after production closed its operation and needs the worker's stop or a supervisor's review."
         actions={<Button onClick={state.reload} loading={state.loading}>Refresh</Button>}
       />
       {state.data ? (

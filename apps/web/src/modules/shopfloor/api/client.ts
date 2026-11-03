@@ -60,7 +60,7 @@ export interface RegistrationInput {
 }
 
 /** Review flags on a registration (BR-25.7, FR-25.3). */
-export type RegistrationFlag = "job-finished-conflict" | "auto-stopped" | "auto-stop-capped" | "auto-clock-out";
+export type RegistrationFlag = "job-finished-conflict" | "auto-stopped" | "auto-stop-capped" | "production-finished" | "auto-clock-out";
 
 /** A job the server stopped because the worker started another one (FR-25.3, SF-0002). */
 export interface AutoStop {
@@ -719,6 +719,8 @@ export interface CurrentJob {
   jobId: string;
   bundleId: string | null;
   startedAt: string;
+  /** When production finished the job's operation while this start stays open (a bundled start); absent on a start the kiosk just made. */
+  productionFinishedAt?: string | null;
 }
 
 export interface ClockedWorker {
