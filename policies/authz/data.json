@@ -1281,6 +1281,7 @@
       {"resource": "/v1/projects/change-orders/*/approve", "methods": ["POST"]},
       {"resource": "/v1/projects/change-orders/*/reject", "methods": ["POST"]}
     ]},
+    "ProjGlPost": {"permissions": [{"resource": "/v1/projects/gl-postings", "methods": ["POST"]}]},
     "ProjInquire": {"permissions": [
       {"resource": "/v1/projects/", "methods": ["GET"]},
       {"resource": "/v1/projects/*", "methods": ["GET"]},
@@ -1294,6 +1295,7 @@
       {"resource": "/v1/projects/categories", "methods": ["GET"]},
       {"resource": "/v1/projects/change-orders", "methods": ["GET"]},
       {"resource": "/v1/projects/change-orders/*", "methods": ["GET"]},
+      {"resource": "/v1/projects/gl-reconciliation", "methods": ["GET"]},
       {"resource": "/v1/projects/groups", "methods": ["GET"]},
       {"resource": "/v1/projects/invoice-proposals", "methods": ["GET"]},
       {"resource": "/v1/projects/invoice-proposals/*", "methods": ["GET"]},
@@ -2878,6 +2880,9 @@
       "inventory": ["inventory.read"]
     },
     "eam": {
+      "ledger": ["ledger.entry.post", "ledger.balance.read"]
+    },
+    "projects": {
       "ledger": ["ledger.entry.post", "ledger.balance.read"]
     },
     "revrec": {

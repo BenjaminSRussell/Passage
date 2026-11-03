@@ -18,6 +18,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/projects/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/projects/internal/store"
@@ -49,7 +50,9 @@ const (
 
 // API holds the HTTP handlers and their store.
 type API struct {
-	store store.Store
+	store  store.Store
+	gl     store.GL
+	ledger ledgerclient.Ledger
 }
 
 // New builds the handlers over a store.
@@ -90,6 +93,9 @@ func (a *API) Register(r chi.Router) {
 
 		// Transactions, invoice proposals and the billing explanation (FR-41.4, FR-41.6).
 		a.registerBilling(r)
+
+		// General ledger postings and their reconciliation (FR-41.4, FR-41.9).
+		a.registerGL(r)
 	})
 }
 

@@ -166,22 +166,10 @@ func (s *Postgres) UpsertPostingProfile(ctx context.Context, pr domain.PostingPr
 // ListPostingProfiles returns every posting profile of the caller's tenant, ordered by key.
 func (s *Postgres) ListPostingProfiles(ctx context.Context) ([]domain.PostingProfile, error) {
 	p, _ := tenant.FromContext(ctx)
-	out := []domain.PostingProfile{}
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select `+profileColumns+` from posting_profile
-			where tenant_id = $1 order by project_group, category, line_property`, p.TenantID)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			pr, err := scanProfile(rows)
-			if err != nil {
-				return err
-			}
-			out = append(out, pr)
-		}
-		return rows.Err()
+	var out []domain.PostingProfile
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
+		out, err = loadProfiles(ctx, tx, p.TenantID)
+		return err
 	})
 	return out, err
 }

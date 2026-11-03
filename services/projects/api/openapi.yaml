@@ -1559,6 +1559,149 @@ paths:
           $ref: '#/components/responses/Problem'
         '428':
           $ref: '#/components/responses/Problem'
+  /v1/projects/gl-postings:
+    post:
+      operationId: postProjectsToGL
+      summary: Book project costs and estimates in the general ledger (D2b, D4c)
+      description: |
+        Books the cost of every unposted project transaction of the legal entity and currency as one balanced entry (Dr WIP account, Cr cost account of
+        the resolved posting profile), keyed `projects:txn:{transactionId}:1`. With `period` (YYYY-MM) it also books, for each fixed-price project that is
+        not CREATED, the movement of its cost-to-cost position at the month end: revenue earned (Dr accrued revenue, Cr invoiced revenue), the amount billed
+        on approved invoice proposals (Dr on-account, Cr accrued revenue) and the change of the loss provision (Dr cost account, Cr WIP), keyed
+        `projects:wip:{projectId}:{period}`. Amounts and accounts come from stored transactions, forecast, proposals, contract value and posting profiles,
+        never from the request. A booking is stored before the ledger is called and resent unchanged until the ledger confirms it. A booking the ledger
+        refuses is listed under failed with the ledger's problem code (or PROJ-POST-001, PROJ-GL-001, PROJ-GL-002 no forecast model, PROJ-GL-003 earlier
+        period unconfirmed or later period booked). At most 200 transactions and 200 projects per run (`more`). Signs only ledger.entry.post.
+      x-passage-duty: ProjGlPost
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ledgerId, currency]
+              properties:
+                legalEntityId:
+                  type: string
+                  format: uuid
+                ledgerId:
+                  type: string
+                  format: uuid
+                currency:
+                  type: string
+                  pattern: '^[A-Z]{3}$'
+                period:
+                  type: string
+                  pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+                projectId:
+                  type: string
+                  maxLength: 20
+      responses:
+        '200':
+          description: What was booked and what failed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [booked, failed, more]
+                properties:
+                  booked:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        kind:
+                          type: string
+                          enum: [TXN, WIP]
+                        ref:
+                          type: string
+                        entryId:
+                          type: string
+                          format: uuid
+                        lines:
+                          type: integer
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        kind:
+                          type: string
+                          enum: [TXN, WIP]
+                        ref:
+                          type: string
+                        code:
+                          type: string
+                  more:
+                    type: boolean
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/gl-reconciliation:
+    get:
+      operationId: getProjectsGLReconciliation
+      summary: Reconcile the project GL subledger to the ledger's accounts (AC4)
+      description: |
+        Per account the service booked on (up to periodTo, YYYY-MM): the net of its posted bookings, the general ledger's balance of the account and the
+        difference (GL minus subledger). unpostedTransactions counts (and lists the first 100 ids of) the entity's transactions whose cost no ledger
+        entry holds yet. reconciled is true when every difference is zero and there are none.
+      x-passage-duty: ProjInquire
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: ledgerId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: currency, in: query, required: true, schema: { type: string, pattern: '^[A-Z]{3}$' } }
+        - { name: periodTo, in: query, schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' } }
+      responses:
+        '200':
+          description: The reconciliation
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [currency, reconciled, unpostedTransactions, accounts]
+                properties:
+                  currency:
+                    type: string
+                  reconciled:
+                    type: boolean
+                  unpostedTransactions:
+                    type: object
+                    properties:
+                      count:
+                        type: integer
+                      ids:
+                        type: array
+                        items:
+                          type: string
+                          format: uuid
+                  accounts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        account:
+                          type: string
+                        subledger:
+                          type: string
+                        gl:
+                          type: string
+                        difference:
+                          type: string
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '502':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
 components:
   parameters:
     ProposalId:

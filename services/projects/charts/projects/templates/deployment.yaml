@@ -36,6 +36,21 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.database.secretName }}
                   key: {{ .Values.database.secretKey }}
+            - name: PASSAGE_SERVICE_NAME
+              value: projects
+            {{- if .Values.ledgerUrl }}
+            - { name: LEDGER_URL, value: {{ .Values.ledgerUrl | quote }} }
+            {{- end }}
+            {{- if .Values.serviceIdentity.signingKeySecret }}
+            - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
+              value: /var/run/passage/service-identity/signing-key
+            {{- if .Values.serviceIdentity.keyId }}
+            - name: PASSAGE_SERVICE_KEY_ID
+              value: {{ .Values.serviceIdentity.keyId | quote }}
+            {{- end }}
+          volumeMounts:
+            - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+            {{- end }}
           livenessProbe:
             httpGet:
               path: {{ .Values.probes.liveness.path }}
@@ -50,3 +65,9 @@ spec:
             runAsNonRoot: true
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
+      {{- if .Values.serviceIdentity.signingKeySecret }}
+      volumes:
+        - name: service-identity
+          secret:
+            secretName: {{ .Values.serviceIdentity.signingKeySecret }}
+      {{- end }}
