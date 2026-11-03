@@ -16,6 +16,7 @@ import (
 const (
 	rollPath  = "/v1/product-costing/versions/" + someID + "/roll"
 	calculate = "CostingCalculate"
+	rollLE    = "0190f0c2-7a5e-7d3c-9a1b-2c3d4e5f6e01"
 	parentID  = "0190f0c2-7a5e-7d3c-9a1b-2c3d4e5f6c01"
 	childID   = "0190f0c2-7a5e-7d3c-9a1b-2c3d4e5f6c02"
 )
@@ -63,7 +64,7 @@ func rollBody(site, extra string) string {
 }
 
 func TestRollStoredVersion_ReadsStructureFromEngineeringAndRefusesItInTheRequest(t *testing.T) {
-	f := &fakeStore{}
+	f := &fakeStore{versionLE: rollLE}
 	eng := parentBOM()
 	h := rollRouter(f, eng)
 	site := ids.New()
@@ -86,7 +87,7 @@ func TestRollStoredVersion_ReadsStructureFromEngineeringAndRefusesItInTheRequest
 	if f.calls != 0 || len(eng.asked) != 0 {
 		t.Fatal("a refused request reached the store or engineering")
 	}
-	rec := call{http.MethodPost, rollPath, rollBody(site, ""), calculate, " roll-1 ", ""}.do(h)
+	rec := call{http.MethodPost, rollPath, rollBody(site, ""), calculate, " roll-1 ", rollLE}.do(h)
 	if rec.Code != http.StatusCreated || f.roll == nil {
 		t.Fatalf("roll: %d %s", rec.Code, rec.Body.String())
 	}
@@ -107,21 +108,21 @@ func TestRollStoredVersion_ReadsStructureFromEngineeringAndRefusesItInTheRequest
 
 func TestRollStoredVersion_FailsClosedWithoutEngineeringOrAPriceInput(t *testing.T) {
 	site := ids.New()
-	f := &fakeStore{}
+	f := &fakeStore{versionLE: rollLE}
 	if rec := (call{http.MethodPost, rollPath, rollBody(site, ""), calculate, "k", ""}).do(storedRouter(f)); rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("no engineering configured: %d", rec.Code)
 	}
 	eng := parentBOM()
 	eng.err = errors.New("down")
-	if rec := (call{http.MethodPost, rollPath, rollBody(site, ""), calculate, "k", ""}).do(rollRouter(f, eng)); rec.Code != http.StatusBadGateway {
+	if rec := (call{http.MethodPost, rollPath, rollBody(site, ""), calculate, "k", rollLE}).do(rollRouter(f, eng)); rec.Code != http.StatusBadGateway {
 		t.Fatalf("engineering down: %d", rec.Code)
 	}
 	noPrice := `{"siteId":"` + site + `","itemIds":["` + parentID + `"],"operationRates":{"OP10":"10.00"}}`
-	if rec := (call{http.MethodPost, rollPath, noPrice, calculate, "k", ""}).do(rollRouter(f, parentBOM())); rec.Code != http.StatusUnprocessableEntity {
+	if rec := (call{http.MethodPost, rollPath, noPrice, calculate, "k", rollLE}).do(rollRouter(f, parentBOM())); rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("a purchased component without a price: %d", rec.Code)
 	}
 	noRate := `{"siteId":"` + site + `","itemIds":["` + parentID + `"],"prices":{"` + childID + `":"3.00"}}`
-	if rec := (call{http.MethodPost, rollPath, noRate, calculate, "k", ""}).do(rollRouter(f, parentBOM())); rec.Code != http.StatusUnprocessableEntity {
+	if rec := (call{http.MethodPost, rollPath, noRate, calculate, "k", rollLE}).do(rollRouter(f, parentBOM())); rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("an operation without a rate: %d", rec.Code)
 	}
 	if f.roll != nil {
@@ -132,9 +133,33 @@ func TestRollStoredVersion_FailsClosedWithoutEngineeringOrAPriceInput(t *testing
 func TestRollStoredVersion_ACostedOperationWithoutAnIdIsRefused(t *testing.T) {
 	eng := parentBOM()
 	eng.routes[parentID].Operations[0].OperationID = ""
-	f := &fakeStore{}
-	rec := call{http.MethodPost, rollPath, rollBody(ids.New(), ""), calculate, "k", ""}.do(rollRouter(f, eng))
+	f := &fakeStore{versionLE: rollLE}
+	rec := call{http.MethodPost, rollPath, rollBody(ids.New(), ""), calculate, "k", rollLE}.do(rollRouter(f, eng))
 	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), domain.CodeRollInput) || f.roll != nil {
 		t.Fatalf("a costed operation with no operationId: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRollStoredVersion_RefusesAnotherLegalEntityAndAVersionThatIsNotOpenBeforeReadingEngineering(t *testing.T) {
+	site := ids.New()
+	otherLE := ids.New()
+	for name, tc := range map[string]struct {
+		f     *fakeStore
+		scope string
+		code  string
+		want  int
+	}{
+		"version of another legal entity": {&fakeStore{versionLE: rollLE}, otherLE, domain.CodeLegalEntityScope, http.StatusForbidden},
+		"no legal entity in scope":        {&fakeStore{versionLE: rollLE}, "", domain.CodeLegalEntityScope, http.StatusForbidden},
+		"version not open":                {&fakeStore{versionLE: rollLE, versionStatus: domain.VersionActive}, rollLE, domain.CodeVersionNotRollable, http.StatusUnprocessableEntity},
+	} {
+		eng := parentBOM()
+		rec := call{http.MethodPost, rollPath, rollBody(site, ""), calculate, "k", tc.scope}.do(rollRouter(tc.f, eng))
+		if code, _ := problemCode(t, rec); rec.Code != tc.want || code != tc.code {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body.String())
+		}
+		if len(eng.asked) != 0 || tc.f.roll != nil {
+			t.Errorf("%s: reached engineering or stored a roll", name)
+		}
 	}
 }
