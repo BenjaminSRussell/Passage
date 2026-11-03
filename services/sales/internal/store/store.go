@@ -266,6 +266,7 @@ type Store interface {
 	ChangeOrder(ctx context.Context, id string, version int, req ChangeRequest, actor string, now time.Time) (Order, error)
 	CancelOrderAs(ctx context.Context, id string, version int, reason, actor string, approver bool, now time.Time) (Order, error)
 	CancelRemainder(ctx context.Context, id string, version int, reason, actor string, now time.Time) (Order, error)
+	CancelLineRemainder(ctx context.Context, id string, lineNo, version int, reason, actor string, now time.Time) (Order, error)
 	ListOrderVersions(ctx context.Context, id string) ([]OrderVersion, error)
 	GetCreditProfile(ctx context.Context, legalEntityID, customerID string) (CreditProfile, error)
 	ListCreditProfiles(ctx context.Context, legalEntityID string, limit int) ([]CreditProfile, error)
@@ -768,19 +769,38 @@ func checksAtTx(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, point s
 	return params.ChecksAt(point), nil
 }
 
+// undeliveredNetSQL is the value of what a line (alias l) has not delivered:
+// its net less the net of the delivered quantity at the same price and
+// discount. It is read only for lines with delivered_qty < quantity. SQL round
+// is half away from zero where domain.LineNet rounds half to even, so the
+// figure can differ from a Go recomputation by at most 0.0001 on an exact tie.
+// It assumes line_net is quantity x price less the discount; a line priced
+// another way (such as by catch weight) needs its own delivered net here.
+const undeliveredNetSQL = `(l.line_net - round(l.delivered_qty * l.unit_price * (100 - l.disc_pct) / 100, 4))`
+
 // openOrdersTx is the customer's exposure from orders in this service: the net
-// total of the customer's other CONFIRMED and PARTIALLY_SHIPPED ORDER and
-// SUBSCRIPTION orders in the credit profile currency (BR-27.3 open orders).
+// total of the customer's other CONFIRMED ORDER and SUBSCRIPTION orders, and
+// only the undelivered part of a PARTIALLY_SHIPPED one, in the credit profile
+// currency (BR-27.3 open orders; what was delivered is open AR, owned by the
+// receivables wave).
 // Orders in another currency cannot be converted without an FX rate (w12):
 // they are returned per currency so the evaluation and the profile flag them
 // instead of understating the exposure silently. The sum reads the partial
 // index sales_order_open_exposure (migration 0022).
 func openOrdersTx(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, customerID, currency, exceptOrderID string) (decimal.Decimal, []domain.CurrencyAmount, error) {
-	rows, err := tx.Query(ctx, `select currency::text, sum(net_total)::text from sales_order
+	rows, err := tx.Query(ctx, `select currency::text, sum(amount)::text from (
+		select currency, net_total as amount from sales_order
 		where tenant_id = $1 and legal_entity_id = $2 and customer_id = $3
-		  and status in ('CONFIRMED', 'PARTIALLY_SHIPPED') and order_type in ('ORDER', 'SUBSCRIPTION')
+		  and status = 'CONFIRMED' and order_type in ('ORDER', 'SUBSCRIPTION')
 		  and ($4::uuid is null or id <> $4::uuid)
-		group by currency order by currency`,
+		union all
+		select o.currency, `+undeliveredNetSQL+` as amount
+		from sales_order o join sales_order_line l on l.tenant_id = o.tenant_id and l.order_id = o.id
+		where o.tenant_id = $1 and o.legal_entity_id = $2 and o.customer_id = $3
+		  and o.status = 'PARTIALLY_SHIPPED' and o.order_type in ('ORDER', 'SUBSCRIPTION')
+		  and ($4::uuid is null or o.id <> $4::uuid)
+		  and l.line_status <> 'CANCELLED' and l.delivered_qty < l.quantity
+	) open_amounts group by currency order by currency`,
 		tenantID, legalEntityID, customerID, nullIfEmpty(exceptOrderID))
 	if err != nil {
 		return decimal.Zero, nil, err
@@ -1277,10 +1297,17 @@ func listOpenOrdersTx(ctx context.Context, tx pgx.Tx, tenantID string, profiles 
 		at[[2]string{c.LegalEntityID, c.CustomerID}] = i
 		profiles[i].Exposure.OpenOrders, profiles[i].Exposure.OpenOrdersOtherCurrencies = decimal.Zero, nil
 	}
-	rows, err := tx.Query(ctx, `select o.legal_entity_id::text, o.customer_id::text, o.currency::text, sum(o.net_total)::text
+	rows, err := tx.Query(ctx, `select legal_entity_id::text, customer_id::text, currency::text, sum(amount)::text from (
+		select o.legal_entity_id, o.customer_id, o.currency, o.net_total as amount
 		from sales_order o join unnest($2::uuid[], $3::uuid[]) as k(le, customer) on o.legal_entity_id = k.le and o.customer_id = k.customer
-		where o.tenant_id = $1 and o.status in ('CONFIRMED', 'PARTIALLY_SHIPPED') and o.order_type in ('ORDER', 'SUBSCRIPTION')
-		group by o.legal_entity_id, o.customer_id, o.currency order by o.currency`, tenantID, les, customers)
+		where o.tenant_id = $1 and o.status = 'CONFIRMED' and o.order_type in ('ORDER', 'SUBSCRIPTION')
+		union all
+		select o.legal_entity_id, o.customer_id, o.currency, `+undeliveredNetSQL+`
+		from sales_order o join unnest($2::uuid[], $3::uuid[]) as k(le, customer) on o.legal_entity_id = k.le and o.customer_id = k.customer
+		join sales_order_line l on l.tenant_id = o.tenant_id and l.order_id = o.id
+		where o.tenant_id = $1 and o.status = 'PARTIALLY_SHIPPED' and o.order_type in ('ORDER', 'SUBSCRIPTION')
+		  and l.line_status <> 'CANCELLED' and l.delivered_qty < l.quantity
+	) open_amounts group by legal_entity_id, customer_id, currency order by currency`, tenantID, les, customers)
 	if err != nil {
 		return err
 	}

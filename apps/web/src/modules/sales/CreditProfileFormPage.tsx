@@ -246,7 +246,7 @@ function ProfileForm({ initial, etag, existing, updatedAt }: FormProps) {
           {text("openAr", "Open AR", { decimal: true })}
           {text("unapplied", "Unapplied cash", { decimal: true })}
           {text("deliveredNotInvoiced", "Delivered, not invoiced", { decimal: true })}
-          {text("openOrders", "Confirmed open orders", { decimal: true, readOnly: true, hint: "Computed from this customer's confirmed orders in the profile currency; counted by limit type Balance all." })}
+          {text("openOrders", "Confirmed open orders", { decimal: true, readOnly: true, hint: "Computed from this customer's confirmed orders and the undelivered part of partly shipped orders, in the profile currency; counted by limit type Balance all." })}
           {text("overdueAr", "Overdue AR", { decimal: true })}
           {text("oldestItemDays", "Oldest item, days overdue", { decimal: true })}
           {text("dunningLevel", "Dunning level", { decimal: true })}

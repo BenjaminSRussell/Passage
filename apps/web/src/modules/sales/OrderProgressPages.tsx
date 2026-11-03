@@ -368,13 +368,16 @@ export function NewOrderProgressPage() {
 
 /**
  * Closes the undelivered remainder of a partly shipped order (BR-27.5): what
- * shipped stays, the rest of every line is cancelled and the order becomes
- * shipped. Holds are left for their owners to release. Shown only to a user
- * who holds the order write duty.
+ * shipped stays, the rest of every line, or of one chosen line, is cancelled.
+ * After an every-line close the order becomes shipped; after a one-line close
+ * it stays partly shipped while another line has quantity to deliver. Holds
+ * are left for their owners to release. Shown only to a user who holds the
+ * order write duty.
  */
 export function CancelRemainderCard({ order, etag, onDone }: { order: Order; etag: string; onDone: (res: Versioned<Order>) => void }) {
   const duties = usePrincipalDuties();
   const [reason, setReason] = useState("");
+  const [scope, setScope] = useState("");
   const [sure, setSure] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -392,8 +395,9 @@ export function CancelRemainderCard({ order, etag, onDone }: { order: Order; eta
     setError(undefined);
     setBusy(true);
     try {
-      const res = await cancelOrderRemainder(order.id, etag, reason.trim());
+      const res = await cancelOrderRemainder(order.id, etag, reason.trim(), scope ? Number(scope) : undefined);
       setSure(false);
+      setScope("");
       onDone(res);
     } catch (e) {
       setFailure(describeProblem(e));
@@ -406,7 +410,9 @@ export function CancelRemainderCard({ order, etag, onDone }: { order: Order; eta
     <Card title="Cancel the remainder">
       <div className={styles.form}>
         <p className={styles.note}>
-          What was delivered stays on the order. {open.length > 0 ? `Line ${open.map((l) => l.lineNo).join(", ")} still ${open.length === 1 ? "has" : "have"} quantity to deliver; ` : ""}closing the remainder cancels it, lowers the order total and the credit exposure to what was delivered, returns allocation quota and agreement quantity, and ends the order as shipped.
+          What was delivered stays on the order. {open.length > 0 ? `Line ${open.map((l) => l.lineNo).join(", ")} still ${open.length === 1 ? "has" : "have"} quantity to deliver; ` : ""}{scope
+            ? `closing line ${scope} cancels what it has not delivered, lowers the order total and the credit exposure by that amount and returns its allocation quota and agreement quantity; the other lines are not touched and the order stays partly shipped.`
+            : "closing the remainder cancels it, lowers the order total and the credit exposure to what was delivered, returns allocation quota and agreement quantity, and ends the order as shipped."}
           {held ? " Its active holds stay until they are released." : ""}
         </p>
         {failure ? (
@@ -414,13 +420,27 @@ export function CancelRemainderCard({ order, etag, onDone }: { order: Order; eta
             {failure.message} ({failure.code})
           </Alert>
         ) : null}
+        {open.length > 1 ? (
+          <FormField id="remainder-scope" label="Close">
+            {(control) => (
+              <Select {...control} value={scope} onChange={(e) => { setScope(e.target.value); setSure(false); }}>
+                <option value="">Every line with quantity to deliver</option>
+                {open.map((l) => (
+                  <option key={l.lineNo} value={String(l.lineNo)}>
+                    Line {l.lineNo} only
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+        ) : null}
         <FormField id="remainder-reason" label="Reason" optional error={error}>
           {(control) => <Textarea {...control} rows={2} maxLength={REASON_MAX} value={reason} onChange={(e) => setReason(e.target.value)} invalid={Boolean(error)} />}
         </FormField>
         <div className={styles.formActions}>
           <span className={styles.check}>
             <Input id="remainder-sure" type="checkbox" checked={sure} onChange={(e) => setSure(e.target.checked)} />
-            <label htmlFor="remainder-sure">Cancel everything not yet delivered on this order</label>
+            <label htmlFor="remainder-sure">{scope ? `Cancel what is not yet delivered on line ${scope}` : "Cancel everything not yet delivered on this order"}</label>
           </span>
         </div>
         <div className={styles.formActions}>

@@ -308,7 +308,12 @@ export function OrderDetailPage() {
         onDone={(res) => {
           setLatest(res);
           setFailure(null);
-          setOutcome({ tone: "success", text: `The remainder of order ${res.value.orderNumber} is cancelled; it is ${sentence(res.value.status).toLowerCase()} with a total of ${money(res.value.netTotal, res.value.currency)}.` });
+          const total = money(res.value.netTotal, res.value.currency);
+          const text =
+            res.value.status === "PARTIALLY_SHIPPED"
+              ? `The remainder of the line is cancelled; order ${res.value.orderNumber} stays partly shipped with a total of ${total}.`
+              : `The remainder of order ${res.value.orderNumber} is cancelled; it is ${sentence(res.value.status).toLowerCase()} with a total of ${total}.`;
+          setOutcome({ tone: "success", text });
         }}
       />
       <Card title="Holds">

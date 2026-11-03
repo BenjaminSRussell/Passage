@@ -650,9 +650,10 @@ export function cancelOrder(id: string, etag: string, reason: string): Promise<V
   return versioned<Order>(`/orders/${encodeURIComponent(id)}:cancel`, { method: "POST", body: JSON.stringify({ reason }), headers: { "If-Match": etag } });
 }
 
-/** Closes what a partly shipped order has not delivered (BR-27.5); the order becomes shipped. */
-export function cancelOrderRemainder(id: string, etag: string, reason: string): Promise<Versioned<Order>> {
-  return versioned<Order>(`/orders/${encodeURIComponent(id)}:cancel-remainder`, { method: "POST", body: JSON.stringify({ reason }), headers: { "If-Match": etag } });
+/** Closes what a partly shipped order, or one of its lines when lineNo is given, has not delivered (BR-27.5). */
+export function cancelOrderRemainder(id: string, etag: string, reason: string, lineNo?: number): Promise<Versioned<Order>> {
+  const path = lineNo ? `/orders/${encodeURIComponent(id)}/lines/${lineNo}:cancel-remainder` : `/orders/${encodeURIComponent(id)}:cancel-remainder`;
+  return versioned<Order>(path, { method: "POST", body: JSON.stringify({ reason }), headers: { "If-Match": etag } });
 }
 
 /** The order's change history, newest first. */

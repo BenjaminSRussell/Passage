@@ -15,7 +15,7 @@ a stateless evaluation at line commit and recorded acceptance. Wave 27, slices
 
 Out of these slices (see `NOT-IMPLEMENTED.md`): amount-based agreements and
 scheduling releases driven by w28 shipments and EDI, the ATP projection and reservations,
-the per-line `:cancel-remainder`, the committed backorder run,
+the committed backorder run,
 allocation, consignment, OPTIONAL supplementary items prompted in an order-entry
 grid, w8 related products as a proposal source, the hourly scheduler for quotation expiry, the quotation PDF, the intake dedup window beyond the
 order's own key, and the Temporal release workflow.
@@ -104,6 +104,7 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | POST | `/v1/sales/orders/{id}:plan-production` | `sales.order.plan-production` | creates, for each configured line of a CONFIRMED order, the production order built to the line's saved configuration (origin `SalesOrderLine`) through the production service and links it to the line in `order_line_production`; idempotent per line; a line's `configurationId` is checked against the product service on order create |
 | POST | `/v1/sales/orders/{id}:cancel` | `sales.order.confirm` | `If-Match`; optional `reason`; cancels OPEN/RESERVED lines, clears ACTIVE holds; emits `order.cancelled`. For a customer whose changes need approval, a caller without `sales.order.approve` gets 202 and a stored request of kind `CANCEL` instead (`SLS-0043` if one already waits) |
 | POST | `/v1/sales/orders/{id}:cancel-remainder` | `sales.order.write` | `If-Match`; optional `reason`; on a PARTIALLY_SHIPPED order cancels undelivered lines and closes part-delivered lines at the delivered quantity, lowers the net total, returns quota and agreement quantity, leaves holds as they are; the order becomes SHIPPED (INVOICED when all delivered was invoiced); emits `order.remaindercancelled` (`SLS-0025` on any other status) |
+| POST | `/v1/sales/orders/{id}/lines/{lineNo}:cancel-remainder` | `sales.order.write` | `If-Match`; optional `reason`; the same close for one line of a PARTIALLY_SHIPPED order, other lines untouched, the order status follows its lines; emits `order.remaindercancelled` for that line (`SLS-0025` when the order is not partly shipped or the line has nothing left, `SLS-0109` unknown line) |
 | GET | `/v1/sales/orders/{id}/versions` | `sales.order.read` | Change history, newest first, with each version's diff |
 | POST | `/v1/sales/orders/{id}/holds` | `sales.order.hold` | `If-Match`; MANUAL, FRAUD or PRICE_REVIEW with a reason code; emits `orderhold.applied` |
 | GET / POST | `/v1/sales/product-listings` | `sales.order.read` / `sales.listing.maintain` | Listing inquiry (`legalEntityId`, `productId`, `scopeKey`, `limit`); add an ALLOW or DENY entry per customer or group |
@@ -171,7 +172,9 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
   mandatory check, CR-5 overdue share (WARN), CR-6 young customer order cap.
   Any FAIL places a CREDIT hold; every rule is stored with value and threshold.
   Exposure is open AR less unapplied cash (both stored as non-negative amounts,
-  so unapplied cash is a credit). Until the wave 12 spot rate is wired, an order
+  so unapplied cash is a credit); for BALANCE_ALL it adds the computed open
+  orders (CONFIRMED net totals plus the undelivered part of PARTIALLY_SHIPPED
+  orders). Until the wave 12 spot rate is wired, an order
   in another currency than the profile fails CR-1 with a note rather than being
   compared across currencies.
 - **BR-27.4 / FR-27.8** holds: CREDIT and FRAUD block confirmation; a CREDIT

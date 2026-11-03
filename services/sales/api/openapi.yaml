@@ -1179,6 +1179,56 @@ paths:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/orders/{id}/lines/{lineNo}:cancel-remainder:
+    post:
+      summary: >-
+        Close what one line of a partly shipped order has not delivered (BR-27.5). A line with nothing
+        delivered, still OPEN or RESERVED, is CANCELLED; a line delivered in part keeps the delivered
+        quantity and is closed at it. The other lines are not touched. The net total falls by the closed
+        value (so the credit exposure does), quota and agreement quantity held by the closed quantity are
+        returned and the line's open schedule lines are cancelled. The order status follows its lines
+        (SHIPPED or INVOICED once every line is delivered or cancelled). A new version is written and
+        order.remaindercancelled is emitted for that one line. ACTIVE holds stay.
+      operationId: cancelOrderLineRemainder
+      x-passage-duty: sales.order.write
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: lineNo, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: {type: string, maxLength: 500}
+      responses:
+        "200":
+          description: the order at its new version, with the closed line
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Order"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404":
+          description: SLS-0100 the order does not exist; SLS-0109 the order has no such line
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "412":
+          description: SLS-0006 the If-Match version is not the order's current version
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "422":
+          description: SLS-0025 the order is not PARTIALLY_SHIPPED, the line is already delivered in full or cancelled, or the line cannot be closed
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
   /v1/sales/orders/{id}/versions:
     get:
       summary: An order's change history, newest first, with the field-level diff of each version (FR-27.9)
@@ -3094,9 +3144,11 @@ components:
         The customer's open position in the profile currency, supplied with the profile
         until the receivables projection exists (waves 29/30). Amounts are non-negative;
         unapplied cash lowers the balance. openOrders and openOrdersOtherCurrencies are
-        computed by sales, not stored: the net total of the customer's CONFIRMED and
-        PARTIALLY_SHIPPED ORDER and SUBSCRIPTION orders (other than the order being
-        checked), in the profile currency and, for orders in other currencies that
+        computed by sales, not stored: the net total of the customer's CONFIRMED ORDER
+        and SUBSCRIPTION orders plus the undelivered part of the PARTIALLY_SHIPPED ones
+        (each line's net less the net of its delivered quantity; cancelled and fully
+        delivered lines count nothing), other than the order being checked, in the
+        profile currency and, for orders in other currencies that
         cannot be converted without an FX rate, per currency; values sent in a PUT are
         ignored. A BALANCE_ALL check with uncounted orders in other currencies is at
         least a CR-1 WARN naming them.
