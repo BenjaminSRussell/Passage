@@ -1,4 +1,4 @@
-# processmfg web module (PSG-24 slices 1 to 3, 9 and 11 to 15)
+# processmfg web module (PSG-24 slices 1 to 3, 9 and 11 to 16)
 
 Front end for `services/processmfg`. Discovered by the shell through `module.ts`. Pages use the
 `shell/ui` primitives and `pages.module.css` (tokens only), as in `docs/design-system.md`.
@@ -21,6 +21,11 @@ Front end for `services/processmfg`. Discovered by the shell through `module.ts`
 | `/processmfg/potency` | Potency consumption calculator (BR-24.2) | `POST /api/v1/production/potency:consume` | `production.batch-order.read` |
 | `/processmfg/allocation` | Co-product allocation preview (BR-24.3) | `POST /api/v1/production/co-products:allocate` | `production.journal.post` |
 | `/processmfg/derivation` | Batch derivation preview: rule (attribute, aggregation, fixed value) and sender batches; shows the derived value and warns about senders without a value (FR-24.15, PMF-0007) | `POST /api/v1/production/batch-derivation:preview` | `production.batch-attribute.write` |
+| `/processmfg/inheritance-rules` | Inheritance rules by item with an active-only filter (loading, empty, error with retry): attribute, how it is derived, fixed value and status; "Define rule" for a holder of the duty (FR-24.15) | `GET /inheritance-rules` | `production.batch-order.read` |
+| `/processmfg/inheritance-rules/new` | Define a rule: item, attribute, aggregation (copy, lowest, highest, weighted average with decimals, earliest or latest date, fixed value of a chosen kind); client-side checks before the call | `POST /inheritance-rules` | `production.inheritance-rule.write` (enforced on the page and in the service) |
+| `/processmfg/inheritance-rules/:id` | One rule with its version; retire it under the version read, with a reload on PMF-0104 | `GET /inheritance-rules/{id}`, `POST ...:retire` | `production.batch-order.read` (retire: `production.inheritance-rule.write`) |
+| `/processmfg/derive-stored` | Derive a stored batch's attributes from sender batches: receiver id, sender ids with the quantity consumed from each; reads the receiver version, derives under one key and shows the value per rule, the batches without a value (PMF-0007) and the new version (FR-24.15, AC-24.11) | `GET /batches/{id}`, `POST /batches/{id}:derive` | `production.batch-attribute.write` |
+| `/processmfg/derivations` | Derivation monitor: the log newest first with receiver, attribute, value, senders and senders without a value; filters by batch, item and "only with senders lacking a value" (loading, empty, error with retry) | `GET /batch-derivations` | `production.batch-order.read` |
 | `/processmfg/merge` | Batch merge preview: source batches with quantity, cost, disposition, expiry, potency and grade; target quantity, cost, attributes and genealogy parents; PMF-0006 refusals (FR-24.16) | `POST /api/v1/production/batch-merge:preview` | `production.batch.merge` |
 | `/processmfg/batch-requirements` | Customer batch requirement check: requirement rows by level, candidate batches; qualifying and excluded batches with reasons, same-batch pick or 409 PMF-0008 (FR-24.19, BR-24.13) | `POST /api/v1/production/batch-requirements:check` | `production.batch-order.read` |
 | `/processmfg/consolidation` | Bulk consolidation preview: bulk/pack relation and packed orders; bulk orders with the packing orders pegged to each (FR-24.17, BR-24.12) | `POST /api/v1/production/bulk-consolidation:preview` | `production.batch-order.write` |

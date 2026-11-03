@@ -4,6 +4,8 @@ import { AttributeDefinitionsPage, BatchDetailPage, BatchesPage, NewBatchPage } 
 import { BatchOrderDetailPage, BatchOrdersPage, NewBatchOrderPage } from "./BatchOrderPages";
 import { BatchAttributesPage, PickingPage, ReworkPage } from "./BatchQualityPages";
 import { ApprovalCheckPage, ConsolidationPage, DerivationPage, MergePage, RequirementCheckPage } from "./BatchRulePages";
+import { DerivationMonitorPage, DeriveStoredPage } from "./DerivationPages";
+import { InheritanceRuleDetailPage, InheritanceRulesPage, NewInheritanceRulePage } from "./InheritanceRulePages";
 import { CustomerRequirementDetailPage, CustomerRequirementsPage, NewCustomerRequirementPage, StoredRequirementCheckPage } from "./CustomerRequirementPages";
 import { BatchRecordDetailPage, BatchRecordsPage, NewRecordProfilePage, RecordProfilesPage } from "./EbrPages";
 import { AllocationPage, PotencyPage } from "./CalculatorPages";
@@ -16,7 +18,7 @@ const processmfg: PassageModule = {
   id: "processmfg",
   title: "Process manufacturing",
   description:
-    "Formulas, batch orders scaled to batch size, potency consumption, co-product cost allocation, batch derivation, merge, consolidation and customer requirements, batch attributes, picking (from typed or stored batches), merging stored batches with their genealogy, stored customer batch requirements with the check over stored batches, rework, and the batch quality record with its disposition history, and the electronic batch record with its profiles, review by exception, approval and seal.",
+    "Formulas, batch orders scaled to batch size, potency consumption, co-product cost allocation, batch derivation (typed, and from stored batches with attribute inheritance rules and a derivation monitor), merge, consolidation and customer requirements, batch attributes, picking (from typed or stored batches), merging stored batches with their genealogy, stored customer batch requirements with the check over stored batches, rework, and the batch quality record with its disposition history, and the electronic batch record with its profiles, review by exception, approval and seal.",
   routes: [
     { path: "/processmfg", element: createElement(ProcessHome), handle: { title: "Process manufacturing" } },
     { path: "/processmfg/formulas", element: createElement(FormulasPage), handle: { title: "Formulas" } },
@@ -32,6 +34,11 @@ const processmfg: PassageModule = {
     { path: "/processmfg/potency", element: createElement(PotencyPage), handle: { title: "Potency consumption" } },
     { path: "/processmfg/allocation", element: createElement(AllocationPage), handle: { title: "Co-product allocation" } },
     { path: "/processmfg/derivation", element: createElement(DerivationPage), handle: { title: "Batch derivation" } },
+    { path: "/processmfg/inheritance-rules", element: createElement(InheritanceRulesPage), handle: { title: "Inheritance rules" } },
+    { path: "/processmfg/inheritance-rules/new", element: createElement(NewInheritanceRulePage), handle: { title: "Define rule" } },
+    { path: "/processmfg/inheritance-rules/:id", element: createElement(InheritanceRuleDetailPage), handle: { title: "Inheritance rule" } },
+    { path: "/processmfg/derive-stored", element: createElement(DeriveStoredPage), handle: { title: "Derive batch attributes" } },
+    { path: "/processmfg/derivations", element: createElement(DerivationMonitorPage), handle: { title: "Derivation monitor" } },
     { path: "/processmfg/merge", element: createElement(MergePage), handle: { title: "Batch merge" } },
     { path: "/processmfg/merge-stored", element: createElement(StoredMergePage), handle: { title: "Merge stored batches" } },
     { path: "/processmfg/batch-requirements", element: createElement(RequirementCheckPage), handle: { title: "Customer batch requirements" } },
@@ -59,6 +66,9 @@ const processmfg: PassageModule = {
     { label: "Potency", to: "/processmfg/potency", duty: "production.batch-order.read" },
     { label: "Co-product allocation", to: "/processmfg/allocation", duty: "production.journal.post" },
     { label: "Batch derivation", to: "/processmfg/derivation", duty: "production.batch-attribute.write" },
+    { label: "Inheritance rules", to: "/processmfg/inheritance-rules", duty: "production.batch-order.read" },
+    { label: "Derive batch attributes", to: "/processmfg/derive-stored", duty: "production.batch-attribute.write" },
+    { label: "Derivation monitor", to: "/processmfg/derivations", duty: "production.batch-order.read" },
     { label: "Batch merge", to: "/processmfg/merge", duty: "production.batch.merge" },
     { label: "Merge stored batches", to: "/processmfg/merge-stored", duty: "production.batch.merge" },
     { label: "Customer batch requirements", to: "/processmfg/batch-requirements", duty: "production.batch-order.read" },

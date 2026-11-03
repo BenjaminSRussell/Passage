@@ -1,6 +1,6 @@
 # processmfg
 
-Process manufacturing for Passage (wave 24, PSG-24, slices 1 to 3, 9 and 11). Formulas, batch orders
+Process manufacturing for Passage (wave 24, PSG-24, slices 1 to 3, 9 and 11 to 16). Formulas, batch orders
 created from a formula snapshot and scaled to the batch size, rescale before the order starts,
 and the potency, catch-weight and co-product allocation rules (slice 1). Slice 2 adds the batch
 rules as stateless previews: batch derivation (FR-24.15), batch merge (FR-24.16), bulk
@@ -144,6 +144,11 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
 | GET | `/v1/production/batches/{id}` | `production.batch-order.read` | One batch with current attributes, attribute history and disposition history |
 | PUT | `/v1/production/batches/{id}/attributes` | `production.batch-attribute.write` | Record attribute values with the limit check; sets the expiry date; `version`; Idempotency-Key (FR-24.5, FR-24.6) |
 | POST | `/v1/production/batches/{id}:disposition` | `production.batch-disposition.write` | Change the disposition with a reason; a change by a user who recorded attributes on the batch is flagged `segregationConflict` (PRD 4.24.17); `version`; Idempotency-Key (AC-24.10) |
+| POST | `/v1/production/inheritance-rules` | `production.inheritance-rule.write` | Define how an attribute of a receiver batch is derived from its senders (FR-24.15): copy, min, max, weighted-average (decimals 0 to 6, default 4), earliest-date, latest-date or fixed; the item must define the attribute and the aggregation must fit its kind (400 COM-0001); one active rule per item and attribute (409 PMF-0127); writes `inheritancerule.defined` |
+| GET | `/v1/production/inheritance-rules`, `/{id}` | `production.batch-order.read` | List by legal entity, item and `active`; one rule (404 PMF-0126) |
+| POST | `/v1/production/inheritance-rules/{id}:retire` | `production.inheritance-rule.write` | Retire under the version read (409 PMF-0104, PMF-0128 when already retired); writes `inheritancerule.retired` |
+| POST | `/v1/production/batches/{id}:derive` | `production.batch-attribute.write` | Derive the receiver's attributes from 1 to 50 sender batches with the item's active rules (FR-24.15, BR-24.11, AC-24.11): the senders' values come from the register, the caller passes the quantity consumed from each; the values are recorded in the attribute history (checked against the definitions), each derivation is logged with the senders used and those without a value (PMF-0007 warning), and `batch.attributesrecorded` and `batch.derived` are written; no active rule is 422 PMF-0129; a sender that descends from the receiver through the latest derivation of each batch is 422 PMF-0130; running it again re-derives |
+| GET | `/v1/production/batch-derivations` | `production.batch-order.read` | The derivation monitor: the log newest first with the receiver value before and after, filtered by receiver batch, item or `withMissing` |
 
 The slice-2 and slice-3 previews live under `/v1/production` because `/v1/inventory` is routed to
 services/inventory (wave 16); the PRD's `/inventory/batches/{id}/...` commands arrive with the
@@ -207,6 +212,11 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 | `PMF-0123` | 422 | The batch has no batch order to compile a record from |
 | `PMF-0124` | 422 | Segregation of duties: the approver raised or decided an exception of the record, or created its batch order (PRD 4.24.17) |
 | `PMF-0125` | 409 | The exception is already decided; a decision is final |
+| `PMF-0126` | 404 | Inheritance rule not found |
+| `PMF-0127` | 409 | The item already has an active inheritance rule for the attribute |
+| `PMF-0128` | 409 | The inheritance rule is already retired |
+| `PMF-0129` | 422 | The receiver's item has no active inheritance rule to derive with |
+| `PMF-0130` | 422 | A sender batch descends from the receiver through earlier derivations (a derivation cycle) |
 | `idempotency_key_reuse` | 422 | Idempotency-Key reused with a different request |
 | `idempotency_key_in_flight` | 409 | A concurrent request with the same key committed first; retry for its answer |
 | `AUTH-0001` | 401 | No tenant or principal |

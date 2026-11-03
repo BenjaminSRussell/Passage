@@ -60,6 +60,10 @@ type fakeStore struct {
 	gotIDs       []string
 	reqs         []store.CustomerRequirement
 	gotReq       store.CustomerRequirement
+	gotRule      store.InheritanceRule
+	gotDerive    store.DeriveInput
+	gotRuleFilt  store.RuleFilter
+	gotDerivFilt store.DerivationFilter
 	gotReqFilt   store.RequirementFilter
 	gotReqWho    store.ReqScope
 	gotReqDate   string

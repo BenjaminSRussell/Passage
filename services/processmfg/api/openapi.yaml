@@ -585,6 +585,151 @@ paths:
           description: idempotency_key_reuse.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/production/inheritance-rules:
+    post:
+      operationId: createInheritanceRule
+      summary: Define how a batch attribute is derived from its sender batches (FR-24.15)
+      description: One active rule per item and attribute (PMF-0127; retire it to replace it). The item must define the attribute (400 COM-0001 otherwise) and the aggregation must fit its kind (min, max and weighted-average need a numeric attribute, earliest-date and latest-date a date, copy any kind) and a fixed rule carries one value (num, text or date) of the attribute kind. decimals (0 to 6, default 4) applies to weighted-average only (BR-24.11). legalEntityId defaults to the caller's legal entity. Writes dev.passage.production.inheritancerule.defined.v1 in the same transaction. A rule is never edited.
+      x-passage-duty: production.inheritance-rule.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/InheritanceRuleRequest' } } }
+      responses:
+        '201':
+          description: 'The stored rule at version 1. A replay returns 200 with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/InheritanceRule' } } }
+        '400':
+          description: COM-0001 for a malformed body, an unknown aggregation, an attribute the item does not define, an aggregation that does not fit the attribute kind, decimals on another aggregation or a fixed value of the wrong kind.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '403':
+          description: AUTH-0003 when the legal entity is outside the caller's scope.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0127 when the item already has an active rule for the attribute.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listInheritanceRules
+      summary: Inheritance rules by item and attribute
+      description: Filter by legal entity and item; active=true leaves out retired rules.
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: itemId, in: query, schema: { type: string, format: uuid } }
+        - { name: active, in: query, schema: { type: boolean } }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: The rules.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/InheritanceRule' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/inheritance-rules/{id}:
+    get:
+      operationId: getInheritanceRule
+      summary: One inheritance rule
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The rule, with its version and whether it is retired.
+          content: { application/json: { schema: { $ref: '#/components/schemas/InheritanceRule' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0126
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/inheritance-rules/{id}:retire:
+    post:
+      operationId: retireInheritanceRule
+      summary: Retire an inheritance rule
+      description: The rule stops applying to later derivations; batches derived earlier keep their values and their log. Writes dev.passage.production.inheritancerule.retired.v1 in the same transaction.
+      x-passage-duty: production.inheritance-rule.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/VersionRequest' } } }
+      responses:
+        '200':
+          description: 'The retired rule at version + 1. A replay returns the first answer with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/InheritanceRule' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0126
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0104 when the version is stale; PMF-0128 when the rule is already retired.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batches/{id}:derive:
+    post:
+      operationId: deriveBatchAttributes
+      summary: Derive a batch's attributes from its sender batches (FR-24.15, AC-24.11)
+      description: For each active inheritance rule of the receiver's item, reads the senders' current value of the attribute from the batch register, derives the receiver value (copy needs one distinct value; weighted-average weights by the quantity given per sender and rounds to the rule's decimals, BR-24.11), records it in the receiver's attribute history (checked against its definitions, so the expiry attribute sets the expiry date) and logs the derivation with the senders used and those without a value (a PMF-0007 warning; the attribute is left as it was when no sender has a value). Running it again re-derives from the senders given and moves the version. Senders must be other batches of the receiver's legal entity (400 otherwise) and none may descend from the receiver through the latest derivation of each batch (422 PMF-0130, a derivation cycle); the register keeps no quantity, so the caller passes the quantity consumed from each and it is not checked against the sender's stock or the consumption posted. The log keeps the receiver value before and after. Writes dev.passage.production.batch.attributesrecorded.v1 and dev.passage.production.batch.derived.v1 in the same transaction.
+      x-passage-duty: production.batch-attribute.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DeriveStoredRequest' } } }
+      responses:
+        '200':
+          description: 'The receiver at its new version, the value each rule derived and the PMF-0007 warnings. A replay returns the first answer with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/DeriveStoredResponse' } } }
+        '400':
+          description: COM-0001 for a malformed body, a sender that is the receiver, belongs to another legal entity or is listed twice, a copy rule whose senders disagree, or a weighted average over a sender with a value and no consumed quantity.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: PMF-0108 when the receiver or a sender does not exist in the caller's scope.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0104 when the receiver version is stale.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: PMF-0129 when the item has no active rule; PMF-0130 when a sender descends from the receiver (a derivation cycle); idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-derivations:
+    get:
+      operationId: listBatchDerivations
+      summary: Derivation log (the derivation monitor, FR-24.15)
+      description: Every derivation of a rule on a receiver batch, newest first, with the receiver value before, the value derived, the senders used and the senders without a value. Filter by receiver batch or item; withMissing=true keeps the derivations that had senders without a value.
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - { name: batchId, in: query, schema: { type: string, format: uuid } }
+        - { name: itemId, in: query, schema: { type: string, format: uuid } }
+        - { name: withMissing, in: query, schema: { type: boolean } }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: The log rows.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Derivation' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/production/batch-requirements:check-stored:
     post:
       operationId: checkStoredBatchRequirements
@@ -1354,6 +1499,94 @@ components:
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    InheritanceRuleRequest:
+      type: object
+      required: [itemId, attribute, aggregation]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid, description: Defaults to the caller's legal entity. }
+        itemId: { type: string, format: uuid }
+        attribute: { type: string, minLength: 1, maxLength: 40, description: The receiver attribute the item defines. }
+        aggregation: { $ref: '#/components/schemas/Aggregation' }
+        decimals: { type: integer, minimum: 0, maximum: 6, description: Rounding of a weighted average (default 4). }
+        fixed: { $ref: '#/components/schemas/AttributeValue' }
+    InheritanceRule:
+      type: object
+      required: [id, legalEntityId, itemId, attribute, aggregation, version, createdBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        attribute: { type: string }
+        aggregation: { $ref: '#/components/schemas/Aggregation' }
+        decimals: { type: integer }
+        fixedNum: { $ref: '#/components/schemas/Decimal' }
+        fixedText: { type: string }
+        fixedDate: { type: string, format: date }
+        retiredAt: { type: string, format: date-time }
+        retiredBy: { type: string }
+        version: { type: integer, minimum: 1 }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    DeriveSender:
+      type: object
+      required: [batchId, qty]
+      additionalProperties: false
+      properties:
+        batchId: { type: string, format: uuid }
+        qty: { type: string, description: Quantity consumed from the sender, 0 to below 10^12 with at most 6 decimals; the weight of a weighted average. }
+    DeriveStoredRequest:
+      type: object
+      required: [version, senders]
+      additionalProperties: false
+      properties:
+        version: { type: integer, minimum: 1, description: The receiver batch version the caller read. }
+        senders: { type: array, minItems: 1, maxItems: 50, items: { $ref: '#/components/schemas/DeriveSender' } }
+    DerivedValue:
+      type: object
+      required: [ruleId, attribute, aggregation, recorded, missing]
+      properties:
+        ruleId: { type: string, format: uuid }
+        attribute: { type: string }
+        aggregation: { $ref: '#/components/schemas/Aggregation' }
+        recorded: { type: boolean, description: False when no sender had a value; the receiver attribute was left as it was. }
+        value: { type: string, description: The derived value as text (a date as yyyy-mm-dd). }
+        missing: { type: array, items: { type: string, format: uuid }, description: Senders without a value for the attribute (PMF-0007). }
+    DeriveStoredResponse:
+      type: object
+      required: [batch, derived, warnings]
+      properties:
+        batch: { $ref: '#/components/schemas/BatchRecord' }
+        derived: { type: array, items: { $ref: '#/components/schemas/DerivedValue' } }
+        warnings: { type: array, items: { type: string } }
+    Derivation:
+      type: object
+      required: [id, legalEntityId, receiverBatchId, batchNumber, receiverVersion, ruleId, attribute, aggregation, recorded, senders, missing, runBy, runAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        receiverBatchId: { type: string, format: uuid }
+        batchNumber: { type: string }
+        receiverVersion: { type: integer, description: The receiver version after the derivation. }
+        ruleId: { type: string, format: uuid }
+        attribute: { type: string }
+        aggregation: { $ref: '#/components/schemas/Aggregation' }
+        recorded: { type: boolean }
+        value: { type: string, description: The value derived (absent when recorded is false). }
+        valueBefore: { type: string, description: The receiver's value of the attribute before the derivation (absent when it had none). }
+        senders:
+          type: array
+          items:
+            type: object
+            required: [batchId, batchNumber, qty]
+            properties:
+              batchId: { type: string, format: uuid }
+              batchNumber: { type: string }
+              qty: { type: string }
+        missing: { type: array, items: { type: string, format: uuid } }
+        runBy: { type: string }
+        runAt: { type: string, format: date-time }
     CheckStoredRequest:
       type: object
       required: [itemId, shipDate, qty, onHand]

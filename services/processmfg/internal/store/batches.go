@@ -406,78 +406,89 @@ func (s *Postgres) RecordAttributes(ctx context.Context, id string, values map[s
 		if b.Version != version {
 			return staleBatch(b, version)
 		}
-		defs, err := loadDefs(ctx, tx, b.ItemID, MaxList)
+		res, err := recordValues(ctx, tx, b, values)
 		if err != nil {
 			return err
 		}
-		dd := make([]domain.AttributeDef, len(defs))
-		for i, d := range defs {
-			dd[i] = toDomainDef(d)
-		}
-		checks, err := domain.CheckAttributes(dd, values)
-		if err != nil {
-			return err
-		}
-		kinds := map[string]string{}
-		potency := ""
-		for _, d := range defs {
-			kinds[d.Name] = d.Kind
-			if d.Role == domain.RolePotency {
-				potency = d.Name
-			}
-		}
-		p := principal(ctx)
-		evt := pmfevents.BatchAttributesRecordedData{BatchID: b.ID, LegalEntityID: b.LegalEntityID, ItemID: b.ItemID,
-			BatchNumber: b.BatchNumber, Version: b.Version + 1, Attributes: []pmfevents.RecordedAttribute{}}
-		var expiry *time.Time
-		res := AttributesResult{Checks: make([]AttributeCheck, len(checks))}
-		for i, c := range checks {
-			v := values[c.Name]
-			if _, err := tx.Exec(ctx, `insert into batch_attribute_history (tenant_id, batch_id, legal_entity_id, name, kind, num_value, text_value, date_value, pass, detail, recorded_by)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-				p.TenantID, b.ID, b.LegalEntityID, c.Name, kinds[c.Name], v.Num, v.Text, v.Date, c.Pass, c.Detail, p.UserID); err != nil {
-				return err
-			}
-			res.Checks[i] = AttributeCheck{Name: c.Name, Pass: c.Pass, Detail: c.Detail}
-			ra := pmfevents.RecordedAttribute{Name: c.Name, Kind: kinds[c.Name], Pass: c.Pass, Detail: c.Detail}
-			switch {
-			case v.Num != nil:
-				ra.Value = v.Num.String()
-				if c.Name == potency {
-					evt.Potency = ra.Value
-				}
-			case v.Text != nil:
-				ra.Value = *v.Text
-			case v.Date != nil:
-				ra.Value = v.Date.Format(dateLayout)
-				if c.Name == domain.ExpiryAttribute {
-					expiry = v.Date
-				}
-			}
-			if !c.Pass {
-				evt.Failures++
-			}
-			evt.Attributes = append(evt.Attributes, ra)
-		}
-		if _, err := tx.Exec(ctx, `update batch_record set version = version + 1, updated_at = now(), expiry_date = coalesce($2, expiry_date) where id = $1`, b.ID, expiry); err != nil {
-			return err
-		}
-		fresh, err := loadBatch(ctx, tx, id, "")
-		if err != nil {
-			return err
-		}
-		if fresh.ExpiryDate != nil {
-			evt.ExpiryDate = *fresh.ExpiryDate
-		}
-		if err := enqueue(ctx, tx, "batch", b.ID, pmfevents.BatchAttributesRecorded, evt); err != nil {
-			return err
-		}
-		res.Batch = fresh
-		sort.Slice(res.Checks, func(i, j int) bool { return res.Checks[i].Name < res.Checks[j].Name })
 		out, changed = res, true
 		return remember(ctx, tx, idem, http.StatusOK, out)
 	})
 	return out, changed, err
+}
+
+// recordValues checks values against the item's definitions, appends them to the
+// batch's history, moves the batch version by one and writes BatchAttributesRecorded,
+// all in the caller's transaction on a batch it has locked.
+func recordValues(ctx context.Context, tx pgx.Tx, b Batch, values map[string]domain.Value) (AttributesResult, error) {
+	defs, err := loadDefs(ctx, tx, b.ItemID, MaxList)
+	if err != nil {
+		return AttributesResult{}, err
+	}
+	dd := make([]domain.AttributeDef, len(defs))
+	for i, d := range defs {
+		dd[i] = toDomainDef(d)
+	}
+	checks, err := domain.CheckAttributes(dd, values)
+	if err != nil {
+		return AttributesResult{}, err
+	}
+	kinds := map[string]string{}
+	potency := ""
+	for _, d := range defs {
+		kinds[d.Name] = d.Kind
+		if d.Role == domain.RolePotency {
+			potency = d.Name
+		}
+	}
+	p := principal(ctx)
+	evt := pmfevents.BatchAttributesRecordedData{BatchID: b.ID, LegalEntityID: b.LegalEntityID, ItemID: b.ItemID,
+		BatchNumber: b.BatchNumber, Version: b.Version + 1, Attributes: []pmfevents.RecordedAttribute{}}
+	var expiry *time.Time
+	res := AttributesResult{Checks: make([]AttributeCheck, len(checks))}
+	for i, c := range checks {
+		v := values[c.Name]
+		if _, err := tx.Exec(ctx, `insert into batch_attribute_history (tenant_id, batch_id, legal_entity_id, name, kind, num_value, text_value, date_value, pass, detail, recorded_by)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+			p.TenantID, b.ID, b.LegalEntityID, c.Name, kinds[c.Name], v.Num, v.Text, v.Date, c.Pass, c.Detail, p.UserID); err != nil {
+			return AttributesResult{}, err
+		}
+		res.Checks[i] = AttributeCheck{Name: c.Name, Pass: c.Pass, Detail: c.Detail}
+		ra := pmfevents.RecordedAttribute{Name: c.Name, Kind: kinds[c.Name], Pass: c.Pass, Detail: c.Detail}
+		switch {
+		case v.Num != nil:
+			ra.Value = v.Num.String()
+			if c.Name == potency {
+				evt.Potency = ra.Value
+			}
+		case v.Text != nil:
+			ra.Value = *v.Text
+		case v.Date != nil:
+			ra.Value = v.Date.Format(dateLayout)
+			if c.Name == domain.ExpiryAttribute {
+				expiry = v.Date
+			}
+		}
+		if !c.Pass {
+			evt.Failures++
+		}
+		evt.Attributes = append(evt.Attributes, ra)
+	}
+	if _, err := tx.Exec(ctx, `update batch_record set version = version + 1, updated_at = now(), expiry_date = coalesce($2, expiry_date) where id = $1`, b.ID, expiry); err != nil {
+		return AttributesResult{}, err
+	}
+	fresh, err := loadBatch(ctx, tx, b.ID, "")
+	if err != nil {
+		return AttributesResult{}, err
+	}
+	if fresh.ExpiryDate != nil {
+		evt.ExpiryDate = *fresh.ExpiryDate
+	}
+	if err := enqueue(ctx, tx, "batch", b.ID, pmfevents.BatchAttributesRecorded, evt); err != nil {
+		return AttributesResult{}, err
+	}
+	res.Batch = fresh
+	sort.Slice(res.Checks, func(i, j int) bool { return res.Checks[i].Name < res.Checks[j].Name })
+	return res, nil
 }
 
 // ChangeDisposition moves a batch to another disposition with a reason and

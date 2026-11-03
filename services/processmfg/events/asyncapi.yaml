@@ -47,6 +47,15 @@ channels:
         $ref: '#/components/messages/BatchDispositionChanged'
       batchMerged:
         $ref: '#/components/messages/BatchMerged'
+      batchDerived:
+        $ref: '#/components/messages/BatchDerived'
+  inheritanceRule:
+    address: passage.production.inheritancerule
+    messages:
+      inheritanceRuleDefined:
+        $ref: '#/components/messages/InheritanceRuleDefined'
+      inheritanceRuleRetired:
+        $ref: '#/components/messages/InheritanceRuleRetired'
   batchRequirement:
     address: passage.production.batchrequirement
     messages:
@@ -125,6 +134,21 @@ operations:
     channel: { $ref: '#/channels/batch' }
     messages: [{ $ref: '#/channels/batch/messages/batchMerged' }]
     summary: Stored batches were merged into a new batch with weighted attributes and cost; inventory posts the transfers from the parents
+  publishBatchDerived:
+    action: send
+    channel: { $ref: '#/channels/batch' }
+    messages: [{ $ref: '#/channels/batch/messages/batchDerived' }]
+    summary: A batch got attribute values derived from its sender batches by the inheritance rules (quality, traceability consume it)
+  publishInheritanceRuleDefined:
+    action: send
+    channel: { $ref: '#/channels/inheritanceRule' }
+    messages: [{ $ref: '#/channels/inheritanceRule/messages/inheritanceRuleDefined' }]
+    summary: An attribute inheritance rule was defined for an item
+  publishInheritanceRuleRetired:
+    action: send
+    channel: { $ref: '#/channels/inheritanceRule' }
+    messages: [{ $ref: '#/channels/inheritanceRule/messages/inheritanceRuleRetired' }]
+    summary: An attribute inheritance rule was retired and no longer applies
   publishBatchRequirementDefined:
     action: send
     channel: { $ref: '#/channels/batchRequirement' }
@@ -222,6 +246,21 @@ components:
       summary: Batches were merged into a new batch
       contentType: application/cloudevents+json
       payload: { $ref: '#/components/schemas/BatchMergedData' }
+    BatchDerived:
+      name: dev.passage.production.batch.derived.v1
+      summary: A batch got attribute values derived from its senders
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/BatchDerivedData' }
+    InheritanceRuleDefined:
+      name: dev.passage.production.inheritancerule.defined.v1
+      summary: An attribute inheritance rule was defined
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/InheritanceRuleData' }
+    InheritanceRuleRetired:
+      name: dev.passage.production.inheritancerule.retired.v1
+      summary: An attribute inheritance rule was retired
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/InheritanceRuleData' }
     BatchRequirementDefined:
       name: dev.passage.production.batchrequirement.defined.v1
       summary: A customer batch requirement was defined
@@ -435,6 +474,38 @@ components:
         qty: { type: string, description: Sum of the parents' quantities. }
         unitCost: { type: string, description: Quantity-weighted average cost per unit. }
         parents: { type: array, items: { $ref: '#/components/schemas/MergedParent' } }
+    InheritanceRuleData:
+      type: object
+      required: [ruleId, legalEntityId, itemId, attribute, aggregation, version]
+      properties:
+        ruleId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        attribute: { type: string, description: The receiver attribute the rule fills. }
+        aggregation: { type: string, enum: [copy, min, max, weighted-average, earliest-date, latest-date, fixed] }
+        decimals: { type: integer, description: Rounding of a weighted average (default 4 when absent). }
+        fixed: { type: string, description: The fixed value of a fixed rule. }
+        version: { type: integer, description: The rule version after the change (1 when defined, 2 when retired). }
+    DerivedAttribute:
+      type: object
+      required: [attribute, aggregation, recorded, missing]
+      properties:
+        attribute: { type: string }
+        aggregation: { type: string }
+        recorded: { type: boolean, description: False when no sender had a value; the receiver attribute was left as it was. }
+        value: { type: string, description: The derived value as text (date as yyyy-mm-dd). }
+        missing: { type: array, items: { type: string, format: uuid }, description: Sender batches without a value for the attribute (PMF-0007). }
+    BatchDerivedData:
+      type: object
+      required: [batchId, legalEntityId, itemId, batchNumber, version, senders, derived]
+      properties:
+        batchId: { type: string, format: uuid, description: The receiver batch. }
+        legalEntityId: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        batchNumber: { type: string }
+        version: { type: integer, description: The receiver batch version after the derivation. }
+        senders: { type: array, items: { type: string, format: uuid } }
+        derived: { type: array, items: { $ref: '#/components/schemas/DerivedAttribute' } }
     BatchRequirementData:
       type: object
       required: [requirementId, legalEntityId, itemId, level, version]

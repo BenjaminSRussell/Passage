@@ -880,3 +880,100 @@ export function approveBatchRecord(id: string, version: number, key: string = ne
 export function sealBatchRecord(id: string, version: number, key: string = newKey()): Promise<BatchRecord> {
   return post<BatchRecord>(`/batch-records/${encodeURIComponent(id)}:seal`, { version }, key);
 }
+
+/** FR-24.15: how one attribute of a receiver batch is derived from its sender batches. */
+export type RuleAggregation = "copy" | "min" | "max" | "weighted-average" | "earliest-date" | "latest-date" | "fixed";
+
+export interface InheritanceRule {
+  id: string;
+  legalEntityId: string;
+  itemId: string;
+  attribute: string;
+  aggregation: RuleAggregation;
+  decimals?: number;
+  fixedNum?: string;
+  fixedText?: string;
+  fixedDate?: string;
+  retiredAt?: string;
+  retiredBy?: string;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewInheritanceRule {
+  itemId: string;
+  attribute: string;
+  aggregation: RuleAggregation;
+  decimals?: number;
+  fixed?: { num?: string; text?: string; date?: string };
+}
+
+export function listInheritanceRules(filter: { itemId?: string; active?: boolean } = {}, signal?: AbortSignal): Promise<InheritanceRule[]> {
+  return items<InheritanceRule>(`/inheritance-rules${query({ itemId: filter.itemId, active: filter.active ? "true" : undefined, limit: 200 })}`, signal);
+}
+
+export function getInheritanceRule(id: string, signal?: AbortSignal): Promise<InheritanceRule> {
+  return send<InheritanceRule>(`/inheritance-rules/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Reuse one key per form so a retried submit cannot define the rule twice. */
+export function createInheritanceRule(input: NewInheritanceRule, key: string = newKey()): Promise<InheritanceRule> {
+  return post<InheritanceRule>("/inheritance-rules", input, key);
+}
+
+export function retireInheritanceRule(id: string, version: number, key: string = newKey()): Promise<InheritanceRule> {
+  return post<InheritanceRule>(`/inheritance-rules/${encodeURIComponent(id)}:retire`, { version }, key);
+}
+
+export interface DeriveSenderInput {
+  batchId: string;
+  qty: string;
+}
+
+export interface DerivedValue {
+  ruleId: string;
+  attribute: string;
+  aggregation: RuleAggregation;
+  recorded: boolean;
+  value?: string;
+  missing: string[];
+}
+
+export interface DeriveStoredResult {
+  batch: Batch;
+  derived: DerivedValue[];
+  warnings: string[];
+}
+
+/** Derives the attributes of a stored batch from its senders with the item's active rules (FR-24.15). */
+export function deriveStoredBatch(id: string, version: number, senders: DeriveSenderInput[], key: string = newKey()): Promise<DeriveStoredResult> {
+  return post<DeriveStoredResult>(`/batches/${encodeURIComponent(id)}:derive`, { version, senders }, key);
+}
+
+export interface Derivation {
+  id: string;
+  legalEntityId: string;
+  receiverBatchId: string;
+  batchNumber: string;
+  receiverVersion: number;
+  ruleId: string;
+  attribute: string;
+  aggregation: RuleAggregation;
+  recorded: boolean;
+  value?: string;
+  /** The receiver's value before the derivation; absent when it had none. */
+  valueBefore?: string;
+  senders: { batchId: string; batchNumber: string; qty: string }[];
+  missing: string[];
+  runBy: string;
+  runAt: string;
+}
+
+export function listDerivations(filter: { batchId?: string; itemId?: string; withMissing?: boolean } = {}, signal?: AbortSignal): Promise<Derivation[]> {
+  return items<Derivation>(
+    `/batch-derivations${query({ batchId: filter.batchId, itemId: filter.itemId, withMissing: filter.withMissing ? "true" : undefined, limit: 200 })}`,
+    signal,
+  );
+}

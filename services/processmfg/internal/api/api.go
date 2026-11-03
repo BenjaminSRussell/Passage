@@ -92,6 +92,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerPickStored(r)
 	a.registerMerge(r)
 	a.registerCustomerRequirements(r)
+	a.registerDerivation(r)
 	a.registerRecords(r)
 }
 

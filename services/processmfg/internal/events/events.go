@@ -31,6 +31,12 @@ const (
 	// batch requirements (FR-24.19): sales and picking read the rules from them.
 	BatchRequirementDefined = "dev.passage.production.batchrequirement.defined.v1"
 	BatchRequirementRetired = "dev.passage.production.batchrequirement.retired.v1"
+	// InheritanceRuleDefined and InheritanceRuleRetired cover the attribute
+	// inheritance rules (FR-24.15); BatchDerived is written when a batch's
+	// attributes are derived from its senders.
+	InheritanceRuleDefined = "dev.passage.production.inheritancerule.defined.v1"
+	InheritanceRuleRetired = "dev.passage.production.inheritancerule.retired.v1"
+	BatchDerived           = "dev.passage.production.batch.derived.v1"
 	// The electronic batch record (FR-24.21): its profile, compilation, review
 	// by exception, approval and seal.
 	BatchRecordProfileDefined    = "dev.passage.production.batchrecordprofile.defined.v1"
@@ -47,7 +53,8 @@ func All() []string {
 	return []string{FormulaCreated, BatchOrderCreated, BatchOrderRescaled, BatchOrderStateChanged, CoProductAllocated,
 		BatchAttributeDefined, BatchRegistered, BatchAttributesRecorded, BatchDispositionChanged, BatchMerged,
 		BatchRequirementDefined, BatchRequirementRetired, BatchRecordProfileDefined, BatchRecordProfileRetired,
-		BatchRecordCompiled, BatchRecordExceptionRaised, BatchRecordExceptionDisposed, BatchRecordApproved, BatchRecordSealed}
+		BatchRecordCompiled, BatchRecordExceptionRaised, BatchRecordExceptionDisposed, BatchRecordApproved, BatchRecordSealed,
+		InheritanceRuleDefined, InheritanceRuleRetired, BatchDerived}
 }
 
 // FormulaCreatedData is the payload of FormulaCreated.
@@ -288,4 +295,39 @@ type BatchRecordExceptionData struct {
 	Severity      string `json:"severity"`
 	Disposition   string `json:"disposition,omitempty"`
 	SignatureID   string `json:"signatureId,omitempty"`
+}
+
+// InheritanceRuleData is the payload of InheritanceRuleDefined and
+// InheritanceRuleRetired. Fixed carries the fixed value of a fixed rule.
+type InheritanceRuleData struct {
+	RuleID        string `json:"ruleId"`
+	LegalEntityID string `json:"legalEntityId"`
+	ItemID        string `json:"itemId"`
+	Attribute     string `json:"attribute"`
+	Aggregation   string `json:"aggregation"`
+	Decimals      *int   `json:"decimals,omitempty"`
+	Fixed         string `json:"fixed,omitempty"`
+	Version       int    `json:"version"`
+}
+
+// DerivedAttribute is one attribute a derivation filled. Recorded is false when
+// no sender had a value, so the receiver attribute was left as it was.
+type DerivedAttribute struct {
+	Attribute   string   `json:"attribute"`
+	Aggregation string   `json:"aggregation"`
+	Recorded    bool     `json:"recorded"`
+	Value       string   `json:"value,omitempty"`
+	Missing     []string `json:"missing"`
+}
+
+// BatchDerivedData is the payload of BatchDerived: the receiver batch, its
+// version after the derivation, the sender batches and what was derived.
+type BatchDerivedData struct {
+	BatchID       string             `json:"batchId"`
+	LegalEntityID string             `json:"legalEntityId"`
+	ItemID        string             `json:"itemId"`
+	BatchNumber   string             `json:"batchNumber"`
+	Version       int                `json:"version"`
+	Senders       []string           `json:"senders"`
+	Derived       []DerivedAttribute `json:"derived"`
 }

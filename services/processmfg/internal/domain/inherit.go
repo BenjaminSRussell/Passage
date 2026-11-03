@@ -60,6 +60,10 @@ const (
 	MaxDecimals     int32 = 10
 )
 
+// StoredDecimals is the precision a numeric batch attribute value is stored
+// with; a stored rule rounds to at most this many places.
+const StoredDecimals int32 = 6
+
 // Derived is the outcome of one derivation. Missing lists the sender batches that
 // had no value; the derivation log records them (PMF-0007).
 type Derived struct {
@@ -165,4 +169,51 @@ func sameValue(a, b Value) bool {
 		return a.Date.Equal(*b.Date)
 	}
 	return false
+}
+
+// ValidateRule checks an inheritance rule against the kind of the receiver
+// attribute it fills (FR-24.15): the aggregation must be known and fit the kind
+// (min, max and weighted-average need a numeric attribute, earliest-date and
+// latest-date a date, copy any kind) and a fixed rule's value must be of that
+// kind. Decimals apply to weighted-average only.
+func ValidateRule(rule Rule, kind string) error {
+	if rule.Attribute == "" {
+		return errorf(CodeInvalid, "a rule names the attribute it fills")
+	}
+	want := ""
+	switch rule.Aggregation {
+	case AggCopy, AggFixed:
+	case AggMin, AggMax, AggWeightedAverage:
+		want = AttrNumeric
+	case AggEarliestDate, AggLatestDate:
+		want = AttrDate
+	default:
+		return errorf(CodeInvalid, "unknown aggregation %q", rule.Aggregation)
+	}
+	if want != "" && kind != want {
+		return errorf(CodeInvalid, "%s needs a %s attribute; %s is %s", rule.Aggregation, want, rule.Attribute, kind)
+	}
+	if rule.Aggregation != AggWeightedAverage && rule.Decimals >= 0 {
+		return errorf(CodeInvalid, "decimals apply to weighted-average only")
+	}
+	if rule.Decimals > StoredDecimals {
+		return errorf(CodeInvalid, "decimals must be at most %d, the precision batch attributes are stored with", StoredDecimals)
+	}
+	if rule.Aggregation == AggFixed {
+		f := rule.Fixed
+		n := 0
+		for _, set := range []bool{f.Num != nil, f.Text != nil, f.Date != nil} {
+			if set {
+				n++
+			}
+		}
+		okKind := (kind == AttrNumeric && f.Num != nil) || (kind == AttrDate && f.Date != nil) ||
+			((kind == AttrText || kind == AttrEnum) && f.Text != nil)
+		if n != 1 || !okKind {
+			return errorf(CodeInvalid, "a fixed rule needs exactly one value of the kind of %s (%s)", rule.Attribute, kind)
+		}
+	} else if !rule.Fixed.Empty() {
+		return errorf(CodeInvalid, "a fixed value applies to the fixed aggregation only")
+	}
+	return nil
 }
