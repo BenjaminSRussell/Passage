@@ -2,9 +2,13 @@ package api
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/store"
 )
@@ -58,8 +62,24 @@ func TestPersonnelRoutesRequireTheirDuty(t *testing.T) {
 	}
 }
 
-func TestRetentionPurgeIsOffByDefault(t *testing.T) {
+func TestRetentionPurgeNeedsTheHoldCheck(t *testing.T) {
 	rec := serve(t, tid(), http.MethodPost, "/v1/hr/candidates/purge", "", dutySetupAdmin)
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "HCM-RET-HOLDS") {
+		t.Fatalf("status %d body %s, want 503 HCM-RET-HOLDS", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRetentionPurgeKillSwitch(t *testing.T) {
+	p, _ := tenant.FromContext(testkit.Ctx(tid(), dutySetupAdmin))
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			next.ServeHTTP(w, req.WithContext(tenant.With(req.Context(), p)))
+		})
+	})
+	New(nil).EnableRetentionPurge(false).Register(r)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/hr/candidates/purge", nil))
 	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "HCM-RET-DISABLED") {
 		t.Fatalf("status %d body %s, want 503 HCM-RET-DISABLED", rec.Code, rec.Body.String())
 	}

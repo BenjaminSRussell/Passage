@@ -62,6 +62,10 @@ spec:
               value: {{ .Values.config.actionSweepInterval | quote }}
             - name: NUMBERING_URL
               value: {{ .Values.numberingUrl | quote }}
+            - name: COMPLIANCE_URL
+              value: {{ .Values.complianceUrl | default (printf "http://compliance-compliance.%s.svc:8080" .Release.Namespace) | quote }}
+            - name: HR_RETENTION_PURGE_ENABLED
+              value: {{ .Values.config.retentionPurgeEnabled | quote }}
 {{- if .Values.serviceIdentity.signingKeySecret }}
             - name: PASSAGE_SERVICE_NAME
               value: hr
