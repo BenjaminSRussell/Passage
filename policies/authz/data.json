@@ -2517,7 +2517,9 @@
       {"resource": "/v1/sales/alternative-item-rules", "methods": ["GET"]},
       {"resource": "/v1/sales/alternative-items:evaluate", "methods": ["POST"]},
       {"resource": "/v1/sales/intake-errors", "methods": ["GET"]},
-      {"resource": "/v1/sales/intake-errors/*", "methods": ["GET"]}
+      {"resource": "/v1/sales/intake-errors/*", "methods": ["GET"]},
+      {"resource": "/v1/sales/delivery-terms", "methods": ["GET"]},
+      {"resource": "/v1/sales/delivery-terms/*", "methods": ["GET"]}
     ]},
     "sales.order.write": {"permissions": [
       {"resource": "/v1/sales/orders", "methods": ["POST"]},
@@ -2527,7 +2529,11 @@
       {"resource": "/v1/sales/change-requests/*:withdraw", "methods": ["POST"]},
       {"resource": "/v1/sales/intake-errors/*:resolve", "methods": ["POST"]}
     ]},
-    "sales.parameter.maintain": {"permissions": [{"resource": "/v1/sales/parameters", "methods": ["PUT"]}]},
+    "sales.parameter.maintain": {"permissions": [
+      {"resource": "/v1/sales/parameters", "methods": ["PUT"]},
+      {"resource": "/v1/sales/delivery-terms", "methods": ["POST"]},
+      {"resource": "/v1/sales/delivery-terms/*", "methods": ["PUT"]}
+    ]},
     "sales.quotation.maintain": {"permissions": [
       {"resource": "/v1/sales/quotations", "methods": ["POST"]},
       {"resource": "/v1/sales/quotations/*:convert", "methods": ["POST"]},
