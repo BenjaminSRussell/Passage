@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Run one Go CI shard. Slow packages get dedicated shards; everything else is
+# hashed into rest-0..rest-2 so `go list` stays the source of package membership.
+set -euo pipefail
+
+shard=${1:?usage: go-test-shard.sh SHARD}
+
+root=$(cd "$(dirname "$0")/../.." && pwd)
+cd "$root"
+
+shard_for() {
+  local pkg=$1
+  case $pkg in
+    github.com/BenjaminSRussell/passage/services/pricing/internal/store) echo pricing-store ;;
+    github.com/BenjaminSRussell/passage/services/identity|github.com/BenjaminSRussell/passage/services/identity/*) echo identity ;;
+    github.com/BenjaminSRussell/passage/services/inventory/internal/store) echo inventory-store ;;
+    github.com/BenjaminSRussell/passage/services/ledger/internal/store) echo ledger-store ;;
+    github.com/BenjaminSRussell/passage/services/org/internal/store) echo org-store ;;
+    *)
+      local n
+      n=$(printf '%s' "$pkg" | cksum | awk '{print $1}')
+      echo "rest-$((n % 3))"
+      ;;
+  esac
+}
+
+modules=()
+while IFS= read -r dir; do
+  modules+=("$dir")
+done < <(find platform/go services tools/rlscheck -name go.mod -not -path '*/node_modules/*' -exec dirname {} \; | sort)
+
+matched=0
+failed=0
+for mod in "${modules[@]}"; do
+  prefix=$(cd "$mod" && go list -m)
+  pkgs=()
+  while IFS= read -r pkg; do
+    [ "$(shard_for "$pkg")" = "$shard" ] || continue
+    matched=$((matched + 1))
+    rel=${pkg#"$prefix"}
+    if [ -z "$rel" ]; then
+      pkgs+=(".")
+    else
+      pkgs+=(".$rel")
+    fi
+  done < <(cd "$mod" && go list ./...)
+  [ "${#pkgs[@]}" -eq 0 ] && continue
+  echo "== go test $mod ${pkgs[*]}"
+  if ! (cd "$mod" && go test -count=1 -p 4 "${pkgs[@]}"); then
+    failed=1
+  fi
+done
+
+if [ "$matched" -eq 0 ]; then
+  echo "go-test-shard: no packages assigned to $shard" >&2
+  exit 1
+fi
+echo "== shard $shard ($matched packages)"
+exit "$failed"

@@ -33,9 +33,40 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  go:
+  go-prep:
     if: inputs.go
+    name: go (vet)
     runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.25'
+          cache-dependency-path: '**/go.sum'
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq libxml2-utils
+      - uses: open-policy-agent/setup-opa@b2b258e089860efaadaaf71bf6e3aecb4a3eeff1
+        with:
+          version: 1.21.4
+      - run: opa test --timeout 120s policies/authz
+      - run: make vet
+      - run: node --test data/cube/cube.test.js
+
+  go-test:
+    if: inputs.go
+    name: go (${{ matrix.shard }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - pricing-store
+          - identity
+          - inventory-store
+          - ledger-store
+          - org-store
+          - rest-0
+          - rest-1
+          - rest-2
     services:
       postgres:
         image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
@@ -61,14 +92,21 @@ jobs:
           go-version: '1.25'
           cache-dependency-path: '**/go.sum'
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq libxml2-utils
-      - uses: open-policy-agent/setup-opa@b2b258e089860efaadaaf71bf6e3aecb4a3eeff1
-        with:
-          version: 1.21.4
-      - run: opa test --timeout 120s policies/authz
       - run: psql -h localhost -U postgres -v ON_ERROR_STOP=1 -f .github/postgres-test-setup.sql
-      - run: make vet
-      - run: make test-go
-      - run: node --test data/cube/cube.test.js
+      - run: bash deploy/ci/go-test-shard.sh ${{ matrix.shard }}
+
+  go:
+    if: always() && inputs.go
+    needs: [go-prep, go-test]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Fail unless every Go shard succeeded
+        env:
+          PREP: ${{ needs.go-prep.result }}
+          TESTS: ${{ needs.go-test.result }}
+        run: |
+          [ "$PREP" = "success" ] || { echo "go-prep: $PREP"; exit 1; }
+          [ "$TESTS" = "success" ] || { echo "go-test: $TESTS"; exit 1; }
 
   keycloak:
     if: inputs.go
