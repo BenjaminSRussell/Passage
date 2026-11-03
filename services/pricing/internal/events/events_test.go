@@ -43,6 +43,13 @@ func TestEventsMatchAsyncAPI(t *testing.T) {
 		{events.CommodityIndexRecorded, events.CommodityIndexRecordedData{}},
 		{events.CommodityCalculationCreated, events.CommodityCalculationData{}},
 		{events.CommodityCalculationWithdrawn, events.CommodityCalculationData{}},
+		{events.BrokerContractCreated, events.BrokerContractData{}},
+		{events.BrokerContractClosed, events.BrokerContractData{}},
+		{events.RoyaltyAgreementCreated, events.RoyaltyAgreementData{}},
+		{events.RoyaltyAgreementClosed, events.RoyaltyAgreementData{}},
+		{events.ContractAccrualPosted, events.ContractAccrualPostedData{}},
+		{events.ContractClaimCreated, events.ContractClaimData{}},
+		{events.ContractClaimApproved, events.ContractClaimData{}},
 		{events.ParametersChanged, events.ParametersChangedData{}},
 		{events.CommodityRunCompleted, events.CommodityRunCompletedData{JournalID: "x"}},
 	}

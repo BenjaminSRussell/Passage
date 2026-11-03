@@ -106,6 +106,36 @@ channels:
         $ref: "#/components/messages/VendorRebateClaimCreated"
       vendorRebateClaimApproved:
         $ref: "#/components/messages/VendorRebateClaimApproved"
+  brokerContract:
+    address: passage.pricing.brokercontract
+    description: Broker contracts created and closed (FR-26.16).
+    messages:
+      brokerContractCreated:
+        $ref: "#/components/messages/BrokerContractCreated"
+      brokerContractClosed:
+        $ref: "#/components/messages/BrokerContractClosed"
+  royaltyAgreement:
+    address: passage.pricing.royaltyagreement
+    description: Royalty agreements created and closed (FR-26.17).
+    messages:
+      royaltyAgreementCreated:
+        $ref: "#/components/messages/RoyaltyAgreementCreated"
+      royaltyAgreementClosed:
+        $ref: "#/components/messages/RoyaltyAgreementClosed"
+  contractAccrual:
+    address: passage.pricing.contractaccrual
+    description: Broker and royalty accruals posted for the ledger (FR-26.16, FR-26.17).
+    messages:
+      contractAccrualPosted:
+        $ref: "#/components/messages/ContractAccrualPosted"
+  contractClaim:
+    address: passage.pricing.contractclaim
+    description: Broker and royalty period claims created and approved for settlement through w19 AP (FR-26.16, FR-26.17).
+    messages:
+      contractClaimCreated:
+        $ref: "#/components/messages/ContractClaimCreated"
+      contractClaimApproved:
+        $ref: "#/components/messages/ContractClaimApproved"
 operations:
   publishJournalPosted:
     action: send
@@ -155,6 +185,48 @@ operations:
     summary: Usage was attributed to a fund within its period budget (or with overspend allowed).
     messages:
       - {$ref: "#/channels/fundUsage/messages/fundUsageRecorded"}
+  publishBrokerContractCreated:
+    action: send
+    channel: {$ref: "#/channels/brokerContract"}
+    summary: A broker contract was created.
+    messages:
+      - {$ref: "#/channels/brokerContract/messages/brokerContractCreated"}
+  publishBrokerContractClosed:
+    action: send
+    channel: {$ref: "#/channels/brokerContract"}
+    summary: A broker contract was closed; it takes no further accruals.
+    messages:
+      - {$ref: "#/channels/brokerContract/messages/brokerContractClosed"}
+  publishRoyaltyAgreementCreated:
+    action: send
+    channel: {$ref: "#/channels/royaltyAgreement"}
+    summary: A royalty agreement was created.
+    messages:
+      - {$ref: "#/channels/royaltyAgreement/messages/royaltyAgreementCreated"}
+  publishRoyaltyAgreementClosed:
+    action: send
+    channel: {$ref: "#/channels/royaltyAgreement"}
+    summary: A royalty agreement was closed; it takes no further accruals.
+    messages:
+      - {$ref: "#/channels/royaltyAgreement/messages/royaltyAgreementClosed"}
+  publishContractAccrualPosted:
+    action: send
+    channel: {$ref: "#/channels/contractAccrual"}
+    summary: A broker or royalty accrual posted; the ledger books Dr 6210 / Cr 2175 (broker) or Dr 6220 / Cr 2176 (royalty).
+    messages:
+      - {$ref: "#/channels/contractAccrual/messages/contractAccrualPosted"}
+  publishContractClaimCreated:
+    action: send
+    channel: {$ref: "#/channels/contractClaim"}
+    summary: A broker or royalty period claim was created.
+    messages:
+      - {$ref: "#/channels/contractClaim/messages/contractClaimCreated"}
+  publishContractClaimApproved:
+    action: send
+    channel: {$ref: "#/channels/contractClaim"}
+    summary: A broker or royalty period claim was approved; w19 AP settles it.
+    messages:
+      - {$ref: "#/channels/contractClaim/messages/contractClaimApproved"}
   publishParametersChanged:
     action: send
     channel: {$ref: "#/channels/parameters"}
@@ -517,7 +589,123 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/VendorRebateClaim"
+    BrokerContractCreated:
+      name: dev.passage.pricing.brokercontract.created.v1
+      title: Broker contract created
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/BrokerContract"
+    BrokerContractClosed:
+      name: dev.passage.pricing.brokercontract.closed.v1
+      title: Broker contract closed
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/BrokerContract"
+    RoyaltyAgreementCreated:
+      name: dev.passage.pricing.royaltyagreement.created.v1
+      title: Royalty agreement created
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/RoyaltyAgreement"
+    RoyaltyAgreementClosed:
+      name: dev.passage.pricing.royaltyagreement.closed.v1
+      title: Royalty agreement closed
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/RoyaltyAgreement"
+    ContractAccrualPosted:
+      name: dev.passage.pricing.contractaccrual.posted.v1
+      title: Broker or royalty accrual posted
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/ContractAccrual"
+    ContractClaimCreated:
+      name: dev.passage.pricing.contractclaim.created.v1
+      title: Broker or royalty claim created
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/ContractClaim"
+    ContractClaimApproved:
+      name: dev.passage.pricing.contractclaim.approved.v1
+      title: Broker or royalty claim approved
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/ContractClaim"
   schemas:
+    BrokerContract:
+      type: object
+      description: A broker contract after create or close (FR-26.16). Ids only; vendor names never appear in events.
+      required: [contract_id, legal_entity_id, broker_vendor_id, rate_kind, rate, currency, valid_from, valid_to, status, version]
+      properties:
+        contract_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        broker_vendor_id: {type: string, format: uuid}
+        rate_kind: {type: string, enum: [PERCENT_NET, PER_UNIT]}
+        rate: {type: string, description: "A percentage of net, or an amount per unit in the contract currency."}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        valid_from: {type: string, format: date}
+        valid_to: {type: string, format: date}
+        status: {type: string, enum: [ACTIVE, CLOSED]}
+        version: {type: integer, minimum: 1}
+    RoyaltyAgreement:
+      type: object
+      description: A royalty agreement after create or close (FR-26.17). Ids only; vendor names never appear in events.
+      required: [agreement_id, legal_entity_id, licensor_vendor_id, basis, period, minimum_royalty, currency, valid_from, valid_to, status, version]
+      properties:
+        agreement_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        licensor_vendor_id: {type: string, format: uuid}
+        basis: {type: string, enum: [NET_SALES, QUANTITY]}
+        period: {type: string, enum: [MONTH, QUARTER, YEAR]}
+        minimum_royalty: {type: string, description: "The least a period pays; 0 for none."}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        valid_from: {type: string, format: date}
+        valid_to: {type: string, format: date}
+        status: {type: string, enum: [ACTIVE, CLOSED]}
+        version: {type: integer, minimum: 1}
+    ContractAccrual:
+      type: object
+      description: >
+        One broker or royalty accrual for the ledger (FR-26.16, FR-26.17). Amount is negative for a
+        credit note line. SHORTFALL is the minimum royalty top-up posted when a period closes below
+        its minimum (PRC-0017). The accounts default to Dr 6210 / Cr 2175 (broker) and Dr 6220 /
+        Cr 2176 (royalty). Withholding on royalties is applied by the w19 AP claim.
+      required: [accrual_id, legal_entity_id, contract_kind, contract_id, vendor_id, period_id, line_key, kind, posting_date, amount, currency, debit_account, credit_account]
+      properties:
+        accrual_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        contract_kind: {type: string, enum: [BROKER, ROYALTY]}
+        contract_id: {type: string, format: uuid}
+        vendor_id: {type: string, format: uuid}
+        period_id: {type: string, description: "2027-03, 2027-Q1 or 2027."}
+        line_key: {type: string, description: "The invoice line id, or MIN:<period> for a shortfall."}
+        kind: {type: string, enum: [ACCRUAL, CREDIT, SHORTFALL]}
+        posting_date: {type: string, format: date, description: "The invoice or credit note date; the last day of the period for a shortfall."}
+        amount: {type: string, description: "Decimal string; negative for a credit note line."}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        debit_account: {type: string}
+        credit_account: {type: string}
+    ContractClaim:
+      type: object
+      description: >
+        A broker or royalty claim for one contract period. amount = accrued_total - prior_claimed.
+        w19 AP pays an APPROVED positive claim to the vendor and offsets a negative one. Numbers run
+        BC- (broker) and RY- (royalty) per legal entity. Ids only.
+      required: [claim_id, number, legal_entity_id, contract_kind, contract_id, vendor_id, period_id, accrued_total, prior_claimed, amount, currency, status, version]
+      properties:
+        claim_id: {type: string, format: uuid}
+        number: {type: string, pattern: "^(BC|RY)-[0-9]{6,}$"}
+        legal_entity_id: {type: string, format: uuid}
+        contract_kind: {type: string, enum: [BROKER, ROYALTY]}
+        contract_id: {type: string, format: uuid}
+        vendor_id: {type: string, format: uuid}
+        period_id: {type: string, description: "2027-03, 2027-Q1 or 2027."}
+        accrued_total: {type: string, description: "The period's accruals when the claim was created."}
+        prior_claimed: {type: string, description: "Sum of the period's earlier claims."}
+        amount: {type: string, description: "Decimal string; negative for an over-accrued period."}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        status: {type: string, enum: [OPEN, APPROVED]}
+        version: {type: integer, minimum: 1}
     VendorRebateClaim:
       type: object
       description: >

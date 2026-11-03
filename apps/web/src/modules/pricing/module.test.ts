@@ -9,7 +9,7 @@ describe("pricing module", () => {
     expect(pricing.nav.every((n) => n.to.startsWith("/pricing"))).toBe(true);
   });
 
-  it("has a list, a create form and a detail page for trade agreements, campaigns, free goods rules, commodity cost basis types and price calculations, procedures, price journals, rebates and vendor rebate claims, sales groups, trade funds and promotions, plus the commission inquiry and settlement export, the journal CSV import, the workspace and simulation", () => {
+  it("has a list, a create form and a detail page for trade agreements, campaigns, free goods rules, commodity cost basis types and price calculations, procedures, price journals, rebates and vendor rebate claims, broker contracts and royalty agreements with their claims, sales groups, trade funds and promotions, plus the commission inquiry and settlement export, the journal CSV import, the workspace and simulation", () => {
     expect(pricing.routes.map((r) => r.path)).toEqual([
       "/pricing",
       "/pricing/agreements",
@@ -39,6 +39,14 @@ describe("pricing module", () => {
       "/pricing/rebates/claims",
       "/pricing/rebates/claims/:id",
       "/pricing/rebates/:id",
+      "/pricing/brokers",
+      "/pricing/brokers/new",
+      "/pricing/brokers/:id",
+      "/pricing/royalties",
+      "/pricing/royalties/new",
+      "/pricing/royalties/:id",
+      "/pricing/contract-claims",
+      "/pricing/contract-claims/:id",
       "/pricing/commission/sales-groups",
       "/pricing/commission/sales-groups/new",
       "/pricing/commission/sales-groups/:id",
@@ -68,6 +76,9 @@ describe("pricing module", () => {
       "/pricing/parameters": "pricing.view",
       "/pricing/rebates": "pricing.rebate.view",
       "/pricing/rebates/claims": "pricing.rebate.view",
+      "/pricing/brokers": "pricing.rebate.view",
+      "/pricing/royalties": "pricing.rebate.view",
+      "/pricing/contract-claims": "pricing.rebate.view",
       "/pricing/commission/sales-groups": "pricing.commission.view",
       "/pricing/commission/transactions": "pricing.commission.view",
       "/pricing/commission/settlement": "pricing.commission.view",

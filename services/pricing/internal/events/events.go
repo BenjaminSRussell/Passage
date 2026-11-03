@@ -25,6 +25,16 @@ const (
 	// Vendor rebate claims (FR-26.15): a period claim was created, and approved for w19 AP.
 	VendorRebateClaimCreated  = "dev.passage.pricing.vendorrebateclaim.created.v1"
 	VendorRebateClaimApproved = "dev.passage.pricing.vendorrebateclaim.approved.v1"
+	// Broker contracts and royalty agreements (FR-26.16, FR-26.17): created and closed.
+	BrokerContractCreated   = "dev.passage.pricing.brokercontract.created.v1"
+	BrokerContractClosed    = "dev.passage.pricing.brokercontract.closed.v1"
+	RoyaltyAgreementCreated = "dev.passage.pricing.royaltyagreement.created.v1"
+	RoyaltyAgreementClosed  = "dev.passage.pricing.royaltyagreement.closed.v1"
+	// A broker or royalty accrual posted (invoice line, credit note line or minimum royalty
+	// shortfall), and the period claim created and approved for w19 AP.
+	ContractAccrualPosted = "dev.passage.pricing.contractaccrual.posted.v1"
+	ContractClaimCreated  = "dev.passage.pricing.contractclaim.created.v1"
+	ContractClaimApproved = "dev.passage.pricing.contractclaim.approved.v1"
 	// Pricing parameters (PRD 5.26.13): a legal entity's parameters were changed.
 	ParametersChanged = "dev.passage.pricing.parameters.changed.v1"
 )
@@ -283,4 +293,71 @@ type CommodityRunCompletedData struct {
 	UnchangedCount int    `json:"unchanged_count"`
 	Stale          bool   `json:"stale"`
 	JournalID      string `json:"journal_id,omitempty"`
+}
+
+// BrokerContractData is the payload of brokercontract.created and .closed. Ids only.
+type BrokerContractData struct {
+	ContractID     string `json:"contract_id"`
+	LegalEntityID  string `json:"legal_entity_id"`
+	BrokerVendorID string `json:"broker_vendor_id"`
+	RateKind       string `json:"rate_kind"`
+	Rate           string `json:"rate"`
+	Currency       string `json:"currency"`
+	ValidFrom      string `json:"valid_from"`
+	ValidTo        string `json:"valid_to"`
+	Status         string `json:"status"`
+	Version        int    `json:"version"`
+}
+
+// RoyaltyAgreementData is the payload of royaltyagreement.created and .closed. Ids only.
+type RoyaltyAgreementData struct {
+	AgreementID      string `json:"agreement_id"`
+	LegalEntityID    string `json:"legal_entity_id"`
+	LicensorVendorID string `json:"licensor_vendor_id"`
+	Basis            string `json:"basis"`
+	Period           string `json:"period"`
+	MinimumRoyalty   string `json:"minimum_royalty"`
+	Currency         string `json:"currency"`
+	ValidFrom        string `json:"valid_from"`
+	ValidTo          string `json:"valid_to"`
+	Status           string `json:"status"`
+	Version          int    `json:"version"`
+}
+
+// ContractAccrualPostedData is the payload of contractaccrual.posted: one broker or royalty
+// accrual (negative for a credit note line) for the ledger, Dr 6210 / Cr 2175 (broker) or
+// Dr 6220 / Cr 2176 (royalty) by default. Kind is ACCRUAL, CREDIT or SHORTFALL.
+type ContractAccrualPostedData struct {
+	AccrualID     string `json:"accrual_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	ContractKind  string `json:"contract_kind"`
+	ContractID    string `json:"contract_id"`
+	VendorID      string `json:"vendor_id"`
+	PeriodID      string `json:"period_id"`
+	LineKey       string `json:"line_key"`
+	Kind          string `json:"kind"`
+	PostingDate   string `json:"posting_date"`
+	Amount        string `json:"amount"`
+	Currency      string `json:"currency"`
+	DebitAccount  string `json:"debit_account"`
+	CreditAccount string `json:"credit_account"`
+}
+
+// ContractClaimData is the payload of contractclaim.created and .approved. Amount is the
+// period's accruals less its earlier claims: w19 AP pays an approved positive claim to the
+// vendor and offsets a negative one against the vendor's next payment. Ids only.
+type ContractClaimData struct {
+	ClaimID       string `json:"claim_id"`
+	Number        string `json:"number"`
+	LegalEntityID string `json:"legal_entity_id"`
+	ContractKind  string `json:"contract_kind"`
+	ContractID    string `json:"contract_id"`
+	VendorID      string `json:"vendor_id"`
+	PeriodID      string `json:"period_id"`
+	AccruedTotal  string `json:"accrued_total"`
+	PriorClaimed  string `json:"prior_claimed"`
+	Amount        string `json:"amount"`
+	Currency      string `json:"currency"`
+	Status        string `json:"status"`
+	Version       int    `json:"version"`
 }

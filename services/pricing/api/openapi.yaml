@@ -877,6 +877,453 @@ paths:
         "409": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/broker-contracts:
+    get:
+      operationId: listBrokerContracts
+      summary: List broker contracts, latest start first (at most 100).
+      x-passage-duty: pricing.rebate.view
+      parameters:
+        - {name: legalEntityId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: brokerVendorId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: status, in: query, required: false, schema: {type: string, enum: [ACTIVE, CLOSED]}}
+      responses:
+        "200":
+          description: The broker contracts.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/BrokerContract"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: createBrokerContract
+      summary: Create a broker contract.
+      description: >
+        Creates an ACTIVE broker contract at version 1 and writes brokercontract.created in the same transaction (FR-26.16). The broker earns a percentage of line net or an amount per unit on the invoices of its customer and product scope; an empty scope key is all. Defaults: payable account 2175, expense account 6210. 403 AUTH-0003 when legalEntityId is outside the caller's scope.
+      x-passage-duty: pricing.rebate.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/BrokerContractInput"}
+      responses:
+        "201":
+          description: Created ACTIVE at version 1.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BrokerContract"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/broker-contracts/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getBrokerContract
+      summary: Read one broker contract.
+      x-passage-duty: pricing.rebate.view
+      responses:
+        "200":
+          description: The broker contract.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BrokerContract"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/broker-contracts/{id}:close:
+    post:
+      operationId: closeBrokerContract
+      summary: Close a broker contract so it takes no further accruals.
+      description: >
+        Checks the body version (412 conflict_version) and requires ACTIVE (409 PRC-0031). Claims of earlier periods stay open. Writes brokercontract.closed.
+      x-passage-duty: pricing.rebate.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/VersionRequest"}
+      responses:
+        "200":
+          description: Closed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BrokerContract"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/broker-contracts/{id}/accruals:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: listBrokerContractAccruals
+      summary: List the accrual rows of a broker contract in posting order (at most 100).
+      x-passage-duty: pricing.rebate.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: period, in: query, required: false, schema: {type: string, pattern: "^[0-9]{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$"}}
+      responses:
+        "200":
+          description: Accrual rows.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/ContractAccrual"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: accrueBrokerContractLine
+      summary: Accrue one posted invoice line or credit note line against a broker contract.
+      description: >
+        Stand-in for the invoice.posted consumer (FR-26.16); the duty is service-only, because every accrual is a GL posting. A line accrues rate x basis, Dr 6210 / Cr 2175 by default, and writes contractaccrual.posted. A credit note line names reversesInvoiceLineId and reverses the original accrual in proportion to its credited share, 422 PRC-0059 when that line was never accrued or the credit exceeds what is left; it is taken in the period of its own date, also after the contract closed or its validity ended. 422 for an invoice line outside the contract scope, validity or currency; 409 PRC-0061 for an invoice line on a closed contract. A redelivered line answers 200 with the stored accrual.
+      x-passage-duty: pricing.contract.accrue
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ContractAccrualInput"}
+      responses:
+        "201":
+          description: A new accrual was posted.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ContractAccrual"}
+        "200":
+          description: The line was already accrued; the stored accrual.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ContractAccrual"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/broker-contracts/{id}/claim-preview:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: previewBrokerContractClaim
+      summary: Preview the claim a broker contract period would produce, without writing anything.
+      x-passage-duty: pricing.rebate.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: period, in: query, required: true, schema: {type: string, pattern: "^[0-9]{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$"}}
+      responses:
+        "200":
+          description: The preview.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ContractClaimPreview"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/royalty-agreements:
+    get:
+      operationId: listRoyaltyAgreements
+      summary: List royalty agreements, latest start first (at most 100).
+      x-passage-duty: pricing.rebate.view
+      parameters:
+        - {name: legalEntityId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: licensorVendorId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: status, in: query, required: false, schema: {type: string, enum: [ACTIVE, CLOSED]}}
+      responses:
+        "200":
+          description: The royalty agreements.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/RoyaltyAgreement"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: createRoyaltyAgreement
+      summary: Create a royalty agreement.
+      description: >
+        Creates an ACTIVE royalty agreement at version 1 and writes royaltyagreement.created (FR-26.17). Tiers follow the rebate rules: the tier in force at the period cumulative basis pays on all of it. minimumRoyalty is the least a period pays. Defaults: payable account 2176, expense account 6220. 403 AUTH-0003 when legalEntityId is outside the caller's scope.
+      x-passage-duty: pricing.rebate.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RoyaltyAgreementInput"}
+      responses:
+        "201":
+          description: Created ACTIVE at version 1.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RoyaltyAgreement"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/royalty-agreements/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getRoyaltyAgreement
+      summary: Read one royalty agreement.
+      x-passage-duty: pricing.rebate.view
+      responses:
+        "200":
+          description: The royalty agreement.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RoyaltyAgreement"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/royalty-agreements/{id}:close:
+    post:
+      operationId: closeRoyaltyAgreement
+      summary: Close a royalty agreement so it takes no further accruals.
+      description: >
+        Checks the body version (412 conflict_version) and requires ACTIVE (409 PRC-0031). Writes royaltyagreement.closed.
+      x-passage-duty: pricing.rebate.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/VersionRequest"}
+      responses:
+        "200":
+          description: Closed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RoyaltyAgreement"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/royalty-agreements/{id}/accruals:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: listRoyaltyAgreementAccruals
+      summary: List the accrual rows of a royalty agreement in posting order (at most 100).
+      x-passage-duty: pricing.rebate.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: period, in: query, required: false, schema: {type: string, pattern: "^[0-9]{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$"}}
+      responses:
+        "200":
+          description: Accrual rows.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/ContractAccrual"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: accrueRoyaltyAgreementLine
+      summary: Accrue one posted invoice line or credit note line against a royalty agreement.
+      description: >
+        Stand-in for the invoice.posted consumer (FR-26.17); the duty is service-only, because every accrual is a GL posting. A line moves the period to its tier target at the new cumulative basis and books the difference, Dr 6220 / Cr 2176 by default (contractaccrual.posted); a credit note line (reversesInvoiceLineId) subtracts from the basis of the period of its own date, also after the agreement closed, and 422 PRC-0059 when the original line was never accrued or the credit exceeds the net sales (or quantity) still creditable on it. 409 PRC-0060 in a closed period, 409 PRC-0061 for an invoice line on a closed agreement. A redelivered line answers 200.
+      x-passage-duty: pricing.contract.accrue
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ContractAccrualInput"}
+      responses:
+        "201":
+          description: A new accrual was posted.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ContractAccrual"}
+        "200":
+          description: The line was already accrued; the stored accrual.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ContractAccrual"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/royalty-agreements/{id}/claim-preview:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: previewRoyaltyAgreementClaim
+      summary: Preview the claim a royalty agreement period would produce, without writing anything.
+      x-passage-duty: pricing.rebate.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: period, in: query, required: true, schema: {type: string, pattern: "^[0-9]{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$"}}
+      responses:
+        "200":
+          description: The preview.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ContractClaimPreview"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/royalty-agreements/{id}:close-period:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: closeRoyaltyPeriod
+      summary: Close one royalty period and post its minimum royalty shortfall (FR-26.17).
+      description: >
+        If the period royalty is below the agreement minimumRoyalty, the shortfall posts as one SHORTFALL accrual (line key MIN:period, Dr 6220 / Cr 2176) and the response carries the PRC-0017 notice. The period then takes no further accruals (PRC-0060) and can be claimed. 422 when the period is not of the agreement granularity or lies outside its validity.
+      x-passage-duty: pricing.rebate.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RoyaltyPeriodCloseInput"}
+      responses:
+        "200":
+          description: The close result; alreadyClosed is true when the period was closed before and nothing was posted again.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RoyaltyPeriodClose"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/contract-claims:
+    get:
+      operationId: listContractClaims
+      summary: Broker and royalty claims inquiry (§5.26.14), newest first.
+      x-passage-duty: pricing.rebate.view
+      parameters:
+        - {name: contractKind, in: query, required: false, schema: {type: string, enum: [BROKER, ROYALTY]}}
+        - {name: contractId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: vendorId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: period, in: query, required: false, schema: {type: string, pattern: "^[0-9]{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$"}}
+        - {name: status, in: query, required: false, schema: {type: string, enum: [OPEN, APPROVED]}}
+      responses:
+        "200":
+          description: At most 100 claims.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/ContractClaim"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: createContractClaim
+      summary: Claim one period of a broker contract or royalty agreement (FR-26.16, FR-26.17).
+      description: >
+        Creates claim BC-n (broker) or RY-n (royalty), sequence per legal entity and kind, for the period accruals (and minimum royalty shortfall) less its earlier claims, under the period lock, and writes contractclaim.created. 422 PRC-0043 when nothing was accrued, 409 PRC-0015 when fully claimed, 409 PRC-0062 for a royalty period that is not closed.
+      x-passage-duty: pricing.rebate.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ContractClaimInput"}
+      responses:
+        "201":
+          description: Created OPEN.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ContractClaim"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/contract-claims/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getContractClaim
+      summary: Read one broker or royalty claim.
+      x-passage-duty: pricing.rebate.view
+      responses:
+        "200":
+          description: The claim.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ContractClaim"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/contract-claims/{id}:approve:
+    post:
+      operationId: approveContractClaim
+      summary: Approve an OPEN broker or royalty claim for settlement through w19 AP (duty VendorRebateClaimApprove).
+      description: >
+        Checks the body version (412 conflict_version), requires OPEN (409 PRC-0031) and refuses the user who created the claim and a caller without a user identity (403 PRC-0046). Writes contractclaim.approved.
+      x-passage-duty: pricing.rebate.claim.approve
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/VersionRequest"}
+      responses:
+        "200":
+          description: Approved.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ContractClaim"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/commission/sales-groups:
     get:
       operationId: listSalesGroups
@@ -2648,6 +3095,155 @@ components:
         approvedBy: {type: string}
         createdAt: {type: string, format: date-time}
         approvedAt: {type: string, format: date-time}
+    BrokerContractInput:
+      type: object
+      required: [legalEntityId, name, brokerVendorId, rateKind, rate, currency, validFrom, validTo]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        name: {type: string, minLength: 1, maxLength: 120}
+        brokerVendorId: {type: string, format: uuid}
+        customerId: {type: string, format: uuid, description: "At most one of customerId and customerGroupId; neither means all customers."}
+        customerGroupId: {type: string, format: uuid}
+        productId: {type: string, maxLength: 64, description: "At most one of productId and productGroupId; neither means all products."}
+        productGroupId: {type: string, maxLength: 64}
+        rateKind: {type: string, enum: [PERCENT_NET, PER_UNIT]}
+        rate: {type: string, description: "Decimal above 0: a percentage of net (at most 100), or an amount per unit in currency."}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        validFrom: {type: string, format: date}
+        validTo: {type: string, format: date, description: "Inclusive; not before validFrom."}
+        payableAccount: {type: string, pattern: "^[0-9]{4,8}$", description: "Default 2175."}
+        expenseAccount: {type: string, pattern: "^[0-9]{4,8}$", description: "Default 6210."}
+    BrokerContract:
+      allOf:
+        - $ref: "#/components/schemas/BrokerContractInput"
+        - type: object
+          required: [id, payableAccount, expenseAccount, status, version]
+          properties:
+            id: {type: string, format: uuid}
+            status: {type: string, enum: [ACTIVE, CLOSED]}
+            version: {type: integer, minimum: 1}
+    RoyaltyAgreementInput:
+      type: object
+      required: [legalEntityId, name, licensorVendorId, basis, period, tiers, currency, validFrom, validTo]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        name: {type: string, minLength: 1, maxLength: 120}
+        licensorVendorId: {type: string, format: uuid}
+        productId: {type: string, maxLength: 64, description: "Exactly one of productId and productGroupId."}
+        productGroupId: {type: string, maxLength: 64}
+        basis: {type: string, enum: [NET_SALES, QUANTITY]}
+        period: {type: string, enum: [MONTH, QUARTER, YEAR]}
+        tiers:
+          type: array
+          minItems: 1
+          description: "Strictly increasing thresholds; NET_SALES tiers take ratePct, QUANTITY tiers amountPerUnit."
+          items: {$ref: "#/components/schemas/Tier"}
+        minimumRoyalty: {type: string, description: "Decimal at least 0 with no more decimals than the currency's minor unit: the least a period pays; default 0."}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        validFrom: {type: string, format: date}
+        validTo: {type: string, format: date, description: "Inclusive; not before validFrom."}
+        payableAccount: {type: string, pattern: "^[0-9]{4,8}$", description: "Default 2176."}
+        expenseAccount: {type: string, pattern: "^[0-9]{4,8}$", description: "Default 6220."}
+    RoyaltyAgreement:
+      allOf:
+        - $ref: "#/components/schemas/RoyaltyAgreementInput"
+        - type: object
+          required: [id, minimumRoyalty, payableAccount, expenseAccount, status, version]
+          properties:
+            id: {type: string, format: uuid}
+            status: {type: string, enum: [ACTIVE, CLOSED]}
+            version: {type: integer, minimum: 1}
+    ContractAccrualInput:
+      type: object
+      required: [invoiceLineId, invoiceDate, currency]
+      properties:
+        invoiceLineId: {type: string, minLength: 1, maxLength: 128}
+        invoiceDate: {type: string, format: date}
+        customerId: {type: string, format: uuid}
+        customerGroupId: {type: string, format: uuid}
+        productId: {type: string, maxLength: 64}
+        productGroupId: {type: string, maxLength: 64}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        netAmount: {type: string, description: "Line net value, decimal at least 0; default 0. Positive on a credit note line too."}
+        quantity: {type: string, description: "Decimal at least 0; default 0."}
+        reversesInvoiceLineId: {type: string, maxLength: 128, description: "Set on a credit note line: the invoice line it reverses."}
+    ContractAccrual:
+      type: object
+      required: [id, contractKind, contractId, periodId, lineKey, kind, invoiceDate, basisValue, basisQuantity, amount, currency]
+      properties:
+        id: {type: string, format: uuid}
+        contractKind: {type: string, enum: [BROKER, ROYALTY]}
+        contractId: {type: string, format: uuid}
+        periodId: {type: string, description: "2027-03, 2027-Q1 or 2027."}
+        lineKey: {type: string, description: "The invoice line id, or MIN:period for a minimum royalty shortfall."}
+        kind: {type: string, enum: [ACCRUAL, CREDIT, SHORTFALL]}
+        invoiceDate: {type: string, format: date}
+        basisValue: {type: string, description: "Negative on a credit."}
+        basisQuantity: {type: string, description: "Negative on a credit."}
+        amount: {type: string, description: "Decimal; negative on a credit."}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        reversesLineKey: {type: string}
+    RoyaltyPeriodCloseInput:
+      type: object
+      required: [period]
+      properties:
+        period: {type: string, pattern: "^[0-9]{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$", description: "A period of the agreement granularity inside its validity."}
+    RoyaltyPeriodClose:
+      type: object
+      required: [agreementId, periodId, accrued, minimumRoyalty, shortfall, currency, alreadyClosed]
+      properties:
+        agreementId: {type: string, format: uuid}
+        periodId: {type: string}
+        accrued: {type: string, description: "The period royalty before the shortfall."}
+        minimumRoyalty: {type: string}
+        shortfall: {type: string, description: "Minimum less accrued, never negative."}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        alreadyClosed: {type: boolean}
+        notice: {type: string, description: "PRC-0017 when a shortfall posted."}
+        accrual: {$ref: "#/components/schemas/ContractAccrual"}
+    ContractClaimInput:
+      type: object
+      required: [contractKind, contractId, period]
+      properties:
+        contractKind: {type: string, enum: [BROKER, ROYALTY]}
+        contractId: {type: string, format: uuid}
+        period: {type: string, pattern: "^[0-9]{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$"}
+    ContractClaim:
+      type: object
+      required: [id, number, legalEntityId, contractKind, contractId, vendorId, periodId, accruedTotal, priorClaimed, amount, currency, status, version, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string, pattern: "^(BC|RY)-[0-9]{6,}$"}
+        legalEntityId: {type: string, format: uuid}
+        contractKind: {type: string, enum: [BROKER, ROYALTY]}
+        contractId: {type: string, format: uuid}
+        vendorId: {type: string, format: uuid}
+        periodId: {type: string}
+        accruedTotal: {type: string, description: "The period accruals and shortfall when the claim was created."}
+        priorClaimed: {type: string}
+        amount: {type: string, description: "Negative for an over-accrued period."}
+        currency: {type: string}
+        status: {type: string, enum: [OPEN, APPROVED]}
+        version: {type: integer, minimum: 1}
+        createdBy: {type: string}
+        approvedBy: {type: string}
+        createdAt: {type: string, format: date-time}
+        approvedAt: {type: string, format: date-time}
+    ContractClaimPreview:
+      type: object
+      required: [contractKind, contractId, vendorId, periodId, accrued, shortfall, priorClaimed, amount, currency, claims, closed]
+      properties:
+        contractKind: {type: string, enum: [BROKER, ROYALTY]}
+        contractId: {type: string, format: uuid}
+        vendorId: {type: string, format: uuid}
+        periodId: {type: string}
+        accrued: {type: string}
+        shortfall: {type: string}
+        priorClaimed: {type: string}
+        amount: {type: string, description: "accrued + shortfall - priorClaimed."}
+        currency: {type: string}
+        claims: {type: integer, minimum: 0}
+        closed: {type: boolean, description: "A royalty period can be claimed only when closed."}
     RetroLine:
       type: object
       required: [invoiceLineId, invoiceDate, currency]

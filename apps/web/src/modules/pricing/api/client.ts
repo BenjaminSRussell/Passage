@@ -1230,3 +1230,211 @@ export function getPricingParameters(legalEntityId: string, signal?: AbortSignal
 export function setPricingParameters(body: { legalEntityId: string; journalFourEyes: boolean; version: number }, key: string = newKey()): Promise<PricingParameters> {
   return send<PricingParameters>("/parameters", { method: "PUT", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) });
 }
+
+// ---- Broker contracts and royalty agreements (FR-26.16, FR-26.17).
+
+export type ContractKind = "BROKER" | "ROYALTY";
+export type ContractStatus = "ACTIVE" | "CLOSED";
+export type BrokerRateKind = "PERCENT_NET" | "PER_UNIT";
+export type RoyaltyBasis = "NET_SALES" | "QUANTITY";
+export type AccrualKind = "ACCRUAL" | "CREDIT" | "SHORTFALL";
+
+export interface BrokerContractInput {
+  legalEntityId: string;
+  name: string;
+  brokerVendorId: string;
+  customerId?: string;
+  customerGroupId?: string;
+  productId?: string;
+  productGroupId?: string;
+  rateKind: BrokerRateKind;
+  rate: string;
+  currency: string;
+  validFrom: string;
+  validTo: string;
+  payableAccount?: string;
+  expenseAccount?: string;
+}
+
+export interface BrokerContract extends BrokerContractInput {
+  id: string;
+  payableAccount: string;
+  expenseAccount: string;
+  status: ContractStatus;
+  version: number;
+}
+
+export interface RoyaltyAgreementInput {
+  legalEntityId: string;
+  name: string;
+  licensorVendorId: string;
+  productId?: string;
+  productGroupId?: string;
+  basis: RoyaltyBasis;
+  period: RebatePeriod;
+  tiers: RebateTier[];
+  minimumRoyalty?: string;
+  currency: string;
+  validFrom: string;
+  validTo: string;
+  payableAccount?: string;
+  expenseAccount?: string;
+}
+
+export interface RoyaltyAgreement extends RoyaltyAgreementInput {
+  id: string;
+  minimumRoyalty: string;
+  payableAccount: string;
+  expenseAccount: string;
+  status: ContractStatus;
+  version: number;
+}
+
+export interface ContractFilter {
+  legalEntityId?: string;
+  status?: ContractStatus | "";
+}
+
+/** One accrual row of a contract; amounts are negative on a credit note line. */
+export interface ContractAccrual {
+  id: string;
+  contractKind: ContractKind;
+  contractId: string;
+  periodId: string;
+  lineKey: string;
+  kind: AccrualKind;
+  invoiceDate: string;
+  basisValue: string;
+  basisQuantity: string;
+  amount: string;
+  currency: string;
+  reversesLineKey?: string;
+}
+
+export interface ContractClaimPreview {
+  contractKind: ContractKind;
+  contractId: string;
+  vendorId: string;
+  periodId: string;
+  accrued: string;
+  shortfall: string;
+  priorClaimed: string;
+  /** accrued + shortfall - priorClaimed. */
+  amount: string;
+  currency: string;
+  claims: number;
+  /** A royalty period can be claimed only when closed. */
+  closed: boolean;
+}
+
+export interface ContractClaim {
+  id: string;
+  number: string;
+  legalEntityId: string;
+  contractKind: ContractKind;
+  contractId: string;
+  vendorId: string;
+  periodId: string;
+  accruedTotal: string;
+  priorClaimed: string;
+  amount: string;
+  currency: string;
+  status: ClaimStatus;
+  version: number;
+  createdBy?: string;
+  approvedBy?: string;
+  createdAt: string;
+  approvedAt?: string;
+}
+
+export interface ContractClaimFilter {
+  contractKind?: ContractKind | "";
+  contractId?: string;
+  vendorId?: string;
+  period?: string;
+  status?: ClaimStatus | "";
+}
+
+export interface RoyaltyPeriodClose {
+  agreementId: string;
+  periodId: string;
+  accrued: string;
+  minimumRoyalty: string;
+  shortfall: string;
+  currency: string;
+  alreadyClosed: boolean;
+  /** PRC-0017 when a shortfall posted at close. */
+  notice?: string;
+  accrual?: ContractAccrual;
+}
+
+const brokerPath = "/broker-contracts";
+const royaltyPath = "/royalty-agreements";
+export const contractPath = (kind: ContractKind) => (kind === "BROKER" ? brokerPath : royaltyPath);
+
+export function listBrokerContracts(filter: ContractFilter = {}, signal?: AbortSignal): Promise<BrokerContract[]> {
+  return items<BrokerContract>(`${brokerPath}${query({ ...filter })}`, signal);
+}
+
+export function getBrokerContract(id: string, signal?: AbortSignal): Promise<BrokerContract> {
+  return send<BrokerContract>(`${brokerPath}/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createBrokerContract(body: BrokerContractInput, key: string = newKey()): Promise<BrokerContract> {
+  return post<BrokerContract>(brokerPath, body, key);
+}
+
+/** POST /broker-contracts/{id}:close at the contract version; a closed contract takes no more accruals. */
+export function closeBrokerContract(id: string, version: number, key: string = newKey()): Promise<BrokerContract> {
+  return post<BrokerContract>(`${brokerPath}/${encodeURIComponent(id)}:close`, { version }, key);
+}
+
+export function listRoyaltyAgreements(filter: ContractFilter = {}, signal?: AbortSignal): Promise<RoyaltyAgreement[]> {
+  return items<RoyaltyAgreement>(`${royaltyPath}${query({ ...filter })}`, signal);
+}
+
+export function getRoyaltyAgreement(id: string, signal?: AbortSignal): Promise<RoyaltyAgreement> {
+  return send<RoyaltyAgreement>(`${royaltyPath}/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createRoyaltyAgreement(body: RoyaltyAgreementInput, key: string = newKey()): Promise<RoyaltyAgreement> {
+  return post<RoyaltyAgreement>(royaltyPath, body, key);
+}
+
+export function closeRoyaltyAgreement(id: string, version: number, key: string = newKey()): Promise<RoyaltyAgreement> {
+  return post<RoyaltyAgreement>(`${royaltyPath}/${encodeURIComponent(id)}:close`, { version }, key);
+}
+
+/** GET /{broker-contracts|royalty-agreements}/{id}/accruals - the accrual rows of a contract, optionally for one period. */
+export function listContractAccruals(kind: ContractKind, id: string, period = "", signal?: AbortSignal): Promise<ContractAccrual[]> {
+  return items<ContractAccrual>(`${contractPath(kind)}/${encodeURIComponent(id)}/accruals${query({ period })}`, signal);
+}
+
+/** GET .../claim-preview - the claim a period would produce; writes nothing. */
+export function previewContractClaim(kind: ContractKind, id: string, period: string, signal?: AbortSignal): Promise<ContractClaimPreview> {
+  return send<ContractClaimPreview>(`${contractPath(kind)}/${encodeURIComponent(id)}/claim-preview${query({ period })}`, {}, signal);
+}
+
+/** POST /royalty-agreements/{id}:close-period - posts the minimum royalty shortfall, once. */
+export function closeRoyaltyPeriod(id: string, period: string): Promise<RoyaltyPeriodClose> {
+  return post<RoyaltyPeriodClose>(`${royaltyPath}/${encodeURIComponent(id)}:close-period`, { period });
+}
+
+/** POST /contract-claims - claim one period (BC-n or RY-n); 409 PRC-0015 when it is fully claimed. */
+export function createContractClaim(body: { contractKind: ContractKind; contractId: string; period: string }, key: string = newKey()): Promise<ContractClaim> {
+  return post<ContractClaim>("/contract-claims", body, key);
+}
+
+/** GET /contract-claims - the Broker and royalty claims inquiry, newest first, at most 100. */
+export function listContractClaims(filter: ContractClaimFilter = {}, signal?: AbortSignal): Promise<ContractClaim[]> {
+  return items<ContractClaim>(`/contract-claims${query({ ...filter })}`, signal);
+}
+
+export function getContractClaim(id: string, signal?: AbortSignal): Promise<ContractClaim> {
+  return send<ContractClaim>(`/contract-claims/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** POST /contract-claims/{id}:approve at the claim version; the claim's creator cannot approve it (PRC-0046). */
+export function approveContractClaim(id: string, version: number, key: string = newKey()): Promise<ContractClaim> {
+  return post<ContractClaim>(`/contract-claims/${encodeURIComponent(id)}:approve`, { version }, key);
+}

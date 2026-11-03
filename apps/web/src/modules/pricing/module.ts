@@ -2,6 +2,14 @@ import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { AgreementDetailPage } from "./AgreementDetailPage";
 import { AgreementsPage } from "./AgreementsPage";
+import { BrokerDetailPage } from "./BrokerDetailPage";
+import { BrokersPage } from "./BrokersPage";
+import { ContractClaimDetailPage } from "./ContractClaimDetailPage";
+import { ContractClaimsPage } from "./ContractClaimsPage";
+import { NewBrokerPage } from "./NewBrokerPage";
+import { NewRoyaltyPage } from "./NewRoyaltyPage";
+import { RoyaltiesPage } from "./RoyaltiesPage";
+import { RoyaltyDetailPage } from "./RoyaltyDetailPage";
 import { CampaignDetailPage } from "./CampaignDetailPage";
 import { CampaignsPage } from "./CampaignsPage";
 import { CommissionSettlementPage } from "./CommissionSettlementPage";
@@ -46,7 +54,7 @@ const pricing: PassageModule = {
   id: "pricing",
   title: "Pricing",
   description:
-    "Trade agreements, campaigns, free goods, commodity index pricing, pricing procedures, price journals, customer and vendor rebates, commissions, trade funds, promotions, journal CSV import, commission settlement and the explanation behind every price.",
+    "Trade agreements, campaigns, free goods, broker contracts and royalty agreements, commodity index pricing, pricing procedures, price journals, customer and vendor rebates, commissions, trade funds, promotions, journal CSV import, commission settlement and the explanation behind every price.",
   routes: [
     { path: "/pricing", element: createElement(WorkspacePage), handle: { title: "Pricing workspace" } },
     { path: "/pricing/agreements", element: createElement(AgreementsPage), handle: { title: "Trade agreements" } },
@@ -76,6 +84,14 @@ const pricing: PassageModule = {
     { path: "/pricing/rebates/claims", element: createElement(VendorClaimsPage), handle: { title: "Vendor rebate claims" } },
     { path: "/pricing/rebates/claims/:id", element: createElement(VendorClaimDetailPage), handle: { title: "Vendor rebate claim" } },
     { path: "/pricing/rebates/:id", element: createElement(RebateDetailPage), handle: { title: "Rebate agreement" } },
+    { path: "/pricing/brokers", element: createElement(BrokersPage), handle: { title: "Broker contracts" } },
+    { path: "/pricing/brokers/new", element: createElement(NewBrokerPage), handle: { title: "New broker contract" } },
+    { path: "/pricing/brokers/:id", element: createElement(BrokerDetailPage), handle: { title: "Broker contract" } },
+    { path: "/pricing/royalties", element: createElement(RoyaltiesPage), handle: { title: "Royalty agreements" } },
+    { path: "/pricing/royalties/new", element: createElement(NewRoyaltyPage), handle: { title: "New royalty agreement" } },
+    { path: "/pricing/royalties/:id", element: createElement(RoyaltyDetailPage), handle: { title: "Royalty agreement" } },
+    { path: "/pricing/contract-claims", element: createElement(ContractClaimsPage), handle: { title: "Broker and royalty claims" } },
+    { path: "/pricing/contract-claims/:id", element: createElement(ContractClaimDetailPage), handle: { title: "Broker or royalty claim" } },
     { path: "/pricing/commission/sales-groups", element: createElement(SalesGroupsPage), handle: { title: "Sales groups" } },
     { path: "/pricing/commission/sales-groups/new", element: createElement(NewSalesGroupPage), handle: { title: "New sales group" } },
     { path: "/pricing/commission/sales-groups/:id", element: createElement(SalesGroupDetailPage), handle: { title: "Sales group" } },
@@ -101,6 +117,9 @@ const pricing: PassageModule = {
     { label: "Price journals", to: "/pricing/journals", duty: "pricing.view" },
     { label: "Rebate agreements", to: "/pricing/rebates", duty: "pricing.rebate.view" },
     { label: "Vendor rebate claims", to: "/pricing/rebates/claims", duty: "pricing.rebate.view" },
+    { label: "Broker contracts", to: "/pricing/brokers", duty: "pricing.rebate.view" },
+    { label: "Royalty agreements", to: "/pricing/royalties", duty: "pricing.rebate.view" },
+    { label: "Broker and royalty claims", to: "/pricing/contract-claims", duty: "pricing.rebate.view" },
     { label: "Sales groups", to: "/pricing/commission/sales-groups", duty: "pricing.commission.view" },
     { label: "Commission transactions", to: "/pricing/commission/transactions", duty: "pricing.commission.view" },
     { label: "Commission settlement", to: "/pricing/commission/settlement", duty: "pricing.commission.view" },

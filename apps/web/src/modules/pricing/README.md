@@ -27,6 +27,14 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | `/pricing/journals/new` | Create an OPEN journal from pasted `UPDATE, id, version, percent` / `DELETE, id, version` rows | `POST /journals` |
 | `/pricing/journals/import` | Import a CSV file (header row, op first; up to 100,000 rows) as an OPEN journal; row faults listed by row number | `POST /journals:import-csv` |
 | `/pricing/journals/:id` | Lines with before and after values, who created and who posted it; validate, post (PRC-0005, PRC-0056 and the four-eyes PRC-0057 shown) and reverse | `GET`, `:validate`, `:post`, `:reverse` |
+| `/pricing/brokers` | Broker contracts (FR-26.16) with rate, scope, validity and status filter | `GET /broker-contracts` |
+| `/pricing/brokers/new` | Create a broker contract: broker vendor, customer and product scope, percentage of net or amount per unit, validity, accounts | `POST /broker-contracts` |
+| `/pricing/brokers/:id` | Terms, accruals (credit note lines reverse in proportion), period claim preview and BC- claim, close the contract | `GET /broker-contracts/{id}`, `GET …/accruals`, `GET …/claim-preview`, `POST /contract-claims`, `:close` |
+| `/pricing/royalties` | Royalty agreements (FR-26.17) with tiers, minimum per period and status filter | `GET /royalty-agreements` |
+| `/pricing/royalties/new` | Create a royalty agreement: licensor vendor, product or group, net sales or quantity, tiers, minimum royalty, period | `POST /royalty-agreements` |
+| `/pricing/royalties/:id` | Terms, accruals, close a period (minimum royalty shortfall, PRC-0017 notice), preview and RY- claim, close the agreement | `GET /royalty-agreements/{id}`, `GET …/accruals`, `:close-period`, `GET …/claim-preview`, `POST /contract-claims`, `:close` |
+| `/pricing/contract-claims` | Broker and royalty claims inquiry by type, vendor, period and status, with exact totals per currency | `GET /contract-claims` |
+| `/pricing/contract-claims/:id` | Claim detail and approval for AP (the creator cannot approve, PRC-0046) | `GET /contract-claims/{id}`, `:approve` |
 | `/pricing/rebates` | Customer and vendor rebate agreements with type, basis, period and tiers; type filter | `GET /rebates/agreements?partyRole=` |
 | `/pricing/rebates/new` | Create a tiered agreement for a customer, a customer group or (vendor rebate) a vendor; accounts follow the type (2150 / 4150 or 2160 / 5100) | `POST /rebates/agreements` |
 | `/pricing/rebates/:id` | Tiers, posting accounts, accruals by period with an exact total (retroactive rows marked), the retroactive recompute from pasted posted invoice lines, and for a vendor rebate the claims card: preview a period, claim it (credit note or payment deduction; PRC-0015 shown) and list its claims | `GET /rebates/agreements/{id}`, `GET /rebates/accruals`, `POST /rebates/agreements/{id}:retro-recompute`, `GET /rebates/agreements/{id}/claim-preview`, `GET`/`POST /rebates/vendor-claims` |

@@ -36,6 +36,17 @@ Built in slice 6:
   `pricing.rebate.claim.approve`, versioned, `Idempotency-Key`) refuses the claim's creator (403
   PRC-0046) and writes `vendorrebateclaim.approved` for w19 AP. The Vendor rebate claims inquiry
   filters by agreement, vendor, period and status.
+- **Broker contracts and royalty agreements** (FR-26.16, FR-26.17): `/broker-contracts` pays a broker
+  vendor a percentage of line net or an amount per unit on the invoices of its customer and product
+  scope; `/royalty-agreements` pays a licensor vendor tiered rates (the rebate tier rule, BR-26.8) on
+  one product or product group with a `minimumRoyalty` per period. `POST .../{id}/accruals` stands in
+  for the `invoice.posted` consumer under the service-only duty `pricing.contract.accrue`: a line
+  accrues once, a broker credit note line reverses the original in proportion and a royalty credit
+  lowers the period basis (422 PRC-0059 beyond the original line, also after the contract closed), and `contractaccrual.posted` carries Dr 6210 / Cr
+  2175 (broker) or Dr 6220 / Cr 2176 (royalty). `POST /royalty-agreements/{id}:close-period` posts the
+  minimum royalty shortfall once (PRC-0017 notice) and locks the period (409 PRC-0060). `POST
+  /contract-claims` claims a period as `BC-n` or `RY-n` (a royalty period must be closed, 409
+  PRC-0062), `:approve` refuses the creator (403 PRC-0046) and writes `contractclaim.approved` for AP.
 - **Record snapshot cache** (FR-26.14): `store.Cache` keeps the ACTIVE record set of a resolve per
   tenant, caller scope, legal entity, currency, customer group and pricing day for
   `PRICING_CACHE_TTL` (default 60s, 10s to 600s, 0 turns it off); activate, withdraw, journal post
@@ -220,6 +231,25 @@ testdata/               fixtures
 | POST | `/v1/pricing/rebates/vendor-claims` | pricing.rebate.maintain | body `{agreementId, period, settlementMode}`; RC-n; PRC-0043 / PRC-0015; `Idempotency-Key` honoured |
 | GET | `/v1/pricing/rebates/vendor-claims/{id}` | pricing.rebate.view | |
 | POST | `/v1/pricing/rebates/vendor-claims/{id}:approve` | pricing.rebate.claim.approve | body `{version}`; not by the creator (PRC-0046); `Idempotency-Key` honoured |
+| GET | `/v1/pricing/broker-contracts?legalEntityId=&brokerVendorId=&status=` | pricing.rebate.view | latest start first |
+| POST | `/v1/pricing/broker-contracts` | pricing.rebate.maintain | `Idempotency-Key` honoured; ACTIVE at version 1; accounts default 6210 / 2175; 403 AUTH-0003 outside the caller's legal entities |
+| GET | `/v1/pricing/broker-contracts/{id}` | pricing.rebate.view | PRC-0058 when unknown |
+| POST | `/v1/pricing/broker-contracts/{id}:close` | pricing.rebate.maintain | body `{version}`; `Idempotency-Key` honoured |
+| POST | `/v1/pricing/broker-contracts/{id}/accruals` | pricing.contract.accrue (service-only) | one posted invoice or credit note line; 201 new, 200 already accrued; PRC-0059 / PRC-0061 (stand-in for the invoice.posted consumer) |
+| GET | `/v1/pricing/broker-contracts/{id}/accruals?period=` | pricing.rebate.view | |
+| GET | `/v1/pricing/broker-contracts/{id}/claim-preview?period=` | pricing.rebate.view | month periods |
+| GET | `/v1/pricing/royalty-agreements?legalEntityId=&licensorVendorId=&status=` | pricing.rebate.view | latest start first |
+| POST | `/v1/pricing/royalty-agreements` | pricing.rebate.maintain | `Idempotency-Key` honoured; tiers as rebates; accounts default 6220 / 2176; 403 AUTH-0003 outside the caller's legal entities |
+| GET | `/v1/pricing/royalty-agreements/{id}` | pricing.rebate.view | PRC-0058 when unknown |
+| POST | `/v1/pricing/royalty-agreements/{id}:close` | pricing.rebate.maintain | body `{version}`; `Idempotency-Key` honoured |
+| POST | `/v1/pricing/royalty-agreements/{id}/accruals` | pricing.contract.accrue (service-only) | as for broker contracts; PRC-0060 in a closed period |
+| GET | `/v1/pricing/royalty-agreements/{id}/accruals?period=` | pricing.rebate.view | |
+| POST | `/v1/pricing/royalty-agreements/{id}:close-period` | pricing.rebate.maintain | body `{period}`; posts the minimum royalty shortfall once (PRC-0017 notice); closing again posts nothing |
+| GET | `/v1/pricing/royalty-agreements/{id}/claim-preview?period=` | pricing.rebate.view | |
+| GET | `/v1/pricing/contract-claims?contractKind=&contractId=&vendorId=&period=&status=` | pricing.rebate.view | Broker and royalty claims inquiry |
+| POST | `/v1/pricing/contract-claims` | pricing.rebate.maintain | body `{contractKind, contractId, period}`; BC-n / RY-n per legal entity; PRC-0043 / PRC-0015 / PRC-0062; `Idempotency-Key` honoured |
+| GET | `/v1/pricing/contract-claims/{id}` | pricing.rebate.view | |
+| POST | `/v1/pricing/contract-claims/{id}:approve` | pricing.rebate.claim.approve | body `{version}`; not by the creator nor without a user identity (PRC-0046); `Idempotency-Key` honoured |
 | POST | `/v1/pricing/rebates/agreements/{id}:retro-recompute` | pricing.rebate.maintain | `Idempotency-Key` required (names the run); body `{lines}` of posted invoices before the activation |
 | GET | `/v1/pricing/commission/sales-groups?legalEntityId=` | pricing.commission.view | |
 | POST | `/v1/pricing/commission/sales-groups` | pricing.commission.maintain | `Idempotency-Key` honoured; reps with shares summing to 100 |
@@ -282,16 +312,22 @@ testdata/               fixtures
 | PRC-0041 | 404 | Campaign not found (also when a condition record names an unknown campaign) |
 | PRC-0042 | 404 | Pricing procedure not found |
 | PRC-0043 | 422 | Nothing accrued in the period to claim |
-| PRC-0044 | 404 | Vendor rebate claim not found |
+| PRC-0044 | 404 | Vendor rebate, broker or royalty claim not found |
 | PRC-0045 | 422 | Party role mismatch: a sales invoice on a VENDOR agreement, a vendor invoice or claim on a CUSTOMER agreement |
-| PRC-0046 | 403 | The user who created a vendor rebate claim cannot approve it |
+| PRC-0046 | 403 | The user who created a vendor rebate, broker or royalty claim cannot approve it |
 | PRC-0056 | 403 | The user who ran a commodity price calculation cannot post its journal |
 | PRC-0057 | 403 | `journalFourEyes` is on: the journal's creator, or a caller without a user identity, cannot post it |
+| PRC-0017 | 200 (notice) | Minimum royalty shortfall posted at period close (informational, in the `:close-period` response) |
+| PRC-0058 | 404 | Broker contract or royalty agreement not found |
+| PRC-0059 | 422 | A credit note line reverses an invoice line never accrued on the contract, or credits more than is left of it |
+| PRC-0060 | 409 | The royalty period is closed and takes no more accruals |
+| PRC-0061 | 409 | The broker contract or royalty agreement is closed and takes no new invoice lines |
+| PRC-0062 | 409 | A royalty period is claimed before it is closed |
 | conflict_version | 412 | Body version does not match the stored version |
 | idempotency_key_reuse | 422 | Same `Idempotency-Key` with a different body, or an invoice line accrued again with a different date, value or quantity |
 | COM-0001 | 422 | Validation failure; `errors` maps each field to its message (percentages outside 0–100, a product-keyed TOTAL_DISC, bad dates, ...) |
 | AUTH-0001 | 401 | Missing or malformed tenant |
-| AUTH-0003 | 403 | Missing duty (kernel `authz`), or a legal entity outside the caller's scope (parameters) |
+| AUTH-0003 | 403 | Missing duty (kernel `authz`), or a legal entity outside the caller's scope (parameters, broker and royalty create) |
 
 ## Events
 
@@ -308,6 +344,9 @@ Written to `outbox` in the same transaction as the change (see `events/asyncapi.
 - `dev.passage.pricing.campaign.killed.v1`, `dev.passage.pricing.campaign.restored.v1` (kill switch)
 - `dev.passage.pricing.procedure.activated.v1` (names the superseded version)
 - `dev.passage.pricing.parameters.changed.v1` (a legal entity's parameters after a change, with the version and the user: the audit record)
+- `dev.passage.pricing.brokercontract.created.v1` and `.closed.v1`; `dev.passage.pricing.royaltyagreement.created.v1` and `.closed.v1`
+- `dev.passage.pricing.contractaccrual.posted.v1` (one per broker or royalty accrual, credit or minimum royalty shortfall, with `posting_date`; Dr 6210 / Cr 2175 broker, Dr 6220 / Cr 2176 royalty by default)
+- `dev.passage.pricing.contractclaim.created.v1` and `.approved.v1` (broker and royalty claims BC-n / RY-n for w19 AP)
 
 The entity segments are `conditionrecord` and `rebateaccrual` (as in `internal/events`); the PRD
 writes `condition-record` and `rebate-accrual`. Naming is a handoff to the kernel owner (see NOT-IMPLEMENTED.md).

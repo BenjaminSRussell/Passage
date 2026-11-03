@@ -65,6 +65,8 @@ type API struct {
 	retroRuns         atomic.Int64
 	// fundUsages counts usage attributions recorded against trade funds.
 	fundUsages atomic.Int64
+	// contractAccruals counts invoice lines accrued against broker contracts and royalty agreements.
+	contractAccruals atomic.Int64
 }
 
 // New builds the API; zero config values take the documented defaults.
@@ -91,6 +93,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerJournalRoutes(r)
 	a.registerParameterRoutes(r)
 	a.registerRebateRoutes(r)
+	a.registerBrokerRoyaltyRoutes(r)
 	a.registerRetroRoutes(r)
 	a.registerCommissionRoutes(r)
 	a.registerFundRoutes(r)
@@ -118,6 +121,7 @@ func (a *API) Metrics() http.Handler {
 			{"pricing_rebate_accruals_total", "Invoice lines accrued against a rebate agreement.", &a.accrualsPosted},
 			{"pricing_commission_postings_total", "Invoice lines that posted commission transactions.", &a.commissionsPosted},
 			{"pricing_rebate_retro_recomputes_total", "Retroactive rebate recomputes run.", &a.retroRuns},
+			{"pricing_contract_accruals_total", "Invoice lines accrued against broker contracts and royalty agreements.", &a.contractAccruals},
 			{"pricing_fund_usages_total", "Usage attributions recorded against trade funds.", &a.fundUsages},
 		}
 		for _, c := range counters {

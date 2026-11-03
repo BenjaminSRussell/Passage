@@ -16,7 +16,7 @@ import (
 func TestGrants_LockedTablesAllowUpdateForAppRole(t *testing.T) {
 	admin, _ := adminAndAppPools(t)
 	ctx := context.Background()
-	for _, table := range []string{"condition_record", "trade_fund", "pricing_procedure", "campaign", "rebate_agreement", "rebate_period", "price_journal", "vendor_rebate_claim", "commodity_basis", "commodity_calculation"} {
+	for _, table := range []string{"condition_record", "trade_fund", "pricing_procedure", "campaign", "rebate_agreement", "rebate_period", "price_journal", "vendor_rebate_claim", "commodity_basis", "commodity_calculation", "broker_contract", "royalty_agreement", "contract_period", "contract_claim"} {
 		var ok bool
 		if err := admin.QueryRow(ctx, `select has_table_privilege('passage_app', $1, 'UPDATE')`, table).Scan(&ok); err != nil {
 			t.Fatal(err)
@@ -37,6 +37,8 @@ func TestGrants_AppRoleCannotRewriteAppendOnlyTables(t *testing.T) {
 		`update outbox set type = type`,
 		`update commodity_index_value set value = value`,
 		`delete from commodity_index_value`,
+		`update contract_accrual set amount = amount`,
+		`delete from contract_accrual`,
 		`update commodity_run set price = price`,
 	} {
 		err := dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
