@@ -176,6 +176,32 @@ paths:
         '404': { description: PTY-PARTY-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /v1/party/parties/{id}:merge:
+    parameters:
+      - { name: id, in: path, required: true, description: Surviving party id., schema: { type: string, format: uuid } }
+    post:
+      operationId: mergeParties
+      summary: Merge a duplicate party into the surviving party.
+      x-passage-duty: party.merge
+      description: Needs duty party.merge from a tenant.administer caller with no legal-entity claim, else 403 AUTH-0003. Merges within the caller's tenant only; a party id from another tenant is 404. Customer and vendor roles and invoice-account references move to the survivor in one transaction, the merged party becomes status merged, and dev.passage.party.party.merged.v1 is emitted. Both parties must be the same type; the same party twice, an already-merged party, or a repeat of a completed merge is 409 PTY-MERGE-CONFLICT. Both holding a role in the same legal entity is 409 PTY-MERGE-ROLE-CONFLICT. rules names a survivorship rule per merge field (keepWinner, keepLoser, newest, nonEmpty); an unknown field or rule is 422 PTY-PARTY-INVALID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MergeRequest' }
+      responses:
+        '200':
+          description: The merge record.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MergeResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: PTY-PARTY-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /v1/party/parties/{id}/vendors:
     parameters:
       - { name: id, in: path, required: true, description: Party id., schema: { type: string, format: uuid } }
@@ -575,6 +601,25 @@ components:
       required: [fields]
       properties:
         fields: { type: array, items: { type: string, enum: [credit_limit] }, uniqueItems: true }
+    MergeRequest:
+      type: object
+      additionalProperties: false
+      required: [mergedPartyId]
+      properties:
+        mergedPartyId: { type: string, format: uuid, description: The duplicate to merge into the party in the path. }
+        rules:
+          type: object
+          additionalProperties: { type: string, enum: [keepWinner, keepLoser, newest, nonEmpty] }
+    MergeResult:
+      type: object
+      required: [mergeId, survivorPartyId, mergedPartyId, rolesMoved, referencesRewritten, resolved]
+      properties:
+        mergeId: { type: string }
+        survivorPartyId: { type: string, format: uuid }
+        mergedPartyId: { type: string, format: uuid }
+        rolesMoved: { type: integer }
+        referencesRewritten: { type: integer }
+        resolved: { type: object, additionalProperties: { type: string } }
     Decision:
       type: object
       additionalProperties: false

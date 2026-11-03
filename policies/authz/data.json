@@ -598,7 +598,8 @@
       {"resource": "/v1/party/parties/*", "methods": ["PATCH"]},
       {"resource": "/v1/party/customers/*/credit-limit", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*/vendor", "methods": ["POST"]},
-      {"resource": "/v1/party/parties/*/customer", "methods": ["POST"]}
+      {"resource": "/v1/party/parties/*/customer", "methods": ["POST"]},
+      {"resource": "/v1/party/parties/*:merge", "methods": ["POST"]}
     ]},
     "party.import.write": {"service_only": true, "permissions": [
       {"resource": "/v1/party/parties", "methods": ["POST"]},

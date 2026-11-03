@@ -45,12 +45,14 @@ type API struct {
 	credit    store.CreditStore
 	vendors   store.VendorStore
 	customers store.CustomerStore
+	merges    MergeStore
 	sequence  Sequencer
 
 	creditCounts     creditMetrics
 	created          atomic.Int64
 	vendorsCreated   atomic.Int64
 	customersCreated atomic.Int64
+	merged           atomic.Int64
 	checker          loggedChecker
 	statuses         map[domain.Status]*atomic.Int64
 	rejected         atomic.Int64
@@ -108,6 +110,9 @@ func (a *API) Register(r chi.Router) {
 	if a.customers != nil {
 		a.registerCustomers(r)
 	}
+	if a.merges != nil {
+		a.registerMerge(r)
+	}
 }
 
 func (a *API) Metrics() http.Handler {
@@ -123,6 +128,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP party_parties_created_total Parties created; an idempotent replay is not counted.\n# TYPE party_parties_created_total counter\nparty_parties_created_total %d\n", a.created.Load())
 		fmt.Fprintf(w, "# HELP party_vendor_roles_created_total Vendor roles created; an idempotent replay is not counted.\n# TYPE party_vendor_roles_created_total counter\nparty_vendor_roles_created_total %d\n", a.vendorsCreated.Load())
 		fmt.Fprintf(w, "# HELP party_customer_roles_created_total Customer roles created; an idempotent replay is not counted.\n# TYPE party_customer_roles_created_total counter\nparty_customer_roles_created_total %d\n", a.customersCreated.Load())
+		fmt.Fprintf(w, "# HELP party_merges_total Party merges completed.\n# TYPE party_merges_total counter\nparty_merges_total %d\n", a.merged.Load())
 		fmt.Fprint(w, "# HELP party_credit_limit_changes_total Credit limit changes by outcome: requested (increase held for approval), applied (decrease), approved, rejected.\n# TYPE party_credit_limit_changes_total counter\n")
 		c := &a.creditCounts
 		fmt.Fprintf(w, "party_credit_limit_changes_total{outcome=\"requested\"} %d\nparty_credit_limit_changes_total{outcome=\"applied\"} %d\nparty_credit_limit_changes_total{outcome=\"approved\"} %d\nparty_credit_limit_changes_total{outcome=\"rejected\"} %d\n",
