@@ -197,13 +197,55 @@ func TestPurgeErasesWithdrawnConsentAndExpiredCandidates(t *testing.T) {
 
 type fakeHolds struct {
 	held  map[string][]string
+	holds func(id string) []string
 	err   error
 	asked []struct{ legalEntityID, candidateID string }
 }
 
 func (h *fakeHolds) CoveringCandidate(_ context.Context, legalEntityID, candidateID string) ([]string, error) {
 	h.asked = append(h.asked, struct{ legalEntityID, candidateID string }{legalEntityID, candidateID})
+	if h.holds != nil {
+		return h.holds(candidateID), h.err
+	}
 	return h.held[candidateID], h.err
+}
+
+func TestPurgePagesPastHeldCandidates(t *testing.T) {
+	f := newPersonnel(t)
+	req := f.openRequisition(t, "REQ-1", 1)
+	if _, err := f.s.SetRetentionPolicy(f.ctx, ClassCandidate, 6); err != nil {
+		t.Fatal(err)
+	}
+	f.setNow(day(time.February, 1).AddDate(0, 7, 0))
+	const heldRows = purgeBatch + 20
+	tenantID := principal(f.ctx).TenantID
+	err := dbx.WithTenantTx(f.ctx, f.s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(f.ctx, `insert into hr_candidate (tenant_id, id, requisition_id, legal_entity_id, stage, full_name_sealed, stage_changed_at)
+			select $1, ('00000000-0000-4000-8000-' || lpad(g::text, 12, '0'))::uuid, $2, $3, 'REJECTED', '\x01', $4
+			from generate_series(1, $5) g`, tenantID, req.ID, f.entity, day(time.January, 1), heldRows)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	free := f.candidateAtOffer(t, req, "Free")
+	if _, err := f.s.MoveCandidate(f.ctx, free.ID, "REJECTED"); err != nil {
+		t.Fatal(err)
+	}
+	f.setNow(day(time.February, 1).AddDate(0, 14, 0))
+	holds := &fakeHolds{holds: func(id string) []string {
+		if id == free.ID {
+			return nil
+		}
+		return []string{"hold-1"}
+	}}
+	res, err := f.s.PurgeCandidates(f.ctx, holds)
+	if err != nil || res.Erased != 1 || res.HeldCount != heldRows || len(res.HeldCandidateIDs) != maxReportedHeld {
+		t.Fatalf("purge = %+v err %v, want the free candidate erased behind %d held rows", res, err, heldRows)
+	}
+	if c, _ := f.s.GetCandidate(f.ctx, free.ID); !c.Erased {
+		t.Fatal("a candidate behind more than one page of held rows was not erased")
+	}
 }
 
 func TestPurgeSkipsHeldCandidatesAndStopsOnAnUnansweredCheck(t *testing.T) {
@@ -233,7 +275,7 @@ func TestPurgeSkipsHeldCandidatesAndStopsOnAnUnansweredCheck(t *testing.T) {
 		}
 	}
 	res, err := f.s.PurgeCandidates(f.ctx, &fakeHolds{held: map[string][]string{held.ID: {"hold-1"}}})
-	if err != nil || res.Erased != 1 || len(res.Held) != 1 || res.Held[0].CandidateID != held.ID || res.Held[0].HoldIDs[0] != "hold-1" {
+	if err != nil || res.Erased != 1 || res.HeldCount != 1 || res.HeldCandidateIDs[0] != held.ID {
 		t.Fatalf("purge = %+v err %v, want the free candidate erased and the held one reported", res, err)
 	}
 	if c, _ := f.s.GetCandidate(f.ctx, held.ID); c.Erased || c.FullName == nil {

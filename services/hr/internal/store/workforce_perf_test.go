@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"testing"
 	"time"
@@ -95,7 +96,7 @@ func TestWorkerAsOfP95AtTwelveHundredWorkers(t *testing.T) {
 	}
 
 	samples := asOfSamples
-	if testing.Short() {
+	if os.Getenv("HR_PERF_FULL") == "" {
 		samples = asOfShortSamples
 	}
 	durations := make([]time.Duration, 0, samples)

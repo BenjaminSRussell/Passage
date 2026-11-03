@@ -42,8 +42,9 @@ func TestScheduledAccrualAndCarryOverExpiry(t *testing.T) {
 	if _, err := s.CloseYear(ctx, plan.ID, day(time.January, 1)); err != nil {
 		t.Fatalf("close year: %v", err)
 	}
-	if _, err := s.RunScheduledAccrual(ctx); err != nil {
-		t.Fatalf("accrual after year end: %v", err)
+	closedYear, err := s.RunScheduledAccrual(ctx)
+	if err != nil || closedYear.Skipped < 7 {
+		t.Fatalf("accrual after year end = %+v err %v, want June to December 2026 reported as skipped", closedYear, err)
 	}
 	if _, err := s.RunScheduledCarryOverExpiry(ctx); err != nil {
 		t.Fatalf("expiry before its day: %v", err)

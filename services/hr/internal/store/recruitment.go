@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -607,14 +608,43 @@ type CandidateHolds interface {
 
 var ErrNoCandidateHolds = errors.New("the compliance hold check is not configured")
 
-type HeldCandidate struct {
-	CandidateID string   `json:"candidateId"`
-	HoldIDs     []string `json:"holdIds"`
-}
+var ErrHoldCheckFailed = errors.New("the legal hold check failed")
 
 type PurgeResult struct {
-	Erased int             `json:"erased"`
-	Held   []HeldCandidate `json:"held"`
+	Erased           int      `json:"erased"`
+	HeldCount        int      `json:"heldCount"`
+	HeldCandidateIDs []string `json:"heldCandidateIds"`
+}
+
+const maxReportedHeld = 100
+
+const purgeDueSQL = `select c.id::text, c.legal_entity_id::text from hr_candidate c
+	where c.tenant_id = $1 and c.erased_at is null and c.id > $5::uuid and ($6::uuid[] is null or c.id = any($6::uuid[]))
+	and (exists (select 1 from hr_consent_record k where k.tenant_id = c.tenant_id and k.subject_type = 'CANDIDATE' and k.subject_id = c.id and k.purpose = 'RECRUITMENT' and k.withdrawn_at is not null)
+		and not exists (select 1 from hr_consent_record k where k.tenant_id = c.tenant_id and k.subject_type = 'CANDIDATE' and k.subject_id = c.id and k.purpose = 'RECRUITMENT' and k.withdrawn_at is null)
+		or ($2::int is not null and c.stage in ('REJECTED', 'HIRED') and c.stage_changed_at < $3::timestamptz - make_interval(months => coalesce($2::int, 0))))
+	order by c.id limit $4`
+
+type dueCandidate struct{ id, legalEntityID string }
+
+func (s *Postgres) dueCandidates(ctx context.Context, tx pgx.Tx, tenantID string, after string, only []string, lock bool) ([]dueCandidate, error) {
+	var months *int
+	err := tx.QueryRow(ctx, `select retention_months from hr_retention_policy where tenant_id = $1 and data_class = 'CANDIDATE'`, tenantID).Scan(&months)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	query := purgeDueSQL
+	if lock {
+		query += ` for update of c`
+	}
+	rows, err := tx.Query(ctx, query, tenantID, months, s.now(), purgeBatch, after, only)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (dueCandidate, error) {
+		var d dueCandidate
+		return d, row.Scan(&d.id, &d.legalEntityID)
+	})
 }
 
 func (s *Postgres) PurgeCandidates(ctx context.Context, holds CandidateHolds) (PurgeResult, error) {
@@ -622,51 +652,61 @@ func (s *Postgres) PurgeCandidates(ctx context.Context, holds CandidateHolds) (P
 		return PurgeResult{}, ErrNoCandidateHolds
 	}
 	p := principal(ctx)
-	result := PurgeResult{Held: []HeldCandidate{}}
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		result = PurgeResult{Held: []HeldCandidate{}}
-		var months *int
-		err := tx.QueryRow(ctx, `select retention_months from hr_retention_policy where tenant_id = $1 and data_class = 'CANDIDATE'`, p.TenantID).Scan(&months)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	result := PurgeResult{HeldCandidateIDs: []string{}}
+	cursor := ids.Nil
+	for {
+		var page []dueCandidate
+		err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
+			page, err = s.dueCandidates(ctx, tx, p.TenantID, cursor, nil, false)
 			return err
-		}
-		rows, err := tx.Query(ctx, `select c.id::text, c.legal_entity_id::text from hr_candidate c
-			where c.tenant_id = $1 and c.erased_at is null
-			and (exists (select 1 from hr_consent_record k where k.tenant_id = c.tenant_id and k.subject_type = 'CANDIDATE' and k.subject_id = c.id and k.purpose = 'RECRUITMENT' and k.withdrawn_at is not null)
-				and not exists (select 1 from hr_consent_record k where k.tenant_id = c.tenant_id and k.subject_type = 'CANDIDATE' and k.subject_id = c.id and k.purpose = 'RECRUITMENT' and k.withdrawn_at is null)
-				or ($2::int is not null and c.stage in ('REJECTED', 'HIRED') and c.stage_changed_at < $3::timestamptz - make_interval(months => coalesce($2::int, 0))))
-			order by c.id limit $4 for update of c`, p.TenantID, months, s.now(), purgeBatch)
-		if err != nil {
-			return err
-		}
-		type due struct{ id, legalEntityID string }
-		doomed, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (due, error) {
-			var d due
-			return d, row.Scan(&d.id, &d.legalEntityID)
 		})
 		if err != nil {
-			return err
+			return result, err
 		}
-		for _, d := range doomed {
+		var clear []string
+		for _, d := range page {
 			holdIDs, err := holds.CoveringCandidate(ctx, d.legalEntityID, d.id)
 			if err != nil {
-				return fmt.Errorf("legal hold check for candidate %s: %w", d.id, err)
+				return result, fmt.Errorf("%w: candidate %s: %w", ErrHoldCheckFailed, d.id, err)
 			}
-			if len(holdIDs) > 0 {
-				result.Held = append(result.Held, HeldCandidate{CandidateID: d.id, HoldIDs: holdIDs})
+			if len(holdIDs) == 0 {
+				clear = append(clear, d.id)
 				continue
 			}
-			if _, err := tx.Exec(ctx, `update hr_candidate set full_name_sealed = null, email_sealed = null, phone_sealed = null, erased_at = now() where tenant_id = $1 and id = $2`, p.TenantID, d.id); err != nil {
-				return err
+			slog.WarnContext(ctx, "retention purge skipped a candidate under legal hold", "candidateId", d.id, "holdIds", holdIDs, "tenantId", p.TenantID)
+			result.HeldCount++
+			if len(result.HeldCandidateIDs) < maxReportedHeld {
+				result.HeldCandidateIDs = append(result.HeldCandidateIDs, d.id)
 			}
-			if err := auditCandidate(ctx, tx, p, "p3_change", d.id, candidatePIIFields, "erased by retention or withdrawn consent"); err != nil {
-				return err
-			}
-			result.Erased++
 		}
-		return nil
-	})
-	return result, err
+		if len(clear) > 0 {
+			erasedNow := 0
+			err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+				locked, err := s.dueCandidates(ctx, tx, p.TenantID, ids.Nil, clear, true)
+				if err != nil {
+					return err
+				}
+				for _, d := range locked {
+					if _, err := tx.Exec(ctx, `update hr_candidate set full_name_sealed = null, email_sealed = null, phone_sealed = null, erased_at = now() where tenant_id = $1 and id = $2`, p.TenantID, d.id); err != nil {
+						return err
+					}
+					if err := auditCandidate(ctx, tx, p, "p3_change", d.id, candidatePIIFields, "erased by retention or withdrawn consent"); err != nil {
+						return err
+					}
+				}
+				erasedNow = len(locked)
+				return nil
+			})
+			if err != nil {
+				return result, err
+			}
+			result.Erased += erasedNow
+		}
+		if len(page) < purgeBatch {
+			return result, nil
+		}
+		cursor = page[len(page)-1].id
+	}
 }
 
 type Offer struct {

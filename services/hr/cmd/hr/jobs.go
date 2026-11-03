@@ -37,7 +37,7 @@ var (
 			return slog.Attr{}, err
 		}
 		res, err := s.PurgeCandidates(ctx, holds)
-		return slog.Group("result", slog.Int("erased", res.Erased), slog.Int("held", len(res.Held))), err
+		return slog.Group("result", slog.Int("erased", res.Erased), slog.Int("held", res.HeldCount)), err
 	}}
 	tenantJobs = []tenantJob{accrueJob, carryOverExpiryJob, retentionPurgeJob}
 )

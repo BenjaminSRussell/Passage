@@ -110,6 +110,7 @@ func (s *Postgres) RunScheduledAccrual(ctx context.Context) (ScheduledRun, error
 			}
 			_, err := s.RunAccrual(ctx, plan.ID, from, to)
 			if problemCode(err) == CodeYearClosed {
+				slog.WarnContext(ctx, "hr accrual skipped a period of a closed plan year", "plan", plan.Code, "periodStart", from.Format(absDateLayout))
 				run.Skipped++
 				last = &to
 				continue
