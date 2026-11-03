@@ -97,6 +97,14 @@ describe("Reservations against expected receipts", () => {
     expect(table).toHaveTextContent("Stock on hand");
   });
 
+  it("marks a reservation whose expected receipt has arrived", async () => {
+    handler = () => json(200, { items: [reservation({ kind: "PHYSICAL", convertedAt: "2026-09-03T09:30:00Z" })] });
+    renderAt("/inventory/reservations");
+    const table = await findTable({ name: "Reservations" });
+    expect(table).toHaveTextContent("Stock on hand (receipt arrived");
+    expect(table).not.toHaveTextContent("Expected receipt");
+  });
+
   it("shows the quantity reserved against expected receipts in the on-hand inquiry", async () => {
     handler = () =>
       json(200, {

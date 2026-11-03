@@ -19,6 +19,9 @@ import (
 type supplyDelta struct {
 	r                *row
 	onOrder, ordered decimal.Decimal
+	// before is the row as it stood when the booking locked it, for the
+	// INV-RES-004 cover check announceTransferSupply runs on the final state.
+	before domain.OnHand
 }
 
 // syncTransferSupply books the supply and demand pair of order o and announces
@@ -179,6 +182,7 @@ func bookTransferSupply(ctx context.Context, tx pgx.Tx, tenantID string, o domai
 		if d.onOrder.IsZero() && d.ordered.IsZero() {
 			continue
 		}
+		d.before = d.r.oh
 		d.r.oh.OnOrder = d.r.oh.OnOrder.Add(d.onOrder)
 		d.r.oh.Ordered = d.r.oh.Ordered.Add(d.ordered)
 		if err := saveRow(ctx, tx, tenantID, o.LegalEntityID, d.r, 0); err != nil {
@@ -205,10 +209,21 @@ func bookTransferSupply(ctx context.Context, tx pgx.Tx, tenantID string, o domai
 // intermediate state between releasing the supply and moving the stock (a
 // receipt's ORDERED release before its quantity arrives). The rows are already
 // locked by this transaction; reading them again does not wait.
+//
+// It is also where a change that took expected receipt away (cancel, delete, a
+// shorter or removed line, a receipt closed short) is checked against the
+// reservations made on that receipt (INV-RES-004): the caller runs it after its
+// stock moves and after converting the reservations of what arrived, so a
+// receipt is measured by what is still uncovered once it converted.
 func announceTransferSupply(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string, moved []*supplyDelta) error {
 	for _, d := range moved {
 		if err := lockRow(ctx, tx, tenantID, legalEntityID, "", d.r); err != nil {
 			return err
+		}
+		if d.ordered.IsNegative() {
+			if err := domain.CheckOrderedCover(d.before, d.r.oh); err != nil {
+				return domainProblem(err)
+			}
 		}
 		if !d.onOrder.IsZero() {
 			if err := enqueueOnHand(ctx, tx, tenantID, legalEntityID, d.r, invevents.BucketOnOrder, d.onOrder); err != nil {

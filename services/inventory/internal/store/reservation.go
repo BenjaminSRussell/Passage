@@ -256,16 +256,16 @@ type ExpireResult struct {
 // releaseReservation releases one reservation; with onlyExpired it leaves a reservation
 // alone that is not (or no longer) ACTIVE and past its expiry, and done is false then.
 // The expiry path re-checks status and expires_at under the row lock with the database
-// clock and skips a row another transaction holds (SKIP LOCKED): two expiry runs at once,
-// or a run racing a DELETE, never release the same reservation twice nor wait on each other.
+// clock: two expiry runs at once, or a run racing a DELETE or a receipt's conversion, wait
+// for each other on the on-hand row and never release the same reservation twice.
 func (s *Postgres) releaseReservation(ctx context.Context, id string, onlyExpired bool) (domain.Reservation, bool, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out domain.Reservation
 	done := false
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		where := `r.tenant_id = $1 and r.id = $2 for update of r`
+		where := `r.tenant_id = $1 and r.id = $2`
 		if onlyExpired {
-			where = `r.tenant_id = $1 and r.id = $2 and r.status = 'ACTIVE' and r.expires_at <= now() for update of r skip locked`
+			where = `r.tenant_id = $1 and r.id = $2 and r.status = 'ACTIVE' and r.expires_at <= now()`
 		}
 		found, err := queryReservations(ctx, tx, where, p.TenantID, id)
 		if err != nil {
@@ -277,17 +277,32 @@ func (s *Postgres) releaseReservation(ctx context.Context, id string, onlyExpire
 			}
 			return problem(http.StatusNotFound, domain.CodeReservationNotFound, "reservation not found")
 		}
+		if found[0].Status != domain.ReservationActive {
+			out = found[0].Reservation
+			return nil
+		}
+		// Lock order: the on-hand row first, then the reservation (as a receipt that converts
+		// the reservations of a row does), so a release racing that receipt waits instead of
+		// deadlocking. The reservation is read again under its lock: a concurrent release,
+		// expiry or conversion may have changed its status, kind or quantity meanwhile (never
+		// its dimension set, so the row locked is still its row).
+		dims, _ := found[0].Dims.Normalize()
+		r := &row{product: found[0].ProductID, dims: dims, hash: dims.Hash()}
+		if err := lockRow(ctx, tx, p.TenantID, found[0].LegalEntityID, "", r); err != nil {
+			return err
+		}
+		if found, err = queryReservations(ctx, tx, where+` for update of r`, p.TenantID, id); err != nil {
+			return err
+		}
+		if len(found) == 0 {
+			return nil // the expiry run lost the race: released (or no longer due) meanwhile
+		}
 		res := found[0].Reservation
 		if res.Status != domain.ReservationActive {
 			out = res
 			return nil
 		}
 		done = true
-		dims, _ := res.Dims.Normalize()
-		r := &row{product: res.ProductID, dims: dims, hash: dims.Hash()}
-		if err := lockRow(ctx, tx, p.TenantID, res.LegalEntityID, "", r); err != nil {
-			return err
-		}
 		bucket := invevents.BucketReservedPhysical
 		if res.Kind == domain.ReserveKindOrdered {
 			r.oh.ReservedOrdered = r.oh.ReservedOrdered.Sub(res.Qty)
@@ -490,7 +505,7 @@ type reservationRow struct {
 // sets; where is the rest of the statement after "where".
 func queryReservations(ctx context.Context, tx pgx.Tx, where string, args ...any) ([]reservationRow, error) {
 	rows, err := tx.Query(ctx, `select r.id::text, r.legal_entity_id::text, r.product_id::text, d.dims, r.qty::text, r.requested_qty::text,
-		r.demand_type, r.demand_id, r.demand_segment, r.policy, r.status, r.allocation_no, r.created_at, r.released_at, r.expires_at, r.kind
+		r.demand_type, r.demand_id, r.demand_segment, r.policy, r.status, r.allocation_no, r.created_at, r.released_at, r.expires_at, r.kind, r.converted_at
 		from inventory_reservation r join dimension_set d on d.tenant_id = r.tenant_id and d.hash = r.dimension_set_hash
 		where `+where, args...)
 	if err != nil {
@@ -503,7 +518,7 @@ func queryReservations(ctx context.Context, tx pgx.Tx, where string, args ...any
 		var raw []byte
 		var qty, requested, demand, policy, status, kind string
 		if err := rows.Scan(&rr.ID, &rr.LegalEntityID, &rr.ProductID, &raw, &qty, &requested, &demand, &rr.DemandID, &rr.DemandSegment, &policy, &status,
-			&rr.AllocationNo, &rr.CreatedAt, &rr.ReleasedAt, &rr.ExpiresAt, &kind); err != nil {
+			&rr.AllocationNo, &rr.CreatedAt, &rr.ReleasedAt, &rr.ExpiresAt, &kind, &rr.ConvertedAt); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(raw, &rr.Dims); err != nil {
@@ -520,6 +535,9 @@ func queryReservations(ctx context.Context, tx pgx.Tx, where string, args ...any
 // samePriorRequest reports whether a replayed request matches what was stored.
 func samePriorRequest(prior []reservationRow, in ReserveInput) bool {
 	first := prior[0]
+	if first.ConvertedAt != nil {
+		first.Kind = domain.ReserveKindOrdered // requested against the expected receipt; the receipt has since arrived
+	}
 	return first.LegalEntityID == in.LegalEntityID && first.ProductID == in.ProductID && first.DemandType == in.DemandType &&
 		first.DemandID == in.DemandID && first.Kind == in.Kind && first.DemandSegment == in.Segment && first.Policy == in.Policy && first.requested.Equal(in.Qty) &&
 		ttlHoursOf(first.Reservation) == in.TTLHours

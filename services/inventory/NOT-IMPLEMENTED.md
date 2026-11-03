@@ -391,9 +391,40 @@ reservation list and a "Reserved on order" column in the on-hand inquiry; tests 
 no service consumes `reservation.*` or `onhand.changed`, and inside inventory `reserved_ordered` only lowers `availOrdered` (the financial-negative check and the ORDERED cap); `availPhysical` is unchanged. Purchasing's per-line warehouse (`po.confirmed.v1` lines carry `warehouse_id`, wave 17 slice 16): inventory books no
 purchase ORDERED itself (it has no consumer of `po.confirmed.v1`; the document's service registers the expected receipt through
 `transactions:apply` with the dimension set it chooses, which already accepts any warehouse), so the per-line warehouse is wave 17's
-call to make, handoff below. Not built: converting an ORDERED reservation into a physical one when the receipt arrives, and refusing a
-transfer cancel / edit that would leave `reserved_ordered` above the remaining ordered supply (the reservation stays; `availOrdered`
-shows the over-commitment); ORDERED reservations by FIFO, FEFO or LIFO policy (a policy has no ordered-stock ranking yet).
+call to make, handoff below. Not built in slice 24 (slice 25 builds the first two): converting an ORDERED reservation into a physical one when the receipt arrives, and refusing a
+transfer cancel / edit that would leave `reserved_ordered` above the remaining ordered supply; ORDERED reservations by FIFO, FEFO or LIFO policy (a policy has no ordered-stock ranking yet).
+
+PSG-1625 (wave 16 slice 25) finishes the two follow-ups of reservations against expected receipts (FR-16.7). (a) Conversion on
+arrival: when stock that was expected arrives at a dimension set, the ACTIVE ORDERED reservations there convert to PHYSICAL for the
+quantity that arrived, oldest first (creation time), never more than `reserved_ordered`: `ReceiveTransfer` does it for every receiving row of the
+receipt, `ShipTransfer` does it for a one-step order (no transit warehouse: the shipment is the receipt), and `ApplyStatusStep` does it when a receipt moves from ORDERED or ARRIVED to any non-expected status (REGISTERED, RECEIVED,
+PURCHASED). A reservation that arrived whole changes `kind` in place; one that arrived in part is split: its quantity falls by the
+arrived part and a new PHYSICAL allocation of the same request, demand, expiry and idempotency key (next `allocation_no`) takes that
+part. Migration 0028 adds `inventory_reservation.converted_at` (nullable, metadata-only, no new table, so no grant): it is set on every
+converted allocation, is returned as `convertedAt`, and lets a retried `POST /reservations` of an ORDERED request still replay after
+its reservation turned physical (the request is compared as ORDERED when `converted_at` is set; the split request replays both
+allocations with no shortfall). `reserved_ordered` falls and `reserved_physical` rises by the converted quantity in the receiving
+transaction, `availOrdered` does not move, `onhand.changed` is announced for RESERVED_ORDERED (negative) and RESERVED_PHYSICAL, and
+each conversion writes `dev.passage.inventory.reservation.converted.v1` (the `ReservationData` payload, with
+`convertedFromReservationId` on a split); the rebuild-and-compare needs no change because it reads the reservation's current kind.
+A converted reservation is an ordinary physical one (release, expiry and the consumers treat it as such). A step back from a physical
+status to ARRIVED (unregister) does not convert anything back. Lock order: the conversion locks the on-hand row and then the
+reservation rows, and a release (DELETE or the expiry run) now locks the on-hand row before the reservation too, so a release racing a
+receipt of the same row waits instead of deadlocking (`TestReleaseRacingReceiptConversion`). (b) Cover guard: every transfer change
+that takes expected receipt away from a dimension set (cancel, delete, line removal, quantity cut, and a receipt closed short) is
+checked once its stock moved and the reservations of what arrived converted (`announceTransferSupply`), and is refused with
+INV-RES-004 (422, new code outside the PRD 3.16.18 catalog, no new duty) when it leaves `reserved_ordered` above ordered plus arrived;
+nothing is changed, and releasing the reservations first lets it through. A row already over-committed before the change (data
+written before this slice) is refused only when the change widens the gap, so a receipt there still goes through. Purchase-side
+expected receipts need no guard: their ordered and arrived quantity only falls through a step to a physical status, which converts. Tests: `TestTransferReceiptConvertsReservationsAgainstIt`,
+`TestReceiptConvertsOnlyReservedQuantityAtTheReceivingSet`, `TestStatusStepToPhysicalConvertsReservations`,
+`TestTransferChangeRefusedWhileReservedAgainstItsReceipt`, `TestDirectTransferShipmentConvertsReservations`,
+`TestReceiptClosedShortRefusedWhileReservedAgainstTheRest`, `TestReleaseRacingReceiptConversion`, `TestPlanConversionTakesOldestFirstAndOnlyWhatArrived`,
+`TestCheckOrderedCover`, and a web test that the reservation list marks a reservation whose receipt arrived ("Stock on hand (receipt
+arrived ...)"). No new duty, route or authz seed row. The OpenAPI and AsyncAPI documents have no FAIL lines on the documentation
+gates. Not built: policy (FIFO / FEFO / LIFO) reservations against expected receipts; converting on a movement journal receipt (only
+transfer receipts and status steps carry an expected receipt today); the consumers of fulfillment's `shipment.closed` /
+`shipment.released` (above, still wave 24 / 27 and Kafka consumer wiring); inventory GL posting through ledgerclient (open issue #477).
 
 Every other item in the ticket and PRD 3.16 is listed here.
 
@@ -419,7 +450,7 @@ Every other item in the ticket and PRD 3.16 is listed here.
 | 2 | Journal number sequence `INVJ-` | handoff — wave 5 (numbering) | Journals are identified by id; the number column and sequence call arrive with the numbering client. |
 | 2 | CSV import, paste from spreadsheet, copy journal | later slice of PSG-16 | Web grid features; the slice 1 screen adds one line at a time. |
 | 3 | Reservations: MANUAL, FIFO, FEFO, LIFO against on-hand (RESERVED_PHYSICAL), over-reservation rejected, partial with shortfall, `POST/GET/DELETE /reservations` | built (slice 2) | Every on-hand row of the product in the legal entity is locked before allocation, so reservations never over-reserve (`TestConcurrentReservationsNeverOverReserve`). |
-| 3 | Reservations against expected receipts (RESERVED_ORDERED) | built (slice 24) for MANUAL reservations of one dimension set; later slice of PSG-16 for policy reservations and conversion on receipt | `against: ORDERED` on `POST /reservations` reserves part of the unreserved ordered / arrived supply (transfer orders fill it; purchase and receiving fill it through `transactions:apply`). Policy (FIFO / FEFO / LIFO) allocation over expected receipts and moving the reservation to physical stock when the receipt arrives are not built. |
+| 3 | Reservations against expected receipts (RESERVED_ORDERED) | built (slice 24 reserve, slice 25 conversion and cover guard) for MANUAL reservations of one dimension set; later slice of PSG-16 for policy reservations | `against: ORDERED` on `POST /reservations` reserves part of the unreserved ordered / arrived supply (transfer orders fill it; purchase and receiving fill it through `transactions:apply`). Slice 25: receiving a transfer (or shipping a one-step one), or stepping a purchase receipt from ORDERED / ARRIVED to a physical status, converts the reservations made against it to PHYSICAL (oldest first, split when only part arrived, `reservation.converted.v1`), and a transfer cancel, delete, shortening or short close that would leave more reserved than still expected is INV-RES-004. Policy (FIFO / FEFO / LIFO) allocation over expected receipts is not built (a policy has no ordered-stock ranking yet). |
 | 3 | Reservations as RESERVED_PHYSICAL issue transactions, CONSUMED status | handoff — waves 21 / 27 (production, sales) | A reservation is a record that moves the `reserved_physical` bucket; the projection's bucket equals the sum of ACTIVE reservations (reconciliation test). The demand documents that would own an issue transaction, and consume the reservation on issue, belong to the sales and production waves. |
 | 3 | Segment-aware reservations (FR-16.20, BR-16.17) | built (slice 5) | The request names the demand's segment (`segmentType` SALES_ORDER / PROJECT, `segmentRef`, `segmentFallback`, default true). A policy reservation takes that segment's stock first, then unsegmented stock with fallback, never another segment; an unsegmented demand never takes segmented stock. A MANUAL reservation of stock whose segment the demand may not take is `INV-SEG-001`. The demand segment is stored (replay check of the key) and shown in the inquiry and the reservation events. Vendor-owned stock is never reserved (`INV-OWN-001` for MANUAL, skipped by the policies). Store test: `TestSegmentAwareReservations`. |
 | 3 | Reservation TTL (`reservation_ttl_hours`, `expires_at`, 5-minute expiry job) | built (slice 16) for the request TTL and the expiry run; later slice of PSG-16 for the scheduler and the legal-entity default | A reservation request may carry `ttlHours` (0 to 8760); `expires_at` is set on every allocation and `POST /v1/inventory/reservations:expire` (`inventory.reservation.write`, optional `limit`) releases the due ones. No scheduler is wired (see the Temporal jobs row): the run is called by an operator, the "Release expired" button or a job, and is safe to repeat. `reservation_ttl_hours` as a legal-entity default is wave 6 / wave 8 parameter data (the request carries it). |

@@ -89,6 +89,7 @@ type reservationResponse struct {
 	CreatedAt     time.Time         `json:"createdAt"`
 	ReleasedAt    *time.Time        `json:"releasedAt,omitempty"`
 	ExpiresAt     *time.Time        `json:"expiresAt,omitempty"`
+	ConvertedAt   *time.Time        `json:"convertedAt,omitempty"`
 }
 
 type reserveResponse struct {
@@ -446,7 +447,7 @@ func toTransactionResponse(t store.TransactionRow) transactionResponse {
 func toReservationResponse(res domain.Reservation) reservationResponse {
 	return reservationResponse{ID: res.ID, LegalEntityID: res.LegalEntityID, ProductID: res.ProductID, Dimensions: res.Dims, Qty: res.Qty.String(),
 		DemandType: string(res.DemandType), DemandID: res.DemandID, DemandSegment: res.DemandSegment, Policy: string(res.Policy), Status: string(res.Status), Kind: reservationKind(res.Kind),
-		AllocationNo: res.AllocationNo, CreatedAt: res.CreatedAt, ReleasedAt: res.ReleasedAt, ExpiresAt: res.ExpiresAt}
+		AllocationNo: res.AllocationNo, CreatedAt: res.CreatedAt, ReleasedAt: res.ReleasedAt, ExpiresAt: res.ExpiresAt, ConvertedAt: res.ConvertedAt}
 }
 
 // detail is the message of a domain rule violation without its code.

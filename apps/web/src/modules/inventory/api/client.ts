@@ -492,6 +492,8 @@ export interface Reservation {
   releasedAt?: string;
   /** When an ACTIVE reservation lapses; absent when it holds until released. */
   expiresAt?: string;
+  /** Set when a reservation against an expected receipt became physical because the receipt arrived. */
+  convertedAt?: string;
 }
 
 export interface ReserveInput {

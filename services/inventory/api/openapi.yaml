@@ -261,7 +261,12 @@ paths:
         INV-BLK-002. One reservation row is written per allocation. A repeated Idempotency-Key returns
         the stored allocations (200, Idempotent-Replayed: true). With against ORDERED a MANUAL request reserves part
         of the expected receipt (ordered plus arrived, less already reserved) of the one dimension set instead of
-        physical stock; kind on each reservation says which.
+        physical stock; kind on each reservation says which. When the receipt arrives (a transfer
+        order received, or a purchase receipt stepped from ordered or arrived to a physical status) the
+        ORDERED reservations of that dimension set convert to PHYSICAL, oldest first, up to the quantity
+        that arrived: one that arrived whole changes kind and gets convertedAt, one that arrived in part
+        is split (the arrived part becomes a new allocation of the same request, the rest stays ORDERED).
+        Each conversion publishes reservation.converted.
       x-passage-duty: inventory.reservation.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1257,6 +1262,9 @@ paths:
         ship date. Warehouses, transit and the legal entity never change: cancel and create
         another. Only a DRAFT or CREATED order can be edited (INV-TRF-006); nothing is posted.
         Publishes transfer.changed for a CREATED order (none for a DRAFT).
+        A change that leaves more reserved against the receiving dimension set's expected receipt than
+        it still expects (a shorter or removed line) is INV-RES-004 (422) and changes nothing; release
+        the reservations first.
       x-passage-duty: inventory.transfer.write
       parameters:
         - $ref: '#/components/parameters/TransferId'
@@ -1288,7 +1296,9 @@ paths:
         Removes the order and its lines at the version in If-Match. The order has posted nothing
         and nothing refers to it. Deleting a CREATED order publishes transfer.changed with status
         DELETED so consumers drop it; a DRAFT was never announced and publishes nothing. Any order
-        past CREATED (shipped, received or cancelled) is INV-TRF-006. Reservations with demand type
+        past CREATED (shipped, received or cancelled) is INV-TRF-006. An order whose expected receipt
+        reservations (against ORDERED) still rely on is INV-RES-004 (422) until they are released.
+        Reservations with demand type
         TRANSFER_ORDER are left alone, as by a cancel. The order's Idempotency-Key stays taken: a
         create retried with it is idempotency_key_reuse (409). A concurrent ship or edit of the
         same order is serialised with the delete; the loser gets 412 or 404.
@@ -1351,7 +1361,10 @@ paths:
         its first (earliest) shipment, so a later partial shipment does not restart the late-receipt
         clock of quantity already in transit. Emits
         dev.passage.inventory.transfer.shipped.v1. Requires If-Match (428 when absent, 412 on
-        mismatch); an order CANCELLED or RECEIVED is INV-TRF-006.
+        mismatch); an order CANCELLED or RECEIVED is INV-TRF-006. A one-step shipment is the receipt,
+        so reservations made against the receiving dimension set's expected receipt (against ORDERED)
+        convert to PHYSICAL for the quantity shipped, oldest first, in the same transaction
+        (reservation.converted).
         A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
         On a plan without freezeStock it flags the counted lines of such a sheet for recount instead and reopens the sheet (BR-16.8, countsheet.changed RECOUNT_REQUESTED); 409 INV-CNT-009 when that sheet is locked by another action at the moment (retry).
       x-passage-duty: inventory.transfer.post
@@ -1406,7 +1419,11 @@ paths:
         stays in transit for investigation. Receiving more than shipped plus overdeliveryPct is
         INV-TRF-002; an allowed over-delivery moves straight from the shipping warehouse and raises
         the line's shipped quantity. A closed line is INV-TRF-006, an unknown line INV-TRF-004.
-        Emits dev.passage.inventory.transfer.received.v1. Requires If-Match.
+        Emits dev.passage.inventory.transfer.received.v1. Requires If-Match. Reservations made against
+        the receiving dimension set's expected receipt (against ORDERED) convert to PHYSICAL for the
+        quantity received, oldest first, in the same transaction (reservation.converted). A closeShort
+        that gives up expected receipt those reservations still rely on once the received quantity
+        converted is INV-RES-004 (422) and changes nothing; release the reservations first.
         A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
         On a plan without freezeStock it flags the counted lines of such a sheet for recount instead and reopens the sheet (BR-16.8, countsheet.changed RECOUNT_REQUESTED); 409 INV-CNT-009 when that sheet is locked by another action at the moment (retry).
       x-passage-duty: inventory.transfer.post
@@ -1440,7 +1457,9 @@ paths:
       summary: Cancel a CREATED order (BR-16.13)
       description: |
         Nothing has moved, so nothing is reversed. A shipped order with quantity in transit is
-        INV-TRF-003; a received or cancelled order is INV-TRF-006. Requires If-Match.
+        INV-TRF-003; a received or cancelled order is INV-TRF-006. An order whose expected receipt
+        reservations (against ORDERED) still rely on is INV-RES-004 (422) until they are released.
+        Requires If-Match.
       x-passage-duty: inventory.transfer.write
       parameters:
         - $ref: '#/components/parameters/TransferId'
@@ -2667,7 +2686,9 @@ paths:
         never reaches a financial status (INV-OWN-001). The move applies to the whole quantity
         (splitting, BR-16.2, is not built). The projection, the audit row and the events are
         written in one database transaction. No GL entry is produced here: the calling document
-        posts its own ledger entry. Internal path: not exposed by the web BFF.
+        posts its own ledger entry. A receipt moved from ORDERED or ARRIVED to a physical or financial
+        status converts the reservations made against its expected receipt (against ORDERED) to PHYSICAL,
+        oldest first, up to the quantity that arrived. Internal path: not exposed by the web BFF.
         A move that changes the physical quantity of a row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
         On a plan without freezeStock it flags the counted lines of such a sheet for recount instead and reopens the sheet (BR-16.8, countsheet.changed RECOUNT_REQUESTED); 409 INV-CNT-009 when that sheet is locked by another action at the moment (retry).
       x-passage-duty: inventory.transaction.apply
@@ -3064,6 +3085,7 @@ components:
         createdAt: { type: string, format: date-time }
         releasedAt: { type: string, format: date-time }
         expiresAt: { type: string, format: date-time, description: When an ACTIVE reservation lapses; absent when it holds until released }
+        convertedAt: { type: string, format: date-time, description: 'When a reservation against an expected receipt became a PHYSICAL one because the receipt arrived (kind is PHYSICAL then); absent otherwise' }
     ReservationCandidate:
       type: object
       required: [dimensions, available, status, eligible]

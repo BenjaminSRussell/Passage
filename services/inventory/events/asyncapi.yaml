@@ -30,6 +30,8 @@ channels:
         $ref: '#/components/messages/ReservationCreated'
       reservationReleased:
         $ref: '#/components/messages/ReservationReleased'
+      reservationConverted:
+        $ref: '#/components/messages/ReservationConverted'
   blocking:
     address: passage.inventory.blocking
     messages:
@@ -170,6 +172,14 @@ components:
       summary: A reservation was released and its quantity returned to available.
       name: dev.passage.inventory.reservation.released.v1
       x-passage-type: dev.passage.inventory.reservation.released.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ReservationData'
+    ReservationConverted:
+      title: Reservation converted
+      summary: A reservation against an expected receipt became a physical reservation because the receipt arrived.
+      name: dev.passage.inventory.reservation.converted.v1
+      x-passage-type: dev.passage.inventory.reservation.converted.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/ReservationData'
@@ -459,6 +469,7 @@ components:
         policy: { type: string, enum: [MANUAL, FIFO, FEFO, LIFO] }
         status: { type: string, enum: [ACTIVE, RELEASED, CONSUMED] }
         kind: { type: string, enum: [PHYSICAL, ORDERED], description: 'PHYSICAL reserves stock on hand (RESERVED_PHYSICAL); ORDERED reserves part of the expected receipt of the dimension set (RESERVED_ORDERED)' }
+        convertedFromReservationId: { type: string, format: uuid, description: 'Present on reservation.converted when only part of an ORDERED reservation arrived: the converted part is a new allocation (reservationId, kind PHYSICAL) split off the reservation named here, which stays ORDERED for the rest; absent when the whole reservation changed kind' }
         reason: { type: string, enum: [EXPIRED], description: 'Present on reservation.released when the expiry run released the allocation (time to live passed); absent for a release by a person or caller' }
     JournalNameData:
       type: object
