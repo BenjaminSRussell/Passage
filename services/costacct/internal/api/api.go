@@ -494,6 +494,10 @@ func (a *API) reconcile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	le, _ := ids.Canonical(b.LegalEntityID)
+	if p, _ := tenant.FromContext(r.Context()); !tenant.InLegalEntityScope(p, le) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the legal entity is outside the caller's scope"))
+		return
+	}
 	ledgerID, ok := a.ledgerIDs[le]
 	if !ok {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeLedgerNotMapped, "no ledger is configured for this legal entity"))
