@@ -21,6 +21,7 @@ func TestPerformanceRoutesRequireTheirDuty(t *testing.T) {
 	}
 	self := []struct{ method, target, body string }{
 		{http.MethodGet, "/v1/hr/me/goals", ""},
+		{http.MethodPost, "/v1/hr/me/goals/" + id + "/progress", `{}`},
 		{http.MethodGet, "/v1/hr/me/reviews", ""},
 		{http.MethodPost, "/v1/hr/me/reviews/" + id + "/self-assessment", `{}`},
 	}
@@ -61,6 +62,7 @@ func TestPerformanceRequestsNameEveryBadField(t *testing.T) {
 	}{
 		{"goal", http.MethodPost, "/v1/hr/workers/" + id + "/goals", `{"title":"  ","dueOn":"2026-02-30"}`, dutyPerfManage, []string{`"title"`, `"dueOn"`}},
 		{"progress", http.MethodPost, "/v1/hr/goals/" + id + "/progress", `{"status":"DONE","progressPercent":101}`, dutyPerfManage, []string{`"status"`, `"progressPercent"`}},
+		{"own progress", http.MethodPost, "/v1/hr/me/goals/" + id + "/progress", `{"status":"CANCELLED","progressPercent":101}`, dutyPerfSelf, []string{`"status"`, `"progressPercent"`}},
 		{"empty progress", http.MethodPost, "/v1/hr/goals/" + id + "/progress", `{}`, dutyPerfManage, []string{`"status"`}},
 		{"review", http.MethodPost, "/v1/hr/workers/" + id + "/reviews", `{"periodStart":"2026-06-01","periodEnd":"2026-01-01"}`, dutyPerfManage, []string{`"periodEnd"`}},
 		{"review dates", http.MethodPost, "/v1/hr/workers/" + id + "/reviews", `{}`, dutyPerfManage, []string{`"periodStart"`, `"periodEnd"`}},

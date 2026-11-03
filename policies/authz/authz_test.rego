@@ -1114,6 +1114,7 @@ test_hr_performance_every_route_is_granted if {
 		allowed(duty, "POST", "/v1/hr/reviews/r-1/sign-off")
 	}
 	allowed("hr.performance.self", "GET", "/v1/hr/me/goals")
+	allowed("hr.performance.self", "POST", "/v1/hr/me/goals/g-1/progress")
 	allowed("hr.performance.self", "GET", "/v1/hr/me/reviews")
 	allowed("hr.performance.self", "POST", "/v1/hr/me/reviews/r-1/self-assessment")
 }
@@ -1130,6 +1131,8 @@ test_hr_performance_duties_reach_only_their_routes if {
 	not allowed("hr.performance.self", "POST", "/v1/hr/reviews/r-1/sign-off")
 	not allowed("hr.performance.self", "GET", "/v1/hr/workers/w-1/reviews")
 	not allowed("hr.performance.self", "POST", "/v1/hr/workers/w-1/goals")
+	not allowed("hr.performance.self", "POST", "/v1/hr/goals/g-1/progress")
+	not allowed("hr.performance.manage", "POST", "/v1/hr/me/goals/g-1/progress")
 }
 
 test_compliance_legal_hold_duties_reach_only_their_routes if {

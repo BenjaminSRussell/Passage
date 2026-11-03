@@ -7,12 +7,14 @@ import {
   listWorkerSkills,
   rateWorkerSkill,
   skillGap,
+  skillGapForJob,
   type NewRating,
   type Problem,
   type Skill,
   type SkillGapRow,
   type WorkerSkill,
 } from "./api/client";
+import { listJobs } from "./api/personnel";
 import { DATE, todayIso } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -137,35 +139,44 @@ function RateForm({ workerId, skills, onDone, onCancel }: { workerId: string; sk
   );
 }
 
-/** The worker against one position's skill profile (FR-42.18, AC-42.16). */
-function GapSection({ workerId }: { workerId: string }) {
-  const positions = useLoad((signal) => listPositions({}, signal), "gap-positions");
-  const [positionId, setPositionId] = useState("");
-  const gap = useLoad((signal) => (positionId ? skillGap(workerId, positionId, signal) : Promise.resolve(null)), `${workerId}|${positionId}`);
+/** The worker against one position's or job's skill profile (FR-42.18, AC-42.16). */
+function GapSection({ workerId, kind }: { workerId: string; kind: "position" | "job" }) {
+  const options = useLoad(
+    async (signal) =>
+      kind === "position"
+        ? (await listPositions({}, signal)).items.map((p) => ({ id: p.id, label: `${p.positionNumber} (${p.jobCode})` }))
+        : (await listJobs(undefined, signal)).items.map((j) => ({ id: j.id, label: `${j.code} – ${j.title}` })),
+    `gap-${kind}s`,
+  );
+  const [targetId, setTargetId] = useState("");
+  const gap = useLoad(
+    (signal) => (targetId ? (kind === "position" ? skillGap(workerId, targetId, signal) : skillGapForJob(workerId, targetId, signal)) : Promise.resolve(null)),
+    `${workerId}|${kind}|${targetId}`,
+  );
+  const fieldId = `gap-${kind}`;
 
-  if (positions.error) {
+  if (options.error) {
     return (
-      <Alert tone="danger" title="Could not load positions to compare with" live="alert" action={<Button size="sm" onClick={positions.reload}>Try again</Button>}>
-        {positions.error.message} ({positions.error.code})
+      <Alert tone="danger" title={`Could not load ${kind}s to compare with`} live="alert" action={<Button size="sm" onClick={options.reload}>Try again</Button>}>
+        {options.error.message} ({options.error.code})
       </Alert>
     );
   }
-  const options = positions.data?.items ?? [];
   return (
     <div className={styles.stack}>
-      <FormField id="gap-position" label="Compare with position" hint="Lists every skill the position requires next to this worker's rating.">
+      <FormField id={fieldId} label={`Compare with ${kind}`} hint={`Lists every skill the ${kind} requires next to this worker's rating.`}>
         {(control) => (
-          <Select {...control} value={positionId} disabled={positions.loading} onChange={(event) => setPositionId(event.target.value)}>
-            <option value="">Choose a position…</option>
-            {options.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.positionNumber} ({p.jobCode})
+          <Select {...control} value={targetId} disabled={options.loading} onChange={(event) => setTargetId(event.target.value)}>
+            <option value="">{`Choose a ${kind}…`}</option>
+            {(options.data ?? []).map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
               </option>
             ))}
           </Select>
         )}
       </FormField>
-      {!positionId ? null : gap.error ? (
+      {!targetId ? null : gap.error ? (
         <Alert tone="danger" title="Could not compare" live="alert" action={<Button size="sm" onClick={gap.reload}>Try again</Button>}>
           {gap.error.message} ({gap.error.code})
         </Alert>
@@ -173,18 +184,18 @@ function GapSection({ workerId }: { workerId: string }) {
         <>
           {gap.data && !gap.loading ? (
             gap.data.met ? (
-              <Badge tone="success">{gap.data.comparison.length === 0 ? "The position requires no skills" : "Meets every requirement"}</Badge>
+              <Badge tone="success">{gap.data.comparison.length === 0 ? `The ${kind} requires no skills` : "Meets every requirement"}</Badge>
             ) : (
               <Badge tone="danger">{`${gap.data.gaps.length} skill${gap.data.gaps.length === 1 ? "" : "s"} short`}</Badge>
             )
           ) : null}
           <DataTable
-            label="Skill gap"
+            label={kind === "position" ? "Skill gap" : "Job skill gap"}
             columns={gapColumns}
             rows={gap.data?.comparison ?? []}
             getRowKey={(row) => row.skill}
             loading={gap.loading}
-            empty={{ title: "No requirements", description: "Set the skills this position needs on the position's page." }}
+            empty={{ title: "No requirements", description: `Set the skills this ${kind} needs on the ${kind}'s page.` }}
           />
         </>
       )}
@@ -248,7 +259,8 @@ export function SkillsCard({ workerId }: { workerId: string }) {
             empty={{ title: "Not rated yet", description: "Rate the worker on a skill from the catalog." }}
           />
         )}
-        <GapSection workerId={workerId} />
+        <GapSection workerId={workerId} kind="position" />
+        <GapSection workerId={workerId} kind="job" />
       </div>
     </Card>
   );

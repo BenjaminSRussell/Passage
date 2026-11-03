@@ -1676,7 +1676,7 @@ paths:
   /v1/hr/reviews/{id}/sign-off:
     post:
       operationId: signOffReview
-      summary: Manager sign-off, step two: self_submitted to signed_off (FR-42.11)
+      summary: "Manager sign-off, step two: self_submitted to signed_off (FR-42.11)"
       description: A draft review cannot be signed (HCM-REV-STATE). The reviewed worker cannot sign their own review (403 HCM-REV-SELF). Signing again with the same comments and rating changes nothing. hr.performance.admin is accepted in place of hr.performance.manage.
       x-passage-duty: hr.performance.manage
       parameters:
@@ -1726,6 +1726,47 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
+  /v1/hr/me/goals/{id}/progress:
+    post:
+      operationId: updateMyGoalProgress
+      summary: The signed-in worker reports progress on their own goal
+      description: Only the goal's own worker can; any other goal is 404. The status can be OPEN or ACHIEVED, never CANCELLED, which stays with the manager. Setting the status to ACHIEVED without progressPercent sets 100.
+      x-passage-duty: hr.performance.self
+      parameters:
+        - $ref: "#/components/parameters/GoalId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoalProgressRequest"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Goal"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          description: HCM-GOAL-STATE (a cancelled goal cannot change)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: HCM-GOAL-STATE (ACHIEVED needs 100 percent)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /v1/hr/me/reviews:
     get:
       operationId: myReviews
@@ -1747,7 +1788,7 @@ paths:
   /v1/hr/me/reviews/{id}/self-assessment:
     post:
       operationId: submitSelfAssessment
-      summary: Employee self-assessment, step one: draft to self_submitted (FR-42.11)
+      summary: "Employee self-assessment, step one: draft to self_submitted (FR-42.11)"
       description: Only the reviewed worker can; any other review is 404. Submitting the same text again changes nothing; the text cannot change once submitted.
       x-passage-duty: hr.performance.self
       parameters:
@@ -2676,7 +2717,7 @@ paths:
   /v1/hr/checklists/{id}/complete:
     post:
       operationId: completeChecklist
-      summary: Complete a checklist: every task done or skipped and, offboarding, no item OUT (AC-42.15)
+      summary: "Complete a checklist: every task done or skipped and, offboarding, no item OUT (AC-42.15)"
       x-passage-duty: HcmActionMaintain
       parameters:
         - $ref: "#/components/parameters/EntityId"
@@ -6723,7 +6764,7 @@ components:
         status: {type: string, enum: [REPORTED, UNDER_REVIEW, CLOSED]}
         supersedesId: {type: string, format: uuid}
         reportedBy: {type: string}
-        details: {type: object, description: Opened medical details; only on GET /incidents/{id}}
+        details: {type: object, description: "Opened medical details; only on GET /incidents/{id}"}
     IncidentPage:
       type: object
       required: [items]

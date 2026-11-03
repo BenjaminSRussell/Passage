@@ -66,6 +66,7 @@ func (a *API) registerPerformance(r chi.Router) {
 	r.With(manager).Get("/v1/hr/reviews/{id}", review)
 	r.With(manager).Post("/v1/hr/reviews/{id}/sign-off", signOff)
 	r.With(authz.RequireDuty(dutyPerfSelf)).Get("/v1/hr/me/goals", a.myGoals)
+	r.With(authz.RequireDuty(dutyPerfSelf)).Post("/v1/hr/me/goals/{id}/progress", idRoute(store.CodeGoalNotFound, "goal not found", a.updateMyGoal))
 	r.With(authz.RequireDuty(dutyPerfSelf)).Get("/v1/hr/me/reviews", a.myReviews)
 	r.With(authz.RequireDuty(dutyPerfSelf)).Post("/v1/hr/me/reviews/{id}/self-assessment", selfAssess)
 }
@@ -206,12 +207,7 @@ func (a *API) writeGoals(w http.ResponseWriter, r *http.Request, workerID string
 	httpx.JSON(w, http.StatusOK, listResponse[store.Goal]{Items: items})
 }
 
-func (a *API) updateGoal(w http.ResponseWriter, r *http.Request, id string) {
-	var req goalProgressRequest
-	if err := httpx.Decode(r, &req); err != nil {
-		httpx.Fail(w, r, err)
-		return
-	}
+func goalProgressFields(req goalProgressRequest) map[string]string {
 	fields := map[string]string{}
 	if req.Status == nil && req.ProgressPercent == nil {
 		fields["status"] = "give status or progressPercent"
@@ -222,6 +218,16 @@ func (a *API) updateGoal(w http.ResponseWriter, r *http.Request, id string) {
 	if req.ProgressPercent != nil && (*req.ProgressPercent < 0 || *req.ProgressPercent > 100) {
 		fields["progressPercent"] = "must be between 0 and 100"
 	}
+	return fields
+}
+
+func (a *API) updateGoal(w http.ResponseWriter, r *http.Request, id string) {
+	var req goalProgressRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := goalProgressFields(req)
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
@@ -237,6 +243,46 @@ func (a *API) updateGoal(w http.ResponseWriter, r *http.Request, id string) {
 	goal, err := a.store.UpdateGoal(r.Context(), id, req.Status, req.ProgressPercent)
 	if err != nil {
 		a.failStore(w, r, "update goal", err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, goal)
+}
+
+// updateMyGoal is POST /v1/hr/me/goals/{id}/progress (hr.performance.self): the
+// employee reports progress on their own goal. Goals set by a manager stay the
+// manager's: the employee can move progress and mark OPEN or ACHIEVED, never
+// CANCELLED. A goal that is not the caller's is the same 404 as a missing one.
+func (a *API) updateMyGoal(w http.ResponseWriter, r *http.Request, id string) {
+	var req goalProgressRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := goalProgressFields(req)
+	if req.Status != nil && *req.Status == domain.GoalCancelled {
+		fields["status"] = "must be OPEN or ACHIEVED"
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	self, err := a.store.SelfWorkerID(r.Context())
+	if err != nil {
+		a.failStore(w, r, "resolve own worker", err)
+		return
+	}
+	owner, err := a.store.GoalWorker(r.Context(), id)
+	if err != nil {
+		a.failStore(w, r, "resolve goal owner", err)
+		return
+	}
+	if owner != self {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeGoalNotFound, "goal not found"))
+		return
+	}
+	goal, err := a.store.UpdateGoal(r.Context(), id, req.Status, req.ProgressPercent)
+	if err != nil {
+		a.failStore(w, r, "update own goal", err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, goal)

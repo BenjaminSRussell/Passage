@@ -249,8 +249,11 @@ their goals at `/v1/hr/me/goals`. A goal or review carries the legal entity of
 the worker's employment: pass `legalEntityId` when the worker has several
 employments (else 422 `HCM-ENTITY-REQUIRED`); a worker with no visible employment
 is refused the same way, so no row has a NULL entity. Nobody sets or changes
-their own goals (403 `HCM-GOAL-SELF`); ACHIEVED needs 100 percent and a
-cancelled goal is final (`HCM-GOAL-STATE`).
+their own goals (403 `HCM-GOAL-SELF`), but the worker reports progress on their
+own goal with `POST /v1/hr/me/goals/{id}/progress` (`hr.performance.self`): status
+OPEN or ACHIEVED only, never CANCELLED, and a goal of anyone else is the same 404
+as a missing one. ACHIEVED needs 100 percent and a cancelled goal is final
+(`HCM-GOAL-STATE`).
 
 Reviews (FR-42.11): one two-step template, no calibration and no rating
 distribution. A manager opens a review for a worker and period (`draft`; one per
@@ -433,6 +436,7 @@ kernel `authz.RequireDuty` (`x-passage-duty` in the spec).
 | GET | `/v1/hr/reviews/{id}` | hr.performance.manage (or .admin) |
 | POST | `/v1/hr/reviews/{id}/sign-off` | hr.performance.manage (or .admin) |
 | GET | `/v1/hr/me/goals`, `/v1/hr/me/reviews` | hr.performance.self |
+| POST | `/v1/hr/me/goals/{id}/progress` | hr.performance.self |
 | POST | `/v1/hr/me/reviews/{id}/self-assessment` | hr.performance.self |
 | POST | `/v1/hr/courses` | HcmLearningAdmin |
 | GET | `/v1/hr/courses?limit=&cursor=` | EssLearning |

@@ -114,6 +114,9 @@ export function TeamMemberPage() {
         </dl>
       </Card>
       <p>
+        <Link to={`/hr/workers/${member.id}/performance`}>Goals and reviews</Link>
+      </p>
+      <p>
         <Link to="/hr/absence/requests">Absence requests for my team</Link>
       </p>
     </div>

@@ -207,6 +207,7 @@ components:
             items: {type: string, format: uuid}
     RequisitionChanged:
       name: dev.passage.hr.requisition.changed.v1
+      description: A job requisition was created or its status changed, including FILLED and back to OPEN as hires count against its headcount.
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -219,11 +220,13 @@ components:
           filled: {type: integer}
     WorkerCreated:
       name: dev.passage.hr.worker.created.v1
+      description: A worker record was created for a party person, with its personnel number and worker type. Carries no personal data.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/WorkerCreatedData"
     EmploymentChanged:
       name: dev.passage.hr.employment.changed.v1
+      description: A worker's employment with a legal entity was opened or changed; action names the change and valid_from and valid_to bound it.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/EmploymentChangedData"

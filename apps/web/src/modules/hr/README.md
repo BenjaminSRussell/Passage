@@ -63,6 +63,17 @@ empty and error states).
 The module adds no npm dependencies. Tests: `npx vitest --run src/modules/hr`
 and `npx tsc --noEmit` in `apps/web`.
 
+## Performance and job skills (#424)
+
+`/hr/my/goals` and `/hr/my/reviews` (`hr.performance.self`) are the
+employee's screens: report progress on a goal and write the self-assessment.
+`/hr/workers/:id/performance` and `/hr/reviews/:id` (`hr.performance.manage`)
+are the manager's: set goals, open a review, sign it off after the
+self-assessment. A job's page carries its skill requirements and the gap
+report (`/hr/jobs/:id`); a worker's skills card compares the worker with a
+position or a job. A holder of only `hr.performance.admin` is not let in by
+the route gate (it takes one duty); the service accepts either.
+
 ## Needs
 
 - Shell owner (wave 5): nav entries carry `HcmWorkerInquire`,

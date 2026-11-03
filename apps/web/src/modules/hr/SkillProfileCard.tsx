@@ -1,12 +1,32 @@
 import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, FormField, Select, Skeleton, type DataTableColumn } from "../../shell/ui";
-import { describeProblem, listAllSkills, listSkillRequirements, removeSkillRequirement, setSkillRequirement, type Problem, type SkillRequirement } from "./api/client";
+import {
+  describeProblem,
+  listAllSkills,
+  listJobSkillRequirements,
+  listSkillRequirements,
+  removeJobSkillRequirement,
+  removeSkillRequirement,
+  setJobSkillRequirement,
+  setSkillRequirement,
+  type Problem,
+  type SkillRequirement,
+} from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
-/** The skills a position requires at a minimum rating (FR-42.18), with add, change and remove. */
-export function SkillProfileCard({ positionId }: { positionId: string }) {
-  const state = useLoad((signal) => listSkillRequirements(positionId, signal), `requirements|${positionId}`);
+type Row = Pick<SkillRequirement, "skillId" | "skillCode" | "skillName" | "scaleMax" | "minRating">;
+type Subject = { positionId: string; jobId?: undefined } | { jobId: string; positionId?: undefined };
+
+/** The skills a position or a job requires at a minimum rating (FR-42.18), with add, change and remove. */
+export function SkillProfileCard(props: Subject) {
+  const job = props.jobId !== undefined;
+  const subjectId = props.jobId ?? props.positionId;
+  const noun = job ? "job" : "position";
+  const load = job ? listJobSkillRequirements : listSkillRequirements;
+  const set = job ? setJobSkillRequirement : setSkillRequirement;
+  const unset = job ? removeJobSkillRequirement : removeSkillRequirement;
+  const state = useLoad((signal): Promise<Row[]> => load(subjectId, signal), `requirements|${noun}|${subjectId}`);
   const catalog = useLoad((signal) => listAllSkills(signal), "skill-catalog");
   const [skillCode, setSkillCode] = useState("");
   const [minRating, setMinRating] = useState("");
@@ -28,7 +48,7 @@ export function SkillProfileCard({ positionId }: { positionId: string }) {
     if (Object.keys(found).length > 0 || !skill) return;
     setBusy("save");
     try {
-      const saved = await setSkillRequirement(positionId, skill.code, n);
+      const saved = await set(subjectId, skill.code, n);
       setNotice(`${saved.skillCode} now requires at least ${saved.minRating}.`);
       setSkillCode("");
       setMinRating("");
@@ -43,11 +63,11 @@ export function SkillProfileCard({ positionId }: { positionId: string }) {
     }
   }
 
-  async function remove(row: SkillRequirement) {
+  async function remove(row: Row) {
     setBusy(row.skillCode);
     setFailure(null);
     try {
-      await removeSkillRequirement(positionId, row.skillCode);
+      await unset(subjectId, row.skillCode);
       setNotice(`${row.skillCode} is no longer required.`);
       state.reload();
     } catch (error) {
@@ -57,7 +77,7 @@ export function SkillProfileCard({ positionId }: { positionId: string }) {
     }
   }
 
-  const columns: DataTableColumn<SkillRequirement>[] = [
+  const columns: DataTableColumn<Row>[] = [
     { key: "skillCode", header: "Skill", mono: true },
     { key: "skillName", header: "Name" },
     { key: "minRating", header: "Minimum", mono: true, align: "end", render: (row) => `${row.minRating} of ${row.scaleMax}` },
@@ -95,7 +115,7 @@ export function SkillProfileCard({ positionId }: { positionId: string }) {
             columns={columns}
             rows={state.data ?? []}
             getRowKey={(row) => row.skillId}
-            empty={{ title: "No skills required", description: "Add the skills this position needs; gap analysis compares workers with them." }}
+            empty={{ title: "No skills required", description: `Add the skills this ${noun} needs; gap analysis compares workers with them.` }}
           />
         )}
         {catalog.error ? (

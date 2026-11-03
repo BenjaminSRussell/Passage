@@ -137,3 +137,48 @@ func TestPerformanceManagerCannotSetTheirOwnGoals(t *testing.T) {
 		t.Fatalf("own goal progress: status %d, want 403", rec.Code)
 	}
 }
+
+func TestPerformanceEmployeeUpdatesOnlyTheirOwnGoal(t *testing.T) {
+	o := newOrg(t)
+	created := o.as(o.users["mgr"], http.MethodPost, "/v1/hr/workers/"+o.workers["rep"].ID+"/goals", `{"title":"Reduce backlog"}`, dutyPerfManage)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create goal: status %d body %s", created.Code, created.Body.String())
+	}
+	goal := decodeBody[store.Goal](t, created)
+	path := "/v1/hr/me/goals/" + goal.ID + "/progress"
+
+	if rec := o.as(o.users["peer"], http.MethodPost, path, `{"progressPercent":50}`, dutyPerfSelf); rec.Code != http.StatusNotFound {
+		t.Fatalf("a peer updating the rep's goal: status %d, want 404", rec.Code)
+	}
+	if rec := o.as(o.users["mgr"], http.MethodPost, path, `{"progressPercent":50}`, dutyPerfSelf); rec.Code != http.StatusNotFound {
+		t.Fatalf("the manager through the self route: status %d, want 404", rec.Code)
+	}
+	if rec := o.as(o.users["rep"], http.MethodPost, "/v1/hr/me/goals/"+ids.New()+"/progress", `{"progressPercent":50}`, dutyPerfSelf); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown goal: status %d, want 404", rec.Code)
+	}
+	if rec := o.as(o.users["rep"], http.MethodPost, path, `{"status":"CANCELLED"}`, dutyPerfSelf); rec.Code != http.StatusBadRequest {
+		t.Fatalf("employee cancelling: status %d, want 400", rec.Code)
+	}
+	half := o.as(o.users["rep"], http.MethodPost, path, `{"progressPercent":50}`, dutyPerfSelf)
+	if got := decodeBody[store.Goal](t, half); half.Code != http.StatusOK || got.ProgressPct != 50 || got.Status != "OPEN" {
+		t.Fatalf("progress: status %d body %s", half.Code, half.Body.String())
+	}
+	if rec := o.as(o.users["rep"], http.MethodPost, path, `{"status":"ACHIEVED","progressPercent":60}`, dutyPerfSelf); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("achieved below 100: status %d, want 422", rec.Code)
+	}
+	done := o.as(o.users["rep"], http.MethodPost, path, `{"status":"ACHIEVED"}`, dutyPerfSelf)
+	if got := decodeBody[store.Goal](t, done); done.Code != http.StatusOK || got.ProgressPct != 100 || got.Status != "ACHIEVED" {
+		t.Fatalf("achieve: status %d body %s", done.Code, done.Body.String())
+	}
+	if again := o.as(o.users["rep"], http.MethodPost, path, `{"status":"ACHIEVED"}`, dutyPerfSelf); again.Code != http.StatusOK {
+		t.Fatalf("the same update again: status %d body %s, want 200", again.Code, again.Body.String())
+	}
+
+	if rec := o.as(o.users["mgr"], http.MethodPost, "/v1/hr/goals/"+goal.ID+"/progress", `{"status":"CANCELLED"}`, dutyPerfManage); rec.Code != http.StatusOK {
+		t.Fatalf("manager cancelling: status %d body %s", rec.Code, rec.Body.String())
+	}
+	cancelled := o.as(o.users["rep"], http.MethodPost, path, `{"progressPercent":10}`, dutyPerfSelf)
+	if cancelled.Code != http.StatusConflict || !strings.Contains(cancelled.Body.String(), store.CodeGoalState) {
+		t.Fatalf("progress on a cancelled goal: status %d body %s, want 409 %s", cancelled.Code, cancelled.Body.String(), store.CodeGoalState)
+	}
+}

@@ -38,6 +38,7 @@ import { NewIncidentPage } from "./NewIncidentPage";
 import { NewJobPage } from "./NewJobPage";
 import { NewPersonnelActionPage } from "./NewPersonnelActionPage";
 import { NewQuestionnairePage } from "./NewQuestionnairePage";
+import { MyGoalsPage, MyReviewsPage, ReviewPage, WorkerPerformancePage } from "./PerformancePages";
 import { OfferPage } from "./OfferPage";
 import { OshaPage } from "./OshaPage";
 import { PersonnelActionDetailPage, PersonnelActionsPage } from "./PersonnelActionsPage";
@@ -51,7 +52,7 @@ const hr: PassageModule = {
   id: "hr",
   title: "Human resources",
   description:
-    "Workers with masked personal data and an audited reveal, effective-dated employments, positions with FTE and reports-to lines, assignments, each worker's position and manager on any date, absence plans, accrual, balances and requests, benefit plans with eligibility simulation, life events and enrollments, and skills: the catalog, worker ratings and certificates, position skill profiles, gap analysis, skill search and expiring certifications, and courses: the catalog, sessions with seats and a waitlist, registrations with approval, and attendance that writes skills and certificates.",
+    "Workers with masked personal data and an audited reveal, effective-dated employments, positions with FTE and reports-to lines, assignments, each worker's position and manager on any date, absence plans, accrual, balances and requests, benefit plans with eligibility simulation, life events and enrollments, and skills: the catalog, worker ratings and certificates, position skill profiles, gap analysis, skill search and expiring certifications, and courses: the catalog, sessions with seats and a waitlist, registrations with approval, and attendance that writes skills and certificates, and performance: goals with progress the worker reports themselves, the two-step review (self-assessment, then manager sign-off) and skill requirements and gap reports per job.",
   routes: [
     { path: "/hr", element: createElement(WorkersPage), handle: { title: "Workers", duty: "HcmWorkerInquire" } },
     { path: "/hr/workers", element: createElement(WorkersPage), handle: { title: "Workers" } },
@@ -109,6 +110,10 @@ const hr: PassageModule = {
     { path: "/hr/questionnaires/:id", element: createElement(QuestionnaireDetailPage), handle: { title: "Questionnaire", duty: "HcmQuestionnaireAdmin" } },
     { path: "/hr/my/questionnaires", element: createElement(MyQuestionnairesPage), handle: { title: "My questionnaires", duty: "EssQuestionnaire" } },
     { path: "/hr/my/questionnaires/:id", element: createElement(AnswerQuestionnairePage), handle: { title: "Answer questionnaire", duty: "EssQuestionnaire" } },
+    { path: "/hr/my/goals", element: createElement(MyGoalsPage), handle: { title: "My goals", duty: "hr.performance.self" } },
+    { path: "/hr/my/reviews", element: createElement(MyReviewsPage), handle: { title: "My reviews", duty: "hr.performance.self" } },
+    { path: "/hr/workers/:id/performance", element: createElement(WorkerPerformancePage), handle: { title: "Goals and reviews", duty: "hr.performance.manage" } },
+    { path: "/hr/reviews/:id", element: createElement(ReviewPage), handle: { title: "Review", duty: "hr.performance.manage" } },
     { path: "/hr/my/profile", element: createElement(MyProfilePage), handle: { title: "My profile", duty: "EssBase" } },
     { path: "/hr/my/team", element: createElement(MyTeamPage), handle: { title: "My team", duty: "MssBase" } },
     { path: "/hr/my/team/:id", element: createElement(TeamMemberPage), handle: { title: "Team member", duty: "MssBase" } },
@@ -135,6 +140,8 @@ const hr: PassageModule = {
     { label: "Tasks", to: "/hr/tasks", duty: "HcmWorkerInquire" },
     { label: "Questionnaires", to: "/hr/questionnaires", duty: "HcmQuestionnaireAdmin" },
     { label: "My questionnaires", to: "/hr/my/questionnaires", duty: "EssQuestionnaire" },
+    { label: "My goals", to: "/hr/my/goals", duty: "hr.performance.self" },
+    { label: "My reviews", to: "/hr/my/reviews", duty: "hr.performance.self" },
     { label: "My profile", to: "/hr/my/profile", duty: "EssBase" },
     { label: "My team", to: "/hr/my/team", duty: "MssBase" },
   ],

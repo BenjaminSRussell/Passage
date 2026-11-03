@@ -4,6 +4,8 @@ import { getJob, listJobs, type Job } from "./api/personnel";
 import { dash } from "./format";
 import styles from "./pages.module.css";
 import { BackLink, Entry, Facts, ListPage, Loaded, Money } from "./parts";
+import { JobGapsCard } from "./JobGapsCard";
+import { SkillProfileCard } from "./SkillProfileCard";
 import { useLoad } from "./useLoad";
 
 export function PayRange({ job }: { job: Job }) {
@@ -68,6 +70,8 @@ export function JobDetailPage() {
               </Entry>
             </Facts>
           </Card>
+          <SkillProfileCard jobId={job.id} />
+          <JobGapsCard jobId={job.id} />
         </div>
       )}
     </Loaded>

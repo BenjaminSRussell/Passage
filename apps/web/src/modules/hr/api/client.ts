@@ -679,7 +679,8 @@ export interface SkillGapRow {
 
 export interface SkillGap {
   workerId: string;
-  positionId: string;
+  positionId?: string;
+  jobId?: string;
   met: boolean;
   comparison: SkillGapRow[];
   gaps: SkillGapRow[];
@@ -774,6 +775,59 @@ export async function removeSkillRequirement(positionId: string, skillCode: stri
 
 export function skillGap(workerId: string, positionId: string, signal?: AbortSignal): Promise<SkillGap> {
   return send<SkillGap>(`/workers/${id(workerId)}/skill-gap${query({ positionId })}`, {}, signal);
+}
+
+/** The worker against a job's skill profile (FR-42.18); a skill the worker is not rated on counts as 0. */
+export function skillGapForJob(workerId: string, jobId: string, signal?: AbortSignal): Promise<SkillGap> {
+  return send<SkillGap>(`/workers/${id(workerId)}/skill-gap${query({ jobId })}`, {}, signal);
+}
+
+export interface JobSkillRequirement {
+  jobId: string;
+  skillId: string;
+  skillCode: string;
+  skillName: string;
+  scaleMax: number;
+  minRating: number;
+}
+
+export interface JobWorkerGap {
+  workerId: string;
+  personnelNumber: string;
+  legalName: string;
+  met: boolean;
+  gaps: SkillGapRow[];
+}
+
+/** Everyone who holds the job on asOf, each with only the unmet requirements; truncated means more exist. */
+export interface JobSkillGaps {
+  jobId: string;
+  jobCode: string;
+  asOf: string;
+  items: JobWorkerGap[];
+  truncated: boolean;
+}
+
+export async function listJobSkillRequirements(jobId: string, signal?: AbortSignal): Promise<JobSkillRequirement[]> {
+  return (await page<JobSkillRequirement>(`/jobs/${id(jobId)}/skill-requirements`, signal)).items;
+}
+
+/** Sets or replaces one skill's minimum, so a retry is safe without a key. */
+export function setJobSkillRequirement(jobId: string, skillCode: string, minRating: number): Promise<JobSkillRequirement> {
+  return command<JobSkillRequirement>(`/jobs/${id(jobId)}/skill-requirements`, { skillCode, minRating });
+}
+
+export async function removeJobSkillRequirement(jobId: string, skillCode: string): Promise<void> {
+  const res = await fetch(`${base}/jobs/${id(jobId)}/skill-requirements/${id(skillCode)}`, {
+    method: "DELETE",
+    headers: { Accept: "application/json" },
+    credentials: "same-origin",
+  });
+  if (!res.ok) throw await toError(res);
+}
+
+export function jobSkillGaps(jobId: string, asOf?: string, signal?: AbortSignal): Promise<JobSkillGaps> {
+  return send<JobSkillGaps>(`/jobs/${id(jobId)}/skill-gaps${query({ asOf })}`, {}, signal);
 }
 
 export function searchSkills(q: SkillSearchQuery, signal?: AbortSignal): Promise<SkillSearchResult> {

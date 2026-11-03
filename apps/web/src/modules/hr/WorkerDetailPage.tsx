@@ -217,6 +217,9 @@ export function WorkerDetailPage() {
       <AbsenceCard workerId={worker.id} />
       <BenefitsCard workerId={worker.id} />
       <SkillsCard workerId={worker.id} />
+      <p>
+        <Link to={`/hr/workers/${worker.id}/performance`}>Goals and reviews</Link>
+      </p>
       <CertificationsCard workerId={worker.id} />
     </div>
   );

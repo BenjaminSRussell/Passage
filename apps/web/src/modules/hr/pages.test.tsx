@@ -126,6 +126,8 @@ describe("hr module", () => {
       { label: "Tasks", to: "/hr/tasks", duty: "HcmWorkerInquire" },
       { label: "Questionnaires", to: "/hr/questionnaires", duty: "HcmQuestionnaireAdmin" },
       { label: "My questionnaires", to: "/hr/my/questionnaires", duty: "EssQuestionnaire" },
+      { label: "My goals", to: "/hr/my/goals", duty: "hr.performance.self" },
+      { label: "My reviews", to: "/hr/my/reviews", duty: "hr.performance.self" },
       { label: "My profile", to: "/hr/my/profile", duty: "EssBase" },
       { label: "My team", to: "/hr/my/team", duty: "MssBase" },
     ]);
