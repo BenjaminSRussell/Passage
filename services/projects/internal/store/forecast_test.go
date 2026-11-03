@@ -105,6 +105,19 @@ func TestForecasts_CreateReplaceAndCompareWithActuals(t *testing.T) {
 	if _, _, err := s.CreateForecastModel(tenantCtx(4), "ES-FC", ForecastInput{Name: "X"}, "fc-5"); problemCode(err) != CodeNotFound {
 		t.Fatalf("other tenant creates a model: %v", err)
 	}
+	foreign := leCtx(3, ids.New())
+	if _, err := s.GetForecast(foreign, "ES-FC", m.ID); problemCode(err) != CodeNotFound {
+		t.Fatalf("other legal entity reads the model: %v", err)
+	}
+	if _, _, err := s.CreateForecastModel(foreign, "ES-FC", ForecastInput{Name: "X"}, "fc-6"); problemCode(err) != CodeNotFound {
+		t.Fatalf("other legal entity creates a model: %v", err)
+	}
+	if _, err := s.ReplaceForecast(foreign, "ES-FC", m.ID, upd.Version, in); problemCode(err) != CodeNotFound {
+		t.Fatalf("other legal entity replaces the model: %v", err)
+	}
+	if _, err := s.ActivateForecastModel(foreign, "ES-FC", m.ID, upd.Version); problemCode(err) != CodeNotFound {
+		t.Fatalf("other legal entity activates the model: %v", err)
+	}
 	if _, err := s.GetForecast(ctx, "ES-FC", ids.New()); problemCode(err) != CodeNotFound {
 		t.Fatalf("unknown model: %v", err)
 	}

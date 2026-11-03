@@ -38,6 +38,8 @@ type fakeStore struct {
 	preview         *store.ActivationInput
 	positions       []inventory.Position
 	versionType     string
+	versionLE       string
+	versionStatus   string
 	roll            *store.RollInput
 }
 
@@ -75,7 +77,11 @@ func (f *fakeStore) GetVersion(_ context.Context, id string) (store.Version, err
 	if kind == "" {
 		kind = domain.VersionStandard
 	}
-	return store.Version{ID: id, Type: kind, Status: domain.VersionOpen, Version: 1, SiteIDs: []string{}}, f.err
+	status := f.versionStatus
+	if status == "" {
+		status = domain.VersionOpen
+	}
+	return store.Version{ID: id, LegalEntityID: f.versionLE, Type: kind, Status: status, Version: 1, SiteIDs: []string{}}, f.err
 }
 
 func (f *fakeStore) CreateVersion(_ context.Context, spec domain.VersionSpec, key string) (store.Version, bool, error) {

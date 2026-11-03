@@ -228,6 +228,14 @@ func (a *API) rollStoredVersion(w http.ResponseWriter, r *http.Request) {
 		storeFailure(w, r, err)
 		return
 	}
+	if !tenant.InLegalEntityScope(p, v.LegalEntityID) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, domain.CodeLegalEntityScope, "legal entity "+v.LegalEntityID+" is outside your scope"))
+		return
+	}
+	if v.Status != domain.VersionOpen {
+		storeFailure(w, r, &domain.CodedError{Code: domain.CodeVersionNotRollable, Detail: "version " + v.Code + " is " + v.Status + "; only an Open version can be rolled"})
+		return
+	}
 	if opts.Mode == "" {
 		opts.Mode = domain.ModeMultilevel
 	}
