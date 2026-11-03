@@ -83,6 +83,10 @@ func postEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in PostInput) 
 	if err != nil || replayed {
 		return out, err
 	}
+	replayed, err = replayFromJournal(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, []string{in.Key}, in.Hash, &out)
+	if err != nil || replayed {
+		return out, err
+	}
 	entry, notices, err := postToLedger(ctx, tx, tenantID, ledger, in)
 	if err != nil {
 		return out, err
@@ -224,6 +228,10 @@ func reverseEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in ReverseI
 		return out, err
 	}
 	replayed, err := replayIdempotent(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, in.Hash, &out)
+	if err != nil || replayed {
+		return out, err
+	}
+	replayed, err = replayFromJournal(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, []string{in.Key}, in.Hash, &out)
 	if err != nil || replayed {
 		return out, err
 	}

@@ -2164,8 +2164,10 @@ paths:
         assignment, insert, balance upsert, outbox. Fiscal periods and FX are not yet applied
         (NOT-IMPLEMENTED.md). The database re-checks the balance at commit.
         Retries with the same Idempotency-Key and payload replay the stored response (200 with
-        idempotency.replayed = true). Idempotency records are kept 400 days; replays after expiry
-        are new requests.
+        idempotency.replayed = true). Idempotency records are kept LEDGER_IDEMPOTENCY_TTL_DAYS (default 400); after expiry the
+        journal entry's own key still answers: the same key and payload return the original entry
+        as a replay (without the original notices), another payload is 409
+        LEDGER_IDEMPOTENCY_CONFLICT. This holds for a post, a ledger-set post and a reversal.
 
         Period control: with CLOSE_URL configured, every posting path (this one, validate, reversal,
         batch submit and post, ledger-set post) asks the close service for the posting date's period status

@@ -22,7 +22,25 @@ var (
 	VersionTransitioned    = events.Type(Context, "version", "transitioned", 1)
 	StandardCostActivated  = events.Type(Context, "standardcost", "activated", 1)
 	PostingAccountsChanged = events.Type(Context, "postingaccounts", "changed", 1)
+	// ActivationAttemptResolved records an operator's decision on a pending
+	// activation attempt too old for the ledger to answer for (issue 435).
+	ActivationAttemptResolved = events.Type(Context, "activationattempt", "resolved", 1)
 )
+
+// ActivationAttemptResolvedData is the payload of ActivationAttemptResolved.
+// Outcome is "posted" (the operator confirmed the ledger entry JournalEntryID
+// exists and the activation was recorded) or "not-posted" (the operator
+// confirmed nothing landed and the attempt was discarded).
+type ActivationAttemptResolvedData struct {
+	CostingVersionID     string `json:"costingVersionId"`
+	LegalEntityID        string `json:"legalEntityId"`
+	ActivationID         string `json:"activationId"`
+	ReversesActivationID string `json:"reversesActivationId,omitempty"`
+	Outcome              string `json:"outcome"`
+	JournalEntryID       string `json:"journalEntryId,omitempty"`
+	Reason               string `json:"reason"`
+	Actor                string `json:"actor"`
+}
 
 // PostingAccountsChangedData is the payload of PostingAccountsChanged: the
 // ledger accounts activations of the legal entity post to from now on.

@@ -374,6 +374,14 @@ func postSetTx(ctx context.Context, tx pgx.Tx, tenantID, setID string, in PostIn
 	if err != nil || replayed {
 		return out, err
 	}
+	setKeys := make([]string, 0, len(ledgers))
+	for _, l := range ledgers {
+		setKeys = append(setKeys, setEntryKey(in.Key, l.ID))
+	}
+	replayed, err = replayFromJournal(ctx, tx, tenantID, set.LegalEntityID, in.Key, setKeys, in.Hash, &out)
+	if err != nil || replayed {
+		return out, err
+	}
 	out = EntryResult{Idempotency: Idempotency{Key: in.Key}, TraceID: in.TraceID}
 	for _, ledger := range ledgers {
 		li := in

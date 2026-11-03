@@ -10,7 +10,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/events"
 )
 
-var published = []string{CostComponentCreated, CostGroupCreated, VersionCreated, VersionTransitioned, StandardCostActivated, PostingAccountsChanged}
+var published = []string{CostComponentCreated, CostGroupCreated, VersionCreated, VersionTransitioned, StandardCostActivated, PostingAccountsChanged, ActivationAttemptResolved}
 
 func TestEventTypesFollowTheNamingRule(t *testing.T) {
 	for _, typ := range published {

@@ -1242,3 +1242,14 @@ test_posting_accounts_are_maintained_by_costing_maintain_and_read_by_costing_vie
 	allowed("CostingView", "GET", "/v1/product-costing/posting-accounts/le-1")
 	not allowed("CostingMaintain", "GET", "/v1/product-costing/posting-accounts/le-1")
 }
+
+test_activation_attempts_are_resolved_only_by_the_operator_duty if {
+	allowed("productcost.activation-attempt.resolve", "GET", "/v1/product-costing/activation-attempts")
+	allowed("productcost.activation-attempt.resolve", "POST", "/v1/product-costing/versions/v-1/activation-attempt/resolve")
+	not allowed("productcost.activation-attempt.resolve", "POST", "/v1/product-costing/versions/v-1/activate")
+	not allowed("productcost.activation-attempt.resolve", "PUT", "/v1/product-costing/posting-accounts/le-1")
+	not allowed("CostingActivate", "GET", "/v1/product-costing/activation-attempts")
+	not allowed("CostingActivate", "POST", "/v1/product-costing/versions/v-1/activation-attempt/resolve")
+	not allowed("CostingMaintain", "POST", "/v1/product-costing/versions/v-1/activation-attempt/resolve")
+	not allowed("CostingView", "GET", "/v1/product-costing/activation-attempts")
+}

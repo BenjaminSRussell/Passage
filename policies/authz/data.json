@@ -845,6 +845,10 @@
       {"resource": "/v1/product-costing/versions/*/activate", "methods": ["POST"]},
       {"resource": "/v1/product-costing/versions:activate", "methods": ["POST"]}
     ]},
+    "productcost.activation-attempt.resolve": {"permissions": [
+      {"resource": "/v1/product-costing/activation-attempts", "methods": ["GET"]},
+      {"resource": "/v1/product-costing/versions/*/activation-attempt/resolve", "methods": ["POST"]}
+    ]},
     "CostingCalculate": {"permissions": [
       {"resource": "/v1/product-costing/calculations", "methods": ["POST"]},
       {"resource": "/v1/product-costing/estimates", "methods": ["POST"]},

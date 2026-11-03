@@ -41,6 +41,8 @@ type fakeStore struct {
 	versionLE       string
 	versionStatus   string
 	roll            *store.RollInput
+	attempts        []store.Attempt
+	resolve         *store.ResolveInput
 }
 
 func (f *fakeStore) ListComponents(context.Context) ([]store.Component, error) {
@@ -137,6 +139,17 @@ func (f *fakeStore) SetPostingAccounts(_ context.Context, in store.PostingAccoun
 	f.calls++
 	f.accounts = in
 	return in, f.err
+}
+
+func (f *fakeStore) ListActivationAttempts(context.Context) ([]store.Attempt, error) {
+	f.calls++
+	return f.attempts, f.err
+}
+
+func (f *fakeStore) ResolveActivationAttempt(_ context.Context, in store.ResolveInput) (store.ResolveResult, bool, error) {
+	f.calls++
+	f.resolve = &in
+	return store.ResolveResult{Outcome: in.Outcome}, f.replayed, f.err
 }
 
 func storedRouter(f *fakeStore) http.Handler {

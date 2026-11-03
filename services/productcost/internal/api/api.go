@@ -32,12 +32,15 @@ import (
 const (
 	readyTimeout = 500 * time.Millisecond
 	// Duties from PRD section 7.39.17.
-	dutyView         = "CostingView"
-	dutyMaintain     = "CostingMaintain"
-	dutyCalculate    = "CostingCalculate"
-	dutyActivate     = "CostingActivate"
-	dutySystem       = "CostingSystem"
-	validationDetail = "request failed validation"
+	dutyView      = "CostingView"
+	dutyMaintain  = "CostingMaintain"
+	dutyCalculate = "CostingCalculate"
+	dutyActivate  = "CostingActivate"
+	dutySystem    = "CostingSystem"
+	// dutyResolveAttempt lets an operator see and settle activation attempts
+	// past the ledger replay window (issue 435).
+	dutyResolveAttempt = "productcost.activation-attempt.resolve"
+	validationDetail   = "request failed validation"
 	// MaxItems bounds one roll request (AC-39.3 sizes the mass roll at 50,000).
 	MaxItems = 50000
 	// MaxRevalLines bounds one activation preview.
@@ -137,6 +140,8 @@ func (a *API) routes() []route {
 		{http.MethodPost, "/v1/product-costing/versions/{id}/transition", dutyMaintain, a.transitionStoredVersion},
 		{http.MethodPost, "/v1/product-costing/versions/{id}/activate", dutyActivate, a.activateStoredVersion},
 		{http.MethodPost, "/v1/product-costing/versions/{id}/roll", dutyCalculate, a.rollStoredVersion},
+		{http.MethodGet, "/v1/product-costing/activation-attempts", dutyResolveAttempt, a.listActivationAttempts},
+		{http.MethodPost, "/v1/product-costing/versions/{id}/activation-attempt/resolve", dutyResolveAttempt, a.resolveActivationAttempt},
 		{http.MethodGet, "/v1/product-costing/posting-accounts/{legalEntityId}", dutyView, a.getPostingAccounts},
 		{http.MethodPut, "/v1/product-costing/posting-accounts/{legalEntityId}", dutyMaintain, a.putPostingAccounts},
 	}

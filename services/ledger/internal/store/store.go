@@ -479,6 +479,48 @@ func replayIdempotent(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, k
 	return true, nil
 }
 
+// replayFromJournal answers a resend whose idempotency_keys record has expired
+// (LEDGER_IDEMPOTENCY_TTL_DAYS, default 400) from the journal itself: journal_entry keeps idempotency_key for
+// good, unique per tenant x legal entity, and the payload hash it was posted with.
+// The same key and hash returns the original entries as a replay; the same key
+// with another body is 409 LEDGER_IDEMPOTENCY_CONFLICT. Without it the second
+// insert would hit the unique key and surface as a misleading
+// LEDGER_IDEMPOTENCY_IN_PROGRESS. keys are the journal keys of the request's
+// entries in output order (one for a post or reversal, one per ledger for a
+// ledger set).
+func replayFromJournal(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, key string, keys []string, hash []byte, out *EntryResult) (bool, error) {
+	var entries []Entry
+	traceID := ""
+	for _, k := range keys {
+		var id string
+		var stored []byte
+		err := tx.QueryRow(ctx, `select id::text, payload_hash from journal_entry where tenant_id = $1 and legal_entity_id = $2 and idempotency_key = $3`,
+			tenantID, legalEntityID, k).Scan(&id, &stored)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if !bytes.Equal(stored, hash) {
+			return false, httpx.NewProblem(http.StatusConflict, "LEDGER_IDEMPOTENCY_CONFLICT", "Idempotency-Key was already used with a different request body")
+		}
+		e, err := loadEntryTx(ctx, tx, tenantID, id)
+		if err != nil {
+			return false, err
+		}
+		if traceID == "" {
+			traceID = e.TraceID
+		}
+		entries = append(entries, e)
+	}
+	if len(entries) == 0 {
+		return false, nil
+	}
+	*out = EntryResult{Entries: entries, Idempotency: Idempotency{Key: key, Replayed: true}, TraceID: traceID}
+	return true, nil
+}
+
 // storeIdempotent records a successful response under the key (2xx only).
 func storeIdempotent(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, key string, hash []byte, result EntryResult) error {
 	body, err := json.Marshal(result)

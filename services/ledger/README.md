@@ -18,7 +18,10 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 - Posting: `POST /v1/ledger/journal-entries` posts a balanced entry atomically
   or rejects it entirely with every violation in one 422 response. Idempotency
   keys replay identical requests (200, `idempotency.replayed = true`) and reject
-  reused keys with different payloads (409 `LEDGER_IDEMPOTENCY_CONFLICT`).
+  reused keys with different payloads (409 `LEDGER_IDEMPOTENCY_CONFLICT`). The
+  entry keeps its key for good (unique per legal entity), so a verbatim resend
+  after the key record expired (`LEDGER_IDEMPOTENCY_TTL_DAYS`, default 400) returns the original entry as a replay
+  rather than booking a second one, and a changed body is the same 409.
 - Validation dry run: `POST /v1/ledger/validate` returns the same violations
   and the resolved dimension combinations without writing.
 - Reversal: `POST /v1/ledger/journal-entries/{id}/reverse` writes an exact
