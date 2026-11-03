@@ -24,6 +24,7 @@ var servicePrincipals = map[string][]string{
 	"receiving-ers":           {"VendorInvoicePost"},
 	"scheduling-downtime":     {"scheduling.downtime.apply"},
 	"scheduling-order-import": {"scheduling.order.import"},
+	"shopfloor-production":    {"shopfloor.job.sync"},
 }
 
 // servicePrincipalIssuers names the services whose signing key may present each
@@ -37,6 +38,7 @@ var servicePrincipalIssuers = map[string][]string{
 	"receiving-ers":           {"receiving"},
 	"scheduling-downtime":     {"scheduling"},
 	"scheduling-order-import": {"scheduling"},
+	"shopfloor-production":    {"shopfloor"},
 }
 
 func ServicePrincipalTable() map[string][]string {

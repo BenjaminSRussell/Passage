@@ -2616,6 +2616,7 @@
       {"resource": "/v1/shopfloor/edge-nodes/*/config", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/edge-nodes/*:heartbeat", "methods": ["POST"]}
     ]},
+    "shopfloor.job.sync": {"flag": true, "permissions": []},
     "shopfloor.job.schedule": {"permissions": [{"resource": "/v1/shopfloor/jobs", "methods": ["POST"]}]},
     "shopfloor.job.reopen": {"permissions": [{"resource": "/v1/shopfloor/jobs/*:reopen", "methods": ["POST"]}]},
     "shopfloor.kiosk.login": {"permissions": [{"resource": "/v1/shopfloor/sessions:badge", "methods": ["POST"]}]},
@@ -2648,7 +2649,9 @@
       {"resource": "/v1/shopfloor/time-profiles/*", "methods": ["PUT"]},
       {"resource": "/v1/shopfloor/workers", "methods": ["POST"]},
       {"resource": "/v1/shopfloor/workers/*:assign-setup", "methods": ["POST"]},
-      {"resource": "/v1/shopfloor/workers/*:assign-resource", "methods": ["POST"]}
+      {"resource": "/v1/shopfloor/workers/*:assign-resource", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/downtime-reasons", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/downtime-reasons/*", "methods": ["PUT"]}
     ]},
     "shopfloor.time.autoclockout": {"service_only": true, "permissions": [{"resource": "/v1/shopfloor/registrations:auto-clock-out", "methods": ["POST"]}]},
     "shopfloor.time.correct": {"permissions": [{"resource": "/v1/shopfloor/registrations/*:correct", "methods": ["POST"]}]},
@@ -2682,7 +2685,9 @@
       {"resource": "/v1/shopfloor/worker-days", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/workers", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/workers/*", "methods": ["GET"]},
-      {"resource": "/v1/shopfloor/jobs/*/reopenings", "methods": ["GET"]}
+      {"resource": "/v1/shopfloor/jobs/*/reopenings", "methods": ["GET"]},
+      {"resource": "/v1/shopfloor/downtime-reasons", "methods": ["GET"]},
+      {"resource": "/v1/shopfloor/downtime-reasons/*", "methods": ["GET"]}
     ]},
     "treasury.bank-account.approve": {"permissions": [
       {"resource": "/v1/treasury/bank-accounts/*:activate", "methods": ["POST"]},
@@ -2881,6 +2886,7 @@
     "receiving-erasure": ["compliance.legal_hold.check"],
     "receiving-ers": ["VendorInvoicePost"],
     "scheduling-downtime": ["scheduling.downtime.apply"],
-    "scheduling-order-import": ["scheduling.order.import"]
+    "scheduling-order-import": ["scheduling.order.import"],
+    "shopfloor-production": ["shopfloor.job.sync"]
   }
 }
