@@ -12,6 +12,7 @@ export interface LoadReleasedEvent {
     loadId: string;
     legalEntityId: string;
     releasedBy: string;
+    legalEntityScope: string[];
     carriers: { carrierId: string; rateQuoted?: string }[];
     currency?: string;
     timeoutMin?: number;
@@ -26,11 +27,12 @@ export interface TenderOutcomeEvent {
 
 export function toTenderInput(event: LoadReleasedEvent): TenderInput {
   if (event.type !== loadReleasedType) throw new TypeError(`expected ${loadReleasedType}, got ${event.type}`);
-  const { loadId, legalEntityId, releasedBy, carriers, currency, timeoutMin } = event.data;
+  const { loadId, legalEntityId, releasedBy, legalEntityScope, carriers, currency, timeoutMin } = event.data;
   const input: TenderInput = {
     tenantId: event.tenantid,
     legalEntityId,
     loadId,
+    legalEntityScope: legalEntityScope ?? [],
     carriers: (carriers ?? []).map((carrier) => ({ carrierId: carrier.carrierId, ...(carrier.rateQuoted ? { rateQuoted: carrier.rateQuoted } : {}) })),
     ...(currency ? { currency } : {}),
     ...(timeoutMin ? { timeoutMin } : {}),
@@ -46,7 +48,7 @@ export async function handleLoadReleased(
   event: LoadReleasedEvent,
 ): Promise<{ workflowId: string; started: boolean }> {
   const input = toTenderInput(event);
-  const workflowId = tenderWorkflowId(input.loadId);
+  const workflowId = tenderWorkflowId(input.tenantId, input.loadId);
   try {
     await client.workflow.start(tenderWorkflow, {
       workflowId,
@@ -63,8 +65,8 @@ export async function handleLoadReleased(
 
 export async function handleTenderOutcome(client: Pick<Client, "workflow">, event: TenderOutcomeEvent): Promise<{ workflowId: string; signalled: boolean }> {
   if (!(tenderOutcomeTypes as readonly string[]).includes(event.type)) throw new TypeError(`expected one of ${tenderOutcomeTypes.join(", ")}, got ${event.type}`);
-  if (!event.data.loadId) throw new TypeError("tender outcome event is missing the load id");
-  const workflowId = tenderWorkflowId(event.data.loadId);
+  if (!event.tenantid || !event.data.loadId) throw new TypeError("tender outcome event is missing the tenant or the load id");
+  const workflowId = tenderWorkflowId(event.tenantid, event.data.loadId);
   try {
     await client.workflow.getHandle(workflowId).signal(tenderResponseSignal);
     return { workflowId, signalled: true };

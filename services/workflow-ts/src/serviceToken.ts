@@ -71,7 +71,7 @@ export function createServiceTokenSigner(options: SignerOptions): ServiceTokenSi
     mintForPayables: (subject) => mint(PAYABLES_AUDIENCE, PAYABLES_GRANT, subject, false),
     mintForEngineering: (subject) => mint(ENGINEERING_AUDIENCE, ENGINEERING_GRANT, subject, true),
     mintForQuality: (subject) => mint(QUALITY_AUDIENCE, QUALITY_GRANT, subject, true),
-    mintForTransport: (subject) => mint(TRANSPORT_AUDIENCE, TRANSPORT_GRANT, subject, false),
+    mintForTransport: (subject) => mint(TRANSPORT_AUDIENCE, TRANSPORT_GRANT, subject, true),
   };
 }
 

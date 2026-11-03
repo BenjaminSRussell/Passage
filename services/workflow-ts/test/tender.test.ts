@@ -17,6 +17,7 @@ const signer = createServiceTokenSigner({ seedBase64: Buffer.alloc(32, 9).toStri
 const input: TenderInput = {
   tenantId: "00000000-0000-0000-0000-000000000001",
   legalEntityId: "00000000-0000-0000-0000-0000000000a1",
+  legalEntityScope: ["00000000-0000-0000-0000-0000000000a1", "00000000-0000-0000-0000-0000000000a2"],
   loadId: LOAD_ID,
   carriers: CARRIERS.map((carrierId) => ({ carrierId })),
   timeoutMin: TIMEOUT_MIN,
@@ -51,7 +52,7 @@ describe("tender workflow", () => {
       activities: createTenderActivities("http://transport", signer, fake.fetch),
     });
     return worker.runUntil(async () => {
-      const handle = await environment.client.workflow.start(tenderWorkflow, { workflowId: `${tenderWorkflowId(LOAD_ID)}:${taskQueue}`, taskQueue, args: [{ ...input, ...override }] });
+      const handle = await environment.client.workflow.start(tenderWorkflow, { workflowId: `${tenderWorkflowId(input.tenantId, LOAD_ID)}:${taskQueue}`, taskQueue, args: [{ ...input, ...override }] });
       await drive(handle);
       return handle.result();
     });
@@ -223,6 +224,12 @@ describe("tender workflow", () => {
     expect(error).toBeInstanceOf(ApplicationFailure);
     expect((error as ApplicationFailure).nonRetryable).toBe(true);
   });
+
+  it("fails the workflow when the releasing user's scope does not cover the load's legal entity", async () => {
+    const fake = new FakeTransport();
+    await expect(run(fake, async () => {}, { legalEntityScope: ["00000000-0000-0000-0000-0000000000a2"] })).rejects.toBeInstanceOf(WorkflowFailedError);
+    expect(fake.tokens).toHaveLength(0);
+  }, 60_000);
 
   it("refuses to start without a load, a requester or carriers", () => {
     expect(() => validateTenderInput({ ...input, requestedBy: "" })).toThrow(/required/);

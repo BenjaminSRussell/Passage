@@ -10,6 +10,7 @@ export interface TenderInput {
   tenantId: string;
   legalEntityId: string;
   loadId: string;
+  legalEntityScope: string[];
   carriers: TenderCarrier[];
   currency?: string;
   timeoutMin?: number;
@@ -20,6 +21,7 @@ export interface TenderRef {
   tenantId: string;
   legalEntityId: string;
   actor: string;
+  scope: string[];
 }
 
 export interface TenderView {
@@ -58,8 +60,8 @@ const activities = proxyActivities<TenderActivities>({
   retry: { initialInterval: "1 second", maximumInterval: "1 minute", nonRetryableErrorTypes: ["ServiceCallRejected"] },
 });
 
-export function tenderWorkflowId(loadId: string): string {
-  return `tender:${loadId}`;
+export function tenderWorkflowId(tenantId: string, loadId: string): string {
+  return `tender:${tenantId}:${loadId}`;
 }
 
 export function validateTenderInput(input: TenderInput): void {
@@ -67,6 +69,7 @@ export function validateTenderInput(input: TenderInput): void {
     throw ApplicationFailure.nonRetryable(message, INVALID_INPUT);
   };
   if (!input.tenantId || !input.legalEntityId || !input.loadId || !input.requestedBy) invalid("tenantId, legalEntityId, loadId and requestedBy are required");
+  if (!(input.legalEntityScope ?? []).includes(input.legalEntityId)) invalid("legalEntityScope must include the load's legal entity");
   if (input.carriers.length === 0) invalid("at least one carrier is required");
   if (new Set(input.carriers.map((carrier) => carrier.carrierId)).size !== input.carriers.length) invalid("list each carrier once, in rank order");
 }
@@ -85,7 +88,7 @@ export async function tenderWorkflow(input: TenderInput): Promise<TenderState> {
     nudged = true;
   });
 
-  const ref: TenderRef = { tenantId: input.tenantId, legalEntityId: input.legalEntityId, actor: input.requestedBy };
+  const ref: TenderRef = { tenantId: input.tenantId, legalEntityId: input.legalEntityId, actor: input.requestedBy, scope: input.legalEntityScope };
   const follow = (tender: TenderView): TenderView => {
     state.tenderId = tender.id;
     state.pendingCarrierId = tender.pendingCarrierId;

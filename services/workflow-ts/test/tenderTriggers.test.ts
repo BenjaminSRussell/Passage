@@ -11,6 +11,7 @@ const released: LoadReleasedEvent = {
     loadId: LOAD_ID,
     legalEntityId: "00000000-0000-0000-0000-0000000000a1",
     releasedBy: "planner",
+    legalEntityScope: ["00000000-0000-0000-0000-0000000000a1"],
     carriers: [{ carrierId: CARRIERS[0]!, rateQuoted: "120.00" }, { carrierId: CARRIERS[1]! }],
     currency: "USD",
     timeoutMin: 45,
@@ -18,7 +19,8 @@ const released: LoadReleasedEvent = {
 };
 
 function clientWith(start: ReturnType<typeof vi.fn>, signal = vi.fn()) {
-  return { client: { workflow: { start, getHandle: vi.fn(() => ({ signal })) } } as unknown as Pick<Client, "workflow">, start, signal };
+  const getHandle = vi.fn(() => ({ signal }));
+  return { client: { workflow: { start, getHandle } } as unknown as Pick<Client, "workflow">, start, signal, getHandle };
 }
 
 describe("tender triggers", () => {
@@ -27,6 +29,7 @@ describe("tender triggers", () => {
       tenantId: released.tenantid,
       legalEntityId: released.data.legalEntityId,
       loadId: LOAD_ID,
+      legalEntityScope: released.data.legalEntityScope,
       carriers: [{ carrierId: CARRIERS[0], rateQuoted: "120.00" }, { carrierId: CARRIERS[1] }],
       currency: "USD",
       timeoutMin: 45,
@@ -36,9 +39,9 @@ describe("tender triggers", () => {
 
   it("starts tender:<loadId>, reports a run already in flight and allows a re-release after the last run closed", async () => {
     const { client, start } = clientWith(vi.fn().mockResolvedValueOnce({}).mockRejectedValueOnce(new WorkflowExecutionAlreadyStartedError("dup", "tender", "tenderWorkflow")));
-    expect(await handleLoadReleased(client, "q", released)).toEqual({ workflowId: `tender:${LOAD_ID}`, started: true });
-    expect(start).toHaveBeenCalledWith(tenderWorkflow, expect.objectContaining({ workflowId: `tender:${LOAD_ID}`, taskQueue: "q", workflowIdReusePolicy: WorkflowIdReusePolicy.ALLOW_DUPLICATE }));
-    expect(await handleLoadReleased(client, "q", released)).toEqual({ workflowId: `tender:${LOAD_ID}`, started: false });
+    expect(await handleLoadReleased(client, "q", released)).toEqual({ workflowId: `tender:${released.tenantid}:${LOAD_ID}`, started: true });
+    expect(start).toHaveBeenCalledWith(tenderWorkflow, expect.objectContaining({ workflowId: `tender:${released.tenantid}:${LOAD_ID}`, taskQueue: "q", workflowIdReusePolicy: WorkflowIdReusePolicy.ALLOW_DUPLICATE }));
+    expect(await handleLoadReleased(client, "q", released)).toEqual({ workflowId: `tender:${released.tenantid}:${LOAD_ID}`, started: false });
   });
 
   it("starts nothing for another event type, a missing carrier list or a missing releasing user", async () => {
@@ -52,10 +55,25 @@ describe("tender triggers", () => {
   it("signals the running tender workflow when a carrier accepts or declines", async () => {
     const { client, signal } = clientWith(vi.fn());
     for (const type of ["dev.passage.tms.tender.accepted.v1", "dev.passage.tms.tender.declined.v1"]) {
-      expect(await handleTenderOutcome(client, { type, tenantid: released.tenantid, data: { loadId: LOAD_ID } })).toEqual({ workflowId: `tender:${LOAD_ID}`, signalled: true });
+      expect(await handleTenderOutcome(client, { type, tenantid: released.tenantid, data: { loadId: LOAD_ID } })).toEqual({ workflowId: `tender:${released.tenantid}:${LOAD_ID}`, signalled: true });
     }
     expect(signal).toHaveBeenCalledTimes(2);
     expect(signal).toHaveBeenCalledWith(tenderResponseSignal);
+  });
+
+  it("signals only the workflow of the event's own tenant", async () => {
+    const { client, getHandle } = clientWith(vi.fn());
+    const otherTenant = "00000000-0000-0000-0000-000000000002";
+    await handleTenderOutcome(client, { type: "dev.passage.tms.tender.accepted.v1", tenantid: otherTenant, data: { loadId: LOAD_ID } });
+    expect(getHandle).toHaveBeenCalledWith(`tender:${otherTenant}:${LOAD_ID}`);
+    expect(getHandle).not.toHaveBeenCalledWith(`tender:${released.tenantid}:${LOAD_ID}`);
+    await expect(handleTenderOutcome(client, { type: "dev.passage.tms.tender.accepted.v1", tenantid: "", data: { loadId: LOAD_ID } })).rejects.toThrow(/tenant/);
+  });
+
+  it("refuses a release whose scope does not cover its legal entity", async () => {
+    const { client, start } = clientWith(vi.fn());
+    await expect(handleLoadReleased(client, "q", { ...released, data: { ...released.data, legalEntityScope: [] } })).rejects.toThrow(/legalEntityScope/);
+    expect(start).not.toHaveBeenCalled();
   });
 
   it("ignores an outcome for a tender no workflow is running", async () => {

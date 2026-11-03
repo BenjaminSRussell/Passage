@@ -14,7 +14,7 @@ export function createTenderActivities(baseUrl: string, signer: ServiceTokenSign
     const response = await fetchImpl(`${baseUrl}/v1/transport${path}`, {
       method: init.method,
       headers: {
-        "X-Passage-Service-Token": mintOrReject(() => signer.mintForTransport({ tenantId: ref.tenantId, legalEntityId: ref.legalEntityId, actor: ref.actor })),
+        "X-Passage-Service-Token": mintOrReject(() => signer.mintForTransport({ tenantId: ref.tenantId, legalEntityId: ref.legalEntityId, actor: ref.actor, scope: ref.scope })),
         ...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
         ...init.headers,
       },
