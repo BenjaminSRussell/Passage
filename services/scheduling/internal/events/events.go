@@ -48,10 +48,16 @@ type RunCompletedData struct {
 // ChangeoverCost (an exact decimal string) and ChangeoverCurrency come from the
 // setup matrix entry that priced it, with the cleaning standard operation set
 // it requires; all three are omitted when no entry priced the job.
+//
+// OrderRef and OperationRef are the keys shop floor execution (wave 25) uses:
+// the production order id and the operation number as text without leading
+// zeros.
 type JobScheduledData struct {
 	JobID              string `json:"jobId"`
 	OrderID            string `json:"orderId"`
 	OperNumber         int    `json:"operNumber"`
+	OrderRef           string `json:"orderRef"`
+	OperationRef       string `json:"operationRef"`
 	ResourceID         string `json:"resourceId"`
 	Start              string `json:"start"`
 	End                string `json:"end"`
@@ -144,13 +150,15 @@ type CapacityOverrideData struct {
 // ResourceUpdatedData announces a changed resource calendar or name (AC-23.7).
 // AffectedJobs are the booked jobs the new calendar no longer covers.
 type ResourceUpdatedData struct {
-	ResourceID   string         `json:"resourceId"`
-	Code         string         `json:"code"`
-	Name         string         `json:"name"`
-	TimeZone     string         `json:"timeZone"`
-	Shifts       []domain.Shift `json:"shifts"`
-	Version      int            `json:"version"`
-	AffectedJobs []string       `json:"affectedJobs"`
+	ResourceID string         `json:"resourceId"`
+	Code       string         `json:"code"`
+	Name       string         `json:"name"`
+	TimeZone   string         `json:"timeZone"`
+	Shifts     []domain.Shift `json:"shifts"`
+	// EfficiencyPct is the resource's efficiency in whole percent (BR-23.1).
+	EfficiencyPct int      `json:"efficiencyPct"`
+	Version       int      `json:"version"`
+	AffectedJobs  []string `json:"affectedJobs"`
 	// EngineeringResourceID is the engineering resource this one stands for,
 	// null when unmapped.
 	EngineeringResourceID *string `json:"engineeringResourceId"`

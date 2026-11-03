@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/eventing"
 	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -19,7 +18,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/scheduling/internal/api"
 	"github.com/BenjaminSRussell/passage/services/scheduling/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/scheduling/internal/store"
-	"github.com/BenjaminSRussell/passage/services/scheduling/migrations"
+	"github.com/BenjaminSRussell/passage/services/scheduling/internal/testdb"
 )
 
 type fakeSource struct {
@@ -66,9 +65,7 @@ func newRig(t *testing.T) (*store.Postgres, func(records ...eventing.Record) (*f
 func newRigWith(t *testing.T, handlers func(*api.API) map[string]eventing.Handler) (*store.Postgres, *api.API, func(records ...eventing.Record) (*fakeSource, *fakeDLQ), func(sql string, args ...any) int) {
 	t.Helper()
 	admin, app := testkit.DBWithApp(t)
-	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
-		t.Fatal(err)
-	}
+	testdb.Migrate(t, admin)
 	st := store.New(app)
 	a := api.New(st, api.DefaultConfig)
 	run := func(records ...eventing.Record) (*fakeSource, *fakeDLQ) {

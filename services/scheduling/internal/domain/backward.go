@@ -63,7 +63,7 @@ func (e *engine) placeBackward(chain []Operation, fixed []Placement, start time.
 	if ok && !last.After(due) {
 		total := 0
 		for _, op := range chain {
-			total += op.Minutes
+			total += e.fastestMinutes(op)
 		}
 		lo, hi := first, due.Add(-minutes(total))
 		for lo.Before(hi) {
@@ -94,4 +94,22 @@ func (e *engine) placeBackward(chain []Operation, fixed []Placement, start time.
 		res.Warnings = append(res.Warnings, Warning{Code: CodeLateFallback, OperationID: chain[len(chain)-1].ID,
 			Detail: fmt.Sprintf("Order %s is late by %d min (backward scheduling fell back to forward)", chain[0].OrderID, minutesBetween(due, end))})
 	}
+}
+
+// fastestMinutes is the fewest minutes op books on any of its candidates
+// (BR-23.1), so due minus the chain's sum stays an upper bound of the latest
+// start even when a candidate runs above 100 percent.
+func (e *engine) fastestMinutes(op Operation) int {
+	best := -1
+	for _, rid := range op.Candidates {
+		if c, ok := e.caps[rid]; ok {
+			if m := BookedMinutes(op.Minutes, c.res.EfficiencyPct); best < 0 || m < best {
+				best = m
+			}
+		}
+	}
+	if best < 0 {
+		return op.Minutes
+	}
+	return best
 }

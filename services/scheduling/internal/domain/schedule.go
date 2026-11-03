@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +37,8 @@ type Resource struct {
 	Blocks       []CapacityBlock
 	Matrix       SetupMatrix
 	CurrentGroup string
+	// EfficiencyPct is the efficiency in whole percent (BR-23.1); 0 means 100.
+	EfficiencyPct int
 	// Overrides are downtimes and extra shifts layered over the calendar
 	// (FR-23.1).
 	Overrides []CapacityOverride
@@ -817,4 +820,18 @@ func TotalLateness(ps []Placement) int {
 		total += p.LateMinutes
 	}
 	return total
+}
+
+// OperationRef is the operation number as text without leading zeros, the key
+// shop floor execution (wave 25) uses with the production order id.
+func OperationRef(operNumber int) string { return strconv.Itoa(operNumber) }
+
+// BookedMinutes is the time a job of process (or route setup) minutes occupies
+// on a resource running at efficiencyPct percent (BR-23.1): ceil(minutes x 100
+// / pct). A percentage of 0 or 100 leaves the minutes as they are.
+func BookedMinutes(minutes, efficiencyPct int) int {
+	if efficiencyPct <= 0 || efficiencyPct == 100 || minutes <= 0 {
+		return minutes
+	}
+	return (minutes*100 + efficiencyPct - 1) / efficiencyPct
 }

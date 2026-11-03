@@ -60,10 +60,11 @@ func TestUpdateResource_ValidatesAndNeedsKeyVersionAndDuty(t *testing.T) {
 		t.Fatalf("read duty only: %d", rec.Code)
 	}
 	bad := map[string]string{
-		"body":     `{}`,
-		"name":     `{"name":"  "}`,
-		"timeZone": `{"timeZone":"Mars/Olympus"}`,
-		"shifts":   `{"shifts":[{"weekday":9,"startMinute":0,"endMinute":60}]}`,
+		"body":          `{}`,
+		"name":          `{"name":"  "}`,
+		"timeZone":      `{"timeZone":"Mars/Olympus"}`,
+		"shifts":        `{"shifts":[{"weekday":9,"startMinute":0,"endMinute":60}]}`,
+		"efficiencyPct": `{"efficiencyPct":0}`,
 	}
 	for field, body := range bad {
 		rec := patchResource(h, resourcePath, body, allDuties, "k-"+field, `"1"`)

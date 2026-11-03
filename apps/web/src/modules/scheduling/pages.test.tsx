@@ -481,6 +481,11 @@ describe("Resources", () => {
       end: "The shift must end after it starts.",
     });
     expect(validateResource({ code: "MIX-1", name: "Mixer", timeZone: "UTC", finite: true, days: [1], start: "08:00", end: "16:00", engineeringResourceId: "x" }).errors.engineeringResourceId).toBeTruthy();
+    for (const bad of ["0", "501", "1.5", "x"]) {
+      expect(validateResource({ code: "MIX-1", name: "Mixer", timeZone: "UTC", finite: true, days: [1], start: "08:00", end: "16:00", efficiencyPct: bad }).errors.efficiencyPct).toBeTruthy();
+    }
+    expect(validateResource({ code: "MIX-1", name: "Mixer", timeZone: "UTC", finite: true, days: [1], start: "08:00", end: "16:00", efficiencyPct: " 80 " }).input?.efficiencyPct).toBe(80);
+    expect(validateResource({ code: "MIX-1", name: "Mixer", timeZone: "UTC", finite: true, days: [1], start: "08:00", end: "16:00" }).input?.efficiencyPct).toBe(100);
     const ok = validateResource({ code: "MIX-1", name: "Mixer", timeZone: "Europe/Berlin", finite: false, days: [1, 2], start: "22:00", end: "00:00" });
     expect(ok.input?.shifts).toEqual([
       { weekday: 1, startMinute: 1320, endMinute: 1440 },

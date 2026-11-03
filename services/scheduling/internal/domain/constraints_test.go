@@ -421,6 +421,7 @@ func TestSchedule_PropertyNetworksAndChangeoversStayFeasible(t *testing.T) {
 			rids = append(rids, id)
 			r0 := res(id, id, true, weekdayShift(6*60, 22*60))
 			r0.Matrix, r0.CurrentGroup = m, "g0"
+			r0.EfficiencyPct = rapid.SampledFrom([]int{0, 50, 80, 100, 125, 300}).Draw(t, "efficiency")
 			resources = append(resources, r0)
 		}
 		var edges []NetworkEdge
@@ -479,9 +480,10 @@ func TestSchedule_PropertyNetworksAndChangeoversStayFeasible(t *testing.T) {
 		for rid, pls := range byRes {
 			slices.SortFunc(pls, func(a, b Placement) int { return a.Start.Compare(b.Start) })
 			group := "g0"
+			c := capacity{res: resources[slices.Index(rids, rid)]}
 			for _, pl := range pls {
 				op := opByID[pl.OperationID]
-				if need, _ := changeoverNeed(m, group, op.SetupGroup, op.SetupMinutes); pl.ChangeoverMinutes < need {
+				if need, _ := c.need(group, op.SetupGroup, op.SetupMinutes); pl.ChangeoverMinutes < need {
 					t.Fatalf("%s on %s after %q carries %d min changeover, needs %d", op.ID, rid, group, pl.ChangeoverMinutes, need)
 				}
 				if op.SetupGroup != "" {

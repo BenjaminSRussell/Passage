@@ -26,6 +26,8 @@ type ResourcePatch struct {
 	Name     *string
 	TimeZone *string
 	Shifts   []domain.Shift
+	// EfficiencyPct is the new efficiency in whole percent (BR-23.1); 0 leaves it.
+	EfficiencyPct int
 	// EngineeringResourceID maps the resource to an engineering resource;
 	// the empty string removes the mapping.
 	EngineeringResourceID *string
@@ -94,12 +96,15 @@ func (s *Postgres) UpdateResource(ctx context.Context, id string, version int, p
 				cur.EngineeringResourceID = patch.EngineeringResourceID
 			}
 		}
+		if patch.EfficiencyPct != 0 {
+			cur.EfficiencyPct = patch.EfficiencyPct
+		}
 		shifts, err := json.Marshal(cur.Shifts)
 		if err != nil {
 			return err
 		}
-		upd, err := scanResource(tx.QueryRow(ctx, `update scheduling_resource set name = $2, time_zone = $3, shifts = $4, engineering_resource_id = $5::uuid, version = version + 1
-			where id = $1::uuid returning `+resourceCols, id, cur.Name, cur.TimeZone, shifts, cur.EngineeringResourceID), nil)
+		upd, err := scanResource(tx.QueryRow(ctx, `update scheduling_resource set name = $2, time_zone = $3, shifts = $4, engineering_resource_id = $5::uuid, efficiency_pct = $6, version = version + 1
+			where id = $1::uuid returning `+resourceCols, id, cur.Name, cur.TimeZone, shifts, cur.EngineeringResourceID, cur.EfficiencyPct), nil)
 		if err != nil {
 			return err
 		}
@@ -113,7 +118,7 @@ func (s *Postgres) UpdateResource(ctx context.Context, id string, version int, p
 			refs = append(refs, j.JobID)
 		}
 		if err := enqueue(ctx, tx, "resource", upd.ID, schedevents.ResourceUpdated, schedevents.ResourceUpdatedData{
-			ResourceID: upd.ID, Code: upd.Code, Name: upd.Name, TimeZone: upd.TimeZone, Shifts: upd.Shifts, EngineeringResourceID: upd.EngineeringResourceID, Version: upd.Version, AffectedJobs: refs}); err != nil {
+			ResourceID: upd.ID, Code: upd.Code, Name: upd.Name, TimeZone: upd.TimeZone, Shifts: upd.Shifts, EfficiencyPct: upd.EfficiencyPct, EngineeringResourceID: upd.EngineeringResourceID, Version: upd.Version, AffectedJobs: refs}); err != nil {
 			return err
 		}
 		if idem.Key != "" {

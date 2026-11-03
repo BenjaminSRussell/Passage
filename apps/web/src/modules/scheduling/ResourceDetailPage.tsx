@@ -124,6 +124,10 @@ export function ResourceDetailPage() {
             <dd className={styles.value}>{resource.timeZone}</dd>
           </div>
           <div className={styles.entry}>
+            <dt className={styles.term}>Efficiency</dt>
+            <dd className={styles.value}>{`${resource.efficiencyPct ?? 100} %`}</dd>
+          </div>
+          <div className={styles.entry}>
             <dt className={styles.term}>Engineering resource</dt>
             <dd className={`${styles.value} ${styles.mono}`}>{resource.engineeringResourceId ?? "Not mapped"}</dd>
           </div>

@@ -21,6 +21,8 @@ type resourcePatchRequest struct {
 	Name     *string        `json:"name"`
 	TimeZone *string        `json:"timeZone"`
 	Shifts   []domain.Shift `json:"shifts"`
+	// EfficiencyPct is whole percent from 1 to 500 (BR-23.1).
+	EfficiencyPct *int `json:"efficiencyPct"`
 	// EngineeringResourceID is a UUID, or "" to remove the mapping.
 	EngineeringResourceID *string `json:"engineeringResourceId"`
 }
@@ -52,8 +54,8 @@ func (a *API) updateResource(w http.ResponseWriter, r *http.Request) {
 	idem.Fingerprint = fingerprint(id+"|"+strconv.Itoa(version), body)
 	fields := map[string]string{}
 	patch := store.ResourcePatch{}
-	if req.Name == nil && req.TimeZone == nil && req.Shifts == nil && req.EngineeringResourceID == nil {
-		fields["body"] = "send at least one of name, timeZone, shifts or engineeringResourceId"
+	if req.Name == nil && req.TimeZone == nil && req.Shifts == nil && req.EfficiencyPct == nil && req.EngineeringResourceID == nil {
+		fields["body"] = "send at least one of name, timeZone, shifts, efficiencyPct or engineeringResourceId"
 	}
 	if req.Name != nil {
 		name := strings.TrimSpace(*req.Name)
@@ -74,6 +76,12 @@ func (a *API) updateResource(w http.ResponseWriter, r *http.Request) {
 			fields["shifts"] = msg
 		}
 		patch.Shifts = req.Shifts
+	}
+	if req.EfficiencyPct != nil {
+		if *req.EfficiencyPct < 1 || *req.EfficiencyPct > 500 {
+			fields["efficiencyPct"] = "must be a whole percent from 1 to 500"
+		}
+		patch.EfficiencyPct = *req.EfficiencyPct
 	}
 	if req.EngineeringResourceID != nil {
 		eid := strings.ToLower(*req.EngineeringResourceID)

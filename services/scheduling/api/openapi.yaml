@@ -68,9 +68,9 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
     patch:
       operationId: updateResource
-      summary: Change a resource's name, time zone, weekly calendar or engineering resource mapping and list the jobs it no longer covers (FR-23.1, AC-23.7)
+      summary: Change a resource's name, time zone, weekly calendar, efficiency or engineering resource mapping and list the jobs it no longer covers (FR-23.1, AC-23.7)
       description: >
-        Send at least one of name, timeZone, shifts or engineeringResourceId;
+        Send at least one of name, timeZone, shifts, efficiencyPct or engineeringResourceId;
         shifts replace the whole weekly calendar and an empty
         engineeringResourceId removes the mapping (another resource already
         mapped to it gets 409 SCHED-0132). A changed mapping does not touch
@@ -1363,6 +1363,7 @@ components:
           maxItems: 14
           items: { $ref: '#/components/schemas/Shift' }
         engineeringResourceId: { type: string, format: uuid, description: The engineering resource this one stands for; production orders name it on their jobs. }
+        efficiencyPct: { type: integer, minimum: 1, maximum: 500, default: 100, description: 'Efficiency in whole percent (BR-23.1). A job of N process minutes books ceil(N x 100 / efficiencyPct) minutes of this resource, so 80 takes a quarter longer and 125 less; the route setup time used when the setup matrix has no entry is stretched the same way and rounded up apart (a matrix entry is this resource''s own changeover time and is used as is).' }
     Shift:
       type: object
       required: [weekday, startMinute, endMinute]
@@ -1381,6 +1382,7 @@ components:
         shifts:
           type: array
           items: { $ref: '#/components/schemas/Shift' }
+        efficiencyPct: { type: integer, minimum: 1, maximum: 500, description: Efficiency in whole percent (BR-23.1). }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
         engineeringResourceId: { type: string, format: uuid, nullable: true, description: The engineering resource this one stands for; null when unmapped. }
@@ -1395,6 +1397,7 @@ components:
           minItems: 1
           maxItems: 14
           items: { $ref: '#/components/schemas/Shift' }
+        efficiencyPct: { type: integer, minimum: 1, maximum: 500, description: 'New efficiency in whole percent (BR-23.1); applies to runs and moves after the change, jobs already placed keep their length.' }
         engineeringResourceId: { type: string, description: 'The engineering resource this one stands for (a UUID), or an empty string to remove the mapping. Another resource already mapped to it gets 409 SCHED-0132.' }
     CapacityBlockUpdate:
       allOf:
@@ -1536,6 +1539,8 @@ components:
         jobId: { type: string, format: uuid }
         orderId: { type: string, format: uuid }
         operNumber: { type: integer }
+        orderRef: { type: string, description: 'Shop floor key: the production order id.' }
+        operationRef: { type: string, description: 'Shop floor key: the operation number as text without leading zeros.' }
         resourceId: { type: string, format: uuid }
         segment: { type: integer }
         start: { type: string, format: date-time }

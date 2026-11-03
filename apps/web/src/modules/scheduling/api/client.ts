@@ -21,6 +21,8 @@ export interface Resource {
   createdAt: string;
   /** The engineering (wave 09) resource this one stands for; production orders name that id on their jobs. */
   engineeringResourceId?: string | null;
+  /** Efficiency in whole percent (BR-23.1): a job books ceil(minutes x 100 / efficiency) minutes of the resource. Absent means 100. */
+  efficiencyPct?: number;
 }
 
 export interface NewResource {
@@ -30,6 +32,7 @@ export interface NewResource {
   timeZone: string;
   shifts: Shift[];
   engineeringResourceId?: string;
+  efficiencyPct?: number;
 }
 
 export const OPERATION_STATUSES = ["open", "scheduled", "unplaced"] as const;
@@ -327,6 +330,8 @@ export interface ResourcePatch {
   name?: string;
   timeZone?: string;
   shifts?: Shift[];
+  /** Whole percent from 1 to 500. */
+  efficiencyPct?: number;
   /** A UUID, or an empty string to remove the mapping. */
   engineeringResourceId?: string;
 }

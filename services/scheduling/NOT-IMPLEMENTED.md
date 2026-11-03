@@ -501,6 +501,39 @@ orders and the detail page explains the withdrawal.
   not touched by the withdrawal.
 - Production's journal-post statuschanged events carry null dates for a dated
   order, against its own AsyncAPI; handoff to wave 21 in the table below.
+Slice 21 builds resource efficiency (BR-23.1) and the shop floor keys on jobs.
+`scheduling_resource.efficiency_pct` (migration `0016_resource_efficiency.sql`,
+whole percent 1 to 500, default 100) is set on `POST /resources` and
+`PATCH /resources/{id}` (`efficiencyPct`, same duty, If-Match and key rules).
+A job of N process minutes books ceil(N x 100 / efficiency) minutes of the
+resource it is placed on (`domain.BookedMinutes`, applied in `fillSlot` for
+runs, backward probes and moves), so least finish already prefers the faster
+candidate. The route setup time a job falls back to when the setup matrix has
+no entry is stretched the same way and rounded up apart from the process time
+(BR-23.1 "both rounded up"); a matrix entry is the resource's own changeover
+time and is booked as is. Backward scheduling bounds the latest start with the
+fewest minutes a job books on any candidate, so a resource above 100 percent
+still lets the job start as late as it can. Jobs already placed keep their
+length until the next run or move (they are not listed in `affectedJobs`);
+`resource.updated` carries `efficiencyPct`. Efficiency is a whole percent
+(PRD ResourceCapacity says numeric(5,2)) and stretches the operation's whole
+minutes: an imported order's hours are rounded up to minutes first, then
+stretched, so a job can book a minute more than one rounding of the hours
+would give (more at efficiencies far below 100). Web: efficiency on the new and edit resource forms,
+the resources list and the resource detail. Wave 25 shop floor expects
+`orderRef` = the production order id and `operationRef` = the operation number
+as text without leading zeros: `job.scheduled` and the Gantt bars now carry
+both (`domain.OperationRef`), alongside `orderId` and `operNumber`, which are
+unchanged. Not built: efficiency per product or per operation, and the
+`/capacity-load` figures still count booked minutes (they already include the
+stretch).
+- Wave 25 handoff: read `orderRef` and `operationRef` from `job.scheduled`
+  when creating job plans (`orderRef` is the order id as Postgres prints a
+  uuid, lower case, which is what shop floor's `operation_production_status`
+  stores; `operationRef` is `strconv.Itoa` of the operation number, as shop
+  floor's production consumer writes it); other scheduling reads
+  (`AffectedJob`, `LoadJob`) still carry only `orderId` and `operNumber`.
+
 Everything else in the ticket and PRD 4.23 is listed here.
 
 No file outside the wave 23 ownership entry was changed. These handoffs
@@ -524,7 +557,7 @@ from slices 16 to 20 lie outside it:
 | 1 | Forward operation scheduling, finite and infinite | built | `domain.Schedule`; `finite: false` runs ignore bookings but keep calendar time. |
 | 1 | Backward scheduling and the BR-23.2 fallback to forward with `late_minutes` (FR-23.2) | built (slice 10) | `direction: backward` on `POST /runs`; `domain.placeBackward` searches the latest start of each order's first operation that still ends by the order's earliest due date, using the forward engine so calendars, bookings, blocks, changeovers and networks apply unchanged. A latest start before run start + 1 h, or an order that cannot end on time, is placed forward; late orders carry `late_minutes` and a SCHED-0003 warning. Orders without a due date are placed forward. Operations after the first are placed as early as possible after it (no slack is spread between them), lateness is measured against the due timestamp, not end-of-day of the delivery date, and moves and the CP-SAT campaign path are unchanged. |
 | 1 | Job scheduling (queue-before, setup, process, overlap, transport, queue-after; FR-23.3) and operations mode in daily buckets (FR-23.2) | later slice of PSG-23 | An operation is one block of process minutes. `mode` is accepted and recorded, and both modes place at minute granularity. Setup that must not split (BR-23.3), overlap quantity (BR-23.5) and transit time are not modelled. |
-| 1 | Duration from route times and efficiency (BR-23.1) | partial (slice 18) | Minutes come from the planned hours of wave 21's process and setup jobs (already route time times quantity); efficiency % of the scheduling resource is not applied. |
+| 1 | Duration from route times and efficiency (BR-23.1) | built (slices 18 and 21) | Minutes come from the planned hours of wave 21's process and setup jobs (already route time times quantity); the scheduling resource's `efficiencyPct` stretches or shrinks them when the job is placed (slice 21). Efficiency from wave 9 resources and per-day overrides remain a handoff (row below). |
 | 1 | Secondary resources booked with the primary (BR-23.4, SCHED-0005) | built (slice 12) | `Operation.Secondaries`, `domain/secondary.go`, `scheduled_job_secondary`. A primary job and a secondary booking on the same resource are kept apart by the scheduler (it sees both as busy time), not by a database constraint, because the two live in different tables. Secondary resources are an explicit list per operation; choosing them by capability or resource group is wave 9. Not yet: secondary bookings as their own bars on the secondary resource's Gantt row (they show on the primary bar, in the jobs table and in the load), in the block-utilization inquiry and in the setup changeover sequencing of the secondary resource; secondaries only for setup or only for process (a secondary is held for the whole job, changeover included); and `ScheduledJob.secondary_resource_ids` on the stored job row (the list lives on the operation and the booking rows). The CP-SAT model does not book secondaries yet. |
 | 1 | Resource selection by resource group and capability with level and expiry (FR-23.2, FR-23.12, SCHED-0004 for capabilities) | handoff — wave 9 (resources, groups, capabilities) | Candidates are explicit resource ids in priority order. Slice 1 keeps its own `scheduling_resource` table with a weekly calendar; wave 9 resources, calendars, efficiency % and capacity-per-day overrides replace it. |
 | 1 | Setup optimization inside schedule runs: the changeover from the matrix (or the route setup, SCHED-0012) laid in front of each job on a resource | built | `domain/constraints.go`; the changeover is part of the job's span and stored as `scheduled_job.changeover_minutes` on its first segment. The run places orders in priority order and prices each changeover from the job before it; it does not reorder jobs to cut changeovers outside a campaign. |
@@ -572,7 +605,7 @@ from slices 16 to 20 lie outside it:
 
 | Item | Status | Reason |
 |---|---|---|
-| FR-23.1 ResourceCapacity table materialized for 365 days, rebuilt on calendar events; efficiency % and per-day capacity overrides | later slice of PSG-23 (calendar events from wave 9) | Open intervals are computed from the weekly calendar plus downtimes and extra shifts (slice 9) on every read and run (`GET /resources/{id}/capacity`). A stored table is not needed while nothing else reads it; efficiency % and calendar events are wave 9. |
+| FR-23.1 ResourceCapacity table materialized for 365 days, rebuilt on calendar events; efficiency % and per-day capacity overrides | later slice of PSG-23 (calendar events from wave 9) | Open intervals are computed from the weekly calendar plus downtimes and extra shifts (slice 9) on every read and run (`GET /resources/{id}/capacity`). A stored table is not needed while nothing else reads it; calendar events and per-day capacity overrides are wave 9. Efficiency % is built per resource (slice 21, BR-23.1: `efficiency_pct` stretches process and route setup minutes on runs and moves). |
 | AC-23.7 calendar change closes capacity and flags affected jobs (SCHED-0002 warnings on existing jobs) | partial (slice 9) | A downtime closes capacity at once (no 30 s lag: capacity is computed on read), returns the overlapping jobs when it is created, and the Gantt flags every bar outside open capacity (`outsideCapacity`) until it is moved. A change of the weekly calendar itself is built (slice 13, `PATCH /resources/{id}`, affected jobs returned and flagged on the Gantt); calendar events from wave 9 and per-job warning rows are not, and a calendar change does not re-run the schedule. |
 | FR-23.8 pegs fed from master planning | handoff — wave 22 (pegging) | Pegs are entered through `POST /order-pegs`; a consumer of wave 22 pegging events would fill the same table. Propagation itself is built (slice 4). |
 | AC-23.3 sales line delay in the move preview | handoff — wave 27 (sales lines) and wave 22 (pegging to demand) | Pegs link orders to orders; the preview lists every pegged order with its old and new dates, but sales lines are not pegged here. |

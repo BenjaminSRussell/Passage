@@ -214,8 +214,8 @@ func checkFeasible(t failer, p Problem, r Result) {
 				t.Fatalf("%s segment %v leaves open capacity", op.ID, s)
 			}
 		}
-		if want := op.Minutes + pl.ChangeoverMinutes; total != want {
-			t.Fatalf("%s has %d minutes, want %d (process plus changeover)", op.ID, total, want)
+		if want := BookedMinutes(op.Minutes, caps[pl.ResourceID].res.EfficiencyPct) + pl.ChangeoverMinutes; total != want {
+			t.Fatalf("%s has %d minutes, want %d (process at the resource efficiency plus changeover)", op.ID, total, want)
 		}
 		if caps[pl.ResourceID].res.Finite {
 			byRes[pl.ResourceID] = append(byRes[pl.ResourceID], pl.Segments...)
@@ -368,5 +368,74 @@ func TestWeeklyLoad_BottleneckNeedsConsecutiveHotWeeks(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBookedMinutes_RoundsUpAtTheResourceEfficiency(t *testing.T) {
+	cases := []struct{ minutes, pct, want int }{
+		{60, 100, 60}, {60, 0, 60}, {60, 80, 75}, {61, 80, 77}, {60, 125, 48}, {1, 500, 1}, {100, 3, 3334},
+	}
+	for _, c := range cases {
+		if got := BookedMinutes(c.minutes, c.pct); got != c.want {
+			t.Errorf("BookedMinutes(%d, %d) = %d, want %d", c.minutes, c.pct, got, c.want)
+		}
+	}
+}
+
+// A slower resource books longer (BR-23.1): 60 process minutes at 80 percent
+// take 75 minutes, a move keeps that length, and least finish prefers the
+// faster resource even when its code sorts later.
+func TestSchedule_EfficiencyStretchesTheBookedTime(t *testing.T) {
+	shifts := weekdayShift(8*60, 16*60)
+	slow := res("slow", "A", true, shifts)
+	slow.EfficiencyPct = 80
+	fast := res("fast", "B", true, shifts)
+	fast.EfficiencyPct = 125
+	op := Operation{ID: "op", OrderID: "o", OperNumber: 10, Minutes: 60, Candidates: []string{"slow", "fast"}}
+
+	r := Schedule(Problem{Resources: []Resource{slow, fast}, Operations: []Operation{op}, Start: monday, HorizonDays: 14})
+	if len(r.Placements) != 1 || r.Placements[0].ResourceID != "fast" || !r.Placements[0].End.Equal(at(0, 8, 48)) {
+		t.Fatalf("both candidates = %+v, want fast ending 08:48", r.Placements)
+	}
+	op.Candidates = []string{"slow"}
+	r = Schedule(Problem{Resources: []Resource{slow, fast}, Operations: []Operation{op}, Start: monday, HorizonDays: 14})
+	if len(r.Placements) != 1 || !r.Placements[0].End.Equal(at(0, 9, 15)) {
+		t.Fatalf("slow only = %+v, want end 09:15", r.Placements)
+	}
+}
+
+func TestOperationRef_HasNoLeadingZeros(t *testing.T) {
+	if got := OperationRef(10); got != "10" {
+		t.Fatalf("OperationRef(10) = %q", got)
+	}
+}
+
+// BR-23.1 stretches the route setup time too: on a resource at 80 percent a
+// missing matrix entry falls back to ceil(45 x 100 / 80) = 57 min of setup,
+// rounded apart from the 75 min of process time. A matrix entry is the
+// resource's own changeover time and is not stretched.
+func TestSchedule_EfficiencyStretchesRouteSetupNotMatrixChangeover(t *testing.T) {
+	r0 := res("R", "R", true, allDays(0, 1440))
+	r0.EfficiencyPct = 80
+	r0.Matrix, r0.CurrentGroup = mustMatrix(t, SetupEntry{FromGroup: "A", ToGroup: "B", Minutes: 30}), "A"
+	p := Problem{
+		Resources: []Resource{r0},
+		Operations: []Operation{
+			{ID: "ob", OrderID: "o1", OperNumber: 10, Minutes: 60, SetupGroup: "B", SetupMinutes: 15, Candidates: []string{"R"}},
+			{ID: "oc", OrderID: "o2", OperNumber: 10, Minutes: 60, SetupGroup: "C", SetupMinutes: 45, Candidates: []string{"R"}},
+		},
+		Start: monday, HorizonDays: 14,
+	}
+	r := Schedule(p)
+	checkFeasible(t, p, r)
+	if b := placementOf(t, r, "ob"); b.ChangeoverMinutes != 30 || !b.End.Equal(b.Start.Add(minutes(30+75))) {
+		t.Fatalf("matrix changeover %d over %v-%v, want 30 + 75 min", b.ChangeoverMinutes, b.Start, b.End)
+	}
+	c := placementOf(t, r, "oc")
+	if c.ChangeoverMinutes != 57 || !c.End.Equal(c.Start.Add(minutes(57+75))) {
+		t.Fatalf("route setup %d over %v-%v, want 57 + 75 min", c.ChangeoverMinutes, c.Start, c.End)
+	}
+	if len(r.Warnings) != 1 || !strings.Contains(r.Warnings[0].Detail, "57 min") {
+		t.Fatalf("warnings = %+v, want SCHED-0012 naming the 57 min used", r.Warnings)
 	}
 }

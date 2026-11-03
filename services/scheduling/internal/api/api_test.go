@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -188,6 +189,20 @@ func TestCreateResource_RequiresIdempotencyKeyAndValidTimeZone(t *testing.T) {
 	rec := do(h, http.MethodPost, "/v1/scheduling/resources", bad, allDuties, "k1")
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"timeZone"`) {
 		t.Fatalf("bad tz: status %d body %s", rec.Code, rec.Body)
+	}
+}
+
+func TestCreateResource_EfficiencyIsAPercentFrom1To500(t *testing.T) {
+	h := newRouter(&fakeStore{})
+	base := `{"code":"V1","name":"Vessel 1","timeZone":"UTC","shifts":[{"weekday":1,"startMinute":480,"endMinute":960}],"efficiencyPct":%s}`
+	for _, v := range []string{"0", "501", "-5"} {
+		rec := do(h, http.MethodPost, "/v1/scheduling/resources", fmt.Sprintf(base, v), allDuties, "k-eff"+v)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"efficiencyPct"`) {
+			t.Fatalf("efficiency %s: status %d body %s", v, rec.Code, rec.Body)
+		}
+	}
+	if rec := do(h, http.MethodPost, "/v1/scheduling/resources", fmt.Sprintf(base, "80"), allDuties, "k-eff80"); rec.Code != http.StatusCreated {
+		t.Fatalf("efficiency 80: status %d body %s", rec.Code, rec.Body)
 	}
 }
 

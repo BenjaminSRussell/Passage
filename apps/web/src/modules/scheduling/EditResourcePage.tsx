@@ -18,9 +18,11 @@ export interface EditValues {
   rows: ShiftRow[];
   /** The engineering resource id this resource stands for; empty when unmapped. */
   engineeringResourceId: string;
+  /** Efficiency in whole percent, as typed. */
+  efficiencyPct: string;
 }
 
-type Errors = Partial<Record<"name" | "timeZone" | "shifts" | "engineeringResourceId" | "form", string>>;
+type Errors = Partial<Record<"name" | "timeZone" | "shifts" | "engineeringResourceId" | "efficiencyPct" | "form", string>>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -53,10 +55,13 @@ export function validateEdit(values: EditValues, current: Resource): { errors: E
   }
   const engineering = values.engineeringResourceId.trim().toLowerCase();
   if (engineering !== "" && !UUID.test(engineering)) errors.engineeringResourceId = "Enter the engineering resource id (a UUID), or leave it empty.";
+  const efficiency = Number(values.efficiencyPct.trim());
+  if (values.efficiencyPct.trim() === "" || !Number.isInteger(efficiency) || efficiency < 1 || efficiency > 500) errors.efficiencyPct = "Enter a whole percent from 1 to 500.";
   if (Object.keys(errors).length > 0) return { errors };
   const patch: ResourcePatch = {};
   if (name !== current.name) patch.name = name;
   if (timeZone !== current.timeZone) patch.timeZone = timeZone;
+  if (efficiency !== (current.efficiencyPct ?? 100)) patch.efficiencyPct = efficiency;
   if (engineering !== (current.engineeringResourceId ?? "")) patch.engineeringResourceId = engineering;
   if (JSON.stringify(rowsOf(shifts)) !== JSON.stringify(rowsOf(current.shifts))) patch.shifts = shifts;
   if (Object.keys(patch).length === 0) {
@@ -68,7 +73,7 @@ export function validateEdit(values: EditValues, current: Resource): { errors: E
 
 function Form({ initial, onReload }: { initial: Resource; onReload: () => void }) {
   const [resource, setResource] = useState<Resource>(initial);
-  const [values, setValues] = useState<EditValues>({ name: resource.name, timeZone: resource.timeZone, rows: rowsOf(resource.shifts), engineeringResourceId: resource.engineeringResourceId ?? "" });
+  const [values, setValues] = useState<EditValues>({ name: resource.name, timeZone: resource.timeZone, rows: rowsOf(resource.shifts), engineeringResourceId: resource.engineeringResourceId ?? "", efficiencyPct: String(resource.efficiencyPct ?? 100) });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -101,7 +106,7 @@ function Form({ initial, onReload }: { initial: Resource; onReload: () => void }
     } catch (error) {
       const problem = describeProblem(error);
       const fieldErrors: Errors = {};
-      for (const name of ["name", "timeZone", "shifts", "engineeringResourceId"] as const) {
+      for (const name of ["name", "timeZone", "shifts", "engineeringResourceId", "efficiencyPct"] as const) {
         if (problem.fields[name]) fieldErrors[name] = problem.fields[name];
       }
       if (problem.code === "SCHED-0132") fieldErrors.engineeringResourceId = problem.message;
@@ -121,6 +126,9 @@ function Form({ initial, onReload }: { initial: Resource; onReload: () => void }
         </FormField>
         <FormField id="edit-tz" label="Time zone" hint="IANA name of the site's zone." error={errors.timeZone}>
           {(control) => <Input {...control} value={values.timeZone} onChange={(event) => update({ timeZone: event.target.value })} invalid={Boolean(errors.timeZone)} />}
+        </FormField>
+        <FormField id="edit-efficiency" label="Efficiency (%)" hint="Applies to schedule runs and moves after the change; jobs already placed keep their length." error={errors.efficiencyPct}>
+          {(control) => <Input {...control} inputMode="numeric" value={values.efficiencyPct} onChange={(event) => update({ efficiencyPct: event.target.value })} invalid={Boolean(errors.efficiencyPct)} />}
         </FormField>
         <FormField
           id="edit-engineering"

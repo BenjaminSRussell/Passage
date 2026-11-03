@@ -249,11 +249,13 @@ components:
         solverStatus: { type: [string, 'null'] }
     JobScheduledData:
       type: object
-      required: [jobId, orderId, operNumber, resourceId, start, end, changeoverMinutes, runId, firmed]
+      required: [jobId, orderId, operNumber, orderRef, operationRef, resourceId, start, end, changeoverMinutes, runId, firmed]
       properties:
         jobId: { type: string, format: uuid }
         orderId: { type: string, format: uuid }
         operNumber: { type: integer }
+        orderRef: { type: string, description: 'Key shop floor execution (wave 25) expects: the production order id.' }
+        operationRef: { type: string, description: 'Key shop floor execution expects: the operation number as text without leading zeros.' }
         resourceId: { type: string, format: uuid }
         start: { type: string, format: date-time }
         end: { type: string, format: date-time }
@@ -368,7 +370,7 @@ components:
         version: { type: integer }
     ResourceUpdatedData:
       type: object
-      required: [resourceId, code, name, timeZone, shifts, version, affectedJobs, engineeringResourceId]
+      required: [resourceId, code, name, timeZone, shifts, efficiencyPct, version, affectedJobs, engineeringResourceId]
       properties:
         resourceId: { type: string, format: uuid }
         code: { type: string }
@@ -383,6 +385,7 @@ components:
               weekday: { type: integer, minimum: 0, maximum: 6, description: 0 is Sunday. }
               startMinute: { type: integer }
               endMinute: { type: integer }
+        efficiencyPct: { type: integer, minimum: 1, maximum: 500, description: 'Efficiency in whole percent (BR-23.1); runs and moves after the change book process and route setup minutes at it, jobs already placed keep their length.' }
         version: { type: integer }
         affectedJobs:
           type: array

@@ -10,6 +10,7 @@ const columns: DataTableColumn<Resource>[] = [
   { key: "name", header: "Name" },
   { key: "finite", header: "Capacity", render: (row) => <Badge tone={row.finite ? "info" : "neutral"}>{row.finite ? "Finite" : "Infinite"}</Badge> },
   { key: "timeZone", header: "Time zone" },
+  { key: "efficiencyPct", header: "Efficiency", render: (row) => `${row.efficiencyPct ?? 100} %` },
   { key: "engineeringResourceId", header: "Engineering resource", mono: true, render: (row) => row.engineeringResourceId ?? dash },
   { key: "shifts", header: "Calendar", render: (row) => describeShifts(row.shifts) },
 ];

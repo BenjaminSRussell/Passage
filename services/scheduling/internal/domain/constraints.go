@@ -60,6 +60,13 @@ func changeoverNeed(m SetupMatrix, from, to string, routeSetup int) (minutes int
 	return e.Minutes, false
 }
 
+// need is changeoverNeed on c's matrix with the route setup time stretched by
+// c's efficiency (BR-23.1: setup minutes = setup time x 60 / efficiency, rounded
+// up). A matrix entry is this resource's own changeover time and is used as is.
+func (c capacity) need(from, to string, routeSetup int) (int, bool) {
+	return changeoverNeed(c.res.Matrix, from, to, BookedMinutes(routeSetup, c.res.EfficiencyPct))
+}
+
 // follower returns the first booked segment with a setup group that starts
 // at or after t: the job whose changeover a job ending at t sets up.
 func follower(bs []Busy, t time.Time) (Busy, bool) {
@@ -91,8 +98,9 @@ type slot struct {
 // job after it would be left too short a changeover (its stored changeover no
 // longer covers the step from op's group).
 func fillSlot(c capacity, iv []Interval, op Operation, bs []Busy, t time.Time, exact, seq bool) (slot, *Conflict) {
+	run := BookedMinutes(op.Minutes, c.res.EfficiencyPct)
 	if !seq {
-		segs, conf := fill(iv, bs, t, op.Minutes, exact)
+		segs, conf := fill(iv, bs, t, run, exact)
 		return slot{segs: segs}, conf
 	}
 	var segs []Segment
@@ -102,9 +110,9 @@ func fillSlot(c capacity, iv []Interval, op Operation, bs []Busy, t time.Time, e
 	start := ceilMinute(t)
 	for {
 		from = groupBefore(c, bs, start)
-		co, missing = changeoverNeed(c.res.Matrix, from, op.SetupGroup, op.SetupMinutes)
+		co, missing = c.need(from, op.SetupGroup, op.SetupMinutes)
 		var conf *Conflict
-		if segs, conf = fill(iv, bs, start, op.Minutes+co, exact); conf != nil {
+		if segs, conf = fill(iv, bs, start, run+co, exact); conf != nil {
 			return slot{}, conf
 		}
 		if s := segs[0].Start; s.After(start) && groupBefore(c, bs, s) != from {
@@ -128,7 +136,7 @@ func fillSlot(c capacity, iv []Interval, op Operation, bs []Busy, t time.Time, e
 		break
 	}
 	if next, ok := follower(bs, segs[len(segs)-1].End); ok && op.SetupGroup != "" {
-		if need, _ := changeoverNeed(c.res.Matrix, op.SetupGroup, next.Group, next.Setup); need > next.Changeover {
+		if need, _ := c.need(op.SetupGroup, next.Group, next.Setup); need > next.Changeover {
 			return slot{}, &Conflict{Code: CodeOverlap, JobID: next.JobID,
 				Detail: fmt.Sprintf("the job after this slot would need a %d min changeover but has %d min", need, next.Changeover)}
 		}
@@ -174,7 +182,7 @@ func checkSequence(c capacity, bs []Busy, from time.Time) *Conflict {
 	group := c.res.CurrentGroup
 	for _, b := range bs {
 		if !b.Start.Before(from) {
-			if need, _ := changeoverNeed(c.res.Matrix, group, b.Group, b.Setup); need > b.Changeover {
+			if need, _ := c.need(group, b.Group, b.Setup); need > b.Changeover {
 				return &Conflict{Code: CodeOverlap, JobID: b.JobID,
 					Detail: fmt.Sprintf("job %s would need a %d min changeover from setup group %s but has %d min", b.JobID, need, group, b.Changeover)}
 			}
@@ -449,7 +457,7 @@ func (e *engine) placeOp(op Operation, ready time.Time, prev *Placement, frozen 
 	}
 	if bestSlot.missing {
 		ws = append(ws, Warning{Code: CodeMissingSetupEntry, OperationID: op.ID,
-			Detail: fmt.Sprintf("setup matrix has no entry %s -> %s; route setup time %d min used", bestSlot.from, op.SetupGroup, op.SetupMinutes)})
+			Detail: fmt.Sprintf("setup matrix has no entry %s -> %s; route setup time %d min used", bestSlot.from, op.SetupGroup, bestSlot.changeover)})
 	}
 	if c := e.caps[best.ResourceID]; len(c.res.Blocks) > 0 && !MatchesAny(c.res.Blocks, op.Attributes) {
 		ws = append(ws, Warning{Code: CodeNoMatchingBlock, OperationID: op.ID,

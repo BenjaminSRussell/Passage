@@ -81,6 +81,8 @@ type resourceRequest struct {
 	Finite   *bool          `json:"finite"`
 	TimeZone string         `json:"timeZone"`
 	Shifts   []domain.Shift `json:"shifts"`
+	// EfficiencyPct is whole percent from 1 to 500, default 100 (BR-23.1).
+	EfficiencyPct *int `json:"efficiencyPct"`
 	// EngineeringResourceID is the engineering (wave 09) resource this one
 	// stands for; optional.
 	EngineeringResourceID *string `json:"engineeringResourceId"`
@@ -330,6 +332,9 @@ func (a *API) createResource(w http.ResponseWriter, r *http.Request) {
 	if msg := validShifts(req.Shifts); msg != "" {
 		fields["shifts"] = msg
 	}
+	if req.EfficiencyPct != nil && (*req.EfficiencyPct < 1 || *req.EfficiencyPct > 500) {
+		fields["efficiencyPct"] = "must be a whole percent from 1 to 500"
+	}
 	if req.EngineeringResourceID != nil && *req.EngineeringResourceID != "" && !ids.Valid(strings.ToLower(*req.EngineeringResourceID)) {
 		fields["engineeringResourceId"] = "must be a UUID"
 	}
@@ -346,8 +351,12 @@ func (a *API) createResource(w http.ResponseWriter, r *http.Request) {
 		eid := strings.ToLower(*req.EngineeringResourceID)
 		engineering = &eid
 	}
+	efficiency := 100
+	if req.EfficiencyPct != nil {
+		efficiency = *req.EfficiencyPct
+	}
 	res, created, err := a.store.CreateResource(r.Context(), store.Resource{Code: req.Code, Name: strings.TrimSpace(req.Name),
-		Finite: finite, TimeZone: req.TimeZone, Shifts: req.Shifts, EngineeringResourceID: engineering}, idem)
+		Finite: finite, TimeZone: req.TimeZone, Shifts: req.Shifts, EfficiencyPct: efficiency, EngineeringResourceID: engineering}, idem)
 	if err != nil {
 		slog.Error("create resource failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)

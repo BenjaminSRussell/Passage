@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -106,5 +107,49 @@ func TestUpdateResource_SecondaryAndRunningJobs(t *testing.T) {
 	got, _, err = s.UpdateResource(ctx, m.ID, 1, store.ResourcePatch{Name: &name}, at(0, 9, 0), store.Idem{})
 	if err != nil || len(got.AffectedJobs) != 0 || got.Name != name || len(got.Shifts) != 5 {
 		t.Fatalf("rename = %+v err=%v", got, err)
+	}
+}
+
+// Efficiency (BR-23.1) is stored on the resource, changed by a patch, and
+// stretches the job a run books on it; job.scheduled carries the shop floor
+// keys (order id and operation number as text).
+func TestResourceEfficiency_StretchesRunsAndJobEventCarriesShopFloorKeys(t *testing.T) {
+	s, _, admin := setup(t)
+	ctx := tenantCtx(1)
+	r := mustResource(t, ctx, s, "PRESS-1", true)
+	if r.EfficiencyPct != 100 {
+		t.Fatalf("default efficiency = %d, want 100", r.EfficiencyPct)
+	}
+	upd, _, err := s.UpdateResource(ctx, r.ID, 1, store.ResourcePatch{EfficiencyPct: 80}, at(0, 6, 0), store.Idem{})
+	if err != nil || upd.EfficiencyPct != 80 || upd.Version != 2 {
+		t.Fatalf("patch = %+v err=%v", upd, err)
+	}
+	order := ids.New()
+	op := mustOperation(t, ctx, s, order, 10, 60, r.ID)
+	if _, _, err := s.RunSchedule(ctx, siteRun(at(0, 6, 0)), store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	bar := barsOf(t, ctx, s)[op.ID]
+	if !bar.Start.Equal(at(0, 8, 0)) || !bar.End.Equal(at(0, 9, 15)) {
+		t.Fatalf("bar %v-%v, want 08:00-09:15 (60 min at 80 percent)", bar.Start, bar.End)
+	}
+	if bar.OrderRef != order || bar.OperationRef != "10" {
+		t.Fatalf("bar refs = %q %q, want %q 10", bar.OrderRef, bar.OperationRef, order)
+	}
+	var orderRef, operationRef string
+	if err := admin.QueryRow(context.Background(), `select payload->'data'->>'orderRef', payload->'data'->>'operationRef' from outbox where type = $1`,
+		"dev.passage.scheduling.job.scheduled.v1").Scan(&orderRef, &operationRef); err != nil {
+		t.Fatal(err)
+	}
+	if orderRef != order || operationRef != "10" {
+		t.Fatalf("job.scheduled refs = %q %q", orderRef, operationRef)
+	}
+	var efficiency int
+	if err := admin.QueryRow(context.Background(), `select (payload->'data'->>'efficiencyPct')::int from outbox where type = $1`,
+		"dev.passage.scheduling.resource.updated.v1").Scan(&efficiency); err != nil || efficiency != 80 {
+		t.Fatalf("resource.updated efficiencyPct = %d err=%v, want 80", efficiency, err)
+	}
+	if _, _, err := s.UpdateResource(ctx, r.ID, 2, store.ResourcePatch{EfficiencyPct: 501}, at(0, 6, 0), store.Idem{}); err == nil {
+		t.Fatal("efficiency 501 stored; the check constraint should refuse it")
 	}
 }

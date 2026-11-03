@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	resourceCols = "id::text, code, name, finite, time_zone, shifts, version, created_at, engineering_resource_id::text"
+	resourceCols = "id::text, code, name, finite, time_zone, shifts, version, created_at, engineering_resource_id::text, efficiency_pct"
 	opCols       = "id::text, order_id::text, oper_number, minutes, due_at, ready_at, priority, candidate_resource_ids::text[], secondary_resource_ids::text[], setup_group, setup_minutes, attributes, network_id::text, status, created_at"
 	runCols      = "id::text, scope, mode, direction, finite, algorithm, status, operations_count, makespan_minutes, total_lateness_minutes, solver_status, messages, warnings, created_at"
 )
@@ -25,7 +25,7 @@ const (
 func scanResource(row pgx.Row, fp *string) (Resource, error) {
 	var r Resource
 	var shifts []byte
-	dest := []any{&r.ID, &r.Code, &r.Name, &r.Finite, &r.TimeZone, &shifts, &r.Version, &r.CreatedAt, &r.EngineeringResourceID}
+	dest := []any{&r.ID, &r.Code, &r.Name, &r.Finite, &r.TimeZone, &shifts, &r.Version, &r.CreatedAt, &r.EngineeringResourceID, &r.EfficiencyPct}
 	if fp != nil {
 		dest = append([]any{fp}, dest...)
 	}
@@ -65,9 +65,9 @@ func (s *Postgres) CreateResource(ctx context.Context, in Resource, idem Idem) (
 			}
 		}
 		row, err := scanResource(tx.QueryRow(ctx, `insert into scheduling_resource (tenant_id, id, code, name, finite, time_zone, shifts, idempotency_key, idempotency_fingerprint,
-				engineering_resource_id)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid) returning `+resourceCols,
-			tenantOf(ctx), ids.New(), in.Code, in.Name, in.Finite, in.TimeZone, shifts, nullable(idem.Key), nullable(idem.Fingerprint), in.EngineeringResourceID), nil)
+				engineering_resource_id, efficiency_pct)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid, $11) returning `+resourceCols,
+			tenantOf(ctx), ids.New(), in.Code, in.Name, in.Finite, in.TimeZone, shifts, nullable(idem.Key), nullable(idem.Fingerprint), in.EngineeringResourceID, efficiencyOrDefault(in.EfficiencyPct)), nil)
 		if err != nil {
 			return err
 		}
@@ -337,7 +337,7 @@ func (s *Postgres) ListRuns(ctx context.Context, limit int) ([]Run, error) {
 }
 
 func loadResources(ctx context.Context, tx pgx.Tx) ([]domain.Resource, map[string]bool, error) {
-	rows, err := tx.Query(ctx, `select id::text, code, finite, time_zone, shifts from scheduling_resource order by code`)
+	rows, err := tx.Query(ctx, `select id::text, code, finite, time_zone, shifts, efficiency_pct from scheduling_resource order by code`)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -348,7 +348,7 @@ func loadResources(ctx context.Context, tx pgx.Tx) ([]domain.Resource, map[strin
 		var r domain.Resource
 		var tz string
 		var shifts []byte
-		if err := rows.Scan(&r.ID, &r.Code, &r.Finite, &tz, &shifts); err != nil {
+		if err := rows.Scan(&r.ID, &r.Code, &r.Finite, &tz, &shifts, &r.EfficiencyPct); err != nil {
 			return nil, nil, err
 		}
 		loc, err := time.LoadLocation(tz)
@@ -590,4 +590,12 @@ func uniqueStrings(in []string) map[string]bool {
 		out[s] = true
 	}
 	return out
+}
+
+// efficiencyOrDefault is the efficiency to store: 100 when none was given.
+func efficiencyOrDefault(pct int) int {
+	if pct == 0 {
+		return 100
+	}
+	return pct
 }

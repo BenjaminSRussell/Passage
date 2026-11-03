@@ -60,14 +60,19 @@ const (
 type Idem struct{ Key, Fingerprint string }
 
 type Resource struct {
-	ID        string         `json:"id"`
-	Code      string         `json:"code"`
-	Name      string         `json:"name"`
-	Finite    bool           `json:"finite"`
-	TimeZone  string         `json:"timeZone"`
-	Shifts    []domain.Shift `json:"shifts"`
-	Version   int            `json:"version"`
-	CreatedAt time.Time      `json:"createdAt"`
+	ID       string         `json:"id"`
+	Code     string         `json:"code"`
+	Name     string         `json:"name"`
+	Finite   bool           `json:"finite"`
+	TimeZone string         `json:"timeZone"`
+	Shifts   []domain.Shift `json:"shifts"`
+	// EfficiencyPct is the resource's efficiency in whole percent (BR-23.1):
+	// a job of N process minutes occupies ceil(N x 100 / EfficiencyPct)
+	// minutes on it, and the route setup time is stretched the same way. 100
+	// means the planned minutes are the booked minutes.
+	EfficiencyPct int       `json:"efficiencyPct"`
+	Version       int       `json:"version"`
+	CreatedAt     time.Time `json:"createdAt"`
 	// EngineeringResourceID is the id of the engineering (wave 09) resource
 	// this resource stands for; production orders name that id on their jobs
 	// (FR-23.10). Nil when the resource is not mapped.
@@ -127,9 +132,13 @@ type Run struct {
 // Bar is one segment of a scheduled job, as drawn on the Gantt. The first
 // segment carries the job's changeover minutes, which open the bar.
 type Bar struct {
-	JobID             string    `json:"jobId"`
-	OrderID           string    `json:"orderId"`
-	OperNumber        int       `json:"operNumber"`
+	JobID      string `json:"jobId"`
+	OrderID    string `json:"orderId"`
+	OperNumber int    `json:"operNumber"`
+	// OrderRef and OperationRef are the keys shop floor execution uses: the
+	// production order id and the operation number as text.
+	OrderRef          string    `json:"orderRef"`
+	OperationRef      string    `json:"operationRef"`
 	ResourceID        string    `json:"resourceId"`
 	Segment           int       `json:"segment"`
 	Start             time.Time `json:"start"`
@@ -732,6 +741,7 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 				v := dec(*cost)
 				b.ChangeoverCost = &v
 			}
+			b.OrderRef, b.OperationRef = b.OrderID, domain.OperationRef(b.OperNumber)
 			bars = append(bars, b)
 		}
 		rows.Close()
@@ -866,7 +876,8 @@ func enqueuePlacements(ctx context.Context, tx pgx.Tx, runID string, ps []domain
 	batch := &pgx.Batch{}
 	for _, pl := range ps {
 		evt, err := newEvent(ctx, schedevents.JobScheduled, pl.OperationID, schedevents.JobScheduledData{JobID: pl.OperationID,
-			OrderID: pl.OrderID, OperNumber: pl.OperNumber, ResourceID: pl.ResourceID, Start: rfc(pl.Start), End: rfc(pl.End),
+			OrderID: pl.OrderID, OperNumber: pl.OperNumber, OrderRef: pl.OrderID, OperationRef: domain.OperationRef(pl.OperNumber),
+			ResourceID: pl.ResourceID, Start: rfc(pl.Start), End: rfc(pl.End),
 			ChangeoverMinutes: pl.ChangeoverMinutes, ChangeoverCost: costOf(pl), ChangeoverCurrency: currencyOf(pl),
 			CleaningSetID: pl.CleaningSetID, SecondaryResourceIDs: pl.Secondaries, RunID: runID, Firmed: firmed})
 		if err != nil {

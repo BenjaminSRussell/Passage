@@ -18,7 +18,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/scheduling/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/scheduling/internal/store"
-	"github.com/BenjaminSRussell/passage/services/scheduling/migrations"
+	"github.com/BenjaminSRussell/passage/services/scheduling/internal/testdb"
 )
 
 // monday is 2027-01-04 00:00 UTC, a Monday in the future.
@@ -34,9 +34,7 @@ func at(day, hh, mm int) time.Time {
 func setup(t *testing.T) (*store.Postgres, *pgxpool.Pool, *pgxpool.Pool) {
 	t.Helper()
 	admin, app := testkit.DBWithApp(t)
-	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
-		t.Fatal(err)
-	}
+	testdb.Migrate(t, admin)
 	return store.New(app), app, admin
 }
 

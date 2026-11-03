@@ -163,3 +163,15 @@ func TestBackward_FeasibleAndUnderBudgetAtScale(t *testing.T) {
 		}
 	}
 }
+
+// BR-23.1 with BR-23.2: on a resource at 200 percent 240 process minutes book
+// 120, so the job due Wednesday 12:00 starts at 10:00, not at 08:00 as the
+// unstretched minutes would bound it.
+func TestBackward_FastResourceStartsLater(t *testing.T) {
+	p := backwardProblem([]Operation{{ID: "o1", OrderID: "a", OperNumber: 10, Minutes: 240, DueAt: at(2, 12, 0), Candidates: []string{"r1"}}}, nil, true)
+	p.Resources[0].EfficiencyPct = 200
+	got := Schedule(p)
+	if len(got.Placements) != 1 || !got.Placements[0].Start.Equal(at(2, 10, 0)) || !got.Placements[0].End.Equal(at(2, 12, 0)) {
+		t.Fatalf("placements = %+v, want Wed 10:00-12:00", got.Placements)
+	}
+}

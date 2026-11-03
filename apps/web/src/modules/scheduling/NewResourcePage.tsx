@@ -15,9 +15,11 @@ interface Values {
   end: string;
   /** Optional engineering resource id production orders use for this resource. */
   engineeringResourceId?: string;
+  /** Efficiency in whole percent, as typed; empty means 100. */
+  efficiencyPct?: string;
 }
 
-type Errors = Partial<Record<"code" | "name" | "timeZone" | "days" | "start" | "end" | "engineeringResourceId", string>>;
+type Errors = Partial<Record<"code" | "name" | "timeZone" | "days" | "start" | "end" | "engineeringResourceId" | "efficiencyPct", string>>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -38,6 +40,9 @@ export function validateResource(values: Values): { errors: Errors; input?: NewR
   else if (start !== null && end <= start) errors.end = "The shift must end after it starts.";
   const engineering = (values.engineeringResourceId ?? "").trim().toLowerCase();
   if (engineering !== "" && !UUID.test(engineering)) errors.engineeringResourceId = "Enter the engineering resource id (a UUID), or leave it empty.";
+  const typed = (values.efficiencyPct ?? "").trim();
+  const efficiency = typed === "" ? 100 : Number(typed);
+  if (!Number.isInteger(efficiency) || efficiency < 1 || efficiency > 500) errors.efficiencyPct = "Enter a whole percent from 1 to 500.";
   if (Object.keys(errors).length > 0 || start === null || end === null) return { errors };
   return {
     errors,
@@ -46,6 +51,7 @@ export function validateResource(values: Values): { errors: Errors; input?: NewR
       name: values.name.trim(),
       timeZone: values.timeZone.trim(),
       finite: values.finite,
+      efficiencyPct: efficiency,
       shifts: values.days.map((weekday) => ({ weekday, startMinute: start, endMinute: end })),
       ...(engineering === "" ? {} : { engineeringResourceId: engineering }),
     },
@@ -55,7 +61,7 @@ export function validateResource(values: Values): { errors: Errors; input?: NewR
 /** Create a resource with one shift on the chosen weekdays (site-local times). */
 export function NewResourcePage() {
   const navigate = useNavigate();
-  const [values, setValues] = useState<Values>({ code: "", name: "", timeZone: "UTC", finite: true, days: [1, 2, 3, 4, 5], start: "08:00", end: "16:00", engineeringResourceId: "" });
+  const [values, setValues] = useState<Values>({ code: "", name: "", timeZone: "UTC", finite: true, days: [1, 2, 3, 4, 5], start: "08:00", end: "16:00", engineeringResourceId: "", efficiencyPct: "100" });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -83,7 +89,7 @@ export function NewResourcePage() {
     } catch (error) {
       const problem = describeProblem(error);
       const fieldErrors: Errors = {};
-      for (const name of ["code", "name", "timeZone", "engineeringResourceId"] as const) {
+      for (const name of ["code", "name", "timeZone", "engineeringResourceId", "efficiencyPct"] as const) {
         if (problem.fields[name]) fieldErrors[name] = problem.fields[name];
       }
       if (problem.fields.shifts) fieldErrors.days = problem.fields.shifts;
@@ -120,6 +126,9 @@ export function NewResourcePage() {
                 invalid={Boolean(errors.engineeringResourceId)}
               />
             )}
+          </FormField>
+          <FormField id="resource-efficiency" label="Efficiency (%)" hint="100 books the planned minutes; 80 takes a quarter longer, 125 less." error={errors.efficiencyPct}>
+            {(control) => <Input {...control} inputMode="numeric" value={values.efficiencyPct ?? ""} onChange={(event) => update({ efficiencyPct: event.target.value })} invalid={Boolean(errors.efficiencyPct)} />}
           </FormField>
           <FormField id="resource-start" label="Shift start" error={errors.start}>
             {(control) => <Input {...control} type="time" value={values.start} onChange={(event) => update({ start: event.target.value })} invalid={Boolean(errors.start)} />}
