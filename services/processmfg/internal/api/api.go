@@ -91,6 +91,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerQuality(r)
 	a.registerPickStored(r)
 	a.registerMerge(r)
+	a.registerRework(r)
 	a.registerCustomerRequirements(r)
 	a.registerDerivation(r)
 	a.registerRecords(r)

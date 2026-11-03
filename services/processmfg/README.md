@@ -1,6 +1,6 @@
 # processmfg
 
-Process manufacturing for Passage (wave 24, PSG-24, slices 1 to 3, 9 and 11 to 16). Formulas, batch orders
+Process manufacturing for Passage (wave 24, PSG-24, slices 1 to 3, 9 and 11 to 17). Formulas, batch orders
 created from a formula snapshot and scaled to the batch size, rescale before the order starts,
 and the potency, catch-weight and co-product allocation rules (slice 1). Slice 2 adds the batch
 rules as stateless previews: batch derivation (FR-24.15), batch merge (FR-24.16), bulk
@@ -137,6 +137,10 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
 | POST | `/v1/production/batch-records/{id}:seal` | `production.batch-record.approve` | Seal an approved record: the canonical JSON document of the approved content (sorted keys, compact, UTC times, `signaturesVerified: false`) is stored with its SHA-256 and the database refuses any later change; writes `batchrecord.sealed` (FR-24.21) |
 | POST | `/v1/production/batch-requirements:check-stored` | `production.batch-order.read` | Check registered batches against the stored rules of the legal entity (default the caller's) for the item, customer and group in force on the ship date; on-hand quantity per batch from the caller (FR-24.19, AC-24.14). Precedence per field: customer over group over item default; within a scope the rule that started last, then the one defined last. Customer and group ids are party/sales references checked for form only; ship date and expiry are calendar days compared without time-zone conversion |
 | POST | `/v1/production/rework-orders:preview` | `production.batch-order.write` | Rework batch order plan: output batch, disposition, quality order, variance type, genealogy (FR-24.18) |
+| POST | `/v1/production/rework-orders` | `production.batch-order.write` | Create a rework batch order from a stored batch: plan, rework formula of the batch's item, batch order, link (FR-24.18; PMF-0132 one open rework per batch) |
+| GET | `/v1/production/rework-orders` | `production.batch-order.read` | List rework orders by status or source batch |
+| GET | `/v1/production/rework-orders/{id}` | `production.batch-order.read` | One rework order |
+| POST | `/v1/production/rework-orders/{id}:receive` | `production.batch-order.write` | Take the output back into the register once the batch order is reported: kept number moves the batch to the output disposition, else a new batch with a rework genealogy link (PMF-0133, PMF-0134); an output planned as available also needs `production.batch-disposition.write` |
 | POST | `/v1/production/batch-attribute-definitions` | `production.batch-attribute.write` | Define a batch attribute of an item, role generic or potency (one per item) (FR-24.5); Idempotency-Key |
 | GET | `/v1/production/batch-attribute-definitions` | `production.batch-order.read` | Definitions by item and name; `itemId`, `limit` |
 | POST | `/v1/production/batches` | `production.batch-attribute.write` | Register a batch for quality records, optionally linked to a batch order of the same legal entity; Idempotency-Key |
@@ -217,6 +221,10 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 | `PMF-0128` | 409 | The inheritance rule is already retired |
 | `PMF-0129` | 422 | The receiver's item has no active inheritance rule to derive with |
 | `PMF-0130` | 422 | A sender batch descends from the receiver through earlier derivations (a derivation cycle) |
+| `PMF-0131` | 404 | Rework order not found in the caller's scope |
+| `PMF-0132` | 409 | The batch already has an open rework order |
+| `PMF-0133` | 409 | The output of this rework order was already received |
+| `PMF-0134` | 422 | The rework's batch order is not reported as finished yet |
 | `idempotency_key_reuse` | 422 | Idempotency-Key reused with a different request |
 | `idempotency_key_in_flight` | 409 | A concurrent request with the same key committed first; retry for its answer |
 | `AUTH-0001` | 401 | No tenant or principal |

@@ -1,4 +1,4 @@
-# processmfg web module (PSG-24 slices 1 to 3, 9 and 11 to 16)
+# processmfg web module (PSG-24 slices 1 to 3, 9 and 11 to 17)
 
 Front end for `services/processmfg`. Discovered by the shell through `module.ts`. Pages use the
 `shell/ui` primitives and `pages.module.css` (tokens only), as in `docs/design-system.md`.
@@ -42,6 +42,9 @@ Front end for `services/processmfg`. Discovered by the shell through `module.ts`
 | `/processmfg/batch-record-profiles` | Profiles by item with active or retired status and a retire action (loading, empty, error with retry) | `GET /batch-record-profiles`, `POST ...:retire` | `production.batch-order.read` (retire: `production.batch-record.write`) |
 | `/processmfg/batch-record-profiles/new` | Define the profile of an item: code, item id and whether release needs the approved record | `POST /batch-record-profiles` | `production.batch-record.write` (enforced on the page and in the service) |
 | `/processmfg/rework` | Rework batch order plan: batch, quantity to rework, expected output and the FR-24.18 parameters; output batch, disposition, quality order, cost treatment and genealogy (AC-24.18) | `POST /api/v1/production/rework-orders:preview` | `production.batch-order.write` |
+| `/processmfg/rework-orders` | Rework orders with a status filter (loading, empty, error with retry); "New rework order" for a holder of the duty (FR-24.18) | `GET /rework-orders` | `production.batch-order.read` |
+| `/processmfg/rework-orders/new` | Create a rework order: rework formula, batch size, batch, its quantity, quantity to rework, planned output, output disposition and the keep-number, quality-order and capitalize options; reads the batch version, creates under one key; client-side checks before the call | `GET /batches/{id}`, `POST /rework-orders` | `production.batch-order.write` (enforced on the page and in the service) |
+| `/processmfg/rework-orders/:id` | One rework order with its links; receive the output once its batch order is reported (a new batch number when the number is not kept), reload on a stale version | `GET /rework-orders/{id}`, `POST ...:receive` | `production.batch-order.read` (receive: `production.batch-order.write`) |
 
 Every command sends an `Idempotency-Key`, kept for the life of the form so a retried submit
 cannot create twice; it is renewed when the input changes. Quantities stay decimal strings, and

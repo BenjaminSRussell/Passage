@@ -210,9 +210,9 @@ describe("batch genealogy on the batch detail (slice 13)", () => {
       return undefined;
     };
     renderAt(`/processmfg/batches/${T}`);
-    const from = await findTable({ name: "Merged from" });
+    const from = await findTable({ name: "Made from" });
     expect(within(from).getByRole("link", { name: "L-B" })).toHaveAttribute("href", `/processmfg/batches/${B}`);
-    expect(within(await findTable({ name: "Merged into" })).getByText("L-NEXT")).toBeInTheDocument();
+    expect(within(await findTable({ name: "Went into" })).getByText("L-NEXT")).toBeInTheDocument();
   });
 
   it("shows the empty states and a genealogy load error with retry", async () => {
@@ -229,7 +229,7 @@ describe("batch genealogy on the batch detail (slice 13)", () => {
     expect(await screen.findByText("Could not load the genealogy")).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getAllByRole("button", { name: "Try again" })[0]);
-    expect(await screen.findByText("Not a merged batch")).toBeInTheDocument();
-    expect(screen.getByText("Not merged into another batch")).toBeInTheDocument();
+    expect(await screen.findByText("Not made from another batch")).toBeInTheDocument();
+    expect(screen.getByText("Did not go into another batch")).toBeInTheDocument();
   });
 });

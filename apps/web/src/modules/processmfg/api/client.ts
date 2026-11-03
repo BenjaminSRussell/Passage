@@ -650,7 +650,7 @@ export interface GenealogyLink {
   batchId: string;
   batchNumber: string;
   itemId: string;
-  relation: "merge";
+  relation: "merge" | "rework";
   qty: string;
   unitCost: string;
   createdBy: string;
@@ -668,6 +668,8 @@ export interface Genealogy {
   batchId: string;
   parents: GenealogyLink[];
   children: GenealogyLink[];
+  /** FR-24.18, AC-24.18: the rework orders of the batch, as the batch reworked or as the output. */
+  reworks: ReworkOrder[];
 }
 
 /** FR-24.16: merges stored batches into a new batch; reuse one key per form submit so a retry cannot merge twice. */
@@ -976,4 +978,60 @@ export function listDerivations(filter: { batchId?: string; itemId?: string; wit
     `/batch-derivations${query({ batchId: filter.batchId, itemId: filter.itemId, withMissing: filter.withMissing ? "true" : undefined, limit: 200 })}`,
     signal,
   );
+}
+
+/** FR-24.18: a rework batch order of a stored batch. */
+export interface ReworkOrder {
+  id: string;
+  legalEntityId: string;
+  batchOrderId: string;
+  orderNumber: string;
+  orderStatus: "planned" | "released" | "started" | "reported" | "ended" | "closed";
+  sourceBatchId: string;
+  sourceBatchNumber: string;
+  itemId: string;
+  inputQty: string;
+  outputQty: string;
+  keepBatchNumber: boolean;
+  qualityOrderRequired: boolean;
+  outputDisposition: ReworkOutputDisposition;
+  varianceType: "rework" | "capitalized";
+  status: "planned" | "received";
+  outputBatchId?: string;
+  outputBatchNumber?: string;
+  receivedQty?: string;
+  receivedBy?: string;
+  receivedAt?: string;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewReworkOrder {
+  formulaId: string;
+  batchSize: string;
+  sourceBatchId: string;
+  sourceVersion: number;
+  sourceQty: string;
+  reworkQty: string;
+  outputQty: string;
+  params: { keepBatchNumber: boolean; requireQualityOrder: boolean; outputDisposition: ReworkOutputDisposition; capitalize: boolean };
+}
+
+export function listReworkOrders(filter: { status?: string; sourceBatchId?: string } = {}, signal?: AbortSignal): Promise<ReworkOrder[]> {
+  return items<ReworkOrder>(`/rework-orders${query({ status: filter.status, sourceBatchId: filter.sourceBatchId, limit: 200 })}`, signal);
+}
+
+export function getReworkOrder(id: string, signal?: AbortSignal): Promise<ReworkOrder> {
+  return send<ReworkOrder>(`/rework-orders/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Reuse one key per form so a retried submit cannot create the rework twice. */
+export function createReworkOrder(input: NewReworkOrder, key: string = newKey()): Promise<ReworkOrder> {
+  return post<ReworkOrder>("/rework-orders", input, key);
+}
+
+export function receiveReworkOrder(id: string, input: { version: number; newBatchNumber?: string }, key: string = newKey()): Promise<ReworkOrder> {
+  return post<ReworkOrder>(`/rework-orders/${encodeURIComponent(id)}:receive`, input, key);
 }

@@ -81,3 +81,26 @@ func PlanRework(source Batch, inputQty, outputQty decimal.Decimal, p ReworkParam
 	}
 	return plan, nil
 }
+
+// CheckReworkFormula refuses a rework formula that does not make the item of
+// the batch being reworked: the output of a rework is the same item, back in
+// the register (FR-24.18). COM-0001.
+func CheckReworkFormula(sourceItemID, formulaItemID string) error {
+	if sourceItemID != formulaItemID {
+		return errorf(CodeInvalid, "the rework formula makes item %s, not item %s of the batch to rework", formulaItemID, sourceItemID)
+	}
+	return nil
+}
+
+// CheckReworkOutputNumber checks the batch number a received rework gives its
+// output: a rework that keeps the batch number takes none, one that does not
+// must name a new one. COM-0001.
+func CheckReworkOutputNumber(keep bool, number string) error {
+	if keep && number != "" {
+		return errorf(CodeInvalid, "this rework keeps the batch number; leave the new batch number out")
+	}
+	if !keep && number == "" {
+		return errorf(CodeInvalid, "this rework does not keep the batch number; name the new batch number")
+	}
+	return nil
+}

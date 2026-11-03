@@ -49,6 +49,13 @@ channels:
         $ref: '#/components/messages/BatchMerged'
       batchDerived:
         $ref: '#/components/messages/BatchDerived'
+  reworkOrder:
+    address: passage.production.reworkorder
+    messages:
+      reworkOrderCreated:
+        $ref: '#/components/messages/ReworkOrderCreated'
+      reworkOrderReceived:
+        $ref: '#/components/messages/ReworkOrderReceived'
   inheritanceRule:
     address: passage.production.inheritancerule
     messages:
@@ -139,6 +146,16 @@ operations:
     channel: { $ref: '#/channels/batch' }
     messages: [{ $ref: '#/channels/batch/messages/batchDerived' }]
     summary: A batch got attribute values derived from its sender batches by the inheritance rules (quality, traceability consume it)
+  publishReworkOrderCreated:
+    action: send
+    channel: { $ref: '#/channels/reworkOrder' }
+    messages: [{ $ref: '#/channels/reworkOrder/messages/reworkOrderCreated' }]
+    summary: A rework batch order was created from a stored batch; inventory issues the source quantity to it
+  publishReworkOrderReceived:
+    action: send
+    channel: { $ref: '#/channels/reworkOrder' }
+    messages: [{ $ref: '#/channels/reworkOrder/messages/reworkOrderReceived' }]
+    summary: The output of a rework batch order went back to the batch register; inventory receives it on the stated disposition
   publishInheritanceRuleDefined:
     action: send
     channel: { $ref: '#/channels/inheritanceRule' }
@@ -251,6 +268,16 @@ components:
       summary: A batch got attribute values derived from its senders
       contentType: application/cloudevents+json
       payload: { $ref: '#/components/schemas/BatchDerivedData' }
+    ReworkOrderCreated:
+      name: dev.passage.production.reworkorder.created.v1
+      summary: A rework batch order was created from a stored batch
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/ReworkOrderCreatedData' }
+    ReworkOrderReceived:
+      name: dev.passage.production.reworkorder.received.v1
+      summary: The output of a rework batch order was received into the batch register
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/ReworkOrderReceivedData' }
     InheritanceRuleDefined:
       name: dev.passage.production.inheritancerule.defined.v1
       summary: An attribute inheritance rule was defined
@@ -562,3 +589,34 @@ components:
         severity: { type: string, enum: [minor, major, critical] }
         disposition: { type: string, enum: [accepted, deviation-raised, rejected], description: Set on exceptiondispositioned. }
         signatureId: { type: string, format: uuid, description: 'Set on exceptiondispositioned. Stored as the caller gave it and NOT verified: the signature service (FR-24.22) is not built yet.' }
+    ReworkOrderCreatedData:
+      type: object
+      required: [reworkId, batchOrderId, legalEntityId, itemId, sourceBatchId, inputQty, outputQty, keepBatchNumber, qualityOrderRequired, outputDisposition, varianceType]
+      properties:
+        reworkId: { type: string, format: uuid }
+        batchOrderId: { type: string, format: uuid, description: The batch order made from the rework formula. }
+        legalEntityId: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        sourceBatchId: { type: string, format: uuid, description: The stored batch put in as the first ingredient. }
+        inputQty: { type: string, description: Decimal quantity of the source batch put in. }
+        outputQty: { type: string, description: Decimal quantity planned out. }
+        keepBatchNumber: { type: boolean }
+        qualityOrderRequired: { type: boolean, description: Whether release waits for a quality order (wave 33). }
+        outputDisposition: { type: string, enum: [available, on-hold, quarantine] }
+        varianceType: { type: string, enum: [rework, capitalized], description: How the cost of the rework is posted. }
+    ReworkOrderReceivedData:
+      type: object
+      required: [reworkId, batchOrderId, legalEntityId, itemId, sourceBatchId, outputBatchId, batchNumber, qty, disposition, keepBatchNumber, qualityOrderRequired, varianceType]
+      properties:
+        reworkId: { type: string, format: uuid }
+        batchOrderId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        sourceBatchId: { type: string, format: uuid }
+        outputBatchId: { type: string, format: uuid, description: The source batch itself when its number is kept, else the new batch. }
+        batchNumber: { type: string }
+        qty: { type: string, description: Decimal quantity of the order reported as finished. }
+        disposition: { type: string, enum: [available, on-hold, quarantine] }
+        keepBatchNumber: { type: boolean }
+        qualityOrderRequired: { type: boolean }
+        varianceType: { type: string, enum: [rework, capitalized] }

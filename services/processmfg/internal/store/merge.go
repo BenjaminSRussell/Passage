@@ -64,6 +64,9 @@ type Genealogy struct {
 	BatchID  string          `json:"batchId"`
 	Parents  []GenealogyLink `json:"parents"`
 	Children []GenealogyLink `json:"children"`
+	// Reworks are the rework orders of the batch, as the batch reworked or as
+	// the output (FR-24.18, AC-24.18).
+	Reworks []ReworkOrder `json:"reworks"`
 }
 
 // MaxMergeSources bounds one merge.
@@ -226,8 +229,8 @@ func (s *Postgres) MergeBatches(ctx context.Context, in MergeInput, idem Idem) (
 	return out, created, err
 }
 
-// GetGenealogy returns the batches a batch was merged from and the batches it
-// went into. A batch outside the caller's scope is PMF-0108.
+// GetGenealogy returns the batches a batch was merged from (or reworked from)
+// and the batches it went into, with the rework orders of the batch. A batch outside the caller's scope is PMF-0108.
 func (s *Postgres) GetGenealogy(ctx context.Context, id string) (Genealogy, error) {
 	out := Genealogy{BatchID: id}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -242,7 +245,10 @@ func (s *Postgres) GetGenealogy(ctx context.Context, id string) (Genealogy, erro
 		if out.Parents, err = genealogyLinks(ctx, tx, `join batch_record b on b.tenant_id = g.tenant_id and b.id = g.parent_batch_id where g.child_batch_id = $1`, id); err != nil {
 			return err
 		}
-		out.Children, err = genealogyLinks(ctx, tx, `join batch_record b on b.tenant_id = g.tenant_id and b.id = g.child_batch_id where g.parent_batch_id = $1`, id)
+		if out.Children, err = genealogyLinks(ctx, tx, `join batch_record b on b.tenant_id = g.tenant_id and b.id = g.child_batch_id where g.parent_batch_id = $1`, id); err != nil {
+			return err
+		}
+		out.Reworks, err = batchReworks(ctx, tx, id)
 		return err
 	})
 	return out, err

@@ -779,6 +779,137 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/ReworkResponse' } } }
         '400': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/production/rework-orders:
+    post:
+      operationId: createReworkOrder
+      summary: Create a rework batch order from a stored batch (FR-24.18, AC-24.18)
+      description: >-
+        Plans the rework as rework-orders:preview does (a quantity of the batch, at most its quantity; the output cannot
+        be available while a quality order is required), creates the batch order from the rework formula at the batch
+        size, which must make the item of the batch, and links it to the batch with the quantity put in, the planned
+        output and the parameters. The register keeps no quantity, so the caller gives the quantity of the batch and the
+        version of the batch it read; the batch is locked and a hold, disposition change or merge since then is
+        PMF-0104. The batch version moves by one, so a merge, derivation or disposition change based on the version read
+        before the rework is refused as stale in turn. A batch has at most one open rework order (PMF-0132). Writes dev.passage.production.batchorder.created.v1 and
+        dev.passage.production.reworkorder.created.v1 in the same transaction.
+      x-passage-duty: production.batch-order.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateReworkRequest' } } }
+      responses:
+        '201':
+          description: 'The rework order at version 1, status planned. A replay returns 200 with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReworkOrder' } } }
+        '400':
+          description: COM-0001 for a malformed body, a rework quantity above the batch quantity, a refused output disposition, a rework formula that makes another item or a batch of another legal entity.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '403':
+          description: AUTH-0003 when the legal entity is outside the caller's scope.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: PMF-0108 when the batch is not in the caller's scope; PMF-0101 when the formula is not found.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0104 when the batch version is stale; PMF-0132 when the batch already has an open rework order.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listReworkOrders
+      summary: List rework batch orders
+      description: Newest first, optionally for one status or one source batch.
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - name: status
+          in: query
+          description: Only rework orders in this status.
+          schema: { type: string, enum: [planned, received] }
+        - name: sourceBatchId
+          in: query
+          description: Only rework orders of this batch.
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: The rework orders, newest first, without a next page (at most 200).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/ReworkOrder' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/rework-orders/{id}:
+    get:
+      operationId: getReworkOrder
+      summary: Read a rework batch order
+      description: The order with its batch order, the batch it reworks and, once received, the batch that holds the output.
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The rework order.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReworkOrder' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0131
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/rework-orders/{id}:receive:
+    post:
+      operationId: receiveReworkOrder
+      summary: Receive the output of a rework batch order (FR-24.18)
+      description: >-
+        Allowed once the batch order is reported as finished (PMF-0134 before), and once. A rework that keeps the batch
+        number moves the batch to the planned output disposition (history reason "Rework <order number>"); one that does
+        not registers a new batch under newBatchNumber, on that disposition, with a genealogy link to the source
+        (relation rework, the quantity put in, cost 0 as the register keeps none). A move to available is gated by the
+        item's batch record profile (PMF-0015). An output planned as available releases the batch, so the caller also
+        needs the duty production.batch-disposition.write (Maintain batch disposition), else AUTH-0003 and nothing is
+        written. The quantity reported on the order is the received quantity. Writes
+        dev.passage.production.reworkorder.received.v1, with batch.dispositionchanged or batch.registered, in the same
+        transaction.
+      x-passage-duty: production.batch-order.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1, description: The rework order version the caller read. }
+                newBatchNumber: { type: string, maxLength: 40, description: Required when the rework does not keep the batch number; refused when it does. }
+      responses:
+        '200':
+          description: 'The rework order at status received with its output batch. A replay returns the first answer with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReworkOrder' } } }
+        '400':
+          description: COM-0001 for a malformed body, a batch number given when the number is kept or missing when it is not.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '403':
+          description: AUTH-0003 when the output is planned as available and the caller lacks production.batch-disposition.write.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: PMF-0131
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0104 when the version is stale; PMF-0133 when the output was already received; PMF-0109 when the new batch number already exists for the item.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: PMF-0134 when the batch order is not reported as finished; PMF-0015 when the output would be available and the batch record profile requires an approved record; idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
       operationId: healthz
@@ -986,8 +1117,8 @@ paths:
   /v1/production/batches/{id}/genealogy:
     get:
       operationId: getBatchGenealogy
-      summary: Where a batch was merged from and where it went (FR-24.16)
-      description: Parents are the batches this one was merged from, children the batches it went into, each with the quantity and cost per unit it contributed.
+      summary: Where a batch was merged or reworked from and where it went (FR-24.16, FR-24.18)
+      description: Parents are the batches this one was merged or reworked from, children the batches it went into, each with the relation, quantity and cost per unit it contributed; reworks are the rework orders of the batch (AC-24.18), including a rework that kept the batch number.
       x-passage-duty: production.batch-order.read
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -1428,7 +1559,7 @@ components:
         batchId: { type: string, format: uuid }
         batchNumber: { type: string }
         itemId: { type: string, format: uuid }
-        relation: { type: string, enum: [merge] }
+        relation: { type: string, enum: [merge, rework] }
         qty: { $ref: '#/components/schemas/Decimal' }
         unitCost: { $ref: '#/components/schemas/Decimal' }
         createdBy: { type: string }
@@ -1443,11 +1574,15 @@ components:
         parents: { type: array, items: { $ref: '#/components/schemas/GenealogyLink' } }
     Genealogy:
       type: object
-      required: [batchId, parents, children]
+      required: [batchId, parents, children, reworks]
       properties:
         batchId: { type: string, format: uuid }
         parents: { type: array, items: { $ref: '#/components/schemas/GenealogyLink' } }
         children: { type: array, items: { $ref: '#/components/schemas/GenealogyLink' } }
+        reworks:
+          type: array
+          description: The rework orders of the batch, as the batch reworked or as the output, oldest first (FR-24.18, AC-24.18). A rework that keeps the batch number shows here only.
+          items: { $ref: '#/components/schemas/ReworkOrder' }
     AttributeCheck:
       type: object
       required: [name, pass]
@@ -2146,6 +2281,54 @@ components:
               type: object
               additionalProperties: { type: string }
               description: Batch number of each listed batch id.
+    CreateReworkRequest:
+      type: object
+      required: [formulaId, batchSize, sourceBatchId, sourceVersion, sourceQty, reworkQty, outputQty]
+      properties:
+        legalEntityId: { type: string, format: uuid, description: Defaults to the caller's legal entity. }
+        formulaId: { type: string, format: uuid, description: The rework formula; it must make the item of the batch. }
+        batchSize: { $ref: '#/components/schemas/Quantity', description: The batch size of the batch order made from the formula. }
+        sourceBatchId: { type: string, format: uuid }
+        sourceVersion: { type: integer, minimum: 1, description: The batch version the caller read. }
+        sourceQty: { $ref: '#/components/schemas/Quantity', description: The quantity of the batch; the register keeps none. }
+        reworkQty: { $ref: '#/components/schemas/Quantity', description: The quantity put in as the first ingredient, at most sourceQty. }
+        outputQty: { $ref: '#/components/schemas/Quantity', description: The planned output quantity. }
+        params:
+          type: object
+          additionalProperties: false
+          properties:
+            keepBatchNumber: { type: boolean, default: true }
+            requireQualityOrder: { type: boolean, default: true }
+            outputDisposition: { type: string, enum: [available, on-hold, quarantine], default: quarantine }
+            capitalize: { type: boolean, default: false }
+    ReworkOrder:
+      type: object
+      required: [id, legalEntityId, batchOrderId, orderNumber, orderStatus, sourceBatchId, sourceBatchNumber, itemId, inputQty, outputQty, keepBatchNumber, qualityOrderRequired, outputDisposition, varianceType, status, version, createdBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        batchOrderId: { type: string, format: uuid, description: The batch order that does the work; it runs through release, start, report-finished and end. }
+        orderNumber: { type: string }
+        orderStatus: { type: string, enum: [planned, released, started, reported, ended, closed], description: The status of the batch order. }
+        sourceBatchId: { type: string, format: uuid }
+        sourceBatchNumber: { type: string }
+        itemId: { type: string, format: uuid }
+        inputQty: { $ref: '#/components/schemas/Quantity' }
+        outputQty: { $ref: '#/components/schemas/Quantity' }
+        keepBatchNumber: { type: boolean }
+        qualityOrderRequired: { type: boolean }
+        outputDisposition: { type: string, enum: [available, on-hold, quarantine] }
+        varianceType: { type: string, enum: [rework, capitalized] }
+        status: { type: string, enum: [planned, received] }
+        outputBatchId: { type: string, format: uuid, description: Set once received; the source batch itself when its number is kept. }
+        outputBatchNumber: { type: string }
+        receivedQty: { $ref: '#/components/schemas/Quantity' }
+        receivedBy: { type: string }
+        receivedAt: { type: string, format: date-time }
+        version: { type: integer }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     ReworkRequest:
       type: object
       required: [batch, reworkQty, outputQty]

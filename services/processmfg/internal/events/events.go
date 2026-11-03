@@ -46,6 +46,10 @@ const (
 	BatchRecordExceptionDisposed = "dev.passage.production.batchrecord.exceptiondispositioned.v1"
 	BatchRecordApproved          = "dev.passage.production.batchrecord.approved.v1"
 	BatchRecordSealed            = "dev.passage.production.batchrecord.sealed.v1"
+	// The rework batch order (FR-24.18): created from a stored batch, received
+	// when its output goes back to the batch register.
+	ReworkOrderCreated  = "dev.passage.production.reworkorder.created.v1"
+	ReworkOrderReceived = "dev.passage.production.reworkorder.received.v1"
 )
 
 // All lists every event type this service publishes.
@@ -54,7 +58,7 @@ func All() []string {
 		BatchAttributeDefined, BatchRegistered, BatchAttributesRecorded, BatchDispositionChanged, BatchMerged,
 		BatchRequirementDefined, BatchRequirementRetired, BatchRecordProfileDefined, BatchRecordProfileRetired,
 		BatchRecordCompiled, BatchRecordExceptionRaised, BatchRecordExceptionDisposed, BatchRecordApproved, BatchRecordSealed,
-		InheritanceRuleDefined, InheritanceRuleRetired, BatchDerived}
+		InheritanceRuleDefined, InheritanceRuleRetired, BatchDerived, ReworkOrderCreated, ReworkOrderReceived}
 }
 
 // FormulaCreatedData is the payload of FormulaCreated.
@@ -330,4 +334,39 @@ type BatchDerivedData struct {
 	Version       int                `json:"version"`
 	Senders       []string           `json:"senders"`
 	Derived       []DerivedAttribute `json:"derived"`
+}
+
+// ReworkOrderCreatedData is the payload of ReworkOrderCreated: the batch order
+// that does the work, the batch it reworks and the FR-24.18 parameters;
+// inventory issues the source quantity to the order from it.
+type ReworkOrderCreatedData struct {
+	ReworkID             string `json:"reworkId"`
+	BatchOrderID         string `json:"batchOrderId"`
+	LegalEntityID        string `json:"legalEntityId"`
+	ItemID               string `json:"itemId"`
+	SourceBatchID        string `json:"sourceBatchId"`
+	InputQty             string `json:"inputQty"`
+	OutputQty            string `json:"outputQty"`
+	KeepBatchNumber      bool   `json:"keepBatchNumber"`
+	QualityOrderRequired bool   `json:"qualityOrderRequired"`
+	OutputDisposition    string `json:"outputDisposition"`
+	VarianceType         string `json:"varianceType"`
+}
+
+// ReworkOrderReceivedData is the payload of ReworkOrderReceived: the batch the
+// output went to (the source itself when its number is kept), the quantity
+// reported and the disposition it holds; inventory receives the output from it.
+type ReworkOrderReceivedData struct {
+	ReworkID             string `json:"reworkId"`
+	BatchOrderID         string `json:"batchOrderId"`
+	LegalEntityID        string `json:"legalEntityId"`
+	ItemID               string `json:"itemId"`
+	SourceBatchID        string `json:"sourceBatchId"`
+	OutputBatchID        string `json:"outputBatchId"`
+	BatchNumber          string `json:"batchNumber"`
+	Qty                  string `json:"qty"`
+	Disposition          string `json:"disposition"`
+	KeepBatchNumber      bool   `json:"keepBatchNumber"`
+	QualityOrderRequired bool   `json:"qualityOrderRequired"`
+	VarianceType         string `json:"varianceType"`
 }

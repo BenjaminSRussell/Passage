@@ -512,27 +512,7 @@ func (s *Postgres) ChangeDisposition(ctx context.Context, id, to, reason string,
 			return httpx.NewProblem(http.StatusConflict, CodeDispositionUnchanged,
 				fmt.Sprintf("batch %s is already %s", b.BatchNumber, to))
 		}
-		if to == domain.DispositionAvailable {
-			if err := releaseGate(ctx, tx, b.LegalEntityID, b.ItemID, []string{b.ID}, b.BatchNumber); err != nil {
-				return err
-			}
-		}
-		p := principal(ctx)
-		var conflict bool
-		if err := tx.QueryRow(ctx, `select exists (select 1 from batch_attribute_history where batch_id = $1 and recorded_by = $2)`,
-			b.ID, p.UserID).Scan(&conflict); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `insert into batch_disposition_history (tenant_id, batch_id, legal_entity_id, from_disposition, to_disposition, reason, segregation_conflict, changed_by)
-			values ($1, $2, $3, $4, $5, $6, $7, $8)`, p.TenantID, b.ID, b.LegalEntityID, b.Disposition, to, reason, conflict, p.UserID); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `update batch_record set disposition = $2, version = version + 1, updated_at = now() where id = $1`, b.ID, to); err != nil {
-			return err
-		}
-		if err := enqueue(ctx, tx, "batch", b.ID, pmfevents.BatchDispositionChanged, pmfevents.BatchDispositionChangedData{
-			BatchID: b.ID, LegalEntityID: b.LegalEntityID, ItemID: b.ItemID, BatchNumber: b.BatchNumber,
-			From: b.Disposition, To: to, Reason: reason, SegregationConflict: conflict, Version: b.Version + 1}); err != nil {
+		if err := moveDisposition(ctx, tx, b, to, reason); err != nil {
 			return err
 		}
 		if out, err = loadBatch(ctx, tx, id, ""); err != nil {
@@ -542,4 +522,32 @@ func (s *Postgres) ChangeDisposition(ctx context.Context, id, to, reason string,
 		return remember(ctx, tx, idem, http.StatusOK, out)
 	})
 	return out, changed, err
+}
+
+// moveDisposition applies the release gate for a move to available, appends the
+// disposition history (flagging a change by a user who recorded attributes on
+// the batch), updates the batch, moving its version by one, and writes the
+// changed event, all inside tx on a batch the caller has locked.
+func moveDisposition(ctx context.Context, tx pgx.Tx, b Batch, to, reason string) error {
+	if to == domain.DispositionAvailable {
+		if err := releaseGate(ctx, tx, b.LegalEntityID, b.ItemID, []string{b.ID}, b.BatchNumber); err != nil {
+			return err
+		}
+	}
+	p := principal(ctx)
+	var conflict bool
+	if err := tx.QueryRow(ctx, `select exists (select 1 from batch_attribute_history where batch_id = $1 and recorded_by = $2)`,
+		b.ID, p.UserID).Scan(&conflict); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `insert into batch_disposition_history (tenant_id, batch_id, legal_entity_id, from_disposition, to_disposition, reason, segregation_conflict, changed_by)
+		values ($1, $2, $3, $4, $5, $6, $7, $8)`, p.TenantID, b.ID, b.LegalEntityID, b.Disposition, to, reason, conflict, p.UserID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `update batch_record set disposition = $2, version = version + 1, updated_at = now() where id = $1`, b.ID, to); err != nil {
+		return err
+	}
+	return enqueue(ctx, tx, "batch", b.ID, pmfevents.BatchDispositionChanged, pmfevents.BatchDispositionChangedData{
+		BatchID: b.ID, LegalEntityID: b.LegalEntityID, ItemID: b.ItemID, BatchNumber: b.BatchNumber,
+		From: b.Disposition, To: to, Reason: reason, SegregationConflict: conflict, Version: b.Version + 1})
 }

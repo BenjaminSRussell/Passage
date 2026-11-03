@@ -10,6 +10,7 @@ import { CustomerRequirementDetailPage, CustomerRequirementsPage, NewCustomerReq
 import { BatchRecordDetailPage, BatchRecordsPage, NewRecordProfilePage, RecordProfilesPage } from "./EbrPages";
 import { AllocationPage, PotencyPage } from "./CalculatorPages";
 import { FormulaDetailPage, FormulasPage, NewFormulaPage } from "./FormulaPages";
+import { NewReworkOrderPage, ReworkOrderDetailPage, ReworkOrdersPage } from "./ReworkOrderPages";
 import { ProcessHome } from "./pages";
 import { StoredMergePage } from "./StoredMergePage";
 import { StoredPickingPage } from "./StoredPickingPage";
@@ -56,6 +57,9 @@ const processmfg: PassageModule = {
     { path: "/processmfg/picking", element: createElement(PickingPage), handle: { title: "Batch picking" } },
     { path: "/processmfg/picking-stored", element: createElement(StoredPickingPage), handle: { title: "Pick from stored batches" } },
     { path: "/processmfg/rework", element: createElement(ReworkPage), handle: { title: "Rework batch order" } },
+    { path: "/processmfg/rework-orders", element: createElement(ReworkOrdersPage), handle: { title: "Rework orders" } },
+    { path: "/processmfg/rework-orders/new", element: createElement(NewReworkOrderPage), handle: { title: "New rework order" } },
+    { path: "/processmfg/rework-orders/:id", element: createElement(ReworkOrderDetailPage), handle: { title: "Rework order" } },
   ],
   nav: [
     { label: "Overview", to: "/processmfg", duty: "production.batch-order.read" },
@@ -82,6 +86,7 @@ const processmfg: PassageModule = {
     { label: "Batch picking", to: "/processmfg/picking", duty: "production.batch-order.read" },
     { label: "Pick from stored batches", to: "/processmfg/picking-stored", duty: "production.batch-order.read" },
     { label: "Rework", to: "/processmfg/rework", duty: "production.batch-order.write" },
+    { label: "Rework orders", to: "/processmfg/rework-orders", duty: "production.batch-order.read" },
   ],
 };
 

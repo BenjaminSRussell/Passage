@@ -162,6 +162,10 @@ type Store interface {
 	RetireInheritanceRule(ctx context.Context, id string, version int, idem Idem) (InheritanceRule, bool, error)
 	DeriveBatch(ctx context.Context, in DeriveInput, idem Idem) (DeriveResult, bool, error)
 	ListDerivations(ctx context.Context, f DerivationFilter) ([]Derivation, error)
+	CreateReworkOrder(ctx context.Context, in NewRework, idem Idem) (ReworkOrder, bool, error)
+	ListReworkOrders(ctx context.Context, f ReworkFilter) ([]ReworkOrder, error)
+	GetReworkOrder(ctx context.Context, id string) (ReworkOrder, error)
+	ReceiveReworkOrder(ctx context.Context, id, newBatchNumber string, version int, canRelease bool, idem Idem) (ReworkOrder, bool, error)
 	ApplicableRequirements(ctx context.Context, legalEntityID, itemID string, who ReqScope, shipDate string) ([]CustomerRequirement, error)
 	DefineRecordProfile(ctx context.Context, in RecordProfile, idem Idem) (RecordProfile, bool, error)
 	ListRecordProfiles(ctx context.Context, f ProfileFilter) ([]RecordProfile, error)
@@ -392,45 +396,59 @@ func (s *Postgres) CreateBatchOrder(ctx context.Context, in NewBatchOrder, idem 
 				return err
 			}
 		}
-		f, err := getFormula(ctx, tx, in.FormulaID)
+		o, err := insertBatchOrder(ctx, tx, in, idem)
 		if err != nil {
 			return err
-		}
-		factor, lines, err := orderLines(f.Size, in.BatchSize, f.Lines)
-		if err != nil {
-			return err
-		}
-		p := principal(ctx)
-		var seq int64
-		if err := tx.QueryRow(ctx, `insert into batch_order_sequence (tenant_id, legal_entity_id, next_value) values ($1, $2, 2)
-			on conflict (tenant_id, legal_entity_id) do update set next_value = batch_order_sequence.next_value + 1
-			returning next_value - 1`, p.TenantID, in.LegalEntityID).Scan(&seq); err != nil {
-			return err
-		}
-		o := BatchOrder{ID: ids.New(), LegalEntityID: in.LegalEntityID, OrderNumber: fmt.Sprintf("BO-%06d", seq), FormulaID: f.ID,
-			FormulaCode: f.Code, FormulaVersion: f.Version, ItemID: f.ItemID, Unit: f.Unit, FormulaSize: f.Size, BatchSize: in.BatchSize,
-			ScaleFactor: factor, Status: "planned", Version: 1, CreatedBy: p.UserID, Lines: lines}
-		if err := tx.QueryRow(ctx, `insert into batch_order (tenant_id, id, legal_entity_id, order_number, formula_id, formula_code, formula_version,
-				item_id, unit, formula_size, batch_size, scale_factor, created_by, idempotency_key, idempotency_fingerprint)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, nullif($14, ''), nullif($15, '')) returning created_at, updated_at`,
-			p.TenantID, o.ID, o.LegalEntityID, o.OrderNumber, o.FormulaID, o.FormulaCode, o.FormulaVersion, o.ItemID, o.Unit,
-			o.FormulaSize, o.BatchSize, o.ScaleFactor, o.CreatedBy, idem.Key, idem.Fingerprint).Scan(&o.CreatedAt, &o.UpdatedAt); err != nil {
-			return mapDuplicate(err, CodeIdempotencyInFlight, "a concurrent request took batch order number "+o.OrderNumber+"; retry")
-		}
-		for _, l := range lines {
-			if _, err := tx.Exec(ctx, `insert into batch_order_line (tenant_id, order_id, legal_entity_id, line_number, item_id, line_type,
-					formula_qty, percent, scalable, percent_controlled, qty)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-				p.TenantID, o.ID, o.LegalEntityID, l.LineNumber, l.ItemID, string(l.Type), l.FormulaQty, l.Percent, l.Scalable, l.PercentControlled, l.Qty); err != nil {
-				return err
-			}
 		}
 		out, created = o, true
-		return enqueue(ctx, tx, "batchorder", o.ID, pmfevents.BatchOrderCreated, pmfevents.BatchOrderCreatedData{
-			OrderID: o.ID, OrderNumber: o.OrderNumber, LegalEntityID: o.LegalEntityID, FormulaID: o.FormulaID, FormulaVersion: o.FormulaVersion,
-			ItemID: o.ItemID, BatchSize: o.BatchSize.String(), ScaleFactor: o.ScaleFactor.String(), CoProducts: outputs(lines)})
+		return nil
 	})
 	return out, created, err
+}
+
+// insertBatchOrder snapshots the formula, scales it to the batch size, numbers
+// the order per legal entity and writes the created event inside tx. idem is
+// stored on the order for replays; a caller that keeps its own record passes none.
+func insertBatchOrder(ctx context.Context, tx pgx.Tx, in NewBatchOrder, idem Idem) (BatchOrder, error) {
+	f, err := getFormula(ctx, tx, in.FormulaID)
+	if err != nil {
+		return BatchOrder{}, err
+	}
+	factor, lines, err := orderLines(f.Size, in.BatchSize, f.Lines)
+	if err != nil {
+		return BatchOrder{}, err
+	}
+	p := principal(ctx)
+	var seq int64
+	if err := tx.QueryRow(ctx, `insert into batch_order_sequence (tenant_id, legal_entity_id, next_value) values ($1, $2, 2)
+		on conflict (tenant_id, legal_entity_id) do update set next_value = batch_order_sequence.next_value + 1
+		returning next_value - 1`, p.TenantID, in.LegalEntityID).Scan(&seq); err != nil {
+		return BatchOrder{}, err
+	}
+	o := BatchOrder{ID: ids.New(), LegalEntityID: in.LegalEntityID, OrderNumber: fmt.Sprintf("BO-%06d", seq), FormulaID: f.ID,
+		FormulaCode: f.Code, FormulaVersion: f.Version, ItemID: f.ItemID, Unit: f.Unit, FormulaSize: f.Size, BatchSize: in.BatchSize,
+		ScaleFactor: factor, Status: "planned", Version: 1, CreatedBy: p.UserID, Lines: lines}
+	if err := tx.QueryRow(ctx, `insert into batch_order (tenant_id, id, legal_entity_id, order_number, formula_id, formula_code, formula_version,
+			item_id, unit, formula_size, batch_size, scale_factor, created_by, idempotency_key, idempotency_fingerprint)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, nullif($14, ''), nullif($15, '')) returning created_at, updated_at`,
+		p.TenantID, o.ID, o.LegalEntityID, o.OrderNumber, o.FormulaID, o.FormulaCode, o.FormulaVersion, o.ItemID, o.Unit,
+		o.FormulaSize, o.BatchSize, o.ScaleFactor, o.CreatedBy, idem.Key, idem.Fingerprint).Scan(&o.CreatedAt, &o.UpdatedAt); err != nil {
+		return BatchOrder{}, mapDuplicate(err, CodeIdempotencyInFlight, "a concurrent request took batch order number "+o.OrderNumber+"; retry")
+	}
+	for _, l := range lines {
+		if _, err := tx.Exec(ctx, `insert into batch_order_line (tenant_id, order_id, legal_entity_id, line_number, item_id, line_type,
+				formula_qty, percent, scalable, percent_controlled, qty)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+			p.TenantID, o.ID, o.LegalEntityID, l.LineNumber, l.ItemID, string(l.Type), l.FormulaQty, l.Percent, l.Scalable, l.PercentControlled, l.Qty); err != nil {
+			return BatchOrder{}, err
+		}
+	}
+	if err := enqueue(ctx, tx, "batchorder", o.ID, pmfevents.BatchOrderCreated, pmfevents.BatchOrderCreatedData{
+		OrderID: o.ID, OrderNumber: o.OrderNumber, LegalEntityID: o.LegalEntityID, FormulaID: o.FormulaID, FormulaVersion: o.FormulaVersion,
+		ItemID: o.ItemID, BatchSize: o.BatchSize.String(), ScaleFactor: o.ScaleFactor.String(), CoProducts: outputs(lines)}); err != nil {
+		return BatchOrder{}, err
+	}
+	return o, nil
 }
 
 const orderCols = `id, legal_entity_id, order_number, formula_id, formula_code, formula_version, item_id, unit,
