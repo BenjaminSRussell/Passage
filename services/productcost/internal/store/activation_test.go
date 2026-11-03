@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -331,7 +333,23 @@ func TestActivation_ADefiniteRefusalClearsTheAttemptAndACorrectedRetryPostsAfres
 	}
 }
 
-func TestActivation_AnAmbiguousFailureKeepsTheAttemptAndALaterRefusalDoesNotClearIt(t *testing.T) {
+func (f activationFixture) otherVersion(t *testing.T, code, unitCost string) Version {
+	t.Helper()
+	v, _, err := f.s.CreateVersion(as(1, ""), spec(f.le, code), "k-"+code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedCalculation(t, f.admin, f.le, v.ID, "Pending", unitCost)
+	return v
+}
+
+func (f activationFixture) activateOther(ledger ledgerclient.Ledger, v Version, key string) ActivationInput {
+	in := f.activate(ledger, key)
+	in.VersionID, in.Fingerprint = v.ID, v.ID
+	return in
+}
+
+func TestActivation_AnAmbiguousAttemptSurvivesRefusalsTheLedgerDecidesBeforeItsReplayCheck(t *testing.T) {
 	f := newActivationFixture(t, true)
 	ledger := ledgerclient.NewFake()
 	for _, status := range []int{http.StatusForbidden, http.StatusTooManyRequests, http.StatusBadGateway} {
@@ -343,16 +361,108 @@ func TestActivation_AnAmbiguousFailureKeepsTheAttemptAndALaterRefusalDoesNotClea
 			t.Fatalf("status %d: attempts %d ambiguous %v, want the attempt kept and flagged", status, n, amb)
 		}
 	}
-	ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: ledgerclient.CodePeriodClosed})
-	if _, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act")); err == nil {
-		t.Fatal("the refusal should fail the call")
+	preReplay := []*ledgerclient.Error{
+		{Op: "post", Status: http.StatusNotFound, Code: "LEDGER_NOT_FOUND"},
+		{Op: "post", Status: http.StatusBadRequest, Code: "COM-0001"},
 	}
-	if n, _ := pendingAttempts(t, f.admin); n != 1 {
-		t.Fatalf("a refusal after an ambiguous attempt cleared it: %d", n)
+	for _, refusal := range preReplay {
+		ledger.FailPosts(refusal)
+		if _, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act")); err == nil {
+			t.Fatalf("%v should fail the call", refusal)
+		}
+		if n, amb := pendingAttempts(t, f.admin); n != 1 || !amb {
+			t.Fatalf("%v cleared or unflagged the ambiguous attempt: %d %v", refusal, n, amb)
+		}
+	}
+	v3 := f.otherVersion(t, "STD-V3", "4.00")
+	if _, _, err := f.s.ActivateVersion(as(1, ""), f.activateOther(ledger, v3, "k-v3")); codeOf(err) != domain.CodeActivationPending {
+		t.Fatalf("the legal entity must stay blocked: %v", err)
 	}
 	ledger.FailPosts(nil)
 	if res, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act")); err != nil || res.Version.Status != domain.VersionActive || len(ledger.Entries()) != 1 {
 		t.Fatalf("recovery: %+v %v", res, err)
+	}
+}
+
+func TestActivation_AnAmbiguousAttemptIsClearedByAPeriodClosedRefusalAndTheLegalEntityIsUnblocked(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ledger := ledgerclient.NewFake()
+	ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusBadGateway})
+	if _, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act")); err == nil {
+		t.Fatal("the post should have failed")
+	}
+	if n, amb := pendingAttempts(t, f.admin); n != 1 || !amb {
+		t.Fatalf("attempts %d ambiguous %v", n, amb)
+	}
+	ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: ledgerclient.CodePeriodClosed})
+	if _, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act")); err == nil {
+		t.Fatal("the refusal should fail the call")
+	}
+	if n, _ := pendingAttempts(t, f.admin); n != 0 {
+		t.Fatalf("a refusal decided after the replay check left %d attempts", n)
+	}
+	ledger.FailPosts(nil)
+	v3 := f.otherVersion(t, "STD-V3", "4.00")
+	if res, _, err := f.s.ActivateVersion(as(1, ""), f.activateOther(ledger, v3, "k-v3")); err != nil || res.Version.Status != domain.VersionActive {
+		t.Fatalf("another version of the legal entity after the cleared attempt: %+v %v", res, err)
+	}
+}
+
+func TestActivation_ANonStandardVersionWithPositionsIsRefusedByTheStore(t *testing.T) {
+	f := newActivationFixture(t, true)
+	if _, err := f.admin.Exec(context.Background(), `update costing_version set type = 'Planned' where id = $1`, f.newVer.ID); err != nil {
+		t.Fatal(err)
+	}
+	ledger := ledgerclient.NewFake()
+	if _, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-planned")); codeOf(err) != domain.CodeNotStandardRevaluation || len(ledger.Entries()) != 0 {
+		t.Fatalf("planned version with positions: %v", err)
+	}
+	if n, _ := pendingAttempts(t, f.admin); n != 0 {
+		t.Fatalf("a refused activation left %d attempts", n)
+	}
+}
+
+func TestActivation_AZeroTotalActivationIsRecordedInTheSameTransactionAsItsPrepare(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ledger := ledgerclient.NewFake()
+	v3 := f.otherVersion(t, "STD-V3", "4.00")
+	zero := f.activate(ledger, "k-zero")
+	zero.OnHand = map[inventory.Position]decimal.Decimal{positionA: decimal.Zero}
+	inputs := []ActivationInput{zero, f.activateOther(ledger, v3, "k-v3")}
+	results := make([]ActivationResult, len(inputs))
+	errs := make([]error, len(inputs))
+	var wg sync.WaitGroup
+	for i := range inputs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i], _, errs[i] = f.s.ActivateVersion(as(1, ""), inputs[i])
+		}()
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err == nil {
+			continue
+		}
+		if codeOf(err) != domain.CodeActivationPending {
+			t.Fatalf("activation %d: %v", i, err)
+		}
+		if results[i], _, errs[i] = f.s.ActivateVersion(as(1, ""), inputs[i]); errs[i] != nil {
+			t.Fatalf("activation %d after the other settled: %v", i, errs[i])
+		}
+	}
+	if n, _ := pendingAttempts(t, f.admin); n != 0 {
+		t.Fatalf("attempts left %d", n)
+	}
+	first, second := results[0].Activation, results[1].Activation
+	if second.CreatedAt.Before(first.CreatedAt) {
+		first, second = second, first
+	}
+	if !first.Total.IsZero() && !second.Total.IsZero() {
+		t.Fatalf("one of the two is the zero-total activation: %s %s", first.Total, second.Total)
+	}
+	if got, want := second.Lines[0].OldStd, first.Lines[0].NewStd; !got.Equal(want) {
+		t.Fatalf("the later activation started from %s, the earlier one booked %s", got, want)
 	}
 }
 
@@ -442,8 +552,8 @@ func TestActivation_APlannedVersionOnlyMovesTheStatusAndAStandardOneWithPosition
 	if _, err := f.admin.Exec(context.Background(), `update costing_version set type = 'Planned' where id = $1`, f.newVer.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.PreviewActivation(ctx, f.activate(nil, "")); err != nil {
-		t.Fatalf("a preview of a planned version stays available: %v", err)
+	if preview, err := f.s.PreviewActivation(ctx, f.activate(nil, "")); err != nil || len(preview.Lines) != 0 || !preview.Total.IsZero() {
+		t.Fatalf("a preview of a planned version is status-only: %+v %v", preview, err)
 	}
 	if _, _, err := f.s.ActivateStatusOnly(ctx, f.newVer.ID, 7); codeOf(err) != domain.CodeVersionConflict {
 		t.Fatalf("stale version counter: %v", err)
@@ -562,6 +672,8 @@ func TestActivation_AnotherVersionsPendingAttemptInTheSameLegalEntityIs409(t *te
 	in.VersionID, in.Fingerprint = v3ver.ID, v3ver.ID
 	if _, _, err := f.s.ActivateVersion(ctx, in); codeOf(err) != domain.CodeActivationPending || statusOf(err) != http.StatusConflict {
 		t.Fatalf("activation beside a pending attempt: %v", err)
+	} else if !strings.Contains(err.Error(), f.newVer.ID) {
+		t.Fatalf("the conflict must name the blocking version %s: %v", f.newVer.ID, err)
 	}
 	if n, _ := pendingAttempts(t, f.admin); n != 1 {
 		t.Fatalf("attempts %d, the refused activation must not add one", n)

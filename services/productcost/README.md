@@ -278,10 +278,22 @@ same transaction (see `events/asyncapi.yaml`).
   the ledger replays the one entry. A definite ledger refusal (400, 404, 422, or a locally
   invalid entry) drops the attempt unless an earlier send was ambiguous; any other failure
   (transport, 5xx, 401, 403, 429, 409) keeps it and flags it ambiguous, because a 401, 403
-  or 429 is decided before the ledger's idempotency replay.
+  or 429 is decided before the ledger's idempotency replay. An ambiguous attempt is dropped
+  only by a refusal the ledger decides after that replay check, which proves the earlier send
+  did not land: a 422 rule rejection (closed period `LEDGER_PERIOD_CLOSED`, account,
+  validation, an already reversed entry). A 400 or 404 does not (the ledger or entry lookup and
+  request validation come first). Stuck state: an ambiguous attempt whose retries keep
+  failing transiently blocks every other version of the legal entity with `CST-0729`; the
+  remedy is to retry the same activation until the ledger answers. There is no operator
+  discard path.
   Activations of one legal entity are serialised by an advisory lock, and an activation or
-  reversal is refused with `CST-0729` (409) while another version of the legal entity has a
-  pending attempt, because its standards are not final until that attempt settles.
+  reversal is refused with `CST-0729` (409), naming the blocking version, while another
+  version of the legal entity has a pending attempt, because its standards are not final
+  until that attempt settles. An activation whose total is zero posts nothing and is
+  recorded in the same transaction that holds the lock.
+  `dryRun` of a version that is not Standard answers a status-only preview (no lines, total
+  0), as the activation does. The store also refuses revaluing a non-Standard version
+  (`CST-0727`, 422).
   The activation tries the per-version roll advisory lock (`CST-0710`), but no roll takes it
   yet (no roll persists calculations), so the refusal is unreachable until the roll slice
   takes `domain.RollLockKey`.
@@ -383,6 +395,7 @@ Problem `type` is `https://passage.dev/problems/<code>`.
 | CST-0726 | 422 | the inventory reports no on-hand for a stored position (its site dimension must be the site id) |
 | CST-0729 | 409 | another version of the legal entity has a pending activation attempt; settle it first |
 | CST-0728 | 422 | too many items or positions for one activation |
+| CST-0727 | 422 | only a Standard version revalues stock |
 | CST-0731 | 422 / warning | inventory close through the day before the conversion date is required (warning in validation; 422 on the close and activate steps) |
 | CST-0732 | diagnostic | negative on-hand (error when the `NegativeOnHand` blocker is enabled) |
 | CST-0733 | diagnostic | open in-transit transfers (error with `InTransit`; new code) |

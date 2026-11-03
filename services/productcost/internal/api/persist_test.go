@@ -37,6 +37,7 @@ type fakeStore struct {
 	activation      *store.ActivationInput
 	preview         *store.ActivationInput
 	positions       []inventory.Position
+	versionType     string
 }
 
 func (f *fakeStore) ListComponents(context.Context) ([]store.Component, error) {
@@ -69,7 +70,11 @@ func (f *fakeStore) ListVersions(_ context.Context, filter store.VersionFilter, 
 
 func (f *fakeStore) GetVersion(_ context.Context, id string) (store.Version, error) {
 	f.calls++
-	return store.Version{ID: id, Status: domain.VersionOpen, Version: 1, SiteIDs: []string{}}, f.err
+	kind := f.versionType
+	if kind == "" {
+		kind = domain.VersionStandard
+	}
+	return store.Version{ID: id, Type: kind, Status: domain.VersionOpen, Version: 1, SiteIDs: []string{}}, f.err
 }
 
 func (f *fakeStore) CreateVersion(_ context.Context, spec domain.VersionSpec, key string) (store.Version, bool, error) {

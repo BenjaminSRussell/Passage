@@ -137,6 +137,11 @@ func (a *API) activateWithRevaluation(w http.ResponseWriter, r *http.Request, id
 			storeFailure(w, r, err)
 			return
 		}
+		if req.DryRun && v.Type != domain.VersionStandard {
+			a.previews.Add(1)
+			httpx.JSON(w, http.StatusOK, activationDryResponse{DryRun: true, Version: v, Preview: domain.Revalue(nil, req.Currency)})
+			return
+		}
 		if a.onHand == nil {
 			httpx.Fail(w, r, activationProblem(http.StatusServiceUnavailable, domain.CodeOnHandUnavailable, "the inventory service is not configured; the on-hand to revalue cannot be read"))
 			return

@@ -12,6 +12,8 @@ const (
 	CodeNoOnHand          = "CST-0726"
 	CodeActivationPending = "CST-0729"
 	CodeActivationTooBig  = "CST-0728"
+
+	CodeNotStandardRevaluation = "CST-0727"
 )
 
 // RollLockKey names the advisory lock a running roll of a version holds and an

@@ -155,6 +155,10 @@ func (s *Postgres) PreviewActivation(ctx context.Context, in ActivationInput) (d
 		if err != nil {
 			return err
 		}
+		if cur.Type != domain.VersionStandard && in.ReversesID == "" {
+			out = domain.Revalue(nil, in.Currency)
+			return nil
+		}
 		plan, err := planActivation(ctx, tx, p.TenantID, cur, in, false)
 		out = plan.preview
 		return err
@@ -190,34 +194,34 @@ func attemptKey(versionID string, in ActivationInput) string {
 // leaves the attempt, and the next call posts it verbatim so the ledger replays
 // the entry instead of booking a second one.
 func (s *Postgres) ActivateVersion(ctx context.Context, in ActivationInput) (ActivationResult, bool, error) {
-	var replay ActivationResult
-	var found bool
+	var out ActivationResult
+	var replayed, done bool
 	var prepared preparedActivation
 	err := s.tenantTx(ctx, func(tx pgx.Tx, p tenant.Principal) error {
 		var err error
-		if replay, found, err = storedReplay[ActivationResult](ctx, tx, p.TenantID, in.Key, activateScope, in.Fingerprint); err != nil || found {
+		if out, done, err = storedReplay[ActivationResult](ctx, tx, p.TenantID, in.Key, activateScope, in.Fingerprint); err != nil || done {
+			replayed = done
 			return err
 		}
-		prepared, err = prepareActivation(ctx, tx, p, in)
+		if prepared, err = prepareActivation(ctx, tx, p, in); err != nil || prepared.post {
+			return err
+		}
+		done = true
+		out, replayed, err = idempotent(ctx, tx, p.TenantID, in.Key, activateScope, in.Fingerprint, func() (ActivationResult, error) {
+			return finalizeActivation(ctx, tx, p, in, prepared)
+		})
 		return err
 	})
-	if err != nil {
-		return ActivationResult{}, false, err
-	}
-	if found {
-		return replay, true, nil
+	if err != nil || done {
+		return out, replayed, err
 	}
 	settle := context.WithoutCancel(ctx)
-	if prepared.post {
-		entryID, err := postPending(settle, in.Ledger, prepared)
-		if err != nil {
-			s.recordFailedAttempt(settle, in, prepared, err)
-			return ActivationResult{}, false, &LedgerRefusal{Err: err}
-		}
-		prepared.pending.Activation.JournalEntryID = entryID
+	entryID, err := postPending(settle, in.Ledger, prepared)
+	if err != nil {
+		s.recordFailedAttempt(settle, in, prepared, err)
+		return ActivationResult{}, false, &LedgerRefusal{Err: err}
 	}
-	var out ActivationResult
-	var replayed bool
+	prepared.pending.Activation.JournalEntryID = entryID
 	err = s.tenantTx(settle, func(tx pgx.Tx, p tenant.Principal) error {
 		var err error
 		out, replayed, err = idempotent(settle, tx, p.TenantID, in.Key, activateScope, in.Fingerprint, func() (ActivationResult, error) {
@@ -285,15 +289,16 @@ func serialiseLegalEntity(ctx context.Context, tx pgx.Tx, tenantID string, cur V
 	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, "productcost.activation|"+tenantID+"|"+cur.LegalEntityID); err != nil {
 		return err
 	}
-	var inFlight bool
-	if err := tx.QueryRow(ctx, `select exists (select 1 from standard_cost_activation_attempt where tenant_id = $1 and legal_entity_id = $2 and costing_version_id <> $3)`,
-		tenantID, cur.LegalEntityID, cur.ID).Scan(&inFlight); err != nil {
+	var blocking string
+	err := tx.QueryRow(ctx, `select costing_version_id::text from standard_cost_activation_attempt where tenant_id = $1 and legal_entity_id = $2 and costing_version_id <> $3 limit 1`,
+		tenantID, cur.LegalEntityID, cur.ID).Scan(&blocking)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
 		return err
 	}
-	if inFlight {
-		return httpx.NewProblem(http.StatusConflict, domain.CodeActivationPending, "another version of this legal entity has an activation in flight; its basis is not final")
-	}
-	return nil
+	return httpx.NewProblem(http.StatusConflict, domain.CodeActivationPending, "version "+blocking+" of this legal entity has an activation in flight; its basis is not final")
 }
 
 func lockVersion(ctx context.Context, tx pgx.Tx, tenantID string, in ActivationInput) (Version, error) {
@@ -351,16 +356,15 @@ func finalizeActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in A
 // locally invalid entry) on an attempt never sent ambiguously drops it, so a
 // corrected request can post afresh; any other failure may have reached the
 // ledger (a 401, 403 or 429 is decided before its idempotency replay), so the
-// attempt is flagged ambiguous and no later refusal drops it.
+// attempt is flagged ambiguous. An ambiguous attempt is dropped only by a
+// refusal the ledger decides after its replay check (decidedAfterReplay).
 func (s *Postgres) recordFailedAttempt(ctx context.Context, in ActivationInput, prepared preparedActivation, cause error) {
 	definite := definiteRefusal(cause)
-	if definite && prepared.ambiguous {
-		return
-	}
 	statement := `update standard_cost_activation_attempt set attempted_ambiguous = true where tenant_id = $1 and attempt_key = $2`
-	if definite {
+	switch {
+	case definite && (!prepared.ambiguous || decidedAfterReplay(cause)):
 		statement = `delete from standard_cost_activation_attempt where tenant_id = $1 and attempt_key = $2`
-	} else if prepared.ambiguous {
+	case prepared.ambiguous:
 		return
 	}
 	err := s.tenantTx(ctx, func(tx pgx.Tx, p tenant.Principal) error {
@@ -381,6 +385,23 @@ func definiteRefusal(err error) bool {
 		return false
 	}
 	return le.Status == http.StatusBadRequest || le.Status == http.StatusNotFound || le.Status == http.StatusUnprocessableEntity
+}
+
+// decidedAfterReplay is true for a ledger refusal that proves an earlier send of
+// the same entry did not land. postEntryTx and reverseEntryTx in
+// services/ledger/internal/store/journal.go check the idempotency key
+// (replayIdempotent) after loading the ledger (404 LEDGER_NOT_FOUND,
+// LEDGER_ENTRY_NOT_FOUND), requireLedgerSpecific (403) and withOwnLedgerLines
+// (a 422 productcost never triggers: it sends no ledger lines); the request
+// validation (400) and the auth checks come before the store. Everything after
+// the replay is a rule rejection, which the API renders as 422: closed period
+// (LEDGER_PERIOD_CLOSED), unknown or blocked account, unbalanced entry, derivation
+// and validation rules, a reversal already reversed, cleared open items, a
+// realignment entry, reversal date and reason rules. A 400, 401, 403, 404 or
+// 429 is not proof, so it leaves an ambiguous attempt in place.
+func decidedAfterReplay(err error) bool {
+	var le *ledgerclient.Error
+	return errors.As(err, &le) && le.Status == http.StatusUnprocessableEntity
 }
 
 func activationID(tenantID string, cur Version, in ActivationInput) string {
@@ -413,8 +434,8 @@ func insertActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, a Acti
 	}
 	err = tx.QueryRow(ctx, `insert into standard_cost_activation
 		(tenant_id, id, legal_entity_id, costing_version_id, reverses_activation_id, ledger_id, posting_date, currency, item_count, total, journal_entry_id,
-		 inventory_account, cost_change_account, journal_lines, new_standard_for_open_orders, lines, activated_by)
-		values ($1, $2, $3, $4, $5::uuid, $6, $7::date, $8, $9, $10, nullif($11, ''), $12, $13, $14, $15, $16, $17) returning created_at`,
+		 inventory_account, cost_change_account, journal_lines, new_standard_for_open_orders, lines, activated_by, created_at)
+		values ($1, $2, $3, $4, $5::uuid, $6, $7::date, $8, $9, $10, nullif($11, ''), $12, $13, $14, $15, $16, $17, clock_timestamp()) returning created_at`,
 		p.TenantID, a.ID, a.LegalEntityID, a.VersionID, a.ReversesActivationID, a.LedgerID, a.PostingDate, a.Currency, a.ItemCount, a.Total, a.JournalEntryID,
 		a.InventoryAccount, a.CostChangeAccount, journal, a.NewStandardForOpenOrders, lines, a.ActivatedBy).Scan(&a.CreatedAt)
 	if pgCode(err) == uniqueViolation {
@@ -475,6 +496,9 @@ func planActivation(ctx context.Context, tx pgx.Tx, tenantID string, cur Version
 	}
 	if len(positions) == 0 {
 		return plan, &domain.CodedError{Code: domain.CodeNoStoredStandard, Detail: "version " + cur.Code + " has no stored calculations to revalue"}
+	}
+	if cur.Type != domain.VersionStandard {
+		return plan, &domain.CodedError{Code: domain.CodeNotStandardRevaluation, Detail: "version " + cur.Code + " is not a Standard version; only its status can move"}
 	}
 	std, err := storedStandards(ctx, tx, tenantID, cur, positions)
 	if err != nil {

@@ -571,7 +571,7 @@ paths:
             schema: { $ref: "#/components/schemas/StoredActivationRequest" }
       responses:
         "200":
-          description: The version, now Active (bare request); or the preview (dryRun); or the version with its activation and journal entry id
+          description: The version, now Active (bare request); or the preview (dryRun; for a version that is not Standard a status-only preview with no lines and total 0); or the version with its activation and journal entry id
           content:
             application/json:
               schema:
@@ -583,8 +583,8 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem", description: "CST-0717 version not found, CST-0723 reversal target not found" }
-        "409": { $ref: "#/components/responses/Problem", description: "CST-0714 the version changed since it was read, CST-0710 a roll holds the version, CST-0723 the activation was already reversed, CST-0729 another version of the legal entity has a pending activation attempt" }
-        "422": { $ref: "#/components/responses/Problem", description: "CST-0711 simulation versions cannot be activated, CST-0715 not Open or Blocked, CST-0723 reversal target of another version, itself a reversal, or booked before a later non-reversed activation of the same positions, CST-0724 no posting accounts configured for the legal entity, CST-0725 a position holds stock but has no earlier standard, CST-0726 the inventory reports no on-hand for a position with an earlier standard, CST-0728 too many items or positions for one activation" }
+        "409": { $ref: "#/components/responses/Problem", description: "CST-0714 the version changed since it was read, CST-0710 a roll holds the version, CST-0723 the activation was already reversed, CST-0729 another version of the legal entity has a pending activation attempt (the detail names that version)" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-0711 simulation versions cannot be activated, CST-0715 not Open or Blocked, CST-0723 reversal target of another version, itself a reversal, or booked before a later non-reversed activation of the same positions, CST-0724 no posting accounts configured for the legal entity, CST-0725 a position holds stock but has no earlier standard, CST-0726 the inventory reports no on-hand for a position with an earlier standard, CST-0727 a version that is not Standard cannot revalue stock, CST-0728 too many items or positions for one activation" }
         "502": { $ref: "#/components/responses/Problem", description: "CST-0721 the ledger did not accept the journal (nothing is activated), CST-0722 the on-hand could not be read" }
         "503": { $ref: "#/components/responses/Problem", description: "CST-0721 no ledger configured, CST-0722 no inventory service configured, or the store is unavailable" }
   /v1/product-costing/posting-accounts/{legalEntityId}:

@@ -232,6 +232,16 @@ func TestActivation_DryRunPreviewsWithoutALedgerOrKey(t *testing.T) {
 	}
 }
 
+func TestActivation_DryRunOfANonStandardVersionIsAStatusOnlyPreview(t *testing.T) {
+	f := &fakeStore{versionType: domain.VersionPlanned}
+	oh := onHandOf("10")
+	h, _ := activationRouter(f, nil, oh)
+	rec := activateAs(h, `{"version":1,"dryRun":true,"currency":"USD","postingDate":"2026-01-02"}`, "")
+	if rec.Code != http.StatusOK || f.preview != nil || oh.calls != 0 || !strings.Contains(rec.Body.String(), `"lines":[]`) || !strings.Contains(rec.Body.String(), `"total":"0"`) {
+		t.Fatalf("status-only preview: %d %s inventory calls %d", rec.Code, rec.Body.String(), oh.calls)
+	}
+}
+
 func TestActivation_ReversalReadsNothingFromTheRequestOrInventory(t *testing.T) {
 	f := &fakeStore{}
 	oh := onHandOf("10")
