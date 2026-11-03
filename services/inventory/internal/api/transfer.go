@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
@@ -41,6 +42,9 @@ type transferRequest struct {
 	UseTransit         *bool                 `json:"useTransit"`
 	ShipDate           string                `json:"shipDate"`
 	PlannedReceiptDate string                `json:"plannedReceiptDate"`
+	DeliveryTerms      string                `json:"deliveryTerms"`
+	ModeOfDelivery     string                `json:"modeOfDelivery"`
+	Draft              bool                  `json:"draft"`
 	Lines              []transferLineRequest `json:"lines"`
 }
 
@@ -54,11 +58,13 @@ type transferLineRequest struct {
 }
 
 // transferEditRequest is the PATCH body: every field is optional, and an empty
-// plannedReceiptDate or toSiteId clears it.
+// plannedReceiptDate, toSiteId, deliveryTerms or modeOfDelivery clears it.
 type transferEditRequest struct {
 	ShipDate           *string               `json:"shipDate"`
 	PlannedReceiptDate *string               `json:"plannedReceiptDate"`
 	ToSiteID           *string               `json:"toSiteId"`
+	DeliveryTerms      *string               `json:"deliveryTerms"`
+	ModeOfDelivery     *string               `json:"modeOfDelivery"`
 	AddLines           []transferLineRequest `json:"addLines"`
 	UpdateLines        []lineEditRequest     `json:"updateLines"`
 	RemoveLineIDs      []string              `json:"removeLineIds"`
@@ -120,6 +126,8 @@ type transferResponse struct {
 	UseTransit         bool                   `json:"useTransit"`
 	ShipDate           string                 `json:"shipDate"`
 	PlannedReceiptDate string                 `json:"plannedReceiptDate,omitempty"`
+	DeliveryTerms      string                 `json:"deliveryTerms,omitempty"`
+	ModeOfDelivery     string                 `json:"modeOfDelivery,omitempty"`
 	ReceiptDate        string                 `json:"receiptDate,omitempty"`
 	Version            int                    `json:"version"`
 	CreatedAt          time.Time              `json:"createdAt"`
@@ -183,11 +191,20 @@ func (a *API) registerTransfers(r chi.Router) {
 	r.With(authz.RequireDuty(dutyTransferPost)).Post(transferOrdersPath+"/{id}:ship", transferRoute(a.shipTransfer))
 	r.With(authz.RequireDuty(dutyTransferPost)).Post(transferOrdersPath+"/{id}:receive", transferRoute(a.receiveTransfer))
 	r.With(authz.RequireDuty(dutyTransferWrite)).Post(transferOrdersPath+"/{id}:cancel", transferRoute(a.cancelTransfer))
+	r.With(authz.RequireDuty(dutyTransferWrite)).Post(transferOrdersPath+"/{id}:confirm", transferRoute(a.confirmTransfer))
+	r.With(authz.RequireDuty(dutyTransferWrite)).Delete(transferOrdersPath+"/{id}", transferRoute(a.deleteTransfer))
 	r.With(authz.RequireDuty(dutyRead)).Get(inTransitPath, a.listInTransit)
 	r.With(authz.RequireDuty(dutyRead)).Get(transferLinesPath, a.listTransferLines)
 	r.With(authz.RequireDuty(dutyABCWrite)).Post(abcRunsPath, a.runABC)
 	r.With(authz.RequireDuty(dutyRead)).Get(abcRunsPath, a.listABCRuns)
 	r.With(authz.RequireDuty(dutyRead)).Get(abcRunsPath+"/{id}", a.getABCRun)
+}
+
+// deliveryCode checks a delivery terms or mode of delivery code: optional, at most 20 characters.
+func deliveryCode(fields map[string]string, name, value string) {
+	if utf8.RuneCountInString(value) > domain.MaxDeliveryCode {
+		fields[name] = fmt.Sprintf("must be at most %d characters", domain.MaxDeliveryCode)
+	}
 }
 
 // transferRoute checks the tenant and the transfer order id before the handler runs.
@@ -234,6 +251,9 @@ func (a *API) createTransfer(w http.ResponseWriter, r *http.Request) {
 	code(fields, "toWarehouseId", req.ToWarehouseID, false)
 	code(fields, "toSiteId", req.ToSiteID, true)
 	code(fields, "transitWarehouseId", req.TransitWarehouseID, true)
+	req.DeliveryTerms, req.ModeOfDelivery = strings.TrimSpace(req.DeliveryTerms), strings.TrimSpace(req.ModeOfDelivery)
+	deliveryCode(fields, "deliveryTerms", req.DeliveryTerms)
+	deliveryCode(fields, "modeOfDelivery", req.ModeOfDelivery)
 	shipDate, err := time.Parse(dateFormat, req.ShipDate)
 	if err != nil {
 		fields["shipDate"] = "must be a date (YYYY-MM-DD)"
@@ -272,7 +292,11 @@ func (a *API) createTransfer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := domain.TransferOrder{LegalEntityID: req.LegalEntityID, FromWarehouse: req.FromWarehouseID, ToWarehouse: req.ToWarehouseID,
-		ToSite: req.ToSiteID, TransitWarehouse: req.TransitWarehouseID, UseTransit: useTransit, ShipDate: shipDate, PlannedReceipt: plannedReceipt, Lines: lines}
+		ToSite: req.ToSiteID, TransitWarehouse: req.TransitWarehouseID, UseTransit: useTransit, ShipDate: shipDate, PlannedReceipt: plannedReceipt,
+		DeliveryTerms: req.DeliveryTerms, ModeOfDelivery: req.ModeOfDelivery, Lines: lines}
+	if req.Draft {
+		in.Status = domain.TransferDraft
+	}
 	out, replayed, err := a.store.CreateTransfer(r.Context(), key, in)
 	if err != nil {
 		a.failed(w, r, "create transfer order", err)
@@ -334,7 +358,7 @@ func (a *API) listTransfers(w http.ResponseWriter, r *http.Request) {
 
 func isTransferStatus(s string) bool {
 	switch s {
-	case domain.TransferCreated, domain.TransferShipped, domain.TransferPartial, domain.TransferReceived, domain.TransferCancelled:
+	case domain.TransferDraft, domain.TransferCreated, domain.TransferShipped, domain.TransferPartial, domain.TransferReceived, domain.TransferCancelled:
 		return true
 	}
 	return false
@@ -455,8 +479,8 @@ func (a *API) receiveTransfer(w http.ResponseWriter, r *http.Request, id string)
 	writeTransfer(w, http.StatusOK, o)
 }
 
-// editTransfer changes a CREATED order (FR-16.15): dates, receiving site and
-// lines added, changed or removed, in one atomic step. If-Match carries the
+// editTransfer changes a DRAFT or CREATED order (FR-16.15): dates, receiving site,
+// delivery terms and mode, and lines added, changed or removed, in one atomic step. If-Match carries the
 // order version.
 func (a *API) editTransfer(w http.ResponseWriter, r *http.Request, id string) {
 	version, err := ifMatchVersion(r)
@@ -491,6 +515,16 @@ func (a *API) editTransfer(w http.ResponseWriter, r *http.Request, id string) {
 		site := strings.TrimSpace(*req.ToSiteID)
 		code(fields, "toSiteId", site, true)
 		e.ToSite = &site
+	}
+	if req.DeliveryTerms != nil {
+		v := strings.TrimSpace(*req.DeliveryTerms)
+		deliveryCode(fields, "deliveryTerms", v)
+		e.DeliveryTerms = &v
+	}
+	if req.ModeOfDelivery != nil {
+		v := strings.TrimSpace(*req.ModeOfDelivery)
+		deliveryCode(fields, "modeOfDelivery", v)
+		e.ModeOfDelivery = &v
 	}
 	if n := len(req.AddLines) + len(req.UpdateLines) + len(req.RemoveLineIDs); n > maxReceiptLines {
 		fields["lines"] = fmt.Sprintf("the edit may name at most %d lines", maxReceiptLines)
@@ -540,6 +574,35 @@ func (a *API) editTransfer(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	writeTransfer(w, http.StatusOK, o)
+}
+
+// confirmTransfer turns a DRAFT order into CREATED (If-Match carries the version).
+func (a *API) confirmTransfer(w http.ResponseWriter, r *http.Request, id string) {
+	version, err := ifMatchVersion(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	o, err := a.store.ConfirmTransfer(r.Context(), id, version)
+	if err != nil {
+		a.failed(w, r, "confirm transfer order", err)
+		return
+	}
+	writeTransfer(w, http.StatusOK, o)
+}
+
+// deleteTransfer removes a DRAFT or CREATED order that shipped nothing (If-Match carries the version).
+func (a *API) deleteTransfer(w http.ResponseWriter, r *http.Request, id string) {
+	version, err := ifMatchVersion(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if err := a.store.DeleteTransfer(r.Context(), id, version); err != nil {
+		a.failed(w, r, "delete transfer order", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) cancelTransfer(w http.ResponseWriter, r *http.Request, id string) {
@@ -690,7 +753,8 @@ func toABCRunResponse(run domain.AbcRun, counts map[string]int, withItems bool) 
 func toTransferResponse(o domain.TransferOrder) transferResponse {
 	out := transferResponse{ID: o.ID, LegalEntityID: o.LegalEntityID, Number: o.Number, Status: o.Status,
 		FromWarehouseID: o.FromWarehouse, ToWarehouseID: o.ToWarehouse, ToSiteID: o.ToSite, TransitWarehouseID: o.TransitWarehouse,
-		UseTransit: o.UseTransit, ShipDate: o.ShipDate.Format(dateFormat), Version: o.Version, CreatedAt: o.CreatedAt,
+		UseTransit: o.UseTransit, DeliveryTerms: o.DeliveryTerms, ModeOfDelivery: o.ModeOfDelivery,
+		ShipDate: o.ShipDate.Format(dateFormat), Version: o.Version, CreatedAt: o.CreatedAt,
 		Lines: []transferLineResponse{}}
 	if !o.ReceiptDate.IsZero() {
 		out.ReceiptDate = o.ReceiptDate.Format(dateFormat)

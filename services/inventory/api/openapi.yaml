@@ -1154,16 +1154,20 @@ paths:
   /v1/inventory/transfer-orders:
     post:
       operationId: createTransferOrder
-      summary: Create a transfer order (CREATED); nothing is posted until it ships (FR-16.15)
+      summary: Create a transfer order (CREATED, or DRAFT); nothing is posted until it ships (FR-16.15)
       description: |
         useTransit (default true) routes the order through transitWarehouseId, which is then
         required (INV-TRF-001); false makes a one-step transfer. Lines follow the journal line rules
         at the shipping warehouse: site required (INV-DIM-001), at most 6 decimals (INV-UOM-002),
         serial quantity 1 (INV-SER-002), owner and license_plate reserved; a warehouse dimension
         other than fromWarehouseId is rejected. toSiteId sets the receiving site when it differs
-        from the lines' site. A repeated Idempotency-Key with the same body returns the stored order
-        (200, Idempotent-Replayed: true); with a different body it is idempotency_key_reuse (422). A
-        legal entity outside the caller's scope is AUTH-0003 (403).
+        from the lines' site. deliveryTerms and modeOfDelivery are free codes of at most 20
+        characters kept on the header. With draft true the order is a DRAFT working copy that no
+        event announces; confirm it with :confirm, or edit or delete it first. A repeated
+        Idempotency-Key with the same body returns the stored order (200, Idempotent-Replayed:
+        true); with a different body it is idempotency_key_reuse (422). The key of a deleted order
+        stays taken: a create retried with it is idempotency_key_reuse (409) naming the deleted
+        order, never a new order. A legal entity outside the caller's scope is AUTH-0003 (403).
       x-passage-duty: inventory.transfer.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1191,6 +1195,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
     get:
       operationId: listTransferOrders
@@ -1233,16 +1238,17 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
     patch:
       operationId: editTransferOrder
-      summary: Edit a CREATED transfer order before it ships (FR-16.15)
+      summary: Edit a DRAFT or CREATED transfer order before it ships (FR-16.15)
       description: |
         One atomic change at the version in If-Match: the planned ship date, the planned receipt
-        date (an empty string clears it), the receiving site (an empty string clears it), lines
+        date (an empty string clears it), the receiving site (an empty string clears it), the
+        delivery terms and mode of delivery (an empty string clears each), lines
         added (addLines, numbered after the highest line before the edit), lines changed (updateLines:
         quantity and tolerances) and lines removed (removeLineIds). The result is validated like a
         new order: at least one line, the line rules of creation, a planned receipt not before the
         ship date. Warehouses, transit and the legal entity never change: cancel and create
-        another. Only a CREATED order can be edited (INV-TRF-006); nothing is posted. Publishes
-        transfer.changed.
+        another. Only a DRAFT or CREATED order can be edited (INV-TRF-006); nothing is posted.
+        Publishes transfer.changed for a CREATED order (none for a DRAFT).
       x-passage-duty: inventory.transfer.write
       parameters:
         - $ref: '#/components/parameters/TransferId'
@@ -1261,6 +1267,54 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/TransferOrder' }
         '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: deleteTransferOrder
+      summary: Delete a DRAFT or CREATED transfer order that shipped nothing (FR-16.15)
+      description: |
+        Removes the order and its lines at the version in If-Match. The order has posted nothing
+        and nothing refers to it. Deleting a CREATED order publishes transfer.changed with status
+        DELETED so consumers drop it; a DRAFT was never announced and publishes nothing. Any order
+        past CREATED (shipped, received or cancelled) is INV-TRF-006. Reservations with demand type
+        TRANSFER_ORDER are left alone, as by a cancel. The order's Idempotency-Key stays taken: a
+        create retried with it is idempotency_key_reuse (409). A concurrent ship or edit of the
+        same order is serialised with the delete; the loser gets 412 or 404.
+      x-passage-duty: inventory.transfer.write
+      parameters:
+        - $ref: '#/components/parameters/TransferId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '204': { description: Order deleted }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/transfer-orders/{id}:confirm:
+    post:
+      operationId: confirmTransferOrder
+      summary: Confirm a DRAFT transfer order, making it CREATED (FR-16.15)
+      description: |
+        Only a DRAFT order can be confirmed (INV-TRF-006). The order is then visible to shipping
+        and announced by transfer.changed with status CREATED and every line. Requires If-Match.
+      x-passage-duty: inventory.transfer.write
+      parameters:
+        - $ref: '#/components/parameters/TransferId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Confirmed order
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferOrder' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
@@ -3148,7 +3202,7 @@ components:
                   recountRounds: { type: integer }
     TransferStatus:
       type: string
-      enum: [CREATED, SHIPPED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED]
+      enum: [DRAFT, CREATED, SHIPPED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED]
     CreateTransferRequest:
       type: object
       additionalProperties: false
@@ -3162,6 +3216,9 @@ components:
         useTransit: { type: boolean, default: true }
         shipDate: { type: string, format: date, description: Planned ship date }
         plannedReceiptDate: { type: string, format: date, description: Planned receipt date, not before shipDate; when set an open shipment is late once it has passed }
+        deliveryTerms: { type: string, maxLength: 20, description: Delivery terms code (for example an incoterm), kept on the order }
+        modeOfDelivery: { type: string, maxLength: 20, description: Mode of delivery code (for example ROAD), kept on the order }
+        draft: { type: boolean, default: false, description: Create the order as a DRAFT working copy; confirm it with :confirm }
         lines:
           type: array
           minItems: 1
@@ -3185,6 +3242,8 @@ components:
         shipDate: { type: string, format: date, description: Planned ship date }
         plannedReceiptDate: { type: string, description: 'Planned receipt date (YYYY-MM-DD, not before the ship date); an empty string clears it' }
         toSiteId: { type: string, maxLength: 60, description: Receiving site; an empty string clears it }
+        deliveryTerms: { type: string, maxLength: 20, description: Delivery terms code; an empty string clears it }
+        modeOfDelivery: { type: string, maxLength: 20, description: Mode of delivery code; an empty string clears it }
         addLines:
           type: array
           maxItems: 1000
@@ -3265,6 +3324,8 @@ components:
         useTransit: { type: boolean }
         shipDate: { type: string, format: date, description: 'Planned until shipped, then the actual date of the first shipment' }
         plannedReceiptDate: { type: string, format: date, description: Planned receipt date when one was given }
+        deliveryTerms: { type: string, description: Delivery terms code when one was given }
+        modeOfDelivery: { type: string, description: Mode of delivery code when one was given }
         receiptDate: { type: string, format: date, description: Set when every line is closed }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
@@ -3295,7 +3356,7 @@ components:
         orderId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
         number: { type: string }
-        orderStatus: { type: string, enum: [CREATED, SHIPPED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED] }
+        orderStatus: { type: string, enum: [DRAFT, CREATED, SHIPPED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED] }
         plannedReceiptDate: { type: string, format: date, description: Planned receipt date of the order, when it has one }
         fromWarehouseId: { type: string }
         toWarehouseId: { type: string }

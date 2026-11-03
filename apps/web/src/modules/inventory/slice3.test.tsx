@@ -138,6 +138,8 @@ describe("New transfer order", () => {
     transitWarehouseId: "T1",
     shipDate: "2026-09-01",
     plannedReceiptDate: "",
+    deliveryTerms: "",
+    modeOfDelivery: "",
     lines: [{ productId: PRODUCT_ID, qty: "100", unit: "EA", underdeliveryPct: "10", overdeliveryPct: "", dimensions: { site: "S1", location: "", batch: "", serial: "" } }],
   };
 

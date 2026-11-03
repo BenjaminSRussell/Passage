@@ -247,7 +247,7 @@ components:
         $ref: '#/components/schemas/TransferData'
     TransferChanged:
       title: Transfer changed
-      summary: A CREATED transfer order was edited (dates, receiving site, lines added, changed or removed) or an order was cancelled.
+      summary: A CREATED transfer order was edited, confirmed from a draft, deleted (status DELETED) or an order was cancelled.
       name: dev.passage.inventory.transfer.changed.v1
       x-passage-type: dev.passage.inventory.transfer.changed.v1
       contentType: application/json
@@ -343,19 +343,24 @@ components:
         givenUpQty: { type: string, description: Ordered minus received }
     TransferData:
       type: object
-      required: [transferOrderId, legalEntityId, number, status, fromWarehouse, toWarehouse, transitWarehouse, shipDate, receiptDate, toSiteId, plannedReceiptDate, lines]
+      required: [transferOrderId, legalEntityId, number, status, fromWarehouse, toWarehouse, transitWarehouse, shipDate, receiptDate, toSiteId, plannedReceiptDate, deliveryTerms, modeOfDelivery, lines]
       description: |
         Lines are the lines this event moved; qty is the quantity moved on the line by this event,
         shippedQty and receivedQty the line totals after it. Each movement is also a valued SOLD /
         PURCHASED transaction pair (sourceType TRANSFER_LINE) with no GL effect. On transfer.changed
         the lines are every line of the order after the change, qty is the ordered quantity and
         shippedQty, receivedQty are the line totals (zero for an order edited before shipment);
-        shipDate is the planned ship date and receiptDate is null.
+        shipDate is the planned ship date and receiptDate is null. transfer.changed is a full
+        snapshot of the order: consumers upsert it by transferOrderId, and an order can be first
+        seen on it (creating a CREATED order publishes nothing). A DRAFT order is never announced;
+        confirming it publishes transfer.changed with status CREATED. Status DELETED means the
+        order no longer exists: drop it if known, ignore it otherwise (a CREATED order deleted
+        before any edit was never announced).
       properties:
         transferOrderId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
         number: { type: string }
-        status: { type: string, enum: [CREATED, SHIPPED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED], description: Order status after the event }
+        status: { type: string, enum: [CREATED, SHIPPED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED, DELETED], description: 'Order status after the event; DELETED on the transfer.changed of a deleted CREATED order, after which the order no longer exists' }
         fromWarehouse: { type: string }
         toWarehouse: { type: string }
         transitWarehouse: { type: [string, 'null'], description: Null for a one-step transfer }
@@ -363,6 +368,8 @@ components:
         receiptDate: { type: [string, 'null'], format: date, description: Date of this receipt; the ship date of a one-step shipment; null on a two-step shipment }
         toSiteId: { type: [string, 'null'], description: Receiving site when it differs from the lines' site; null when not set }
         plannedReceiptDate: { type: [string, 'null'], format: date, description: Planned receipt date of the order; null when not set }
+        deliveryTerms: { type: [string, 'null'], description: Delivery terms code of the order; null when not set }
+        modeOfDelivery: { type: [string, 'null'], description: Mode of delivery code of the order; null when not set }
         lines:
           type: array
           items:

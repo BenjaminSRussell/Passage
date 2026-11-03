@@ -4,8 +4,9 @@ package events
 const (
 	TransferShipped  = "dev.passage.inventory.transfer.shipped.v1"
 	TransferReceived = "dev.passage.inventory.transfer.received.v1"
-	// TransferChanged is published when a CREATED order is edited or any order is
-	// cancelled; it carries TransferData with every line of the order.
+	// TransferChanged is published when a CREATED order is edited, confirmed from
+	// a draft, deleted (status DELETED), or any order is cancelled; it carries
+	// TransferData with every line of the order.
 	TransferChanged = "dev.passage.inventory.transfer.changed.v1"
 )
 
@@ -39,7 +40,11 @@ type TransferData struct {
 	ReceiptDate      *string `json:"receiptDate"`
 	// ToSiteID is the receiving site when it differs from the lines' site, and
 	// PlannedReceiptDate the planned receipt date; both null when not set.
-	ToSiteID           *string            `json:"toSiteId"`
-	PlannedReceiptDate *string            `json:"plannedReceiptDate"`
-	Lines              []TransferLineData `json:"lines"`
+	ToSiteID           *string `json:"toSiteId"`
+	PlannedReceiptDate *string `json:"plannedReceiptDate"`
+	// DeliveryTerms and ModeOfDelivery are the order's delivery terms code and
+	// transport mode code; null when not set.
+	DeliveryTerms  *string            `json:"deliveryTerms"`
+	ModeOfDelivery *string            `json:"modeOfDelivery"`
+	Lines          []TransferLineData `json:"lines"`
 }

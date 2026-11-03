@@ -164,6 +164,8 @@ describe("Planned receipt date", () => {
     transitWarehouseId: "T1",
     shipDate: "2026-09-10",
     plannedReceiptDate: "",
+    deliveryTerms: "",
+    modeOfDelivery: "",
     lines: [{ productId: PRODUCT_ID, qty: "5", unit: "EA", underdeliveryPct: "", overdeliveryPct: "", dimensions: { site: "S1", location: "", batch: "", serial: "" } }],
   };
 

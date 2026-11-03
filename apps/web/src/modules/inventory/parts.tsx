@@ -50,6 +50,7 @@ export const stateTones: Record<string, BadgeTone> = {
   POSTED: "success",
   BLOCKED: "danger",
   QUARANTINE: "warning",
+  DRAFT: "neutral",
   CREATED: "info",
   SHIPPED: "warning",
   PARTIALLY_RECEIVED: "warning",

@@ -16,14 +16,17 @@ type LineEdit struct {
 	OverPct  *decimal.Decimal
 }
 
-// TransferEdit is one atomic change of a CREATED transfer order (FR-16.15):
-// header fields, lines added, lines changed and lines removed. A nil header
-// field is left as it is; ClearPlannedReceipt removes the planned receipt date.
+// TransferEdit is one atomic change of a DRAFT or CREATED transfer order
+// (FR-16.15): header fields, lines added, lines changed and lines removed. A nil
+// header field is left as it is; ClearPlannedReceipt removes the planned receipt
+// date, and an empty delivery terms or mode of delivery clears it.
 type TransferEdit struct {
 	ShipDate            *time.Time
 	PlannedReceipt      *time.Time
 	ClearPlannedReceipt bool
 	ToSite              *string
+	DeliveryTerms       *string
+	ModeOfDelivery      *string
 	Add                 []TransferLine
 	Update              []LineEdit
 	Remove              []string
@@ -32,14 +35,14 @@ type TransferEdit struct {
 // Empty reports whether the edit changes nothing.
 func (e TransferEdit) Empty() bool {
 	return e.ShipDate == nil && e.PlannedReceipt == nil && !e.ClearPlannedReceipt && e.ToSite == nil &&
-		len(e.Add) == 0 && len(e.Update) == 0 && len(e.Remove) == 0
+		e.DeliveryTerms == nil && e.ModeOfDelivery == nil && len(e.Add) == 0 && len(e.Update) == 0 && len(e.Remove) == 0
 }
 
-// CanEdit allows an edit only while the order is CREATED, before anything has
-// shipped (INV-TRF-006). Warehouses, transit and the legal entity never change:
+// CanEdit allows an edit only while the order is DRAFT or CREATED, before
+// anything has shipped (INV-TRF-006). Warehouses, transit and the legal entity never change:
 // cancel the order and create another.
 func CanEdit(o TransferOrder) error {
-	if o.Status != TransferCreated {
+	if o.Status != TransferCreated && o.Status != TransferDraft {
 		return fail(CodeTransferState, "transfer order in status %s cannot be edited", o.Status)
 	}
 	for _, l := range o.Lines {
@@ -50,7 +53,7 @@ func CanEdit(o TransferOrder) error {
 	return nil
 }
 
-// ApplyTransferEdit applies e to a CREATED order and returns the edited order.
+// ApplyTransferEdit applies e to a DRAFT or CREATED order and returns the edited order.
 // Added lines come back with an empty ID and the next line numbers after the
 // highest line on the order before the edit, so a line removed in the same
 // edit never gives its number to an added one (a number removed by an earlier
@@ -120,6 +123,12 @@ func ApplyTransferEdit(o TransferOrder, e TransferEdit, maxScale int32) (Transfe
 	}
 	if e.ToSite != nil {
 		next.ToSite = *e.ToSite
+	}
+	if e.DeliveryTerms != nil {
+		next.DeliveryTerms = *e.DeliveryTerms
+	}
+	if e.ModeOfDelivery != nil {
+		next.ModeOfDelivery = *e.ModeOfDelivery
 	}
 	if err := ValidateNewTransfer(next, maxScale); err != nil {
 		return o, err

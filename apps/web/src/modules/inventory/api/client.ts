@@ -188,6 +188,7 @@ async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSigna
   if (!res.ok) {
     throw await toError(res);
   }
+  if (res.status === 204) return { body: undefined as T, etag: null };
   return { body: (await res.json()) as T, etag: res.headers.get("ETag") };
 }
 
@@ -996,7 +997,7 @@ export async function transferTags(planId: string, markOpenMissing: boolean, key
 
 // ---- Transfer orders and stock in transit (FR-16.15, FR-16.16) ----
 
-export const TRANSFER_STATUSES = ["CREATED", "SHIPPED", "PARTIALLY_RECEIVED", "RECEIVED", "CANCELLED"] as const;
+export const TRANSFER_STATUSES = ["DRAFT", "CREATED", "SHIPPED", "PARTIALLY_RECEIVED", "RECEIVED", "CANCELLED"] as const;
 export type TransferStatus = (typeof TRANSFER_STATUSES)[number];
 
 export interface TransferLine {
@@ -1029,6 +1030,10 @@ export interface TransferOrder {
   shipDate: string;
   /** Planned receipt date when one was given; an open shipment is late once it has passed. */
   plannedReceiptDate?: string;
+  /** Delivery terms code (for example an incoterm) when one was given. */
+  deliveryTerms?: string;
+  /** Mode of delivery code (for example ROAD) when one was given. */
+  modeOfDelivery?: string;
   receiptDate?: string;
   version: number;
   createdAt: string;
@@ -1053,6 +1058,10 @@ export interface TransferInput {
   useTransit: boolean;
   shipDate: string;
   plannedReceiptDate?: string;
+  deliveryTerms?: string;
+  modeOfDelivery?: string;
+  /** Create a DRAFT working copy instead of a CREATED order. */
+  draft?: boolean;
   lines: TransferLineInput[];
 }
 
@@ -1094,6 +1103,9 @@ export async function createTransfer(input: TransferInput, key: string = newKey(
     }),
   };
   if (input.plannedReceiptDate?.trim()) body.plannedReceiptDate = input.plannedReceiptDate.trim();
+  if (input.deliveryTerms?.trim()) body.deliveryTerms = input.deliveryTerms.trim();
+  if (input.modeOfDelivery?.trim()) body.modeOfDelivery = input.modeOfDelivery.trim();
+  if (input.draft) body.draft = true;
   if (input.toSiteId?.trim()) body.toSiteId = input.toSiteId.trim();
   if (input.useTransit && input.transitWarehouseId?.trim()) body.transitWarehouseId = input.transitWarehouseId.trim();
   return (await send<TransferOrder>("/transfer-orders", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) })).body;
@@ -1139,11 +1151,13 @@ export async function receiveTransfer(id: string, version: number, receiptDate: 
   ).body;
 }
 
-/** One atomic edit of a CREATED transfer order; an empty date or site clears it. */
+/** One atomic edit of a DRAFT or CREATED transfer order; an empty date, site or code clears it. */
 export interface TransferEditInput {
   shipDate?: string;
   plannedReceiptDate?: string;
   toSiteId?: string;
+  deliveryTerms?: string;
+  modeOfDelivery?: string;
   addLines?: TransferLineInput[];
   updateLines?: { lineId: string; qty?: string; underdeliveryPct?: string; overdeliveryPct?: string }[];
   removeLineIds?: string[];
@@ -1161,6 +1175,16 @@ export async function editTransfer(id: string, version: number, edit: TransferEd
 
 export async function cancelTransfer(id: string, version: number): Promise<TransferOrder> {
   return (await send<TransferOrder>(`/transfer-orders/${encodeURIComponent(id)}:cancel`, { method: "POST", headers: { "If-Match": `"${version}"` } })).body;
+}
+
+/** Confirms a DRAFT order at the version the screen shows; it becomes CREATED. */
+export async function confirmTransfer(id: string, version: number): Promise<TransferOrder> {
+  return (await send<TransferOrder>(`/transfer-orders/${encodeURIComponent(id)}:confirm`, { method: "POST", headers: { "If-Match": `"${version}"` } })).body;
+}
+
+/** Deletes a DRAFT or CREATED order that shipped nothing, at the version the screen shows. */
+export async function deleteTransfer(id: string, version: number): Promise<void> {
+  await send<void>(`/transfer-orders/${encodeURIComponent(id)}`, { method: "DELETE", headers: { "If-Match": `"${version}"` } });
 }
 
 export async function listInTransit(signal?: AbortSignal): Promise<InTransitItem[]> {

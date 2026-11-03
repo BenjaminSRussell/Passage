@@ -1,8 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, useParams } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, FormField, Input, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { Alert, Badge, Button, buttonClassName, Card, ConfirmDialog, DataTable, EmptyState, FormField, Input, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
 import {
   cancelTransfer,
+  confirmTransfer,
+  deleteTransfer,
   describeProblem,
   getTransfer,
   receiveTransfer,
@@ -241,10 +243,42 @@ export function TransferOrderPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     setOrder(state.data);
   }, [state.data]);
+
+  async function confirm() {
+    if (!order) return;
+    setBusy(true);
+    setFailure(null);
+    setNotice("");
+    try {
+      const next = await confirmTransfer(order.id, order.version);
+      setOrder(next);
+      setNotice(`Transfer order ${next.number} confirmed. It can now be shipped.`);
+    } catch (error) {
+      setFailure(describeProblem(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!order || busy) return;
+    setBusy(true);
+    setFailure(null);
+    try {
+      await deleteTransfer(order.id, order.version);
+      navigate("/inventory/transfer-orders");
+    } catch (error) {
+      setFailure(describeProblem(error));
+      setConfirmingDelete(false);
+      setBusy(false);
+    }
+  }
 
   async function cancel() {
     if (!order) return;
@@ -292,7 +326,9 @@ export function TransferOrderPage() {
     );
   }
 
+  const draft = order.status === "DRAFT";
   const created = order.status === "CREATED";
+  const editable = draft || created;
   const receivable = order.status === "SHIPPED" || order.status === "PARTIALLY_RECEIVED";
   const shippable = created || (receivable && order.lines.some((l) => Number(unshipped(l)) > 0));
   return (
@@ -304,9 +340,19 @@ export function TransferOrderPage() {
         actions={
           <>
             {back}
+            {draft ? (
+              <Button variant="primary" loading={busy} onClick={confirm}>
+                Confirm order
+              </Button>
+            ) : null}
             {created ? (
               <Button variant="danger" loading={busy} onClick={cancel}>
                 Cancel order
+              </Button>
+            ) : null}
+            {editable ? (
+              <Button variant="danger" disabled={busy} onClick={() => setConfirmingDelete(true)}>
+                Delete order
               </Button>
             ) : null}
           </>
@@ -315,6 +361,21 @@ export function TransferOrderPage() {
       <Alert tone="success" live="status">
         {notice}
       </Alert>
+      {draft ? (
+        <Alert tone="info" title="Draft">
+          This order is a working copy. Nothing sees it until you confirm it; edit it below, or delete it.
+        </Alert>
+      ) : null}
+      {confirmingDelete ? (
+        <ConfirmDialog
+          title={`Delete transfer order ${order.number}?`}
+          description="The order and its lines are removed for good. Nothing has been shipped, so no stock moves."
+          confirmLabel={busy ? "Deleting" : "Delete order"}
+          cancelLabel="Keep order"
+          onCancel={() => (busy ? undefined : setConfirmingDelete(false))}
+          onConfirm={() => void remove()}
+        />
+      ) : null}
       {failure ? (
         <Alert
           tone="danger"
@@ -339,13 +400,15 @@ export function TransferOrderPage() {
           <Detail term="Receiving warehouse" mono>
             {order.toSiteId ? `${order.toWarehouseId} (site ${order.toSiteId})` : order.toWarehouseId}
           </Detail>
-          <Detail term={created ? "Planned ship date" : "First shipped on"}>{order.shipDate}</Detail>
+          <Detail term={editable ? "Planned ship date" : "First shipped on"}>{order.shipDate}</Detail>
           <Detail term="Planned receipt date">{order.plannedReceiptDate ?? dash}</Detail>
           <Detail term="Received on">{order.receiptDate ?? dash}</Detail>
+          <Detail term="Delivery terms">{order.deliveryTerms ?? dash}</Detail>
+          <Detail term="Mode of delivery">{order.modeOfDelivery ?? dash}</Detail>
           <Detail term="Created">{formatDateTime(order.createdAt)}</Detail>
         </dl>
       </Card>
-      {created ? (
+      {editable ? (
         <TransferEditForm
           key={order.version}
           order={order}

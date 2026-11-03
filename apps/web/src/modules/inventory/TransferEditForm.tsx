@@ -8,6 +8,8 @@ export interface TransferEditValues {
   shipDate: string;
   plannedReceiptDate: string;
   toSiteId: string;
+  deliveryTerms: string;
+  modeOfDelivery: string;
   /** Quantity per line id, as typed. */
   qty: Record<string, string>;
   remove: Record<string, boolean>;
@@ -18,6 +20,8 @@ export const startingValues = (order: TransferOrder): TransferEditValues => ({
   shipDate: order.shipDate,
   plannedReceiptDate: order.plannedReceiptDate ?? "",
   toSiteId: order.toSiteId ?? "",
+  deliveryTerms: order.deliveryTerms ?? "",
+  modeOfDelivery: order.modeOfDelivery ?? "",
   qty: Object.fromEntries(order.lines.map((l) => [l.id, l.qty])),
   remove: {},
   add: { productId: "", site: "", unit: "", qty: "" },
@@ -38,6 +42,10 @@ export function buildTransferEdit(order: TransferOrder, v: TransferEditValues): 
   const shipDate = v.shipDate || order.shipDate;
   if (v.plannedReceiptDate !== "" && v.plannedReceiptDate < shipDate) errors.plannedReceiptDate = "The planned receipt cannot be before the ship date.";
   if (v.toSiteId.trim() !== (order.toSiteId ?? "")) edit.toSiteId = v.toSiteId.trim();
+  if (v.deliveryTerms.trim().length > 20) errors.deliveryTerms = "At most 20 characters.";
+  else if (v.deliveryTerms.trim() !== (order.deliveryTerms ?? "")) edit.deliveryTerms = v.deliveryTerms.trim();
+  if (v.modeOfDelivery.trim().length > 20) errors.modeOfDelivery = "At most 20 characters.";
+  else if (v.modeOfDelivery.trim() !== (order.modeOfDelivery ?? "")) edit.modeOfDelivery = v.modeOfDelivery.trim();
   const removed = order.lines.filter((l) => v.remove[l.id]);
   if (removed.length > 0) edit.removeLineIds = removed.map((l) => l.id);
   const updateLines: NonNullable<TransferEditInput["updateLines"]> = [];
@@ -64,7 +72,7 @@ export function buildTransferEdit(order: TransferOrder, v: TransferEditValues): 
   return { edit, errors };
 }
 
-/** Edit form of a CREATED transfer order (FR-16.15): dates, receiving site and lines. */
+/** Edit form of a DRAFT or CREATED transfer order (FR-16.15): dates, receiving site, delivery terms and lines. */
 export function TransferEditForm({ order, onDone, onError }: { order: TransferOrder; onDone(next: TransferOrder): void; onError(p: Problem): void }) {
   const [v, setV] = useState<TransferEditValues>(() => startingValues(order));
   const [invalid, setInvalid] = useState<Record<string, string>>({});
@@ -98,6 +106,12 @@ export function TransferEditForm({ order, onDone, onError }: { order: TransferOr
         </FormField>
         <FormField id="edit-to-site" label="Receiving site" hint="Only when it differs from the lines' site.">
           {(control) => <Input {...control} value={v.toSiteId} onChange={(e) => setV({ ...v, toSiteId: e.target.value })} />}
+        </FormField>
+        <FormField id="edit-delivery-terms" label="Delivery terms" hint="A code of at most 20 characters, for example FCA. Leave empty for none." error={invalid.deliveryTerms}>
+          {(control) => <Input {...control} value={v.deliveryTerms} maxLength={20} onChange={(e) => setV({ ...v, deliveryTerms: e.target.value })} invalid={Boolean(invalid.deliveryTerms)} />}
+        </FormField>
+        <FormField id="edit-mode-of-delivery" label="Mode of delivery" hint="A code of at most 20 characters, for example ROAD." error={invalid.modeOfDelivery}>
+          {(control) => <Input {...control} value={v.modeOfDelivery} maxLength={20} onChange={(e) => setV({ ...v, modeOfDelivery: e.target.value })} invalid={Boolean(invalid.modeOfDelivery)} />}
         </FormField>
         {order.lines.map((l) => (
           <div key={l.id} className={styles.formActions}>

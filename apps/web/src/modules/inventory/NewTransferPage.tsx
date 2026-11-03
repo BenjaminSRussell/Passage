@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } from "../../shell/ui";
 import { createTransfer, describeProblem, type Problem } from "./api/client";
@@ -27,10 +27,12 @@ export interface TransferValues {
   transitWarehouseId: string;
   shipDate: string;
   plannedReceiptDate: string;
+  deliveryTerms: string;
+  modeOfDelivery: string;
   lines: TransferLineValues[];
 }
 
-type HeaderField = "legalEntityId" | "fromWarehouseId" | "toWarehouseId" | "toSiteId" | "transitWarehouseId" | "shipDate" | "plannedReceiptDate" | "lines";
+type HeaderField = "legalEntityId" | "fromWarehouseId" | "toWarehouseId" | "toSiteId" | "transitWarehouseId" | "shipDate" | "plannedReceiptDate" | "deliveryTerms" | "modeOfDelivery" | "lines";
 type LineField = "productId" | "qty" | "unit" | "underdeliveryPct" | "overdeliveryPct" | "site";
 
 export interface TransferErrors {
@@ -73,6 +75,8 @@ export function validateTransfer(values: TransferValues): TransferErrors {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(values.plannedReceiptDate)) header.plannedReceiptDate = "Enter the planned receipt date.";
     else if (values.plannedReceiptDate < values.shipDate) header.plannedReceiptDate = "The planned receipt date must not be before the ship date.";
   }
+  if (values.deliveryTerms.trim().length > 20) header.deliveryTerms = "At most 20 characters.";
+  if (values.modeOfDelivery.trim().length > 20) header.modeOfDelivery = "At most 20 characters.";
   if (values.lines.length === 0) header.lines = "Add at least one line.";
   const lines = values.lines.map((line) => {
     const errors: Partial<Record<LineField, string>> = {};
@@ -106,7 +110,7 @@ function mapProblem(problem: Problem, lineCount: number): TransferErrors | null 
         out.lines[i][field] = message;
         found = true;
       }
-    } else if (["legalEntityId", "fromWarehouseId", "toWarehouseId", "toSiteId", "transitWarehouseId", "shipDate", "plannedReceiptDate", "lines"].includes(name)) {
+    } else if (["legalEntityId", "fromWarehouseId", "toWarehouseId", "toSiteId", "transitWarehouseId", "shipDate", "plannedReceiptDate", "deliveryTerms", "modeOfDelivery", "lines"].includes(name)) {
       out.header[name as HeaderField] = message;
       found = true;
     }
@@ -126,6 +130,8 @@ export function NewTransferPage() {
     transitWarehouseId: "",
     shipDate: today(),
     plannedReceiptDate: "",
+    deliveryTerms: "",
+    modeOfDelivery: "",
     lines: [emptyLine()],
   });
   const [errors, setErrors] = useState<TransferErrors>({ header: {}, lines: [] });
@@ -142,7 +148,7 @@ export function NewTransferPage() {
   const setLine = (index: number, patch: Partial<TransferLineValues>) =>
     change({ ...values, lines: values.lines.map((line, i) => (i === index ? { ...line, ...patch } : line)) });
 
-  async function submit(event: FormEvent) {
+  async function submit(event: { preventDefault(): void }, draft = false) {
     event.preventDefault();
     const found = validateTransfer(values);
     setErrors(found);
@@ -160,6 +166,9 @@ export function NewTransferPage() {
           transitWarehouseId: values.transitWarehouseId.trim(),
           shipDate: values.shipDate,
           plannedReceiptDate: values.plannedReceiptDate,
+          deliveryTerms: values.deliveryTerms,
+          modeOfDelivery: values.modeOfDelivery,
+          draft,
           lines: values.lines.map((line) => ({
             productId: line.productId.trim(),
             qty: line.qty.trim(),
@@ -186,7 +195,10 @@ export function NewTransferPage() {
   const he = errors.header;
   return (
     <div className={styles.stack}>
-      <PageHeader title="New transfer order" description="Plan a move of stock between two warehouses. Nothing moves until the order is shipped." />
+      <PageHeader
+        title="New transfer order"
+        description="Plan a move of stock between two warehouses. Nothing moves until the order is shipped. Save it as a draft to keep working on it before it is released."
+      />
       <form onSubmit={submit} noValidate className={styles.stack}>
         <Card title="Route">
           <div className={styles.form}>
@@ -209,6 +221,12 @@ export function NewTransferPage() {
               {(control) => (
                 <Input {...control} type="date" value={values.plannedReceiptDate} onChange={set("plannedReceiptDate")} invalid={Boolean(he.plannedReceiptDate)} />
               )}
+            </FormField>
+            <FormField id="to-delivery-terms" label="Delivery terms" optional hint="A code of at most 20 characters, for example FCA." error={he.deliveryTerms}>
+              {(control) => <Input {...control} value={values.deliveryTerms} maxLength={20} onChange={set("deliveryTerms")} invalid={Boolean(he.deliveryTerms)} />}
+            </FormField>
+            <FormField id="to-mode-of-delivery" label="Mode of delivery" optional hint="A code of at most 20 characters, for example ROAD." error={he.modeOfDelivery}>
+              {(control) => <Input {...control} value={values.modeOfDelivery} maxLength={20} onChange={set("modeOfDelivery")} invalid={Boolean(he.modeOfDelivery)} />}
             </FormField>
             {values.useTransit ? (
               <FormField id="to-transit" label="Transit warehouse" hint="Shipped stock waits here until it is received." error={he.transitWarehouseId}>
@@ -291,6 +309,9 @@ export function NewTransferPage() {
           <Button onClick={() => change({ ...values, lines: [...values.lines, emptyLine(values.lines.at(-1)?.dimensions.site ?? "")] })}>Add line</Button>
           <Button type="submit" variant="primary" loading={busy}>
             Create transfer order
+          </Button>
+          <Button loading={busy} onClick={(event) => void submit(event, true)}>
+            Save as draft
           </Button>
           <Link className={buttonClassName("ghost")} to="/inventory/transfer-orders">
             Cancel

@@ -9,7 +9,7 @@ import { useLoad } from "./useLoad";
 
 /** Quantity totals of an order, for the list: "60 of 100 received". */
 function progress(order: TransferOrder): string {
-  if (order.status === "CREATED" || order.status === "CANCELLED") return dash;
+  if (order.status === "DRAFT" || order.status === "CREATED" || order.status === "CANCELLED") return dash;
   const sum = (pick: (l: TransferOrder["lines"][number]) => string) => order.lines.reduce((total, l) => total + Number(pick(l)), 0);
   return `${sum((l) => l.receivedQty)} of ${sum((l) => l.shippedQty)} received`;
 }

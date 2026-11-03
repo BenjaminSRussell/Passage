@@ -2,6 +2,7 @@ package domain
 
 import (
 	"time"
+	"unicode/utf8"
 
 	"github.com/shopspring/decimal"
 )
@@ -18,9 +19,17 @@ const (
 	CodeTransferShipQty     = "INV-TRF-007" // ship quantity above the open quantity, or nothing left to ship
 )
 
-// Transfer order statuses (BR-16.13). DRAFT is not used yet: orders are created
-// CREATED.
+// MaxDeliveryCode is the longest delivery terms or mode of delivery code, in
+// characters (the column check counts characters, the web form too).
+const MaxDeliveryCode = 20
+
+// Transfer order statuses (BR-16.13). A DRAFT order is a working copy: it can be
+// edited, confirmed to CREATED or deleted, and nothing outside this service sees
+// it. TransferDeleted is the status a transfer.changed event carries when a
+// CREATED order was deleted; no order is ever stored with it.
 const (
+	TransferDraft     = "DRAFT"
+	TransferDeleted   = "DELETED"
 	TransferCreated   = "CREATED"
 	TransferShipped   = "SHIPPED"
 	TransferPartial   = "PARTIALLY_RECEIVED"
@@ -68,6 +77,8 @@ type TransferOrder struct {
 	ToSite           string
 	TransitWarehouse string
 	UseTransit       bool
+	DeliveryTerms    string    // incoterm-style code, empty when not set
+	ModeOfDelivery   string    // transport mode code, empty when not set
 	ShipDate         time.Time // planned until shipped, then the actual ship date
 	PlannedReceipt   time.Time // zero when no receipt date was planned
 	ReceiptDate      time.Time // zero until the order is fully received
@@ -123,6 +134,9 @@ func ValidateNewTransfer(o TransferOrder, maxScale int32) error {
 		if o.TransitWarehouse == o.FromWarehouse || o.TransitWarehouse == o.ToWarehouse {
 			return fail(CodeInvalid, "transit warehouse must differ from the shipping and receiving warehouses")
 		}
+	}
+	if utf8.RuneCountInString(o.DeliveryTerms) > MaxDeliveryCode || utf8.RuneCountInString(o.ModeOfDelivery) > MaxDeliveryCode {
+		return fail(CodeInvalid, "delivery terms and mode of delivery must be at most %d characters", MaxDeliveryCode)
 	}
 	if !o.PlannedReceipt.IsZero() && o.PlannedReceipt.Before(o.ShipDate) {
 		return fail(CodeInvalid, "planned receipt date must not be before the ship date")
@@ -414,4 +428,30 @@ func TransferLineRemaining(orderStatus string, l TransferLine) decimal.Decimal {
 		return q
 	}
 	return decimal.Zero
+}
+
+// CanConfirm allows confirming only a DRAFT order, which becomes CREATED and so
+// visible to shipping and planning.
+func CanConfirm(o TransferOrder) error {
+	if o.Status != TransferDraft {
+		return fail(CodeTransferState, "transfer order in status %s is not a draft and cannot be confirmed", o.Status)
+	}
+	return nil
+}
+
+// CanDelete allows deleting a DRAFT or CREATED order that has shipped nothing:
+// it has posted nothing and nothing refers to it. Once an order has shipped it
+// is history with postings, whatever is still in transit, and a CANCELLED or
+// RECEIVED order is closed: all are INV-TRF-006 (INV-TRF-003's remedy,
+// receiving what is in transit, would not make a shipped order deletable).
+func CanDelete(o TransferOrder) error {
+	if o.Status != TransferDraft && o.Status != TransferCreated {
+		return fail(CodeTransferState, "transfer order in status %s cannot be deleted: only a DRAFT or CREATED order that shipped nothing can", o.Status)
+	}
+	for _, l := range o.Lines {
+		if l.ShippedQty.IsPositive() {
+			return fail(CodeTransferState, "transfer order %s has shipped quantity and cannot be deleted", o.Number)
+		}
+	}
+	return nil
 }

@@ -48,9 +48,10 @@ type InTransitRow struct {
 	Closed           bool
 }
 
-// CreateTransfer stores a CREATED transfer order. A repeated Idempotency-Key
+// CreateTransfer stores a CREATED transfer order, or a DRAFT one when o.Status is
+// DRAFT (a draft posts and announces nothing until it is confirmed). A repeated Idempotency-Key
 // returns the stored order with replayed=true, or idempotency_key_reuse when the
-// body differs. Creating an order posts nothing; the supply and demand pair
+// body differs (422) or the order made under the key was deleted (409). Creating an order posts nothing; the supply and demand pair
 // (ON_ORDER / ORDERED) for planning is a later slice.
 func (s *Postgres) CreateTransfer(ctx context.Context, key string, o domain.TransferOrder) (domain.TransferOrder, bool, error) {
 	if err := domain.ValidateNewTransfer(o, s.rules.MaxScale); err != nil {
@@ -78,13 +79,29 @@ func (s *Postgres) CreateTransfer(ctx context.Context, key string, o domain.Tran
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		// A deleted order keeps its key: a create retried after the delete must
+		// not bring the order back under a new id.
+		var deleted string
+		err = tx.QueryRow(ctx, `select number from transfer_order_deleted where tenant_id = $1 and idempotency_key = $2`, tp.TenantID, key).Scan(&deleted)
+		if err == nil {
+			return problem(http.StatusConflict, CodeIdempotencyReuse,
+				"transfer order "+deleted+" created with this Idempotency-Key was deleted; use a new key to create another order")
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
 		id := ids.New()
+		status := domain.TransferCreated
+		if o.Status == domain.TransferDraft {
+			status = domain.TransferDraft
+		}
 		number := "TO-" + strings.ToUpper(strings.ReplaceAll(id, "-", "")[20:])
 		if _, err := tx.Exec(ctx, `insert into transfer_order (tenant_id, legal_entity_id, id, number, idempotency_key, status, from_warehouse,
-			to_warehouse, to_site, transit_warehouse, use_transit, ship_date, planned_receipt_date)
-			values ($1, $2, $3, $4, $5, 'CREATED', $6, $7, $8, $9, $10, $11, $12)`,
+			to_warehouse, to_site, transit_warehouse, use_transit, ship_date, planned_receipt_date, delivery_terms, mode_of_delivery)
+			values ($1, $2, $3, $4, $5, $13, $6, $7, $8, $9, $10, $11, $12, $14, $15)`,
 			tp.TenantID, o.LegalEntityID, id, number, key, o.FromWarehouse, o.ToWarehouse, optionalText(o.ToSite), optionalText(o.TransitWarehouse),
-			o.UseTransit, o.ShipDate.Format(dateLayout), optionalDate(o.PlannedReceipt)); err != nil {
+			o.UseTransit, o.ShipDate.Format(dateLayout), optionalDate(o.PlannedReceipt), status,
+			optionalText(o.DeliveryTerms), optionalText(o.ModeOfDelivery)); err != nil {
 			return scopeProblem(err)
 		}
 		// Shared dimension sets in hash order first, so concurrent orders that
@@ -116,7 +133,8 @@ func (s *Postgres) CreateTransfer(ctx context.Context, key string, o domain.Tran
 // sameTransfer reports whether a stored order was created from request o.
 func sameTransfer(stored, o domain.TransferOrder) bool {
 	if stored.LegalEntityID != o.LegalEntityID || stored.FromWarehouse != o.FromWarehouse || stored.ToWarehouse != o.ToWarehouse ||
-		stored.ToSite != o.ToSite || stored.UseTransit != o.UseTransit || stored.TransitWarehouse != o.TransitWarehouse ||
+		stored.ToSite != o.ToSite || stored.DeliveryTerms != o.DeliveryTerms || stored.ModeOfDelivery != o.ModeOfDelivery ||
+		(stored.Status == domain.TransferDraft) != (o.Status == domain.TransferDraft) || stored.UseTransit != o.UseTransit || stored.TransitWarehouse != o.TransitWarehouse ||
 		!stored.ShipDate.Equal(o.ShipDate) || !stored.PlannedReceipt.Equal(o.PlannedReceipt) || len(stored.Lines) != len(o.Lines) {
 		return false
 	}
@@ -373,9 +391,10 @@ func orderedQty(o domain.TransferOrder) map[string]decimal.Decimal {
 	return m
 }
 
-// EditTransfer applies one edit to a CREATED transfer order at the version the
-// caller read (If-Match): header dates and receiving site, lines added, changed
-// and removed, in one transaction with one transfer.changed event. Posting
+// EditTransfer applies one edit to a DRAFT or CREATED transfer order at the
+// version the caller read (If-Match): header dates, receiving site, delivery
+// terms and mode, lines added, changed and removed, in one transaction with one
+// transfer.changed event (none for a DRAFT, which nobody else has seen). Posting
 // nothing: nothing has moved before the first shipment. A repeated request at
 // the old version is a stale-version 412, so the edit is not applied twice.
 func (s *Postgres) EditTransfer(ctx context.Context, id string, version int, e domain.TransferEdit) (domain.TransferOrder, error) {
@@ -424,8 +443,38 @@ func (s *Postgres) EditTransfer(ctx context.Context, id string, version int, e d
 			}
 		}
 		if _, err := tx.Exec(ctx, `update transfer_order set ship_date = $3, planned_receipt_date = $4, to_site = $5,
-			version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`,
-			tp.TenantID, id, next.ShipDate.Format(dateLayout), optionalDate(next.PlannedReceipt), optionalText(next.ToSite)); err != nil {
+			delivery_terms = $6, mode_of_delivery = $7, version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`,
+			tp.TenantID, id, next.ShipDate.Format(dateLayout), optionalDate(next.PlannedReceipt), optionalText(next.ToSite),
+			optionalText(next.DeliveryTerms), optionalText(next.ModeOfDelivery)); err != nil {
+			return err
+		}
+		if out, err = loadTransfer(ctx, tx, id, false); err != nil {
+			return err
+		}
+		if o.Status == domain.TransferDraft {
+			return nil
+		}
+		return enqueue(ctx, tx, "transfer", id, invevents.TransferChanged, tp.TenantID, transferData(out, orderedQty(out), time.Time{}))
+	})
+	return out, err
+}
+
+// ConfirmTransfer turns a DRAFT order into CREATED at the version the caller
+// read (If-Match). This is the first time the order is announced: it writes
+// transfer.changed with status CREATED and every line.
+func (s *Postgres) ConfirmTransfer(ctx context.Context, id string, version int) (domain.TransferOrder, error) {
+	tp, _ := tenant.FromContext(ctx)
+	var out domain.TransferOrder
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		o, err := lockedTransfer(ctx, tx, id, version)
+		if err != nil {
+			return err
+		}
+		if err := domain.CanConfirm(o); err != nil {
+			return domainProblem(err)
+		}
+		o.Status = domain.TransferCreated
+		if err := saveTransfer(ctx, tx, tp.TenantID, o); err != nil {
 			return err
 		}
 		if out, err = loadTransfer(ctx, tx, id, false); err != nil {
@@ -434,6 +483,44 @@ func (s *Postgres) EditTransfer(ctx context.Context, id string, version int, e d
 		return enqueue(ctx, tx, "transfer", id, invevents.TransferChanged, tp.TenantID, transferData(out, orderedQty(out), time.Time{}))
 	})
 	return out, err
+}
+
+// DeleteTransfer removes a DRAFT or CREATED order that shipped nothing, with
+// its lines, at the version the caller read (If-Match). The order has posted
+// nothing and nothing refers to it. Deleting a CREATED order writes
+// transfer.changed with status DELETED so consumers drop it; a DRAFT was never
+// announced and writes nothing. A transfer_order_deleted row keeps the order's
+// Idempotency-Key taken (a retried create is refused) and records who deleted
+// it. The row lock taken by lockedTransfer serialises the delete with a
+// concurrent ship, edit or confirm: whichever commits second sees the other's
+// result (a new version, or no order).
+func (s *Postgres) DeleteTransfer(ctx context.Context, id string, version int) error {
+	tp, _ := tenant.FromContext(ctx)
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		o, err := lockedTransfer(ctx, tx, id, version)
+		if err != nil {
+			return err
+		}
+		if err := domain.CanDelete(o); err != nil {
+			return domainProblem(err)
+		}
+		if _, err := tx.Exec(ctx, `delete from transfer_order_line where tenant_id = $1 and transfer_order_id = $2`, tp.TenantID, id); err != nil {
+			return err
+		}
+		var key string
+		if err := tx.QueryRow(ctx, `delete from transfer_order where tenant_id = $1 and id = $2 returning idempotency_key`, tp.TenantID, id).Scan(&key); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `insert into transfer_order_deleted (tenant_id, legal_entity_id, id, number, idempotency_key, status, deleted_by)
+			values ($1, $2, $3, $4, $5, $6, $7)`, tp.TenantID, o.LegalEntityID, id, o.Number, key, o.Status, optionalText(tp.UserID)); err != nil {
+			return err
+		}
+		if o.Status == domain.TransferDraft {
+			return nil
+		}
+		o.Status = domain.TransferDeleted
+		return enqueue(ctx, tx, "transfer", id, invevents.TransferChanged, tp.TenantID, transferData(o, orderedQty(o), time.Time{}))
+	})
 }
 
 // ListInTransit lists transfer lines with quantity shipped but not yet
@@ -621,7 +708,7 @@ func lockedTransfer(ctx context.Context, tx pgx.Tx, id string, version int) (dom
 
 const transferColumns = `id::text, legal_entity_id::text, number, status, from_warehouse, to_warehouse, coalesce(to_site, ''),
 	coalesce(transit_warehouse, ''), use_transit, to_char(ship_date, 'YYYY-MM-DD'), to_char(receipt_date, 'YYYY-MM-DD'), version, created_at,
-	to_char(planned_receipt_date, 'YYYY-MM-DD')`
+	to_char(planned_receipt_date, 'YYYY-MM-DD'), coalesce(delivery_terms, ''), coalesce(mode_of_delivery, '')`
 
 const transferLineColumns = `l.id::text, l.line_no, l.product_id::text, d.dims::text, l.unit, l.qty::text, l.shipped_qty::text,
 	l.received_qty::text, l.under_pct::text, l.over_pct::text, l.closed`
@@ -631,7 +718,7 @@ func scanTransfer(row pgx.Row) (domain.TransferOrder, error) {
 	var ship string
 	var receipt, planned *string
 	if err := row.Scan(&o.ID, &o.LegalEntityID, &o.Number, &o.Status, &o.FromWarehouse, &o.ToWarehouse, &o.ToSite, &o.TransitWarehouse,
-		&o.UseTransit, &ship, &receipt, &o.Version, &o.CreatedAt, &planned); err != nil {
+		&o.UseTransit, &ship, &receipt, &o.Version, &o.CreatedAt, &planned, &o.DeliveryTerms, &o.ModeOfDelivery); err != nil {
 		return o, err
 	}
 	var err error
@@ -730,7 +817,8 @@ func transferData(o domain.TransferOrder, moved map[string]decimal.Decimal, rece
 	out := invevents.TransferData{
 		TransferOrderID: o.ID, LegalEntityID: o.LegalEntityID, Number: o.Number, Status: o.Status, FromWarehouse: o.FromWarehouse,
 		ToWarehouse: o.ToWarehouse, TransitWarehouse: optionalText(o.TransitWarehouse), ShipDate: o.ShipDate.Format(dateLayout),
-		ToSiteID: optionalText(o.ToSite), Lines: []invevents.TransferLineData{},
+		ToSiteID: optionalText(o.ToSite), DeliveryTerms: optionalText(o.DeliveryTerms), ModeOfDelivery: optionalText(o.ModeOfDelivery),
+		Lines: []invevents.TransferLineData{},
 	}
 	if !o.PlannedReceipt.IsZero() {
 		out.PlannedReceiptDate = optionalText(o.PlannedReceipt.Format(dateLayout))
