@@ -73,6 +73,10 @@
       {"resource": "/v1/fx/rates{,/**}", "methods": ["GET", "POST"]}
     ]},
     "Administer exchange rates": {"permissions": [{"resource": "/v1/fx/providers/*:import", "methods": ["POST"]}]},
+    "pricing.contract.accrue": {"service_only": true, "permissions": [
+      {"resource": "/v1/pricing/broker-contracts/*/accruals", "methods": ["POST"]},
+      {"resource": "/v1/pricing/royalty-agreements/*/accruals", "methods": ["POST"]}
+    ]},
     "product.released.read": {"permissions": [{"resource": "/v1/product/released-products", "methods": ["GET"]}]},
     "product.variants.explode": {"permissions": [{"resource": "/v1/product/products/*/variants:explode", "methods": ["POST"]}]},
     "product.jobs.write": {"permissions": [{"resource": "/v1/product/jobs/group-change", "methods": ["POST"]}]},
@@ -2185,7 +2189,10 @@
       {"resource": "/v1/pricing/free-goods-rules", "methods": ["POST"]},
       {"resource": "/v1/pricing/free-goods-rules/*:withdraw", "methods": ["POST"]}
     ]},
-    "pricing.rebate.claim.approve": {"permissions": [{"resource": "/v1/pricing/rebates/vendor-claims/*:approve", "methods": ["POST"]}]},
+    "pricing.rebate.claim.approve": {"permissions": [
+      {"resource": "/v1/pricing/rebates/vendor-claims/*:approve", "methods": ["POST"]},
+      {"resource": "/v1/pricing/contract-claims/*:approve", "methods": ["POST"]}
+    ]},
     "pricing.rebate.maintain": {"permissions": [
       {"resource": "/v1/pricing/rebates/accruals", "methods": ["POST"]},
       {"resource": "/v1/pricing/rebates/agreements", "methods": ["POST"]},
@@ -2193,7 +2200,13 @@
       {"resource": "/v1/pricing/rebates/agreements/*:retro-recompute", "methods": ["POST"]},
       {"resource": "/v1/pricing/rebates/agreements/*:revise", "methods": ["POST"]},
       {"resource": "/v1/pricing/rebates/vendor-accruals", "methods": ["POST"]},
-      {"resource": "/v1/pricing/rebates/vendor-claims", "methods": ["POST"]}
+      {"resource": "/v1/pricing/rebates/vendor-claims", "methods": ["POST"]},
+      {"resource": "/v1/pricing/broker-contracts", "methods": ["POST"]},
+      {"resource": "/v1/pricing/broker-contracts/*:close", "methods": ["POST"]},
+      {"resource": "/v1/pricing/royalty-agreements", "methods": ["POST"]},
+      {"resource": "/v1/pricing/royalty-agreements/*:close", "methods": ["POST"]},
+      {"resource": "/v1/pricing/royalty-agreements/*:close-period", "methods": ["POST"]},
+      {"resource": "/v1/pricing/contract-claims", "methods": ["POST"]}
     ]},
     "pricing.rebate.view": {"permissions": [
       {"resource": "/v1/pricing/rebates/accruals", "methods": ["GET"]},
@@ -2201,7 +2214,17 @@
       {"resource": "/v1/pricing/rebates/agreements/*", "methods": ["GET"]},
       {"resource": "/v1/pricing/rebates/agreements/*/claim-preview", "methods": ["GET"]},
       {"resource": "/v1/pricing/rebates/vendor-claims", "methods": ["GET"]},
-      {"resource": "/v1/pricing/rebates/vendor-claims/*", "methods": ["GET"]}
+      {"resource": "/v1/pricing/rebates/vendor-claims/*", "methods": ["GET"]},
+      {"resource": "/v1/pricing/broker-contracts", "methods": ["GET"]},
+      {"resource": "/v1/pricing/broker-contracts/*", "methods": ["GET"]},
+      {"resource": "/v1/pricing/broker-contracts/*/accruals", "methods": ["GET"]},
+      {"resource": "/v1/pricing/broker-contracts/*/claim-preview", "methods": ["GET"]},
+      {"resource": "/v1/pricing/royalty-agreements", "methods": ["GET"]},
+      {"resource": "/v1/pricing/royalty-agreements/*", "methods": ["GET"]},
+      {"resource": "/v1/pricing/royalty-agreements/*/accruals", "methods": ["GET"]},
+      {"resource": "/v1/pricing/royalty-agreements/*/claim-preview", "methods": ["GET"]},
+      {"resource": "/v1/pricing/contract-claims", "methods": ["GET"]},
+      {"resource": "/v1/pricing/contract-claims/*", "methods": ["GET"]}
     ]},
     "pricing.view": {"permissions": [
       {"resource": "/v1/pricing/parameters", "methods": ["GET"]},

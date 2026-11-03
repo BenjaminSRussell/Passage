@@ -672,6 +672,7 @@ awaiting_service_caller := {
 	"shopfloor.time.autoclockout",
 	"sales.channel.intake",
 	"inventory.transaction.apply",
+	"pricing.contract.accrue",
 }
 
 test_internal_only_duties_are_service_only if {
