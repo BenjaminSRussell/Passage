@@ -99,8 +99,8 @@ subtotals named in `refs`). See slice 3 below.
 | `POST /v1/product-costing/variances/compute` | `CostingSystem` |
 | `POST /v1/product-costing/activations:preview`, `/versions:activate`, `/conversions:validate`, `/conversions:advance` | `CostingActivate` |
 | `POST /v1/product-costing/versions:transition` (block, unblock, close) | `CostingMaintain` |
-| `GET /v1/product-costing/cost-components`, `/cost-groups`, `/versions`, `/versions/{id}` | `CostingView` |
-| `POST /v1/product-costing/cost-components`, `/cost-groups`, `/versions`, `/versions/{id}/transition` | `CostingMaintain` |
+| `GET /v1/product-costing/cost-components`, `/cost-groups`, `/versions`, `/versions/{id}`, `/posting-accounts/{legalEntityId}` | `CostingView` |
+| `POST /v1/product-costing/cost-components`, `/cost-groups`, `/versions`, `/versions/{id}/transition`; `PUT /v1/product-costing/posting-accounts/{legalEntityId}` | `CostingMaintain` |
 | `POST /v1/product-costing/versions/{id}/activate` | `CostingActivate` |
 
 The comparison and the reconciliation compute an inquiry without changing anything, so they
@@ -245,9 +245,75 @@ same transaction (see `events/asyncapi.yaml`).
   blocks, unblocks or closes (CostingMaintain); `POST /v1/product-costing/versions/{id}/activate` with
   `{version}` activates (CostingActivate, segregated). `version` is the counter the caller read;
   a stale one is `CST-0714` (409) and changes nothing. The rules are those of slice 3
-  (`CST-0711`, `CST-0715`). Activation stamps `activatedAt`. No pending prices are stored yet,
-  so activating a version revalues and posts nothing (D6). Event
+  (`CST-0711`, `CST-0715`). Activation stamps `activatedAt`. Event
   `dev.passage.costing.version.transitioned.v1` with the action and both statuses.
+- **Activation with revaluation** (FR-39.6, D6): the positions are the version's own stored
+  `cost_calculation` rows (Legal view, status Pending or Active), never the request's: a request
+  that lists `lines` is 400. A version with such rows is always revalued, so the bare
+  `{version}` request (plus `currency`, `ledgerId`, `postingDate` and the `Idempotency-Key`
+  header) posts the journal and activates; `dryRun` previews it. Every version type except
+  Simulation can be activated (BR-39.2), but only a Standard version with stored calculations
+  revalues and posts: any other version, or a Standard one with none, only moves the status
+  (no revaluation, no attempt row), decided inside the store transaction. The amounts are never the caller's: the new standard
+  is the version's calculation and the old one the standard the stock is carried at now, read
+  inside the transaction: the new standard of the latest activation that booked the position
+  and was not reversed, else the calculation of the latest activated Standard version whose
+  activation was not reversed. The quantity is the inventory on-hand (`INVENTORY_URL`) at the
+  posting date (a future date reads the live on-hand). Site key contract: inventory's `site`
+  dimension is free text, so it must carry the productcost site id (a UUID, any case); rows
+  with another site value cannot be matched, and a position inventory reports no row for is
+  `CST-0726` (422), never quantity 0, except a position with no earlier standard at all: with
+  no inventory row or zero on-hand it is booked at its own new standard (old = new, amount 0);
+  with stock and no earlier standard it is `CST-0725`. Inventory is read once per distinct item (the inquiry
+  filters on one product and caps at 10000 groups); more than 1000 items or 50000 positions
+  is `CST-0728`. `oldStd`, `newStd`, `qty` and account fields are unknown fields (400). A
+  position with stock and no earlier standard is `CST-0725` (422), no inventory service is `CST-0722`
+  (503), and nothing is posted in either case. A journal the ledger refuses fails the call
+  (`CST-0721`, 502).
+  Posting is three steps: the first transaction checks everything and commits a pending
+  attempt (the exact entry: ids, date, ledger, currency, accounts, amounts); the ledger is then
+  posted from that attempt, off the request's cancellation; the second transaction records the
+  activation, the version change and the event. A retry after a failure that followed the post
+  reuses the pending attempt verbatim (whatever the defaults, accounts or on-hand became), so
+  the ledger replays the one entry. A definite ledger refusal (400, 404, 422, or a locally
+  invalid entry) drops the attempt unless an earlier send was ambiguous; any other failure
+  (transport, 5xx, 401, 403, 429, 409) keeps it and flags it ambiguous, because a 401, 403
+  or 429 is decided before the ledger's idempotency replay. An ambiguous attempt is dropped
+  only by a refusal the ledger decides after that replay check, which proves the earlier send
+  did not land: a 422 rule rejection (closed period `LEDGER_PERIOD_CLOSED`, account,
+  validation, an already reversed entry). A 400 or 404 does not (the ledger or entry lookup and
+  request validation come first). Stuck state: an ambiguous attempt whose retries keep
+  failing transiently blocks every other version of the legal entity with `CST-0729`; the
+  remedy is to retry the same activation until the ledger answers. There is no operator
+  discard path.
+  Activations of one legal entity are serialised by an advisory lock, and an activation or
+  reversal is refused with `CST-0729` (409), naming the blocking version, while another
+  version of the legal entity has a pending attempt, because its standards are not final
+  until that attempt settles. An activation whose total is zero posts nothing and is
+  recorded in the same transaction that holds the lock.
+  `dryRun` of a version that is not Standard answers a status-only preview (no lines, total
+  0), as the activation does. The store also refuses revaluing a non-Standard version
+  (`CST-0727`, 422).
+  The activation tries the per-version roll advisory lock (`CST-0710`), but no roll takes it
+  yet (no roll persists calculations), so the refusal is unreachable until the roll slice
+  takes `domain.RollLockKey`.
+  A reversal (`version`, `reversesActivationId`, `postingDate`; no currency or
+  ledger) is a new activation that reverses the original ledger entry through the ledger's
+  reverse route, using the lines, accounts and quantities stored with the original, never
+  today's accounts or on-hand. A second reversal of the same activation, a reversal of
+  another version's activation or of a reversal is `CST-0723`, and so is reversing an
+  activation while a later, non-reversed activation booked any of its positions (the stock
+  would sit at the later standard; reverse the later one first). The ledger accounts are
+  stored configuration per legal entity, `PUT /v1/product-costing/posting-accounts/{legalEntityId}`
+  with `{inventoryAccount, costChangeAccount}` (CostingMaintain, legal-entity scope; the two
+  must differ; each change publishes `dev.passage.costing.postingaccounts.changed.v1`) and
+  `GET` (`CST-0724`, 404 when none). Productcost holds `ledger.entry.post` and
+  `ledger.journal.reverse`, so a caller choosing an account would let CostingActivate post
+  to any account. An activation with a non-zero revaluation and no configured accounts is
+  `CST-0724` (422). Event `dev.passage.costing.standardcost.activated.v1`.
+  Deployment: the ledger and inventory services must list productcost's public key in
+  `PASSAGE_SERVICE_PUBLIC_KEYS`, and productcost needs `INVENTORY_URL`, `LEDGER_URL` and its
+  service signing key.
 - The slice-3 stateless routes (`/versions:transition`, `/versions:activate`) still serve
   callers that carry a version themselves.
 - Without a store (no database) the stored routes answer `CST-0799` (503).
@@ -321,6 +387,15 @@ Problem `type` is `https://passage.dev/problems/<code>`.
 | CST-0715 | 422 | version transition not allowed from the current status (new code) |
 | CST-0716 | 422 | `SpecifiedVersion` fallback without a fallback version, or pointing to itself (new code) |
 | CST-0720 | 422 | variance identity failed for the order (residual above the rounding bound) |
+| CST-0721 | 502 / 503 | the ledger did not accept the revaluation journal (nothing activated), or no ledger is configured |
+| CST-0722 | 502 / 503 | the inventory on-hand could not be read, or no inventory service is configured |
+| CST-0723 | 404 / 409 / 422 | reversal target missing (404), already reversed (409), of another version or itself a reversal (422) |
+| CST-0724 | 422 / 404 | no posting accounts configured for the legal entity |
+| CST-0725 | 422 | a position holds stock but has no earlier standard (or the version has no calculation for it) |
+| CST-0726 | 422 | the inventory reports no on-hand for a stored position (its site dimension must be the site id) |
+| CST-0729 | 409 | another version of the legal entity has a pending activation attempt; settle it first |
+| CST-0728 | 422 | too many items or positions for one activation |
+| CST-0727 | 422 | only a Standard version revalues stock |
 | CST-0731 | 422 / warning | inventory close through the day before the conversion date is required (warning in validation; 422 on the close and activate steps) |
 | CST-0732 | diagnostic | negative on-hand (error when the `NegativeOnHand` blocker is enabled) |
 | CST-0733 | diagnostic | open in-transit transfers (error with `InTransit`; new code) |

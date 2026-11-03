@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/productcost/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/store"
 )
 
@@ -30,6 +31,13 @@ type fakeStore struct {
 	expected, calls int
 	replayed        bool
 	err             error
+	accountsErr     error
+	activateErr     error
+	accounts        store.PostingAccounts
+	activation      *store.ActivationInput
+	preview         *store.ActivationInput
+	positions       []inventory.Position
+	versionType     string
 }
 
 func (f *fakeStore) ListComponents(context.Context) ([]store.Component, error) {
@@ -62,7 +70,11 @@ func (f *fakeStore) ListVersions(_ context.Context, filter store.VersionFilter, 
 
 func (f *fakeStore) GetVersion(_ context.Context, id string) (store.Version, error) {
 	f.calls++
-	return store.Version{ID: id, Status: domain.VersionOpen, Version: 1, SiteIDs: []string{}}, f.err
+	kind := f.versionType
+	if kind == "" {
+		kind = domain.VersionStandard
+	}
+	return store.Version{ID: id, Type: kind, Status: domain.VersionOpen, Version: 1, SiteIDs: []string{}}, f.err
 }
 
 func (f *fakeStore) CreateVersion(_ context.Context, spec domain.VersionSpec, key string) (store.Version, bool, error) {
@@ -75,6 +87,43 @@ func (f *fakeStore) TransitionVersion(_ context.Context, id string, expected int
 	f.calls++
 	f.moveID, f.expected, f.action = id, expected, action
 	return store.Version{ID: id, Status: domain.VersionBlocked, Version: expected + 1, SiteIDs: []string{}}, f.err
+}
+
+func (f *fakeStore) ActivateStatusOnly(_ context.Context, id string, expected int) (store.Version, bool, error) {
+	f.calls++
+	handled := len(f.positions) == 0
+	if handled {
+		f.moveID, f.expected, f.action = id, expected, domain.ActionActivate
+	}
+	return store.Version{ID: id, Status: domain.VersionActive, Version: expected + 1, SiteIDs: []string{}}, handled, f.err
+}
+
+func (f *fakeStore) PreviewActivation(_ context.Context, in store.ActivationInput) (domain.RevalPreview, error) {
+	f.calls++
+	f.preview = &in
+	return domain.Revalue(nil, in.Currency), f.activateErr
+}
+
+func (f *fakeStore) ActivateVersion(_ context.Context, in store.ActivationInput) (store.ActivationResult, bool, error) {
+	f.calls++
+	f.activation = &in
+	return store.ActivationResult{}, f.replayed, f.activateErr
+}
+
+func (f *fakeStore) ActivationPositions(context.Context, string) ([]inventory.Position, error) {
+	f.calls++
+	return f.positions, f.err
+}
+
+func (f *fakeStore) GetPostingAccounts(context.Context, string) (store.PostingAccounts, error) {
+	f.calls++
+	return f.accounts, f.accountsErr
+}
+
+func (f *fakeStore) SetPostingAccounts(_ context.Context, in store.PostingAccounts) (store.PostingAccounts, error) {
+	f.calls++
+	f.accounts = in
+	return in, f.err
 }
 
 func storedRouter(f *fakeStore) http.Handler {

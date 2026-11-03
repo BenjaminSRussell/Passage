@@ -121,12 +121,10 @@ func enqueue(ctx context.Context, tx pgx.Tx, aggregateType, aggregateID, eventTy
 // as the change. A key reused with a different request (or on another command,
 // through scope) is 422. replayed reports a stored response.
 func idempotent[T any](ctx context.Context, tx pgx.Tx, tenantID, key, scope string, request any, run func() (T, error)) (out T, replayed bool, err error) {
-	raw, err := json.Marshal(request)
+	hash, err := requestHash(scope, request)
 	if err != nil {
 		return out, false, err
 	}
-	sum := sha256.Sum256(append([]byte(scope+"\n"), raw...))
-	hash := hex.EncodeToString(sum[:])
 	tag, err := tx.Exec(ctx, `insert into idempotency_keys (tenant_id, key, request_hash, response_status) values ($1, $2, $3, 0)
 		on conflict (tenant_id, key) do nothing`, tenantID, key, hash)
 	if err != nil {
@@ -156,6 +154,40 @@ func idempotent[T any](ctx context.Context, tx pgx.Tx, tenantID, key, scope stri
 	_, err = tx.Exec(ctx, `update idempotency_keys set response_status = $3, response_body = $4 where tenant_id = $1 and key = $2`,
 		tenantID, key, http.StatusCreated, body)
 	return out, false, err
+}
+
+func requestHash(scope string, request any) (string, error) {
+	raw, err := json.Marshal(request)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(append([]byte(scope+"\n"), raw...))
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// storedReplay reads the response an earlier request stored under key, without
+// claiming the key: found is false when the key is unused.
+func storedReplay[T any](ctx context.Context, tx pgx.Tx, tenantID, key, scope string, request any) (out T, found bool, err error) {
+	hash, err := requestHash(scope, request)
+	if err != nil {
+		return out, false, err
+	}
+	var stored string
+	var body []byte
+	err = tx.QueryRow(ctx, `select request_hash, response_body from idempotency_keys where tenant_id = $1 and key = $2`, tenantID, key).Scan(&stored, &body)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return out, false, nil
+	}
+	if err != nil {
+		return out, false, err
+	}
+	if stored != hash {
+		return out, false, httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request")
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return out, false, fmt.Errorf("replay %s: %w", key, err)
+	}
+	return out, true, nil
 }
 
 // tenantTx runs fn in a tenant transaction and maps a row-level security
@@ -443,7 +475,22 @@ func checkFallbackVersion(ctx context.Context, tx pgx.Tx, tenantID string, spec 
 // domain.Transition; a refused move is returned as its coded error.
 // Activation stamps activated_at.
 func (s *Postgres) TransitionVersion(ctx context.Context, id string, expected int, action string) (Version, error) {
+	out, _, err := s.transitionVersion(ctx, id, expected, action, false)
+	return out, err
+}
+
+// ActivateStatusOnly activates a version that revalues nothing: any type but
+// Standard, or a Standard version with no stored Legal calculations. The
+// decision and the transition share one transaction, so calculations stored
+// meanwhile cannot slip past it. handled is false when the version needs the
+// revaluing path.
+func (s *Postgres) ActivateStatusOnly(ctx context.Context, id string, expected int) (Version, bool, error) {
+	return s.transitionVersion(ctx, id, expected, domain.ActionActivate, true)
+}
+
+func (s *Postgres) transitionVersion(ctx context.Context, id string, expected int, action string, statusOnly bool) (Version, bool, error) {
 	var out Version
+	handled := true
 	err := s.tenantTx(ctx, func(tx pgx.Tx, p tenant.Principal) error {
 		cur, err := scanVersion(tx.QueryRow(ctx, `select `+versionColumns+` from costing_version where tenant_id = $1 and id = $2 for update`, p.TenantID, id))
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -451,6 +498,15 @@ func (s *Postgres) TransitionVersion(ctx context.Context, id string, expected in
 		}
 		if err != nil {
 			return err
+		}
+		if statusOnly && cur.Type == domain.VersionStandard {
+			positions, err := versionPositions(ctx, tx, p.TenantID, id)
+			if err != nil {
+				return err
+			}
+			if handled = len(positions) == 0; !handled {
+				return nil
+			}
 		}
 		if cur.Version != expected {
 			return httpx.NewProblem(http.StatusConflict, domain.CodeVersionConflict, fmt.Sprintf("current version is %d", cur.Version))
@@ -472,5 +528,5 @@ func (s *Postgres) TransitionVersion(ctx context.Context, id string, expected in
 			FromStatus: cur.Status, ToStatus: out.Status, Version: out.Version, ActivatedAt: out.ActivatedAt, Actor: p.UserID,
 		})
 	})
-	return out, err
+	return out, handled, err
 }
