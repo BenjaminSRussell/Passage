@@ -67,6 +67,9 @@ type OutboundDefinition struct {
 	// Lookups read lookup table entries (enum codes, unit conversion factors, prices) for the event; the mapping
 	// reads them as lookup.<name>.
 	Lookups []OutboundLookup `json:"lookups,omitempty"`
+	// Collections map event arrays (an order's lines) to body arrays, element by element, so one push creates a
+	// header and all its lines in the legacy ERP.
+	Collections []OutboundCollection `json:"collections,omitempty"`
 	// DecimalsAsNumbers writes decimal fields as exact JSON numbers instead of strings.
 	DecimalsAsNumbers bool `json:"decimalsAsNumbers,omitempty"`
 	// Mapping is the inbound mapping DSL: Entity is the legacy entity written, Fields read the event row. A target
@@ -114,7 +117,14 @@ func (d OutboundDefinition) check() error {
 			return bad("subject.idPath must be a dotted path into the event, such as data.order_id")
 		}
 	}
-	if err := checkTargets(d.Mapping.Fields); err != nil {
+	targets := fieldTargets(d.Mapping.Fields)
+	for _, c := range d.Collections {
+		targets = append(targets, c.Name)
+	}
+	if err := checkTargets(targets); err != nil {
+		return err
+	}
+	if err := d.checkCollections(); err != nil {
 		return err
 	}
 	if len(d.Xrefs) > maxOutboundXrefs {
@@ -154,13 +164,16 @@ func (d OutboundDefinition) check() error {
 
 // checkTargets refuses targets that cannot nest into one body: an empty dotted segment, or one target that is a
 // prefix of another ("Header" and "Header.No"). ParseMapping already refuses a repeated target.
-func checkTargets(fields []FieldRule) error {
+func checkTargets(targets []string) error {
 	leaf := map[string]bool{}
-	for _, f := range fields {
-		if slices.Contains(strings.Split(f.Target, "."), "") {
-			return &Error{CodeOutboundInvalid, "target " + f.Target + " has an empty segment"}
+	for _, t := range targets {
+		if slices.Contains(strings.Split(t, "."), "") {
+			return &Error{CodeOutboundInvalid, "target " + t + " has an empty segment"}
 		}
-		leaf[f.Target] = true
+		if leaf[t] {
+			return &Error{CodeOutboundInvalid, "target " + t + " is used twice"}
+		}
+		leaf[t] = true
 	}
 	for t := range leaf {
 		segs := strings.Split(t, ".")
@@ -340,11 +353,25 @@ func (d OutboundDefinition) Render(ctx context.Context, sourceSystem, mappingID 
 			unresolved = append(unresolved, UnresolvedRef{Name: "subject", Entity: d.Subject.Entity, Reason: "the event has no id at " + d.Subject.IDPath})
 		}
 	}
-	lookups, missing, used, err := d.resolveLookups(ctx, resolver, event)
+	// Lookup tables are read once each for the whole render (the event's lookups and every element's), see lookupCache.
+	prepared, shapeRejects := d.collectionRows(event)
+	tables, cache := lookupSource(resolver)
+	if cache != nil {
+		if err := cache.prefetch(ctx, d.lookupKeys(event, prepared)); err != nil {
+			return Rendered{}, err
+		}
+	}
+	lookups, missing, used, err := d.resolveLookups(ctx, tables, event)
 	if err != nil {
 		return Rendered{}, err
 	}
 	unresolved = append(unresolved, missing...)
+	itemUnresolved, itemLookups, err := d.resolveItems(ctx, resolver, tables, sourceSystem, prepared)
+	if err != nil {
+		return Rendered{}, err
+	}
+	unresolved = append(unresolved, itemUnresolved...)
+	used = append(used, itemLookups...)
 	if len(unresolved) > 0 {
 		return Rendered{}, &UnresolvedError{Refs: unresolved}
 	}
@@ -356,47 +383,64 @@ func (d OutboundDefinition) Render(ctx context.Context, sourceSystem, mappingID 
 	row["xref"] = keys
 	row["lookup"] = lookups
 	out, warnings, rejects := d.Mapping.ApplyWithWarnings(row)
-	if len(rejects) > 0 {
-		return Rendered{}, &RejectedError{Rejects: rejects}
+	rejects = append(rejects, shapeRejects...)
+	body := map[string]any{}
+	if len(rejects) == 0 {
+		if body, err = shapeFields(d.Mapping.Fields, out, d.DecimalsAsNumbers); err != nil {
+			return Rendered{}, err
+		}
 	}
-	body, err := d.shape(out)
+	itemWarnings, itemRejects, err := d.mapCollections(prepared, body)
 	if err != nil {
 		return Rendered{}, err
 	}
+	rejects = append(rejects, itemRejects...)
+	if len(rejects) > 0 {
+		return Rendered{}, &RejectedError{Rejects: rejects}
+	}
+	warnings = append(warnings, itemWarnings...)
 	return Rendered{Body: body, IdempotencyKey: OutboundIdempotencyKey(mappingID, eventID), Refs: refs, Warnings: warnings, Lookups: used}, nil
 }
 
-// shape nests dotted targets and turns decimals into exact numbers when the definition asks for it.
-func (d OutboundDefinition) shape(out map[string]any) (map[string]any, error) {
+// shapeFields nests dotted targets and turns decimals into exact numbers when the definition asks for it.
+func shapeFields(fields []FieldRule, out map[string]any, decimalsAsNumbers bool) (map[string]any, error) {
 	decimals := map[string]bool{}
-	for _, f := range d.Mapping.Fields {
+	for _, f := range fields {
 		decimals[f.Target] = f.Type == TypeDecimal
 	}
 	body := make(map[string]any, len(out))
 	for target, v := range out {
-		if s, ok := v.(string); ok && d.DecimalsAsNumbers && decimals[target] {
+		if s, ok := v.(string); ok && decimalsAsNumbers && decimals[target] {
 			v = json.Number(s)
 		}
-		segs := strings.Split(target, ".")
-		cur := body
-		for _, seg := range segs[:len(segs)-1] {
-			next, ok := cur[seg].(map[string]any)
-			if !ok {
-				if _, taken := cur[seg]; taken {
-					return nil, &Error{CodeOutboundInvalid, "target " + target + " collides with another target"}
-				}
-				next = map[string]any{}
-				cur[seg] = next
-			}
-			cur = next
+		if err := place(body, target, v); err != nil {
+			return nil, err
 		}
-		last := segs[len(segs)-1]
-		if _, taken := cur[last]; taken {
-			return nil, &Error{CodeOutboundInvalid, "target " + target + " collides with another target"}
-		}
-		cur[last] = v
 	}
 	return body, nil
+}
+
+// place puts v at the dotted target of body, creating the objects on the way.
+func place(body map[string]any, target string, v any) error {
+	segs := strings.Split(target, ".")
+	cur := body
+	for _, seg := range segs[:len(segs)-1] {
+		next, ok := cur[seg].(map[string]any)
+		if !ok {
+			if _, taken := cur[seg]; taken {
+				return &Error{CodeOutboundInvalid, "target " + target + " collides with another target"}
+			}
+			next = map[string]any{}
+			cur[seg] = next
+		}
+		cur = next
+	}
+	last := segs[len(segs)-1]
+	if _, taken := cur[last]; taken {
+		return &Error{CodeOutboundInvalid, "target " + target + " collides with another target"}
+	}
+	cur[last] = v
+	return nil
 }
 
 // idAt reads a string id (a UUID or any key) at a dotted path of the event.

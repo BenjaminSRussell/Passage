@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -17,7 +18,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/egress"
@@ -184,19 +187,54 @@ func TestFile_ListsMatchingFilesUnderTheDropRootOnly(t *testing.T) {
 	}
 }
 
+// isolatedDatabase creates a database of its own holding only probe_customer and returns its connection config. The probe
+// lists every schema of the database it connects to and reads columns for the first tables only, so it must not share a
+// database with the schemas other packages' tests create while `go test ./...` runs them in parallel. A test role
+// without CREATEDB skips the test (a CI database that grants only a schema must not fail the suite); the database is
+// dropped when the test ends, whether it passed or failed.
+func isolatedDatabase(t *testing.T, url string) *pgx.ConnConfig {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	base, err := pgx.ParseConfig(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := pgx.ConnectConfig(ctx, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "probe_" + strings.ReplaceAll(ids.New(), "-", "")
+	if _, err := admin.Exec(ctx, "create database "+name); err != nil {
+		_ = admin.Close(ctx)
+		if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) && pe.Code == "42501" {
+			t.Skipf("the test role cannot create databases (CREATEDB), which this test needs: %v", err)
+		}
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(), "drop database if exists "+name+" with (force)")
+		_ = admin.Close(context.Background())
+	})
+	cc := base.Copy()
+	cc.Database = name
+	conn, err := pgx.ConnectConfig(ctx, cc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	if _, err := conn.Exec(ctx, `create table probe_customer (id integer primary key, name text not null, credit numeric)`); err != nil {
+		t.Fatal(err)
+	}
+	return cc
+}
+
 func TestSQL_ListsSchemasTablesAndColumnsThroughTheGuard(t *testing.T) {
 	url := os.Getenv(testkit.EnvURL)
 	if url == "" {
 		t.Skipf("%s not set; skipping database test", testkit.EnvURL)
 	}
-	pool := testkit.DB(t)
-	if _, err := pool.Exec(context.Background(), `create table probe_customer (id integer primary key, name text not null, credit numeric)`); err != nil {
-		t.Fatal(err)
-	}
-	cc, err := pgx.ParseConfig(url)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cc := isolatedDatabase(t, url)
 	local := net.JoinHostPort(cc.Host, strconv.Itoa(int(cc.Port)))
 	target := probe.Target{Kind: domain.ConnSQL, Secret: "pw", Config: map[string]any{
 		"driver": "postgres", "host": "erp.acme.test", "port": float64(cc.Port), "database": cc.Database, "user": cc.User, "sslmode": "disable"}}

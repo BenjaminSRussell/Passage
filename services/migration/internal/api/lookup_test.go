@@ -231,3 +231,41 @@ func TestLookup_RenderAndPreviewUseTheTable(t *testing.T) {
 		t.Fatalf("hub create = %d", rec.Code)
 	}
 }
+
+// The hub's render of an order with lines: one body carries every line, each with its own table value, the answer names
+// the table read for the lines, and a line whose unit is not in the table is 422 naming that line.
+func TestLookup_RenderMapsEveryOrderLine(t *testing.T) {
+	s := store.NewMem()
+	r := obRouter(s, hubPrincipal(1))
+	def := strings.Replace(lkOutboundDefinition, `"lookups": [{"name": "unit", "table": "unit-codes", "keyPaths": ["data.uom"]}],`,
+		`"collections": [{"name": "Lines", "path": "data.lines",
+		  "lookups": [{"name": "unit", "table": "unit-codes", "keyPaths": ["uom"]}],
+		  "fields": [{"source": "lookup.unit", "target": "Unit", "type": "string", "required": true}, {"source": "index", "target": "LineNo", "type": "int"}]}],`, 1)
+	def = strings.Replace(def, `,
+    {"source": "lookup.unit", "target": "Line.Unit", "type": "string", "required": true}`, ``, 1)
+	rec := do(r, http.MethodPost, obPath, `{"name":"Orders","sourceSystem":"custom_acme","definition":`+def+`}`, obWrite, true)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create mapping = %d %s", rec.Code, rec.Body)
+	}
+	var m obBody
+	_ = json.Unmarshal(rec.Body.Bytes(), &m)
+	createLookup(t, r, "unit-codes", lkEnum)
+	cust, order := seedCustomer(t, s, "C-1001"), ids.New()
+	event := func(lines string) string {
+		return strings.Replace(hubEvent("evt-1", order, cust), `"number":"SO-9"`, `"number":"SO-9","lines":`+lines, 1)
+	}
+
+	rec = hubCall(r, obPath+"/"+m.ID+":render", `{"event":`+event(`[{"uom":"kg"},{"uom":"ea"}]`)+`}`)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"Lines":[{"LineNo":0,"Unit":"KGM"},{"LineNo":1,"Unit":"EA"}]`) ||
+		!strings.Contains(rec.Body.String(), `"lookups":[{"name":"Lines.unit","table":"unit-codes","version":1}]`) {
+		t.Fatalf("render = %d %s", rec.Code, rec.Body)
+	}
+	rec = hubCall(r, obPath+"/"+m.ID+":render", `{"event":`+event(`[{"uom":"kg"},{"uom":"box"}]`)+`}`)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"Lines[1].unit"`) || strings.Contains(rec.Body.String(), `"Lines[0].unit"`) {
+		t.Fatalf("unknown unit on line 1 = %d %s", rec.Code, rec.Body)
+	}
+	rec = hubCall(r, obPath+"/"+m.ID+":render", `{"event":`+event(`[]`)+`}`)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "MIG-OUTBOUND-REJECTED") || !strings.Contains(rec.Body.String(), "empty_array") {
+		t.Fatalf("no lines = %d %s", rec.Code, rec.Body)
+	}
+}

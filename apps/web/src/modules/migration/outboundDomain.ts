@@ -6,6 +6,19 @@ export const STARTER_DEFINITION: OutboundDefinition = {
   eventType: "dev.passage.sales.order.*.v1",
   subject: { entity: "salesOrder", idPath: "data.order_id" },
   xrefs: [{ name: "customer", entity: "customer", idPath: "data.customer_id" }],
+  // Array iteration: every line of data.lines becomes an object of the body's Lines array, with its own product key.
+  collections: [
+    {
+      name: "Lines",
+      path: "data.lines",
+      xrefs: [{ name: "item", entity: "product", idPath: "product_id" }],
+      fields: [
+        { source: "xref.item", target: "ItemNo", type: "string", required: true },
+        { source: "index", target: "LineNo", type: "int" },
+        { source: "qty", target: "Qty", type: "decimal", scale: 3 },
+      ],
+    },
+  ],
   mapping: {
     entity: "SalesOrder",
     fields: [
@@ -22,7 +35,9 @@ export const STARTER_EVENT = {
   type: "dev.passage.sales.order.confirmed.v1",
   source: "/passage/sales",
   time: "2027-01-05T10:00:00Z",
-  data: { order_id: "0195f0a0-0000-7000-8000-0000000000a1", customer_id: "0195f0a0-0000-7000-8000-0000000000c1", number: "SO-100", total: "125.50" },
+  data: { order_id: "0195f0a0-0000-7000-8000-0000000000a1", customer_id: "0195f0a0-0000-7000-8000-0000000000c1", number: "SO-100", total: "125.50",
+    lines: [{ product_id: "0195f0a0-0000-7000-8000-0000000000b1", qty: "2" }],
+  },
 };
 
 export function toJsonText(value: unknown): string {

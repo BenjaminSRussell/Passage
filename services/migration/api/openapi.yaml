@@ -1843,6 +1843,50 @@ components:
               quantityPath: { type: string, description: "For a unit conversion table only: the event quantity to convert. lookup.<name> is then the quantity times the factor (exact decimal), the quantity itself between equal units; the mapping field rounds it to its scale. Against another kind of table the render is unresolved." }
               default: { type: string, description: The value used when the table has no entry for the key. Cannot be combined with optional. }
               optional: { type: boolean }
+        collections:
+          type: array
+          maxItems: 4
+          description: "Array iteration: each collection maps an array of the event (an order's data.lines) to an array of the request body, element by element, so one push creates a header and all its lines in the legacy ERP. An element's rules read the element itself, parent.* (the whole event), index (from 0), and the collection's own xref.<name> and lookup.<name>, resolved per element (idPath, keyPaths and quantityPath are relative to the element). An unresolved element is listed as Lines[2].item in MIG-XREF-UNRESOLVED (at most 50 per collection); an array that is missing, empty, not an array, or longer than maxItems is MIG-OUTBOUND-REJECTED, never truncated. The render's lookups name the tables read as <collection>.<lookup>. Each xref of a collection is one query for all its elements and each lookup table is read once per render, so every value comes from one table version. The legacy keys of the created lines are not recorded: xref:record keeps one subject per push."
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, path, fields]
+            properties:
+              name: { type: string, description: "Body target of the array; dots nest (Header.Lines). Must not collide with a mapping target." }
+              path: { type: string, description: Dotted path of the array in the event, for example data.lines. }
+              maxItems: { type: integer, minimum: 1, maximum: 1000, description: The most elements one event may carry (default 200). }
+              optional: { type: boolean, description: "Leave the array out of the body when the event has none, and send [] when the event's array is empty; otherwise a missing or empty array is refused (MIG-OUTBOUND-REJECTED missing_array, empty_array)." }
+              xrefs:
+                type: array
+                maxItems: 8
+                description: Passage ids of each element resolved to legacy keys, as xref.<name> for that element.
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [name, entity, idPath]
+                  properties:
+                    name: { type: string }
+                    entity: { type: string }
+                    idPath: { type: string, description: Dotted path of the id inside the element. }
+                    optional: { type: boolean }
+              lookups:
+                type: array
+                maxItems: 8
+                description: Lookup table entries read for each element, as lookup.<name>. Same shape and rules as the definition's lookups; paths are relative to the element (parent.<path> reads the event).
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [name, table, keyPaths]
+                  properties:
+                    name: { type: string }
+                    table: { type: string }
+                    keyPaths: { type: array, minItems: 1, maxItems: 3, items: { type: string } }
+                    keyConstants: { type: array, maxItems: 2, items: { type: string } }
+                    quantityPath: { type: string }
+                    default: { type: string }
+                    optional: { type: boolean }
+              fields: { type: array, minItems: 1, items: { type: object }, description: "Mapping DSL field rules that build each element's object; a target with dots nests." }
+              rejectWhen: { type: array, items: { type: object }, description: Mapping DSL reject conditions, applied to each element. }
         decimalsAsNumbers: { type: boolean, description: Write decimal fields as exact JSON numbers instead of strings. }
         mapping: { type: object, description: "Mapping DSL document: entity is the legacy entity, fields read the event (data.*, id, type, time, subject) and xref.<name> and lookup.<name>; a target with dots nests (Header.CustomerRef). Its version is set by the service." }
     OutboundMapping:

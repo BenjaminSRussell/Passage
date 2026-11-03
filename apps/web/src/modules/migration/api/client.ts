@@ -659,6 +659,22 @@ export interface LookupUse {
   version: number;
 }
 
+/** Array iteration: maps an event array (an order's lines) to a body array, element by element. */
+export interface OutboundCollection {
+  /** Body target of the array; dots nest. */
+  name: string;
+  /** Dotted path of the array in the event. */
+  path: string;
+  maxItems?: number;
+  optional?: boolean;
+  /** Paths are relative to the element; `parent.` reads the event. */
+  xrefs?: OutboundXrefLookup[];
+  lookups?: OutboundLookupRef[];
+  /** Mapping DSL field rules building each element's object. */
+  fields: Record<string, unknown>[];
+  rejectWhen?: Record<string, unknown>[];
+}
+
 /** One version of an outbound mapping. `mapping` is the mapping DSL read in the Passage-to-legacy direction. */
 export interface OutboundDefinition {
   eventType: string;
@@ -666,6 +682,8 @@ export interface OutboundDefinition {
   xrefs?: OutboundXrefLookup[];
   /** Entries of lookup tables offered to the mapping as lookup.<name>. */
   lookups?: OutboundLookupRef[];
+  /** Array iteration, such as an order's lines mapped to a body array. */
+  collections?: OutboundCollection[];
   decimalsAsNumbers?: boolean;
   mapping: Record<string, unknown>;
 }

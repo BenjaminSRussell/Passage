@@ -96,6 +96,20 @@ func exerciseXrefLegalEntity(t *testing.T, s store.Store) {
 	if look(hubA, "customer", both) != "X-A" || look(hubB, "customer", both) != "X-B" {
 		t.Fatal("each legal entity must get its own key for a record that has one in each")
 	}
+	// The batched query of a collection (every order line's id at once) is scoped like a single lookup: legal entity
+	// A gets its own and the tenant-wide keys, never B's, and (in Postgres: Mem keeps one tenant) another tenant's hub
+	// gets nothing for these ids.
+	batch, err := s.LegacyKeys(hubA, "custom_acme", "customer", []string{ca, cb, both, ids.New()})
+	if err != nil || len(batch) != 2 || batch[ca] != "C-A" || batch[both] != "X-A" {
+		t.Fatalf("batched lookup for legal entity A = %v %v", batch, err)
+	}
+	otherTenant := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(2), LegalEntityID: leA, UserID: "service:integration-hub", Service: store.HubService,
+		Duties: map[string]struct{}{store.DutyOutboundRender: {}, store.DutyXrefRecord: {}}})
+	if _, mem := s.(*store.Mem); !mem {
+		if batch, err := s.LegacyKeys(otherTenant, "custom_acme", "customer", []string{ca, cb, both}); err != nil || len(batch) != 0 {
+			t.Fatalf("another tenant resolved this tenant's keys: %v %v", batch, err)
+		}
+	}
 
 	// A tagged row is never moved to another legal entity by a later load.
 	put("customer", "C-A", ca, leB2)
