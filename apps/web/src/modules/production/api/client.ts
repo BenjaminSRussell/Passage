@@ -362,8 +362,15 @@ export type TriggerFunction = "insert-operations" | "create-rework-order" | "not
 
 export const TRIGGER_FUNCTIONS: TriggerFunction[] = ["insert-operations", "create-rework-order", "notify"];
 
-/** The feedback fields a condition compares: the route-card line of the operation. */
-export type TriggerField = "qty_error" | "qty_good" | "hours";
+/**
+ * The fields a condition compares: the card line of the operation, or its totals when the trigger
+ * is evaluated as the operation finishes. qty_total is good plus error, error_pct the error as a
+ * percentage of the total.
+ */
+export type TriggerField = "qty_error" | "qty_good" | "qty_total" | "error_pct" | "hours";
+
+/** What evaluates a trigger point: each card line of its operation, or the operation finishing. */
+export type TriggerEvent = "feedback" | "operation-finished";
 
 export type TriggerOperator = ">" | ">=" | "<" | "<=" | "==" | "!=";
 
@@ -380,8 +387,10 @@ export interface TriggerOperation {
 export interface CreateTriggerPointInput {
   operNumber: number;
   sequence: number;
-  /** `<field> <op> <number>`, for example `qty_error > 0`. */
+  /** `<field> <op> <number>` comparisons joined by `and` / `or`, for example `qty_error > 0 and hours > 2`. */
   condition: string;
+  /** Defaults to feedback. */
+  event?: TriggerEvent;
   function: TriggerFunction;
   repeatable?: boolean;
   operations?: TriggerOperation[];
@@ -393,11 +402,13 @@ export interface TriggerFeedback {
   qtyError: string;
 }
 
-/** One due trigger point on a route-card post: fired, or failed with the reason (PROD-0019). */
+/** One due trigger point on a card post or an operation finishing: fired, or failed with the reason (PROD-0019). */
 export interface TriggerFiring {
   id: string;
   triggerPointId: string;
-  journalId: string;
+  event: TriggerEvent;
+  /** The card that fed a feedback firing; null when the operation finishing did. */
+  journalId: string | null;
   operNumber: number;
   function: TriggerFunction;
   status: "fired" | "failed";
@@ -415,6 +426,7 @@ export interface TriggerPoint {
   operNumber: number;
   sequence: number;
   condition: string;
+  event: TriggerEvent;
   function: TriggerFunction;
   operations: TriggerOperation[];
   repeatable: boolean;

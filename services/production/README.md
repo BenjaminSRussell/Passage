@@ -182,6 +182,21 @@ Slice 6:
   cascades when an order edit removes the operation) and the firing log
   `production_trigger_firing`, with RLS and grants.
 
+Slice 24:
+
+- Conditions are up to five `<field> <op> <number>` comparisons joined by `and` / `or` (`and`
+  binds tighter), over `qty_error`, `qty_good`, `qty_total` (good + error), `error_pct` (error as a
+  percentage of the total) and `hours`.
+- A trigger point has an `event`: `feedback` (the default, each card line) or `operation-finished`,
+  evaluated when its operation becomes finished, by `:finish` or by a card line with `finished`
+  that closes it, against the operation's posted totals, in the finish's transaction. Failures are
+  recorded (PROD-0019) and never stop the finish; the firings have no `journalId` and are read with
+  the trigger points. An operation the last report as finished closes fires nothing.
+- A split gives the new order the original's trigger points (same operations, with each rule's
+  fired count). Migration `0022_trigger_events.sql` adds `event` to both tables and makes the
+  firing's `journal_id` nullable, under a 5 s `lock_timeout` with its checks `NOT VALID`;
+  `0023_trigger_events_validate.sql` validates them without the exclusive lock.
+
 Slice 7:
 
 - Subcontract purchase requests (FR-21.10): releasing an order (one at a time or by bulk status)
@@ -393,7 +408,7 @@ Problems are RFC 9457 with `type` `https://passage.dev/problems/<code>`.
 | `PRODUCTION_ORDER_CHANGE_NOT_ELIGIBLE` | 409 | Applying a change to an order that is Started or later (FR-21.16) |
 | `PRODUCTION_ORDER_CHANGE_SUPERSEDED` | 409 | A later ECO on the order replaces the same BOM or route; applying would undo it |
 | `PRODUCTION_ORDER_CHANGE_NO_DELTA` | 422 | The order already matches the change's BOM and route; dismiss it |
-| `PRODUCTION_TRIGGER_CONDITION_INVALID` | 422 | The trigger condition is not `<field> <op> <number>` |
+| `PRODUCTION_TRIGGER_CONDITION_INVALID` | 422 | The trigger condition is not `<field> <op> <number>` comparisons joined by `and` / `or` (at most 5) |
 | `PRODUCTION_TRIGGER_FUNCTION_UNSUPPORTED` | 422 | `release-next` or `start-workflow` (waves 23 and 4) |
 | `PRODUCTION_TRIGGER_OPERATION_NOT_FOUND` | 422 | The trigger's operation is not on the order's route |
 | `PRODUCTION_TRIGGER_POINT_EXISTS` | 409 | The operation already has a trigger point with that sequence |

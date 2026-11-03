@@ -406,24 +406,26 @@ components:
       name: fired
       title: Trigger point fired
       description: |
-        Emitted in the same transaction as a route-card post, once per trigger point whose
-        condition held on the feedback of its operation (FR-21.17), in ascending sequence
-        (BR-21.13). status fired: insert-operations added insertedOperations after the
+        Emitted in the same transaction as a route-card or job-card post (event feedback) or as
+        the operation turning finished (event operation-finished: the :finish command, or a card
+        that finishes it), once per trigger point whose condition held on the feedback of its
+        operation (FR-21.17), or on its totals for a finish, in ascending sequence (BR-21.13). status fired: insert-operations added insertedOperations after the
         operation, create-rework-order created reworkOrderId for the error quantity, notify did
         nothing else (consumers: notifications, scheduling, planning). status failed
         (PROD-0019, PRODUCTION_TRIGGER_FUNCTION_FAILED): the function changed nothing, reason
-        says why, and the journal was posted anyway; the trigger stays due for the next feedback.
+        says why, and the journal was posted (or the operation finished) anyway; the trigger stays due.
       payload:
         type: object
-        required: [firingId, triggerPointId, orderId, journalId, operNumber, sequence, condition, function, status, reason, feedback, insertedOperations, reworkOrderId, actor]
+        required: [firingId, triggerPointId, orderId, event, journalId, operNumber, sequence, condition, function, status, reason, feedback, insertedOperations, reworkOrderId, actor]
         properties:
           firingId: { type: string, format: uuid }
           triggerPointId: { type: string, format: uuid }
           orderId: { type: string, format: uuid }
-          journalId: { type: string, format: uuid, description: The route card whose post evaluated the trigger. }
+          event: { type: string, enum: [feedback, operation-finished] }
+          journalId: { type: [string, 'null'], format: uuid, description: The card whose post evaluated the trigger; null for operation-finished. }
           operNumber: { type: integer }
           sequence: { type: integer }
-          condition: { type: string, examples: ['qty_error > 0'] }
+          condition: { type: string, examples: ['qty_error > 0', 'error_pct >= 5 and hours > 2'] }
           function: { type: string, enum: [insert-operations, create-rework-order, notify] }
           status: { type: string, enum: [fired, failed] }
           reason: { type: [string, 'null'] }
@@ -708,7 +710,7 @@ components:
         key: { type: string, description: The line number, or the operation number as text. }
     triggerFeedback:
       type: object
-      description: The route-card feedback on the trigger's operation that the condition was evaluated against.
+      description: The card line on the trigger's operation that the condition was evaluated against, or the operation's totals when it finished.
       required: [hours, qtyGood, qtyError]
       properties:
         hours: { type: string }

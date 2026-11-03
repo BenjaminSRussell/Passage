@@ -152,6 +152,9 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 		if err := insertOperations(ctx, tx, p.TenantID, newID, plan.NewOps); err != nil {
 			return err
 		}
+		if err := copyTriggerPoints(ctx, tx, p.TenantID, in.OrderID, newID, in.Actor); err != nil {
+			return err
+		}
 		if err := splitCoProducts(ctx, tx, p.TenantID, h.legalEntityID, in.OrderID, newID, plan.OriginalQty, plan.SplitQty); err != nil {
 			return err
 		}

@@ -563,6 +563,15 @@ components:
           type: array
           description: On a posted route card, the trigger points its feedback made due (FR-21.17), in the order they acted.
           items: { $ref: '#/components/schemas/TriggerFiring' }
+    TriggerEvent:
+      type: string
+      enum: [feedback, operation-finished]
+      default: feedback
+      description: |
+        What evaluates a trigger point (FR-21.17). feedback: each route card or job card line of
+        its operation, against the line. operation-finished: the operation becoming finished, by
+        the :finish command or by a card that finishes it, against the hours and quantities posted
+        on the operation in total. An operation the last report as finished closes fires nothing.
     TriggerFunction:
       type: string
       enum: [insert-operations, create-rework-order, release-next, start-workflow, notify]
@@ -594,8 +603,14 @@ components:
         condition:
           type: string
           maxLength: 200
-          examples: ['qty_error > 0', 'hours >= 8']
-          description: '`<field> <op> <number>` over the route-card line of the operation; field qty_error, qty_good or hours; op > >= < <= == !=.'
+          examples: ['qty_error > 0', 'hours >= 8', 'error_pct >= 5 and hours > 2']
+          description: |
+            Comparisons `<field> <op> <number>` joined by `and` / `or` (and binds tighter; at most 5
+            comparisons) over the line of the operation (event feedback) or its totals (event
+            operation-finished). Fields: qty_error, qty_good, qty_total (good + error), error_pct
+            (error as a percentage of the total, 0 without one) and hours; op > >= < <= == !=; the number
+            is a plain decimal such as 2 or 0.5 (no exponent).
+        event: { $ref: '#/components/schemas/TriggerEvent' }
         function: { $ref: '#/components/schemas/TriggerFunction' }
         repeatable: { type: boolean, default: false, description: Without it the trigger fires once per operation (FR-21.17). }
         operations:
@@ -611,11 +626,12 @@ components:
         qtyError: { $ref: '#/components/schemas/Decimal' }
     TriggerFiring:
       type: object
-      required: [id, triggerPointId, journalId, operNumber, function, status, feedback, insertedOperations, actor, firedAt]
+      required: [id, triggerPointId, event, journalId, operNumber, function, status, feedback, insertedOperations, actor, firedAt]
       properties:
         id: { type: string, format: uuid }
         triggerPointId: { type: string, format: uuid }
-        journalId: { type: string, format: uuid }
+        event: { $ref: '#/components/schemas/TriggerEvent' }
+        journalId: { type: [string, 'null'], format: uuid, description: The card whose post evaluated the trigger; null for event operation-finished. }
         operNumber: { type: integer }
         function: { $ref: '#/components/schemas/TriggerFunction' }
         status: { type: string, enum: [fired, failed] }
@@ -627,13 +643,14 @@ components:
         firedAt: { type: string, format: date-time }
     TriggerPoint:
       type: object
-      required: [id, orderId, operNumber, sequence, condition, function, operations, repeatable, firedCount, createdBy, createdAt, firings]
+      required: [id, orderId, operNumber, sequence, condition, event, function, operations, repeatable, firedCount, createdBy, createdAt, firings]
       properties:
         id: { type: string, format: uuid }
         orderId: { type: string, format: uuid }
         operNumber: { type: integer }
         sequence: { type: integer }
         condition: { type: string, description: In canonical form. }
+        event: { $ref: '#/components/schemas/TriggerEvent' }
         function: { $ref: '#/components/schemas/TriggerFunction' }
         operations: { type: array, items: { $ref: '#/components/schemas/TriggerOperation' } }
         repeatable: { type: boolean }
@@ -1896,7 +1913,10 @@ paths:
         A route card then evaluates the trigger points of each operation it reports on, in
         ascending sequence (FR-21.17, BR-21.13), and returns them in triggerFirings, each
         emitting dev.passage.production.triggerpoint.fired.v1. A function that fails is
-        recorded with its reason and never blocks the post (PROD-0019).
+        recorded with its reason and never blocks the post (PROD-0019). A line with `finished`
+        that finishes its operation also evaluates the operation's trigger points on the event
+        operation-finished; those firings belong to the operation and are read with its trigger
+        points, not returned here.
       x-passage-duty: production.journal.post
       parameters:
         - { $ref: '#/components/parameters/JournalId' }

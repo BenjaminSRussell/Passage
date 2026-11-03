@@ -116,10 +116,23 @@ func (s *Postgres) ApplyOperationCommand(ctx context.Context, c OperationCommand
 		if err != nil || !changed {
 			return err
 		}
-		return enqueue(ctx, tx, c.OrderID, prodevents.OperationStatusChanged, p.TenantID, c.Actor, prodevents.OperationStatusChangedData{
+		if err := enqueue(ctx, tx, c.OrderID, prodevents.OperationStatusChanged, p.TenantID, c.Actor, prodevents.OperationStatusChangedData{
 			OrderID: c.OrderID, OperNumber: c.OperNumber, Action: string(c.Action), From: string(from), To: string(next),
 			OrderVersion: out.Version, Actor: c.Actor, OccurredAt: out.UpdatedAt.UTC().Format(time.RFC3339Nano),
-		})
+		}); err != nil {
+			return err
+		}
+		// FR-21.17: the operation turning finished evaluates its trigger points (a function that
+		// fails is recorded and the finish stands); the order is read again for what they changed.
+		if next != domain.OperFinished {
+			return nil
+		}
+		fired, err := fireOperationFinished(ctx, tx, p.TenantID, h, c.OperNumber, c.Actor)
+		if err != nil || len(fired) == 0 {
+			return err
+		}
+		out, err = loadOrder(ctx, tx, p.TenantID, c.OrderID)
+		return err
 	})
 	return out, res, err
 }

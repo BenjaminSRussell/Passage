@@ -21,6 +21,7 @@ import type {
   ScheduleDirection,
   SchedulingMethod,
   Tracking,
+  TriggerEvent,
   TriggerField,
   TriggerFiring,
   TriggerFunction,
@@ -205,7 +206,15 @@ export const triggerFunctionLabel: Record<TriggerFunction, string> = {
 export const triggerFieldLabel: Record<TriggerField, string> = {
   qty_error: "Error quantity",
   qty_good: "Good quantity",
+  qty_total: "Total quantity (good + error)",
+  error_pct: "Error percentage",
   hours: "Hours",
+};
+
+/** What evaluates a trigger point (FR-21.17). */
+export const triggerEventLabel: Record<TriggerEvent, string> = {
+  feedback: "Each card line",
+  "operation-finished": "Operation finishes",
 };
 
 export const triggerOperatorLabel: Record<TriggerOperator, string> = {
@@ -232,15 +241,30 @@ export function describeFiring(f: TriggerFiring): string {
   }
 }
 
-/** A stored condition (`qty_error > 0`) in words, or as stored when it does not parse. */
+/**
+ * A stored condition (`qty_error > 0`, or comparisons joined by and / or) in words, or as stored
+ * when it does not parse.
+ */
 export function describeCondition(condition: string): string {
-  const [field, op, value, ...rest] = condition.trim().split(/\s+/);
-  const fieldLabel = triggerFieldLabel[field as TriggerField];
-  const opLabel = triggerOperatorLabel[op as TriggerOperator];
-  if (!fieldLabel || !opLabel || value === undefined || rest.length > 0) {
+  const parts = condition.trim().split(/\s+/);
+  if ((parts.length + 1) % 4 !== 0) {
     return condition;
   }
-  return `${fieldLabel} ${opLabel} ${value}`;
+  const words: string[] = [];
+  for (let i = 0; i < parts.length; i += 4) {
+    const [field, op, value] = parts.slice(i, i + 3);
+    const fieldLabel = triggerFieldLabel[field as TriggerField];
+    const opLabel = triggerOperatorLabel[op as TriggerOperator];
+    const join = parts[i + 3];
+    if (!fieldLabel || !opLabel || value === undefined || (join !== undefined && join !== "and" && join !== "or")) {
+      return condition;
+    }
+    words.push(`${fieldLabel} ${opLabel} ${value}`);
+    if (join !== undefined) {
+      words.push(join);
+    }
+  }
+  return words.join(" ");
 }
 
 export const changeStatusLabel: Record<ChangeStatus, string> = { pending: "Pending", applied: "Applied", dismissed: "Dismissed" };

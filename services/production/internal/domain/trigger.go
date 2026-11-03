@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -10,7 +11,7 @@ import (
 
 // Stable error codes of trigger points (FR-21.17, BR-21.13).
 const (
-	// CodeTriggerCondition: the condition is not "<field> <op> <number>".
+	// CodeTriggerCondition: the condition is not comparisons "<field> <op> <number>" joined by and / or.
 	CodeTriggerCondition = "PRODUCTION_TRIGGER_CONDITION_INVALID"
 	// CodeTriggerFunctionUnsupported: the function needs an engine this service does not have yet.
 	CodeTriggerFunctionUnsupported = "PRODUCTION_TRIGGER_FUNCTION_UNSUPPORTED"
@@ -80,52 +81,163 @@ func (t TriggerOperation) operation(n int, processQty decimal.Decimal) Operation
 		LaborRate: t.LaborRate, OverheadRate: t.OverheadRate, ProcessQty: processQty, Status: OperOpen}
 }
 
-// Feedback is what a route card reports on one operation, the payload a condition is
-// evaluated against: the hours, good quantity and error quantity of the journal line.
+// Feedback is the payload a condition is evaluated against: the hours, good quantity and
+// error quantity of a card line, or of the operation's totals when it finishes.
 type Feedback struct {
 	Hours    decimal.Decimal `json:"hours"`
 	QtyGood  decimal.Decimal `json:"qtyGood"`
 	QtyError decimal.Decimal `json:"qtyError"`
 }
 
-// Condition is a feedback predicate "<field> <op> <number>", for example "qty_error > 0".
-// The fields are qty_error, qty_good and hours; the operators > >= < <= == !=.
-type Condition struct {
+// TriggerEvent is what evaluates a trigger point (FR-21.17): the feedback of a route card or job
+// card, or the operation turning finished. The feedback of a finish is the operation's totals.
+type TriggerEvent string
+
+const (
+	// EventFeedback evaluates the point on each route card or job card line of its operation.
+	EventFeedback TriggerEvent = "feedback"
+	// EventOperationFinished evaluates it when its operation becomes finished (the :finish
+	// command, or a card that finishes it), against the hours and quantities posted on it.
+	EventOperationFinished TriggerEvent = "operation-finished"
+)
+
+// Valid reports whether e is one of the two events; the empty event is feedback.
+func (e TriggerEvent) Valid() bool {
+	return e == "" || e == EventFeedback || e == EventOperationFinished
+}
+
+// Or returns e, or feedback when it is empty.
+func (e TriggerEvent) Or() TriggerEvent {
+	if e == "" {
+		return EventFeedback
+	}
+	return e
+}
+
+// MaxConditionClauses bounds the comparisons of one condition.
+const MaxConditionClauses = 5
+
+// Comparison is one "<field> <op> <number>" of a condition.
+type Comparison struct {
 	Field string
 	Op    string
 	Value decimal.Decimal
 }
 
+// Condition is a feedback predicate: comparisons "<field> <op> <number>" joined by and / or,
+// for example "qty_error > 0 and hours >= 2". and binds tighter than or, so a condition is
+// an or of groups of and-ed comparisons. The fields are qty_error, qty_good, qty_total
+// (good + error), error_pct (error as a percentage of the total, 0 without a total) and
+// hours; the operators > >= < <= == !=.
+type Condition struct {
+	Groups [][]Comparison
+}
+
 var conditionFields = map[string]func(Feedback) decimal.Decimal{
 	"qty_error": func(f Feedback) decimal.Decimal { return f.QtyError },
 	"qty_good":  func(f Feedback) decimal.Decimal { return f.QtyGood },
-	"hours":     func(f Feedback) decimal.Decimal { return f.Hours },
+	"qty_total": func(f Feedback) decimal.Decimal { return f.QtyGood.Add(f.QtyError) },
+	"error_pct": func(f Feedback) decimal.Decimal {
+		total := f.QtyGood.Add(f.QtyError)
+		if !total.IsPositive() {
+			return decimal.Zero
+		}
+		return f.QtyError.Mul(hundred).Div(total)
+	},
+	"hours": func(f Feedback) decimal.Decimal { return f.Hours },
 }
 
-// ParseCondition reads a condition such as "qty_error > 0".
+// conditionNumber is the value of a comparison: a plain decimal, its length bounded by the
+// condition's. Exponents ("1e-2000000000") are refused: comparing or printing such a value
+// would allocate a number with billions of digits. Every stored condition is canonical
+// (Condition.String never writes an exponent), so this refuses nothing already stored.
+var conditionNumber = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?$`)
+
+const conditionHint = "the condition must be '<field> <op> <number>' comparisons joined by and / or, with field qty_error, qty_good, qty_total, error_pct or hours"
+
+// ParseCondition reads a condition such as "qty_error > 0" or "error_pct >= 5 and hours > 2".
 func ParseCondition(s string) (Condition, error) {
+	bad := func(detail string) (Condition, error) {
+		return Condition{}, &Error{Code: CodeTriggerCondition, Detail: detail}
+	}
 	parts := strings.Fields(s)
-	if len(s) > MaxConditionLength || len(parts) != 3 || conditionFields[parts[0]] == nil {
-		return Condition{}, &Error{Code: CodeTriggerCondition,
-			Detail: "the condition must be '<field> <op> <number>' with field qty_error, qty_good or hours"}
+	if len(s) > MaxConditionLength || len(parts) == 0 || (len(parts)+1)%4 != 0 {
+		return bad(conditionHint)
 	}
-	switch parts[1] {
-	case ">", ">=", "<", "<=", "==", "!=":
-	default:
-		return Condition{}, &Error{Code: CodeTriggerCondition, Detail: "the operator must be one of > >= < <= == !="}
+	var c Condition
+	group := []Comparison{}
+	clauses := 0
+	for i := 0; i < len(parts); i += 4 {
+		if conditionFields[parts[i]] == nil {
+			return bad(conditionHint)
+		}
+		switch parts[i+1] {
+		case ">", ">=", "<", "<=", "==", "!=":
+		default:
+			return bad("the operator must be one of > >= < <= == !=")
+		}
+		if !conditionNumber.MatchString(parts[i+2]) {
+			return bad("the condition value must be a plain decimal number such as 2 or 0.5")
+		}
+		v, err := decimal.NewFromString(parts[i+2])
+		if err != nil {
+			return bad("the condition value must be a plain decimal number such as 2 or 0.5")
+		}
+		group = append(group, Comparison{Field: parts[i], Op: parts[i+1], Value: v})
+		clauses++
+		if i+3 >= len(parts) {
+			break
+		}
+		switch parts[i+3] {
+		case "and":
+		case "or":
+			c.Groups, group = append(c.Groups, group), []Comparison{}
+		default:
+			return bad("comparisons are joined with and or or")
+		}
 	}
-	v, err := decimal.NewFromString(parts[2])
-	if err != nil {
-		return Condition{}, &Error{Code: CodeTriggerCondition, Detail: "the condition value must be a number"}
+	if clauses > MaxConditionClauses {
+		return bad(fmt.Sprintf("at most %d comparisons", MaxConditionClauses))
 	}
-	return Condition{Field: parts[0], Op: parts[1], Value: v}, nil
+	c.Groups = append(c.Groups, group)
+	return c, nil
 }
 
 // String is the condition in its canonical form.
-func (c Condition) String() string { return c.Field + " " + c.Op + " " + c.Value.String() }
+func (c Condition) String() string {
+	var out []string
+	for gi, g := range c.Groups {
+		if gi > 0 {
+			out = append(out, "or")
+		}
+		for i, cmp := range g {
+			if i > 0 {
+				out = append(out, "and")
+			}
+			out = append(out, cmp.Field, cmp.Op, cmp.Value.String())
+		}
+	}
+	return strings.Join(out, " ")
+}
 
-// Holds evaluates the condition against a feedback.
+// Holds evaluates the condition against a feedback: some group of comparisons all hold.
 func (c Condition) Holds(f Feedback) bool {
+	for _, g := range c.Groups {
+		all := true
+		for _, cmp := range g {
+			if !cmp.holds(f) {
+				all = false
+				break
+			}
+		}
+		if all {
+			return true
+		}
+	}
+	return false
+}
+
+func (c Comparison) holds(f Feedback) bool {
 	cmp := conditionFields[c.Field](f).Cmp(c.Value)
 	switch c.Op {
 	case ">":
@@ -150,6 +262,7 @@ type TriggerPoint struct {
 	OperNumber int                `json:"operNumber"`
 	Sequence   int                `json:"sequence"`
 	Condition  string             `json:"condition"`
+	Event      TriggerEvent       `json:"event"`
 	Function   TriggerFunction    `json:"function"`
 	Operations []TriggerOperation `json:"operations"`
 	Repeatable bool               `json:"repeatable"`
@@ -162,6 +275,9 @@ type TriggerPoint struct {
 func CheckTriggerPoint(tp TriggerPoint) error {
 	if _, err := ParseCondition(tp.Condition); err != nil {
 		return err
+	}
+	if !tp.Event.Valid() {
+		return &Error{Code: CodeInvalidInput, Detail: fmt.Sprintf("unknown trigger event %q: use feedback or operation-finished", tp.Event)}
 	}
 	if !tp.Function.Valid() {
 		return &Error{Code: CodeInvalidInput, Detail: fmt.Sprintf("unknown trigger function %q", tp.Function)}
@@ -186,13 +302,13 @@ func CheckTriggerPoint(tp TriggerPoint) error {
 	return nil
 }
 
-// DueTriggers returns the trigger points of operation operNumber whose condition holds for
-// the feedback, in ascending sequence (BR-21.13). A trigger that is not repeatable and has
+// DueTriggers returns the trigger points of operation operNumber on the event whose condition
+// holds for the feedback, in ascending sequence (BR-21.13). A trigger that is not repeatable and has
 // fired is skipped: it fires at most once per operation (FR-21.17).
-func DueTriggers(tps []TriggerPoint, operNumber int, f Feedback) ([]TriggerPoint, error) {
+func DueTriggers(tps []TriggerPoint, operNumber int, event TriggerEvent, f Feedback) ([]TriggerPoint, error) {
 	var due []TriggerPoint
 	for _, tp := range tps {
-		if tp.OperNumber != operNumber || (!tp.Repeatable && tp.FiredCount > 0) {
+		if tp.OperNumber != operNumber || tp.Event.Or() != event || (!tp.Repeatable && tp.FiredCount > 0) {
 			continue
 		}
 		c, err := ParseCondition(tp.Condition)

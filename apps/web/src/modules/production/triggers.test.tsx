@@ -55,6 +55,7 @@ function firing(overrides: Partial<TriggerFiring> = {}): TriggerFiring {
   return {
     id: uuid(601),
     triggerPointId: uuid(401),
+    event: "feedback",
     journalId: uuid(201),
     operNumber: 20,
     function: "insert-operations",
@@ -74,6 +75,7 @@ function point(overrides: Partial<TriggerPoint> = {}): TriggerPoint {
     operNumber: 20,
     sequence: 10,
     condition: "qty_error > 0",
+    event: "feedback",
     function: "insert-operations",
     operations: [
       { resourceId: resource, setupTimeH: "0", runTimeHPer: "0.5", scrapPct: "0", laborRate: "40", overheadRate: "0" },
@@ -158,6 +160,22 @@ describe("trigger point definitions", () => {
     expect(toTriggerInput({ ...emptyTrigger("10"), function: "notify", value: "-2", operations: [] }).input?.condition).toBe("qty_error > -2");
   });
 
+  it("builds a compound condition and sends the event only when it is not feedback", () => {
+    const base = { ...emptyTrigger("20"), function: "notify" as const, operations: [] };
+    expect(toTriggerInput({ ...base, event: "operation-finished", field: "error_pct", operator: ">=", value: "5", join: "and", field2: "hours", operator2: ">", value2: "2" }).input).toEqual({
+      operNumber: 20,
+      sequence: 10,
+      event: "operation-finished",
+      condition: "error_pct >= 5 and hours > 2",
+      function: "notify",
+      repeatable: false,
+    });
+    expect(toTriggerInput({ ...base, join: "or", value2: "1.5" }).input?.condition).toBe("qty_error > 0 or hours > 1.5");
+    // The second comparison is only checked when it is used.
+    expect(toTriggerInput({ ...base, value2: "x" }).errors).toEqual({});
+    expect(toTriggerInput({ ...base, join: "or", value2: "x" }).errors.value2).toBe("Enter a number with up to 6 decimals.");
+  });
+
   it("refuses what the service refuses", () => {
     const bad = toTriggerInput({
       ...emptyTrigger(""),
@@ -176,6 +194,10 @@ describe("trigger point definitions", () => {
     expect(describeCondition("qty_error > 0")).toBe("Error quantity is more than 0");
     expect(describeCondition("hours != 2.5")).toBe("Hours is not 2.5");
     expect(describeCondition("speed > 1")).toBe("speed > 1");
+    expect(describeCondition("error_pct >= 5 and hours > 2")).toBe("Error percentage is at least 5 and Hours is more than 2");
+    expect(describeCondition("qty_total == 0 or qty_good < 3")).toBe("Total quantity (good + error) equals 0 or Good quantity is less than 3");
+    expect(describeCondition("hours > 2 xor hours < 1")).toBe("hours > 2 xor hours < 1");
+    expect(describeCondition("hours > 2 and")).toBe("hours > 2 and");
     expect(describeFiring(firing())).toBe("Inserted operations 25, 26");
     expect(describeFiring(firing({ function: "create-rework-order", insertedOperations: [], reworkOrderId }))).toBe("Created a rework order for 3");
     expect(describeFiring(firing({ function: "notify", insertedOperations: [] }))).toBe("Notification sent");
@@ -262,6 +284,56 @@ describe("Trigger points on the order detail", () => {
     const table = await findTable({ name: "Trigger points of this order" });
     await waitFor(() => expect(within(table).getByText("Insert operations")).toBeInTheDocument());
     expect(within(form).getByLabelText("Sequence")).toHaveValue("20");
+  });
+
+  it("shows when a trigger is evaluated and the totals a finish firing used", async () => {
+    const onFinish = point({
+      event: "operation-finished",
+      condition: "error_pct >= 5 and hours > 2",
+      function: "notify",
+      operations: [],
+      firedCount: 1,
+      lastFiredAt: "2026-10-26T15:00:00Z",
+      firings: [firing({ event: "operation-finished", journalId: null, function: "notify", insertedOperations: [], feedback: { hours: "3", qtyGood: "90", qtyError: "10" } })],
+    });
+    detailFetch(routed(), (url) => (url.endsWith("/trigger-points") ? json({ orderId, items: [onFinish, point({ sequence: 20 })] }) : undefined));
+    renderAt(`/production/${orderId}`);
+    const table = await findTable({ name: "Trigger points of this order" });
+    await waitFor(() => expect(within(table).getByText("Error percentage is at least 5 and Hours is more than 2")).toBeInTheDocument());
+    expect(within(table).getByText("Operation finishes")).toBeInTheDocument();
+    expect(within(table).getByText("Each card line")).toBeInTheDocument();
+    const firings = screen.getByRole("table", { name: "Trigger firings" });
+    expect(within(firings).getByText("Operation finishes")).toBeInTheDocument();
+    expect(within(firings).getByText("3 h, 90 good, 10 error (totals)")).toBeInTheDocument();
+  });
+
+  it("defines a trigger on the operation finishing with two comparisons", async () => {
+    const fetchMock = detailFetch(routed(), (url, init) =>
+      url.endsWith("/trigger-points") && init?.method === "POST" ? json(point({ event: "operation-finished", function: "notify", operations: [] }), 201) : undefined,
+    );
+    renderAt(`/production/${orderId}`);
+    const form = await screen.findByRole("form", { name: "Define a trigger point" });
+    await userEvent.selectOptions(within(form).getByLabelText("Then"), "notify");
+    await userEvent.selectOptions(within(form).getByLabelText("Evaluated"), "operation-finished");
+    await userEvent.selectOptions(within(form).getByLabelText("When"), "error_pct");
+    await userEvent.selectOptions(within(form).getByLabelText("Comparison"), ">=");
+    await userEvent.clear(within(form).getByLabelText("Value"));
+    await userEvent.type(within(form).getByLabelText("Value"), "5");
+    expect(within(form).queryByLabelText("Second value")).not.toBeInTheDocument();
+    await userEvent.selectOptions(within(form).getByLabelText(/^And \/ or/), "and");
+    await userEvent.clear(within(form).getByLabelText("Second value"));
+    await userEvent.type(within(form).getByLabelText("Second value"), "2");
+    await userEvent.click(within(form).getByRole("button", { name: "Define trigger point" }));
+    await waitFor(() => expect(calls(fetchMock).some(([url, init]) => url.endsWith("/trigger-points") && init?.method === "POST")).toBe(true));
+    const create = calls(fetchMock).find(([url, init]) => url.endsWith("/trigger-points") && init?.method === "POST");
+    expect(JSON.parse(String(create?.[1]?.body))).toEqual({
+      operNumber: 10,
+      sequence: 10,
+      event: "operation-finished",
+      condition: "error_pct >= 5 and hours > 2",
+      function: "notify",
+      repeatable: false,
+    });
   });
 
   it("shows a refusal, such as a rework trigger without the rework duty", async () => {

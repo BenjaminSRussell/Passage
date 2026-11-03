@@ -753,7 +753,11 @@ func postJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, 
 		return err
 	}
 	// FR-21.17: the route card's feedback evaluates the trigger points of its operations.
-	return fireTriggers(ctx, tx, tenantID, *h, j, o.actor)
+	if err := fireTriggers(ctx, tx, tenantID, *h, j, o.actor); err != nil {
+		return err
+	}
+	// ... and a card that finishes an operation evaluates the ones set on its finish.
+	return fireFinishTriggers(ctx, tx, tenantID, *h, j, o.actor)
 }
 
 // applyLines stores the valued lines of a posted journal and books them on

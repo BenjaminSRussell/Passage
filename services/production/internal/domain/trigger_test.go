@@ -22,7 +22,20 @@ func TestParseCondition(t *testing.T) {
 		{"scrap > 0", ""},
 		{"qty_error ~ 0", ""},
 		{"qty_error > x", ""},
-		{"qty_error > 0 and hours > 1", ""},
+		{"hours > 1e-2000000000", ""},
+		{"hours > 1e3", ""},
+		{"hours > .5", ""},
+		{"hours > 1E5", ""},
+		{"hours > 0.000001", "hours > 0.000001"},
+		{"qty_error > 0 and hours > 1", "qty_error > 0 and hours > 1"},
+		{"qty_error > 0 or hours >= 8.0 and qty_good < 5", "qty_error > 0 or hours >= 8 and qty_good < 5"},
+		{"error_pct >= 5", "error_pct >= 5"},
+		{"qty_total == 100", "qty_total == 100"},
+		{"qty_error > 0 and", ""},
+		{"qty_error > 0 xor hours > 1", ""},
+		{"qty_error > 0 and hours", ""},
+		{"a > 1 and a > 1 and a > 1 and a > 1 and a > 1 and a > 1", ""},
+		{"qty_error > 0 and hours > 1 and hours < 9 and qty_good > 1 and qty_good < 9 and qty_total > 3", ""},
 		{"", ""},
 	}
 	for _, c := range cases {
@@ -55,6 +68,25 @@ func TestCondition_Holds(t *testing.T) {
 			t.Errorf("%s holds = %v, want %v", cond, got, want)
 		}
 	}
+	// error_pct and qty_total are derived; and binds tighter than or.
+	derived := map[string]bool{
+		"error_pct >= 3": true, "error_pct > 3": false, "qty_total == 100": true,
+		"qty_error > 5 or hours > 1": true, "qty_error > 5 and hours > 1": false,
+		"qty_error > 5 and hours > 1 or qty_good == 97": true, "qty_error > 0 and hours > 1 and qty_good < 100": true,
+	}
+	for cond, want := range derived {
+		c, err := ParseCondition(cond)
+		if err != nil {
+			t.Fatalf("%s: %v", cond, err)
+		}
+		if got := c.Holds(f); got != want {
+			t.Errorf("%s holds = %v, want %v", cond, got, want)
+		}
+	}
+	// With nothing reported the error percentage is 0, not a division by zero.
+	if c, _ := ParseCondition("error_pct > 0"); c.Holds(Feedback{Hours: d("2")}) {
+		t.Error("error_pct > 0 held without a quantity")
+	}
 	// A route card that reports no error quantity does not fire "qty_error > 0".
 	if c, _ := ParseCondition("qty_error > 0"); c.Holds(Feedback{Hours: d("2")}) {
 		t.Error("qty_error > 0 held without an error quantity")
@@ -71,6 +103,8 @@ func TestCheckTriggerPoint(t *testing.T) {
 		{"insert", TriggerPoint{Condition: "qty_error > 0", Function: FnInsertOperations, Operations: ops}, ""},
 		{"rework order", TriggerPoint{Condition: "qty_error > 0", Function: FnCreateReworkOrder, Operations: ops}, ""},
 		{"notify", TriggerPoint{Condition: "hours > 8", Function: FnNotify}, ""},
+		{"on finish", TriggerPoint{Condition: "error_pct > 2 and hours > 8", Event: EventOperationFinished, Function: FnNotify}, ""},
+		{"unknown event", TriggerPoint{Condition: "hours > 8", Event: "start", Function: FnNotify}, CodeInvalidInput},
 		{"bad condition", TriggerPoint{Condition: "qty_error", Function: FnNotify}, CodeTriggerCondition},
 		{"unknown function", TriggerPoint{Condition: "qty_error > 0", Function: "explode"}, CodeInvalidInput},
 		{"release-next", TriggerPoint{Condition: "qty_good > 0", Function: FnReleaseNext}, CodeTriggerFunctionUnsupported},
@@ -105,7 +139,7 @@ func TestDueTriggers(t *testing.T) {
 		{ID: "n", OperNumber: 20, Sequence: 1, Condition: "qty_good > 100"},
 		{ID: "o", OperNumber: 30, Sequence: 1, Condition: "qty_error > 0"},
 	}
-	due, err := DueTriggers(tps, 20, Feedback{Hours: d("1"), QtyGood: d("7"), QtyError: d("3")})
+	due, err := DueTriggers(tps, 20, EventFeedback, Feedback{Hours: d("1"), QtyGood: d("7"), QtyError: d("3")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +150,15 @@ func TestDueTriggers(t *testing.T) {
 	if got != "abc" {
 		t.Fatalf("due = %q, want abc", got)
 	}
-	if _, err := DueTriggers([]TriggerPoint{{OperNumber: 20, Condition: "bad"}}, 20, Feedback{}); codeOf(err) != CodeTriggerCondition {
+	// A trigger on the operation finishing is not due on feedback, and the other way round.
+	tps = append(tps, TriggerPoint{ID: "f", OperNumber: 20, Sequence: 40, Condition: "qty_error > 0", Event: EventOperationFinished})
+	if due, _ := DueTriggers(tps, 20, EventFeedback, Feedback{QtyError: d("3")}); len(due) == 0 || due[len(due)-1].ID == "f" {
+		t.Fatalf("feedback due = %+v", due)
+	}
+	if due, _ := DueTriggers(tps, 20, EventOperationFinished, Feedback{QtyError: d("3")}); len(due) != 1 || due[0].ID != "f" {
+		t.Fatalf("finish due = %+v", due)
+	}
+	if _, err := DueTriggers([]TriggerPoint{{OperNumber: 20, Condition: "bad"}}, 20, EventFeedback, Feedback{}); codeOf(err) != CodeTriggerCondition {
 		t.Fatalf("a stored bad condition: %v", err)
 	}
 }

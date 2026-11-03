@@ -22,6 +22,7 @@ type triggerRequest struct {
 	OperNumber int                       `json:"operNumber"`
 	Sequence   int                       `json:"sequence"`
 	Condition  string                    `json:"condition"`
+	Event      domain.TriggerEvent       `json:"event"`
 	Function   domain.TriggerFunction    `json:"function"`
 	Repeatable bool                      `json:"repeatable"`
 	Operations []domain.TriggerOperation `json:"operations"`
@@ -55,14 +56,14 @@ func (a *API) createTriggerPoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cond, _ := domain.ParseCondition(req.Condition)
-	tp := domain.TriggerPoint{OperNumber: req.OperNumber, Sequence: req.Sequence, Condition: cond.String(), Function: req.Function,
+	tp := domain.TriggerPoint{OperNumber: req.OperNumber, Sequence: req.Sequence, Condition: cond.String(), Event: req.Event.Or(), Function: req.Function,
 		Operations: req.Operations, Repeatable: req.Repeatable}
 	if err := domain.CheckTriggerPoint(tp); err != nil {
 		a.refuse(w, r, problemFrom(err))
 		return
 	}
 	saved, created, err := a.store.CreateTriggerPoint(r.Context(), store.NewTriggerPoint{OrderID: id, OperNumber: tp.OperNumber,
-		Sequence: tp.Sequence, Condition: tp.Condition, Function: tp.Function, Operations: tp.Operations, Repeatable: tp.Repeatable,
+		Sequence: tp.Sequence, Condition: tp.Condition, Event: tp.Event, Function: tp.Function, Operations: tp.Operations, Repeatable: tp.Repeatable,
 		Actor: p.UserID, IdempotencyKey: key, RequestHash: hashOf(struct {
 			Order string
 			Req   triggerRequest
@@ -90,7 +91,10 @@ func validateTrigger(req triggerRequest, fields map[string]string) {
 		fields["sequence"] = fmt.Sprintf("must be a whole number from 1 to %d", maxSequence)
 	}
 	if strings.TrimSpace(req.Condition) == "" || len(req.Condition) > domain.MaxConditionLength {
-		fields["condition"] = fmt.Sprintf("is required, at most %d characters, for example 'qty_error > 0'", domain.MaxConditionLength)
+		fields["condition"] = fmt.Sprintf("is required, at most %d characters, for example 'qty_error > 0' or 'error_pct >= 5 and hours > 2'", domain.MaxConditionLength)
+	}
+	if !req.Event.Valid() {
+		fields["event"] = "must be feedback or operation-finished"
 	}
 	if !req.Function.Valid() {
 		fields["function"] = "must be insert-operations, create-rework-order, release-next, start-workflow or notify"

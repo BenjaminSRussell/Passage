@@ -184,7 +184,7 @@ func TestTriggers_AC2113(t *testing.T) {
 
 	evts := firedEvents(t, pool, o.ID)
 	if len(evts) != 3 || evts[0].Function != string(domain.FnInsertOperations) || !sameInts(evts[0].InsertedOperations, []int{25, 26}) ||
-		evts[0].Feedback.QtyError != "3" || evts[0].JournalID != j.ID || evts[0].Sequence != 10 || evts[0].Condition != "qty_error > 0" ||
+		evts[0].Feedback.QtyError != "3" || evts[0].JournalID == nil || *evts[0].JournalID != j.ID || evts[0].Event != "feedback" || evts[0].Sequence != 10 || evts[0].Condition != "qty_error > 0" ||
 		evts[1].Function != string(domain.FnNotify) || evts[2].ReworkOrderID == nil || *evts[2].ReworkOrderID != ro.ID || evts[2].Actor != "supervisor-1" {
 		t.Fatalf("triggerpoint.fired: %+v", evts)
 	}

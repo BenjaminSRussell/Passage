@@ -11,6 +11,7 @@ import {
   type CreateTriggerPointInput,
   type Problem,
   type ProductionOrder,
+  type TriggerEvent,
   type TriggerField,
   type TriggerFiring,
   type TriggerFunction,
@@ -18,7 +19,7 @@ import {
   type TriggerOperator,
   type TriggerPoint,
 } from "./api/client";
-import { dash, describeCondition, describeFiring, triggerFieldLabel, triggerFunctionLabel, triggerOperatorLabel } from "./labels";
+import { dash, describeCondition, describeFiring, triggerEventLabel, triggerFieldLabel, triggerFunctionLabel, triggerOperatorLabel } from "./labels";
 import styles from "./pages.module.css";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -41,12 +42,20 @@ const operationDecimalLabel: Record<OperationDecimal, string> = {
 
 export type TriggerOperationDraft = Record<"resourceId" | OperationDecimal, string>;
 
+/** The optional second comparison of a condition, joined to the first by and / or. */
+export type TriggerJoin = "" | "and" | "or";
+
 export interface TriggerDraft {
   operNumber: string;
   sequence: string;
+  event: TriggerEvent;
   field: TriggerField;
   operator: TriggerOperator;
   value: string;
+  join: TriggerJoin;
+  field2: TriggerField;
+  operator2: TriggerOperator;
+  value2: string;
   function: TriggerFunction;
   repeatable: boolean;
   operations: TriggerOperationDraft[];
@@ -64,9 +73,14 @@ export const emptyTriggerOperation = (): TriggerOperationDraft => ({
 export const emptyTrigger = (operNumber = ""): TriggerDraft => ({
   operNumber,
   sequence: "10",
+  event: "feedback",
   field: "qty_error",
   operator: ">",
   value: "0",
+  join: "",
+  field2: "hours",
+  operator2: ">",
+  value2: "0",
   function: "insert-operations",
   repeatable: false,
   operations: [emptyTriggerOperation()],
@@ -90,13 +104,21 @@ export function toTriggerInput(draft: TriggerDraft): { input?: CreateTriggerPoin
   if (!conditionValuePattern.test(draft.value)) {
     errors.value = "Enter a number with up to 6 decimals.";
   }
+  if (draft.join !== "" && !conditionValuePattern.test(draft.value2)) {
+    errors.value2 = "Enter a number with up to 6 decimals.";
+  }
   const input: CreateTriggerPointInput = {
     operNumber: Number(draft.operNumber),
     sequence: Number(draft.sequence),
-    condition: `${draft.field} ${draft.operator} ${draft.value}`,
+    condition:
+      `${draft.field} ${draft.operator} ${draft.value}` +
+      (draft.join === "" ? "" : ` ${draft.join} ${draft.field2} ${draft.operator2} ${draft.value2}`),
     function: draft.function,
     repeatable: draft.repeatable,
   };
+  if (draft.event !== "feedback") {
+    input.event = draft.event;
+  }
   if (routesOperations(draft.function)) {
     if (draft.operations.length === 0) {
       errors.operations = "Add at least one operation.";
@@ -144,11 +166,12 @@ const firingColumns: DataTableColumn<TriggerFiring & { sequence: number }>[] = [
   { key: "firedAt", header: "When", mono: true, render: (f) => at(f.firedAt) },
   { key: "operNumber", header: "Operation", align: "end" },
   { key: "sequence", header: "Sequence", align: "end" },
+  { key: "event", header: "On", render: (f) => triggerEventLabel[f.event] ?? f.event },
   { key: "function", header: "Function", render: (f) => triggerFunctionLabel[f.function] ?? f.function },
   {
     key: "feedback",
     header: "Feedback",
-    render: (f) => `${f.feedback.hours} h, ${f.feedback.qtyGood} good, ${f.feedback.qtyError} error`,
+    render: (f) => `${f.feedback.hours} h, ${f.feedback.qtyGood} good, ${f.feedback.qtyError} error${f.event === "operation-finished" ? " (totals)" : ""}`,
   },
   { key: "status", header: "Result", render: (f) => <Badge tone={f.status === "fired" ? "success" : "warning"}>{f.status === "fired" ? "Fired" : "Failed"}</Badge> },
   { key: "outcome", header: "What happened", render: (f) => describeFiring(f) },
@@ -162,7 +185,7 @@ export interface TriggerPointsPanelProps {
 
 /**
  * Trigger points of an order (FR-21.17, BR-21.13): rules on an operation evaluated when a route
- * card posts feedback on it. They insert rework operations after the operation, create a rework
+ * card or job card posts feedback on it, or when the operation finishes. They insert rework operations after the operation, create a rework
  * order for the error quantity, or notify; a failure is recorded and never blocks the post.
  */
 export function TriggerPointsPanel({ order, onOpenOrder }: TriggerPointsPanelProps) {
@@ -238,6 +261,7 @@ export function TriggerPointsPanel({ order, onOpenOrder }: TriggerPointsPanelPro
   const columns: DataTableColumn<TriggerPoint>[] = [
     { key: "operNumber", header: "Operation", align: "end" },
     { key: "sequence", header: "Sequence", align: "end" },
+    { key: "event", header: "On", render: (tp) => triggerEventLabel[tp.event] ?? tp.event },
     { key: "condition", header: "When", render: (tp) => describeCondition(tp.condition) },
     { key: "function", header: "Then", render: (tp) => triggerFunctionLabel[tp.function] ?? tp.function },
     { key: "operations", header: "Operations", render: describeOperations },
@@ -352,6 +376,17 @@ export function TriggerPointsPanel({ order, onOpenOrder }: TriggerPointsPanelPro
               <FormField id="tp-sequence" label="Sequence" error={errors.sequence}>
                 {(control) => <Input {...control} inputMode="numeric" value={draft.sequence} onChange={(e) => set({ sequence: e.target.value })} />}
               </FormField>
+              <FormField id="tp-event" label="Evaluated" hint="On each card line of the operation, or once when it finishes, against its totals.">
+                {(control) => (
+                  <Select {...control} value={draft.event} onChange={(e) => set({ event: e.target.value as TriggerEvent })}>
+                    {(Object.keys(triggerEventLabel) as TriggerEvent[]).map((ev) => (
+                      <option key={ev} value={ev}>
+                        {triggerEventLabel[ev]}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </FormField>
               <FormField id="tp-field" label="When">
                 {(control) => (
                   <Select {...control} value={draft.field} onChange={(e) => set({ field: e.target.value as TriggerField })}>
@@ -377,6 +412,44 @@ export function TriggerPointsPanel({ order, onOpenOrder }: TriggerPointsPanelPro
               <FormField id="tp-value" label="Value" error={errors.value}>
                 {(control) => <Input {...control} inputMode="decimal" value={draft.value} onChange={(e) => set({ value: e.target.value })} />}
               </FormField>
+              <FormField id="tp-join" label="And / or" optional hint="Add a second comparison.">
+                {(control) => (
+                  <Select {...control} value={draft.join} onChange={(e) => set({ join: e.target.value as TriggerJoin })}>
+                    <option value="">None</option>
+                    <option value="and">and</option>
+                    <option value="or">or</option>
+                  </Select>
+                )}
+              </FormField>
+              {draft.join !== "" ? (
+                <>
+                  <FormField id="tp-field2" label="Second comparison">
+                    {(control) => (
+                      <Select {...control} value={draft.field2} onChange={(e) => set({ field2: e.target.value as TriggerField })}>
+                        {(Object.keys(triggerFieldLabel) as TriggerField[]).map((f) => (
+                          <option key={f} value={f}>
+                            {triggerFieldLabel[f]}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
+                  </FormField>
+                  <FormField id="tp-operator2" label="Second comparison operator">
+                    {(control) => (
+                      <Select {...control} value={draft.operator2} onChange={(e) => set({ operator2: e.target.value as TriggerOperator })}>
+                        {(Object.keys(triggerOperatorLabel) as TriggerOperator[]).map((op) => (
+                          <option key={op} value={op}>
+                            {triggerOperatorLabel[op]}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
+                  </FormField>
+                  <FormField id="tp-value2" label="Second value" error={errors.value2}>
+                    {(control) => <Input {...control} inputMode="decimal" value={draft.value2} onChange={(e) => set({ value2: e.target.value })} />}
+                  </FormField>
+                </>
+              ) : null}
               <FormField id="tp-function" label="Then">
                 {(control) => (
                   <Select

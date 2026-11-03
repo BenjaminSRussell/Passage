@@ -24,7 +24,7 @@ func (f *fakeStore) CreateTriggerPoint(_ context.Context, in store.NewTriggerPoi
 		return store.TriggerPoint{}, false, f.triggerErr
 	}
 	return store.TriggerPoint{TriggerPoint: domain.TriggerPoint{ID: "tp-1", OrderID: in.OrderID, OperNumber: in.OperNumber, Sequence: in.Sequence,
-		Condition: in.Condition, Function: in.Function, Operations: in.Operations, Repeatable: in.Repeatable}, Firings: []store.TriggerFiring{}}, !f.triggerOld, nil
+		Condition: in.Condition, Event: in.Event, Function: in.Function, Operations: in.Operations, Repeatable: in.Repeatable}, Firings: []store.TriggerFiring{}}, !f.triggerOld, nil
 }
 
 func (f *fakeStore) ListTriggerPoints(context.Context, string) ([]store.TriggerPoint, error) {
@@ -71,6 +71,37 @@ func TestTrigger_CreatePassesTheDefinition(t *testing.T) {
 	rec = do(h, triggerCall(id, body, DutySetupWrite))
 	if rec.Code != http.StatusOK || rec.Header().Get("Idempotent-Replayed") != "true" {
 		t.Fatalf("replay: %d %v", rec.Code, rec.Header())
+	}
+}
+
+// A compound condition is stored canonically, the event defaults to feedback and can be
+// operation-finished.
+func TestTrigger_CreateEventAndCompoundCondition(t *testing.T) {
+	f := &fakeStore{}
+	_, h := newServer(t, f)
+	id := ids.New()
+	for _, tc := range []struct{ body, event, condition string }{
+		{`{"operNumber":20,"sequence":1,"condition":"qty_error>0","function":"notify"}`, "", ""},
+		{`{"operNumber":20,"sequence":1,"condition":"hours >= 2.0  and error_pct > 5 or qty_total == 0","function":"notify"}`, "feedback", "hours >= 2 and error_pct > 5 or qty_total == 0"},
+		{`{"operNumber":20,"sequence":2,"event":"operation-finished","condition":"qty_error > 0","function":"notify"}`, "operation-finished", "qty_error > 0"},
+	} {
+		if tc.event == "" {
+			expectProblem(t, do(h, triggerCall(id, tc.body, DutySetupWrite)), http.StatusUnprocessableEntity, domain.CodeTriggerCondition)
+			continue
+		}
+		rec := do(h, triggerCall(id, tc.body, DutySetupWrite))
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+		}
+		in := f.triggers[len(f.triggers)-1]
+		if string(in.Event) != tc.event || in.Condition != tc.condition {
+			t.Fatalf("passed: %+v", in)
+		}
+	}
+	rec := do(h, triggerCall(id, `{"operNumber":20,"sequence":3,"event":"start","condition":"hours > 1","function":"notify"}`, DutySetupWrite))
+	p := expectProblem(t, rec, http.StatusBadRequest, validationCode)
+	if _, ok := p.Errors["event"]; !ok {
+		t.Fatalf("no error for event: %v", p.Errors)
 	}
 }
 

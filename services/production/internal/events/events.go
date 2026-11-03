@@ -367,8 +367,9 @@ type OrderBOMEditedData struct {
 	Actor       string            `json:"actor"`
 }
 
-// TriggerFeedback is the route-card feedback a trigger point's condition was evaluated
-// against: the hours, good and error quantity reported on its operation.
+// TriggerFeedback is what a trigger point's condition was evaluated against: the hours, good
+// and error quantity reported on its operation, by the route card (event feedback) or in total
+// when the operation finished (event operation-finished).
 type TriggerFeedback struct {
 	Hours    string `json:"hours"`
 	QtyGood  string `json:"qtyGood"`
@@ -378,12 +379,14 @@ type TriggerFeedback struct {
 // TriggerPointFiredData is the payload of triggerpoint.fired.v1 (FR-21.17, BR-21.13).
 // Status is fired or failed; a failed function carries the reason and changed nothing.
 // InsertedOperations are the operation numbers insert-operations added; ReworkOrderID is
-// the order create-rework-order created. notify does nothing but publish this event.
+// the order create-rework-order created. notify does nothing but publish this event. JournalID
+// is the card that fed an event feedback firing and null for operation-finished.
 type TriggerPointFiredData struct {
 	FiringID           string          `json:"firingId"`
 	TriggerPointID     string          `json:"triggerPointId"`
 	OrderID            string          `json:"orderId"`
-	JournalID          string          `json:"journalId"`
+	Event              string          `json:"event"`
+	JournalID          *string         `json:"journalId"`
 	OperNumber         int             `json:"operNumber"`
 	Sequence           int             `json:"sequence"`
 	Condition          string          `json:"condition"`
