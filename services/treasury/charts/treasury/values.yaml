@@ -10,3 +10,13 @@ resources:
   requests: { cpu: 50m, memory: 64Mi }
   limits: { cpu: 250m, memory: 256Mi }
 serviceMonitor: { enabled: false }
+# Bank connectivity keys stay in Vault. Leave addr empty to switch it off; use
+# k8sRole (Vault Kubernetes auth) or tokenSecret (a Secret holding VAULT_TOKEN).
+vault:
+  addr: ""
+  k8sRole: ""
+  k8sMount: kubernetes
+  tokenSecret: ""
+  signingKeyName: ""
+  sftpKeyPath: ""
+  sftpKeyField: private_key

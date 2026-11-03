@@ -17,6 +17,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/api"
+	"github.com/BenjaminSRussell/passage/services/treasury/internal/bankconnect"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/store"
 	"github.com/BenjaminSRussell/passage/services/treasury/migrations"
 )
@@ -43,6 +44,13 @@ func run() error {
 			return fmt.Errorf("TREASURY_MAX_FILE_MB: %w", err)
 		}
 		maxMB = n
+	}
+	vault, err := bankconnect.LoadVaultConfig(os.Getenv)
+	if err != nil {
+		return err
+	}
+	if vault.Enabled() {
+		slog.Info("bank connectivity keys come from vault", "addr", vault.Addr, "signingKey", vault.SigningKeyName, "sftpKeyPath", vault.SFTPKeyPath)
 	}
 	pool, err := dbx.Connect(ctx, dsn)
 	if err != nil {

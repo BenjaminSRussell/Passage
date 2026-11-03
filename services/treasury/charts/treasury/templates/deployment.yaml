@@ -37,6 +37,30 @@ spec:
               value: {{ .Values.migrateOnStart | quote }}
             - name: TREASURY_MAX_FILE_MB
               value: {{ .Values.statement.maxFileMb | quote }}
+            {{- with .Values.vault }}
+            {{- if .addr }}
+            - name: VAULT_ADDR
+              value: {{ .addr | quote }}
+            {{- if .tokenSecret }}
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .tokenSecret }}
+                  key: VAULT_TOKEN
+            {{- else }}
+            - name: VAULT_K8S_ROLE
+              value: {{ required "vault.k8sRole or vault.tokenSecret is required" .k8sRole | quote }}
+            - name: VAULT_K8S_AUTH_MOUNT
+              value: {{ .k8sMount | quote }}
+            {{- end }}
+            - name: TREASURY_SIGNING_KEY_NAME
+              value: {{ .signingKeyName | quote }}
+            - name: TREASURY_SFTP_KEY_PATH
+              value: {{ .sftpKeyPath | quote }}
+            - name: TREASURY_SFTP_KEY_FIELD
+              value: {{ .sftpKeyField | quote }}
+            {{- end }}
+            {{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }
