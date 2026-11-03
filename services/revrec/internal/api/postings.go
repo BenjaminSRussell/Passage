@@ -209,6 +209,10 @@ type glReconciliationOut struct {
 	Recognized    string `json:"recognized"`
 	GLDebit       string `json:"glDebit"`
 	Difference    string `json:"difference"`
+	Deferred      string `json:"deferred"`
+	GLCredit      string `json:"glCredit"`
+	GLClosing     string `json:"glClosing"`
+	ClosingDiff   string `json:"closingDifference"`
 	Reconciled    bool   `json:"reconciled"`
 }
 
@@ -258,8 +262,12 @@ func (a *API) glReconciliation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	diff := rf.Recognized.Sub(bal.Debit)
+	glClosing := bal.Credit.Sub(bal.Debit)
+	closingDiff := rf.Closing.Sub(glClosing)
 	httpx.JSON(w, http.StatusOK, glReconciliationOut{
 		LegalEntityID: le, LedgerID: ledgerID, Currency: cur, Period: period, Account: store.DeferredAccount,
-		Recognized: fixed(rf.Recognized, cur), GLDebit: fixed(bal.Debit, cur), Difference: fixed(diff, cur), Reconciled: diff.IsZero(),
+		Recognized: fixed(rf.Recognized, cur), GLDebit: fixed(bal.Debit, cur), Difference: fixed(diff, cur),
+		Deferred: fixed(rf.Closing, cur), GLCredit: fixed(bal.Credit, cur), GLClosing: fixed(glClosing, cur), ClosingDiff: fixed(closingDiff, cur),
+		Reconciled: diff.IsZero() && closingDiff.IsZero(),
 	})
 }

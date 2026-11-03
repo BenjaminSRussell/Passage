@@ -95,6 +95,9 @@ func (f *fakeStore) ListContracts(_ context.Context, filter store.ContractFilter
 		if filter.CustomerID != "" && filter.CustomerID != c.CustomerID {
 			continue
 		}
+		if filter.OrderID != "" && filter.OrderID != c.OrderID {
+			continue
+		}
 		if filter.Method != "" && !hasMethod(c, filter.Method) {
 			continue
 		}
@@ -645,9 +648,35 @@ func TestListContracts_PagesAndFiltersByMethod(t *testing.T) {
 		t.Errorf("POINT_IN_TIME filter: %d items, want 3", len(p.Items))
 	}
 
-	bad := call(t, h, http.MethodGet, "/v1/revrec/contracts?cursor=bm9wZQ&method=BARTER", "", nil)
-	if p := decodeProblem(t, bad); bad.Code != http.StatusBadRequest || p.Errors["cursor"] == "" || p.Errors["method"] == "" {
-		t.Errorf("bad cursor and method %d %+v, want 400 with both field errors", bad.Code, p.Errors)
+	bad := call(t, h, http.MethodGet, "/v1/revrec/contracts?cursor=bm9wZQ&method=BARTER&orderId=x", "", nil)
+	if p := decodeProblem(t, bad); bad.Code != http.StatusBadRequest || p.Errors["cursor"] == "" || p.Errors["method"] == "" || p.Errors["orderId"] == "" {
+		t.Errorf("bad cursor, method and order %d %+v, want 400 with every field error", bad.Code, p.Errors)
+	}
+	if p := get("/v1/revrec/contracts?orderId=018f0000-0000-7000-8000-0000000000f2"); len(p.Items) != 1 {
+		t.Errorf("order filter: %d items, want the one goods contract", len(p.Items))
+	}
+}
+
+func TestAllocationRead_IsLimitedToTheContractOfOneOrder(t *testing.T) {
+	h := newHandler(newFakeStore())
+	created := decodeContract(t, postContract(t, h, bundleContract, "alloc-read"))
+	const order = "018f0000-0000-7000-8000-00000000000f"
+	read := func(path string) int {
+		return callAs(t, h, http.MethodGet, path, "", dutyAllocationRead, entityID, nil).Code
+	}
+	for path, want := range map[string]int{
+		"/v1/revrec/contracts":                                                      http.StatusBadRequest,
+		"/v1/revrec/contracts?orderId=" + order:                                     http.StatusOK,
+		"/v1/revrec/contracts/" + created.ID:                                        http.StatusNotFound,
+		"/v1/revrec/contracts/" + created.ID + "?orderId=" + ids.New():              http.StatusNotFound,
+		"/v1/revrec/contracts/" + created.ID + "?orderId=" + strings.ToUpper(order): http.StatusOK,
+	} {
+		if got := read(path); got != want {
+			t.Errorf("allocation reader GET %s = %d, want %d", path, got, want)
+		}
+	}
+	if rec := call(t, h, http.MethodGet, "/v1/revrec/contracts", "", nil); rec.Code != http.StatusOK {
+		t.Errorf("revrec.view list without orderId = %d, want 200", rec.Code)
 	}
 }
 

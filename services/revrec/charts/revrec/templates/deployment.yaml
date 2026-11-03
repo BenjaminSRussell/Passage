@@ -55,6 +55,10 @@ spec:
                   key: DATABASE_URL
             - name: PASSAGE_SERVICE_NAME
               value: revrec
+            {{- with .Values.serviceIdentity.publicKeys }}
+            - name: PASSAGE_SERVICE_PUBLIC_KEYS
+              value: {{ . | quote }}
+            {{- end }}
             {{- if .Values.ledgerUrl }}
             - name: LEDGER_URL
               value: {{ .Values.ledgerUrl | quote }}
