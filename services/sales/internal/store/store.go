@@ -338,13 +338,23 @@ type Store interface {
 	ResolveIntakeError(ctx context.Context, id string, version int, note, actor string, now time.Time) (IntakeError, error)
 	GetParameters(ctx context.Context, legalEntityID string) (SalesParameters, error)
 	PutParameters(ctx context.Context, in SalesParameters, version int, actor string) (SalesParameters, error)
+	CreateReturnOrder(ctx context.Context, in NewReturnOrder) (ReturnOrder, bool, error)
+	GetReturnOrder(ctx context.Context, id string) (ReturnOrder, error)
+	ListReturnOrders(ctx context.Context, f ReturnOrderFilter) ([]ReturnOrder, error)
+	AuthorizeReturnOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ReturnOrder, error)
+	ReceiveReturnOrder(ctx context.Context, id string, version int, lines []ReceiveLine, actor string, now time.Time) (ReturnOrder, error)
+	InspectReturnOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ReturnOrder, error)
+	DispositionReturnOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ReturnOrder, error)
+	CreditReturnOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ReturnOrder, error)
 	Ping(ctx context.Context) error
 }
 
 // Postgres implements Store on a pool whose role is subject to RLS.
 type Postgres struct {
-	pool  *pgxpool.Pool
-	crypt *fieldcrypt.Keys
+	pool      *pgxpool.Pool
+	crypt     *fieldcrypt.Keys
+	inventory InventoryReceiver
+	ar        ARCreditor
 }
 
 // New returns a Postgres store.

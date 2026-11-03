@@ -62,6 +62,9 @@ func (f *fakeStore) ApplyPayment(_ context.Context, id string, version int, plan
 	return store.ApplyResult{Payment: store.Payment{ID: id, Version: version + 1, Status: "APPLIED"}}, nil
 }
 func (f *fakeStore) Ping(context.Context) error { return nil }
+func (f *fakeStore) PostRMACredit(context.Context, store.RMACredit) (store.RMACreditNote, error) {
+	return store.RMACreditNote{}, nil
+}
 
 // Collections, dunning and interest stubs; collectionsFake overrides them.
 func (f *fakeStore) OpenDispute(context.Context, store.Dispute, string) (store.Dispute, error) {

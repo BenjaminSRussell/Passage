@@ -11,6 +11,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/store"
 	"github.com/BenjaminSRussell/passage/services/receivables/migrations"
@@ -47,7 +48,13 @@ func run() error {
 			return err
 		}
 	}
-	h := api.New(store.New(pool))
+	s := store.New(pool)
+	if gl, err := ledgerclient.FromEnv(os.Getenv, "receivables"); err != nil {
+		return err
+	} else if gl != nil {
+		s.WithLedger(gl)
+	}
+	h := api.New(s)
 	r := httpx.NewRouter()
 	h.Register(r)
 	admin := http.NewServeMux()

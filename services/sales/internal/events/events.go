@@ -48,6 +48,12 @@ var (
 	OrderProgressRecorded = events.Type(Context, "orderprogress", "recorded", 1)
 
 	OrderRemainderCancelled = events.Type(Context, "order", "remaindercancelled", 1)
+
+	ReturnOrderAuthorized    = events.Type(Context, "returnorder", "authorized", 1)
+	ReturnOrderReceived      = events.Type(Context, "returnorder", "received", 1)
+	ReturnOrderInspected     = events.Type(Context, "returnorder", "inspected", 1)
+	ReturnOrderDispositioned = events.Type(Context, "returnorder", "dispositioned", 1)
+	ReturnOrderCredited      = events.Type(Context, "returnorder", "credited", 1)
 )
 
 // All lists every event type this service publishes.
@@ -57,7 +63,8 @@ func All() []string {
 		QuotationConverted, QuotationExpired, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
 		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted, ParametersChanged, IntakeErrorRecorded, IntakeErrorResolved,
 		OrderChangeRequested, OrderChangeApproved, OrderChangeRejected, OrderChangeWithdrawn, ChangePolicyChanged,
-		DeliveryTermsCreated, DeliveryTermsChanged, OrderProgressRecorded, OrderRemainderCancelled}
+		DeliveryTermsCreated, DeliveryTermsChanged, OrderProgressRecorded, OrderRemainderCancelled,
+		ReturnOrderAuthorized, ReturnOrderReceived, ReturnOrderInspected, ReturnOrderDispositioned, ReturnOrderCredited}
 }
 
 // PromisedSlice is one schedule line of an ATP promise.
@@ -496,4 +503,35 @@ type OrderProgressData struct {
 	OrderStatus    string         `json:"order_status"`
 	Actor          string         `json:"actor"`
 	Version        int            `json:"version"`
+}
+
+// ReturnOrderLine is one line on a return-order event.
+type ReturnOrderLine struct {
+	LineID             string  `json:"line_id"`
+	LineNo             int     `json:"line_no"`
+	ProductID          string  `json:"product_id"`
+	Disposition        string  `json:"disposition,omitempty"`
+	QuantityExpected   string  `json:"quantity_expected"`
+	QuantityReceived   string  `json:"quantity_received"`
+	UnitPrice          string  `json:"unit_price"`
+	Restocking         string  `json:"restocking"`
+	InventoryReceiptID *string `json:"inventory_receipt_id,omitempty"`
+}
+
+// ReturnOrderData is the data member of returnorder.*.v1 (FR-30.11).
+type ReturnOrderData struct {
+	ReturnOrderID    string            `json:"return_order_id"`
+	RMANumber        string            `json:"rma_number"`
+	LegalEntityID    string            `json:"legal_entity_id"`
+	CustomerID       string            `json:"customer_id"`
+	Status           string            `json:"status"`
+	Currency         string            `json:"currency"`
+	Gross            string            `json:"gross"`
+	Restocking       string            `json:"restocking"`
+	Net              string            `json:"net"`
+	CreditNoteID     *string           `json:"credit_note_id,omitempty"`
+	JournalPostingID *string           `json:"journal_posting_id,omitempty"`
+	Lines            []ReturnOrderLine `json:"lines"`
+	Actor            string            `json:"actor"`
+	Version          int               `json:"version"`
 }

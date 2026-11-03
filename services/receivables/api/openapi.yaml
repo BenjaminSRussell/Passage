@@ -1351,6 +1351,31 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/rma-credits:
+    post:
+      operationId: postRMACredit
+      summary: Post an RMA credit note (AC-30.5)
+      description: |
+        Sales calls this after a return order is dispositioned. Creates a CREDIT_NOTE open item
+        (negative amount) keyed by `CN-{rmaNumber}` and posts Dr 4000 gross / Cr 4200 restocking /
+        Cr 1200 net when a ledger id is supplied. A repeat of the same RMA number in the legal
+        entity returns the stored open item.
+      x-passage-duty: ARPaymentPost
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RMACreditRequest" }
+      responses:
+        "201":
+          description: Credit note posted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RMACreditNote" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
 components:
   securitySchemes:
     bearerAuth:
@@ -2143,3 +2168,27 @@ components:
           type: array
           description: The OPEN deductions a split created; present on a single read of a SPLIT deduction.
           items: { $ref: "#/components/schemas/Deduction" }
+    RMACreditRequest:
+      type: object
+      required: [rmaId, rmaNumber, customerId, legalEntityId, currency, postingDate, gross, restocking, net]
+      properties:
+        rmaId: { type: string, format: uuid }
+        rmaNumber: { type: string, minLength: 1 }
+        customerId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        postingDate: { type: string, format: date }
+        ledgerId: { type: string, format: uuid, description: When set, the credit posts Dr 4000 / Cr 4200 / Cr 1200 through the ledger }
+        gross: { $ref: "#/components/schemas/Money" }
+        restocking: { $ref: "#/components/schemas/Money" }
+        net: { $ref: "#/components/schemas/Money" }
+    RMACreditNote:
+      type: object
+      required: [openItemId, documentNumber, gross, restocking, net]
+      properties:
+        openItemId: { type: string, format: uuid }
+        documentNumber: { type: string }
+        journalPostingId: { type: string }
+        gross: { $ref: "#/components/schemas/Money" }
+        restocking: { $ref: "#/components/schemas/Money" }
+        net: { $ref: "#/components/schemas/Money" }

@@ -158,6 +158,13 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | GET | `/v1/sales/intake-errors`, `/v1/sales/intake-errors/{id}` | `sales.order.read` | Channel orders refused at intake (`legalEntityId`, `channel`, `status`, `errorCode`, `limit`), most recently seen first; a retry of the same payload raises `attempts` and reopens a resolved row. The payload is not kept, only its hash |
 | POST | `/v1/sales/intake-errors/{id}:resolve` | `sales.order.write` | Close an OPEN intake error with a `note` (`If-Match`; `SLS-0116` when already resolved) |
 | POST | `/v1/sales/alternative-items:evaluate` | `sales.order.read` | Stateless: when the ordered product cannot ship the whole quantity by the requested date, the applicable alternatives that can, each with its available quantity and promise, from ATP buckets in the request |
+| GET / POST | `/v1/sales/return-orders` | `sales.order.read` / `sales.order.write` | List (`legalEntityId`, `customerId`, `status`, `limit`); create a REQUESTED RMA (`Idempotency-Key`, numbered `RMA-`, CREDIT_ONLY or RETURN_TO_STOCK) |
+| GET | `/v1/sales/return-orders/{id}` | `sales.order.read` | The RMA with lines; ETag = version |
+| POST | `/v1/sales/return-orders/{id}:authorize` | `sales.order.write` | `If-Match`; REQUESTED → AUTHORIZED with 30-day validity |
+| POST | `/v1/sales/return-orders/{id}:receive` | `sales.order.write` | `If-Match`; AUTHORIZED → RECEIVED; RETURN_TO_STOCK restocks at original cost (`SLS-0120` if expired) |
+| POST | `/v1/sales/return-orders/{id}:inspect` | `sales.order.write` | `If-Match`; RECEIVED → INSPECTED |
+| POST | `/v1/sales/return-orders/{id}:disposition` | `sales.order.write` | `If-Match`; INSPECTED → DISPOSITIONED |
+| POST | `/v1/sales/return-orders/{id}:credit` | `sales.order.write` | `If-Match`; posts the credit note (restocking, AR, GL) and closes the RMA (`SLS-0121` when receivables is not configured) |
 | GET | `/readyz` | none | Postgres `SELECT` within 500 ms |
 
 ## Rules implemented
@@ -360,6 +367,10 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0114` | 403 | Only the user who requested a change can withdraw it |
 | `SLS-0115` | 404 | Intake error not found |
 | `SLS-0116` | 409 | Intake error is already resolved |
+| `SLS-0118` | 404 | Return order not found |
+| `SLS-0119` | 409 | Return order is not in the status the command requires |
+| `SLS-0120` | 409 | Return order has expired |
+| `SLS-0121` | 503 | Receivables is not configured; the credit note cannot be posted |
 | `idempotency_key_reuse` | 422 | Same `Idempotency-Key` with a different body (kernel) |
 | `COM-0001` | 400 | Request failed validation; field errors in `errors` |
 | `AUTH-0001` | 401 | Missing or malformed tenant |

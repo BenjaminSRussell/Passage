@@ -23,6 +23,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/domain"
@@ -199,11 +200,15 @@ type Store interface {
 	Statement(ctx context.Context, legalEntityID, customerID string, asOf time.Time) ([]domain.StatementSection, error)
 	RunAgingSnapshot(ctx context.Context, legalEntityID string, asOf time.Time) (SnapshotResult, error)
 	ListBalanceSnapshots(ctx context.Context, f SnapshotFilter, limit int) ([]BalanceSnapshot, error)
+	PostRMACredit(ctx context.Context, in RMACredit) (RMACreditNote, error)
 	Ping(ctx context.Context) error
 }
 
 // Postgres implements Store on pgx.
-type Postgres struct{ pool *pgxpool.Pool }
+type Postgres struct {
+	pool   *pgxpool.Pool
+	ledger ledgerclient.Ledger
+}
 
 // New returns a Postgres store over pool.
 func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
