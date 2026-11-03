@@ -12,6 +12,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/engineering/internal/api"
 	"github.com/BenjaminSRussell/passage/services/engineering/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/engineering/internal/store"
@@ -67,6 +68,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	slog.WarnContext(ctx, "fail-closed ECO approver bound, :release returns 503 until a workflow approver is wired", "err", errApproverNotConfigured)
 	a := api.New(store.New(pool), failClosedApprover{}, time.Now)
+	if u := getenv("AUDIT_URL"); u != "" {
+		signer, err := tenant.ServiceSignerFromEnv(getenv)
+		if err != nil {
+			return fmt.Errorf("audit signer: %w", err)
+		}
+		a.WithAuditor(api.NewHTTPAuditor(u, signer))
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

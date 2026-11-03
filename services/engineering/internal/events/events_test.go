@@ -11,7 +11,7 @@ import (
 )
 
 func TestEventTypes_Valid(t *testing.T) {
-	for _, typ := range []string{events.ResourceChanged, events.CalendarGenerated, events.RouteVersionActivated, events.EcrSubmitted, events.EcrApproved, events.EcrRejected, events.EcrCancelled} {
+	for _, typ := range []string{events.ResourceChanged, events.CalendarGenerated, events.RouteVersionActivated, events.EcrSubmitted, events.EcrApproved, events.EcrRejected, events.EcrCancelled, events.ReleaseSessionCreated, events.ReleaseLineAccepted, events.ReleasedProductChanged, events.DocumentSigned, events.DocumentReleased, events.EbomImported} {
 		if !platformevents.ValidType(typ) {
 			t.Errorf("%s is not a valid event type", typ)
 		}
@@ -33,6 +33,9 @@ func TestPayloads_MatchAsyncAPI(t *testing.T) {
 		{"calendarGenerated", events.CalendarGenerated, events.CalendarGeneratedData{}},
 		{"ecrSubmitted", events.EcrSubmitted, events.EcrData{DecidedBy: "d"}},
 		{"ecoSubmitted", events.EcoSubmitted, events.EcoData{ApproverID: "a", EcrID: "e", ReleaseDate: "2026-01-01"}},
+		{"releaseSessionCreated", events.ReleaseSessionCreated, events.ReleaseSessionCreatedData{Source: "eco"}},
+		{"documentSigned", events.DocumentSigned, events.DocumentSignedData{SignedAt: "2026-07-01T12:00:00Z"}},
+		{"ebomImported", events.EbomImported, events.EbomImportedData{Added: 1, Exceptions: 0}},
 	}
 	for _, tc := range cases {
 		start := strings.Index(spec, "    "+tc.message+":\n")

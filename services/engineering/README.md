@@ -4,7 +4,7 @@ Wave 9 (PSG-9): engineering data for the `product` context: BOMs, routings, engi
 
 ## Layout
 
-- `cmd/engineering/main.go`: wiring. Env: `DATABASE_URL` (required, from Secret `engineering-db`), `MIGRATE_ON_START=true` (dev only), `HTTP_ADDR` (default `:8080`), `ADMIN_ADDR` (default `:9090`, serves `/metrics`).
+- `cmd/engineering/main.go`: wiring. Env: `DATABASE_URL` (required, from Secret `engineering-db`), `MIGRATE_ON_START=true` (dev only), `HTTP_ADDR` (default `:8080`), `ADMIN_ADDR` (default `:9090`, serves `/metrics`), `AUDIT_URL` (optional; when set, Part 11 signatures are posted to `POST /v1/audit/changes` with an `engineering → audit.write` service token).
 - `internal/domain/bom.go`: as-of version resolution, multi-level explosion, implosion (where-used), cycle and overlap checks, cost roll-up skeleton.
 - `internal/domain/routing.go`: operation DAG validation and lead time (sequential sum, parallel branches take the max and a secondary starts with its primary, efficiency, overlap transfer batches).
 - `internal/domain/eco.go`: ECO state machine, `Approver` seam to the Temporal approval workflow, release plan (expire old at `release_date - 1`, activate new).
@@ -32,6 +32,9 @@ Wave 9 (PSG-9): engineering data for the `product` context: BOMs, routings, engi
 | `POST /v1/engineering/calendars`, `POST /v1/engineering/calendars/{id}:generate`, `POST /v1/engineering/resource-groups`, `POST /v1/engineering/capabilities`, `POST /v1/engineering/resources` | `engineering.resource.write` |
 | `GET /v1/engineering/calendars/{id}/days`, `GET /v1/engineering/resources/{id}`, `GET /v1/engineering/resources`, `GET /v1/engineering/resource-groups`, `GET /v1/engineering/capabilities` | `engineering.read` |
 | `POST /v1/engineering/route-versions/{id}:activate` | `engineering.route.write` |
+| `POST/GET /v1/engineering/organizations`, nomenclatures, categories, versions; `PUT /identifiers`; `POST/GET` release policies, sessions, readiness policies, document types, documents, eBOM imports | `engineering.bom.write` / `engineering.read` |
+| `POST /v1/engineering/release-lines/{id}:accept`, `:reject`; `POST /released-products/{id}/checks/{key}:sign` | `engineering.release.accept` |
+| `POST /v1/engineering/documents/{id}:sign` | `engineering.doc.sign` (re-auth via `X-Passage-Reauth-Assertion`, meaning, timestamp, record id, then `POST /v1/audit/changes`) |
 
 Calendar, group, capability and resource creates honour `Idempotency-Key` (a different body under the same key is 422 `idempotency_key_reuse`); `:generate` is state-based, so a repeat upserts the same days. A calendar template is exactly seven day patterns, Monday first. `GET /resources/{id}` returns capabilities and `effectiveCalendarId`. Malformed bodies are 400 `COM-0001` with an `errors` map. Counters: `engineering_calendars_created_total`, `engineering_resources_created_total`, `engineering_resource_requests_failed_total`.
 
@@ -47,7 +50,7 @@ Lists page by id with `limit` (1 to 100) and `cursor`, answer `{items, nextCurso
 
 ## Event types
 
-The PRD names `dev.passage.engineering.bom.version.activated.v1`, which has four segments after the context and fails `platform/go/events.ValidType`. The entity is folded into one segment instead: `bomversion`, `routeversion` is reserved the same way (as `releasedproduct` is in the product service). Emitted: `bomversion.activated`, `bomversion.expired`, `eco.submitted`, `eco.approved`, `eco.released`, `resource.changed`, `calendar.generated`.
+The PRD names `dev.passage.engineering.bom.version.activated.v1`, which has four segments after the context and fails `platform/go/events.ValidType`. The entity is folded into one segment instead: `bomversion`, `routeversion` is reserved the same way (as `releasedproduct` is in the product service). Emitted: `bomversion.activated`, `bomversion.expired`, `eco.submitted`, `eco.approved`, `eco.released`, `resource.changed`, `calendar.generated`, `releasesession.created`, `releaseline.accepted`, `releasedproduct.changed`, `document.signed`, `document.released`, `ebom.imported`.
 
 ## Dependencies
 

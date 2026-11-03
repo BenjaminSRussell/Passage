@@ -901,6 +901,649 @@ paths:
           description: ENG-RES-IN-USE, an active route version requires this resource directly; change the route first. Requirements by group, capability or type do not block.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/organizations:
+    post:
+      operationId: createOrganization
+      summary: Create an engineering organization
+      x-passage-duty: engineering.bom.write
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/EngineeringOrganization' } } }
+      responses:
+        '201':
+          description: Organization created, or the original on an Idempotency-Key replay.
+          content: { application/json: { schema: { $ref: '#/components/schemas/EngineeringOrganization' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listOrganizations
+      summary: List engineering organizations
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of engineering organizations ordered by id.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/EngineeringOrganization' } }, nextCursor: { type: string } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/organizations/{id}:
+    get:
+      operationId: getOrganization
+      summary: Get an engineering organization
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The engineering organization.
+          content: { application/json: { schema: { $ref: '#/components/schemas/EngineeringOrganization' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/nomenclatures:
+    post:
+      operationId: createNomenclature
+      summary: Create a version nomenclature
+      x-passage-duty: engineering.bom.write
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Nomenclature' } } }
+      responses:
+        '201':
+          description: Nomenclature created, or the original on an Idempotency-Key replay.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Nomenclature' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listNomenclatures
+      summary: List version nomenclatures
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of nomenclatures ordered by id.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Nomenclature' } }, nextCursor: { type: string } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/nomenclatures/{id}:
+    get:
+      operationId: getNomenclature
+      summary: Get a version nomenclature
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The nomenclature.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Nomenclature' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/nomenclatures/{id}:next:
+    get:
+      operationId: nextNomenclature
+      summary: Allocate the next version code
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: last, in: query, schema: { type: string }, description: Previous version code; empty starts at each segment's start. }
+      responses:
+        '200':
+          description: The next version code. Overflow is 422 ENG-NOMEN-OVERFLOW.
+          content: { application/json: { schema: { type: object, required: [next], properties: { next: { type: string } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/categories:
+    post:
+      operationId: createCategory
+      summary: Create an engineering category
+      x-passage-duty: engineering.bom.write
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/EngineeringCategory' } } }
+      responses:
+        '201':
+          description: Category created, or the original on an Idempotency-Key replay.
+          content: { application/json: { schema: { $ref: '#/components/schemas/EngineeringCategory' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listCategories
+      summary: List engineering categories
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of categories ordered by id.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/EngineeringCategory' } }, nextCursor: { type: string } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/categories/{id}:
+    get:
+      operationId: getCategory
+      summary: Get an engineering category
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The category.
+          content: { application/json: { schema: { $ref: '#/components/schemas/EngineeringCategory' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/versions:
+    post:
+      operationId: createEngineeringVersion
+      summary: Create an engineering version
+      x-passage-duty: engineering.bom.write
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/EngineeringVersion' } } }
+      responses:
+        '201':
+          description: Engineering version created, or the original on an Idempotency-Key replay.
+          content: { application/json: { schema: { $ref: '#/components/schemas/EngineeringVersion' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listEngineeringVersions
+      summary: List engineering versions
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: productId, in: query, schema: { type: string, maxLength: 64 } }
+      responses:
+        '200':
+          description: One page of engineering versions ordered by id.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/EngineeringVersion' } }, nextCursor: { type: string } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/versions/{id}:
+    get:
+      operationId: getEngineeringVersion
+      summary: Get an engineering version
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The engineering version.
+          content: { application/json: { schema: { $ref: '#/components/schemas/EngineeringVersion' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/identifiers:
+    put:
+      operationId: putIdentifier
+      summary: Map an external part identifier to a product
+      x-passage-duty: engineering.bom.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ProductIdentifier' } } }
+      responses:
+        '200':
+          description: The identifier is stored and used by eBOM import.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ProductIdentifier' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/release-policies:
+    post:
+      operationId: createReleasePolicy
+      summary: Create a product-release policy
+      x-passage-duty: engineering.bom.write
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReleasePolicy' } } }
+      responses:
+        '201':
+          description: Policy created, or the original on an Idempotency-Key replay.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReleasePolicy' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listReleasePolicies
+      summary: List product-release policies
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of release policies ordered by id.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/ReleasePolicy' } }, nextCursor: { type: string } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/release-policies/{id}:
+    get:
+      operationId: getReleasePolicy
+      summary: Get a product-release policy
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The release policy.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReleasePolicy' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/site-mappings:
+    put:
+      operationId: putSiteMapping
+      summary: Map an engineering site onto an operational site
+      x-passage-duty: engineering.bom.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SiteMapping' } } }
+      responses:
+        '200':
+          description: The site mapping used when a release line is accepted.
+          content: { application/json: { schema: { $ref: '#/components/schemas/SiteMapping' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/release-sessions:
+    post:
+      operationId: createReleaseSession
+      summary: Send an engineering version to operational legal entities
+      x-passage-duty: engineering.bom.write
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReleaseSession' } } }
+      responses:
+        '201':
+          description: Session created with one line per legal entity, or the original on an Idempotency-Key replay.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReleaseSession' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listReleaseSessions
+      summary: List product-release sessions
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of release sessions ordered by id.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/ReleaseSession' } }, nextCursor: { type: string } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/release-sessions/{id}:
+    get:
+      operationId: getReleaseSession
+      summary: Get a product-release session with its lines
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The session and its lines.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReleaseSession' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/release-lines:
+    get:
+      operationId: listReleaseLines
+      summary: List product-release lines
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [pending, sent, accepted, rejected, failed] } }
+        - { name: legalEntityId, in: query, schema: { type: string, maxLength: 64 } }
+      responses:
+        '200':
+          description: One page of release lines ordered by id.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/ReleaseLine' } }, nextCursor: { type: string } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/release-lines/{id}:accept:
+    post:
+      operationId: acceptReleaseLine
+      summary: Accept a product-release line
+      x-passage-duty: engineering.release.accept
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { reason: { type: string, maxLength: 200 } } } } }
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The accepted line. Copies the engineering BOM onto the operational site when the policy says so (AC-9.11).
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReleaseLine' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: ENG-RELEASE-STATE, the line is not waiting for acceptance.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/release-lines/{id}:reject:
+    post:
+      operationId: rejectReleaseLine
+      summary: Reject a product-release line
+      x-passage-duty: engineering.release.accept
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { reason: { type: string, maxLength: 200 } } } } }
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The rejected line.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReleaseLine' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/readiness-policies:
+    post:
+      operationId: createReadinessPolicy
+      summary: Create a product-readiness policy
+      x-passage-duty: engineering.bom.write
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReadinessPolicy' } } }
+      responses:
+        '201':
+          description: Policy created, or the original on an Idempotency-Key replay.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReadinessPolicy' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listReadinessPolicies
+      summary: List product-readiness policies
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of readiness policies ordered by id.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/ReadinessPolicy' } }, nextCursor: { type: string } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/readiness-policies/{id}:
+    get:
+      operationId: getReadinessPolicy
+      summary: Get a product-readiness policy
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The readiness policy.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReadinessPolicy' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/released-products:
+    get:
+      operationId: listReleasedProducts
+      summary: List products released to operational legal entities
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: legalEntityId, in: query, schema: { type: string, maxLength: 64 } }
+      responses:
+        '200':
+          description: One page of released products ordered by id.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/ReleasedProduct' } }, nextCursor: { type: string } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/released-products/{id}:
+    get:
+      operationId: getReleasedProduct
+      summary: Get a released product and its readiness checks
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The released product and its latest check results.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReleasedProduct' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/released-products/{id}:process-policy:
+    get:
+      operationId: processPolicy
+      summary: Ask whether a process may use this released product
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: process, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Process-policy code for the product's current readiness state (AC-9.12). Pending sales_order is PRD-LC-BLOCKED.
+          content: { application/json: { schema: { type: object, required: [code, state], properties: { code: { type: string }, state: { type: string } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/released-products/{id}/checks/{key}:sign:
+    post:
+      operationId: signReadinessCheck
+      summary: Sign a mandatory readiness check
+      x-passage-duty: engineering.release.accept
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: key, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The released product after the check is signed. The session creator cannot sign (403 ENG-READINESS-SELF-SIGN).
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReleasedProduct' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/document-types:
+    post:
+      operationId: createDocumentType
+      summary: Create an engineering document type
+      x-passage-duty: engineering.bom.write
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DocumentType' } } }
+      responses:
+        '201':
+          description: Document type created, or the original on an Idempotency-Key replay.
+          content: { application/json: { schema: { $ref: '#/components/schemas/DocumentType' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listDocumentTypes
+      summary: List engineering document types
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of document types ordered by id.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/DocumentType' } }, nextCursor: { type: string } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/document-types/{code}:
+    get:
+      operationId: getDocumentType
+      summary: Get an engineering document type by code
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string, maxLength: 64 } }
+      responses:
+        '200':
+          description: The document type.
+          content: { application/json: { schema: { $ref: '#/components/schemas/DocumentType' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/documents:
+    post:
+      operationId: createDocument
+      summary: Create an engineering document version
+      x-passage-duty: engineering.bom.write
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Document' } } }
+      responses:
+        '201':
+          description: Document created in_work, or the original on an Idempotency-Key replay.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Document' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listDocuments
+      summary: List engineering documents
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: number, in: query, schema: { type: string, maxLength: 64 } }
+      responses:
+        '200':
+          description: One page of documents ordered by id.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Document' } }, nextCursor: { type: string } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/documents/{id}:
+    get:
+      operationId: getDocument
+      summary: Get an engineering document version
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The document with its originals and links.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Document' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/documents/{id}:transition:
+    post:
+      operationId: transitionDocument
+      summary: Move a document along its status network
+      x-passage-duty: engineering.bom.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [to], properties: { to: { type: string, enum: [in_work, in_review, released, obsolete, cancelled] } } } } }
+      responses:
+        '200':
+          description: The document in the new status. A signature-required edge is 409 ENG-DOC-SIGNED; use :sign instead.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Document' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/documents/{id}:sign:
+    post:
+      operationId: signDocument
+      summary: Electronically sign a document (21 CFR Part 11)
+      x-passage-duty: engineering.doc.sign
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: X-Passage-Reauth-Assertion, in: header, required: true, schema: { type: string }, description: Step-up assertion from re-authentication of the signer (21 CFR 11.200). The acting user must match the assertion. }
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { printedName: { type: string }, method: { type: string }, to: { type: string } } } } }
+      responses:
+        '200':
+          description: The signed document. Records meaning, timestamp, record id and originals hash, then posts an immutable change to the audit service.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Document' } } }
+        '403':
+          description: ENG-DOC-REAUTH, missing or mismatched re-authentication; ENG-DOC-SIGNER, the last editor cannot independently review their own document.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/documents/{id}/signatures:
+    get:
+      operationId: listSignatures
+      summary: List Part 11 signatures on a document
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Append-only signature manifestations for this document.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/DocumentSignature' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/documents/{id}/where-used:
+    get:
+      operationId: documentWhereUsed
+      summary: Find every product, BOM and route that names this document
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Where-used rows for the document number.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/DocumentWhereUsed' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/documents/{id}/structure:
+    put:
+      operationId: setDocumentStructure
+      summary: Set a document's child documents
+      x-passage-duty: engineering.bom.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [children], properties: { children: { type: array, items: { type: string, format: uuid } } } } } }
+      responses:
+        '200':
+          description: The child list as stored. A cycle is 422 ENG-DOC-CYCLE.
+          content: { application/json: { schema: { type: object, required: [children], properties: { children: { type: array, items: { type: string, format: uuid } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/ebom-imports:
+    post:
+      operationId: importEbom
+      summary: Import an engineering BOM from CAD or PLM
+      x-passage-duty: engineering.bom.write
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/EbomImport' } } }
+      responses:
+        '201':
+          description: Import stored as a draft engineering BOM. Unknown part numbers become ENG-EBOM-PART-UNKNOWN exceptions (AC-9.17). A released revision is 409 ENG-EBOM-REVISION-RELEASED.
+          content: { application/json: { schema: { $ref: '#/components/schemas/EbomImport' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listEbomImports
+      summary: List eBOM imports
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of eBOM imports ordered by id.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/EbomImport' } }, nextCursor: { type: string } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/ebom-imports/{id}:
+    get:
+      operationId: getEbomImport
+      summary: Get an eBOM import
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The import, its exceptions and the eBOM-versus-mBOM comparison.
+          content: { application/json: { schema: { $ref: '#/components/schemas/EbomImport' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
       operationId: liveness
@@ -1098,7 +1741,7 @@ components:
     Eco:
       type: object
       additionalProperties: false
-      required: [number, replaces]
+      required: [number]
       properties:
         id: { type: string, format: uuid }
         number: { type: string, maxLength: 40 }
@@ -1108,7 +1751,8 @@ components:
         createdBy: { type: string, readOnly: true, description: The user who created the ECO; they cannot decide it. }
         decisionReason: { type: string, readOnly: true, maxLength: 200 }
         ecrId: { type: string, format: uuid, description: 'Optional. The approved ECR this ECO carries out. Every replaced product must be listed on the ECR (422 ENG-ECR-PRODUCT), the ECR must be approved (409 ENG-ECR-NOT-APPROVED) and have no other live ECO (409 ENG-ECR-CONVERTED).' }
-        replaces: { type: array, minItems: 1, items: { type: object, required: [oldVersionId, newVersionId], properties: { oldVersionId: { type: string, format: uuid }, newVersionId: { type: string, format: uuid } } } }
+        replaces: { type: array, items: { type: object, required: [oldVersionId, newVersionId], properties: { oldVersionId: { type: string, format: uuid }, newVersionId: { type: string, format: uuid } } }, description: BOM version replacements. At least one of replaces or documents is required. }
+        documents: { type: array, items: { type: object, required: [oldDocumentId, newDocumentId], properties: { oldDocumentId: { type: string, format: uuid }, newDocumentId: { type: string, format: uuid } } }, description: Document version replacements for an ECO-controlled DIR (FR-9.25). }
     Ecr:
       type: object
       additionalProperties: false
@@ -1254,6 +1898,255 @@ components:
         capabilities: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/ResourceCapability' } }
         effectiveCalendarId: { type: string, format: uuid, readOnly: true }
         version: { type: integer, minimum: 1, description: 'Starts at 1 and counts each saved edit. Required on PUT as the value the editor loaded; ignored on POST.' }
+    EngineeringOrganization:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, code, name]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, maxLength: 64 }
+        code: { type: string, maxLength: 64 }
+        name: { type: string, maxLength: 200 }
+    Nomenclature:
+      type: object
+      additionalProperties: false
+      required: [code, segments]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, maxLength: 20 }
+        separator: { type: string, maxLength: 3 }
+        segments:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [type]
+            properties:
+              type: { type: string, enum: [number, letter, constant, date] }
+              width: { type: integer }
+              start: { type: integer }
+              skipIo: { type: boolean }
+              format: { type: string, enum: [yyyyMMdd, yyMM] }
+              text: { type: string }
+    EngineeringCategory:
+      type: object
+      additionalProperties: false
+      required: [code, name]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, maxLength: 64 }
+        name: { type: string, maxLength: 200 }
+        productType: { type: string }
+        trackVersions: { type: boolean }
+        versionAsDimension: { type: boolean }
+        nomenclatureId: { type: string, format: uuid }
+        readinessPolicyId: { type: string, format: uuid }
+        releasePolicyId: { type: string, format: uuid }
+        changeControlled: { type: boolean }
+    EngineeringVersion:
+      type: object
+      additionalProperties: false
+      required: [productId, versionCode, engineeringLeId]
+      properties:
+        id: { type: string, format: uuid }
+        productId: { type: string, maxLength: 64 }
+        versionCode: { type: string, maxLength: 64 }
+        engineeringLeId: { type: string, maxLength: 64 }
+        categoryId: { type: string, format: uuid }
+        bomVersionId: { type: string, format: uuid }
+        routeVersionId: { type: string, format: uuid }
+        lifecycleState: { type: string }
+    ProductIdentifier:
+      type: object
+      additionalProperties: false
+      required: [idType, value, productId]
+      properties:
+        idType: { type: string, maxLength: 64 }
+        value: { type: string, maxLength: 64 }
+        productId: { type: string, maxLength: 64 }
+    ReleasePolicy:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, maxLength: 64 }
+        copyBom: { type: boolean }
+        activateBom: { type: boolean }
+        copyRoute: { type: boolean }
+        activateRoute: { type: boolean }
+        copyAttributes: { type: boolean }
+        copyOrderSettings: { type: boolean }
+        copyDocuments: { type: boolean }
+        requireAcceptance: { type: object, additionalProperties: { type: boolean } }
+    SiteMapping:
+      type: object
+      additionalProperties: false
+      required: [engineeringLeId, operationalLeId]
+      properties:
+        engineeringLeId: { type: string, maxLength: 64 }
+        operationalLeId: { type: string, maxLength: 64 }
+        engineeringSite: { type: string }
+        operationalSite: { type: string }
+    ReleaseLine:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        sessionId: { type: string, format: uuid }
+        productId: { type: string }
+        engineeringVersion: { type: string }
+        legalEntityId: { type: string }
+        status: { type: string, enum: [pending, sent, accepted, rejected, failed] }
+        reason: { type: string }
+        acceptedBy: { type: string }
+        copiedBomVersionId: { type: string, format: uuid }
+        copiedRouteVersionId: { type: string, format: uuid }
+    ReleaseSession:
+      type: object
+      additionalProperties: false
+      required: [policyId, productId, versionCode, legalEntities]
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string }
+        createdBy: { type: string }
+        source: { type: string }
+        policyId: { type: string, format: uuid }
+        ecoId: { type: string, format: uuid }
+        engineeringLeId: { type: string }
+        productId: { type: string, maxLength: 64 }
+        versionCode: { type: string, maxLength: 64 }
+        legalEntities: { type: array, minItems: 1, items: { type: string } }
+        lines: { type: array, items: { $ref: '#/components/schemas/ReleaseLine' } }
+    ReadinessPolicy:
+      type: object
+      additionalProperties: false
+      required: [code, checks]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, maxLength: 64 }
+        targetState: { type: string }
+        continuous: { type: boolean }
+        checks:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string }
+              kind: { type: string }
+              mandatory: { type: boolean }
+    ReleasedProduct:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        productId: { type: string }
+        legalEntityId: { type: string }
+        engineeringVersion: { type: string }
+        sessionId: { type: string, format: uuid }
+        state: { type: string }
+        checks:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string }
+              status: { type: string }
+              signedBy: { type: string }
+    DocumentType:
+      type: object
+      additionalProperties: false
+      required: [code, name]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, maxLength: 64 }
+        name: { type: string, maxLength: 200 }
+        changeControlled: { type: boolean }
+        signatureOnRelease: { type: boolean }
+        independentReview: { type: boolean }
+        signatureMeaning: { type: string }
+    Document:
+      type: object
+      additionalProperties: false
+      required: [typeCode, number]
+      properties:
+        id: { type: string, format: uuid }
+        typeCode: { type: string, maxLength: 64 }
+        number: { type: string, maxLength: 64 }
+        part: { type: string }
+        version: { type: string }
+        description: { type: string }
+        status: { type: string, enum: [in_work, in_review, released, obsolete, cancelled] }
+        lastEditor: { type: string }
+        ecoId: { type: string, format: uuid }
+        signedAt: { type: string, format: date-time }
+        originals:
+          type: array
+          items:
+            type: object
+            required: [storageKey, sha256]
+            properties:
+              storageKey: { type: string }
+              sha256: { type: string }
+              sizeBytes: { type: integer }
+        links:
+          type: array
+          items:
+            type: object
+            properties:
+              targetType: { type: string }
+              targetId: { type: string }
+    DocumentSignature:
+      type: object
+      required: [id, recordId, signerId, meaning, signedAt]
+      properties:
+        id: { type: string, format: uuid }
+        recordId: { type: string, format: uuid }
+        documentNumber: { type: string }
+        documentVersion: { type: string }
+        transition: { type: string }
+        signerId: { type: string }
+        printedName: { type: string }
+        meaning: { type: string }
+        signedAt: { type: string, format: date-time }
+        originalsHash: { type: string }
+        method: { type: string }
+    DocumentWhereUsed:
+      type: object
+      properties:
+        targetType: { type: string }
+        targetId: { type: string }
+        productId: { type: string }
+    EbomImport:
+      type: object
+      additionalProperties: false
+      required: [source, partNumber, revision, lines]
+      properties:
+        id: { type: string, format: uuid }
+        source: { type: string, maxLength: 64 }
+        partNumber: { type: string, maxLength: 64 }
+        revision: { type: string, maxLength: 64 }
+        status: { type: string }
+        bomVersionId: { type: string, format: uuid }
+        ecrId: { type: string, format: uuid }
+        added: { type: integer }
+        removed: { type: integer }
+        changed: { type: integer }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [partNumber]
+            properties:
+              findNumber: { type: integer }
+              partNumber: { type: string }
+              quantity: { type: string }
+              unit: { type: string }
+        exceptions:
+          type: array
+          items:
+            type: object
+            properties:
+              partNumber: { type: string }
+              code: { type: string }
     Problem:
       type: object
       required: [type, title, status]

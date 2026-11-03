@@ -79,4 +79,17 @@ const (
 	CodeResSite     = "ENG-RES-SITE"
 	CodeResInUse    = "ENG-RES-IN-USE"
 	CodeResConflict = "ENG-RES-VERSION-CONFLICT"
+
+	CodeOwnedField           = "ENG-OWNED-FIELD"
+	CodeNomenOverflow        = "ENG-NOMEN-OVERFLOW"
+	CodeReleaseState         = "ENG-RELEASE-STATE"
+	CodeReadinessSelfSign    = "ENG-READINESS-SELF-SIGN"
+	CodeDocEcoRequired       = "ENG-DOC-ECO-REQUIRED"
+	CodeDocSigned            = "ENG-DOC-SIGNED"
+	CodeDocCycle             = "ENG-DOC-CYCLE"
+	CodeDocReauth            = "ENG-DOC-REAUTH"
+	CodeDocSignerSame        = "ENG-DOC-SIGNER"
+	CodeDocState             = "ENG-DOC-STATE"
+	CodeEbomPartUnknown      = "ENG-EBOM-PART-UNKNOWN"
+	CodeEbomRevisionReleased = "ENG-EBOM-REVISION-RELEASED"
 )
