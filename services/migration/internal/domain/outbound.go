@@ -64,6 +64,9 @@ type OutboundDefinition struct {
 	EventType string           `json:"eventType"`
 	Subject   *OutboundSubject `json:"subject,omitempty"`
 	Xrefs     []OutboundXref   `json:"xrefs,omitempty"`
+	// Lookups read lookup table entries (enum codes, unit conversion factors, prices) for the event; the mapping
+	// reads them as lookup.<name>.
+	Lookups []OutboundLookup `json:"lookups,omitempty"`
 	// DecimalsAsNumbers writes decimal fields as exact JSON numbers instead of strings.
 	DecimalsAsNumbers bool `json:"decimalsAsNumbers,omitempty"`
 	// Mapping is the inbound mapping DSL: Entity is the legacy entity written, Fields read the event row. A target
@@ -132,6 +135,19 @@ func (d OutboundDefinition) check() error {
 			return bad("xref %s: idPath must be a dotted path into the event", x.Name)
 		}
 		seen[x.Name] = true
+	}
+	if len(d.Lookups) > maxOutboundLookups {
+		return bad("at most %d lookups", maxOutboundLookups)
+	}
+	seenLookup := map[string]bool{}
+	for _, l := range d.Lookups {
+		if err := l.check(); err != nil {
+			return err
+		}
+		if seenLookup[l.Name] {
+			return bad("duplicate lookup name %q", l.Name)
+		}
+		seenLookup[l.Name] = true
 	}
 	return nil
 }
@@ -241,6 +257,8 @@ type Rendered struct {
 	IdempotencyKey string         `json:"idempotencyKey"`
 	Refs           []OutboundRef  `json:"refs"`
 	Warnings       []Warning      `json:"warnings,omitempty"`
+	// Lookups lists the lookup table versions the render read, for the audit of what was pushed.
+	Lookups []LookupUse `json:"lookups,omitempty"`
 }
 
 // OutboundIdempotencyKey is the render's repeatable key: SHA-256 of the mapping id and the event id. The mapping
@@ -322,6 +340,11 @@ func (d OutboundDefinition) Render(ctx context.Context, sourceSystem, mappingID 
 			unresolved = append(unresolved, UnresolvedRef{Name: "subject", Entity: d.Subject.Entity, Reason: "the event has no id at " + d.Subject.IDPath})
 		}
 	}
+	lookups, missing, used, err := d.resolveLookups(ctx, resolver, event)
+	if err != nil {
+		return Rendered{}, err
+	}
+	unresolved = append(unresolved, missing...)
 	if len(unresolved) > 0 {
 		return Rendered{}, &UnresolvedError{Refs: unresolved}
 	}
@@ -331,6 +354,7 @@ func (d OutboundDefinition) Render(ctx context.Context, sourceSystem, mappingID 
 		row[k] = v
 	}
 	row["xref"] = keys
+	row["lookup"] = lookups
 	out, warnings, rejects := d.Mapping.ApplyWithWarnings(row)
 	if len(rejects) > 0 {
 		return Rendered{}, &RejectedError{Rejects: rejects}
@@ -339,7 +363,7 @@ func (d OutboundDefinition) Render(ctx context.Context, sourceSystem, mappingID 
 	if err != nil {
 		return Rendered{}, err
 	}
-	return Rendered{Body: body, IdempotencyKey: OutboundIdempotencyKey(mappingID, eventID), Refs: refs, Warnings: warnings}, nil
+	return Rendered{Body: body, IdempotencyKey: OutboundIdempotencyKey(mappingID, eventID), Refs: refs, Warnings: warnings, Lookups: used}, nil
 }
 
 // shape nests dotted targets and turns decimals into exact numbers when the definition asks for it.

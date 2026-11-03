@@ -157,7 +157,7 @@ export function NewOutboundPage() {
             id="outbound-definition"
             label="Definition"
             error={errors.definition}
-            hint="JSON: the event type (a name, * for one segment, a trailing ** for the rest), the record the legacy key belongs to, the legacy keys to look up, and the mapping fields. Fields read data.* of the event and xref.<lookup>."
+            hint="JSON: the event type (a name, * for one segment, a trailing ** for the rest), the record the legacy key belongs to, the legacy keys to look up, the lookup table entries to read (lookups), and the mapping fields. Fields read data.* of the event, xref.<name> and lookup.<name>."
           >
             {(control) => <Textarea {...control} mono rows={22} value={form.definition} invalid={Boolean(errors.definition)} onChange={(event) => edit({ ...form, definition: event.target.value })} />}
           </FormField>

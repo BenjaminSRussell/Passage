@@ -167,6 +167,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerBindings(r)
 	a.registerSync(r)
 	a.registerOutbound(r)
+	a.registerLookup(r)
 }
 
 func (a *API) Metrics() http.Handler {

@@ -8,6 +8,7 @@ import { NewRunPage, RunDetailPage, RunsPage } from "./RunPages";
 import { NewTemplatePage, TemplateDetailPage, TemplatesPage } from "./TemplatePages";
 import { SyncDetailPage, SyncPage } from "./SyncPages";
 import { NewOutboundPage, OutboundDetailPage, OutboundListPage } from "./OutboundPages";
+import { LookupDetailPage, LookupListPage, NewLookupPage } from "./LookupPages";
 import { XrefPage } from "./XrefPages";
 import { NewSpecPage, SpecDetailPage, SpecsPage } from "./SpecPages";
 
@@ -47,6 +48,9 @@ const migration: PassageModule = {
     { path: "/migration/outbound", element: createElement(OutboundListPage), handle: { title: "Outbound mappings" } },
     { path: "/migration/outbound/new", element: createElement(NewOutboundPage), handle: { title: "New outbound mapping" } },
     { path: "/migration/outbound/:id", element: createElement(OutboundDetailPage), handle: { title: "Outbound mapping" } },
+    { path: "/migration/lookups", element: createElement(LookupListPage), handle: { title: "Lookup tables" } },
+    { path: "/migration/lookups/new", element: createElement(NewLookupPage), handle: { title: "New lookup table" } },
+    { path: "/migration/lookups/:id", element: createElement(LookupDetailPage), handle: { title: "Lookup table" } },
     { path: "/migration/xref", element: createElement(XrefPage), handle: { title: "Legacy key cross-reference" } },
   ],
   nav: [
@@ -56,6 +60,7 @@ const migration: PassageModule = {
     { label: "Entity bindings", to: "/migration/bindings", duty: "migration.run" },
     { label: "Delta sync", to: "/migration/sync", duty: "migration.run" },
     { label: "Outbound mappings", to: "/migration/outbound", duty: "migration.run" },
+    { label: "Lookup tables", to: "/migration/lookups", duty: "migration.run" },
     { label: "Mapping specs", to: "/migration/specs" },
     { label: "Data templates", to: "/migration/templates" },
     { label: "Configuration packages", to: "/migration/packages" },

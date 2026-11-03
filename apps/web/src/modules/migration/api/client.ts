@@ -636,11 +636,32 @@ export interface OutboundXrefLookup {
   optional?: boolean;
 }
 
+export interface OutboundLookupRef {
+  name: string;
+  table: string;
+  /** Event paths, then the fixed keyConstants, joined with | form the key. */
+  keyPaths: string[];
+  keyConstants?: string[];
+  /** Unit conversion tables only: the event quantity to multiply by the factor. */
+  quantityPath?: string;
+  default?: string;
+  optional?: boolean;
+}
+
+/** A lookup table version a render or preview read. */
+export interface LookupUse {
+  name: string;
+  table: string;
+  version: number;
+}
+
 /** One version of an outbound mapping. `mapping` is the mapping DSL read in the Passage-to-legacy direction. */
 export interface OutboundDefinition {
   eventType: string;
   subject?: { entity: string; idPath: string };
   xrefs?: OutboundXrefLookup[];
+  /** Entries of lookup tables offered to the mapping as lookup.<name>. */
+  lookups?: OutboundLookupRef[];
   decimalsAsNumbers?: boolean;
   mapping: Record<string, unknown>;
 }
@@ -686,6 +707,7 @@ export interface OutboundPreview {
   idempotencyKey?: string;
   refs?: { entity: string; id: string }[];
   warnings?: RowIssue[];
+  lookups?: LookupUse[];
   unresolved?: UnresolvedRef[];
   rejects?: RowIssue[];
   code?: string;
@@ -715,3 +737,59 @@ export const previewOutboundMapping = (id: string, event: unknown, version?: num
 /** The same for a definition that is not saved yet. */
 export const previewOutboundDraft = (sourceSystem: SourceSystem, definition: OutboundDefinition, event: unknown) =>
   send<OutboundPreview>("/outbound-mappings:preview", { method: "POST", body: JSON.stringify({ sourceSystem, definition, event }) });
+
+// ---- Lookup tables: keyed values (enum codes, unit conversion factors, prices) outbound mappings read ----
+
+export type LookupKind = "enum" | "uom_conversion" | "price_list";
+
+export interface LookupDefinition {
+  kind: LookupKind;
+  description?: string;
+  /** Key to value. Prices (at most 6 decimals) and factors (at most 12) are decimal strings. A composite key joins its parts with |. */
+  entries: Record<string, string>;
+}
+
+export interface LookupTable {
+  id: string;
+  name: string;
+  kind: LookupKind;
+  status: OutboundStatus;
+  version: number;
+  entryCount: number;
+  checksum?: string;
+  /** Present on the single-table read, not on lists. */
+  definition?: LookupDefinition;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LookupVersion {
+  version: number;
+  entryCount: number;
+  checksum: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface LookupEdit {
+  name?: string;
+  status?: OutboundStatus;
+  definition?: LookupDefinition;
+}
+
+export const listLookupTables = (filter: { status?: string; kind?: string; cursor?: string; limit?: number }, signal?: AbortSignal) => {
+  const { limit = 50, ...rest } = filter;
+  return page<LookupTable>(`/lookup-tables${query({ ...rest, limit: String(limit) })}`, signal);
+};
+
+export const getLookupTable = (id: string, version?: number, signal?: AbortSignal) =>
+  send<LookupTable>(`/lookup-tables/${encodeURIComponent(id)}${query({ version: version ? String(version) : undefined })}`, {}, signal);
+
+export const listLookupVersions = (id: string, signal?: AbortSignal) => items<LookupVersion>(`/lookup-tables/${encodeURIComponent(id)}/versions`, signal);
+
+export const createLookupTable = (input: { name: string; definition: LookupDefinition }, key: string = newKey()) =>
+  send<LookupTable>("/lookup-tables", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+
+export const updateLookupTable = (id: string, version: number, edit: LookupEdit) =>
+  send<LookupTable>(`/lookup-tables/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ version, ...edit }) });

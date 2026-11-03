@@ -294,6 +294,7 @@ type renderView struct {
 	Body           map[string]any       `json:"body"`
 	IdempotencyKey string               `json:"idempotencyKey"`
 	Refs           []domain.OutboundRef `json:"refs"`
+	Lookups        []domain.LookupUse   `json:"lookups,omitempty"`
 }
 
 // renderOutbound is the integration hub's call. It is pure: it reads the mapping and the cross-reference and writes
@@ -335,7 +336,7 @@ func (a *API) renderOutbound(w http.ResponseWriter, r *http.Request) {
 		a.failRender(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, renderView{Body: out.Body, IdempotencyKey: out.IdempotencyKey, Refs: out.Refs})
+	httpx.JSON(w, http.StatusOK, renderView{Body: out.Body, IdempotencyKey: out.IdempotencyKey, Refs: out.Refs, Lookups: out.Lookups})
 }
 
 // sameLegalEntity reports whether the event's CloudEvents legalentityid extension is the token's legal entity. An
@@ -404,6 +405,7 @@ type previewView struct {
 	IdempotencyKey string                 `json:"idempotencyKey,omitempty"`
 	Refs           []domain.OutboundRef   `json:"refs,omitempty"`
 	Warnings       []domain.Warning       `json:"warnings,omitempty"`
+	Lookups        []domain.LookupUse     `json:"lookups,omitempty"`
 	Unresolved     []domain.UnresolvedRef `json:"unresolved,omitempty"`
 	Rejects        []domain.Reject        `json:"rejects,omitempty"`
 	Code           string                 `json:"code,omitempty"`
@@ -416,7 +418,7 @@ func previewOf(out domain.Rendered, err error) (previewView, error) {
 	var de *domain.Error
 	switch {
 	case err == nil:
-		return previewView{Status: "ok", Body: out.Body, IdempotencyKey: out.IdempotencyKey, Refs: out.Refs, Warnings: out.Warnings}, nil
+		return previewView{Status: "ok", Body: out.Body, IdempotencyKey: out.IdempotencyKey, Refs: out.Refs, Warnings: out.Warnings, Lookups: out.Lookups}, nil
 	case errors.As(err, &unresolved):
 		return previewView{Status: "unresolved", Code: domain.CodeXrefUnresolved, Detail: unresolved.Error(), Unresolved: unresolved.Refs}, nil
 	case errors.As(err, &rejected):

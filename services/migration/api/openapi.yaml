@@ -1014,6 +1014,116 @@ paths:
           description: MIG-XREF-REF-MISMATCH, the ref's entity is not the subject entity of the mapping.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/lookup-tables:
+    get:
+      operationId: listLookupTables
+      summary: List lookup tables
+      description: Lookup tables (keyed values an outbound mapping reads while it renders) in name order, optionally filtered by status and kind, paged with the opaque nextCursor. Each row is the header of the current version; the entries are read with the single-table route. Callers must be tenant-wide.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [active, archived] } }
+        - { name: kind, in: query, schema: { type: string, enum: [enum, uom_conversion, price_list] } }
+        - { name: cursor, in: query, description: The nextCursor of the previous page., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: One page of lookup tables; nextCursor is absent on the last page.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/LookupTable' } }, nextCursor: { type: string } } } } }
+        '400':
+          description: A filter or the cursor is not valid.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createLookupTable
+      summary: Create a lookup table
+      description: Defines a tenant lookup table of a kind (enum codes, unit-of-measure conversion factors keyed FROM|TO, or a price list). Version 1 is stored; every later change writes a new immutable version. Outbound mappings refer to a table by name in their lookups and render with its current version; the outbound preview routes show the result.
+      x-passage-duty: migration.project.write
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateLookupTable' } } }
+      responses:
+        '201':
+          description: The table was created at version 1.
+          headers:
+            Location: { schema: { type: string } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/LookupTable' } } }
+        '200':
+          description: The Idempotency-Key was replayed; the stored table is returned.
+          content: { application/json: { schema: { $ref: '#/components/schemas/LookupTable' } } }
+        '400':
+          description: The name or the definition is missing or malformed.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: MIG-LOOKUP-NAME-EXISTS, a table with this name already exists.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-LOOKUP-INVALID, the definition is not valid; or idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/lookup-tables/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getLookupTable
+      summary: Get a lookup table
+      description: Returns the table with the entries of its current version, or of the version named in the query.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: version, in: query, description: A version to read instead of the current one., schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: The table and one version's entries.
+          content: { application/json: { schema: { $ref: '#/components/schemas/LookupTable' } } }
+        '400':
+          description: The version is not a positive integer.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: MIG-LOOKUP-NOT-FOUND or MIG-LOOKUP-VERSION-NOT-FOUND.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateLookupTable
+      summary: Change a lookup table
+      description: Writes the next version under the caller's version (409 MIG-VERSION-CONFLICT when it is stale). A new definition replaces all entries and keeps the table's kind; a rename or an archive carries the current entries into the new version. An archived table does not resolve (renders that need it are unresolved); it can only be reactivated.
+      x-passage-duty: migration.project.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateLookupTable' } } }
+      responses:
+        '200':
+          description: The table at its new version.
+          content: { application/json: { schema: { $ref: '#/components/schemas/LookupTable' } } }
+        '400':
+          description: The version, name or status is missing or malformed.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: MIG-LOOKUP-NOT-FOUND.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: MIG-VERSION-CONFLICT, MIG-LOOKUP-NAME-EXISTS or MIG-LOOKUP-ARCHIVED.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-LOOKUP-INVALID, the definition is not valid or changes the kind.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/lookup-tables/{id}/versions:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listLookupTableVersions
+      summary: List the versions of a lookup table
+      description: The history of a table, newest first, with each version's entry count, checksum, author and time.
+      x-passage-duty: migration.run
+      responses:
+        '200':
+          description: The versions.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/LookupVersion' } } } } } }
+        '404':
+          description: MIG-LOOKUP-NOT-FOUND.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/integration/parallel-run-diffs:
     post:
       operationId: createParallelRunDiff
@@ -1711,8 +1821,24 @@ components:
               entity: { type: string, description: The entity name the cross-reference holds, for example customer. }
               idPath: { type: string }
               optional: { type: boolean }
+        lookups:
+          type: array
+          maxItems: 8
+          description: "Entries of lookup tables (an enum code, a unit conversion factor, a price) read for the event and offered to the mapping as lookup.<name>, from the table's current version (the render names the versions it read in lookups). The key is the event values at keyPaths, then the keyConstants, joined with |; an event value that contains | matches no entry. An entry that is missing takes the default, is left out when optional, and otherwise fails the render with MIG-XREF-UNRESOLVED naming the table and key. A table that does not exist or is archived always fails the render: default and optional do not cover it. Tables serve every legal entity; a per-legal-entity or per-currency list keys on those event fields (keyPaths [legalentityid, data.currency, data.sku])."
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, table, keyPaths]
+            properties:
+              name: { type: string }
+              table: { type: string, description: The name of a lookup table. }
+              keyPaths: { type: array, minItems: 1, maxItems: 3, items: { type: string }, description: Dotted paths into the event whose values form the key; with keyConstants at most 3 parts in all. }
+              keyConstants: { type: array, maxItems: 2, items: { type: string, minLength: 1, maxLength: 200 }, description: "Fixed key parts after the event values, without |: for a unit conversion to the legacy ERP's unit, keyPaths [data.unit] and keyConstants [KG] read the entry <unit>|KG." }
+              quantityPath: { type: string, description: "For a unit conversion table only: the event quantity to convert. lookup.<name> is then the quantity times the factor (exact decimal), the quantity itself between equal units; the mapping field rounds it to its scale. Against another kind of table the render is unresolved." }
+              default: { type: string, description: The value used when the table has no entry for the key. Cannot be combined with optional. }
+              optional: { type: boolean }
         decimalsAsNumbers: { type: boolean, description: Write decimal fields as exact JSON numbers instead of strings. }
-        mapping: { type: object, description: "Mapping DSL document: entity is the legacy entity, fields read the event (data.*, id, type, time, subject) and xref.<name>; a target with dots nests (Header.CustomerRef). Its version is set by the service." }
+        mapping: { type: object, description: "Mapping DSL document: entity is the legacy entity, fields read the event (data.*, id, type, time, subject) and xref.<name> and lookup.<name>; a target with dots nests (Header.CustomerRef). Its version is set by the service." }
     OutboundMapping:
       type: object
       required: [id, name, sourceSystem, eventType, status, version, createdBy, createdAt, updatedAt]
@@ -1733,6 +1859,58 @@ components:
       required: [version, checksum, createdBy, createdAt]
       properties:
         version: { type: integer }
+        checksum: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    CreateLookupTable:
+      type: object
+      additionalProperties: false
+      required: [name, definition]
+      properties:
+        name: { type: string, pattern: '^[A-Za-z][A-Za-z0-9_.-]{0,63}$', description: The name outbound mappings refer to. }
+        definition: { $ref: '#/components/schemas/LookupDefinition' }
+    UpdateLookupTable:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1, description: The table version the change is based on. }
+        name: { type: string, pattern: '^[A-Za-z][A-Za-z0-9_.-]{0,63}$' }
+        status: { type: string, enum: [active, archived] }
+        definition: { $ref: '#/components/schemas/LookupDefinition' }
+    LookupDefinition:
+      type: object
+      additionalProperties: false
+      required: [kind, entries]
+      properties:
+        kind: { type: string, enum: [enum, uom_conversion, price_list], description: "enum maps a code to a code; uom_conversion keys are FROM|TO with a positive decimal factor (both directions are entered, the service never divides); price_list values are decimals that are not negative. A key of two or three parts joins them with |." }
+        description: { type: string, maxLength: 500 }
+        entries:
+          type: object
+          maxProperties: 5000
+          description: Key to value. Values are strings; prices are decimal strings with at most 6 decimals and unit conversion factors with at most 12, never floats.
+          additionalProperties: { type: string, minLength: 1, maxLength: 512 }
+    LookupTable:
+      type: object
+      required: [id, name, kind, status, version, entryCount, createdBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        kind: { type: string, enum: [enum, uom_conversion, price_list] }
+        status: { type: string, enum: [active, archived] }
+        version: { type: integer, minimum: 1 }
+        entryCount: { type: integer, minimum: 0 }
+        checksum: { type: string, description: SHA-256 of the version's canonical definition (present with a definition). }
+        definition: { $ref: '#/components/schemas/LookupDefinition' }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    LookupVersion:
+      type: object
+      required: [version, entryCount, checksum, createdBy, createdAt]
+      properties:
+        version: { type: integer }
+        entryCount: { type: integer }
         checksum: { type: string }
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
@@ -1769,6 +1947,17 @@ components:
           type: array
           description: The Passage records the legacy key belongs to; the hub passes them back to xref:record.
           items: { $ref: '#/components/schemas/OutboundRef' }
+        lookups:
+          type: array
+          description: The lookup table versions the render read (absent when the mapping has no lookups), so the pushed body can be traced to the entries behind it.
+          items: { $ref: '#/components/schemas/LookupUse' }
+    LookupUse:
+      type: object
+      required: [name, table, version]
+      properties:
+        name: { type: string, description: The lookup name in the mapping definition. }
+        table: { type: string }
+        version: { type: integer, minimum: 1 }
     OutboundRef:
       type: object
       required: [entity, id]
@@ -1779,9 +1968,9 @@ components:
       type: object
       required: [name, entity, reason]
       properties:
-        name: { type: string, description: The xref name in the mapping definition. }
+        name: { type: string, description: The xref or lookup name in the mapping definition. }
         entity: { type: string }
-        id: { type: string, description: The Passage id that has no legacy key; absent when the event carried none. }
+        id: { type: string, description: "The Passage id that has no legacy key, or for a lookup (entity lookup:<table>) the key that found no entry; absent when the event carried none." }
         reason: { type: string }
     UnresolvedProblem:
       description: A problem; for MIG-XREF-UNRESOLVED the unresolved array lists every reference without a legacy key.
@@ -1799,6 +1988,7 @@ components:
         idempotencyKey: { type: string }
         refs: { type: array, items: { $ref: '#/components/schemas/OutboundRef' } }
         warnings: { type: array, items: { type: object, properties: { field: { type: string }, code: { type: string }, detail: { type: string } } } }
+        lookups: { type: array, description: The lookup table versions the preview read., items: { $ref: '#/components/schemas/LookupUse' } }
         unresolved: { type: array, items: { $ref: '#/components/schemas/UnresolvedRef' } }
         rejects: { type: array, items: { type: object, properties: { field: { type: string }, code: { type: string }, detail: { type: string } } } }
         code: { type: string }

@@ -7,7 +7,7 @@ import styles from "./pages.module.css";
 const unresolvedColumns: DataTableColumn<UnresolvedRef>[] = [
   { key: "name", header: "Lookup", mono: true },
   { key: "entity", header: "Entity" },
-  { key: "id", header: "Passage id", mono: true, render: (row) => row.id ?? "" },
+  { key: "id", header: "Passage id or key", mono: true, render: (row) => row.id ?? "" },
   { key: "reason", header: "Why" },
 ];
 
@@ -86,14 +86,20 @@ export function OutboundPreviewPanel({ run, disabledReason }: { run(event: Recor
                   <dt className={styles.term}>Legacy key recorded against</dt>
                   <dd className={`${styles.value} ${styles.mono}`}>{(result.refs ?? []).map((r) => `${r.entity} ${r.id}`).join(", ") || "Nothing: the mapping has no subject."}</dd>
                 </div>
+                {(result.lookups ?? []).length > 0 ? (
+                  <div className={styles.entry}>
+                    <dt className={styles.term}>Lookup tables read</dt>
+                    <dd className={`${styles.value} ${styles.mono}`}>{(result.lookups ?? []).map((l) => `${l.table} v${l.version}`).join(", ")}</dd>
+                  </div>
+                ) : null}
               </dl>
               {(result.warnings ?? []).length > 0 ? <p className={styles.note}>{(result.warnings ?? []).map((w) => `${w.field}: ${w.detail} (${w.code})`).join("; ")}</p> : null}
             </>
           ) : null}
           {result.status === "unresolved" ? (
             <>
-              <Alert tone="warning" title="Some references have no legacy key yet">
-                The hub would answer 422 {result.code} and dead-letter the delivery. Load the missing records from the legacy system, or mark the lookup optional.
+              <Alert tone="warning" title="Some references or lookup entries are missing">
+                The hub would answer 422 {result.code} and dead-letter the delivery. Load the missing records from the legacy system, add the missing entries to the lookup table (entity lookup:&lt;table&gt;), or mark the lookup optional.
               </Alert>
               <DataTable label="Unresolved references" columns={unresolvedColumns} rows={result.unresolved ?? []} getRowKey={(row) => `${row.name}|${row.id ?? ""}`} />
             </>

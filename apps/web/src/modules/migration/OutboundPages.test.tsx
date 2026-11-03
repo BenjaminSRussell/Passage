@@ -69,6 +69,7 @@ const rendered: OutboundPreview = {
   body: { CustAccount: "C-1001", Header: { CustomerRef: "SO-100", Total: "125.50" } },
   idempotencyKey: "mig-ob-v1-abc",
   refs: [{ entity: "salesOrder", id: "0195f0a0-0000-7000-8000-0000000000a1" }],
+  lookups: [{ name: "unit", table: "unit-codes", version: 3 }],
 };
 const unresolved: OutboundPreview = {
   status: "unresolved",
@@ -155,6 +156,7 @@ describe("new outbound mapping", () => {
     expect(await screen.findByText("Rendered")).toBeInTheDocument();
     expect(screen.getByLabelText("Rendered request body")).toHaveTextContent("C-1001");
     expect(screen.getByText("mig-ob-v1-abc")).toBeInTheDocument();
+    expect(screen.getByText("unit-codes v3")).toBeInTheDocument();
     const draft = calls.find((c) => c.url.pathname.endsWith("/outbound-mappings:preview"));
     expect(draft?.body).toMatchObject({ sourceSystem: "custom_acme", definition: { eventType: "dev.passage.sales.order.*.v1" }, event: { id: "evt-sample-1" } });
     expect(calls.filter((c) => c.method === "POST" && !c.url.pathname.includes(":preview"))).toHaveLength(0);
