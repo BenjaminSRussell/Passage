@@ -64,6 +64,7 @@ const readiness = (over: Partial<Readiness> = {}): Readiness => ({
   items: items("OPEN"),
   openItems: items("OPEN").map((i) => i.code),
   decisions: [],
+  stagedPacks: [],
   ...over,
 });
 
@@ -76,6 +77,7 @@ const noGo: GoNoGoDecision = {
   decidedAt: "2027-01-01T20:00:00Z",
   planVersion: 2,
   checklist: items("OPEN"),
+  waivers: [],
 };
 
 const planAfter: CutoverPlan = {
@@ -89,12 +91,13 @@ const pendingGo: GoApproval = {
   round: 1,
   approver: "alice",
   attestations: [{ code: "load_test", confirmed: true, reference: "https://e/load" }],
+  waivers: [],
   planVersion: 2,
   approvedAt: "2027-01-01T21:00:00Z",
 };
 
 describe("decision form helpers", () => {
-  const base: DecisionValues = { decision: "GO", reason: "", attestations: {} };
+  const base: DecisionValues = { decision: "GO", reason: "", attestations: {}, waivers: {} };
   it("applies the service's rules before sending and never sends approvers", () => {
     expect(validateDecision({ ...base, decision: "NO_GO" }, 2).errors.reason).toBeDefined();
     expect(validateDecision({ ...base, attestations: { load_test: { confirmed: true, reference: " " } } }, 2).errors.attestations).toMatch(/CUT-1606/);
@@ -167,6 +170,25 @@ describe("Go/no-go decision page", () => {
     expect(await screen.findByText("NO_GO recorded with cfo as approvers.")).toBeInTheDocument();
     const decisions = await findTable({ name: "Decisions" });
     await waitFor(() => expect(within(decisions).getAllByRole("row")[1]).toHaveTextContent("UAT not signed"));
+  });
+
+  it("waives a pack that is staged and not posted, with a reason, and sends it with the GO", async () => {
+    handler = (url, init) => {
+      if (url.pathname !== goPath) return undefined;
+      if (init.method === "POST") return json(202, { pendingGo: { ...pendingGo, waivers: [{ pack: "onhand", reason: "posted manually" }] }, plan: planAfter });
+      return json(200, readiness({ stagedPacks: [{ pack: "onhand", reason: "staged in the factory only, not posted to the inventory ledger" }] }));
+    };
+    renderAt(`/migration-factory/cutover/${PLAN}/go-no-go`);
+    await screen.findByRole("button", { name: "Record decision" });
+    await userEvent.selectOptions(screen.getByLabelText("Decision"), "GO");
+    await userEvent.click(screen.getByRole("checkbox", { name: /onhand: staged in the factory only/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Record decision" }));
+    expect(await screen.findByText(/Every waived pack needs a reason/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Reason for waiving onhand"), { target: { value: " posted manually " } });
+    await userEvent.click(screen.getByRole("button", { name: "Record decision" }));
+    await userEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Approve GO" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(1));
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ decision: "GO", attestations: [], waivers: [{ pack: "onhand", reason: "posted manually" }], version: 2 });
   });
 
   it("approves a GO as the first approver with attestations and shows the service's refusal", async () => {

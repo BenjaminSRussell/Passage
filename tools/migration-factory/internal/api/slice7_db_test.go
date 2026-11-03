@@ -45,6 +45,9 @@ func insertParallelRun(t *testing.T, admin *pgxpool.Pool, tenantID, period, syst
 	return id
 }
 
+// glWaiver waives the staged gl_balances pack of readyPlan (CUT-1608).
+const glWaiver = `[{"pack":"gl_balances","reason":"opening balances posted manually in the target"}]`
+
 func attestations(codes ...string) string {
 	if len(codes) == 0 {
 		codes = []string{"opening_tb_signed", "sod_clear", "country_packs", "load_test", "dr_game_day", "backup_verified", "security_clear",
@@ -125,7 +128,8 @@ func TestGoNoGo_ChecklistFromFactoryData(t *testing.T) {
 	insertParallelRun(t, admin, tenantA, "2026-11", "AX2012", "SIGNED_OFF")
 	insertParallelRun(t, admin, tenantA, "2027-01", "AX2012", "SIGNED_OFF")
 	rd = c.get(t)
-	if rd.Items[0].Status != "MET" || rd.Items[1].Status != "OPEN" || rd.SystemReady {
+	// gl_balances is staged and not posted, so the item stays open until both approvers waive it (CUT-1608).
+	if rd.Items[0].Status != "OPEN" || !strings.Contains(rd.Items[0].Detail, "gl_balances/USMF is RECONCILED but staged") || rd.Items[1].Status != "OPEN" || rd.SystemReady {
 		t.Fatalf("parallel runs of other months: %+v", rd.Items[:2])
 	}
 	insertParallelRun(t, admin, tenantA, "2026-12", "AX2012", "SIGNED_OFF")
@@ -136,8 +140,8 @@ func TestGoNoGo_ChecklistFromFactoryData(t *testing.T) {
 	if _, err := admin.Exec(context.Background(), `update parallel_run set state = 'SIGNED_OFF', signed_off_by = 'controller', signed_off_at = now() where parallel_run_id = $1`, sap); err != nil {
 		t.Fatal(err)
 	}
-	if rd = c.get(t); !rd.SystemReady || rd.Items[1].Status != "MET" || len(rd.Items[1].References) != 2 || len(rd.OpenItems) != 12 {
-		t.Fatalf("system ready: %+v", rd)
+	if rd = c.get(t); rd.SystemReady || rd.Items[0].Status != "OPEN" || rd.Items[1].Status != "MET" || len(rd.Items[1].References) != 2 || len(rd.OpenItems) != 13 {
+		t.Fatalf("packs staged, parallel runs signed off: %+v", rd)
 	}
 }
 
@@ -149,7 +153,7 @@ func TestGoNoGo_TwoAuthenticatedApprovers(t *testing.T) {
 	plan, _ := readyPlan(t, h, admin)
 	c := decisionCall{t, h, "/api/v1/cutover/plans/" + plan.PlanID + "/go-no-go"}
 	goBody := func(version int, att string) string {
-		return fmt.Sprintf(`{"decision":"GO","version":%d,"attestations":%s}`, version, att)
+		return fmt.Sprintf(`{"decision":"GO","version":%d,"attestations":%s,"waivers":%s}`, version, att, glWaiver)
 	}
 
 	// Approvers cannot be named in the request.
@@ -258,26 +262,31 @@ func TestGoNoGo_NoGoVoidsAPendingApproval(t *testing.T) {
 	plan, _ := readyPlan(t, h, admin)
 	c := decisionCall{t, h, "/api/v1/cutover/plans/" + plan.PlanID + "/go-no-go"}
 
-	if r := c.post("alice", `{"decision":"GO","attestations":`+attestations()+`}`, ""); r.Code != http.StatusAccepted {
+	if r := c.post("alice", `{"decision":"GO","attestations":`+attestations()+`,"waivers":`+glWaiver+`}`, ""); r.Code != http.StatusAccepted {
 		t.Fatalf("alice: %d %s", r.Code, r.Body)
 	}
 	if r := c.post("bob", `{"decision":"NO_GO","reason":" "}`, ""); r.Code != http.StatusUnprocessableEntity || !strings.Contains(r.Body.String(), "reason") {
 		t.Fatalf("no-go without reason: %d %s", r.Code, r.Body)
 	}
-	noGo := c.post("bob", `{"decision":"NO_GO","reason":"Bank smoke test failed","version":2}`, "")
+	// Waivers sent with a NO_GO are not recorded: a NO_GO does not go live (CUT-1608).
+	noGo := c.post("bob", `{"decision":"NO_GO","reason":"Bank smoke test failed","version":2,"waivers":`+glWaiver+`}`, "")
 	if noGo.Code != http.StatusCreated {
 		t.Fatalf("no-go: %d %s", noGo.Code, noGo.Body)
 	}
 	res := decode[decisionResponse](t, noGo)
 	if res.Decision == nil || res.Decision.Decision != "NO_GO" || strings.Join(res.Decision.Approvers, ",") != "bob" || res.Decision.DecidedBy != "bob" || res.Plan.Version != 3 ||
-		len(res.Decision.Checklist) != 14 || res.Decision.Checklist[2].Status != "UNCONFIRMED" {
+		len(res.Decision.Checklist) != 14 || res.Decision.Checklist[2].Status != "UNCONFIRMED" || len(res.Decision.Waivers) != 0 || res.Decision.Checklist[0].Status != "OPEN" {
 		t.Fatalf("no-go result %+v", res)
 	}
-	if rd := c.get(t); rd.PendingGo != nil || len(rd.Decisions) != 1 || rd.Items[2].Status != "UNCONFIRMED" {
+	// The no-go voids Alice's approval with its waivers: the staged gl_balances pack is open again.
+	if rd := c.get(t); rd.PendingGo != nil || len(rd.Decisions) != 1 || rd.Items[2].Status != "UNCONFIRMED" || rd.Items[0].Status != "OPEN" {
 		t.Fatalf("readiness after the no-go: %+v", rd)
 	}
+	if r := c.post("alice", `{"decision":"GO","attestations":`+attestations()+`}`, ""); r.Code != http.StatusUnprocessableEntity || !strings.Contains(r.Body.String(), "packs_reconciled") {
+		t.Fatalf("round 2 without a waiver: %d %s", r.Code, r.Body)
+	}
 	// Bob's GO now is a first approval of round 2, not the second approval of Alice's.
-	r := c.post("bob", `{"decision":"GO","attestations":`+attestations()+`}`, "")
+	r := c.post("bob", `{"decision":"GO","attestations":`+attestations()+`,"waivers":`+glWaiver+`}`, "")
 	if r.Code != http.StatusAccepted || decode[decisionResponse](t, r).PendingGo.Round != 2 {
 		t.Fatalf("bob after the no-go: %d %s", r.Code, r.Body)
 	}
@@ -286,6 +295,65 @@ func TestGoNoGo_NoGoVoidsAPendingApproval(t *testing.T) {
 	}
 	if n := count(t, admin, `select count(*) from outbox where type = 'dev.passage.cutover.decision.recorded.v1'`); n != 2 {
 		t.Fatalf("decision events = %d, want 2", n)
+	}
+}
+
+// CUT-1608: a staged-but-unposted pack goes live only when both approvers waive it with a reason.
+// The second approver approves the first's waivers; they are kept on the decision and in its event.
+func TestGoNoGo_WaiverOfStagedPackNeedsBothApprovers(t *testing.T) {
+	h, admin := dbServer(t)
+	plan, _ := readyPlan(t, h, admin)
+	c := decisionCall{t, h, "/api/v1/cutover/plans/" + plan.PlanID + "/go-no-go"}
+	att := `"attestations":` + attestations()
+
+	if r := c.post("alice", `{"decision":"GO",`+att+`}`, ""); r.Code != http.StatusUnprocessableEntity || !strings.Contains(r.Body.String(), "packs_reconciled") {
+		t.Fatalf("no waiver: %d %s", r.Code, r.Body)
+	}
+	for name, w := range map[string]string{
+		"posted pack": `[{"pack":"open_items","reason":"x"}]`,
+		"no reason":   `[{"pack":"gl_balances","reason":""}]`,
+		"not in plan": `[{"pack":"onhand","reason":"x"}]`,
+	} {
+		if r := c.post("alice", `{"decision":"GO",`+att+`,"waivers":`+w+`}`, ""); r.Code != http.StatusUnprocessableEntity || !strings.Contains(r.Body.String(), "CUT-1608") {
+			t.Errorf("%s: %d %s", name, r.Code, r.Body)
+		}
+	}
+	first := c.post("alice", `{"decision":"GO",`+att+`,"waivers":`+glWaiver+`}`, "")
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("alice: %d %s", first.Code, first.Body)
+	}
+	if fr := decode[decisionResponse](t, first); fr.PendingGo == nil || len(fr.PendingGo.Waivers) != 1 || fr.PendingGo.Waivers[0].Pack != "gl_balances" {
+		t.Fatalf("pending approval %+v", fr.PendingGo)
+	}
+	if rd := c.get(t); rd.Items[0].Status != "MET" || !strings.Contains(rd.Items[0].Detail, "gl_balances waived") {
+		t.Fatalf("readiness with the pending waiver: %+v", rd.Items[0])
+	}
+	if r := c.post("bob", `{"decision":"GO","waivers":[{"pack":"gl_balances","reason":"a different reason"}]}`, ""); r.Code != http.StatusUnprocessableEntity || !strings.Contains(r.Body.String(), "CUT-1608") {
+		t.Fatalf("bob with another waiver: %d %s", r.Code, r.Body)
+	}
+	done := c.post("bob", `{"decision":"GO","waivers":`+glWaiver+`}`, "")
+	if done.Code != http.StatusCreated {
+		t.Fatalf("bob: %d %s", done.Code, done.Body)
+	}
+	d := decode[decisionResponse](t, done).Decision
+	if d == nil || len(d.Waivers) != 1 || d.Waivers[0].Pack != "gl_balances" || !strings.Contains(d.Checklist[0].Detail, "waived by both approvers") {
+		t.Fatalf("decision %+v", d)
+	}
+	var stored string
+	if err := admin.QueryRow(context.Background(), `select waivers::text from cutover_decision where plan_id = $1`, plan.PlanID).Scan(&stored); err != nil || !strings.Contains(stored, "posted manually") {
+		t.Fatalf("stored waivers %q %v", stored, err)
+	}
+	var payload []byte
+	if err := admin.QueryRow(context.Background(), `select payload from outbox where type = 'dev.passage.cutover.decision.recorded.v1' and aggregate_id = $1`, plan.PlanID).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	var evt struct {
+		Data struct {
+			Waivers []struct{ Pack, Reason string } `json:"waivers"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &evt); err != nil || len(evt.Data.Waivers) != 1 || evt.Data.Waivers[0].Pack != "gl_balances" || evt.Data.Waivers[0].Reason == "" {
+		t.Fatalf("event %s %v", payload, err)
 	}
 }
 

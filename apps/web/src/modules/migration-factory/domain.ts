@@ -4,6 +4,7 @@ import type {
   Category,
   BillingStatus,
   GLBalanceRecord,
+  BankBalanceRecord,
   OnhandLineRecord,
   LegacyCategoryTotal,
   OpeningLine,
@@ -345,6 +346,26 @@ export function parseOnhandLines(text: string): { records: OnhandLineRecord[]; e
     if (batch) record.batch = batch;
     if (serial) record.serial = serial;
     records.push(record);
+    return undefined;
+  });
+  return { records, errors };
+}
+
+const BANK_HEADER = ["legacyId", "bankAccount", "currency", "balance"];
+
+/**
+ * Parses a pasted bank_balances extract, one account per line: legacyId, bankAccount, currency,
+ * balance. The balance is signed (an overdrawn account is negative) and stays a decimal string.
+ * The service applies the FR-49.11 rules; this checks the shape.
+ */
+export function parseBankBalances(text: string): { records: BankBalanceRecord[]; errors: string[] } {
+  const records: BankBalanceRecord[] = [];
+  const errors = rows(text, BANK_HEADER, ([legacyId, bankAccount, currency, balance], n) => {
+    if (!legacyId || !bankAccount) return `Line ${n}: the legacy id and bank account are required.`;
+    const cur = currency.toUpperCase();
+    if (!CURRENCY.test(cur)) return `Line ${n}: currency "${currency}" is not a three-letter code.`;
+    if (toMicro(balance) === null) return `Line ${n}: balance "${balance}" is not a decimal such as -1250.00.`;
+    records.push({ legacyId, bankAccount, currency: cur, balance });
     return undefined;
   });
   return { records, errors };

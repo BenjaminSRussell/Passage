@@ -76,6 +76,7 @@ type Store interface {
 	RunProjectWIP(ctx context.Context, idem store.Idem, in store.ProjectWIPRun) (domain.PackRun, bool, error)
 	RunGLBalances(ctx context.Context, idem store.Idem, in store.GLBalancesRun) (domain.PackRun, bool, error)
 	RunOnhand(ctx context.Context, idem store.Idem, in store.OnhandRun) (domain.PackRun, bool, error)
+	RunBankBalances(ctx context.Context, idem store.Idem, in store.BankRun) (domain.PackRun, bool, error)
 	GetProjectOpening(ctx context.Context, f store.OpeningFilter) (store.ProjectOpening, error)
 	GetTargetLoad(ctx context.Context, runID string) (domain.TargetLoad, error)
 	ListTargetRows(ctx context.Context, runID string, f store.TargetRowFilter) ([]domain.TargetRowView, error)

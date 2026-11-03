@@ -309,7 +309,7 @@ components:
               const: dev.passage.cutover.decision.recorded.v1
             data:
               type: object
-              required: [plan_id, decision, approvers, reason, open_items, decided_by, timestamp]
+              required: [plan_id, decision, approvers, reason, open_items, waivers, decided_by, timestamp]
               properties:
                 plan_id:
                   type: string
@@ -331,6 +331,19 @@ components:
                   description: Codes of the checklist items not met when the decision was taken; empty for a GO.
                   items:
                     type: string
+                waivers:
+                  type: array
+                  description: Packs that are staged in the factory and not posted to their ledger which both approvers accepted for this decision, each with the reason. Empty when none.
+                  items:
+                    type: object
+                    required: [pack, reason]
+                    properties:
+                      pack:
+                        type: string
+                        description: Pack code, for example onhand or gl_balances.
+                      reason:
+                        type: string
+                        description: Why the pack may go live without being posted.
                 decided_by:
                   type: string
                   description: The user who recorded the decision; always one of the approvers.

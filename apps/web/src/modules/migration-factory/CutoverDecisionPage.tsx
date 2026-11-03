@@ -31,6 +31,7 @@ import {
   type GoNoGoDecision,
   type GoNoGoValue,
   type Problem,
+  type Waiver,
 } from "./api/client";
 import { formatDateTime } from "./domain";
 import styles from "./pages.module.css";
@@ -43,10 +44,14 @@ export interface DecisionValues {
   decision: GoNoGoValue;
   reason: string;
   attestations: Record<string, { confirmed: boolean; reference: string }>;
+  /** Waivers of staged-but-unposted packs by pack code (CUT-1608). */
+  waivers: Record<string, { waived: boolean; reason: string }>;
 }
 
-type Field = "reason" | "attestations";
+type Field = "reason" | "attestations" | "waivers";
 export type DecisionErrors = Partial<Record<Field, string>>;
+
+const WAIVER_REASON_MAX = 500;
 
 /**
  * The checks the service makes (CUT-1606, NO_GO needs a reason), and the request the form sends. The approver is the
@@ -66,10 +71,25 @@ export function validateDecision(values: DecisionValues, version: number, pendin
     }
     attestations.push({ code, confirmed: true, reference: a.reference.trim() });
   }
+  // Waivers go with the first GO only: the second approver approves the pending ones, and a NO_GO carries none.
+  const waivers: Waiver[] = [];
+  for (const [pack, w] of values.decision === "GO" && !approving ? Object.entries(values.waivers) : []) {
+    if (!w.waived) continue;
+    const reason = w.reason.trim();
+    if (reason === "") {
+      errors.waivers = "Every waived pack needs a reason (CUT-1608).";
+      break;
+    }
+    if ([...reason].length > WAIVER_REASON_MAX) {
+      errors.waivers = `A waiver reason is at most ${WAIVER_REASON_MAX} characters.`;
+      break;
+    }
+    waivers.push({ pack, reason });
+  }
   if (Object.keys(errors).length > 0) return { errors };
   return {
     errors,
-    input: { decision: values.decision, ...(values.reason.trim() ? { reason: values.reason.trim() } : {}), ...(approving ? {} : { attestations }), version },
+    input: { decision: values.decision, ...(values.reason.trim() ? { reason: values.reason.trim() } : {}), ...(approving ? {} : { attestations, ...(waivers.length > 0 ? { waivers } : {}) }), version },
   };
 }
 
@@ -113,11 +133,12 @@ const decisionColumns: DataTableColumn<GoNoGoDecision>[] = [
   { key: "decision", header: "Decision", render: (row) => <Badge tone={row.decision === "GO" ? "success" : "danger"}>{row.decision === "GO" ? "Go" : "No-go"}</Badge> },
   { key: "approvers", header: "Approvers", render: (row) => row.approvers.join(", ") },
   { key: "reason", header: "Reason", render: (row) => row.reason ?? "" },
+  { key: "waivers", header: "Waived packs", render: (row) => (row.waivers ?? []).map((w) => `${w.pack}: ${w.reason}`).join("; ") },
   { key: "decidedBy", header: "Recorded by", render: (row) => row.decidedBy ?? "" },
   { key: "decidedAt", header: "When", render: (row) => formatDateTime(row.decidedAt) },
 ];
 
-const emptyValues: DecisionValues = { decision: "NO_GO", reason: "", attestations: {} };
+const emptyValues: DecisionValues = { decision: "NO_GO", reason: "", attestations: {}, waivers: {} };
 
 function conflictMessage(problem: Problem): string {
   return problem.code === "MIG-0006" ? "Someone changed this plan since you opened it. The checklist has been reloaded; check it and try again." : problem.message;
@@ -149,6 +170,11 @@ export function CutoverDecisionPage() {
   function attest(code: string, patch: Partial<{ confirmed: boolean; reference: string }>) {
     const current = values.attestations[code] ?? { confirmed: false, reference: "" };
     update({ attestations: { ...values.attestations, [code]: { ...current, ...patch } } });
+  }
+
+  function waive(pack: string, patch: Partial<{ waived: boolean; reason: string }>) {
+    const current = values.waivers[pack] ?? { waived: false, reason: "" };
+    update({ waivers: { ...values.waivers, [pack]: { ...current, ...patch } } });
   }
 
   function ask(event: FormEvent) {
@@ -235,6 +261,9 @@ export function CutoverDecisionPage() {
             <Alert tone="info" title="GO waiting for a second approver">
               {pendingGo.approver} approved a GO on {formatDateTime(pendingGo.approvedAt)} with the evidence shown in the checklist. A different
               CutoverManager records the GO by approving it below; a no-go recorded instead voids this approval.
+              {pendingGo.waivers && pendingGo.waivers.length > 0
+                ? ` Waived as staged and not posted: ${pendingGo.waivers.map((w) => `${w.pack} (${w.reason})`).join("; ")}.`
+                : ""}
             </Alert>
           ) : null}
           <Card title="Checklist">
@@ -298,6 +327,39 @@ export function CutoverDecisionPage() {
                     })}
                   </fieldset>
                 )}
+                {approving || values.decision !== "GO" || readiness.stagedPacks.length === 0 ? null : (
+                  <fieldset className={styles.choices} aria-describedby={errors.waivers ? "decision-waiver-error" : undefined}>
+                    <legend className={styles.legend}>Waive packs staged and not posted</legend>
+                    {readiness.stagedPacks.map((staged) => {
+                      const w = values.waivers[staged.pack] ?? { waived: false, reason: "" };
+                      return (
+                        <div key={staged.pack} className={styles.wide}>
+                          <div className={styles.check}>
+                            <Input id={`waive-${staged.pack}`} type="checkbox" checked={w.waived} onChange={(event) => waive(staged.pack, { waived: event.target.checked })} />
+                            <label htmlFor={`waive-${staged.pack}`}>
+                              {staged.pack}: {staged.reason}
+                            </label>
+                          </div>
+                          {w.waived ? (
+                            <Input
+                              aria-label={`Reason for waiving ${staged.pack}`}
+                              placeholder="Why it may go live without being posted"
+                              maxLength={WAIVER_REASON_MAX}
+                              value={w.reason}
+                              onChange={(event) => waive(staged.pack, { reason: event.target.value })}
+                            />
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                    <p className={styles.note}>The second approver approves the same waivers.</p>
+                  </fieldset>
+                )}
+                {errors.waivers ? (
+                  <p id="decision-waiver-error" role="alert" className={styles.note}>
+                    {errors.waivers}
+                  </p>
+                ) : null}
                 {errors.attestations ? (
                   <p id="decision-attest-error" role="alert" className={styles.note}>
                     {errors.attestations}

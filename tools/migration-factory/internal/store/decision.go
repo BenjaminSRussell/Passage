@@ -67,7 +67,7 @@ func readinessFacts(ctx context.Context, tx pgx.Tx, plan domain.Plan) (domain.Re
 }
 
 func loadApprovals(ctx context.Context, tx pgx.Tx, planID string, round int) ([]domain.GoApproval, error) {
-	rows, err := tx.Query(ctx, `select round, approver, attestations, plan_version, approved_at from cutover_go_approval
+	rows, err := tx.Query(ctx, `select round, approver, attestations, waivers, plan_version, approved_at from cutover_go_approval
 		where tenant_id = current_setting('passage.tenant_id', true)::uuid and plan_id = $1 and round = $2 order by approved_at, approver`, planID, round)
 	if err != nil {
 		return nil, err
@@ -76,9 +76,12 @@ func loadApprovals(ctx context.Context, tx pgx.Tx, planID string, round int) ([]
 	out := []domain.GoApproval{}
 	for rows.Next() {
 		var a domain.GoApproval
-		var att []byte
-		if err := rows.Scan(&a.Round, &a.Approver, &att, &a.PlanVersion, &a.ApprovedAt); err != nil {
+		var att, wv []byte
+		if err := rows.Scan(&a.Round, &a.Approver, &att, &wv, &a.PlanVersion, &a.ApprovedAt); err != nil {
 			return nil, err
+		}
+		if err := json.Unmarshal(wv, &a.Waivers); err != nil {
+			return nil, fmt.Errorf("decode waivers of the GO approval by %s: %w", a.Approver, err)
 		}
 		if err := json.Unmarshal(att, &a.Attestations); err != nil {
 			return nil, fmt.Errorf("decode attestations of the GO approval by %s: %w", a.Approver, err)
@@ -89,7 +92,7 @@ func loadApprovals(ctx context.Context, tx pgx.Tx, planID string, round int) ([]
 }
 
 func loadDecisions(ctx context.Context, tx pgx.Tx, planID string) ([]domain.Decision, error) {
-	rows, err := tx.Query(ctx, `select seq, decision, approvers, reason, checklist, decided_by, decided_at, plan_version
+	rows, err := tx.Query(ctx, `select seq, decision, approvers, reason, checklist, waivers, decided_by, decided_at, plan_version
 		from cutover_decision where tenant_id = current_setting('passage.tenant_id', true)::uuid and plan_id = $1 order by seq`, planID)
 	if err != nil {
 		return nil, err
@@ -98,12 +101,15 @@ func loadDecisions(ctx context.Context, tx pgx.Tx, planID string) ([]domain.Deci
 	out := []domain.Decision{}
 	for rows.Next() {
 		var d domain.Decision
-		var checklist []byte
-		if err := rows.Scan(&d.Seq, &d.Decision, &d.Approvers, &d.Reason, &checklist, &d.DecidedBy, &d.DecidedAt, &d.PlanVersion); err != nil {
+		var checklist, wv []byte
+		if err := rows.Scan(&d.Seq, &d.Decision, &d.Approvers, &d.Reason, &checklist, &wv, &d.DecidedBy, &d.DecidedAt, &d.PlanVersion); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(checklist, &d.Checklist); err != nil {
 			return nil, fmt.Errorf("decode checklist of decision %d: %w", d.Seq, err)
+		}
+		if err := json.Unmarshal(wv, &d.Waivers); err != nil {
+			return nil, fmt.Errorf("decode waivers of decision %d: %w", d.Seq, err)
 		}
 		out = append(out, d)
 	}
@@ -191,7 +197,7 @@ func (s *Postgres) RecordDecision(ctx context.Context, idem Idem, r DecisionRequ
 			if err != nil {
 				return DecisionResult{}, err
 			}
-			items, err := domain.EvaluateChecklist(facts, step.Attestations)
+			items, err := domain.EvaluateChecklist(facts, step.Attestations, step.Waivers)
 			if err != nil {
 				return DecisionResult{}, err
 			}
@@ -212,14 +218,18 @@ func (s *Postgres) RecordDecision(ctx context.Context, idem Idem, r DecisionRequ
 				return DecisionResult{Plan: plan, Approval: &a}, nil
 			}
 			d := domain.Decision{Seq: facts.Round(), Decision: r.Input.Decision, Approvers: step.Approvers, Reason: step.Reason,
-				Checklist: items, DecidedBy: step.Approvers[len(step.Approvers)-1], PlanVersion: plan.Version}
+				Checklist: items, Waivers: domain.NormalizeWaivers(step.Waivers), DecidedBy: step.Approvers[len(step.Approvers)-1], PlanVersion: plan.Version}
 			checklist, err := json.Marshal(items)
 			if err != nil {
 				return DecisionResult{}, err
 			}
-			if err := tx.QueryRow(ctx, `insert into cutover_decision (tenant_id, plan_id, seq, decision, approvers, reason, checklist, plan_version, decided_by)
-				values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, $6::jsonb, $7, $8) returning decided_at`,
-				plan.PlanID, d.Seq, d.Decision, d.Approvers, d.Reason, string(checklist), d.PlanVersion, d.DecidedBy).Scan(&d.DecidedAt); err != nil {
+			waivers, err := json.Marshal(d.Waivers)
+			if err != nil {
+				return DecisionResult{}, err
+			}
+			if err := tx.QueryRow(ctx, `insert into cutover_decision (tenant_id, plan_id, seq, decision, approvers, reason, checklist, waivers, plan_version, decided_by)
+				values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9) returning decided_at`,
+				plan.PlanID, d.Seq, d.Decision, d.Approvers, d.Reason, string(checklist), string(waivers), d.PlanVersion, d.DecidedBy).Scan(&d.DecidedAt); err != nil {
 				return DecisionResult{}, fmt.Errorf("insert cutover_decision: %w", err)
 			}
 			if err := savePlanVersion(ctx, tx, plan); err != nil {
@@ -230,7 +240,7 @@ func (s *Postgres) RecordDecision(ctx context.Context, idem Idem, r DecisionRequ
 				open = []string{}
 			}
 			if err := enqueue(ctx, tx, mfevents.CutoverDecisionRecorded, "cutover_plan", plan.PlanID, mfevents.CutoverDecisionRecordedData{
-				PlanID: plan.PlanID, Decision: d.Decision, Approvers: d.Approvers, Reason: d.Reason, OpenItems: open, DecidedBy: d.DecidedBy,
+				PlanID: plan.PlanID, Decision: d.Decision, Approvers: d.Approvers, Reason: d.Reason, OpenItems: open, Waivers: eventWaivers(d.Waivers), DecidedBy: d.DecidedBy,
 				Timestamp: d.DecidedAt.UTC().Format(time.RFC3339),
 			}); err != nil {
 				return DecisionResult{}, fmt.Errorf("enqueue cutover.decision.recorded: %w", err)
@@ -248,15 +258,28 @@ func (s *Postgres) RecordDecision(ctx context.Context, idem Idem, r DecisionRequ
 
 // insertApproval stores the first approval of a GO in the plan's current round.
 func insertApproval(ctx context.Context, tx pgx.Tx, plan domain.Plan, round int, step domain.DecisionStep) (domain.GoApproval, error) {
-	a := domain.GoApproval{Round: round, Approver: step.Approvers[0], Attestations: domain.ConfirmedAttestations(step.Attestations), PlanVersion: plan.Version}
+	a := domain.GoApproval{Round: round, Approver: step.Approvers[0], Attestations: domain.ConfirmedAttestations(step.Attestations),
+		Waivers: domain.NormalizeWaivers(step.Waivers), PlanVersion: plan.Version}
 	att, err := json.Marshal(a.Attestations)
 	if err != nil {
 		return domain.GoApproval{}, err
 	}
-	if err := tx.QueryRow(ctx, `insert into cutover_go_approval (tenant_id, plan_id, round, approver, attestations, plan_version)
-		values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4::jsonb, $5) returning approved_at`,
-		plan.PlanID, a.Round, a.Approver, string(att), a.PlanVersion).Scan(&a.ApprovedAt); err != nil {
+	wv, err := json.Marshal(a.Waivers)
+	if err != nil {
+		return domain.GoApproval{}, err
+	}
+	if err := tx.QueryRow(ctx, `insert into cutover_go_approval (tenant_id, plan_id, round, approver, attestations, waivers, plan_version)
+		values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4::jsonb, $5::jsonb, $6) returning approved_at`,
+		plan.PlanID, a.Round, a.Approver, string(att), string(wv), a.PlanVersion).Scan(&a.ApprovedAt); err != nil {
 		return domain.GoApproval{}, fmt.Errorf("insert cutover_go_approval: %w", err)
 	}
 	return a, nil
+}
+
+func eventWaivers(in []domain.Waiver) []mfevents.CutoverDecisionWaiver {
+	out := make([]mfevents.CutoverDecisionWaiver, 0, len(in))
+	for _, w := range in {
+		out = append(out, mfevents.CutoverDecisionWaiver{Pack: w.Pack, Reason: w.Reason})
+	}
+	return out
 }

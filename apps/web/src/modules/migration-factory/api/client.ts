@@ -212,6 +212,25 @@ export interface OnhandRunRequest {
   records: OnhandLineRecord[];
 }
 
+/** One legacy bank account balance at the cutoff. The balance is a signed decimal string: an overdrawn account is negative. */
+export interface BankBalanceRecord {
+  legacyId: string;
+  bankAccount: string;
+  currency: string;
+  balance: string;
+}
+
+export interface BankRunRequest {
+  sourceSystem: SourceSystem;
+  sourceCompany: string;
+  cutoffTs: string;
+  freezeTs: string;
+  quarantineMaxPct?: string;
+  /** The bank account master the lines are checked against. */
+  bankAccounts: string[];
+  records: BankBalanceRecord[];
+}
+
 /** A correction to a quarantined open item (FR-49.11). Blank fields keep the extracted value. */
 export interface ReleaseRequest {
   party?: string;
@@ -445,7 +464,14 @@ export interface ChecklistItem {
   references: string[];
 }
 
+/** Acceptance of a pack that is staged in the factory and not posted to its ledger, attested by both approvers (CUT-1608). */
+export interface Waiver {
+  pack: string;
+  reason: string;
+}
+
 export interface GoNoGoDecision extends DecisionSummary {
+  waivers: Waiver[];
   planVersion: number;
   /** The checklist as it was when the decision was taken. */
   checklist: ChecklistItem[];
@@ -460,6 +486,8 @@ export interface Readiness {
   items: ChecklistItem[];
   openItems: string[];
   decisions: GoNoGoDecision[];
+  /** Packs of the plan that are staged and not posted; each keeps the packs item open unless waived. */
+  stagedPacks: { pack: string; reason: string }[];
   /** A CutoverManager's approval of a GO waiting for a second, different one; the checklist shows its attestations. */
   pendingGo?: GoApproval;
 }
@@ -475,6 +503,7 @@ export interface GoApproval {
   round: number;
   approver: string;
   attestations: Attestation[];
+  waivers: Waiver[];
   planVersion: number;
   approvedAt: string;
 }
@@ -484,6 +513,7 @@ export interface DecisionRequest {
   decision: GoNoGoValue;
   reason?: string;
   attestations?: Attestation[];
+  waivers?: Waiver[];
   version?: number;
 }
 
@@ -601,6 +631,11 @@ export function getTargetLoad(runId: string, signal?: AbortSignal): Promise<Targ
 /** GET /migration/runs/{id}/target-rows. */
 export function listTargetRows(runId: string, filter: { status?: TargetRowStatus; after?: number; limit?: number } = {}, signal?: AbortSignal): Promise<TargetRow[]> {
   return items(`/migration/runs/${encodeURIComponent(runId)}/target-rows${query(filter)}`, signal);
+}
+
+/** POST /migration/packs/bank_balances/runs: bank account opening balances (FR-49.1). */
+export function startBankRun(body: BankRunRequest, key: string = newKey()): Promise<PackRunDetail> {
+  return post("/migration/packs/bank_balances/runs", body, key);
 }
 
 /** POST /migration/packs/onhand/runs: opening stock at legacy cost (FR-49.1, BR-49.3). */

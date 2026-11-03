@@ -100,6 +100,14 @@ type CutoverDecisionRecordedData struct {
 	Approvers []string `json:"approvers"`
 	Reason    string   `json:"reason"`
 	OpenItems []string `json:"open_items"`
-	DecidedBy string   `json:"decided_by"`
-	Timestamp string   `json:"timestamp"`
+	// Waivers lists the staged-but-unposted packs both approvers accepted, with their reasons.
+	Waivers   []CutoverDecisionWaiver `json:"waivers"`
+	DecidedBy string                  `json:"decided_by"`
+	Timestamp string                  `json:"timestamp"`
+}
+
+// CutoverDecisionWaiver is one waived pack on dev.passage.cutover.decision.recorded.v1.
+type CutoverDecisionWaiver struct {
+	Pack   string `json:"pack"`
+	Reason string `json:"reason"`
 }

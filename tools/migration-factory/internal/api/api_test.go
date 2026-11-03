@@ -122,6 +122,10 @@ func (u unreachableStore) RunOnhand(context.Context, store.Idem, store.OnhandRun
 	u.fail()
 	return domain.PackRun{}, false, nil
 }
+func (u unreachableStore) RunBankBalances(context.Context, store.Idem, store.BankRun) (domain.PackRun, bool, error) {
+	u.fail()
+	return domain.PackRun{}, false, nil
+}
 func (u unreachableStore) GetProjectOpening(context.Context, store.OpeningFilter) (store.ProjectOpening, error) {
 	u.fail()
 	return store.ProjectOpening{}, nil

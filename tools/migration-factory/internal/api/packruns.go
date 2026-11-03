@@ -215,7 +215,7 @@ func (s *Server) startPackRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !domain.PackAvailable(pack) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeUnsupported, "pack "+string(pack)+" is not available yet; open_items, gl_balances, onhand and project_wip run"))
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeUnsupported, "pack "+string(pack)+" is not available yet; open_items, gl_balances, onhand, bank_balances and project_wip run"))
 		return
 	}
 	switch pack {
@@ -227,6 +227,9 @@ func (s *Server) startPackRun(w http.ResponseWriter, r *http.Request) {
 		return
 	case domain.PackOnhand:
 		s.startOnhandRun(w, r)
+		return
+	case domain.PackBankBal:
+		s.startBankRun(w, r)
 		return
 	}
 	var req packRunRequest

@@ -42,6 +42,14 @@ interface Correction {
 }
 
 /** One pack run: its counts, the control-total board, the quarantine with release, and its projects (9.49.6). */
+/** Packs whose loaded rows stay in the factory (domain.NotPosted), with the ledger they are not posted to. */
+const STAGED_ONLY: Partial<Record<string, string>> = {
+  onhand: "the inventory ledger",
+  gl_balances: "the general ledger",
+  project_wip: "project operations",
+  bank_balances: "treasury",
+};
+
 export function PackRunDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -167,10 +175,10 @@ export function PackRunDetailPage() {
               {run.message}
             </Alert>
           ) : null}
-          {run.pack === "onhand" ? (
-            <Alert tone="warning" title="Staged, not posted to inventory">
-              This run holds the opening stock in the migration factory and reconciles it with the extract. Nothing is posted to the inventory ledger
-              yet, so the cutover go/no-go keeps the packs item open for a plan that includes on-hand stock (H-S9-1).
+          {STAGED_ONLY[run.pack] ? (
+            <Alert tone="warning" title={`Staged, not posted to ${STAGED_ONLY[run.pack]}`}>
+              This run holds its rows in the migration factory and reconciles them with the extract. Nothing is posted to {STAGED_ONLY[run.pack]} yet,
+              so the cutover go/no-go keeps the packs item open for a plan that includes this pack until both approvers waive it.
             </Alert>
           ) : null}
           {run.mismatchMessages && run.mismatchMessages.length > 0 ? (

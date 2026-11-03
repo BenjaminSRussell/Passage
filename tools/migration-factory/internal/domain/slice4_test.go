@@ -187,8 +187,8 @@ func TestPackCatalog_NinePacksAllSystemsFourAvailable(t *testing.T) {
 			available = append(available, e.Pack)
 		}
 	}
-	if len(available) != 4 || available[0] != PackOpenItems || available[1] != PackGLBalances || available[2] != PackOnhand || available[3] != PackProjectWIP {
-		t.Fatalf("available packs %v, want open_items, gl_balances, onhand and project_wip", available)
+	if len(available) != 5 || available[0] != PackOpenItems || available[1] != PackGLBalances || available[2] != PackOnhand || available[3] != PackProjectWIP || available[4] != PackBankBal {
+		t.Fatalf("available packs %v, want open_items, gl_balances, onhand, project_wip and bank_balances", available)
 	}
 	cat[0].Systems[0] = "X"
 	if PackCatalog()[0].Systems[0] != SourceAX2012 {

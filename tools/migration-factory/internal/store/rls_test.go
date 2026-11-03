@@ -48,6 +48,12 @@ const insertXrefForBalance = `with r as (insert into pack_run (tenant_id, run_id
 	insert into legacy_xref (tenant_id, run_id, xref_id, source_system, source_company, source_table, source_id, passage_entity, passage_id, amount, currency)
 	select $1, run_id, $3::uuid, 'AX2012', 'USMF', 'gl_balances', $3::text, 'gl_opening_balance', $3::uuid, 10, 'USD' from r`
 
+// insertXrefForBank creates the bank_balances run and the xref row a bank opening balance references; $3 is the xref id.
+const insertXrefForBank = `with r as (insert into pack_run (tenant_id, run_id, pack, source_system, source_company, cutoff_ts, input_hash, status,
+	records_in, records_loaded, records_quarantined) values ($1, $2, 'bank_balances', 'AX2012', 'USMF', now(), 'h', 'LOADED', 1, 1, 0) returning run_id)
+	insert into legacy_xref (tenant_id, run_id, xref_id, source_system, source_company, source_table, source_id, passage_entity, passage_id, amount, currency)
+	select $1, run_id, $3::uuid, 'AX2012', 'USMF', 'bank_balances', $3::text, 'bank_opening_balance', $3::uuid, -10, 'USD' from r`
+
 const insertPlan = `insert into cutover_plan (tenant_id, plan_id, t0, packs, entities, abort_offset_min)
 	values ($1, $2, now(), '{open_items}', '{USMF}', 2160)`
 
@@ -127,6 +133,15 @@ func TestAppRole_CrossTenantRLS(t *testing.T) {
 			NoUpdate: true,
 		},
 		{
+			Table:  "bank_opening_balance",
+			Before: insertXrefForBank,
+			Insert: `insert into bank_opening_balance (tenant_id, run_id, legacy_xref_id, balance_id, source_system, source_company, legacy_id,
+				bank_account, currency, balance)
+				values ($1, $2, $3::uuid, $3::uuid, 'AX2012', 'USMF', 'BK-1', 'OPER-USD', 'USD', -10)`,
+			Args:     func(tenantID, _ string) []any { return []any{tenantID, ids.New(), ids.New()} },
+			NoUpdate: true,
+		},
+		{
 			Table:  "cutover_plan",
 			Insert: insertPlan,
 			Args:   func(tenantID, _ string) []any { return []any{tenantID, ids.New()} },
@@ -173,7 +188,7 @@ func TestAppRole_CrossTenantRLS(t *testing.T) {
 	})
 }
 
-// legacy_xref, project opening lines, GL opening balances, opening stock and re-keying lines are append-only
+// legacy_xref, project opening lines, GL opening balances, opening stock, bank opening balances and re-keying lines are append-only
 // (9.49.4, FR-49.12, FR-49.1, FR-49.9): the application role cannot change or delete a row, and it deletes nothing else
 // either.
 func TestAppRole_LegacyXrefIsAppendOnly(t *testing.T) {
@@ -202,7 +217,8 @@ func TestAppRole_LegacyXrefIsAppendOnly(t *testing.T) {
 		`update cutover_go_approval set approver = 'x'`, `delete from cutover_go_approval`,
 		`update cutover_rollback_approval set approver = 'x'`, `delete from cutover_rollback_approval`,
 		`update gl_opening_balance set balance = 0`, `delete from gl_opening_balance`,
-		`update onhand_opening_balance set quantity = 1`, `delete from onhand_opening_balance`} {
+		`update onhand_opening_balance set quantity = 1`, `delete from onhand_opening_balance`,
+		`update bank_opening_balance set balance = 0`, `delete from bank_opening_balance`} {
 		err := inTenant(func(tx pgx.Tx) error { _, err := tx.Exec(ctx, stmt); return err })
 		var pgErr *pgconn.PgError
 		if !errors.As(err, &pgErr) || pgErr.Code != "42501" {

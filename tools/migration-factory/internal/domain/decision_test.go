@@ -38,6 +38,11 @@ func allAttested() []Attestation {
 	return out
 }
 
+// glWaived waives the staged gl_balances pack, which decisionPlan includes.
+func glWaived() []Waiver {
+	return []Waiver{{Pack: "gl_balances", Reason: "opening balances posted manually in the target"}}
+}
+
 func statuses(items []ItemResult) map[string]string {
 	m := map[string]string{}
 	for _, it := range items {
@@ -60,7 +65,7 @@ func TestChecklist_HasFourteenItemsTwoEvaluatedByTheFactory(t *testing.T) {
 
 func TestEvaluateChecklist_PacksNeedEveryPackAndEntityReconciled(t *testing.T) {
 	facts := ReadinessFacts{Plan: decisionPlan(), Packs: allPackFacts(StatusReconciled), Parallel: signedOff()}
-	items, err := EvaluateChecklist(facts, allAttested())
+	items, err := EvaluateChecklist(facts, allAttested(), glWaived())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +79,7 @@ func TestEvaluateChecklist_PacksNeedEveryPackAndEntityReconciled(t *testing.T) {
 	// One company missing and one mismatching.
 	facts.Packs = facts.Packs[1:]
 	facts.Packs[0].Status = StatusLoaded
-	items, err = EvaluateChecklist(facts, allAttested())
+	items, err = EvaluateChecklist(facts, allAttested(), glWaived())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,12 +93,12 @@ func TestEvaluateChecklist_PacksNeedEveryPackAndEntityReconciled(t *testing.T) {
 func TestEvaluateChecklist_PackRunBeforeTheFreezeIsStale(t *testing.T) {
 	facts := ReadinessFacts{Plan: decisionPlan(), Packs: allPackFacts(StatusReconciled), Parallel: signedOff()}
 	facts.Packs[3].CreatedAt = decisionT0.Add(-7 * 24 * time.Hour)
-	items, _ := EvaluateChecklist(facts, nil)
+	items, _ := EvaluateChecklist(facts, nil, glWaived())
 	if items[0].Status != ItemOpen || !strings.Contains(items[0].Detail, "before the legacy freeze 2026-12-31T18:00:00Z for gl_balances/DEMF") {
 		t.Fatalf("stale run: %s %q", items[0].Status, items[0].Detail)
 	}
 	facts.Packs[3].CreatedAt = decisionT0.Add(LegacyFreezeOffsetMin * time.Minute)
-	if items, _ = EvaluateChecklist(facts, nil); items[0].Status != ItemMet {
+	if items, _ = EvaluateChecklist(facts, nil, glWaived()); items[0].Status != ItemMet {
 		t.Fatalf("run at the freeze: %s %q", items[0].Status, items[0].Detail)
 	}
 }
@@ -125,7 +130,7 @@ func TestEvaluateChecklist_ParallelRun(t *testing.T) {
 	} {
 		f := base
 		f.Parallel = c.p
-		items, err := EvaluateChecklist(f, nil)
+		items, err := EvaluateChecklist(f, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -144,12 +149,12 @@ func TestEvaluateChecklist_RejectsBadAttestations(t *testing.T) {
 		"confirmed no ref":    {{Code: "load_test", Confirmed: true, Reference: "  "}},
 		"reference too large": {{Code: "load_test", Confirmed: true, Reference: strings.Repeat("x", 501)}},
 	} {
-		if _, err := EvaluateChecklist(f, att); !errors.Is(err, ErrInvalid) {
+		if _, err := EvaluateChecklist(f, att, nil); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%s: %v, want ErrInvalid", name, err)
 		}
 	}
 	// Unconfirmed attestations are accepted and stay UNCONFIRMED.
-	items, err := EvaluateChecklist(f, []Attestation{{Code: "load_test", Confirmed: false}})
+	items, err := EvaluateChecklist(f, []Attestation{{Code: "load_test", Confirmed: false}}, nil)
 	if err != nil || statuses(items)["load_test"] != ItemUnconfirmed {
 		t.Fatalf("%v %v", err, statuses(items))
 	}
@@ -208,11 +213,11 @@ func TestPrepareDecision_ApproversAreAuthenticatedUsers(t *testing.T) {
 }
 
 func TestRequireAllMet(t *testing.T) {
-	ready, _ := EvaluateChecklist(ReadinessFacts{Plan: decisionPlan(), Packs: allPackFacts(StatusReconciled), Parallel: signedOff()}, allAttested())
+	ready, _ := EvaluateChecklist(ReadinessFacts{Plan: decisionPlan(), Packs: allPackFacts(StatusReconciled), Parallel: signedOff()}, allAttested(), glWaived())
 	if err := RequireAllMet(ready); err != nil {
 		t.Fatal(err)
 	}
-	notReady, _ := EvaluateChecklist(ReadinessFacts{Plan: decisionPlan()}, nil)
+	notReady, _ := EvaluateChecklist(ReadinessFacts{Plan: decisionPlan()}, nil, nil)
 	if err := RequireAllMet(notReady); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "CUT-1607") || !strings.Contains(err.Error(), "packs_reconciled") {
 		t.Fatalf("%v", err)
 	}
@@ -227,5 +232,75 @@ func TestSameAttestations_IgnoresOrderAndUnconfirmed(t *testing.T) {
 	b[2].Reference = "other"
 	if SameAttestations(a, b) {
 		t.Fatal("a different reference is a different set")
+	}
+}
+
+// A staged-but-unposted pack stays open without a waiver and is met with one; the waiver is
+// validated against the plan and the pack's status.
+func TestEvaluateChecklist_WaiverForStagedPack(t *testing.T) {
+	facts := ReadinessFacts{Plan: decisionPlan(), Packs: allPackFacts(StatusReconciled), Parallel: signedOff()}
+	items, err := EvaluateChecklist(facts, allAttested(), nil)
+	if err != nil || items[0].Status != ItemOpen || !strings.Contains(items[0].Detail, "gl_balances/USMF is RECONCILED but staged") {
+		t.Fatalf("no waiver: %v %s %q", err, items[0].Status, items[0].Detail)
+	}
+	items, err = EvaluateChecklist(facts, allAttested(), glWaived())
+	if err != nil || items[0].Status != ItemMet || !strings.Contains(items[0].Detail, "gl_balances waived") || !strings.Contains(items[0].Detail, "posted manually") {
+		t.Fatalf("waived: %v %s %q", err, items[0].Status, items[0].Detail)
+	}
+	// A waiver does not excuse a run that is not RECONCILED.
+	facts.Packs[3].Status = StatusLoaded
+	if items, _ = EvaluateChecklist(facts, allAttested(), glWaived()); items[0].Status != ItemOpen || !strings.Contains(items[0].Detail, "is LOADED") {
+		t.Fatalf("waived but loaded: %s %q", items[0].Status, items[0].Detail)
+	}
+	// Nor a RECONCILED run started before the legacy freeze (a rehearsal).
+	facts.Packs[3].Status = StatusReconciled
+	facts.Packs[3].CreatedAt = decisionT0.Add(-7 * 24 * time.Hour)
+	if items, _ = EvaluateChecklist(facts, allAttested(), glWaived()); items[0].Status != ItemOpen || !strings.Contains(items[0].Detail, "before the legacy freeze") {
+		t.Fatalf("waived but stale: %s %q", items[0].Status, items[0].Detail)
+	}
+	// The limit is 500 characters, not bytes.
+	if _, err := EvaluateChecklist(facts, nil, []Waiver{{Pack: "gl_balances", Reason: strings.Repeat("é", 500)}}); err != nil {
+		t.Fatalf("500 two-byte characters: %v", err)
+	}
+	for name, w := range map[string][]Waiver{
+		"posted pack":  {{Pack: "open_items", Reason: "x"}},
+		"not in plan":  {{Pack: "onhand", Reason: "x"}},
+		"no reason":    {{Pack: "gl_balances", Reason: "  "}},
+		"duplicate":    {{Pack: "gl_balances", Reason: "x"}, {Pack: "gl_balances", Reason: "y"}},
+		"too long":     {{Pack: "gl_balances", Reason: strings.Repeat("x", 501)}},
+		"unknown pack": {{Pack: "nope", Reason: "x"}},
+	} {
+		if _, err := EvaluateChecklist(facts, nil, w); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// The second approver approves the waivers the first approved (CUT-1608): none or the same set.
+func TestPrepareDecision_WaiversNeedTheSecondApprover(t *testing.T) {
+	plan := decisionPlan()
+	first, err := (&plan).PrepareDecision(DecisionInput{Decision: DecisionGo, By: "alice", Waivers: glWaived()}, ReadinessFacts{Plan: plan})
+	if err != nil || first.Complete || len(first.Waivers) != 1 {
+		t.Fatalf("first: %+v %v", first, err)
+	}
+	pending := ReadinessFacts{Plan: plan, Pending: []GoApproval{{Round: 1, Approver: "alice", Waivers: NormalizeWaivers(glWaived())}}}
+	if _, err := (&plan).PrepareDecision(DecisionInput{Decision: DecisionGo, By: "bob", Waivers: []Waiver{{Pack: "gl_balances", Reason: "other"}}}, pending); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("different waiver: %v", err)
+	}
+	step, err := (&plan).PrepareDecision(DecisionInput{Decision: DecisionGo, By: "bob", Waivers: glWaived()}, pending)
+	if err != nil || !step.Complete || len(step.Waivers) != 1 {
+		t.Fatalf("same waiver: %+v %v", step, err)
+	}
+	step, err = (&plan).PrepareDecision(DecisionInput{Decision: DecisionGo, By: "bob"}, pending)
+	if err != nil || !step.Complete || len(step.Waivers) != 1 {
+		t.Fatalf("none sent takes the first approver's: %+v %v", step, err)
+	}
+	// A NO_GO carries no waivers: it does not go live, and it voids the pending approval's.
+	noGo, err := (&plan).PrepareDecision(DecisionInput{Decision: DecisionNoGo, Reason: "bank smoke test failed", By: "bob", Waivers: glWaived()}, pending)
+	if err != nil || !noGo.Complete || len(noGo.Waivers) != 0 {
+		t.Fatalf("no-go: %+v %v", noGo, err)
+	}
+	if !SameWaivers(glWaived(), []Waiver{{Pack: "gl_balances", Reason: " opening balances posted manually in the target "}}) {
+		t.Fatal("reasons compare trimmed")
 	}
 }

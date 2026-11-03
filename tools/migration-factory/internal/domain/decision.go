@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Go/no-go decision values (FR-49.6, 9.49.5 "record go/no-go").
@@ -94,6 +95,14 @@ type Attestation struct {
 	Reference string `json:"reference,omitempty"`
 }
 
+// Waiver accepts one staged-but-unposted pack (NotPosted) in the go/no-go: the pack's runs must still
+// be RECONCILED and fresh, but the plan may go live without the rows being posted to the target
+// ledger, for the reason given (posted manually in the target, accepted as staged).
+type Waiver struct {
+	Pack   string `json:"pack"`
+	Reason string `json:"reason"`
+}
+
 // ItemResult is a checklist item as evaluated: its status, why, and the records it rests on.
 type ItemResult struct {
 	Code       string   `json:"code"`
@@ -112,6 +121,7 @@ type Decision struct {
 	Approvers   []string
 	Reason      string
 	Checklist   []ItemResult
+	Waivers     []Waiver
 	DecidedBy   string
 	DecidedAt   time.Time
 	PlanVersion int
@@ -124,6 +134,7 @@ type GoApproval struct {
 	Round        int           `json:"round"`
 	Approver     string        `json:"approver"`
 	Attestations []Attestation `json:"attestations"`
+	Waivers      []Waiver      `json:"waivers"`
 	PlanVersion  int           `json:"planVersion"`
 	ApprovedAt   time.Time     `json:"approvedAt"`
 }
@@ -144,7 +155,11 @@ func (f ReadinessFacts) Round() int { return len(f.Decisions) + 1 }
 // EvaluateChecklist evaluates every checklist item over the facts and the attestations given. An
 // attestation naming an unknown or system item, naming an item twice, or confirming without an
 // evidence reference is invalid. Items are returned in checklist order.
-func EvaluateChecklist(f ReadinessFacts, att []Attestation) ([]ItemResult, error) {
+func EvaluateChecklist(f ReadinessFacts, att []Attestation, waivers []Waiver) ([]ItemResult, error) {
+	waived, err := waiverMap(f.Plan, waivers)
+	if err != nil {
+		return nil, err
+	}
 	byCode := map[string]Attestation{}
 	for _, a := range att {
 		item, ok := checklistItem(a.Code)
@@ -171,7 +186,7 @@ func EvaluateChecklist(f ReadinessFacts, att []Attestation) ([]ItemResult, error
 		r := ItemResult{Code: item.Code, Title: item.Title, Source: item.Source, References: []string{}}
 		switch item.Code {
 		case ItemPacksReconciled:
-			r.Status, r.Detail, r.References = packsReconciled(f)
+			r.Status, r.Detail, r.References = packsReconciled(f, waived)
 			r.References = nonNil(r.References)
 		case ItemParallelSignedOf:
 			r.Status, r.Detail, r.References = parallelSignedOff(f.Plan.ParallelPeriod(), f.Parallel)
@@ -202,13 +217,14 @@ func checklistItem(code string) (ChecklistItem, bool) {
 // to entities by their source company (the plan's entities are legacy company codes). A pack whose
 // load is staged in the factory and not posted to its ledger (NotPosted) stays open even when
 // RECONCILED: the plan cannot go live as if that stock were loaded.
-func packsReconciled(f ReadinessFacts) (status, detail string, refs []string) {
+func packsReconciled(f ReadinessFacts, waived map[string]string) (status, detail string, refs []string) {
 	latest := map[string]PackFact{}
 	for _, pf := range f.Packs {
 		latest[string(pf.Pack)+"|"+pf.Company] = pf
 	}
 	freeze := f.Plan.T0.Add(LegacyFreezeOffsetMin * time.Minute)
-	var missing, stale, notReconciled []string
+	var missing, stale, notReconciled, waivedNotes []string
+	seenWaiver := map[string]bool{}
 	for _, pk := range f.Plan.Packs {
 		for _, e := range f.Plan.Entities {
 			pf, ok := latest[string(pk)+"|"+e]
@@ -221,6 +237,12 @@ func packsReconciled(f ReadinessFacts) (status, detail string, refs []string) {
 			case pf.Status != StatusReconciled:
 				notReconciled = append(notReconciled, fmt.Sprintf("%s/%s is %s", pk, e, pf.Status))
 				refs = append(refs, pf.RunID)
+			case NotPosted(pk) != "" && waived[string(pk)] != "":
+				if !seenWaiver[string(pk)] {
+					seenWaiver[string(pk)] = true
+					waivedNotes = append(waivedNotes, fmt.Sprintf("%s waived (%s): %s", pk, NotPosted(pk), waived[string(pk)]))
+				}
+				refs = append(refs, pf.RunID)
 			case NotPosted(pk) != "":
 				notReconciled = append(notReconciled, fmt.Sprintf("%s/%s is RECONCILED but %s", pk, e, NotPosted(pk)))
 				refs = append(refs, pf.RunID)
@@ -232,6 +254,7 @@ func packsReconciled(f ReadinessFacts) (status, detail string, refs []string) {
 	sort.Strings(missing)
 	sort.Strings(stale)
 	sort.Strings(notReconciled)
+	sort.Strings(waivedNotes)
 	var parts []string
 	if len(missing) > 0 {
 		parts = append(parts, "no run for "+strings.Join(missing, ", "))
@@ -245,7 +268,67 @@ func packsReconciled(f ReadinessFacts) (status, detail string, refs []string) {
 	if len(parts) > 0 {
 		return ItemOpen, strings.Join(parts, "; ") + ".", refs
 	}
-	return ItemMet, fmt.Sprintf("%d pack/entity runs RECONCILED.", len(refs)), refs
+	detail = fmt.Sprintf("%d pack/entity runs RECONCILED.", len(refs))
+	if len(waivedNotes) > 0 {
+		detail += " Not posted, waived by both approvers: " + strings.Join(waivedNotes, "; ") + "."
+	}
+	return ItemMet, detail, refs
+}
+
+// waiverMap validates the waivers of a request and returns the reason per pack. A waiver names a
+// pack of the plan that is staged but not posted (NotPosted), once, with a reason of at most 500
+// characters.
+func waiverMap(plan Plan, waivers []Waiver) (map[string]string, error) {
+	out := map[string]string{}
+	for _, w := range waivers {
+		reason := strings.TrimSpace(w.Reason)
+		inPlan := false
+		for _, pk := range plan.Packs {
+			if string(pk) == w.Pack {
+				inPlan = true
+			}
+		}
+		switch {
+		case !inPlan:
+			return nil, fmt.Errorf("%w: CUT-1608 waiver names %q, which is not a pack of this plan", ErrInvalid, w.Pack)
+		case NotPosted(Pack(w.Pack)) == "":
+			return nil, fmt.Errorf("%w: CUT-1608 pack %q is posted to its target and has nothing to waive", ErrInvalid, w.Pack)
+		case reason == "":
+			return nil, fmt.Errorf("%w: CUT-1608 the waiver for %q needs a reason", ErrInvalid, w.Pack)
+		case utf8.RuneCountInString(reason) > 500:
+			return nil, fmt.Errorf("%w: the waiver reason for %q is at most 500 characters", ErrInvalid, w.Pack)
+		}
+		if _, dup := out[w.Pack]; dup {
+			return nil, fmt.Errorf("%w: pack %q is waived twice", ErrInvalid, w.Pack)
+		}
+		out[w.Pack] = reason
+	}
+	return out, nil
+}
+
+// NormalizeWaivers returns the waivers trimmed and sorted by pack: the set an approval stores and a
+// second approver is compared against.
+func NormalizeWaivers(in []Waiver) []Waiver {
+	out := make([]Waiver, 0, len(in))
+	for _, w := range in {
+		out = append(out, Waiver{Pack: w.Pack, Reason: strings.TrimSpace(w.Reason)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Pack < out[j].Pack })
+	return out
+}
+
+// SameWaivers reports whether two waiver sets waive the same packs for the same reasons.
+func SameWaivers(a, b []Waiver) bool {
+	x, y := NormalizeWaivers(a), NormalizeWaivers(b)
+	if len(x) != len(y) {
+		return false
+	}
+	for i := range x {
+		if x[i] != y[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // parallelSignedOff is met when the period has at least one parallel run and every parallel run of
@@ -284,6 +367,7 @@ type DecisionInput struct {
 	Decision     string
 	Reason       string
 	Attestations []Attestation
+	Waivers      []Waiver
 	By           string
 }
 
@@ -294,6 +378,7 @@ type DecisionStep struct {
 	Complete     bool
 	Approvers    []string
 	Attestations []Attestation
+	Waivers      []Waiver
 	Reason       string
 }
 
@@ -324,6 +409,8 @@ func (p *Plan) PrepareDecision(in DecisionInput, f ReadinessFacts) (DecisionStep
 		if reason == "" {
 			return DecisionStep{}, fmt.Errorf("%w: a NO_GO decision needs a reason", ErrInvalid)
 		}
+		// A waiver accepts a staged pack for going live; a NO_GO does not go live, so it carries none
+		// (any sent are dropped, never stored or validated) and it voids the pending approval's waivers.
 		return DecisionStep{Complete: true, Approvers: []string{by}, Attestations: in.Attestations, Reason: reason}, nil
 	case DecisionGo:
 		for _, a := range f.Pending {
@@ -332,13 +419,16 @@ func (p *Plan) PrepareDecision(in DecisionInput, f ReadinessFacts) (DecisionStep
 			}
 		}
 		if len(f.Pending) == 0 {
-			return DecisionStep{Approvers: []string{by}, Attestations: in.Attestations, Reason: reason}, nil
+			return DecisionStep{Approvers: []string{by}, Attestations: in.Attestations, Waivers: in.Waivers, Reason: reason}, nil
 		}
 		first := f.Pending[0]
 		if len(in.Attestations) > 0 && !SameAttestations(in.Attestations, first.Attestations) {
 			return DecisionStep{}, fmt.Errorf("%w: CUT-1605 the second approver approves the attestations %s approved; send none or the same ones, or record a NO_GO to start again", ErrInvalid, first.Approver)
 		}
-		return DecisionStep{Complete: true, Approvers: []string{first.Approver, by}, Attestations: first.Attestations, Reason: reason}, nil
+		if len(in.Waivers) > 0 && !SameWaivers(in.Waivers, first.Waivers) {
+			return DecisionStep{}, fmt.Errorf("%w: CUT-1608 the second approver approves the waivers %s approved; send none or the same ones, or record a NO_GO to start again", ErrInvalid, first.Approver)
+		}
+		return DecisionStep{Complete: true, Approvers: []string{first.Approver, by}, Attestations: first.Attestations, Waivers: first.Waivers, Reason: reason}, nil
 	default:
 		return DecisionStep{}, fmt.Errorf("%w: decision must be GO or NO_GO", ErrInvalid)
 	}

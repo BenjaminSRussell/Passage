@@ -10,7 +10,7 @@ type CatalogEntry struct {
 }
 
 // availablePacks are the packs the service validates, loads and reconciles today.
-var availablePacks = map[Pack]bool{PackOpenItems: true, PackGLBalances: true, PackProjectWIP: true, PackOnhand: true}
+var availablePacks = map[Pack]bool{PackOpenItems: true, PackGLBalances: true, PackProjectWIP: true, PackOnhand: true, PackBankBal: true}
 
 // PackAvailable reports whether a pack run can be started in this release.
 func PackAvailable(p Pack) bool { return availablePacks[p] }
@@ -25,7 +25,7 @@ var controlTotalsByPack = map[Pack]string{
 	PackFixedAssets: "count, acquisition cost, accumulated depreciation, NBV per book",
 	PackProjectWIP:  "cost, sales, WIP cost and WIP sales per (project, category)",
 	PackPayrollYTD:  "gross, tax, net per worker",
-	PackBankBal:     "balance per bank account",
+	PackBankBal:     "balance per (bank account, currency), balance per entity and currency, account count",
 }
 
 // PackCatalog lists the nine packs in FR-49.1 order. Every pack covers AX 2012, D365 F&O,

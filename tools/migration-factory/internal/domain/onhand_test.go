@@ -222,13 +222,13 @@ func TestEvaluateChecklist_StagedOnhandIsNotLoadedStock(t *testing.T) {
 	for _, e := range plan.Entities {
 		packs = append(packs, PackFact{Pack: PackOnhand, Company: e, RunID: "onhand-" + e, Status: StatusReconciled, CreatedAt: decisionT0.Add(2 * time.Hour)})
 	}
-	items, err := EvaluateChecklist(ReadinessFacts{Plan: plan, Packs: packs, Parallel: signedOff()}, allAttested())
+	items, err := EvaluateChecklist(ReadinessFacts{Plan: plan, Packs: packs, Parallel: signedOff()}, allAttested(), glWaived())
 	if err != nil {
 		t.Fatal(err)
 	}
 	it := items[0]
 	if it.Code != ItemPacksReconciled || it.Status != ItemOpen || !strings.Contains(it.Detail, "onhand/USMF is RECONCILED but staged in the factory only, not posted to the inventory ledger") ||
-		strings.Contains(it.Detail, "gl_balances") || len(it.References) != 6 {
+		strings.Contains(it.Detail, "gl_balances/") || len(it.References) != 6 {
 		t.Fatalf("packs item %s %q %v", it.Status, it.Detail, it.References)
 	}
 	if err := RequireAllMet(items); !errors.Is(err, ErrInvalid) {

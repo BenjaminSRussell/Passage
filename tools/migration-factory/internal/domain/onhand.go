@@ -226,7 +226,10 @@ func ReconcileOnhand(r *PackRun, source, accepted []OnhandLine, loaded int, held
 // opening rows against the extract and nothing reaches the target ledger yet. A RECONCILED run of
 // such a pack is not stock or balances in Passage, so the go/no-go checklist does not count it.
 var notPosted = map[Pack]string{
-	PackOnhand: "staged in the factory only, not posted to the inventory ledger (H-S9-1)",
+	PackOnhand:     "staged in the factory only, not posted to the inventory ledger (H-S9-1)",
+	PackGLBalances: "staged in the factory only, not posted to the general ledger (wave 12 handoff)",
+	PackProjectWIP: "staged in the factory only, not posted to project operations (D7)",
+	PackBankBal:    "staged in the factory only, not posted to treasury (H-S10-1)",
 }
 
 // NotPosted reports why a pack's loaded rows are not in the target ledger, or "" when they are or

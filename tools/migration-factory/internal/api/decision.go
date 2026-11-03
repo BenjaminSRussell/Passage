@@ -32,11 +32,12 @@ type decisionDTO struct {
 	decisionSummaryDTO
 	PlanVersion int                 `json:"planVersion"`
 	Checklist   []domain.ItemResult `json:"checklist"`
+	Waivers     []domain.Waiver     `json:"waivers"`
 }
 
 func toDecisionDTO(d domain.Decision) decisionDTO {
 	s := toDecisionSummary(&d)
-	return decisionDTO{decisionSummaryDTO: *s, PlanVersion: d.PlanVersion, Checklist: d.Checklist}
+	return decisionDTO{decisionSummaryDTO: *s, PlanVersion: d.PlanVersion, Checklist: d.Checklist, Waivers: domain.NormalizeWaivers(d.Waivers)}
 }
 
 // readinessDTO is the go/no-go view of a plan: the checklist evaluated now (attested items show
@@ -50,8 +51,16 @@ type readinessDTO struct {
 	Items       []domain.ItemResult `json:"items"`
 	OpenItems   []string            `json:"openItems"`
 	Decisions   []decisionDTO       `json:"decisions"`
+	// StagedPacks are the plan's packs that are staged in the factory and not posted to their ledger:
+	// each keeps packs_reconciled open unless both approvers of a GO waive it.
+	StagedPacks []stagedPackDTO `json:"stagedPacks"`
 	// PendingGo is the first approval of a GO waiting for a second, different CutoverManager; nil when none.
 	PendingGo *domain.GoApproval `json:"pendingGo,omitempty"`
+}
+
+type stagedPackDTO struct {
+	Pack   string `json:"pack"`
+	Reason string `json:"reason"`
 }
 
 func (s *Server) readiness(w http.ResponseWriter, r *http.Request) {
@@ -69,11 +78,12 @@ func (s *Server) readiness(w http.ResponseWriter, r *http.Request) {
 	// they are approving; without one they are UNCONFIRMED.
 	var pending *domain.GoApproval
 	var att []domain.Attestation
+	var wv []domain.Waiver
 	if len(facts.Pending) > 0 {
 		pending = &facts.Pending[0]
-		att = pending.Attestations
+		att, wv = pending.Attestations, pending.Waivers
 	}
-	items, err := domain.EvaluateChecklist(facts, att)
+	items, err := domain.EvaluateChecklist(facts, att, wv)
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -90,6 +100,12 @@ func (s *Server) readiness(w http.ResponseWriter, r *http.Request) {
 	}
 	out := readinessDTO{PlanID: facts.Plan.PlanID, Version: facts.Plan.Version, RolledBack: facts.Plan.RolledBack,
 		SystemReady: systemReady, Items: items, OpenItems: open, Decisions: make([]decisionDTO, 0, len(facts.Decisions)), PendingGo: pending}
+	out.StagedPacks = []stagedPackDTO{}
+	for _, pk := range facts.Plan.Packs {
+		if why := domain.NotPosted(pk); why != "" {
+			out.StagedPacks = append(out.StagedPacks, stagedPackDTO{Pack: string(pk), Reason: why})
+		}
+	}
 	for _, d := range facts.Decisions {
 		out.Decisions = append(out.Decisions, toDecisionDTO(d))
 	}
@@ -101,6 +117,7 @@ type decisionRequest struct {
 	Decision     string               `json:"decision"`
 	Reason       string               `json:"reason"`
 	Attestations []domain.Attestation `json:"attestations"`
+	Waivers      []domain.Waiver      `json:"waivers"`
 	Version      int                  `json:"version,omitempty"`
 }
 
@@ -136,8 +153,12 @@ func (s *Server) recordDecision(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, invalid("too many attestations"))
 		return
 	}
+	if len(req.Waivers) > len(domain.Packs) {
+		fail(w, r, invalid("too many waivers"))
+		return
+	}
 	res, replayed, err := s.store.RecordDecision(r.Context(), idem, store.DecisionRequest{PlanID: id, ExpectedVersion: req.Version,
-		Input: domain.DecisionInput{Decision: req.Decision, Reason: req.Reason, Attestations: req.Attestations, By: approverID(p)}})
+		Input: domain.DecisionInput{Decision: req.Decision, Reason: req.Reason, Attestations: req.Attestations, Waivers: req.Waivers, By: approverID(p)}})
 	if err != nil {
 		fail(w, r, err)
 		return
