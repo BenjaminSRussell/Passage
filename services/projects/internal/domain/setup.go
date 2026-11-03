@@ -91,6 +91,17 @@ func ValidateProfile(p PostingProfile) map[string]string {
 			fields[a.name] = "must be 1 to 40 characters"
 		}
 	}
+	optional := []struct{ name, value string }{
+		{"offsetAccount", p.OffsetAccount},
+		{"costOfSalesAccount", p.CostOfSalesAccount},
+		{"lossProvisionAccount", p.LossProvisionAccount},
+		{"lossExpenseAccount", p.LossExpenseAccount},
+	}
+	for _, a := range optional {
+		if n := utf8.RuneCountInString(a.value); n > 40 {
+			fields[a.name] = "must be at most 40 characters"
+		}
+	}
 	return fields
 }
 

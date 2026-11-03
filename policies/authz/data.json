@@ -1313,6 +1313,7 @@
     "ProjPlan": {"permissions": [
       {"resource": "/v1/projects/*/forecasts", "methods": ["POST"]},
       {"resource": "/v1/projects/*/forecasts/*", "methods": ["PUT"]},
+      {"resource": "/v1/projects/*/forecasts/*/activate", "methods": ["POST"]},
       {"resource": "/v1/projects/*/plans", "methods": ["POST"]},
       {"resource": "/v1/projects/*/plans/*/schedule", "methods": ["POST"]},
       {"resource": "/v1/projects/*/plans/*/transfer", "methods": ["POST"]},

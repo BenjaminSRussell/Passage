@@ -26,8 +26,8 @@ func (f *fakeGL) PostGL(_ context.Context, _ ledgerclient.Ledger, in store.GLPos
 
 func (f *fakeGL) ReconcileGL(_ context.Context, _ ledgerclient.Ledger, in store.GLReconcileRequest) (store.GLReconciliation, error) {
 	f.reconciled = append(f.reconciled, in)
-	return store.GLReconciliation{Currency: "USD", Reconciled: true, Unposted: store.TxnList{Ids: []string{}},
-		Accounts: []store.GLAccountRecon{{Account: "1410", Subledger: decimal.RequireFromString("12.5"), GL: decimal.RequireFromString("12.5")}}}, nil
+	return store.GLReconciliation{Currency: "USD", Reconciled: true, Unposted: store.UnpostedList{Items: []store.UnpostedTxn{}},
+		Accounts: []store.GLAccountRecon{{Account: "1410", Control: true, Subledger: decimal.RequireFromString("12.5"), GL: decimal.RequireFromString("12.5")}}}, nil
 }
 
 func glRouter(gl *fakeGL) http.Handler {
@@ -38,6 +38,20 @@ func glRouter(gl *fakeGL) http.Handler {
 	}
 	api.Register(r)
 	return r
+}
+
+func TestActivateForecast_NeedsPlanDutyIfMatchAndAKnownModel(t *testing.T) {
+	h := glRouter(nil)
+	path := "/v1/projects/P-1/forecasts/" + ids.New() + "/activate"
+	if rec := do(t, h, ctxFor(DutyInquire), http.MethodPost, path, "", map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusForbidden {
+		t.Fatalf("without ProjPlan: %d", rec.Code)
+	}
+	if rec := do(t, h, ctxFor(DutyPlan), http.MethodPost, path, "", nil); rec.Code != http.StatusPreconditionRequired {
+		t.Fatalf("without If-Match: %d", rec.Code)
+	}
+	if rec := do(t, h, ctxFor(DutyPlan), http.MethodPost, path, "", map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown model: %d", rec.Code)
+	}
 }
 
 func TestGL_PostIsUnavailableWithoutLedger(t *testing.T) {
@@ -104,7 +118,7 @@ func TestGL_ReconciliationFormatsAmountsAndValidates(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("status %d %v %s", rec.Code, err, rec.Body.String())
 	}
-	if !out.Reconciled || len(out.Accounts) != 1 || out.Accounts[0].Subledger != "12.50" || out.Accounts[0].Difference != "0.00" {
+	if !out.Reconciled || len(out.Accounts) != 1 || !out.Accounts[0].Compared || out.Accounts[0].Subledger != "12.50" || out.Accounts[0].Difference != "0.00" {
 		t.Fatalf("%+v", out)
 	}
 	if len(gl.reconciled) != 1 || gl.reconciled[0].LegalEntityID != entity || gl.reconciled[0].PeriodTo != "2026-10" {

@@ -117,12 +117,14 @@ func (s *Postgres) ListProjectGroups(ctx context.Context) ([]domain.ProjectGroup
 }
 
 const profileColumns = `project_group, category, line_property, cost_account, wip_account, accrued_revenue_account,
-	invoiced_revenue_account, on_account_account, version`
+	invoiced_revenue_account, on_account_account, coalesce(offset_account, ''), coalesce(cost_of_sales_account, ''),
+	coalesce(loss_provision_account, ''), coalesce(loss_expense_account, ''), version`
 
 func scanProfile(row pgx.Row) (domain.PostingProfile, error) {
 	var pr domain.PostingProfile
 	err := row.Scan(&pr.Key.ProjectGroup, &pr.Key.Category, &pr.Key.LineProperty, &pr.CostAccount, &pr.WIPAccount,
-		&pr.AccruedRevenueAccount, &pr.InvoicedRevenueAccount, &pr.OnAccountAccount, &pr.Version)
+		&pr.AccruedRevenueAccount, &pr.InvoicedRevenueAccount, &pr.OnAccountAccount, &pr.OffsetAccount, &pr.CostOfSalesAccount,
+		&pr.LossProvisionAccount, &pr.LossExpenseAccount, &pr.Version)
 	return pr, err
 }
 
@@ -145,18 +147,22 @@ func (s *Postgres) UpsertPostingProfile(ctx context.Context, pr domain.PostingPr
 		}
 		if exists {
 			out, err = scanProfile(tx.QueryRow(ctx, `update posting_profile set cost_account = $5, wip_account = $6, accrued_revenue_account = $7,
-				invoiced_revenue_account = $8, on_account_account = $9, version = version + 1, updated_at = now()
+				invoiced_revenue_account = $8, on_account_account = $9, offset_account = nullif($10, ''), cost_of_sales_account = nullif($11, ''),
+				loss_provision_account = nullif($12, ''), loss_expense_account = nullif($13, ''), version = version + 1, updated_at = now()
 				where tenant_id = $1 and project_group = $2 and category = $3 and line_property = $4
 				returning `+profileColumns,
 				p.TenantID, k.ProjectGroup, k.Category, k.LineProperty, pr.CostAccount, pr.WIPAccount,
-				pr.AccruedRevenueAccount, pr.InvoicedRevenueAccount, pr.OnAccountAccount))
+				pr.AccruedRevenueAccount, pr.InvoicedRevenueAccount, pr.OnAccountAccount, pr.OffsetAccount, pr.CostOfSalesAccount,
+				pr.LossProvisionAccount, pr.LossExpenseAccount))
 			return err
 		}
 		out, err = scanProfile(tx.QueryRow(ctx, `insert into posting_profile (tenant_id, project_group, category, line_property, cost_account,
-			wip_account, accrued_revenue_account, invoiced_revenue_account, on_account_account)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning `+profileColumns,
+			wip_account, accrued_revenue_account, invoiced_revenue_account, on_account_account, offset_account, cost_of_sales_account,
+			loss_provision_account, loss_expense_account)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, nullif($10, ''), nullif($11, ''), nullif($12, ''), nullif($13, '')) returning `+profileColumns,
 			p.TenantID, k.ProjectGroup, k.Category, k.LineProperty, pr.CostAccount, pr.WIPAccount,
-			pr.AccruedRevenueAccount, pr.InvoicedRevenueAccount, pr.OnAccountAccount))
+			pr.AccruedRevenueAccount, pr.InvoicedRevenueAccount, pr.OnAccountAccount, pr.OffsetAccount, pr.CostOfSalesAccount,
+			pr.LossProvisionAccount, pr.LossExpenseAccount))
 		created = err == nil
 		return err
 	})

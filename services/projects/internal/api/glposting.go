@@ -77,6 +77,7 @@ type glPostRequest struct {
 	Currency      string `json:"currency"`
 	Period        string `json:"period"`
 	ProjectID     string `json:"projectId"`
+	RetryParked   bool   `json:"retryParked"`
 }
 
 func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
@@ -101,7 +102,7 @@ func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, validation(fields))
 		return
 	}
-	res, err := a.gl.PostGL(r.Context(), a.ledger, store.GLPostRequest{LegalEntityID: entity, LedgerID: req.LedgerID, Currency: req.Currency, Period: req.Period, ProjectID: req.ProjectID})
+	res, err := a.gl.PostGL(r.Context(), a.ledger, store.GLPostRequest{LegalEntityID: entity, LedgerID: req.LedgerID, Currency: req.Currency, Period: req.Period, ProjectID: req.ProjectID, RetryParked: req.RetryParked})
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
@@ -111,16 +112,19 @@ func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
 
 type glAccountOut struct {
 	Account    string `json:"account"`
+	Compared   bool   `json:"compared"`
 	Subledger  string `json:"subledger"`
-	GL         string `json:"gl"`
-	Difference string `json:"difference"`
+	GL         string `json:"gl,omitempty"`
+	Difference string `json:"difference,omitempty"`
 }
 
 type glReconciliationOut struct {
-	Currency   string         `json:"currency"`
-	Reconciled bool           `json:"reconciled"`
-	Unposted   store.TxnList  `json:"unpostedTransactions"`
-	Accounts   []glAccountOut `json:"accounts"`
+	Currency          string             `json:"currency"`
+	Reconciled        bool               `json:"reconciled"`
+	Unposted          store.UnpostedList `json:"unpostedTransactions"`
+	PendingEstimates  int                `json:"pendingEstimates"`
+	UnbookedEstimates int                `json:"unbookedEstimates"`
+	Accounts          []glAccountOut     `json:"accounts"`
 }
 
 func (a *API) glReconciliation(w http.ResponseWriter, r *http.Request) {
@@ -148,9 +152,14 @@ func (a *API) glReconciliation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mu := money.MinorUnits(rec.Currency)
-	out := glReconciliationOut{Currency: rec.Currency, Reconciled: rec.Reconciled, Unposted: rec.Unposted, Accounts: make([]glAccountOut, 0, len(rec.Accounts))}
+	out := glReconciliationOut{Currency: rec.Currency, Reconciled: rec.Reconciled, Unposted: rec.Unposted, PendingEstimates: rec.PendingEstimates,
+		UnbookedEstimates: rec.UnbookedEstimates, Accounts: make([]glAccountOut, 0, len(rec.Accounts))}
 	for _, acc := range rec.Accounts {
-		out.Accounts = append(out.Accounts, glAccountOut{Account: acc.Account, Subledger: acc.Subledger.StringFixed(mu), GL: acc.GL.StringFixed(mu), Difference: acc.Difference.StringFixed(mu)})
+		row := glAccountOut{Account: acc.Account, Compared: acc.Control, Subledger: acc.Subledger.StringFixed(mu)}
+		if acc.Control {
+			row.GL, row.Difference = acc.GL.StringFixed(mu), acc.Difference.StringFixed(mu)
+		}
+		out.Accounts = append(out.Accounts, row)
 	}
 	httpx.JSON(w, http.StatusOK, out)
 }

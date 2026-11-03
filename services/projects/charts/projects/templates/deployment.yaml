@@ -70,4 +70,5 @@ spec:
         - name: service-identity
           secret:
             secretName: {{ .Values.serviceIdentity.signingKeySecret }}
+            defaultMode: 0440
       {{- end }}
