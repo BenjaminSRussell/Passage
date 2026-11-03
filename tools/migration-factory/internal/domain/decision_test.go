@@ -304,3 +304,44 @@ func TestPrepareDecision_WaiversNeedTheSecondApprover(t *testing.T) {
 		t.Fatal("reasons compare trimmed")
 	}
 }
+
+// An open_items run with payables lines the payables service has not taken is staged for them
+// (H-S8-3) and needs a waiver; a run whose lines are all receivables stays loaded (needs none).
+func TestEvaluateChecklist_OpenItemsPayablesStagedNeedsWaiver(t *testing.T) {
+	plan := decisionPlan()
+	plan.Packs = []Pack{PackOpenItems}
+	facts := ReadinessFacts{Plan: plan, Packs: nil, Parallel: signedOff()}
+	for _, e := range plan.Entities {
+		facts.Packs = append(facts.Packs, PackFact{Pack: PackOpenItems, Company: e, RunID: "oi-" + e, Status: StatusReconciled, CreatedAt: decisionT0.Add(2 * time.Hour)})
+	}
+	items, err := EvaluateChecklist(facts, allAttested(), nil)
+	if err != nil || items[0].Status != ItemMet {
+		t.Fatalf("receivables only: %v %s %q", err, items[0].Status, items[0].Detail)
+	}
+	if _, err := EvaluateChecklist(facts, allAttested(), []Waiver{{Pack: "open_items", Reason: "x"}}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("nothing to waive: %v", err)
+	}
+	facts.Packs[1].PayablesStaged = true
+	items, err = EvaluateChecklist(facts, allAttested(), nil)
+	if err != nil || items[0].Status != ItemOpen || !strings.Contains(items[0].Detail, "open_items/DEMF is RECONCILED but payables lines staged") {
+		t.Fatalf("mixed run: %v %s %q", err, items[0].Status, items[0].Detail)
+	}
+	items, err = EvaluateChecklist(facts, allAttested(), []Waiver{{Pack: "open_items", Reason: "AP opened by hand in payables"}})
+	if err != nil || items[0].Status != ItemMet || !strings.Contains(items[0].Detail, "open_items waived") {
+		t.Fatalf("waived: %v %s %q", err, items[0].Status, items[0].Detail)
+	}
+}
+
+// A run stored before payables lines were counted (pack_run.payables_staged NULL, migration 0012)
+// may hold some: an open_items run of that kind is held as staged; another pack's is not affected.
+func TestNotPostedRun_UncountedOpenItemsRunIsStaged(t *testing.T) {
+	if why := NotPostedRun(PackFact{Pack: PackOpenItems, PayablesUncounted: true}); why != PayablesUncountedReason {
+		t.Fatalf("uncounted open_items run: %q", why)
+	}
+	if why := NotPostedRun(PackFact{Pack: PackOpenItems}); why != "" {
+		t.Fatalf("counted receivables-only run: %q", why)
+	}
+	if why := NotPostedRun(PackFact{Pack: PackOnhand, PayablesUncounted: true}); why != NotPosted(PackOnhand) {
+		t.Fatalf("onhand keeps its own reason: %q", why)
+	}
+}

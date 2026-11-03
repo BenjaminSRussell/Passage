@@ -71,6 +71,29 @@ type PackFact struct {
 	RunID     string
 	Status    RunStatus
 	CreatedAt time.Time
+	// PayablesStaged is true for an open_items run that holds payables lines (ledger AP) the
+	// payables service has not taken (H-S8-3): staged in the factory, not posted.
+	PayablesStaged bool
+	// PayablesUncounted is true for a run stored before the count was kept (migration 0012) and
+	// not backfilled: an open_items run of that kind may hold payables lines, so it counts as staged.
+	PayablesUncounted bool
+}
+
+// NotPostedRun reports why a run's loaded rows are not all in the target ledger, or "" when they
+// are. A whole pack can be staged (NotPosted); an open_items run is staged only for its payables
+// lines, while its receivables lines that went through the receivables import count as loaded.
+func NotPostedRun(pf PackFact) string {
+	if why := NotPosted(pf.Pack); why != "" {
+		return why
+	}
+	switch {
+	case pf.Pack != PackOpenItems:
+	case pf.PayablesStaged:
+		return PayablesStagedReason
+	case pf.PayablesUncounted:
+		return PayablesUncountedReason
+	}
+	return ""
 }
 
 // ParallelFact is one parallel run of the period the checklist asks for.
@@ -156,7 +179,7 @@ func (f ReadinessFacts) Round() int { return len(f.Decisions) + 1 }
 // attestation naming an unknown or system item, naming an item twice, or confirming without an
 // evidence reference is invalid. Items are returned in checklist order.
 func EvaluateChecklist(f ReadinessFacts, att []Attestation, waivers []Waiver) ([]ItemResult, error) {
-	waived, err := waiverMap(f.Plan, waivers)
+	waived, err := waiverMap(f, waivers)
 	if err != nil {
 		return nil, err
 	}
@@ -237,14 +260,14 @@ func packsReconciled(f ReadinessFacts, waived map[string]string) (status, detail
 			case pf.Status != StatusReconciled:
 				notReconciled = append(notReconciled, fmt.Sprintf("%s/%s is %s", pk, e, pf.Status))
 				refs = append(refs, pf.RunID)
-			case NotPosted(pk) != "" && waived[string(pk)] != "":
+			case NotPostedRun(pf) != "" && waived[string(pk)] != "":
 				if !seenWaiver[string(pk)] {
 					seenWaiver[string(pk)] = true
-					waivedNotes = append(waivedNotes, fmt.Sprintf("%s waived (%s): %s", pk, NotPosted(pk), waived[string(pk)]))
+					waivedNotes = append(waivedNotes, fmt.Sprintf("%s waived (%s): %s", pk, NotPostedRun(pf), waived[string(pk)]))
 				}
 				refs = append(refs, pf.RunID)
-			case NotPosted(pk) != "":
-				notReconciled = append(notReconciled, fmt.Sprintf("%s/%s is RECONCILED but %s", pk, e, NotPosted(pk)))
+			case NotPostedRun(pf) != "":
+				notReconciled = append(notReconciled, fmt.Sprintf("%s/%s is RECONCILED but %s", pk, e, NotPostedRun(pf)))
 				refs = append(refs, pf.RunID)
 			default:
 				refs = append(refs, pf.RunID)
@@ -278,8 +301,15 @@ func packsReconciled(f ReadinessFacts, waived map[string]string) (status, detail
 // waiverMap validates the waivers of a request and returns the reason per pack. A waiver names a
 // pack of the plan that is staged but not posted (NotPosted), once, with a reason of at most 500
 // characters.
-func waiverMap(plan Plan, waivers []Waiver) (map[string]string, error) {
+func waiverMap(f ReadinessFacts, waivers []Waiver) (map[string]string, error) {
 	out := map[string]string{}
+	plan := f.Plan
+	staged := map[string]bool{}
+	for _, pf := range f.Packs {
+		if NotPostedRun(pf) != "" {
+			staged[string(pf.Pack)] = true
+		}
+	}
 	for _, w := range waivers {
 		reason := strings.TrimSpace(w.Reason)
 		inPlan := false
@@ -291,7 +321,7 @@ func waiverMap(plan Plan, waivers []Waiver) (map[string]string, error) {
 		switch {
 		case !inPlan:
 			return nil, fmt.Errorf("%w: CUT-1608 waiver names %q, which is not a pack of this plan", ErrInvalid, w.Pack)
-		case NotPosted(Pack(w.Pack)) == "":
+		case !staged[w.Pack]:
 			return nil, fmt.Errorf("%w: CUT-1608 pack %q is posted to its target and has nothing to waive", ErrInvalid, w.Pack)
 		case reason == "":
 			return nil, fmt.Errorf("%w: CUT-1608 the waiver for %q needs a reason", ErrInvalid, w.Pack)

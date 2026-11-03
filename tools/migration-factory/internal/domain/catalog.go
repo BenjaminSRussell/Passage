@@ -10,7 +10,7 @@ type CatalogEntry struct {
 }
 
 // availablePacks are the packs the service validates, loads and reconciles today.
-var availablePacks = map[Pack]bool{PackOpenItems: true, PackGLBalances: true, PackProjectWIP: true, PackOnhand: true, PackBankBal: true}
+var availablePacks = map[Pack]bool{PackOpenItems: true, PackGLBalances: true, PackProjectWIP: true, PackOnhand: true, PackBankBal: true, PackOpenOrders: true}
 
 // PackAvailable reports whether a pack run can be started in this release.
 func PackAvailable(p Pack) bool { return availablePacks[p] }
@@ -20,7 +20,7 @@ var controlTotalsByPack = map[Pack]string{
 	PackOpenItems:   "count, amount per currency, amount per (entity, account, currency)",
 	PackGLBalances:  "balance per (entity, account, dimensions, currency), trial balance debit = credit, non-zero combinations",
 	PackOnhand:      "quantity per (item, site, warehouse, location, batch, serial), value per (item, site), value per entity",
-	PackOpenOrders:  "order count, line count, remaining quantity, remaining amount",
+	PackOpenOrders:  "open quantity per (order type, item, unit), open value per (order type, currency), line and order count per order type",
 	PackWIPProd:     "order count, WIP value per order",
 	PackFixedAssets: "count, acquisition cost, accumulated depreciation, NBV per book",
 	PackProjectWIP:  "cost, sales, WIP cost and WIP sales per (project, category)",

@@ -5,7 +5,7 @@ import { describeProblem, lookupXref, type Problem, type Xref } from "./api/clie
 import { formatDateTime, SOURCE_LABELS, SOURCE_SYSTEMS, type SourceSystem } from "./domain";
 import styles from "./pages.module.css";
 
-const TABLES = ["open_items", "project_wip"] as const;
+const TABLES = ["open_items", "gl_balances", "onhand", "open_orders.sales", "open_orders.purchase", "project_wip", "bank_balances"] as const;
 
 const columns: DataTableColumn<Xref>[] = [
   { key: "system", header: "System", render: (row) => SOURCE_LABELS[row.system] ?? row.system },

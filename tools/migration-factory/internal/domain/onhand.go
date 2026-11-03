@@ -229,8 +229,16 @@ var notPosted = map[Pack]string{
 	PackOnhand:     "staged in the factory only, not posted to the inventory ledger (H-S9-1)",
 	PackGLBalances: "staged in the factory only, not posted to the general ledger (wave 12 handoff)",
 	PackProjectWIP: "staged in the factory only, not posted to project operations (D7)",
+	PackOpenOrders: "staged in the factory only, not posted to sales or purchasing (H-S11-1)",
 	PackBankBal:    "staged in the factory only, not posted to treasury (H-S10-1)",
 }
+
+// PayablesStagedReason is why an open_items run with payables lines is staged for them.
+const PayablesStagedReason = "payables lines staged in the factory only, not posted to payables (H-S8-3)"
+
+// PayablesUncountedReason is why an open_items run stored before its payables lines were counted
+// is held as staged: it may hold payables lines nobody counted; a re-run counts them.
+const PayablesUncountedReason = "run stored before payables lines were counted, so it may hold payables lines not posted to payables (H-S8-3); re-run open_items"
 
 // NotPosted reports why a pack's loaded rows are not in the target ledger, or "" when they are or
 // the pack has no target.

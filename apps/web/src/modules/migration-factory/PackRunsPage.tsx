@@ -39,6 +39,9 @@ export function PackRunsPage() {
             <Link className={buttonClassName("secondary")} to="/migration-factory/runs/new-onhand">
               Load on-hand stock
             </Link>
+            <Link className={buttonClassName("secondary")} to="/migration-factory/runs/new-orders">
+              Load open orders
+            </Link>
             <Link className={buttonClassName("secondary")} to="/migration-factory/runs/new-bank">
               Load bank balances
             </Link>

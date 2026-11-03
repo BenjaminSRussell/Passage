@@ -6,6 +6,7 @@ import type {
   GLBalanceRecord,
   BankBalanceRecord,
   OnhandLineRecord,
+  OpenOrderRecord,
   LegacyCategoryTotal,
   OpeningLine,
   OpenItemRecord,
@@ -366,6 +367,47 @@ export function parseBankBalances(text: string): { records: BankBalanceRecord[];
     if (!CURRENCY.test(cur)) return `Line ${n}: currency "${currency}" is not a three-letter code.`;
     if (toMicro(balance) === null) return `Line ${n}: balance "${balance}" is not a decimal such as -1250.00.`;
     records.push({ legacyId, bankAccount, currency: cur, balance });
+    return undefined;
+  });
+  return { records, errors };
+}
+
+const ORDER_HEADER = ["legacyId", "orderType", "orderNumber", "lineNumber", "item", "party", "unit", "currency", "orderedQty", "deliveredQty", "unitPrice", "deliveryDate"];
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Parses a pasted open_orders extract, one order line per row: legacyId, orderType (SALES or
+ * PURCHASE), orderNumber, lineNumber, item, party, unit, currency, orderedQty, deliveredQty,
+ * unitPrice, deliveryDate (blank, or YYYY-MM-DD). Quantities and the price stay decimal strings;
+ * the ordered quantity is above zero and the delivered one below it. Decimals take a point: a
+ * decimal comma splits the value and the line is refused for its count of values or its date, and
+ * a quoted value is refused. The service applies the FR-49.11 rules; this checks the shape.
+ */
+export function parseOpenOrders(text: string): { records: OpenOrderRecord[]; errors: string[] } {
+  const records: OpenOrderRecord[] = [];
+  const errors = rows(text, ORDER_HEADER, (cells, n) => {
+    // A CSV export may quote a value; the paste is split on every comma, semicolon and tab, so a
+    // quoted value would keep its quotes or be cut in two. Refuse it rather than send it.
+    if (cells.some((c) => c.includes('"'))) return `Line ${n}: quoted values are not supported; paste plain values separated by commas, semicolons or tabs.`;
+    const [legacyId, orderType, orderNumber, lineNumber, item, party, unit, currency, orderedQty, deliveredQty, unitPrice, deliveryDate] = cells;
+    if (!legacyId || !orderNumber || !lineNumber) return `Line ${n}: the legacy id, order number and line number are required.`;
+    const type = orderType.toUpperCase();
+    if (type !== "SALES" && type !== "PURCHASE") return `Line ${n}: order type "${orderType}" is not SALES or PURCHASE.`;
+    if (!item || !party) return `Line ${n}: the item and the customer or vendor are required.`;
+    if (!unit) return `Line ${n}: the unit of measure is required.`;
+    const cur = currency.toUpperCase();
+    if (!CURRENCY.test(cur)) return `Line ${n}: currency "${currency}" is not a three-letter code.`;
+    const ordered = toMicro(orderedQty);
+    if (ordered === null || ordered <= BigInt(0)) return `Line ${n}: ordered quantity "${orderedQty}" must be a decimal above zero such as 12.5.`;
+    const delivered = toMicro(deliveredQty);
+    if (delivered === null || delivered < BigInt(0)) return `Line ${n}: delivered quantity "${deliveredQty}" must be a decimal of zero or more such as 0.`;
+    if (delivered >= ordered) return `Line ${n}: delivered quantity ${deliveredQty} covers the ordered ${orderedQty}; the line is not open.`;
+    const price = toMicro(unitPrice);
+    if (price === null || price < BigInt(0)) return `Line ${n}: unit price "${unitPrice}" must be a decimal of zero or more such as 2.50.`;
+    if (deliveryDate && !ISO_DATE.test(deliveryDate)) return `Line ${n}: delivery date "${deliveryDate}" is not a date such as 2027-01-15.`;
+    const record: OpenOrderRecord = { legacyId, orderType: type, orderNumber, lineNumber, item, party, unit, currency: cur, orderedQty, deliveredQty, unitPrice };
+    if (deliveryDate) record.deliveryDate = deliveryDate;
+    records.push(record);
     return undefined;
   });
   return { records, errors };

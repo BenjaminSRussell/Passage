@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
@@ -701,5 +703,77 @@ func TestOpenItemsLoad_StagedRowsAreHeldToTheLegalEntity(t *testing.T) {
 	inA := tenant.With(context.Background(), tenant.Principal{TenantID: tenantA, LegalEntityID: leA, UserID: "u1", Duties: map[string]struct{}{}})
 	if rows, err := e.st.ListTargetRows(inA, run.RunID, store.TargetRowFilter{Limit: 50}); err != nil || len(rows) != 3 {
 		t.Fatalf("legal entity A reads %d rows (%v)", len(rows), err)
+	}
+}
+
+// H-S8-3: an open_items run that holds payables lines is staged for them in the go/no-go, a run of
+// receivables lines only is not; the readiness lists the pack as staged only in the first case.
+func TestOpenItemsLoad_PayablesLinesMakeThePackStagedInTheGoNoGo(t *testing.T) {
+	e := newLoadEnv(t, 3, nil)
+	plan := func() planDTO {
+		body := `{"t0":"2027-01-01T00:00:00Z","packs":["open_items"],"entities":["USMF"],"abortOffsetHours":36}`
+		return decode[planDTO](t, do(t, e.h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "CutoverManager", body: body, user: "manager"}))
+	}()
+	readiness := func() readinessDTO {
+		r := do(t, e.h, request{method: "GET", path: "/api/v1/cutover/plans/" + plan.PlanID + "/go-no-go", tenant: tenantA, duties: "CutoverManager"})
+		if r.Code != http.StatusOK {
+			t.Fatalf("readiness %d %s", r.Code, r.Body)
+		}
+		return decode[readinessDTO](t, r)
+	}
+
+	run := e.start(t, loadBody([]string{loadRecord("OK-1", "100.00", "")}, ""))
+	e.load(t, run.RunID)
+	if rd := readiness(); len(rd.StagedPacks) != 0 {
+		t.Fatalf("receivables only: %+v", rd.StagedPacks)
+	}
+
+	ap := `{"legacyId":"AP-1","party":"V001","account":"2100","currency":"USD","amount":"-300.00","ledger":"AP","documentDate":"2026-01-01","dueDate":"2026-02-01"}`
+	run = e.start(t, loadBody([]string{loadRecord("OK-2", "50.00", ""), ap}, ""))
+	e.load(t, run.RunID)
+	rd := readiness()
+	if len(rd.StagedPacks) != 1 || rd.StagedPacks[0].Pack != "open_items" || !strings.Contains(rd.StagedPacks[0].Reason, "payables") {
+		t.Fatalf("mixed run: %+v", rd.StagedPacks)
+	}
+	// A re-run of the same extract stages the payables lines again (they are re-staged with every
+	// accepted record), so the pack stays staged; the count is the run's AP rows.
+	run = e.start(t, loadBody([]string{loadRecord("OK-2", "50.00", ""), ap}, ""))
+	e.load(t, run.RunID)
+	if rd := readiness(); len(rd.StagedPacks) != 1 || rd.StagedPacks[0].Pack != "open_items" {
+		t.Fatalf("re-run of the mixed extract: %+v", rd.StagedPacks)
+	}
+	if n := count(t, e.admin, `select payables_staged from pack_run where run_id = $1`, run.RunID); n != 1 {
+		t.Fatalf("payables_staged = %d, want 1", n)
+	}
+	// A run stored before the count was kept (NULL) is staged until backfilled; the 0014 backfill
+	// counts its AP rows from target_row.
+	if _, err := e.admin.Exec(context.Background(), `update pack_run set payables_staged = null where run_id = $1`, run.RunID); err != nil {
+		t.Fatal(err)
+	}
+	if rd := readiness(); len(rd.StagedPacks) != 1 || !strings.Contains(rd.StagedPacks[0].Reason, "before payables lines were counted") {
+		t.Fatalf("uncounted run: %+v", rd.StagedPacks)
+	}
+	backfill, err := fs.ReadFile(migrations.FS, "0014_payables_staged_backfill.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pgx.BeginFunc(context.Background(), e.admin, func(tx pgx.Tx) error { _, err := tx.Exec(context.Background(), string(backfill)); return err }); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, e.admin, `select payables_staged from pack_run where run_id = $1`, run.RunID); n != 1 {
+		t.Fatalf("backfilled payables_staged = %d, want 1", n)
+	}
+	if n := count(t, e.admin, `select count(*) from pack_run where payables_staged is null`); n != 0 {
+		t.Fatalf("%d runs left uncounted", n)
+	}
+	// A waiver for the pack is accepted as a waiver; the GO is refused only for the other open items.
+	w := `{"decision":"GO","waivers":[{"pack":"open_items","reason":"AP opened by hand in payables"}]}`
+	r := do(t, e.h, request{method: "POST", path: "/api/v1/cutover/plans/" + plan.PlanID + "/go-no-go", tenant: tenantA, duties: "CutoverManager", user: "alice", key: "k-waive-ap", body: w})
+	if r.Code != http.StatusUnprocessableEntity || strings.Contains(r.Body.String(), "nothing to waive") || !strings.Contains(r.Body.String(), "checklist items not met") {
+		t.Fatalf("waiver: %d %s", r.Code, r.Body)
+	}
+	// packs_reconciled stays open: the waiver excuses the staging, not a run older than the legacy freeze.
+	if !strings.Contains(r.Body.String(), "packs_reconciled") {
+		t.Fatalf("packs_reconciled must stay open for a run before the freeze: %s", r.Body)
 	}
 }

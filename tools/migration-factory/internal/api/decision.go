@@ -101,9 +101,13 @@ func (s *Server) readiness(w http.ResponseWriter, r *http.Request) {
 	out := readinessDTO{PlanID: facts.Plan.PlanID, Version: facts.Plan.Version, RolledBack: facts.Plan.RolledBack,
 		SystemReady: systemReady, Items: items, OpenItems: open, Decisions: make([]decisionDTO, 0, len(facts.Decisions)), PendingGo: pending}
 	out.StagedPacks = []stagedPackDTO{}
+	seenStaged := map[string]bool{}
 	for _, pk := range facts.Plan.Packs {
-		if why := domain.NotPosted(pk); why != "" {
-			out.StagedPacks = append(out.StagedPacks, stagedPackDTO{Pack: string(pk), Reason: why})
+		for _, pf := range facts.Packs {
+			if why := domain.NotPostedRun(pf); pf.Pack == pk && why != "" && !seenStaged[string(pk)] {
+				seenStaged[string(pk)] = true
+				out.StagedPacks = append(out.StagedPacks, stagedPackDTO{Pack: string(pk), Reason: why})
+			}
 		}
 	}
 	for _, d := range facts.Decisions {

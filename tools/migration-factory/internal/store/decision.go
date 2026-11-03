@@ -22,7 +22,7 @@ func readinessFacts(ctx context.Context, tx pgx.Tx, plan domain.Plan) (domain.Re
 	for i, p := range plan.Packs {
 		packs[i] = string(p)
 	}
-	rows, err := tx.Query(ctx, `select distinct on (pack, source_company) pack, source_company, run_id::text, status, created_at from pack_run
+	rows, err := tx.Query(ctx, `select distinct on (pack, source_company) pack, source_company, run_id::text, status, created_at, payables_staged from pack_run
 		where tenant_id = current_setting('passage.tenant_id', true)::uuid and pack = any($1) and source_company = any($2)
 		order by pack, source_company, created_at desc, run_id desc`, packs, plan.Entities)
 	if err != nil {
@@ -31,11 +31,14 @@ func readinessFacts(ctx context.Context, tx pgx.Tx, plan domain.Plan) (domain.Re
 	for rows.Next() {
 		var pf domain.PackFact
 		var pack, status string
-		if err := rows.Scan(&pack, &pf.Company, &pf.RunID, &status, &pf.CreatedAt); err != nil {
+		var payables *int
+		if err := rows.Scan(&pack, &pf.Company, &pf.RunID, &status, &pf.CreatedAt, &payables); err != nil {
 			rows.Close()
 			return f, err
 		}
 		pf.Pack, pf.Status = domain.Pack(pack), domain.RunStatus(status)
+		// NULL: a run stored before the count was kept (0012) and not backfilled (0014).
+		pf.PayablesStaged, pf.PayablesUncounted = payables != nil && *payables > 0, payables == nil
 		f.Packs = append(f.Packs, pf)
 	}
 	rows.Close()

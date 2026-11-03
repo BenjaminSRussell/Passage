@@ -48,6 +48,12 @@ const insertXrefForBalance = `with r as (insert into pack_run (tenant_id, run_id
 	insert into legacy_xref (tenant_id, run_id, xref_id, source_system, source_company, source_table, source_id, passage_entity, passage_id, amount, currency)
 	select $1, run_id, $3::uuid, 'AX2012', 'USMF', 'gl_balances', $3::text, 'gl_opening_balance', $3::uuid, 10, 'USD' from r`
 
+// insertXrefForOrder creates the open_orders run and the xref row an opening order line references; $3 is the xref id.
+const insertXrefForOrder = `with r as (insert into pack_run (tenant_id, run_id, pack, source_system, source_company, cutoff_ts, input_hash, status,
+	records_in, records_loaded, records_quarantined) values ($1, $2, 'open_orders', 'AX2012', 'USMF', now(), 'h', 'LOADED', 1, 1, 0) returning run_id)
+	insert into legacy_xref (tenant_id, run_id, xref_id, source_system, source_company, source_table, source_id, passage_entity, passage_id, amount, currency)
+	select $1, run_id, $3::uuid, 'AX2012', 'USMF', 'open_orders.sales', $3::text, 'open_order_opening_line', $3::uuid, 10, 'USD' from r`
+
 // insertXrefForBank creates the bank_balances run and the xref row a bank opening balance references; $3 is the xref id.
 const insertXrefForBank = `with r as (insert into pack_run (tenant_id, run_id, pack, source_system, source_company, cutoff_ts, input_hash, status,
 	records_in, records_loaded, records_quarantined) values ($1, $2, 'bank_balances', 'AX2012', 'USMF', now(), 'h', 'LOADED', 1, 1, 0) returning run_id)
@@ -142,6 +148,15 @@ func TestAppRole_CrossTenantRLS(t *testing.T) {
 			NoUpdate: true,
 		},
 		{
+			Table:  "open_order_opening_line",
+			Before: insertXrefForOrder,
+			Insert: `insert into open_order_opening_line (tenant_id, run_id, legacy_xref_id, line_id, source_system, source_company, legacy_id, order_type,
+				order_number, line_number, item, party, unit, currency, ordered_qty, delivered_qty, unit_price)
+				values ($1, $2, $3::uuid, $3::uuid, 'AX2012', 'USMF', 'SL-1', 'SALES', 'SO-1', '1', 'BOLT', 'C1', 'EA', 'USD', 5, 1, 2.5)`,
+			Args:     func(tenantID, _ string) []any { return []any{tenantID, ids.New(), ids.New()} },
+			NoUpdate: true,
+		},
+		{
 			Table:  "cutover_plan",
 			Insert: insertPlan,
 			Args:   func(tenantID, _ string) []any { return []any{tenantID, ids.New()} },
@@ -218,7 +233,8 @@ func TestAppRole_LegacyXrefIsAppendOnly(t *testing.T) {
 		`update cutover_rollback_approval set approver = 'x'`, `delete from cutover_rollback_approval`,
 		`update gl_opening_balance set balance = 0`, `delete from gl_opening_balance`,
 		`update onhand_opening_balance set quantity = 1`, `delete from onhand_opening_balance`,
-		`update bank_opening_balance set balance = 0`, `delete from bank_opening_balance`} {
+		`update bank_opening_balance set balance = 0`, `delete from bank_opening_balance`,
+		`update open_order_opening_line set ordered_qty = 9`, `delete from open_order_opening_line`} {
 		err := inTenant(func(tx pgx.Tx) error { _, err := tx.Exec(ctx, stmt); return err })
 		var pgErr *pgconn.PgError
 		if !errors.As(err, &pgErr) || pgErr.Code != "42501" {

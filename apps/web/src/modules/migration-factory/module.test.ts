@@ -23,13 +23,14 @@ describe("migration-factory module", () => {
     expect(migrationFactory.nav.every((n) => n.to.startsWith("/migration-factory"))).toBe(true);
   });
 
-  it("has list, create and detail pages for the pack catalog, pack runs, GL balances, on-hand stock, project balances, parallel runs, legacy references and cutover plans", () => {
+  it("has list, create and detail pages for the pack catalog, pack runs, GL balances, on-hand stock, open orders, project balances, parallel runs, legacy references and cutover plans", () => {
     expect(migrationFactory.routes.map((r) => r.path)).toEqual([
       "/migration-factory",
       "/migration-factory/packs",
       "/migration-factory/runs/new",
       "/migration-factory/runs/new-gl",
       "/migration-factory/runs/new-onhand",
+      "/migration-factory/runs/new-orders",
       "/migration-factory/runs/new-bank",
       "/migration-factory/runs/new-project",
       "/migration-factory/runs/:id",

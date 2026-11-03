@@ -10,6 +10,7 @@ const startPath: Partial<Record<Pack, string>> = {
   open_items: "/migration-factory/runs/new",
   gl_balances: "/migration-factory/runs/new-gl",
   onhand: "/migration-factory/runs/new-onhand",
+  open_orders: "/migration-factory/runs/new-orders",
   bank_balances: "/migration-factory/runs/new-bank",
   project_wip: "/migration-factory/runs/new-project",
 };

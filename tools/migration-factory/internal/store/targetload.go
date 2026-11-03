@@ -91,6 +91,11 @@ func stageTarget(ctx context.Context, tx pgx.Tx, runID string, st *TargetStage) 
 		runID, domain.TargetReceivables, st.LegalEntityID, st.ImportSource, domain.LoadStaged, len(st.Rows), rejected, na, pending); err != nil {
 		return fmt.Errorf("insert target_load: %w", err)
 	}
+	if na > 0 {
+		if _, err := tx.Exec(ctx, `update pack_run set payables_staged = $2 where tenant_id = current_setting('passage.tenant_id', true)::uuid and run_id = $1`, runID, countLedger(st.Rows, domain.LedgerAP)); err != nil {
+			return fmt.Errorf("update pack_run payables_staged: %w", err)
+		}
+	}
 	n := len(st.Rows)
 	if n == 0 {
 		return nil
@@ -478,4 +483,15 @@ func upsertTargetTotals(ctx context.Context, tx pgx.Tx, runID string, totals []d
 		}
 	}
 	return nil
+}
+
+// countLedger counts the staged rows of one subledger that the target has not taken.
+func countLedger(rows []domain.StagedRow, ledger string) int {
+	n := 0
+	for _, r := range rows {
+		if r.Ledger == ledger && r.Status == domain.RowNotAvailable {
+			n++
+		}
+	}
+	return n
 }

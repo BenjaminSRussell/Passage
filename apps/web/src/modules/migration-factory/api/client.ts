@@ -231,6 +231,35 @@ export interface BankRunRequest {
   records: BankBalanceRecord[];
 }
 
+/** One legacy open order line at the cutoff. Quantities and the price are decimal strings. */
+export interface OpenOrderRecord {
+  legacyId: string;
+  orderType: "SALES" | "PURCHASE";
+  orderNumber: string;
+  lineNumber: string;
+  item: string;
+  party: string;
+  unit: string;
+  currency: string;
+  orderedQty: string;
+  deliveredQty: string;
+  unitPrice: string;
+  deliveryDate?: string;
+}
+
+export interface OpenOrdersRunRequest {
+  sourceSystem: SourceSystem;
+  sourceCompany: string;
+  cutoffTs: string;
+  freezeTs: string;
+  quarantineMaxPct?: string;
+  /** The item master, and the customer and vendor masters of the order types present, the lines are checked against. */
+  items: string[];
+  customers?: string[];
+  vendors?: string[];
+  records: OpenOrderRecord[];
+}
+
 /** A correction to a quarantined open item (FR-49.11). Blank fields keep the extracted value. */
 export interface ReleaseRequest {
   party?: string;
@@ -747,4 +776,9 @@ export function recordDecision(planId: string, input: DecisionRequest, key: stri
 /** GET /cutover/plans/{id}/rekeying/{file}: the CSV download of a rolled-back plan's re-keying file. */
 export function rekeyFileUrl(planId: string, file: RekeyFile): string {
   return `/api/v1/cutover/plans/${encodeURIComponent(planId)}/rekeying/${file}`;
+}
+
+/** POST /migration/packs/open_orders/runs: open sales and purchase order lines (FR-49.1). */
+export function startOpenOrdersRun(body: OpenOrdersRunRequest, key: string = newKey()): Promise<PackRunDetail> {
+  return post("/migration/packs/open_orders/runs", body, key);
 }

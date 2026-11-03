@@ -47,6 +47,7 @@ const STAGED_ONLY: Partial<Record<string, string>> = {
   onhand: "the inventory ledger",
   gl_balances: "the general ledger",
   project_wip: "project operations",
+  open_orders: "sales or purchasing",
   bank_balances: "treasury",
 };
 
@@ -69,9 +70,22 @@ export function PackRunDetailPage() {
     { key: "legacyId", header: "Record", mono: true },
     { key: "rule", header: "Rule failed" },
     { key: "reason", header: "Reason" },
-    { key: "dimensions", header: run?.pack === "gl_balances" ? "Account and dimensions" : run?.pack === "onhand" ? "Item and dimension" : "Party and account", render: (row) => (run?.pack === "gl_balances" || run?.pack === "onhand" ? [row.account, row.dimensions] : [row.party, row.account]).filter(Boolean).join(" / ") || dash },
-    // An onhand line's amount is its quantity in the line's unit, not money in its currency.
-    { key: "amount", header: run?.pack === "onhand" ? "Quantity" : "Amount", align: "end", mono: true, render: (row) => (run?.pack === "onhand" ? row.amount : `${money(row.amount)} ${row.currency ?? ""}`.trim()) },
+    {
+      key: "dimensions",
+      header: run?.pack === "gl_balances" ? "Account and dimensions" : run?.pack === "onhand" ? "Item and dimension" : run?.pack === "open_orders" ? "Party, item and order line" : "Party and account",
+      render: (row) =>
+        (run?.pack === "gl_balances" || run?.pack === "onhand" ? [row.account, row.dimensions] : run?.pack === "open_orders" ? [row.party, row.account, row.dimensions] : [row.party, row.account])
+          .filter(Boolean)
+          .join(" / ") || dash,
+    },
+    // An onhand or open order line's amount is its quantity (the open quantity of an order) in the line's unit, not money in its currency.
+    {
+      key: "amount",
+      header: run?.pack === "onhand" ? "Quantity" : run?.pack === "open_orders" ? "Open quantity" : "Amount",
+      align: "end",
+      mono: true,
+      render: (row) => (run?.pack === "onhand" || run?.pack === "open_orders" ? row.amount : `${money(row.amount)} ${row.currency ?? ""}`.trim()),
+    },
     { key: "status", header: "Status", render: (row) => <StatusPill status={row.status} /> },
     {
       key: "action",
