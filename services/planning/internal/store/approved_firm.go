@@ -107,7 +107,7 @@ func firmApprovedOrders(ctx context.Context, tx pgx.Tx, tenantID, planID, planEn
 			o := byID[id]
 			evt, err := events.New(planevents.PlannedOrderFirmed, eventSource, id, tenantID, planevents.PlannedOrderFirmedData{
 				PlannedOrderID: id, PlanVersionID: versionIDs[id], BatchID: batch.ID, OrderType: g.OrderType,
-				TargetType: g.TargetType, TargetID: g.TargetID, ItemID: o.itemID, WarehouseID: optional(o.warehouseID), SiteID: o.siteID,
+				TargetType: g.TargetType, TargetID: g.TargetID, ItemID: o.itemID, WarehouseID: optional(o.warehouseID), SiteID: o.siteID, LegalEntityID: optional(planEntity),
 				VendorID: optional(o.vendorID), Qty: o.qty.String(), OrderDate: o.orderDate, DeliveryDate: o.deliveryDate,
 				QuotaArrangementID: quotaRefs[id].arrangement(), QuotaSourceID: quotaRefs[id].source(),
 			})

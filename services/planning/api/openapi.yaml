@@ -2152,6 +2152,10 @@ components:
           type: boolean
           default: false
           description: 'When true the plan''s firmed planned orders at the site whose delivery date is on or after asOf are added as scheduled receipts (refType planned-order, ref FP:<planned order id>) of their items, so a firmed order is supply of the run and is not planned a second time (FR-22.1, FR-22.10). The approved planned orders of the current version are carried the same way, since an operational run firms them (FR-22.11). Leave it false when the target orders already arrive in receipts. Orders of simulation versions are never carried.'
+        warehouseScopesFromCoverage:
+          type: boolean
+          default: false
+          description: 'When true every warehouse scope an item has as stored warehouse-scope item coverage at the site, and does not name in its warehouses list, is planned as well (FR-22.18); a scope named inline wins over the stored one and is never added twice. A discovered scope takes its coverage, order type, lead time, vendor and min/max from the stored coverage and is planned as an empty scope: no on-hand, safety stock, demand or receipts of its own beyond the plan''s carried-forward firmed orders (carryForward). So a requirement or period scope plans nothing, while a min/max scope is replenished to its maximum (by transfer from the site, or by its own order type) on every run; a firmed one counts as its receipt with carryForward until delivered, after which the scope is empty again unless sent inline. Planning does not split the site''s stock by warehouse (PSG-16): send a scope that holds stock or demand inline, and leave its stock out of the site''s onHand. An item that would hold more than 50 warehouse scopes, or a run more than 100,000, is a 400 (scopes are never dropped).'
         horizonDays:
           type: integer
           minimum: 0

@@ -395,6 +395,20 @@ describe("Run plan page", () => {
     expect(key(1)).not.toBe(key(0));
   });
 
+  it("sends warehouseScopesFromCoverage only when the stored warehouse scopes are planned", async () => {
+    const fetchMock = stubApi([":run", () => json(version, 201)]);
+    renderAt("/planning/runs/new?plan=MAIN");
+    fireEvent.change(screen.getByLabelText("Site"), { target: { value: site } });
+    fireEvent.click(screen.getByRole("button", { name: "Run plan" }));
+    await findStatus();
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).not.toHaveProperty("warehouseScopesFromCoverage");
+
+    fireEvent.click(screen.getByLabelText("Plan warehouse scopes from item coverage"));
+    fireEvent.click(screen.getByRole("button", { name: "Run plan" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toMatchObject({ warehouseScopesFromCoverage: true });
+  });
+
   it("reuses the Idempotency-Key when the same request is retried", async () => {
     let calls = 0;
     const fetchMock = stubApi([":run", () => (++calls === 1 ? problem(503, "COM-0503", "unavailable") : json(version, 200))]);

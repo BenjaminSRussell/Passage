@@ -110,10 +110,15 @@ func TestFirmPlannedOrders(t *testing.T) {
 			t.Fatal(err)
 		}
 		var evt struct {
-			Data events.PlannedOrderFirmedData `json:"data"`
+			LegalEntity string                        `json:"legalentityid"`
+			Data        events.PlannedOrderFirmedData `json:"data"`
 		}
 		if err := json.Unmarshal(raw, &evt); err != nil {
 			t.Fatal(err)
+		}
+		const entity = "00000000-0000-0000-0000-0000000000e1"
+		if evt.Data.LegalEntityID == nil || *evt.Data.LegalEntityID != entity || evt.LegalEntity != entity {
+			t.Fatalf("legal entity in data %v and extension %q, want %s", evt.Data.LegalEntityID, evt.LegalEntity, entity)
 		}
 		if evt.Data.BatchID != batch.ID || evt.Data.ItemID == "" || evt.Data.SiteID == "" || evt.Data.DeliveryDate == "" {
 			t.Fatalf("event data = %+v", evt.Data)
@@ -306,5 +311,27 @@ func TestFirmPlannedOrders_ConcurrentRetryReplays(t *testing.T) {
 	}
 	if a.batch.ID != b.batch.ID || a.replayed == b.replayed {
 		t.Fatalf("batches %s (replayed %v) and %s (replayed %v); want one firming and one replay", a.batch.ID, a.replayed, b.batch.ID, b.replayed)
+	}
+}
+
+// A plan without a legal entity (a legacy row, run by an all-entity caller) firms
+// through the firming fence with legal_entity_id as JSON null, never an empty string
+// a consumer would reject as a non-UUID, and without the legalentityid extension.
+func TestRunPlan_FirmingFenceOfAPlanWithoutLegalEntity(t *testing.T) {
+	st, admin, _ := setup(t)
+	if _, err := admin.Exec(context.Background(), `insert into plan (tenant_id, id, code) values ($1, $2, 'MAIN')`, testkit.TenantID(1), ids.New()); err != nil {
+		t.Fatal(err)
+	}
+	res := oneItemPlan(t)
+	res.Orders[0].AutoFirmed = true
+	if _, _, err := st.RunPlan(scopedCtx(testkit.TenantID(1), ""), runRequest(res, "run-noentity", "in-noentity")); err != nil {
+		t.Fatal(err)
+	}
+	var nullEntity, withExtension int
+	if err := admin.QueryRow(context.Background(), `select
+		count(*) filter (where jsonb_typeof(payload->'data'->'legal_entity_id') = 'null'),
+		count(*) filter (where payload ? 'legalentityid')
+		from outbox where type = $1`, events.PlannedOrderFirmed).Scan(&nullEntity, &withExtension); err != nil || nullEntity != 1 || withExtension != 0 {
+		t.Fatalf("firmed events with a null legal entity %d and with the extension %d, %v; want 1 and 0", nullEntity, withExtension, err)
 	}
 }

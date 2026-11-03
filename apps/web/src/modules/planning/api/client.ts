@@ -127,6 +127,8 @@ export interface RunPlanRequest {
   calendar?: WorkCalendar;
   /** Adds the plan's undelivered firmed orders as scheduled receipts (FR-22.1). */
   carryForward?: boolean;
+  /** Also plans the warehouse scopes stored as warehouse-scope item coverage (FR-22.18). */
+  warehouseScopesFromCoverage?: boolean;
   /** Demand dated beyond this many days from asOf is ignored (30 to 1095); omitted takes the service default. */
   horizonDays?: number;
   /** Restricts the items the version reports (FR-22.13). */

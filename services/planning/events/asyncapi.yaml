@@ -219,6 +219,7 @@ components:
         item_id: {type: string, format: uuid}
         warehouse_id: {type: [string, 'null'], format: uuid, description: 'Warehouse of a warehouse planning scope (FR-22.18, added in PSG-2227): for a planned transfer the to-warehouse, whose from-warehouse is the site (BR-22.7); null for an order of the site scope. The owning context creates the transfer order to this warehouse'}
         site_id: {type: string, format: uuid}
+        legal_entity_id: {type: [string, 'null'], format: uuid, description: "Legal entity of the plan version (added within v1); the CloudEvents legalentityid extension carries the same value so entity-scoped consumers, such as production's planned-orders inbox, can filter by it. Null for a plan without a legal entity"}
         vendor_id: {type: [string, 'null'], format: uuid}
         qty: {type: string, description: Decimal string in the inventory unit}
         order_date: {type: string, format: date}

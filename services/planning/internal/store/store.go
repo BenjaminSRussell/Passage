@@ -452,7 +452,7 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 			}
 			evt, err := events.New(planevents.PlannedOrderFirmed, eventSource, orderIDs[i], p.TenantID, planevents.PlannedOrderFirmedData{
 				PlannedOrderID: orderIDs[i], PlanVersionID: versionID, BatchID: autoFirm.batch.ID, OrderType: g.OrderType,
-				TargetType: g.TargetType, TargetID: g.TargetID, ItemID: o.ItemID, WarehouseID: optional(o.WarehouseID), SiteID: req.SiteID, VendorID: optional(o.VendorID), Qty: o.Qty.String(),
+				TargetType: g.TargetType, TargetID: g.TargetID, ItemID: o.ItemID, WarehouseID: optional(o.WarehouseID), SiteID: req.SiteID, LegalEntityID: optional(planEntity), VendorID: optional(o.VendorID), Qty: o.Qty.String(),
 				OrderDate: dayDate(req.AsOf, o.OrderDate), DeliveryDate: dayDate(req.AsOf, o.DeliveryDate),
 				QuotaArrangementID: quotaRefs[orderIDs[i]].arrangement(), QuotaSourceID: quotaRefs[orderIDs[i]].source(),
 			})

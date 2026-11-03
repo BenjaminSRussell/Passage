@@ -170,7 +170,7 @@ func (s *Postgres) FirmPlannedOrders(ctx context.Context, req FirmRequest) (Firm
 				o := rows[id]
 				evt, err := events.New(planevents.PlannedOrderFirmed, eventSource, id, p.TenantID, planevents.PlannedOrderFirmedData{
 					PlannedOrderID: id, PlanVersionID: o.versionID, BatchID: batchID, OrderType: g.OrderType,
-					TargetType: g.TargetType, TargetID: g.TargetID, ItemID: o.itemID, WarehouseID: optional(o.warehouseID), SiteID: o.cand.SiteID,
+					TargetType: g.TargetType, TargetID: g.TargetID, ItemID: o.itemID, WarehouseID: optional(o.warehouseID), SiteID: o.cand.SiteID, LegalEntityID: optional(o.entity),
 					VendorID: optional(o.cand.VendorID), Qty: o.cand.Qty.String(), OrderDate: o.orderDate, DeliveryDate: o.deliveryDate,
 					QuotaArrangementID: quotaRefs[id].arrangement(), QuotaSourceID: quotaRefs[id].source(),
 				})

@@ -147,7 +147,7 @@ func TestRunWarehouseCoverages(t *testing.T) {
 		t.Fatalf("warehouse coverage = %+v, %v", got, err)
 	}
 	r := got[domain.WarehouseKey(item, wh)]
-	if r.PlannedOrderType != domain.OrderTransfer || r.LeadTimeDays == nil || *r.LeadTimeDays != 2 || r.CoverageCode != domain.CoverageRequirement {
+	if r.WarehouseID != wh || r.ItemID != item || r.PlannedOrderType != domain.OrderTransfer || r.LeadTimeDays == nil || *r.LeadTimeDays != 2 || r.CoverageCode != domain.CoverageRequirement {
 		t.Fatalf("coverage = %+v", r)
 	}
 	if site, err := st.RunCoverages(ctx, site, "", []string{item}); err != nil || len(site) != 0 {

@@ -16,7 +16,9 @@ import (
 // leaves coverage, order type or lead time out (FR-22.2, FR-22.5, data model
 // ItemCoverage 4.22.4).
 type RunCoverage struct {
-	ItemID            string
+	ItemID string
+	// WarehouseID is the warehouse of a warehouse-scope coverage; empty for the site scope.
+	WarehouseID       string
 	GroupCode         string
 	CoverageCode      string
 	CoverageFenceDays int
@@ -101,6 +103,7 @@ func (s *Postgres) runCoverages(ctx context.Context, scope, siteID, planEntity s
 				return err
 			}
 			if scope == "warehouse" {
+				c.WarehouseID = warehouse
 				out[domain.WarehouseKey(c.ItemID, warehouse)] = c
 				continue
 			}

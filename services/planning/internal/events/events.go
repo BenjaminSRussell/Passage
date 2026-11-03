@@ -139,12 +139,16 @@ type PlannedOrderFirmedData struct {
 	// WarehouseID is the warehouse of a warehouse planning scope (FR-22.18): the
 	// to-warehouse of a planned transfer, whose from-warehouse is the site (BR-22.7);
 	// null for an order of the site scope.
-	WarehouseID  *string `json:"warehouse_id"`
-	SiteID       string  `json:"site_id"`
-	VendorID     *string `json:"vendor_id"`
-	Qty          string  `json:"qty"`
-	OrderDate    string  `json:"order_date"`
-	DeliveryDate string  `json:"delivery_date"`
+	WarehouseID *string `json:"warehouse_id"`
+	SiteID      string  `json:"site_id"`
+	// LegalEntityID is the plan version's legal entity (null for a plan without
+	// one); consumers scope their inbox by it, and the CloudEvents legalentityid
+	// extension is set from it. Added within v1.
+	LegalEntityID *string `json:"legal_entity_id"`
+	VendorID      *string `json:"vendor_id"`
+	Qty           string  `json:"qty"`
+	OrderDate     string  `json:"order_date"`
+	DeliveryDate  string  `json:"delivery_date"`
 	// QuotaArrangementID and QuotaSourceID are set when a quota arrangement
 	// allocated the order (FR-22.17); the owning context stores them on the
 	// target order so allocated quantity can be traced.

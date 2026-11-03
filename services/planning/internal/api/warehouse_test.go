@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -155,5 +156,84 @@ func TestRun_CarryForwardFirmedTransferIssuesFromTheSite(t *testing.T) {
 	_, req = runVersion(t, st, body, "k-wh-carry-shipped")
 	if len(req.Result.Orders) != 0 {
 		t.Fatalf("orders = %+v; a shipped transfer is only the warehouse's receipt", req.Result.Orders)
+	}
+}
+
+// siteOnlyBody is a site item with 100 on hand and no warehouse scope of its own.
+const siteOnlyBody = `{"asOf":"2026-11-02","siteId":"` + siteID + `","items":[
+ {"itemId":"` + fgID + `","coverage":{"code":"requirement"},"onHand":"100","orderType":"purchase","leadTimeDays":3,"lot":{},
+  "demand":[],"receipts":[],"components":[]}]}`
+
+func storedWarehouseScope() map[string]store.RunCoverage {
+	c := transferCoverage()
+	c.WarehouseID = wh2ID
+	c.CoverageCode = domain.CoverageMinMax
+	c.MinQty, c.MaxQty = decimal.NewFromInt(10), decimal.NewFromInt(40)
+	return map[string]store.RunCoverage{domain.WarehouseKey(fgID, wh2ID): c}
+}
+
+// FR-22.18: with warehouseScopesFromCoverage a warehouse scope that exists only as
+// stored item coverage is planned too (here a transfer up to its maximum of 40, since the scope is empty below its minimum of 10).
+func TestRun_WarehouseScopeDiscoveredFromStoredCoverage(t *testing.T) {
+	body := strings.Replace(siteOnlyBody, `{"asOf"`, `{"warehouseScopesFromCoverage":true,"asOf"`, 1)
+	_, req := runVersion(t, &fakeStore{runWhCovs: storedWarehouseScope()}, body, "k-wh-disc")
+	o := onlyOrder(t, req)
+	if o.WarehouseID != wh2ID || o.OrderType != domain.OrderTransfer || !o.Qty.Equal(decimal.NewFromInt(40)) {
+		t.Fatalf("planned order %+v; want a transfer of 40 to the stored scope WH-2", o)
+	}
+}
+
+// Without the switch the stored scope is not planned (the default is unchanged).
+func TestRun_WarehouseScopeFromCoverageIsOptIn(t *testing.T) {
+	_, req := runVersion(t, &fakeStore{runWhCovs: storedWarehouseScope()}, siteOnlyBody, "k-wh-off")
+	if len(req.Result.Orders) != 0 {
+		t.Fatalf("orders %+v; want none without the switch", req.Result.Orders)
+	}
+}
+
+// A scope named inline wins over the same stored scope, which is not added twice.
+func TestRun_WarehouseScopeInlineIsNotDuplicatedByDiscovery(t *testing.T) {
+	body := strings.Replace(warehouseBody, `{"asOf"`, `{"warehouseScopesFromCoverage":true,"asOf"`, 1)
+	_, req := runVersion(t, &fakeStore{runWhCovs: storedWarehouseScope()}, body, "k-wh-dup")
+	o := onlyOrder(t, req)
+	if o.WarehouseID != wh2ID || o.OrderType != domain.OrderTransfer || !o.Qty.Equal(decimal.NewFromInt(37)) {
+		t.Fatalf("planned order %+v; want the inline scope's single min/max transfer of 37 (40 less its 3 on hand), not a second scope", o)
+	}
+}
+
+// A discovered requirement-coverage scope has no demand of its own, so it plans no
+// order and adds no issue demand at the site: the site's 100 on hand stays its own and
+// nothing is planned or counted twice.
+func TestRun_WarehouseScopeDiscoveredWithoutDemandPlansNothing(t *testing.T) {
+	body := strings.Replace(siteOnlyBody, `{"asOf"`, `{"warehouseScopesFromCoverage":true,"asOf"`, 1)
+	body = strings.Replace(body, `"demand":[]`, `"demand":[{"ref":"SO-1","refType":"sales-line","date":"2026-11-06","qty":"120"}]`, 1)
+	c := transferCoverage()
+	c.WarehouseID = wh2ID
+	st := &fakeStore{runWhCovs: map[string]store.RunCoverage{domain.WarehouseKey(fgID, wh2ID): c}}
+	_, req := runVersion(t, st, body, "k-wh-disc-req")
+	o := onlyOrder(t, req)
+	if o.WarehouseID != "" || o.OrderType != domain.OrderPurchase || !o.Qty.Equal(decimal.NewFromInt(20)) {
+		t.Fatalf("planned order %+v; want only the site's purchase of 20 (120 demanded less 100 on hand)", o)
+	}
+	for _, n := range req.Result.Net {
+		if n.WarehouseID != "" {
+			t.Fatalf("net row %+v; an empty requirement scope has no activity", n)
+		}
+	}
+}
+
+// Discovery never truncates: an item whose stored scopes take it past the per-item
+// limit is a 400 naming the item, not a run that silently leaves scopes out.
+func TestRun_WarehouseScopesFromCoverageOverTheLimitIs400(t *testing.T) {
+	covs := map[string]store.RunCoverage{}
+	for i := 0; i <= maxWarehouseScopes; i++ {
+		c := transferCoverage()
+		c.WarehouseID = fmt.Sprintf("00000000-0000-0000-0000-%012x", 0xd00+i)
+		covs[domain.WarehouseKey(fgID, c.WarehouseID)] = c
+	}
+	body := strings.Replace(siteOnlyBody, `{"asOf"`, `{"warehouseScopesFromCoverage":true,"asOf"`, 1)
+	rec := do(t, &fakeStore{runWhCovs: covs}, http.MethodPost, "/v1/planning/plans/MAIN:run", body, "planning.run", true, "k-wh-cap")
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "items[0].warehouses") {
+		t.Fatalf("status %d body %s; want a 400 on items[0].warehouses", rec.Code, rec.Body.String())
 	}
 }

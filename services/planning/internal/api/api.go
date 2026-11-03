@@ -167,6 +167,11 @@ type runRequest struct {
 	// firms (FR-22.11), as scheduled receipts of the run (FR-22.1, FR-22.10),
 	// so a firmed order is supply and is not planned a second time.
 	CarryForward bool `json:"carryForward,omitempty"`
+	// WarehouseScopesFromCoverage also plans each warehouse scope the items have as
+	// stored warehouse-scope item coverage at the site and that the items do not name
+	// in warehouses[] (FR-22.18); a scope named inline wins. A discovered scope has no
+	// stock or demand of its own: the caller names a scope inline to send them.
+	WarehouseScopesFromCoverage bool `json:"warehouseScopesFromCoverage,omitempty"`
 	// HorizonDays ignores demand dated beyond that many days from asOf (30 to
 	// 1,095); 0 takes the service default (PLANNING_HORIZON_DAYS).
 	HorizonDays int `json:"horizonDays,omitempty"`
@@ -526,11 +531,17 @@ func (a *API) buildSnapshot(w http.ResponseWriter, r *http.Request, code string,
 			return time.Time{}, nil, nil, false
 		}
 	}
-	if hasWarehouses(req.Items) {
+	if hasWarehouses(req.Items) || req.WarehouseScopesFromCoverage {
 		whStored, err := a.store.RunWarehouseCoverages(r.Context(), req.SiteID, planEntity, itemIDsOf(req.Items))
 		if err != nil {
 			httpx.Fail(w, r, err)
 			return time.Time{}, nil, nil, false
+		}
+		if req.WarehouseScopesFromCoverage {
+			if fields := req.addStoredWarehouseScopes(whStored); len(fields) > 0 {
+				validationFailed(w, r, fields)
+				return time.Time{}, nil, nil, false
+			}
 		}
 		specs, fields, err := req.warehouseSpecs(whStored, asOf)
 		if err == nil && len(fields) == 0 {

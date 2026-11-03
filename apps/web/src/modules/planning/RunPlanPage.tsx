@@ -42,6 +42,8 @@ interface Draft {
   closedDates?: string;
   /** Count the plan's firmed, undelivered orders as supply (FR-22.1). */
   carryForward?: boolean;
+  /** Also plan the warehouse scopes stored as warehouse-scope item coverage (FR-22.18). */
+  warehouseScopes?: boolean;
   /** Planning horizon in days (30 to 1095); empty takes the service default. */
   horizonDays?: string;
   /** Plan scope (FR-22.13): item ids separated by commas or spaces, item groups and planners separated by commas, and the low-level code range. */
@@ -159,6 +161,7 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
     closedWeekdays: [],
     closedDates: "",
     carryForward: false,
+    warehouseScopes: false,
     horizonDays: "",
     scopeItemIds: "",
     scopeGroups: "",
@@ -190,6 +193,11 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
     setDraft((d) => ({ ...d, carryForward: on }));
   };
 
+  const toggleWarehouseScopes = (on: boolean) => {
+    key.current = newKey();
+    setDraft((d) => ({ ...d, warehouseScopes: on }));
+  };
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (busy) return;
@@ -209,6 +217,7 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
           ...(forecastModel ? { forecastModel } : {}),
           ...(calendar ? { calendar } : {}),
           ...(draft.carryForward ? { carryForward: true } : {}),
+          ...(draft.warehouseScopes ? { warehouseScopesFromCoverage: true } : {}),
           ...(horizonDays !== undefined ? { horizonDays } : {}),
           ...(scope ? { scope } : {}),
           items,
@@ -315,6 +324,23 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
               Adds this plan's firmed orders that are not yet delivered, and the approved orders this run firms, as receipts of their
               items, so they are not planned again.
               Leave it off when the target orders already arrive in the receipts below.
+            </p>
+          </div>
+          <div className={styles.wide}>
+            <label className={styles.check} htmlFor="run-wh-scopes">
+              <Input
+                id="run-wh-scopes"
+                type="checkbox"
+                aria-describedby="run-wh-scopes-hint"
+                checked={draft.warehouseScopes ?? false}
+                onChange={(e) => toggleWarehouseScopes(e.target.checked)}
+              />
+              Plan warehouse scopes from item coverage
+            </label>
+            <p id="run-wh-scopes-hint" className={styles.summary}>
+              Also plans each warehouse the items have warehouse-scope item coverage for, apart from the site. A warehouse found this way is
+              planned as empty: no stock or demand of its own, so a min/max warehouse is filled to its maximum. Name a warehouse that holds
+              stock or demand in the items, and leave its stock out of the on-hand of the site.
             </p>
           </div>
           <FormField

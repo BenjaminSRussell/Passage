@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -104,4 +105,45 @@ func (req runRequest) warehouseSpecs(stored map[string]store.RunCoverage, asOf t
 		}
 	}
 	return specs, nil, nil
+}
+
+// addStoredWarehouseScopes adds to each run item the warehouse scopes its stored
+// warehouse-scope item coverage has and the item does not name inline (FR-22.18),
+// in warehouse id order so the plan hash is stable. The added scope carries nothing
+// but its warehouse: coverage, order type, lead time and vendor come from the stored
+// coverage in warehouseSpecs (both are NOT NULL in item_coverage, so a stored scope
+// always has them). It is planned as an empty scope: no on-hand, safety stock, demand
+// or receipts beyond the plan's carried-forward firmed orders. It returns the field
+// errors of an item, or a run, that would hold more scopes than a run allows; the
+// scopes are never truncated, since a dropped scope would go unplanned silently.
+func (req runRequest) addStoredWarehouseScopes(stored map[string]store.RunCoverage) map[string]string {
+	byItem := map[string][]string{}
+	for _, c := range stored {
+		byItem[c.ItemID] = append(byItem[c.ItemID], c.WarehouseID)
+	}
+	fields := map[string]string{}
+	total := 0
+	for i := range req.Items {
+		it := &req.Items[i]
+		named := map[string]bool{}
+		for _, w := range it.Warehouses {
+			named[w.WarehouseID] = true
+		}
+		found := byItem[it.ItemID]
+		slices.Sort(found)
+		for _, wh := range found {
+			if !named[wh] {
+				it.Warehouses = append(it.Warehouses, warehouseDTO{WarehouseID: wh})
+				named[wh] = true
+			}
+		}
+		if len(it.Warehouses) > maxWarehouseScopes {
+			fields[fmt.Sprintf("items[%d].warehouses", i)] = fmt.Sprintf("holds at most %d warehouse scopes with the scopes of its stored item coverage", maxWarehouseScopes)
+		}
+		total += len(it.Warehouses)
+	}
+	if total > maxItems {
+		fields["items.warehouses"] = fmt.Sprintf("the run holds at most %d warehouse scopes with the scopes of the stored item coverage", maxItems)
+	}
+	return fields
 }

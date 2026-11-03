@@ -81,6 +81,12 @@ func TestRunPlan_FirmsApprovedOrders(t *testing.T) {
 	if v2.ApprovedFirmed != 2 {
 		t.Fatalf("approvedFirmed = %d, want 2", v2.ApprovedFirmed)
 	}
+	// Every event, including those of the approved orders this run firmed, names the plan's legal entity.
+	var withoutEntity int
+	if err := admin.QueryRow(context.Background(), `select count(*) from outbox where type = 'dev.passage.planning.plannedorder.firmed.v1'
+		and (payload->'data'->>'legal_entity_id' is distinct from '00000000-0000-0000-0000-0000000000e1' or payload->>'legalentityid' is distinct from '00000000-0000-0000-0000-0000000000e1')`).Scan(&withoutEntity); err != nil || withoutEntity != 0 {
+		t.Fatalf("firmed events without the legal entity: %d, %v", withoutEntity, err)
+	}
 	var firmed, open, targets int
 	if err := admin.QueryRow(context.Background(), `select
 		count(*) filter (where status = 'firmed' and firmed_target_type = 'purchase-order' and firmed_batch_id is not null),
