@@ -359,6 +359,8 @@ type matchIndex struct {
 	byRefLen map[int][]*prepared
 	byGram   map[string][]*prepared
 	refCount map[string]int
+	shareN   []int
+	hot      []bool
 }
 
 func newMatchIndex(cands map[string]Facts) *matchIndex {
@@ -448,24 +450,29 @@ func (ix *matchIndex) matchLine(line *prepared, rules []Rule, t Thresholds, pref
 		needRef = needRef || r.Weights.Reference > 0
 		needSim = needSim || r.Weights.Counterparty > 0
 	}
+	n := len(all)
+	if cap(ix.shareN) < n {
+		ix.shareN = make([]int, n)
+		ix.hot = make([]bool, n)
+	} else {
+		ix.shareN = ix.shareN[:n]
+		ix.hot = ix.hot[:n]
+		clear(ix.shareN)
+		clear(ix.hot)
+	}
+	shareN, hot := ix.shareN, ix.hot
 	// Shared trigram counts are Jaccard numerators; items with 0 get sim 0
 	// without a per-candidate map walk.
-	shareN := make([]int, len(all))
 	if needSim {
 		for g := range line.grams {
 			for _, p := range ix.byGram[g] {
 				shareN[p.idx]++
+				hot[p.idx] = true
 			}
 		}
 	}
-	hot := make([]bool, len(all))
 	if needRef {
 		ix.markRefHits(line, hot)
-	}
-	for i, n := range shareN {
-		if n > 0 {
-			hot[i] = true
-		}
 	}
 	decided := map[ruleShape]Decision{}
 	for _, r := range rules {
