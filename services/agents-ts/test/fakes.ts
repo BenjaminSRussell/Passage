@@ -84,6 +84,13 @@ export class FakeApprovals implements ApprovalPort {
   }
 }
 
+/** In-memory ports for tests that do not exercise persistence: nothing is stored or limited. */
+export const testAudit: RunDeps["audit"] = { startRun: async () => undefined, finishRun: async () => undefined };
+export const testBudgets: RunDeps["budgets"] = {
+  reserve: async (r) => ({ holdId: "test-hold", tenantId: r.tenantId, month: r.month }),
+  settle: async () => undefined,
+};
+
 export function makeDeps(parts: {
   provider: ModelProvider;
   tools: ToolPort;
@@ -100,6 +107,8 @@ export function makeDeps(parts: {
     now: () => "2026-10-21T00:00:00.000Z",
     nowMs: () => Date.UTC(2026, 9, 21),
     pseudonymTtlMs: 86_400_000,
+    audit: testAudit,
+    budgets: testBudgets,
   };
 }
 

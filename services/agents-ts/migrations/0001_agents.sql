@@ -18,12 +18,13 @@ CREATE TABLE IF NOT EXISTS agent_run (
   agent_id text NOT NULL,
   agent_version integer NOT NULL CHECK (agent_version >= 1),
   invoker_user_id text NOT NULL,
-  status text NOT NULL CHECK (status IN ('COMMITTED', 'REJECTED', 'FAILED', 'KILLED')),
+  status text NOT NULL CHECK (status IN ('RUNNING', 'COMMITTED', 'REJECTED', 'FAILED', 'KILLED', 'FAILED_AFTER_COMMIT')),
   code text,
   reason text,
   tokens_in bigint NOT NULL CHECK (tokens_in >= 0),
   tokens_out bigint NOT NULL CHECK (tokens_out >= 0),
   estimated boolean NOT NULL,
+  post_commit_error text,
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, run_id)
 );
@@ -57,24 +58,44 @@ CREATE POLICY agent_action_tenant_access ON agent_action AS PERMISSIVE
   USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
 
+-- FR-47.11: one budget per tenant per month. Rows are created lazily from the
+-- configured default; agent attribution lives on the holds, not the budget.
 CREATE TABLE IF NOT EXISTS token_budget (
   tenant_id uuid NOT NULL,
-  agent_id text NOT NULL,
   month text NOT NULL CHECK (month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'),
   limit_in bigint NOT NULL CHECK (limit_in >= 0),
   limit_out bigint NOT NULL CHECK (limit_out >= 0),
   used_in bigint NOT NULL DEFAULT 0 CHECK (used_in >= 0),
   used_out bigint NOT NULL DEFAULT 0 CHECK (used_out >= 0),
-  reserved_in bigint NOT NULL DEFAULT 0 CHECK (reserved_in >= 0),
-  reserved_out bigint NOT NULL DEFAULT 0 CHECK (reserved_out >= 0),
   soft_pct integer NOT NULL DEFAULT 80 CHECK (soft_pct BETWEEN 1 AND 99),
   alert_state text NOT NULL DEFAULT 'OK' CHECK (alert_state IN ('OK', 'SOFT', 'HARD')),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (tenant_id, agent_id, month)
+  PRIMARY KEY (tenant_id, month)
 );
 ALTER TABLE token_budget ENABLE ROW LEVEL SECURITY;
 ALTER TABLE token_budget FORCE ROW LEVEL SECURITY;
 CREATE POLICY token_budget_tenant_access ON token_budget AS PERMISSIVE
+  USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
+  WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
+
+-- A hold is the tokens a running run may still spend. reserved = the sum of live
+-- holds; a hold whose worker died is swept once expires_at (start + run timeout) passes.
+CREATE TABLE IF NOT EXISTS budget_hold (
+  tenant_id uuid NOT NULL,
+  hold_id text NOT NULL,
+  month text NOT NULL,
+  agent_id text NOT NULL,
+  run_id text NOT NULL,
+  tokens_in bigint NOT NULL CHECK (tokens_in > 0),
+  tokens_out bigint NOT NULL CHECK (tokens_out > 0),
+  expires_at timestamptz NOT NULL,
+  PRIMARY KEY (tenant_id, hold_id),
+  FOREIGN KEY (tenant_id, month) REFERENCES token_budget (tenant_id, month)
+);
+CREATE INDEX IF NOT EXISTS budget_hold_expiry ON budget_hold (tenant_id, expires_at);
+ALTER TABLE budget_hold ENABLE ROW LEVEL SECURITY;
+ALTER TABLE budget_hold FORCE ROW LEVEL SECURITY;
+CREATE POLICY budget_hold_tenant_access ON budget_hold AS PERMISSIVE
   USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
 
@@ -95,14 +116,15 @@ CREATE POLICY outbox_tenant_access ON outbox AS PERMISSIVE
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
 
 -- Application role privileges (skipped when the role does not exist: developer
--- databases without the role split). Audit rows are never updated or deleted.
+-- databases without the role split). Action rows are never updated or deleted.
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
     EXECUTE format('GRANT USAGE ON SCHEMA %I TO passage_app', current_schema());
-    EXECUTE 'GRANT SELECT, INSERT ON agent_run TO passage_app';
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE ON agent_run TO passage_app';
     EXECUTE 'GRANT SELECT, INSERT ON agent_action TO passage_app';
     EXECUTE 'GRANT SELECT, INSERT, UPDATE ON token_budget TO passage_app';
+    EXECUTE 'GRANT SELECT, INSERT, DELETE ON budget_hold TO passage_app';
     EXECUTE 'GRANT SELECT, INSERT ON outbox TO passage_app';
   END IF;
 END

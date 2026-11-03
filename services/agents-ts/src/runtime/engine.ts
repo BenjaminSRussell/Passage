@@ -112,23 +112,41 @@ export interface KillSwitchPort {
   isHalted(tenantId: string): boolean;
 }
 
-export interface BudgetHold {
+export const RUN_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+
+export interface BudgetRequest {
   tenantId: string;
   agentId: string;
+  runId: string;
   month: string;
   tokensIn: number;
   tokensOut: number;
+  nowMs: number;
+  /** A hold older than this is swept: its worker died before settling. */
+  ttlMs: number;
 }
 
-/** Persisted token budget (AC-47.4): reserve before the run, settle with the actual usage after it. */
+export interface BudgetHold {
+  holdId: string;
+  tenantId: string;
+  month: string;
+}
+
+/** Persisted token budget (FR-47.11): reserve before the run, settle with the actual usage after it. */
 export interface BudgetPort {
-  reserve(hold: BudgetHold): Promise<void>;
+  reserve(req: BudgetRequest): Promise<BudgetHold>;
   settle(hold: BudgetHold, actual: ModelUsage): Promise<void>;
 }
 
-/** Persisted audit trail (AC-47.3): the run and its action rows, written once the run has ended. */
+/**
+ * Persisted audit trail (AC-47.3). `startRun` opens the run as RUNNING before any
+ * model call, so a reused run id is refused before a tool can commit; `finishRun`
+ * writes the action rows and the final status, FAILED_AFTER_COMMIT when
+ * `afterCommitError` is set.
+ */
 export interface AuditPort {
-  saveRun(req: RunRequest, result: RunResult): Promise<void>;
+  startRun(req: RunRequest): Promise<void>;
+  finishRun(req: RunRequest, result: RunResult, afterCommitError?: string): Promise<void>;
 }
 
 export interface RunDeps {
@@ -140,8 +158,8 @@ export interface RunDeps {
   now: () => string;
   nowMs: () => number;
   pseudonymTtlMs: number;
-  audit?: AuditPort;
-  budgets?: BudgetPort;
+  audit: AuditPort;
+  budgets: BudgetPort;
 }
 
 export interface RunRequest {
@@ -170,6 +188,8 @@ export interface RunResult {
   budgetState: BudgetState;
   /** Real values, for the UI only. Never stored or sent back to a provider. */
   displayText: string;
+  /** Set when the run committed but the budget settle or the audit write then failed. */
+  postCommitError?: string;
 }
 
 /**
@@ -185,24 +205,64 @@ export async function runAgent(
   deps: RunDeps,
   req: RunRequest,
 ): Promise<RunResult> {
-  const { budgets, audit } = deps;
-  const hold: BudgetHold = {
+  const cap = req.runTokenCap;
+  if (!Number.isSafeInteger(cap) || cap <= 0) {
+    throw new Error(`runTokenCap must be a positive safe integer, got ${cap}`);
+  }
+  const hold = await deps.budgets.reserve({
     tenantId: req.tenantId,
     agentId: req.agent.agentId,
+    runId: req.runId,
     month: deps.now().slice(0, 7),
-    tokensIn: req.runTokenCap,
-    tokensOut: req.runTokenCap,
-  };
-  await budgets?.reserve(hold);
-  let spent: ModelUsage = { tokensIn: 0, tokensOut: 0 };
+    tokensIn: cap,
+    tokensOut: cap,
+    nowMs: deps.nowMs(),
+    ttlMs: RUN_TIMEOUT_MS,
+  });
+  const release = (): Promise<void> =>
+    deps.budgets.settle(hold, { tokensIn: 0, tokensOut: 0 }).catch(() => undefined);
   try {
-    const result = await executeRun(deps, req);
-    spent = { tokensIn: result.tokensIn, tokensOut: result.tokensOut };
-    await audit?.saveRun(req, result);
-    return result;
-  } finally {
-    await budgets?.settle(hold, spent);
+    await deps.audit.startRun(req);
+  } catch (err) {
+    await release();
+    throw err;
   }
+  let result: RunResult;
+  try {
+    result = await executeRun(deps, req);
+  } catch (err) {
+    const failed: RunResult = {
+      runId: req.runId,
+      status: "FAILED",
+      code: err instanceof AgentError ? err.code : undefined,
+      reason: err instanceof Error ? err.message : String(err),
+      actions: [],
+      tokensIn: 0,
+      tokensOut: 0,
+      estimated: false,
+      budgetState: budgetStatus(req.budget).state,
+      displayText: "",
+    };
+    await deps.audit.finishRun(req, failed).catch(() => undefined);
+    await release();
+    throw err;
+  }
+  const problems: Error[] = [];
+  const attempt = async (step: () => Promise<void>): Promise<void> => {
+    try {
+      await step();
+    } catch (err) {
+      problems.push(err instanceof Error ? err : new Error(String(err)));
+    }
+  };
+  await attempt(() =>
+    deps.budgets.settle(hold, { tokensIn: result.tokensIn, tokensOut: result.tokensOut }),
+  );
+  const settleFailure = problems[0]?.message;
+  await attempt(() => deps.audit.finishRun(req, result, settleFailure));
+  if (problems.length === 0) return result;
+  if (result.status !== "COMMITTED") throw problems[0];
+  return { ...result, postCommitError: problems.map((p) => p.message).join("; ") };
 }
 
 async function executeRun(
