@@ -392,7 +392,7 @@ export interface ReleaseInput {
 
 export interface ReleaseSkip {
   orderLineId: string;
-  reason: "held" | "beyond_horizon" | "atp_short" | "non_positive_qty" | "already_released" | "drop_ship" | "journal_order";
+  reason: "held" | "beyond_horizon" | "atp_short" | "non_positive_qty" | "already_released" | "drop_ship" | "journal_order" | "order_remainder_cancelled";
 }
 
 export interface ReleaseResult {
@@ -982,7 +982,7 @@ export function cancelDropShip(id: string, version: number, key: string): Promis
   return command<DropShip>(`/drop-ships/${encodeURIComponent(id)}:cancel`, undefined, key, version);
 }
 
-export type ExceptionKind = "SLIP_POSTED_BEYOND_KEPT" | "PACKED_BEYOND_KEPT";
+export type ExceptionKind = "SLIP_POSTED_BEYOND_KEPT" | "PACKED_BEYOND_KEPT" | "DROPSHIP_CONFIRMED_BEYOND_KEPT";
 export type ExceptionStatus = "OPEN" | "RESOLVED";
 
 /** A case on the warehouse supervisor's list (sales cancelled the remainder of an order). */

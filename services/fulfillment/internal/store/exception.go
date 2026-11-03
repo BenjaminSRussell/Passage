@@ -27,6 +27,11 @@ const (
 	// ExceptionPackedBeyondKept: packed, unposted quantity beyond the kept quantity. The
 	// post is refused (FUL-0066); the supervisor unpacks and puts the goods back.
 	ExceptionPackedBeyondKept = "PACKED_BEYOND_KEPT"
+	// ExceptionDropShipBeyondKept: the vendor confirmed more of a drop-shipped order line than
+	// sales kept when it cancelled the remainder (the confirmation was booked before the
+	// cancellation arrived). The vendor shipped and the cost is booked; the remedy is a
+	// vendor return or a new order, and nothing is reversed here.
+	ExceptionDropShipBeyondKept = "DROPSHIP_CONFIRMED_BEYOND_KEPT"
 )
 
 // Catalog codes of the remainder-cancelled slice.

@@ -352,13 +352,40 @@ Handoffs and gaps from slice 20:
 | Inventory must consume `shipment.closed` with `reason` `order_remainder_cancelled` and `shipment.cancelled` as for a manual close or cancel (release the reservation of `qty`, put back `picked_unpacked`); sales must not cancel the order line again on that reason, and should show `exception.raised.v1` where it tracks order fulfilment problems. | handoff to inventory (wave 16) and sales (wave 27) | No consumer exists yet. |
 | Packed quantity beyond the kept quantity is not unpacked by the service | deviation | A container is a physical object with an SSCC; the supervisor unpacks it (`:unpack`), which cuts the unpacked quantity above the kept quantity. Until then the post is refused (FUL-0066). The exception is resolved by hand; it is not closed by the unpack. |
 | Unposted batch and serial entries of a cut line that cover more than stays picked are dropped as a whole | deviation | Capture is repeated for what stays picked; trimming entries by quantity would guess which serials stay. Entries that still fit are kept. |
-| A drop-ship line of an order whose remainder sales cancelled is not cut, and its vendor confirmation is not checked against the kept quantity | later slice of PSG-28 | The consumer cuts warehouse shipments only; the drop-ship remainder is closed by hand (`:close-remainder`) until the drop-ship flow follows the event. |
-| Release does not read `order_line_kept` | deviation | Sales cancels the remaining schedule lines with the remainder, so a release run fed from sales no longer offers them; a line released again regardless is still refused at post (FUL-0066). |
 | Pick and pack of a line sales cut back are not blocked by the kept quantity; only the post is (FUL-0066) | deviation | The cut already shrinks the plan to what is packed or shipped, so a pick above the plan is refused as an over-pick (FUL-0004). |
 | A slip posted beyond the kept quantity is not reversed or returned by the service | handoff to receivables / returns (wave 30) | The exception tells the supervisor; return authorisation and credit are wave 30. |
 | A hold check on capture tracking and on drop-ship creation and vendor confirmation | deviation | Capture tracking is a recording step, and a vendor confirmation records a shipment the vendor already made. |
 | `tools/rlscheck` reports `fulfillment.service_token_replay` (migration 0019, from main) as `rls-not-enabled-and-forced`: the table is missing from `tools/rlscheck/allowlist.go`, where the other services' replay tables carry the permanent SECURITY DEFINER purge reason. The slice 20 tables pass. | handoff (repo tooling, outside this wave's paths) | Add `"fulfillment.service_token_replay:" + problemNotForced` with the same reason as the other services. |
 | `order_line_kept` is never pruned | deviation | One small row per cancelled order line; a retention job belongs with the data lifecycle work. |
+
+Slice 21 closes the two gaps slice 20 left. Drop-ship: on `order.remaindercancelled.v1` the same consumer now also reads the
+active drop-ship of each order line (`followDropShip`, in the consumer's transaction, after the shipment lines were cut). The
+vendor quantity not yet shipped above what the line keeps is closed with no booking, as `:close-remainder` does
+(`qty_closed` grows, an OPEN drop-ship stays OPEN with less open, a PARTIALLY_CONFIRMED one becomes CONFIRMED when none is
+left), and `dropship.closed.v1` is published; an OPEN drop-ship that keeps nothing is CANCELLED and `dropship.cancelled.v1` is
+published. Both events carry the new optional `reason` `order_remainder_cancelled` (additive, kept at v1) so sales does not
+cancel again. A vendor confirmation already booked above the kept quantity raises the new exception kind
+`DROPSHIP_CONFIRMED_BEYOND_KEPT` (migration 0025 widens the kind check on `fulfillment_exception`; no new table, so the grants
+of 0024 stand); nothing is reversed and the supervisor arranges a vendor return or a new order. Creating a drop-ship above the
+quantity sales kept, and a vendor confirmation that would take the confirmed total above it, are refused with FUL-0066.
+Release: a run reads `order_line_kept`: a line sales cut back is offered only for the kept quantity minus the planned quantity of
+its live shipments and the quantity of its active drop-ship (capped, and not flagged partial: nothing is left for a later run, so
+a repeat run skips it as `already_released`), and is skipped with the new reason `order_remainder_cancelled` when it has no live
+shipment and nothing is left to offer. The release OpenAPI skip reason enum, the exception kind enums, the
+AsyncAPI drop-ship `reason` and exception kinds, and the web labels (skip reason, exception kind, advice) are updated. No new
+route, duty, principal, topic or entity; the exception list and detail pages already show the new kind.
+
+Handoffs and gaps from slice 21:
+
+| Item | Status | Reason |
+|---|---|---|
+| Sales must treat `dropship.closed.v1` and `dropship.cancelled.v1` with `reason` `order_remainder_cancelled` as already known (no second cancel), and inventory has nothing to do (no stock moves for a drop-ship). | handoff to sales (wave 27) | No consumer exists yet. |
+| A drop-ship that keeps part of its quantity and has nothing confirmed stays OPEN with `qty_closed` above zero; the vendor's purchase order line is not reduced by fulfillment. | handoff to purchasing (wave 17) | Purchasing must lower the PO line quantity from `dropship.closed.v1` (`qty_closed`); fulfillment does not call purchasing. |
+| A vendor confirmation booked above the kept quantity is not reversed (the Dr 5000 / Cr 2110 stays) | deviation; handoff to purchasing (wave 17) and the ledger | The exception tells the supervisor; a vendor return and its reversal are not built (see "A confirmed drop-ship cannot be reversed"). |
+| A drop-ship created while the consumer applies the cancellation (the consumer does not see the uncommitted drop-ship, and the create does not see the uncommitted kept row) keeps its full quantity. | deviation | The vendor confirmation is held to the kept quantity (FUL-0066, `TestDropShip_ConfirmAboveKeptIsRefused`); the supervisor cancels the OPEN drop-ship and creates one for the kept quantity, or closes the remainder after a partial confirmation. Closing the window would need a lock on an order line that has no row yet. |
+| A vendor confirmation above the kept quantity is refused (FUL-0066) even when the vendor has already shipped (the purchase order line is not lowered by fulfillment, see above), so that shipment cannot be booked here. | deviation; decision for Ben | The ticket asks for the refusal; the alternative is to book it and raise `DROPSHIP_CONFIRMED_BEYOND_KEPT`, as the consumer does for a confirmation booked before the cancellation arrived. |
+| A second drop-ship of a line that already has an active one is refused with FUL-0066 rather than FUL-0061 when its quantity is also above the kept quantity. | deviation | The kept check runs before the insert that detects the active drop-ship; both are refusals. |
+| Authz seed: none. The new exception kind and skip reason use existing duties and routes. | none | |
 
 ## Important gaps (read first)
 

@@ -29,4 +29,8 @@ describe("release line order type, priority and ATP quantity", () => {
   it("explains a journal order skip", () => {
     expect(SKIP_LABELS.journal_order).toMatch(/never ships/);
   });
+
+  it("explains a line sales cut back that is already released", () => {
+    expect(SKIP_LABELS.order_remainder_cancelled).toMatch(/cancelled the remainder/);
+  });
 });

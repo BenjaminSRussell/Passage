@@ -184,8 +184,8 @@ components:
         legalEntityId: { type: string, format: uuid }
         kind:
           type: string
-          enum: [SLIP_POSTED_BEYOND_KEPT, PACKED_BEYOND_KEPT]
-          description: "SLIP_POSTED_BEYOND_KEPT: the goods left before the cancellation arrived; return them (wave 30) or raise a new order. PACKED_BEYOND_KEPT: packed and not posted; the post is refused (FUL-0066), unpack (which cuts the quantity above the kept one) and put the goods back."
+          enum: [SLIP_POSTED_BEYOND_KEPT, PACKED_BEYOND_KEPT, DROPSHIP_CONFIRMED_BEYOND_KEPT]
+          description: "DROPSHIP_CONFIRMED_BEYOND_KEPT: the vendor shipped more than the order line keeps before the cancellation arrived; arrange a vendor return or a new order (the booked cost is not reversed). SLIP_POSTED_BEYOND_KEPT: the goods left before the cancellation arrived; return them (wave 30) or raise a new order. PACKED_BEYOND_KEPT: packed and not posted; the post is refused (FUL-0066), unpack (which cuts the quantity above the kept one) and put the goods back."
         status: { type: string, enum: [OPEN, RESOLVED] }
         orderId: { type: string, format: uuid }
         orderLineId: { type: string, format: uuid }
@@ -247,7 +247,7 @@ components:
         unit: { type: string }
         qty: { type: string, description: "Ordered quantity, decimal string." }
         qtyConfirmed: { type: string, description: "Quantity the vendor has shipped and confirmed so far." }
-        qtyClosed: { type: string, description: "Quantity closed without shipping (close-remainder)." }
+        qtyClosed: { type: string, description: "Quantity closed without shipping: by close-remainder, or when sales cancelled the remainder of the order (an OPEN or PARTIALLY_CONFIRMED drop-ship then stays in its status with less open)." }
         qtyOpen: { type: string, description: "Quantity the vendor still has to ship or close: qty less qtyConfirmed less qtyClosed; 0 once CONFIRMED or CANCELLED." }
         vendorId: { type: string, format: uuid }
         purchaseOrderId: { type: string, format: uuid }
@@ -528,6 +528,9 @@ paths:
         with its reason when it is held, beyond the horizon, short of ATP, of a JOURNAL order
         (never ships), already released or drop-shipped. With requireFullAtp false a line above its
         atpQty is released for the ATP it has and flagged partial; a later run releases the rest.
+        A line whose remainder sales cancelled (order.remaindercancelled) is released only up to the
+        quantity it keeps beyond its live shipments and drop-ship, not flagged partial for the cut, and
+        skipped as order_remainder_cancelled when nothing of it is left to release.
       x-passage-duty: WarehouseRelease
       parameters:
         - { $ref: "#/components/parameters/IdempotencyKey" }
@@ -583,7 +586,7 @@ paths:
                       type: object
                       properties:
                         orderLineId: { type: string, format: uuid }
-                        reason: { type: string, enum: [held, beyond_horizon, atp_short, non_positive_qty, already_released, drop_ship, journal_order] }
+                        reason: { type: string, enum: [held, beyond_horizon, atp_short, non_positive_qty, already_released, drop_ship, journal_order, order_remainder_cancelled] }
         "400": { description: "FUL-0050 validation (also a repeated orderLineId, or lines of one order with different customers, legal entities or carriers), FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { description: "idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
@@ -2305,7 +2308,7 @@ paths:
         "400": { description: "FUL-0050 validation, FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "403": { $ref: "#/components/responses/Problem" }
         "409": { description: "FUL-0061 the order line already has an active drop-ship; FUL-0062 the order line is on a warehouse shipment", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0058 legal entity outside your scope, FUL-0065 a JOURNAL order, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0058 legal entity outside your scope, FUL-0065 a JOURNAL order, FUL-0066 qty above the quantity the order line keeps after sales cancelled the remainder of the order, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
     get:
       operationId: listDropShips
       summary: List drop-ships
@@ -2387,7 +2390,7 @@ paths:
         "404": { description: "FUL-0060 drop-ship not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: "conflict_version", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "409": { description: "FUL-0064 the vendor shipment reference is already booked on the drop-ship", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0001 the drop-ship is not OPEN or PARTIALLY_CONFIRMED; FUL-0063 qty above the open quantity; or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 the drop-ship is not OPEN or PARTIALLY_CONFIRMED; FUL-0063 qty above the open quantity; FUL-0066 the confirmed total would exceed the quantity the order line keeps after sales cancelled the remainder of the order; or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: "precondition_required", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/drop-ships/{id}:cancel:
     post:

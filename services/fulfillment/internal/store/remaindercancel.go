@@ -37,6 +37,9 @@ type RemainderCancelledResult struct {
 	ShipmentsCut       int
 	ShipmentsCancelled int
 	Exceptions         int
+	// DropShipsCut counts the drop-ships whose open quantity was closed and DropShipsCancelled
+	// those cancelled because the vendor had shipped nothing and the line keeps nothing.
+	DropShipsCut, DropShipsCancelled int
 }
 
 type cutLine struct {
@@ -118,6 +121,13 @@ func applyRemainder(ctx context.Context, tx pgx.Tx, tenantID string, in Remainde
 			return res, err
 		}
 		res.Exceptions += exceptions
+		dsCut, dsCancelled, dsExceptions, err := followDropShip(ctx, tx, tenantID, in, l)
+		if err != nil {
+			return res, err
+		}
+		res.DropShipsCut += dsCut
+		res.DropShipsCancelled += dsCancelled
+		res.Exceptions += dsExceptions
 		for _, c := range lineCuts {
 			if _, seen := cuts[c.shipmentID]; !seen {
 				shipmentOrder = append(shipmentOrder, c.shipmentID)

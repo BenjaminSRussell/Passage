@@ -415,4 +415,7 @@ type DropShipData struct {
 	ConfirmationSeq   int            `json:"confirmation_seq,omitempty"`
 	ConfirmedQty      string         `json:"confirmed_qty,omitempty"`
 	Journal           []JournalEntry `json:"journal"`
+	// Reason is set when the drop-ship was closed or cancelled because sales cancelled the
+	// remainder of the order (ReasonOrderRemainderCancelled): sales already knows.
+	Reason string `json:"reason,omitempty"`
 }

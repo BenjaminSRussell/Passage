@@ -118,6 +118,13 @@ describe("warehouse exception detail", () => {
     expect((await findAlert()).textContent).toContain("Someone else changed this exception");
   });
 
+  it("explains a vendor confirmation beyond the kept quantity", async () => {
+    server.handler = () => json(200, exception({ kind: "DROPSHIP_CONFIRMED_BEYOND_KEPT", shipmentId: null, packingSlipId: null }));
+    renderAt(`/fulfillment/exceptions/${ID}`, ["WarehouseView"]);
+    expect(await screen.findByRole("heading", { name: "Vendor shipped beyond the kept quantity" })).toBeInTheDocument();
+    expect(screen.getByText(/vendor return/)).toBeInTheDocument();
+  });
+
   it("shows the problem when the exception cannot be loaded", async () => {
     server.handler = () => json(404, { code: "FUL-0067", detail: "exception not found" });
     renderAt(`/fulfillment/exceptions/${ID}`, ["WarehouseView"]);

@@ -172,6 +172,9 @@ func (s *Postgres) CreateDropShip(ctx context.Context, in DropShipInput, idem Id
 			if onShipment {
 				return DropShip{}, httpx.NewProblem(http.StatusConflict, CodeDropShipOnShipment, "the order line is on a warehouse shipment; cancel the shipment before drop-shipping it")
 			}
+			if err := checkDropShipKept(ctx, tx, in.OrderLineID, in.Qty); err != nil {
+				return DropShip{}, err
+			}
 			seq, err := nextNumber(ctx, tx, p.TenantID, "DS:"+in.LegalEntityID)
 			if err != nil {
 				return DropShip{}, err
@@ -320,6 +323,9 @@ func (s *Postgres) ConfirmDropShip(ctx context.Context, id string, version int, 
 			if !qty.IsPositive() || qty.GreaterThan(d.QtyOpen) {
 				return d, httpx.NewProblem(http.StatusUnprocessableEntity, CodeDropShipQty,
 					fmt.Sprintf("the confirmation names %s %s but %s are open on the drop-ship", qty.String(), d.Unit, d.QtyOpen.String()))
+			}
+			if err := checkDropShipKept(ctx, tx, d.OrderLineID, d.QtyConfirmed.Add(qty)); err != nil {
+				return d, err
 			}
 			journal, err := domain.DropShipPosting(d.OrderLineID, d.QtyConfirmed, qty, d.UnitCost, d.Currency)
 			if err != nil {

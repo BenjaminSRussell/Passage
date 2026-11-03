@@ -132,6 +132,7 @@ export const SKIP_LABELS: Record<ReleaseSkip["reason"], string> = {
   already_released: "Already on an open shipment",
   drop_ship: "Shipped by the vendor (drop-ship)",
   journal_order: "Journal order (never ships)",
+  order_remainder_cancelled: "Sales cancelled the remainder; nothing is left to release",
 };
 
 /** Short form of a UUID for dense tables: the first 8 characters. */
@@ -170,4 +171,5 @@ export const SHORT_PICK_REASONS: Record<string, string> = {
 export const EXCEPTION_KIND_LABELS: Record<string, string> = {
   SLIP_POSTED_BEYOND_KEPT: "Shipped beyond the kept quantity",
   PACKED_BEYOND_KEPT: "Packed beyond the kept quantity",
+  DROPSHIP_CONFIRMED_BEYOND_KEPT: "Vendor shipped beyond the kept quantity",
 };

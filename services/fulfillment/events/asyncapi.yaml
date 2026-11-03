@@ -516,14 +516,14 @@ components:
       summary: >
         Fulfillment recorded a case the warehouse supervisor must handle: a packing slip
         posted beyond the quantity sales kept when it cancelled the remainder of the order
-        (SLIP_POSTED_BEYOND_KEPT), or packed quantity beyond it (PACKED_BEYOND_KEPT).
+        (SLIP_POSTED_BEYOND_KEPT), packed quantity beyond it (PACKED_BEYOND_KEPT), or a vendor confirmation of a drop-ship beyond it (DROPSHIP_CONFIRMED_BEYOND_KEPT).
       contentType: application/json
       payload:
         type: object
         required: [exception_id, kind, order_id, order_line_id, qty, kept_qty, detail]
         properties:
           exception_id: { type: string, format: uuid }
-          kind: { type: string, enum: [SLIP_POSTED_BEYOND_KEPT, PACKED_BEYOND_KEPT] }
+          kind: { type: string, enum: [SLIP_POSTED_BEYOND_KEPT, PACKED_BEYOND_KEPT, DROPSHIP_CONFIRMED_BEYOND_KEPT] }
           order_id: { type: string, format: uuid }
           order_line_id: { type: string, format: uuid }
           shipment_id: { type: string, format: uuid }
@@ -541,7 +541,7 @@ components:
         required: [exception_id, kind, order_id, order_line_id, note, resolved_by]
         properties:
           exception_id: { type: string, format: uuid }
-          kind: { type: string, enum: [SLIP_POSTED_BEYOND_KEPT, PACKED_BEYOND_KEPT] }
+          kind: { type: string, enum: [SLIP_POSTED_BEYOND_KEPT, PACKED_BEYOND_KEPT, DROPSHIP_CONFIRMED_BEYOND_KEPT] }
           order_id: { type: string, format: uuid }
           order_line_id: { type: string, format: uuid }
           note: { type: string }
@@ -622,7 +622,7 @@ components:
     DropShipCancelled:
       name: dev.passage.fulfillment.dropship.cancelled.v1
       title: Drop-ship cancelled
-      summary: An OPEN drop-ship was cancelled before the vendor confirmed; nothing was booked.
+      summary: An OPEN drop-ship was cancelled before the vendor confirmed (by hand, or with reason order_remainder_cancelled when sales cancelled the remainder and the line keeps nothing); nothing was booked.
       contentType: application/json
       payload:
         $ref: "#/components/schemas/DropShipPayload"
@@ -632,7 +632,7 @@ components:
       summary: >
         The vendor shipped part of the drop-ship and will not ship the rest. qty_closed is the
         quantity that never shipped, the status is CONFIRMED, and the journal is empty (nothing is
-        booked for the closed quantity). Sales may cancel the order line remainder from it.
+        booked for the closed quantity). Sales may cancel the order line remainder from it, unless reason is order_remainder_cancelled (sales cancelled it first; the status then stays OPEN or PARTIALLY_CONFIRMED when quantity is still open).
       contentType: application/json
       payload:
         $ref: "#/components/schemas/DropShipPayload"
@@ -911,6 +911,7 @@ components:
           type: array
           description: The journal of this confirmation in dropship.confirmed; empty in every other event.
           items: { $ref: "#/components/schemas/JournalEntry" }
+        reason: { type: string, enum: [order_remainder_cancelled], description: "Set in dropship.closed and dropship.cancelled when sales cancelled the remainder of the order and fulfillment followed it; sales already knows and must not cancel again." }
     SlipLine:
       type: object
       required: [order_line_id, qty, cost_amount, cost_snapshot_id]
