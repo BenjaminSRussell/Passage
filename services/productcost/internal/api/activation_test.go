@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -193,7 +194,7 @@ func TestActivation_StoreRefusalsMapToTheirCodes(t *testing.T) {
 		{&domain.CodedError{Code: domain.CodePostingAccounts, Detail: "none"}, http.StatusUnprocessableEntity, domain.CodePostingAccounts},
 		{&domain.CodedError{Code: domain.CodeNoStoredStandard, Detail: "none"}, http.StatusUnprocessableEntity, domain.CodeNoStoredStandard},
 		{&domain.CodedError{Code: domain.CodeNoOnHand, Detail: "none"}, http.StatusUnprocessableEntity, domain.CodeNoOnHand},
-		{&domain.CodedError{Code: domain.CodeNotStandard, Detail: "planned"}, http.StatusUnprocessableEntity, domain.CodeNotStandard},
+		{httpx.NewProblem(http.StatusConflict, domain.CodeActivationPending, "in flight"), http.StatusConflict, domain.CodeActivationPending},
 		{&store.LedgerRefusal{Err: &ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: ledgerclient.CodePeriodClosed}}, http.StatusBadGateway, domain.CodeActivationLedger},
 	} {
 		f := &fakeStore{activateErr: tc.err}
@@ -252,6 +253,35 @@ func TestActivation_ReversalReadsNothingFromTheRequestOrInventory(t *testing.T) 
 	}
 	if rec := activateAs(h, `{"version":2,"reversesActivationId":"nope"}`, "k-rev-3"); rec.Code != http.StatusBadRequest || f.activation != nil {
 		t.Errorf("malformed target: %d", rec.Code)
+	}
+}
+
+func TestActivation_UppercaseIdsReachTheStoreCanonical(t *testing.T) {
+	f := &fakeStore{}
+	h, _ := activationRouter(f, ledgerclient.NewFake(), nil)
+	target := ids.New()
+	path := "/v1/product-costing/versions/" + strings.ToUpper(someID) + "/activate"
+	body := `{"version":2,"reversesActivationId":"` + strings.ToUpper(target) + `"}`
+	do := func(b string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(b))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(tenant.HeaderTenant, testkit.TenantID(1))
+		req.Header.Set(tenant.HeaderDuties, activate)
+		req.Header.Set(tenant.HeaderUser, "cost.controller")
+		req.Header.Set("Idempotency-Key", "k-upper")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := do(body); rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if in := f.activation; in == nil || in.VersionID != someID || in.ReversesID != target {
+		t.Fatalf("store input %+v, want lowercase ids", in)
+	}
+	lower := f.activation.Fingerprint
+	if rec := do(strings.ToLower(body)); rec.Code != http.StatusOK || !reflect.DeepEqual(f.activation.Fingerprint, lower) {
+		t.Fatalf("the same request in lowercase must fingerprint equal: %d", rec.Code)
 	}
 }
 

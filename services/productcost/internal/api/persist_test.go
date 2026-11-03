@@ -84,6 +84,15 @@ func (f *fakeStore) TransitionVersion(_ context.Context, id string, expected int
 	return store.Version{ID: id, Status: domain.VersionBlocked, Version: expected + 1, SiteIDs: []string{}}, f.err
 }
 
+func (f *fakeStore) ActivateStatusOnly(_ context.Context, id string, expected int) (store.Version, bool, error) {
+	f.calls++
+	handled := len(f.positions) == 0
+	if handled {
+		f.moveID, f.expected, f.action = id, expected, domain.ActionActivate
+	}
+	return store.Version{ID: id, Status: domain.VersionActive, Version: expected + 1, SiteIDs: []string{}}, handled, f.err
+}
+
 func (f *fakeStore) PreviewActivation(_ context.Context, in store.ActivationInput) (domain.RevalPreview, error) {
 	f.calls++
 	f.preview = &in

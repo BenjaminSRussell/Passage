@@ -475,7 +475,22 @@ func checkFallbackVersion(ctx context.Context, tx pgx.Tx, tenantID string, spec 
 // domain.Transition; a refused move is returned as its coded error.
 // Activation stamps activated_at.
 func (s *Postgres) TransitionVersion(ctx context.Context, id string, expected int, action string) (Version, error) {
+	out, _, err := s.transitionVersion(ctx, id, expected, action, false)
+	return out, err
+}
+
+// ActivateStatusOnly activates a version that revalues nothing: any type but
+// Standard, or a Standard version with no stored Legal calculations. The
+// decision and the transition share one transaction, so calculations stored
+// meanwhile cannot slip past it. handled is false when the version needs the
+// revaluing path.
+func (s *Postgres) ActivateStatusOnly(ctx context.Context, id string, expected int) (Version, bool, error) {
+	return s.transitionVersion(ctx, id, expected, domain.ActionActivate, true)
+}
+
+func (s *Postgres) transitionVersion(ctx context.Context, id string, expected int, action string, statusOnly bool) (Version, bool, error) {
 	var out Version
+	handled := true
 	err := s.tenantTx(ctx, func(tx pgx.Tx, p tenant.Principal) error {
 		cur, err := scanVersion(tx.QueryRow(ctx, `select `+versionColumns+` from costing_version where tenant_id = $1 and id = $2 for update`, p.TenantID, id))
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -483,6 +498,15 @@ func (s *Postgres) TransitionVersion(ctx context.Context, id string, expected in
 		}
 		if err != nil {
 			return err
+		}
+		if statusOnly && cur.Type == domain.VersionStandard {
+			positions, err := versionPositions(ctx, tx, p.TenantID, id)
+			if err != nil {
+				return err
+			}
+			if handled = len(positions) == 0; !handled {
+				return nil
+			}
 		}
 		if cur.Version != expected {
 			return httpx.NewProblem(http.StatusConflict, domain.CodeVersionConflict, fmt.Sprintf("current version is %d", cur.Version))
@@ -504,5 +528,5 @@ func (s *Postgres) TransitionVersion(ctx context.Context, id string, expected in
 			FromStatus: cur.Status, ToStatus: out.Status, Version: out.Version, ActivatedAt: out.ActivatedAt, Actor: p.UserID,
 		})
 	})
-	return out, err
+	return out, handled, err
 }

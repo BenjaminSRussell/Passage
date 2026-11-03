@@ -251,9 +251,10 @@ same transaction (see `events/asyncapi.yaml`).
   `cost_calculation` rows (Legal view, status Pending or Active), never the request's: a request
   that lists `lines` is 400. A version with such rows is always revalued, so the bare
   `{version}` request (plus `currency`, `ledgerId`, `postingDate` and the `Idempotency-Key`
-  header) posts the journal and activates; `dryRun` previews it; a version with no stored
-  calculations only moves the status. Only a Standard version revalues and posts (`CST-0727`
-  otherwise; `dryRun` stays available). The amounts are never the caller's: the new standard
+  header) posts the journal and activates; `dryRun` previews it. Every version type except
+  Simulation can be activated (BR-39.2), but only a Standard version with stored calculations
+  revalues and posts: any other version, or a Standard one with none, only moves the status
+  (no revaluation, no attempt row), decided inside the store transaction. The amounts are never the caller's: the new standard
   is the version's calculation and the old one the standard the stock is carried at now, read
   inside the transaction: the new standard of the latest activation that booked the position
   and was not reversed, else the calculation of the latest activated Standard version whose
@@ -261,10 +262,12 @@ same transaction (see `events/asyncapi.yaml`).
   posting date (a future date reads the live on-hand). Site key contract: inventory's `site`
   dimension is free text, so it must carry the productcost site id (a UUID, any case); rows
   with another site value cannot be matched, and a position inventory reports no row for is
-  `CST-0726` (422), never quantity 0. Inventory is read once per distinct item (the inquiry
+  `CST-0726` (422), never quantity 0, except a position with no earlier standard at all: with
+  no inventory row or zero on-hand it is booked at its own new standard (old = new, amount 0);
+  with stock and no earlier standard it is `CST-0725`. Inventory is read once per distinct item (the inquiry
   filters on one product and caps at 10000 groups); more than 1000 items or 50000 positions
   is `CST-0728`. `oldStd`, `newStd`, `qty` and account fields are unknown fields (400). A
-  position without both standards is `CST-0725` (422), no inventory service is `CST-0722`
+  position with stock and no earlier standard is `CST-0725` (422), no inventory service is `CST-0722`
   (503), and nothing is posted in either case. A journal the ledger refuses fails the call
   (`CST-0721`, 502).
   Posting is three steps: the first transaction checks everything and commits a pending
@@ -276,6 +279,9 @@ same transaction (see `events/asyncapi.yaml`).
   invalid entry) drops the attempt unless an earlier send was ambiguous; any other failure
   (transport, 5xx, 401, 403, 429, 409) keeps it and flags it ambiguous, because a 401, 403
   or 429 is decided before the ledger's idempotency replay.
+  Activations of one legal entity are serialised by an advisory lock, and an activation or
+  reversal is refused with `CST-0729` (409) while another version of the legal entity has a
+  pending attempt, because its standards are not final until that attempt settles.
   The activation tries the per-version roll advisory lock (`CST-0710`), but no roll takes it
   yet (no roll persists calculations), so the refusal is unreachable until the roll slice
   takes `domain.RollLockKey`.
@@ -283,7 +289,9 @@ same transaction (see `events/asyncapi.yaml`).
   ledger) is a new activation that reverses the original ledger entry through the ledger's
   reverse route, using the lines, accounts and quantities stored with the original, never
   today's accounts or on-hand. A second reversal of the same activation, a reversal of
-  another version's activation or of a reversal is `CST-0723`. The ledger accounts are
+  another version's activation or of a reversal is `CST-0723`, and so is reversing an
+  activation while a later, non-reversed activation booked any of its positions (the stock
+  would sit at the later standard; reverse the later one first). The ledger accounts are
   stored configuration per legal entity, `PUT /v1/product-costing/posting-accounts/{legalEntityId}`
   with `{inventoryAccount, costChangeAccount}` (CostingMaintain, legal-entity scope; the two
   must differ; each change publishes `dev.passage.costing.postingaccounts.changed.v1`) and
@@ -371,9 +379,9 @@ Problem `type` is `https://passage.dev/problems/<code>`.
 | CST-0722 | 502 / 503 | the inventory on-hand could not be read, or no inventory service is configured |
 | CST-0723 | 404 / 409 / 422 | reversal target missing (404), already reversed (409), of another version or itself a reversal (422) |
 | CST-0724 | 422 / 404 | no posting accounts configured for the legal entity |
-| CST-0725 | 422 | no stored standard for a position: the version has no calculation for it, or no earlier Active version does |
+| CST-0725 | 422 | a position holds stock but has no earlier standard (or the version has no calculation for it) |
 | CST-0726 | 422 | the inventory reports no on-hand for a stored position (its site dimension must be the site id) |
-| CST-0727 | 422 | only a Standard version revalues the inventory and posts |
+| CST-0729 | 409 | another version of the legal entity has a pending activation attempt; settle it first |
 | CST-0728 | 422 | too many items or positions for one activation |
 | CST-0731 | 422 / warning | inventory close through the day before the conversion date is required (warning in validation; 422 on the close and activate steps) |
 | CST-0732 | diagnostic | negative on-hand (error when the `NegativeOnHand` blocker is enabled) |

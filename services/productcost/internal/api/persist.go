@@ -42,6 +42,7 @@ type Store interface {
 	GetVersion(ctx context.Context, id string) (store.Version, error)
 	CreateVersion(ctx context.Context, spec domain.VersionSpec, key string) (store.Version, bool, error)
 	TransitionVersion(ctx context.Context, id string, expected int, action string) (store.Version, error)
+	ActivateStatusOnly(ctx context.Context, id string, expected int) (store.Version, bool, error)
 	PreviewActivation(ctx context.Context, in store.ActivationInput) (domain.RevalPreview, error)
 	ActivateVersion(ctx context.Context, in store.ActivationInput) (store.ActivationResult, bool, error)
 	ActivationPositions(ctx context.Context, versionID string) ([]inventory.Position, error)
@@ -226,9 +227,10 @@ func (a *API) listVersions(w http.ResponseWriter, r *http.Request) {
 
 // versionID reads the {id} path parameter; a malformed id cannot exist (404).
 func versionID(w http.ResponseWriter, r *http.Request) (string, bool) {
-	id := chi.URLParam(r, "id")
-	if !ids.Valid(id) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, domain.CodeVersionNotFound, "costing version "+id+" not found"))
+	raw := chi.URLParam(r, "id")
+	id, ok := ids.Canonical(raw)
+	if !ok {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, domain.CodeVersionNotFound, "costing version "+raw+" not found"))
 		return "", false
 	}
 	return id, true
@@ -346,15 +348,15 @@ type storedActivateRequest struct {
 
 // activateStoredVersion moves a stored Open or Blocked version to Active
 // (BR-39.2, duty CostingActivate). Simulation versions cannot (CST-0711). A
-// version with stored calculations revalues every one of its positions against
-// the inventory on-hand and posts the journal (activation.go); a version with
-// none only moves the status.
+// Standard version with stored calculations revalues every one of its positions
+// against the inventory on-hand and posts the journal (activation.go); any other
+// version only moves the status, decided inside the store transaction.
 func (a *API) activateStoredVersion(w http.ResponseWriter, r *http.Request) {
 	if !a.storeReady(w, r) {
 		return
 	}
 	var req storedActivateRequest
-	if !decodeLimit(w, r, &req, maxActivationBody) {
+	if !decode(w, r, &req) {
 		return
 	}
 	id, ok := versionID(w, r)
@@ -363,13 +365,21 @@ func (a *API) activateStoredVersion(w http.ResponseWriter, r *http.Request) {
 	}
 	var positions []inventory.Position
 	if req.ReversesActivationID == "" {
+		if !req.DryRun && len(req.Lines) == 0 && req.Version != nil && *req.Version >= 1 {
+			v, handled, err := a.store.ActivateStatusOnly(r.Context(), id, *req.Version)
+			if err != nil {
+				storeFailure(w, r, err)
+				return
+			}
+			if handled {
+				a.versionTransitions.Add(1)
+				httpx.JSON(w, http.StatusOK, v)
+				return
+			}
+		}
 		var err error
 		if positions, err = a.store.ActivationPositions(r.Context(), id); err != nil {
 			storeFailure(w, r, err)
-			return
-		}
-		if len(positions) == 0 && !req.DryRun && len(req.Lines) == 0 {
-			a.storedMove(w, r, domain.ActionActivate, map[string]string{}, req.Version)
 			return
 		}
 	}

@@ -110,6 +110,9 @@ func (a *API) activateWithRevaluation(w http.ResponseWriter, r *http.Request, id
 		storeFailure(w, r, err)
 		return
 	}
+	if canonical, ok := ids.Canonical(req.ReversesActivationID); ok {
+		req.ReversesActivationID = canonical
+	}
 	fingerprint := struct {
 		ID  string
 		Req storedActivateRequest

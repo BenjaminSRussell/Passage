@@ -20,6 +20,7 @@ import (
 const (
 	itemA = "0190f0c2-7a5e-7d3c-9a1b-2c3d4e5f6b01"
 	siteA = "0190f0c2-7a5e-7d3c-9a1b-2c3d4e5f6b02"
+	itemB = "0190f0c2-7a5e-7d3c-9a1b-2c3d4e5f6b03"
 )
 
 var positionA = inventory.Position{ItemID: itemA, SiteID: siteA}
@@ -36,10 +37,15 @@ type activationFixture struct {
 
 func seedCalculation(t *testing.T, admin *pgxpool.Pool, le, versionID, status, unitCost string) {
 	t.Helper()
+	seedCalculationFor(t, admin, le, versionID, itemA, status, unitCost)
+}
+
+func seedCalculationFor(t *testing.T, admin *pgxpool.Pool, le, versionID, itemID, status, unitCost string) {
+	t.Helper()
 	_, err := admin.Exec(context.Background(), `insert into cost_calculation
 		(tenant_id, id, legal_entity_id, costing_version_id, item_id, site_id, calc_quantity, explosion_mode, bom_version_id, route_version_id, unit_cost, status)
 		values ($1, $2, $3, $4, $5, $6, 1, 'Multilevel', $7, $7, $8, $9)`,
-		testkit.TenantID(1), ids.New(), le, versionID, itemA, siteA, ids.New(), unitCost, status)
+		testkit.TenantID(1), ids.New(), le, versionID, itemID, siteA, ids.New(), unitCost, status)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,21 +430,155 @@ func TestActivation_ARevertedStandardIsNotTheOldStandardOfTheNextActivation(t *t
 	}
 }
 
-func TestActivation_RefusesAPlannedVersionAndAPositionInventoryDoesNotReport(t *testing.T) {
+func TestActivation_APlannedVersionOnlyMovesTheStatusAndAStandardOneWithPositionsIsLeftToTheRevaluation(t *testing.T) {
 	f := newActivationFixture(t, true)
-	ledger := ledgerclient.NewFake()
+	ctx := as(1, "")
+	if _, handled, err := f.s.ActivateStatusOnly(ctx, f.newVer.ID, 1); err != nil || handled {
+		t.Fatalf("a Standard version with positions: handled=%v err=%v", handled, err)
+	}
+	if got, _ := f.s.GetVersion(ctx, f.newVer.ID); got.Status != domain.VersionOpen || got.Version != 1 {
+		t.Fatalf("an unhandled version moved: %+v", got)
+	}
 	if _, err := f.admin.Exec(context.Background(), `update costing_version set type = 'Planned' where id = $1`, f.newVer.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-planned")); codeOf(err) != domain.CodeNotStandard {
-		t.Fatalf("planned version: %v", err)
-	}
-	if _, err := f.s.PreviewActivation(as(1, ""), f.activate(nil, "")); err != nil {
+	if _, err := f.s.PreviewActivation(ctx, f.activate(nil, "")); err != nil {
 		t.Fatalf("a preview of a planned version stays available: %v", err)
 	}
-	if _, err := f.admin.Exec(context.Background(), `update costing_version set type = 'Standard' where id = $1`, f.newVer.ID); err != nil {
+	if _, _, err := f.s.ActivateStatusOnly(ctx, f.newVer.ID, 7); codeOf(err) != domain.CodeVersionConflict {
+		t.Fatalf("stale version counter: %v", err)
+	}
+	v, handled, err := f.s.ActivateStatusOnly(ctx, f.newVer.ID, 1)
+	if err != nil || !handled || v.Status != domain.VersionActive || v.Version != 2 || v.ActivatedAt == nil {
+		t.Fatalf("planned activation: %+v handled=%v err=%v", v, handled, err)
+	}
+	if n, _ := pendingAttempts(t, f.admin); n != 0 || activationRows(t, f.admin, f.newVer.ID) != 0 {
+		t.Fatalf("a status-only activation left attempts %d or activation rows", n)
+	}
+	if got := outboxTypes(t, f.admin, f.newVer.ID); len(got) != 2 || got[1] != costevents.VersionTransitioned {
+		t.Fatalf("outbox %v", got)
+	}
+}
+
+func TestActivation_ASimulationVersionStaysRefusedOnTheStatusOnlyPath(t *testing.T) {
+	f := newActivationFixture(t, true)
+	if _, err := f.admin.Exec(context.Background(), `update costing_version set type = 'Simulation' where id = $1`, f.newVer.ID); err != nil {
 		t.Fatal(err)
 	}
+	if _, _, err := f.s.ActivateStatusOnly(as(1, ""), f.newVer.ID, 1); codeOf(err) != domain.CodeSimulationActivation {
+		t.Fatalf("simulation: %v", err)
+	}
+}
+
+func TestActivation_AFirstTimePositionWithoutStockIsBookedAtItsOwnStandard(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ctx := as(1, "")
+	seedCalculationFor(t, f.admin, f.le, f.newVer.ID, itemB, "Pending", "3.00")
+	ledger := ledgerclient.NewFake()
+	res, _, err := f.s.ActivateVersion(ctx, f.activate(ledger, "k-first"))
+	if err != nil || res.Activation.ItemCount != 2 || res.Activation.Total.String() != "15" {
+		t.Fatalf("absent on-hand for a position without a basis: %+v %v", res.Activation, err)
+	}
+	for _, l := range res.Activation.Lines {
+		if l.ItemID == itemB && (!l.Qty.IsZero() || !l.OldStd.Equal(l.NewStd) || !l.Amount.IsZero() || l.NewStd.String() != "3") {
+			t.Errorf("first-time line %+v, want old = new = 3 and amount 0", l)
+		}
+	}
+	if _, err := f.admin.Exec(context.Background(), `delete from cost_calculation where costing_version_id = $1`, f.oldVer.ID); err != nil {
+		t.Fatal(err)
+	}
+	next, _, err := f.s.CreateVersion(ctx, spec(f.le, "STD-ZERO"), "k-next")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedCalculationFor(t, f.admin, f.le, next.ID, "0190f0c2-7a5e-7d3c-9a1b-2c3d4e5f6b09", "Pending", "9.00")
+	z := f.activate(ledgerclient.NewFake(), "k-zero-qty")
+	z.VersionID, z.Fingerprint = next.ID, next.ID
+	z.OnHand = map[inventory.Position]decimal.Decimal{{ItemID: "0190f0c2-7a5e-7d3c-9a1b-2c3d4e5f6b09", SiteID: siteA}: decimal.Zero}
+	if got, _, err := f.s.ActivateVersion(ctx, z); err != nil || !got.Activation.Total.IsZero() || got.Activation.JournalEntryID != "" {
+		t.Fatalf("zero on-hand: %+v %v", got.Activation, err)
+	}
+}
+
+func TestActivation_StockWithoutABasisIsStillRefused(t *testing.T) {
+	f := newActivationFixture(t, true)
+	if _, err := f.admin.Exec(context.Background(), `delete from cost_calculation where costing_version_id = $1`, f.oldVer.ID); err != nil {
+		t.Fatal(err)
+	}
+	ledger := ledgerclient.NewFake()
+	if _, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-stock")); codeOf(err) != domain.CodeNoStoredStandard || len(ledger.Entries()) != 0 {
+		t.Fatalf("10 on hand and no earlier standard: %v", err)
+	}
+}
+
+func TestActivation_ReversingAnActivationBehindALaterOneIsRefusedUntilTheLaterIsReversed(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ctx := as(1, "")
+	ledger := ledgerclient.NewFake()
+	v2, _, err := f.s.ActivateVersion(ctx, f.activate(ledger, "k-v2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v3ver, _, err := f.s.CreateVersion(ctx, spec(f.le, "STD-V3"), "k-v3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedCalculation(t, f.admin, f.le, v3ver.ID, "Pending", "4.00")
+	in := f.activate(ledger, "k-act-v3")
+	in.VersionID, in.Fingerprint = v3ver.ID, v3ver.ID
+	v3, _, err := f.s.ActivateVersion(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = f.s.ActivateVersion(ctx, reversal(f.newVer.ID, v2.Activation.ID, v2.Version.Version, "k-rev-v2", ledger))
+	if codeOf(err) != domain.CodeReversalTarget || statusOf(err) == http.StatusConflict {
+		t.Fatalf("out-of-order reversal: %v", err)
+	}
+	if len(ledger.Entries()) != 2 {
+		t.Fatalf("the refused reversal posted: %d entries", len(ledger.Entries()))
+	}
+	if _, _, err := f.s.ActivateVersion(ctx, reversal(v3ver.ID, v3.Activation.ID, v3.Version.Version, "k-rev-v3", ledger)); err != nil {
+		t.Fatalf("reversing the latest: %v", err)
+	}
+	if _, _, err := f.s.ActivateVersion(ctx, reversal(f.newVer.ID, v2.Activation.ID, v2.Version.Version, "k-rev-v2", ledger)); err != nil {
+		t.Fatalf("reversing the earlier once the later is reversed: %v", err)
+	}
+}
+
+func TestActivation_AnotherVersionsPendingAttemptInTheSameLegalEntityIs409(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ctx := as(1, "")
+	ledger := ledgerclient.NewFake()
+	ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusBadGateway})
+	if _, _, err := f.s.ActivateVersion(ctx, f.activate(ledger, "k-v2")); err == nil {
+		t.Fatal("the post should have failed")
+	}
+	v3ver, _, err := f.s.CreateVersion(ctx, spec(f.le, "STD-V3"), "k-v3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedCalculation(t, f.admin, f.le, v3ver.ID, "Pending", "4.00")
+	in := f.activate(ledger, "k-act-v3")
+	in.VersionID, in.Fingerprint = v3ver.ID, v3ver.ID
+	if _, _, err := f.s.ActivateVersion(ctx, in); codeOf(err) != domain.CodeActivationPending || statusOf(err) != http.StatusConflict {
+		t.Fatalf("activation beside a pending attempt: %v", err)
+	}
+	if n, _ := pendingAttempts(t, f.admin); n != 1 {
+		t.Fatalf("attempts %d, the refused activation must not add one", n)
+	}
+	ledger.FailPosts(nil)
+	if _, _, err := f.s.ActivateVersion(ctx, f.activate(ledger, "k-v2")); err != nil {
+		t.Fatalf("the pending version recovers: %v", err)
+	}
+	res, _, err := f.s.ActivateVersion(ctx, in)
+	if err != nil || res.Activation.Lines[0].OldStd.String() != "2.5" {
+		t.Fatalf("after recovery v3 starts from v2's booked standard: %+v %v", res.Activation, err)
+	}
+}
+
+func TestActivation_APositionInventoryDoesNotReportIsRefused(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ledger := ledgerclient.NewFake()
 	missing := f.activate(ledger, "k-missing")
 	missing.OnHand = map[inventory.Position]decimal.Decimal{}
 	if _, _, err := f.s.ActivateVersion(as(1, ""), missing); codeOf(err) != domain.CodeNoOnHand {

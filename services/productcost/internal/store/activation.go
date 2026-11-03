@@ -178,7 +178,7 @@ type preparedActivation struct {
 
 func attemptKey(versionID string, in ActivationInput) string {
 	if in.ReversesID != "" {
-		return "reverse:" + in.ReversesID
+		return "reverse:" + versionID + ":" + in.ReversesID
 	}
 	return "activate:" + versionID
 }
@@ -245,9 +245,9 @@ func prepareActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ac
 		if _, err := domain.Transition(cur.Lifecycle(), domain.ActionActivate); err != nil {
 			return out, err
 		}
-		if cur.Type != domain.VersionStandard {
-			return out, &domain.CodedError{Code: domain.CodeNotStandard, Detail: "only a Standard version revalues the inventory; version " + cur.Code + " is " + cur.Type}
-		}
+	}
+	if err := serialiseLegalEntity(ctx, tx, p.TenantID, cur); err != nil {
+		return out, err
 	}
 	out.cur = cur
 	key := attemptKey(cur.ID, in)
@@ -281,6 +281,21 @@ func prepareActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ac
 	return out, err
 }
 
+func serialiseLegalEntity(ctx context.Context, tx pgx.Tx, tenantID string, cur Version) error {
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, "productcost.activation|"+tenantID+"|"+cur.LegalEntityID); err != nil {
+		return err
+	}
+	var inFlight bool
+	if err := tx.QueryRow(ctx, `select exists (select 1 from standard_cost_activation_attempt where tenant_id = $1 and legal_entity_id = $2 and costing_version_id <> $3)`,
+		tenantID, cur.LegalEntityID, cur.ID).Scan(&inFlight); err != nil {
+		return err
+	}
+	if inFlight {
+		return httpx.NewProblem(http.StatusConflict, domain.CodeActivationPending, "another version of this legal entity has an activation in flight; its basis is not final")
+	}
+	return nil
+}
+
 func lockVersion(ctx context.Context, tx pgx.Tx, tenantID string, in ActivationInput) (Version, error) {
 	cur, err := scanVersion(tx.QueryRow(ctx, `select `+versionColumns+` from costing_version where tenant_id = $1 and id = $2 for update`, tenantID, in.VersionID))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -300,7 +315,7 @@ func finalizeActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in A
 	if _, err := lockVersion(ctx, tx, p.TenantID, in); err != nil {
 		return res, err
 	}
-	if _, err := tx.Exec(ctx, `delete from standard_cost_activation_attempt where tenant_id = $1 and attempt_key = $2`, p.TenantID, attemptKey(in.VersionID, in)); err != nil {
+	if _, err := tx.Exec(ctx, `delete from standard_cost_activation_attempt where tenant_id = $1 and attempt_key = $2`, p.TenantID, attemptKey(prepared.cur.ID, in)); err != nil {
 		return res, err
 	}
 	reversing := in.ReversesID != ""
@@ -371,7 +386,7 @@ func definiteRefusal(err error) bool {
 func activationID(tenantID string, cur Version, in ActivationInput) string {
 	name := tenantID + "|activate|" + cur.ID + "|" + strconv.Itoa(in.Expected)
 	if in.ReversesID != "" {
-		name = tenantID + "|reverse|" + in.ReversesID
+		name = tenantID + "|reverse|" + cur.ID + "|" + in.ReversesID
 	}
 	return uuid.NewSHA1(activationNamespace, []byte(name)).String()
 }
@@ -412,7 +427,7 @@ func postPending(ctx context.Context, ledger ledgerclient.Ledger, prepared prepa
 	a := prepared.pending.Activation
 	if a.ReversesActivationID != nil {
 		return ledger.Reverse(ctx, ledgerclient.Reversal{LegalEntityID: a.LegalEntityID, EntryID: prepared.pending.ReversesEntryID, PostingDate: a.PostingDate,
-			Description: "Reversal of standard cost activation " + *a.ReversesActivationID, IdempotencyKey: "productcost.activation.reversal:" + *a.ReversesActivationID})
+			Description: "Reversal of standard cost activation " + *a.ReversesActivationID, IdempotencyKey: "productcost.activation.reversal:" + a.VersionID + ":" + *a.ReversesActivationID})
 	}
 	e := ledgerclient.Entry{LegalEntityID: a.LegalEntityID, LedgerID: a.LedgerID, DocumentID: a.ID, PostingDate: a.PostingDate, Currency: a.Currency,
 		IdempotencyKey: "productcost.activation:" + a.ID, SourceType: activationSourceType}
@@ -467,12 +482,18 @@ func planActivation(ctx context.Context, tx pgx.Tx, tenantID string, cur Version
 	}
 	lines := make([]domain.RevalLine, len(positions))
 	for i, pos := range positions {
-		qty, ok := in.OnHand[pos]
-		if !ok {
+		qty, reported := in.OnHand[pos]
+		s := std[pos]
+		switch {
+		case !s.hasOld && reported && !qty.IsZero():
+			return plan, &domain.CodedError{Code: domain.CodeNoStoredStandard, Detail: "item " + pos.ItemID + " at site " + pos.SiteID +
+				" has stock but no earlier standard in an Active version; nothing is revalued without a basis"}
+		case !s.hasOld:
+			s.old, qty = s.new, decimal.Zero
+		case !reported:
 			return plan, &domain.CodedError{Code: domain.CodeNoOnHand, Detail: "the inventory reports no on-hand for item " + pos.ItemID + " at site " + pos.SiteID +
 				"; inventory must carry the site's id in its site dimension"}
 		}
-		s := std[pos]
 		lines[i] = domain.RevalLine{ItemID: pos.ItemID, SiteID: pos.SiteID, Qty: qty, OldStd: s.old, NewStd: s.new}
 	}
 	plan.preview = domain.Revalue(lines, in.Currency)
@@ -506,16 +527,38 @@ func loadReversible(ctx context.Context, tx pgx.Tx, tenantID string, cur Version
 	if reversed {
 		return orig, httpx.NewProblem(http.StatusConflict, domain.CodeReversalTarget, "activation "+reversesID+" was already reversed")
 	}
-	return orig, nil
+	return orig, refuseOutOfOrderReversal(ctx, tx, tenantID, orig)
 }
 
-type standard struct{ old, new decimal.Decimal }
+func refuseOutOfOrderReversal(ctx context.Context, tx pgx.Tx, tenantID string, orig Activation) error {
+	items, sites := make([]string, len(orig.Lines)), make([]string, len(orig.Lines))
+	for i, l := range orig.Lines {
+		items[i], sites[i] = l.ItemID, l.SiteID
+	}
+	var later bool
+	err := tx.QueryRow(ctx, `select exists (
+		select 1 from standard_cost_activation a cross join lateral jsonb_array_elements(a.lines) l
+		where a.tenant_id = $1 and a.legal_entity_id::text = $2 and a.reverses_activation_id is null and a.id <> $3::uuid and (a.created_at, a.id) > ($4, $3::uuid)
+		  and not exists (select 1 from standard_cost_activation r where r.tenant_id = a.tenant_id and r.reverses_activation_id = a.id)
+		  and (l->>'itemId', l->>'siteId') in (select * from unnest($5::text[], $6::text[])))`,
+		tenantID, orig.LegalEntityID, orig.ID, orig.CreatedAt, items, sites).Scan(&later)
+	if err != nil || !later {
+		return err
+	}
+	return &domain.CodedError{Code: domain.CodeReversalTarget, Detail: "a later activation booked the same positions; reverse that one first"}
+}
+
+type standard struct {
+	old, new decimal.Decimal
+	hasOld   bool
+}
 
 // storedStandards pairs each position's new standard (this version's Legal
 // calculation) with the standard the stock is carried at now: the new standard
 // of the latest activation that booked the position and was not reversed, else
 // the calculation of the latest activated Standard version whose activation was
-// not reversed. A position without both is refused.
+// not reversed. A position without a new standard is refused; one without an
+// earlier standard is booked at its own new standard when it holds no stock.
 func storedStandards(ctx context.Context, tx pgx.Tx, tenantID string, cur Version, positions []inventory.Position) (map[inventory.Position]standard, error) {
 	items, sites := make([]string, len(positions)), make([]string, len(positions))
 	for i, pos := range positions {
@@ -552,11 +595,10 @@ func storedStandards(ctx context.Context, tx pgx.Tx, tenantID string, cur Versio
 		if !hasOld {
 			o, hasOld = older[pos]
 		}
-		if !hasNew || !hasOld {
-			return nil, &domain.CodedError{Code: domain.CodeNoStoredStandard, Detail: "item " + pos.ItemID + " at site " + pos.SiteID +
-				" has no stored standard in this version or no earlier standard in an Active version; nothing is revalued without both"}
+		if !hasNew {
+			return nil, &domain.CodedError{Code: domain.CodeNoStoredStandard, Detail: "item " + pos.ItemID + " at site " + pos.SiteID + " has no stored standard in this version"}
 		}
-		out[pos] = standard{old: o, new: n}
+		out[pos] = standard{old: o, new: n, hasOld: hasOld}
 	}
 	return out, nil
 }

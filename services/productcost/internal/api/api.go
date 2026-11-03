@@ -44,8 +44,6 @@ const (
 	// maxRollBody lets a 50,000-item selection fit in one mass roll request
 	// (AC-39.3): about 1.3 KB per item, against the platform default of 4 MiB.
 	maxRollBody = 64 << 20
-	// maxActivationBody fits MaxRevalLines lines of an activation.
-	maxActivationBody = 32 << 20
 )
 
 var decimalHundred = decimal.NewFromInt(100)

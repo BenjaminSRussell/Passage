@@ -10,7 +10,7 @@ const (
 	CodePostingAccounts   = "CST-0724"
 	CodeNoStoredStandard  = "CST-0725"
 	CodeNoOnHand          = "CST-0726"
-	CodeNotStandard       = "CST-0727"
+	CodeActivationPending = "CST-0729"
 	CodeActivationTooBig  = "CST-0728"
 )
 
