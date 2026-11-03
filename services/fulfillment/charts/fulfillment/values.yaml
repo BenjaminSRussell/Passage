@@ -22,10 +22,16 @@ config:
   releaseRequiresFullAtp: "true"
   migrateOnStart: "false"       # dev only; stage and prod run the Argo PreSync migration Job
 
+# Inventory holds on packing-slip post (wave 33 AC2). Empty skips the check.
+inventoryUrl: ""
+
 # Callers (edi reads shipments) present a signed service token verified against these
-# keys, formatted name=base64-public-key and comma separated.
+# keys, formatted name=base64-public-key and comma separated. signingKeySecret is
+# required with inventoryUrl so fulfillment can read held quantity.
 serviceIdentity:
   publicKeys: ""
+  signingKeySecret: ""
+  keyId: ""
 
 resources:
   requests:

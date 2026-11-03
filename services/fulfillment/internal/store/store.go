@@ -25,6 +25,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/domain"
 	fulevents "github.com/BenjaminSRussell/passage/services/fulfillment/internal/events"
+	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/inventory"
 )
 
 // Error codes returned by the store (service catalog FUL-*).
@@ -48,14 +49,17 @@ const (
 	CodeRTPNegative        = "FUL-0015"
 	CodeValidation         = "FUL-0050"
 	CodeSSCCInvalid        = "FUL-0007"
-	CodePickBelowPacked    = "FUL-0031"
-	CodeWaveLimits         = "FUL-0032"
-	CodeGroupBy            = "FUL-0033"
-	CodeWaveTooLarge       = "FUL-0034"
-	CodeWaveNotFound       = "FUL-0052"
-	CodeWaveConflict       = "FUL-0053"
-	CodeContainerNotFound  = "FUL-0054"
-	CodeNesting            = "FUL-0056"
+	// CodeQualityHold refuses a packing-slip post that would ship held stock
+	// (wave 33 AC2). Distinct from the short-pick reason of the same name.
+	CodeQualityHold       = "QUALITY_HOLD"
+	CodePickBelowPacked   = "FUL-0031"
+	CodeWaveLimits        = "FUL-0032"
+	CodeGroupBy           = "FUL-0033"
+	CodeWaveTooLarge      = "FUL-0034"
+	CodeWaveNotFound      = "FUL-0052"
+	CodeWaveConflict      = "FUL-0053"
+	CodeContainerNotFound = "FUL-0054"
+	CodeNesting           = "FUL-0056"
 	// CodeWarehouseLegalEntity refuses a warehouse setting saved for a legal
 	// entity the warehouse does not belong to.
 	CodeWarehouseLegalEntity = "FUL-0057"
@@ -328,6 +332,7 @@ type Postgres struct {
 	extension int
 	// releaseDefaults is what a warehouse without a saved release rule reads.
 	releaseDefaults ReleaseRuleInput
+	holds           inventory.Checker
 }
 
 // New returns a Postgres store that issues SSCCs under gs1Prefix.
@@ -342,6 +347,34 @@ func New(pool *pgxpool.Pool, gs1Prefix string, extension int) *Postgres {
 func (s *Postgres) WithReleaseDefaults(horizonDays int, requireFullATP bool) *Postgres {
 	s.releaseDefaults.HorizonDays, s.releaseDefaults.RequireFullATP = horizonDays, requireFullATP
 	return s
+}
+
+// WithHolds checks inventory holds on packing-slip post. A nil checker (the
+// default, when INVENTORY_URL is unset) leaves current behaviour.
+func (s *Postgres) WithHolds(h inventory.Checker) *Postgres {
+	s.holds = h
+	return s
+}
+
+func (s *Postgres) checkHolds(ctx context.Context, sh Shipment) error {
+	if s.holds == nil {
+		return nil
+	}
+	for _, l := range sh.Lines {
+		q := l.Packed.Sub(l.Shipped)
+		if !q.IsPositive() {
+			continue
+		}
+		lot, err := s.holds.Lot(ctx, sh.LegalEntityID, l.ProductID, sh.WarehouseID, "")
+		if err != nil {
+			return httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "inventory hold check failed")
+		}
+		if inventory.Blocks(lot.Physical, lot.Held, q) {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeQualityHold,
+				fmt.Sprintf("item %s is on quality hold; ship not allowed", l.ProductID))
+		}
+	}
+	return nil
 }
 
 // Ping checks the database connection for readiness.
@@ -1166,6 +1199,9 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 			}
 			// Sales cancelled the remainder of the order line: shipping more than it keeps is refused (FUL-0066).
 			if err := checkKeptQty(ctx, tx, slip.Lines); err != nil {
+				return PackingSlip{}, err
+			}
+			if err := s.checkHolds(ctx, sh); err != nil {
 				return PackingSlip{}, err
 			}
 			journal, err := domain.PackingSlipPosting(postLines, in.CogsAtShipment, in.Currency)
