@@ -1821,6 +1821,7 @@
     ]},
     "expense.approve": {"permissions": [
       {"resource": "/v1/expense/cash-advances/*/decide", "methods": ["POST"]},
+      {"resource": "/v1/expense/reports/*/decide", "methods": ["POST"]},
       {"resource": "/v1/expense/travel-requisitions/*/decide", "methods": ["POST"]}
     ]},
     "expense.card.import": {"permissions": [

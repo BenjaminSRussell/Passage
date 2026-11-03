@@ -59,6 +59,7 @@ type API struct {
 	reportsCreated      atomic.Int64
 	linesAdded          atomic.Int64
 	reportsSubmitted    atomic.Int64
+	reportsDecided      atomic.Int64
 	advancesRequested   atomic.Int64
 	requisitionsCreated atomic.Int64
 	cardImports         atomic.Int64
@@ -102,6 +103,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP expense_reports_created_total Expense reports created.\n# TYPE expense_reports_created_total counter\nexpense_reports_created_total %d\n", a.reportsCreated.Load())
 		fmt.Fprintf(w, "# HELP expense_lines_added_total Expense lines committed.\n# TYPE expense_lines_added_total counter\nexpense_lines_added_total %d\n", a.linesAdded.Load())
 		fmt.Fprintf(w, "# HELP expense_reports_submitted_total Expense reports submitted.\n# TYPE expense_reports_submitted_total counter\nexpense_reports_submitted_total %d\n", a.reportsSubmitted.Load())
+		fmt.Fprintf(w, "# HELP expense_reports_decided_total Expense reports approved or rejected.\n# TYPE expense_reports_decided_total counter\nexpense_reports_decided_total %d\n", a.reportsDecided.Load())
 		fmt.Fprintf(w, "# HELP expense_cash_advances_requested_total Cash advances requested.\n# TYPE expense_cash_advances_requested_total counter\nexpense_cash_advances_requested_total %d\n", a.advancesRequested.Load())
 		fmt.Fprintf(w, "# HELP expense_travel_requisitions_created_total Travel requisitions created.\n# TYPE expense_travel_requisitions_created_total counter\nexpense_travel_requisitions_created_total %d\n", a.requisitionsCreated.Load())
 		fmt.Fprintf(w, "# HELP expense_card_imports_total Card feed files imported.\n# TYPE expense_card_imports_total counter\nexpense_card_imports_total %d\n", a.cardImports.Load())

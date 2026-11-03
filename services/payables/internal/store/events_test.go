@@ -231,7 +231,7 @@ func TestListProposals_FiltersOrdersAndPages(t *testing.T) {
 func TestMigration0009_DropsTheUnusedVendorGroupIndex(t *testing.T) {
 	s := setup(t)
 	var n int
-	err := s.pool.QueryRow(context.Background(), `select count(*) from pg_indexes where indexname = 'ap_open_item_entity_vendor_group'`).Scan(&n)
+	err := s.pool.QueryRow(context.Background(), `select count(*) from pg_indexes where indexname = 'ap_open_item_entity_vendor_group' and schemaname = current_schema()`).Scan(&n)
 	if err != nil || n != 0 {
 		t.Fatalf("index count = %d err=%v", n, err)
 	}

@@ -78,7 +78,16 @@ type Proposal struct {
 	Groups              []domain.ProposalGroup     `json:"groups"`
 	TotalValued         decimal.Decimal            `json:"totalValued"`
 	TotalWithheld       map[string]decimal.Decimal `json:"totalWithheld"`
+	ExcludedItems       []ExcludedItem             `json:"excludedItems,omitempty"`
 	RequestHash         string                     `json:"-"`
+}
+
+const ReasonPayeeUnverified = "PAYEE_UNVERIFIED"
+
+type ExcludedItem struct {
+	ItemID   string `json:"itemId"`
+	VendorID string `json:"vendorId"`
+	Reason   string `json:"reason"`
 }
 
 type NewProposal struct {
@@ -97,7 +106,7 @@ type NewProposal struct {
 func (s *Postgres) Candidates(ctx context.Context, legalEntityID, dueBy string) ([]domain.ProposalCandidate, error) {
 	var out []domain.ProposalCandidate
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select i.id::text, i.vendor_id::text, i.currency, i.version, i.open_amount::text, i.discount_amount::text, i.discount_date, i.status = 'PARTIALLY_SETTLED'
+		rows, err := tx.Query(ctx, `select i.id::text, i.vendor_id::text, i.currency, i.version, i.open_amount::text, i.discount_amount::text, i.discount_date, i.status = 'PARTIALLY_SETTLED', i.payee_unverified
 			from ap_open_item i
 			where i.legal_entity_id = $1::uuid and i.due_date <= $2::date and i.status in ('OPEN', 'PARTIALLY_SETTLED') and not i.payment_hold
 			and not exists (select 1 from ap_vendor_block b where b.vendor_id = i.vendor_id and b.legal_entity_id = i.legal_entity_id)
@@ -110,7 +119,7 @@ func (s *Postgres) Candidates(ctx context.Context, legalEntityID, dueBy string) 
 		for rows.Next() {
 			var c domain.ProposalCandidate
 			var open, discount string
-			if err := rows.Scan(&c.ID, &c.VendorID, &c.Currency, &c.Version, &open, &discount, &c.DiscountDate, &c.PartiallySettled); err != nil {
+			if err := rows.Scan(&c.ID, &c.VendorID, &c.Currency, &c.Version, &open, &discount, &c.DiscountDate, &c.PartiallySettled, &c.PayeeUnverified); err != nil {
 				return err
 			}
 			if c.OpenAmount, err = decimal.NewFromString(open); err != nil {
