@@ -2075,7 +2075,8 @@
     ]},
     "planning.forecast.maintain": {"permissions": [
       {"resource": "/v1/planning/forecasts/*/lines", "methods": ["PUT"]},
-      {"resource": "/v1/planning/forecasts/*:submit", "methods": ["POST"]}
+      {"resource": "/v1/planning/forecasts/*:submit", "methods": ["POST"]},
+      {"resource": "/v1/planning/forecasts/*:generate", "methods": ["POST"]}
     ]},
     "planning.order.firm": {"permissions": [{"resource": "/v1/planning/planned-orders:firm", "methods": ["POST"]}]},
     "planning.order.maintain": {"permissions": [{"resource": "/v1/planning/planned-orders/*", "methods": ["PATCH", "DELETE"]}]},
