@@ -44,19 +44,23 @@ interface Correction {
   location: string;
   batch: string;
   unit: string;
+  deliveryDate: string;
   parties: string;
+  customers: string;
+  vendors: string;
 }
 
-const NO_FIX: Correction = { party: "", account: "", site: "", warehouse: "", location: "", batch: "", unit: "", parties: "" };
+const NO_FIX: Correction = { party: "", account: "", site: "", warehouse: "", location: "", batch: "", unit: "", deliveryDate: "", parties: "", customers: "", vendors: "" };
 
 /** Packs whose quarantined records can be corrected and released (FR-49.11). */
-const RELEASABLE = ["open_items", "bank_balances", "onhand"];
+const RELEASABLE = ["open_items", "bank_balances", "onhand", "open_orders"];
 
 /** What the master-data list of a release names, by pack. */
 const MASTER_LABEL: Record<string, string> = {
   open_items: "Parties added to master data",
   bank_balances: "Bank accounts added to master data",
   onhand: "Items added to master data",
+  open_orders: "Items added to master data",
 };
 
 /** One pack run: its counts, the control-total board, the quarantine with release, and its projects (9.49.6). */
@@ -145,7 +149,16 @@ export function PackRunDetailPage() {
           ? changed(fix.account, selected.account)
             ? { bankAccount: fix.account.trim() }
             : {}
-          : run.pack === "onhand"
+          : run.pack === "open_orders"
+            ? {
+                ...(changed(fix.account, selected.account) ? { item: fix.account.trim() } : {}),
+                ...(changed(fix.party, selected.party) ? { party: fix.party.trim() } : {}),
+                ...(fix.unit.trim() ? { unit: fix.unit.trim() } : {}),
+                ...(fix.deliveryDate.trim() ? { deliveryDate: fix.deliveryDate.trim() } : {}),
+                ...(splitList(fix.customers).length > 0 ? { customers: splitList(fix.customers) } : {}),
+                ...(splitList(fix.vendors).length > 0 ? { vendors: splitList(fix.vendors) } : {}),
+              }
+            : run.pack === "onhand"
             ? {
                 ...(changed(fix.account, selected.account) ? { item: fix.account.trim() } : {}),
                 ...(fix.site.trim() ? { site: fix.site.trim() } : {}),
@@ -316,7 +329,9 @@ export function PackRunDetailPage() {
               {selected.rule}: {selected.reason}.{" "}
               {run?.pack === "bank_balances"
                 ? "Correct the bank account; the balance and currency come from the legacy extract and change only by re-extract."
-                : run?.pack === "onhand"
+                : run?.pack === "open_orders"
+                  ? "Correct the item, the customer or vendor, the unit or the delivery date (blank keeps the extracted value); order and line number, quantities, price and currency come from the legacy extract and change only by re-extract."
+                  : run?.pack === "onhand"
                   ? "Correct the item, the inventory dimension or the unit (blank keeps the extracted value); quantity, value and serial come from the legacy extract and change only by re-extract."
                   : "Correct the party or control account; amount and currency come from the legacy extract and change only by re-extract."}
             </p>
@@ -334,6 +349,22 @@ export function PackRunDetailPage() {
               <FormField id="release-bank-account" label="Bank account">
                 {(control) => <Input {...control} value={fix.account} onChange={(event) => setFix({ ...fix, account: event.target.value })} />}
               </FormField>
+            ) : null}
+            {run?.pack === "open_orders" ? (
+              <>
+                <FormField id="release-item" label="Item">
+                  {(control) => <Input {...control} value={fix.account} onChange={(event) => setFix({ ...fix, account: event.target.value })} />}
+                </FormField>
+                <FormField id="release-party" label={selected.dimensions?.startsWith("PURCHASE/") ? "Vendor" : "Customer"}>
+                  {(control) => <Input {...control} value={fix.party} onChange={(event) => setFix({ ...fix, party: event.target.value })} />}
+                </FormField>
+                <FormField id="release-unit" label="Unit" hint="Blank keeps the extracted value." optional>
+                  {(control) => <Input {...control} value={fix.unit} onChange={(event) => setFix({ ...fix, unit: event.target.value })} />}
+                </FormField>
+                <FormField id="release-delivery-date" label="Delivery date" hint="YYYY-MM-DD. Blank keeps the extracted value." optional>
+                  {(control) => <Input {...control} value={fix.deliveryDate} onChange={(event) => setFix({ ...fix, deliveryDate: event.target.value })} />}
+                </FormField>
+              </>
             ) : null}
             {run?.pack === "onhand" ? (
               <>
@@ -360,6 +391,16 @@ export function PackRunDetailPage() {
                 {(control) => <Textarea {...control} mono rows={2} value={fix.parties} onChange={(event) => setFix({ ...fix, parties: event.target.value })} />}
               </FormField>
             </div>
+            {run?.pack === "open_orders" ? (
+              <>
+                <FormField id="release-customers" label="Customers added to master data" hint="Ids created since the run, separated by commas." optional>
+                  {(control) => <Textarea {...control} mono rows={2} value={fix.customers} onChange={(event) => setFix({ ...fix, customers: event.target.value })} />}
+                </FormField>
+                <FormField id="release-vendors" label="Vendors added to master data" hint="Ids created since the run, separated by commas." optional>
+                  {(control) => <Textarea {...control} mono rows={2} value={fix.vendors} onChange={(event) => setFix({ ...fix, vendors: event.target.value })} />}
+                </FormField>
+              </>
+            ) : null}
             <div className={styles.formActions}>
               <Button type="submit" variant="primary" loading={busy}>
                 Release record

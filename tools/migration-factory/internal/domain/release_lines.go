@@ -156,3 +156,73 @@ func finishRelease(r *PackRun, moves []totalMove) error {
 	}
 	return nil
 }
+
+// OrderCorrection is an operator's fix to a quarantined open_orders line: the item, the customer or
+// vendor, the unit and the delivery date. Order and line numbers, quantities, price and currency are
+// the legacy truth and change only by re-extract, so the totals keep comparing against the source.
+// Blank keeps the extracted value, so a delivery date cannot be corrected to blank.
+type OrderCorrection struct {
+	Item, Party, Unit, DeliveryDate string
+}
+
+// IsZero reports whether the correction changes nothing.
+func (c OrderCorrection) IsZero() bool {
+	for _, v := range []string{c.Item, c.Party, c.Unit, c.DeliveryDate} {
+		if strings.TrimSpace(v) != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// Apply returns the line with the correction applied.
+func (c OrderCorrection) Apply(o OpenOrderLine) OpenOrderLine {
+	set := func(dst *string, v string) {
+		if v = strings.TrimSpace(v); v != "" {
+			*dst = v
+		}
+	}
+	set(&o.Item, c.Item)
+	set(&o.Party, c.Party)
+	set(&o.Unit, c.Unit)
+	set(&o.DeliveryDate, c.DeliveryDate)
+	return o
+}
+
+// ReleaseOpenOrder is ReleaseBankBalance for an open_orders line: it re-runs the suite on the
+// corrected line and books it into the run. The open quantity moves from the extracted (order type,
+// item, unit) to the corrected one on the legacy side; the open value, the line count and, when the
+// run's loaded side holds no line of the order yet (newOrder), the order count gain the line on the
+// Passage side. masters are the item, customer and vendor masters to check the line against.
+func ReleaseOpenOrder(r *PackRun, original OpenOrderLine, fix OrderCorrection, masters OrderMasters, newOrder bool) (OpenOrderLine, error) {
+	if r.Pack != PackOpenOrders {
+		return OpenOrderLine{}, fmt.Errorf("%w: run is a %s run, not open_orders", ErrUnknownPack, r.Pack)
+	}
+	if r.Status != StatusLoaded {
+		return OpenOrderLine{}, fmt.Errorf("%w: a line can be released only while the run is LOADED, run is %s", ErrTransition, r.Status)
+	}
+	line := fix.Apply(original)
+	if _, quarantined := ValidateOpenOrders([]OpenOrderLine{line}, masters); len(quarantined) > 0 {
+		q := quarantined[0]
+		return OpenOrderLine{}, fmt.Errorf("%w: %s rule still fails: %s", ErrInvalid, q.Rule, q.Reason)
+	}
+	company, typ, qty := r.SourceCompany, line.OrderType, line.OpenQty()
+	qtyKey := func(o OpenOrderLine) map[string]string {
+		return map[string]string{"company": company, "order_type": typ, "item": o.Item, "unit": o.Unit}
+	}
+	one := decimal.NewFromInt(1)
+	typeKey := map[string]string{"company": company, "order_type": typ}
+	var moves []totalMove
+	if from, to := qtyKey(original), qtyKey(line); sameKey(from, to) {
+		moves = append(moves, totalMove{OrdersQuantityName, to, decimal.Zero, qty})
+	} else {
+		moves = append(moves, totalMove{OrdersQuantityName, from, qty.Neg(), decimal.Zero}, totalMove{OrdersQuantityName, to, qty, qty})
+	}
+	moves = append(moves,
+		totalMove{OrdersValueName, map[string]string{"company": company, "order_type": typ, "currency": line.Currency}, decimal.Zero, line.OpenValue()},
+		totalMove{OrdersLineName, typeKey, decimal.Zero, one})
+	if newOrder {
+		moves = append(moves, totalMove{OrdersOrderName, typeKey, decimal.Zero, one})
+	}
+	return line, finishRelease(r, moves)
+}

@@ -154,13 +154,13 @@ describe("on-hand line release", () => {
     await waitFor(() => expect(calls.filter((c) => c.method === "GET").length).toBeGreaterThan(1));
   });
 
-  it("offers no release once the run is reconciled, and none on an open order run", async () => {
+  it("offers no release once the run is reconciled, and none on a general ledger run", async () => {
     handler = () => json(200, { ...onhandRun, status: "RECONCILED" });
     const first = renderAt(`/migration-factory/runs/${RUN}`);
     expect(await screen.findByRole("table", { name: "Quarantined records" })).toHaveTextContent("OH-9");
     expect(screen.queryByRole("button", { name: "Release record OH-9" })).not.toBeInTheDocument();
     first.unmount();
-    handler = () => json(200, { ...onhandRun, pack: "open_orders" });
+    handler = () => json(200, { ...onhandRun, pack: "gl_balances" });
     renderAt(`/migration-factory/runs/${RUN}`);
     expect(await screen.findByRole("table", { name: "Quarantined records" })).toHaveTextContent("OH-9");
     expect(screen.queryByRole("button", { name: "Release record OH-9" })).not.toBeInTheDocument();

@@ -277,7 +277,12 @@ export interface ReleaseRequest {
   location?: string;
   batch?: string;
   unit?: string;
-  /** Master-data ids added since the run: parties, bank accounts or items, by pack. */
+  /** Corrected delivery date (ISO) of an open_orders line; party, item and unit also correct one. */
+  deliveryDate?: string;
+  /** Customer and vendor ids added since an open_orders run. */
+  customers?: string[];
+  vendors?: string[];
+  /** Master-data ids added since the run: parties, bank accounts or items (also of open_orders), by pack. */
   parties?: string[];
   version?: number;
 }

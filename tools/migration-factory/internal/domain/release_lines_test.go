@@ -143,3 +143,67 @@ func TestCorrections_WhitespaceIsNoCorrection(t *testing.T) {
 		t.Fatal("OnhandCorrection.IsZero")
 	}
 }
+
+func TestReleaseOpenOrder_MovesQuantityAndCountsTheOrderOnce(t *testing.T) {
+	masters := OrderMasters{Items: map[string]struct{}{"BOLT": {}, "NUT": {}}, Customers: map[string]struct{}{"C1": {}}, Vendors: map[string]struct{}{}}
+	lines := []OpenOrderLine{
+		orderLine("L1", "SALES", "SO1", "1", "BOLT", "C1", "10", "4", "2.5"),
+		orderLine("L2", "SALES", "SO1", "2", "TYPO", "C1", "4", "0", "1.5"),
+		orderLine("L3", "SALES", "SO2", "1", "TYPO", "C1", "2", "0", "1"),
+	}
+	r := PackRun{Pack: PackOpenOrders, SourceCompany: "USMF", Status: StatusValidated}
+	accepted, _ := ValidateOpenOrders(lines, masters)
+	held := map[string]OpenOrderLine{}
+	for _, l := range accepted {
+		held[l.HeldKey()] = l
+	}
+	if err := ReconcileOpenOrders(&r, lines, accepted, len(accepted), held); err != nil {
+		t.Fatal(err)
+	}
+	r.RecordsQuarantined = 2
+	if r.Status != StatusLoaded || !r.HasMismatch() {
+		t.Fatalf("run %s", r.Status)
+	}
+	// SO1 is on the loaded side already: its order count does not move; SO2 is new.
+	if _, err := ReleaseOpenOrder(&r, lines[1], OrderCorrection{Item: " NUT "}, masters, false); err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != StatusLoaded || r.RecordsLoaded != 2 {
+		t.Fatalf("after first release %s loaded %d", r.Status, r.RecordsLoaded)
+	}
+	line, err := ReleaseOpenOrder(&r, lines[2], OrderCorrection{Item: "BOLT", DeliveryDate: "2027-03-01"}, masters, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if line.DeliveryDate != "2027-03-01" || r.Status != StatusReconciled || r.RecordsQuarantined != 0 {
+		t.Fatalf("line %+v run %s", line, r.Status)
+	}
+	for _, c := range r.Totals {
+		if c.Status != "MATCH" {
+			t.Errorf("total %s %v: source %s target %s", c.Name, c.Key, c.Source, c.Target)
+		}
+	}
+}
+
+func TestReleaseOpenOrder_RefusesWhileTheSuiteStillFailsOrWrongRun(t *testing.T) {
+	masters := OrderMasters{Items: map[string]struct{}{"BOLT": {}}, Customers: map[string]struct{}{"C1": {}}}
+	bad := orderLine("L1", "SALES", "SO1", "1", "TYPO", "C1", "4", "0", "1")
+	r := PackRun{Pack: PackOpenOrders, SourceCompany: "USMF", Status: StatusLoaded}
+	if _, err := ReleaseOpenOrder(&r, bad, OrderCorrection{}, masters, true); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("uncorrected: %v", err)
+	}
+	if _, err := ReleaseOpenOrder(&r, bad, OrderCorrection{Item: "BOLT", Party: "C9"}, masters, true); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("unknown customer: %v", err)
+	}
+	r.Status = StatusReconciled
+	if _, err := ReleaseOpenOrder(&r, bad, OrderCorrection{Item: "BOLT"}, masters, true); !errors.Is(err, ErrTransition) {
+		t.Fatalf("reconciled run: %v", err)
+	}
+	r.Pack = PackOnhand
+	if _, err := ReleaseOpenOrder(&r, bad, OrderCorrection{Item: "BOLT"}, masters, true); !errors.Is(err, ErrUnknownPack) {
+		t.Fatalf("other pack: %v", err)
+	}
+	if !(OrderCorrection{Item: " "}).IsZero() || (OrderCorrection{DeliveryDate: "2027-01-01"}).IsZero() {
+		t.Fatal("IsZero")
+	}
+}
