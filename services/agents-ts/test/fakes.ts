@@ -37,14 +37,14 @@ export const postDescriptor: ToolDescriptor = { requiredDuty: "APInvoicePost", a
 export const codingDescriptor: ToolDescriptor = { requiredDuty: "APInvoicePost", approvalMode: "suggest" };
 
 export class ScriptedProvider implements ModelProvider {
-  readonly seen: Array<{ system: string; user: string; allowedTools: readonly string[] }> = [];
+  readonly seen: Array<{ system: string; user: string; allowedTools: readonly string[]; maxOutputTokens?: number }> = [];
   private readonly responses: ModelResponse[];
 
   constructor(responses: ModelResponse[]) {
     this.responses = [...responses];
   }
 
-  async complete(req: { system: string; user: string; allowedTools: readonly string[] }): Promise<ModelResponse> {
+  async complete(req: { system: string; user: string; allowedTools: readonly string[]; maxOutputTokens?: number }): Promise<ModelResponse> {
     this.seen.push(req);
     const next = this.responses.shift();
     if (!next) throw new Error("no scripted model response left");
@@ -87,7 +87,7 @@ export class FakeApprovals implements ApprovalPort {
 }
 
 /** In-memory ports for tests that do not exercise persistence: nothing is stored or limited. */
-export const testAudit: RunDeps["audit"] = { startRun: async () => undefined, finishRun: async () => undefined };
+export const testAudit: RunDeps["audit"] = { startRun: async () => undefined, finishRun: async () => undefined, runStatus: async () => "RUNNING" };
 export const testBudgets: RunDeps["budgets"] = {
   reserve: async (r) => ({ holdId: "test-hold", tenantId: r.tenantId, month: r.month }),
   settle: async () => "OK",

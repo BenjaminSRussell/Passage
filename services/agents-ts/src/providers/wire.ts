@@ -122,3 +122,6 @@ export function parseJsonBody(text: string): unknown {
 }
 
 export { isRecord };
+
+export const outputLimit = (configured: number | undefined, requested: number | undefined): number =>
+  Math.min(configured ?? 1024, requested ?? Number.POSITIVE_INFINITY);

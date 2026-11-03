@@ -123,6 +123,13 @@ export class PgAgentStore implements AuditPort, BudgetPort {
     );
   }
 
+  async runStatus(req: RunRequest): Promise<string | undefined> {
+    return this.withTenant(req.tenantId, async (c) => {
+      const res = await c.query<{ status: string }>("select status from agent_run where tenant_id = $1 and run_id = $2", [req.tenantId, req.runId]);
+      return res.rows[0]?.status;
+    });
+  }
+
   async finishRun(req: RunRequest, result: RunResult, afterCommitError?: string): Promise<void> {
     await this.withTenant(req.tenantId, async (c) => {
       const res = await c.query(
@@ -200,9 +207,14 @@ export class PgAgentStore implements AuditPort, BudgetPort {
     return row;
   }
 
-  /** The stored budget for a run start: used tokens only, reserve is the authority on live holds. */
+  /** A read: no lock and no insert. A month with no row reports the defaults unused; reserve is the authority on live holds. */
   async budgetSnapshot(tenantId: string, month: string): Promise<TokenBudget> {
-    return this.withTenant(tenantId, async (c) => asTokenBudget(await this.lockBudget(c, tenantId, month)));
+    return this.withTenant(tenantId, async (c) => {
+      const row = (await c.query<BudgetRow>("select * from token_budget where tenant_id = $1 and month = $2", [tenantId, month])).rows[0];
+      if (row !== undefined) return asTokenBudget(row);
+      if (this.defaults === null) throw new Error(`no token budget is configured for ${month} and defaults are disabled`);
+      return { ...this.defaults, usedIn: 0, usedOut: 0 };
+    });
   }
 
   /** Sets a month's limits. Raising the limit lowers alert_state to the new status, so the next crossing alerts again. */

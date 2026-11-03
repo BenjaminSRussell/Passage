@@ -41,7 +41,11 @@ export function addUsage(b: TokenBudget, u: Usage): TokenBudget {
   return { ...b, usedIn: b.usedIn + u.tokensIn, usedOut: b.usedOut + u.tokensOut };
 }
 
-/** BR-47.4: four characters per token when the provider reports no usage. */
+/**
+ * BR-47.4: four characters per token when the provider reports no usage. It is also the pre-call
+ * estimate of the prompt, so it can undercount dense scripts; that input error is the only way a
+ * call overshoots its hold, because output is capped by outputBudgetForCall.
+ */
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
@@ -51,6 +55,19 @@ export function assertRunWithinCap(runTokens: number, cap: number): void {
   if (runTokens > cap) {
     throw new AgentError("AGT-0202", `run used ${runTokens} tokens, cap is ${cap}`);
   }
+}
+
+/**
+ * Output tokens a call may generate: what the run cap leaves after tokens already used and the
+ * estimated prompt. Refuses (AGT-0202) when none is left, which also stops any further call of a
+ * run that has already spent its cap.
+ */
+export function outputBudgetForCall(cap: number, usedTokens: number, promptTokens: number): number {
+  const remaining = cap - usedTokens - promptTokens;
+  if (remaining < 1) {
+    throw new AgentError("AGT-0202", `run cap ${cap} leaves no room for a call: ${usedTokens} used, prompt estimated at ${promptTokens}`);
+  }
+  return remaining;
 }
 
 /** Run start check: a HARD budget rejects new runs (AC-47.7). */

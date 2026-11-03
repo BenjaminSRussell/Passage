@@ -68,13 +68,112 @@ describe("run start validation and post-commit failures (no database)", () => {
     expect(order).toEqual(["settle 1200", "approval"]);
   });
 
-  it("a settle that fails during the run fails it before any tool call and still tries to release the hold", async () => {
+  it("a settle that keeps failing after the model call fails the run, retries a bounded number of times and never releases the hold with zero", async () => {
     const attempts: number[] = [];
     const { deps, tools } = committingRun({ budgets: { ...testBudgets, settle: async (_h, u) => (attempts.push(u.tokensIn), Promise.reject(new Error("budget db down"))) } });
-    const result = await runAgent(deps, makeRequest());
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    let result;
+    try {
+      result = await runAgent(deps, makeRequest());
+    } finally {
+      stderr.mockRestore();
+    }
     expect(tools.calls).toHaveLength(0);
-    expect(result).toMatchObject({ status: "FAILED", reason: "budget db down" });
-    expect(attempts).toEqual([1200, 0]);
+    expect(result).toMatchObject({ status: "FAILED", reason: "budget db down", tokensIn: 1200, tokensOut: 180 });
+    expect(attempts).toEqual([1200, 1200, 1200]);
+  });
+
+  it("a settle that fails once with a connection reset is retried and charges the real usage", async () => {
+    const attempts: number[] = [];
+    const { deps, tools } = committingRun({
+      budgets: {
+        ...testBudgets,
+        settle: async (_h, u) => {
+          attempts.push(u.tokensIn);
+          if (attempts.length === 1) throw new Error("connection reset");
+          return "OK";
+        },
+      },
+    });
+    const result = await runAgent(deps, makeRequest());
+    expect(result.status).toBe("COMMITTED");
+    expect(tools.calls).toHaveLength(1);
+    expect(attempts).toEqual([1200, 1200]);
+  });
+
+  it("a provider that throws leaves the hold for the full-cap sweep instead of releasing it with zero", async () => {
+    const settled: number[] = [];
+    const { deps } = committingRun({
+      provider: { complete: async () => Promise.reject(new Error("socket hang up")) },
+      budgets: { ...testBudgets, settle: async (_h, u) => (settled.push(u.tokensIn), "OK") },
+    });
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      await expect(runAgent(deps, makeRequest())).resolves.toMatchObject({ status: "FAILED", reason: "socket hang up" });
+    } finally {
+      stderr.mockRestore();
+    }
+    expect(settled).toEqual([]);
+  });
+
+  it.each([
+    ["a fractional count", { tokensIn: 500.5, tokensOut: 10 }],
+    ["a negative count", { tokensIn: -1, tokensOut: 10 }],
+    ["NaN", { tokensIn: 100, tokensOut: Number.NaN }],
+    ["an unsafe integer", { tokensIn: 2 ** 60, tokensOut: 10 }],
+  ])("provider usage with %s is charged at the full reserved cap, and the run row gets integers", async (_name, usage) => {
+    const settled: Array<[number, number]> = [];
+    const finished: Array<[number, number]> = [];
+    const response = { ...proposal(0.8), usage };
+    const { deps } = committingRun({
+      provider: new ScriptedProvider([response]),
+      budgets: { ...testBudgets, settle: async (_h, u) => (settled.push([u.tokensIn, u.tokensOut]), "OK") },
+      audit: { ...testAudit, finishRun: async (_r, res) => void finished.push([res.tokensIn, res.tokensOut]) },
+    });
+    const result = await runAgent(deps, makeRequest({ runTokenCap: 5_000 }));
+    expect(settled).toEqual([[5_000, 5_000]]);
+    expect(finished).toEqual([[5_000, 5_000]]);
+    expect(result).toMatchObject({ status: "FAILED", code: "AGT-0202", estimated: true });
+  });
+
+  it("a prompt estimated above the run cap is refused before any provider call, with the hold released", async () => {
+    const settled: number[] = [];
+    const { deps, provider } = committingRun({ budgets: { ...testBudgets, settle: async (_h, u) => (settled.push(u.tokensIn), "OK") } });
+    const result = await runAgent(deps, makeRequest({ runTokenCap: 20 }));
+    expect(provider.seen).toHaveLength(0);
+    expect(result).toMatchObject({ status: "FAILED", code: "AGT-0202" });
+    expect(settled).toEqual([0]);
+  });
+
+  it("the provider is told to generate no more than the cap less the estimated prompt", async () => {
+    const { deps, provider } = committingRun({});
+    const request = makeRequest({ runTokenCap: 5_000 });
+    await runAgent(deps, request);
+    const promptTokens = Math.ceil(provider.seen[0]!.user.length / 4) + Math.ceil(request.agent.systemPrompt.length / 4);
+    expect(provider.seen[0]!.maxOutputTokens).toBe(5_000 - promptTokens);
+  });
+
+  it("an escape from the run records the tokens already charged on the FAILED audit row", async () => {
+    const finished: Array<[number, number]> = [];
+    let clockCalls = 0;
+    let haltedCalls = 0;
+    const { deps } = committingRun({
+      now: () => {
+        clockCalls += 1;
+        if (clockCalls > 1) throw new Error("clock failure");
+        return "2026-10-21T00:00:00.000Z";
+      },
+      killSwitch: {
+        isHalted: () => {
+          haltedCalls += 1;
+          if (haltedCalls === 3) throw new Error("kill switch feed down");
+          return false;
+        },
+      },
+      audit: { ...testAudit, finishRun: async (_r, res) => void finished.push([res.tokensIn, res.tokensOut]) },
+    });
+    await expect(runAgent(deps, makeRequest())).rejects.toThrow("clock failure");
+    expect(finished).toEqual([[1200, 180]]);
   });
 
   it("an audit write that fails after the commit is retried as FAILED_AFTER_COMMIT and the COMMITTED result is kept", async () => {
@@ -92,6 +191,23 @@ describe("run start validation and post-commit failures (no database)", () => {
     expect(tools.calls).toHaveLength(1);
     expect(result).toMatchObject({ status: "COMMITTED", postCommitError: "audit db down" });
     expect(finished).toEqual([undefined, "audit db down"]);
+  });
+
+  it("an audit write whose first response was lost is not logged as left RUNNING when the row is already finished", async () => {
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => (written.push(String(chunk)), true));
+    let result;
+    try {
+      const { deps } = committingRun({
+        audit: { ...testAudit, finishRun: async () => Promise.reject(new Error("connection lost")), runStatus: async () => "COMMITTED" },
+      });
+      result = await runAgent(deps, makeRequest());
+    } finally {
+      spy.mockRestore();
+    }
+    expect(result).toMatchObject({ status: "COMMITTED" });
+    expect(result.postCommitError).toBeUndefined();
+    expect(written.map((l) => JSON.parse(l).message)).toEqual(["audit write failed after commit"]);
   });
 
   it("an audit write that fails twice after the commit is logged, never thrown", async () => {
@@ -171,6 +287,52 @@ describe.runIf(ownerUrl)("persisted audit and token budget in Postgres", () => {
     expect(await holds(t)).toBe(0);
   });
 
+  it("a budget snapshot is a read: it does not wait on a row lock held by a settle", async () => {
+    const t = tenant(28);
+    await store.setBudget(t, "2026-10", { limitIn: 1_000, limitOut: 1_000, softPct: 80 });
+    const locker = await db.owner.connect();
+    try {
+      await locker.query("begin");
+      await locker.query("select 1 from token_budget where tenant_id = $1 and month = '2026-10' for update", [t]);
+      await expect(store.budgetSnapshot(t, "2026-10")).resolves.toMatchObject({ limitIn: 1_000, usedIn: 0 });
+    } finally {
+      await locker.query("rollback");
+      locker.release();
+    }
+  });
+
+  it("concurrent runs through the engine never charge more than the limit, and an overrun is bounded by the input estimate error", async () => {
+    const t = tenant(29);
+    const limit = 1_000;
+    const cap = 100;
+    await store.setBudget(t, "2026-10", { limitIn: limit, limitOut: limit, softPct: 80 });
+    const runAll = (tokensIn: number, tenantId: string, label: string) =>
+      Promise.allSettled(
+        Array.from({ length: 20 }, (_, i) => {
+          const response = { ...proposal(0.8), usage: { tokensIn, tokensOut: 30 } };
+          const run = committingRun({ budgets: store, audit: store, provider: new ScriptedProvider([response]) });
+          return runAgent(run.deps, makeRequest({ runId: `${label}${i}`, tenantId, runTokenCap: cap }));
+        }),
+      );
+
+    const honest = await runAll(60, t, "ok");
+    expect(honest.filter((o) => o.status === "fulfilled")).toHaveLength(10);
+    for (const o of honest.filter((x): x is PromiseRejectedResult => x.status === "rejected")) expect(o.reason).toMatchObject({ code: "AGT-0202" });
+    expect(await budgetRow(t)).toMatchObject({ used_in: 600, used_out: 300 });
+    expect(await holds(t)).toBe(0);
+
+    const t2 = tenant(30);
+    await store.setBudget(t2, "2026-10", { limitIn: limit, limitOut: limit, softPct: 80 });
+    const excess = 50;
+    const liars = await runAll(cap + excess, t2, "liar");
+    const reserved = liars.filter((o) => o.status === "fulfilled").length;
+    expect(reserved).toBe(10);
+    const row = await budgetRow(t2);
+    expect(row.used_in).toBe(reserved * (cap + excess));
+    expect(row.used_in).toBeLessThanOrEqual(limit + reserved * excess);
+    expect(await holds(t2)).toBe(0);
+  });
+
   it("live holds count against the limit, and a settle by hold id frees only its own hold", async () => {
     const t = tenant(13);
     await store.setBudget(t, "2026-10", { limitIn: 1_000, limitOut: 1_000, softPct: 80 });
@@ -234,6 +396,7 @@ describe.runIf(ownerUrl)("persisted audit and token budget in Postgres", () => {
     expect((await db.owner.query("select count(*)::int as n from token_budget where tenant_id = $1", [t])).rows[0].n).toBe(1);
     const snapshot = await store.budgetSnapshot(t, "2026-11");
     expect(snapshot).toMatchObject({ limitIn: 50_000_000, limitOut: 10_000_000, usedIn: 0, softPct: 80 });
+    expect((await db.owner.query("select count(*)::int as n from token_budget where tenant_id = $1", [t])).rows[0].n).toBe(1);
     await expect(store.reserve(ask(t, 10_000_001))).rejects.toMatchObject({ code: "AGT-0202" });
   });
 
@@ -287,6 +450,7 @@ describe.runIf(ownerUrl)("persisted audit and token budget in Postgres", () => {
         await store.startRun(r);
         seenAtStart.push((await runRow(t, r.runId))?.status);
       },
+      runStatus: (r) => store.runStatus(r),
       finishRun: (r, res, after) => store.finishRun(r, res, after),
     };
     const first = committingRun({ budgets: store, audit });
@@ -319,6 +483,7 @@ describe.runIf(ownerUrl)("persisted audit and token budget in Postgres", () => {
     let first = true;
     const audit: AuditPort = {
       startRun: (r) => store.startRun(r),
+      runStatus: (r) => store.runStatus(r),
       finishRun: async (r, res, after) => {
         if (first) {
           first = false;

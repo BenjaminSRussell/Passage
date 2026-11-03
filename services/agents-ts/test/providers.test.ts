@@ -111,6 +111,18 @@ describe("provider parity (FR-47.13, AC-47.10)", () => {
     expect(oSchema?.properties.tool.enum).toEqual(ALLOWED);
   });
 
+  it("every adapter caps generated tokens at the run's remaining hold, never above its own configured limit", async () => {
+    const seenA: Seen[] = [];
+    const seenO: Seen[] = [];
+    for (const { provider } of providers(seenA, seenO)) {
+      await provider.complete({ system: "s", user: "u", allowedTools: ALLOWED, maxOutputTokens: 300 });
+      await provider.complete({ system: "s", user: "u", allowedTools: ALLOWED, maxOutputTokens: 5_000 });
+    }
+    const limits = (seen: Seen[]) => seen.map((r) => (JSON.parse(String(r.init.body)) as { max_tokens: number }).max_tokens);
+    expect(limits(seenA)).toEqual([300, 1024]);
+    expect(limits(seenO)).toEqual([300, 1024]);
+  });
+
   it("authenticates each adapter with its own header and sends no tenant id", async () => {
     const seenA: Seen[] = [];
     const seenO: Seen[] = [];
