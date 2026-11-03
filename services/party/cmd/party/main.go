@@ -93,7 +93,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		slog.Warn("FIELDCRYPT_KEYS is empty, vendor bank accounts cannot be stored or read until it is set")
 	}
 	parties := store.New(pool).WithKeys(keys)
-	a := api.New(taxChecker(getenv), parties, parties, sequencer).WithCredit(parties).WithVendors(parties).WithCustomers(parties)
+	a := api.New(taxChecker(getenv), parties, parties, sequencer).WithCredit(parties).WithVendors(parties).WithCustomers(parties).WithMerge(parties)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
