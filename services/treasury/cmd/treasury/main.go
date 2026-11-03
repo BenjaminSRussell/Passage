@@ -17,6 +17,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/api"
+	"github.com/BenjaminSRussell/passage/services/treasury/internal/bankconnect"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/store"
 	"github.com/BenjaminSRussell/passage/services/treasury/migrations"
 )
@@ -43,6 +44,21 @@ func run() error {
 			return fmt.Errorf("TREASURY_MAX_FILE_MB: %w", err)
 		}
 		maxMB = n
+	}
+	vaultCfg, err := bankconnect.LoadVaultConfig(os.Getenv)
+	if err != nil {
+		return err
+	}
+	if vaultCfg.Enabled() {
+		vault := bankconnect.NewVault(vaultCfg)
+		defer func() {
+			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := vault.Close(closeCtx); err != nil {
+				slog.Error("vault token revoke failed", "err", err)
+			}
+		}()
+		slog.Info("bank connectivity keys stay in vault transit", "addr", vaultCfg.Addr, "signingKeys", vaultCfg.SigningKeyNames, "sftpKey", vaultCfg.SFTPKeyName, "channels", vaultCfg.BankChannels)
 	}
 	pool, err := dbx.Connect(ctx, dsn)
 	if err != nil {

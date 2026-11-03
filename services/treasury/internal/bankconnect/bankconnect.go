@@ -140,25 +140,36 @@ func (s Sender) Send(ctx context.Context, f File) (Receipt, error) {
 // Only the token, key name and input travel; Vault hashes and signs the input
 // itself. The algorithm is pinned to RSASSA-PSS with SHA-256 and a salt as long as the hash (EBICS A006).
 type VaultTransit struct {
-	Addr   string
-	Token  string
-	Client *http.Client
+	Addr      string
+	Token     string
+	TokenFunc func(context.Context) (string, error)
+	Client    *http.Client
 }
 
 func (v VaultTransit) Sign(ctx context.Context, keyName string, payload []byte) (Signature, error) {
 	if err := checkURL(v.Addr); err != nil {
 		return Signature{}, err
 	}
+	if !vaultName.MatchString(keyName) {
+		return Signature{}, fmt.Errorf("vault sign: invalid key name %q", keyName)
+	}
+	token := v.Token
+	if v.TokenFunc != nil {
+		var err error
+		if token, err = v.TokenFunc(ctx); err != nil {
+			return Signature{}, err
+		}
+	}
 	body, err := json.Marshal(map[string]string{"input": base64.StdEncoding.EncodeToString(payload), "signature_algorithm": "pss", "salt_length": "hash"})
 	if err != nil {
 		return Signature{}, err
 	}
-	endpoint := strings.TrimRight(v.Addr, "/") + "/v1/transit/sign/" + url.PathEscape(keyName) + "/sha2-256"
+	endpoint := strings.TrimRight(v.Addr, "/") + "/v1/transit/sign/" + keyName + "/sha2-256"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return Signature{}, err
 	}
-	req.Header.Set("X-Vault-Token", v.Token)
+	req.Header.Set("X-Vault-Token", token)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := httpClient(v.Client).Do(req)
 	if err != nil {
