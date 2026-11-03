@@ -26,7 +26,7 @@ func loadedWithQuarantine(t *testing.T, records []Record, parties ...string) (*P
 	r.Pack, r.RecordsIn, r.RecordsQuarantined = PackOpenItems, len(records), len(quarantined)
 	present := map[string]decimal.Decimal{}
 	for _, rec := range accepted {
-		present[rec.LegacyID] = rec.Amount
+		present[OpenItemKey(rec.Side(), rec.LegacyID)] = rec.Amount
 	}
 	if err := ReconcileOpenItems(r, records, accepted, len(accepted), present); err != nil {
 		t.Fatal(err)
@@ -149,7 +149,7 @@ func TestReleaseOpenItem_ReleasingEveryRecordReconciles(t *testing.T) {
 		r := &PackRun{SourceCompany: "1000", Status: StatusValidated, Pack: PackOpenItems, RecordsIn: n, RecordsQuarantined: len(quarantined)}
 		present := map[string]decimal.Decimal{}
 		for _, rec := range accepted {
-			present[rec.LegacyID] = rec.Amount
+			present[OpenItemKey(rec.Side(), rec.LegacyID)] = rec.Amount
 		}
 		if err := ReconcileOpenItems(r, records, accepted, len(accepted), present); err != nil {
 			rt.Fatal(err)

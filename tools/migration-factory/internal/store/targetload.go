@@ -96,6 +96,9 @@ func stageTarget(ctx context.Context, tx pgx.Tx, runID string, st *TargetStage) 
 			return fmt.Errorf("update pack_run payables_staged: %w", err)
 		}
 	}
+	if err := setReceivablesLoad(ctx, tx, runID, domain.LoadStaged); err != nil {
+		return err
+	}
 	n := len(st.Rows)
 	if n == 0 {
 		return nil
@@ -259,6 +262,9 @@ func (s *Postgres) ClaimTargetLoad(ctx context.Context, runID, startedBy string,
 			runID, domain.LoadLoading, int32(lease.Seconds()), startedBy); err != nil {
 			return err
 		}
+		if err := setReceivablesLoad(ctx, tx, runID, domain.LoadLoading); err != nil {
+			return err
+		}
 		load, err = scanLoad(tx.QueryRow(ctx, `select `+loadColumns+` from target_load where tenant_id = current_setting('passage.tenant_id', true)::uuid and run_id = $1`, runID))
 		return err
 	})
@@ -328,7 +334,7 @@ func (s *Postgres) RecordTargetChunk(ctx context.Context, runID string, lease ti
 				from pack_run p, unnest($2::text[], $3::text[]) as t(l, p)
 				where p.tenant_id = x.tenant_id and p.run_id = $1 and x.tenant_id = current_setting('passage.tenant_id', true)::uuid
 				  and x.source_system = p.source_system and x.source_company = p.source_company and x.source_table = $4
-				  and x.source_id = t.l and not x.target_confirmed`, runID, aLegacy, aPassage, domain.TableOpenItems); err != nil {
+				  and x.source_id = t.l and not x.target_confirmed`, runID, aLegacy, aPassage, domain.TableOpenItemsReceivable); err != nil {
 				return fmt.Errorf("confirm legacy_xref: %w", err)
 			}
 		}
@@ -415,6 +421,9 @@ func (s *Postgres) FinishTargetLoad(ctx context.Context, runID string, fin Targe
 			runID, load.Status, load.Created, load.Updated, load.Unchanged, load.Skipped, load.Rejected, load.NotAvailable, load.Pending, load.LastError); err != nil {
 			return err
 		}
+		if err := setReceivablesLoad(ctx, tx, runID, load.Status); err != nil {
+			return err
+		}
 		match, mismatch := domain.CountTotals(totals)
 		if err := enqueue(ctx, tx, mfevents.PackLoaded, "pack_run", runID, mfevents.PackLoadedData{
 			RunID: runID, Pack: string(domain.PackOpenItems), Target: load.Target, ImportSource: load.ImportSource, LegalEntityID: load.LegalEntityID, Status: load.Status,
@@ -494,4 +503,14 @@ func countLedger(rows []domain.StagedRow, ledger string) int {
 		}
 	}
 	return n
+}
+
+// setReceivablesLoad copies the load's status onto the run (pack_run.receivables_load). The run is scoped
+// by tenant only while target_load is held to the caller's legal-entity scopes, and the go/no-go reads the
+// status as a cutover manager of any scope: a narrow scope must not read "no load ran" and pass.
+func setReceivablesLoad(ctx context.Context, tx pgx.Tx, runID, status string) error {
+	if _, err := tx.Exec(ctx, `update pack_run set receivables_load = $2 where tenant_id = current_setting('passage.tenant_id', true)::uuid and run_id = $1`, runID, status); err != nil {
+		return fmt.Errorf("update pack_run receivables_load: %w", err)
+	}
+	return nil
 }

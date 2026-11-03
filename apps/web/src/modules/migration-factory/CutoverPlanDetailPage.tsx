@@ -21,11 +21,13 @@ import {
 import {
   completeStep,
   describeProblem,
+  exportFileUrl,
   getPlan,
   newKey,
   rekeyFileUrl,
   rollbackPlan,
   startStep,
+  type ExportFile,
   type Problem,
   type RekeyPosting,
   type RollbackStep,
@@ -34,6 +36,14 @@ import {
 import { elapsedSince, formatDateTime, formatMinutes, formatOffset, overrunTone, parsePostings, toneLabel, type Tone } from "./domain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+
+const EXPORT_FILES: { file: ExportFile; label: string }[] = [
+  { file: "runbook.csv", label: "Download runbook (CSV)" },
+  { file: "rollback-plan.csv", label: "Download rollback plan (CSV)" },
+  { file: "go-no-go.csv", label: "Download go/no-go checklist (CSV)" },
+  { file: "decisions.csv", label: "Download decisions (CSV)" },
+  { file: "reconciliation.csv", label: "Download reconciliation (CSV)" },
+];
 
 const WHOLE = /^\d{1,5}$/;
 
@@ -357,6 +367,23 @@ export function CutoverPlanDetailPage() {
               cutover manager decides on the rollback and these steps follow.
             </p>
             <DataTable label="Rollback plan" columns={rollbackColumns} rows={plan.rollbackSteps} getRowKey={(row) => String(row.seq)} />
+          </div>
+        </Card>
+      ) : null}
+      {plan ? (
+        <Card title="Cutover record">
+          <div className={styles.stack}>
+            <p className={styles.note}>
+              CSV files to keep with the cutover record (9.49.15), built from the factory's data when you download them. The reconciliation carries
+              the runs' control totals and also needs Migration view. The signed PDF records need e-signature and come later.
+            </p>
+            <div className={styles.toolbar}>
+              {EXPORT_FILES.map((file) => (
+                <a key={file.file} className={buttonClassName("secondary")} href={exportFileUrl(plan.planId, file.file)} download>
+                  {file.label}
+                </a>
+              ))}
+            </div>
           </div>
         </Card>
       ) : null}

@@ -89,7 +89,7 @@ func release(ctx context.Context, tx pgx.Tx, rq Release) (domain.PackRun, bool, 
 		passage_entity, passage_id, run_id, amount, currency)
 		values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, 'open_item', $6, $7, $8, $9)
 		on conflict do nothing`,
-		ids.New(), sys, company, domain.TableOpenItems, rec.LegacyID, ids.New(), run.RunID, rec.Amount.String(), rec.Currency)
+		ids.New(), sys, company, domain.OpenItemsTable(rec.Side()), rec.LegacyID, ids.New(), run.RunID, rec.Amount.String(), rec.Currency)
 	if err != nil {
 		return domain.PackRun{}, false, fmt.Errorf("insert legacy_xref: %w", err)
 	}

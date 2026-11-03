@@ -17,25 +17,31 @@ func rec(id, party string, amount string) Record {
 	return Record{LegacyID: id, Party: party, Account: "1100", Currency: "USD", Amount: decimal.RequireFromString(amount)}
 }
 
+func apRec(id, party, amount string) Record {
+	r := rec(id, party, amount)
+	r.Ledger = LedgerAP
+	return r
+}
+
 func extra(date, due string) TargetExtra { return TargetExtra{DocumentDate: date, DueDate: due} }
 
 func TestStageRows_BuildsReceivablesRowsAndHoldsBackTheRest(t *testing.T) {
 	cfg := TargetConfig{LegalEntityID: leA, ImportSource: "ax2012.usmf", Customers: map[string]string{"C-100": cust2}}
 	accepted := []Record{
-		rec("INV-1", "C-100", "125.50"), // mapped party, debit
-		rec("CN-1", cust1, "-20.00"),    // party is itself a UUID, credit
-		rec("AP-1", "V-200", "300.00"),  // open AP
-		rec("INV-2", "C-404", "10.00"),  // no customer
-		rec("INV-3", "C-100", "10.00"),  // no dates
-		rec("PAY-1", "C-100", "-5.00"),  // explicit kind
+		rec("INV-1", "C-100", "125.50"),  // mapped party, debit
+		rec("CN-1", cust1, "-20.00"),     // party is itself a UUID, credit
+		apRec("AP-1", "V-200", "300.00"), // open AP
+		rec("INV-2", "C-404", "10.00"),   // no customer
+		rec("INV-3", "C-100", "10.00"),   // no dates
+		rec("PAY-1", "C-100", "-5.00"),   // explicit kind
 	}
 	extras := map[string]TargetExtra{
-		"INV-1": extra("2026-01-05", "2026-02-04"),
-		"CN-1":  extra("2026-01-06", "2026-01-06"),
-		"AP-1":  {Ledger: LedgerAP, DocumentDate: "2026-01-01", DueDate: "2026-02-01"},
-		"INV-2": extra("2026-01-05", "2026-02-04"),
-		"INV-3": {},
-		"PAY-1": {Kind: "PAYMENT", DocumentDate: "2026-01-07", DueDate: "2026-01-07"},
+		"AR|INV-1": extra("2026-01-05", "2026-02-04"),
+		"AR|CN-1":  extra("2026-01-06", "2026-01-06"),
+		"AP|AP-1":  {Ledger: LedgerAP, DocumentDate: "2026-01-01", DueDate: "2026-02-01"},
+		"AR|INV-2": extra("2026-01-05", "2026-02-04"),
+		"AR|INV-3": {},
+		"AR|PAY-1": {Kind: "PAYMENT", DocumentDate: "2026-01-07", DueDate: "2026-01-07"},
 	}
 	rows := StageRows(accepted, extras, cfg)
 	if len(rows) != 6 {
@@ -73,27 +79,27 @@ func TestStageRows_BuildsReceivablesRowsAndHoldsBackTheRest(t *testing.T) {
 
 func TestRowHash_ChangesWithAnyField(t *testing.T) {
 	cfg := TargetConfig{LegalEntityID: leA, ImportSource: "s", Customers: map[string]string{"C": cust1}}
-	base := StageRows([]Record{rec("A", "C", "10")}, map[string]TargetExtra{"A": extra("2026-01-01", "2026-01-31")}, cfg)[0]
-	same := StageRows([]Record{rec("A", "C", "10.000")}, map[string]TargetExtra{"A": extra("2026-01-01", "2026-01-31")}, cfg)[0]
+	base := StageRows([]Record{rec("A", "C", "10")}, map[string]TargetExtra{"AR|A": extra("2026-01-01", "2026-01-31")}, cfg)[0]
+	same := StageRows([]Record{rec("A", "C", "10.000")}, map[string]TargetExtra{"AR|A": extra("2026-01-01", "2026-01-31")}, cfg)[0]
 	if base.Hash != same.Hash {
 		t.Fatal("10 and 10.000 are the same row")
 	}
 	for name, mutate := range map[string]func() StagedRow{
 		"amount": func() StagedRow {
-			return StageRows([]Record{rec("A", "C", "10.01")}, map[string]TargetExtra{"A": extra("2026-01-01", "2026-01-31")}, cfg)[0]
+			return StageRows([]Record{rec("A", "C", "10.01")}, map[string]TargetExtra{"AR|A": extra("2026-01-01", "2026-01-31")}, cfg)[0]
 		},
 		"due": func() StagedRow {
-			return StageRows([]Record{rec("A", "C", "10")}, map[string]TargetExtra{"A": extra("2026-01-01", "2026-02-01")}, cfg)[0]
+			return StageRows([]Record{rec("A", "C", "10")}, map[string]TargetExtra{"AR|A": extra("2026-01-01", "2026-02-01")}, cfg)[0]
 		},
 		"source": func() StagedRow {
 			c := cfg
 			c.ImportSource = "t"
-			return StageRows([]Record{rec("A", "C", "10")}, map[string]TargetExtra{"A": extra("2026-01-01", "2026-01-31")}, c)[0]
+			return StageRows([]Record{rec("A", "C", "10")}, map[string]TargetExtra{"AR|A": extra("2026-01-01", "2026-01-31")}, c)[0]
 		},
 		"entity": func() StagedRow {
 			c := cfg
 			c.LegalEntityID = cust1
-			return StageRows([]Record{rec("A", "C", "10")}, map[string]TargetExtra{"A": extra("2026-01-01", "2026-01-31")}, c)[0]
+			return StageRows([]Record{rec("A", "C", "10")}, map[string]TargetExtra{"AR|A": extra("2026-01-01", "2026-01-31")}, c)[0]
 		},
 	} {
 		if mutate().Hash == base.Hash {

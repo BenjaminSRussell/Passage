@@ -205,9 +205,9 @@ func TestPlanLoad_RerunLoadsNothing(t *testing.T) {
 		existing := map[string]struct{}{}
 		for i := range recs {
 			recs[i] = Record{LegacyID: fmt.Sprintf("OI-%d", i), Amount: d("1")}
-			existing[XrefKey(SourceAX2012, "USMF", "open_items", recs[i].LegacyID)] = struct{}{}
+			existing[XrefKey(SourceAX2012, "USMF", TableOpenItemsReceivable, recs[i].LegacyID)] = struct{}{}
 		}
-		plan := PlanLoad(recs, SourceAX2012, "USMF", "open_items", existing)
+		plan := PlanLoad(recs, SourceAX2012, "USMF", func(r Record) string { return OpenItemsTable(r.Side()) }, existing)
 		if len(plan.ToLoad) != 0 || plan.AlreadyPresent != n {
 			t.Fatalf("re-run loaded %d, present %d of %d", len(plan.ToLoad), plan.AlreadyPresent, n)
 		}
@@ -216,12 +216,33 @@ func TestPlanLoad_RerunLoadsNothing(t *testing.T) {
 
 func TestPlanLoad_KeyIncludesCompanyAndTable(t *testing.T) {
 	recs := []Record{{LegacyID: "1"}}
-	existing := map[string]struct{}{XrefKey(SourceAX2012, "USMF", "open_items", "1"): {}}
-	if got := PlanLoad(recs, SourceAX2012, "DEMF", "open_items", existing); len(got.ToLoad) != 1 {
+	existing := map[string]struct{}{XrefKey(SourceAX2012, "USMF", TableOpenItemsReceivable, "1"): {}}
+	table := func(r Record) string { return OpenItemsTable(r.Side()) }
+	if got := PlanLoad(recs, SourceAX2012, "DEMF", table, existing); len(got.ToLoad) != 1 {
 		t.Fatalf("different company must not match")
 	}
-	if got := PlanLoad(recs, SourceAX2012, "USMF", "open_orders", existing); len(got.ToLoad) != 1 {
+	if got := PlanLoad(recs, SourceAX2012, "USMF", func(Record) string { return "open_orders" }, existing); len(got.ToLoad) != 1 {
 		t.Fatalf("different table must not match")
+	}
+	// S11-a: the same legacy id on the payable side is another item, not the held receivable.
+	ap := []Record{{LegacyID: "1", Ledger: LedgerAP}}
+	if got := PlanLoad(ap, SourceAX2012, "USMF", table, existing); len(got.ToLoad) != 1 {
+		t.Fatalf("a payable must not match the receivable with the same legacy id")
+	}
+}
+
+func TestValidate_UniquenessIsPerSide(t *testing.T) {
+	parties := map[string]struct{}{"C1": {}}
+	rec := func(ledger string) Record {
+		return Record{LegacyID: "7", Ledger: ledger, Party: "C1", Account: "1100", Currency: "USD", Amount: d("5")}
+	}
+	acc, q := Validate([]Record{rec(""), rec(LedgerAP)}, parties)
+	if len(acc) != 2 || len(q) != 0 {
+		t.Fatalf("a receivable and a payable with one legacy id are two items: accepted %d quarantined %d", len(acc), len(q))
+	}
+	acc, q = Validate([]Record{rec(LedgerAP), rec(LedgerAP), rec(LedgerAR)}, parties)
+	if len(acc) != 2 || len(q) != 1 || q[0].Rule != RuleUniqueness {
+		t.Fatalf("a repeated payable is the duplicate: accepted %d quarantined %v", len(acc), q)
 	}
 }
 
@@ -401,7 +422,7 @@ func TestReconcileOpenItems(t *testing.T) {
 	records := []Record{rec("1", "2100", "USD", "10.00"), rec("2", "2100", "EUR", "5.50"), rec("3", "2200", "USD", "1.25")}
 	t.Run("all present reconciles", func(t *testing.T) {
 		r := validatedRun(t)
-		present := map[string]decimal.Decimal{"1": d("10"), "2": d("5.5"), "3": d("1.25")}
+		present := map[string]decimal.Decimal{"AR|1": d("10"), "AR|2": d("5.5"), "AR|3": d("1.25")}
 		if err := ReconcileOpenItems(r, records, records, 2, present); err != nil {
 			t.Fatal(err)
 		}
@@ -421,7 +442,7 @@ func TestReconcileOpenItems(t *testing.T) {
 	})
 	t.Run("held back record mismatches its subtotals", func(t *testing.T) {
 		r := validatedRun(t)
-		present := map[string]decimal.Decimal{"1": d("10"), "2": d("5.5")}
+		present := map[string]decimal.Decimal{"AR|1": d("10"), "AR|2": d("5.5")}
 		if err := ReconcileOpenItems(r, records, records[:2], 2, present); err != nil {
 			t.Fatal(err)
 		}
@@ -441,7 +462,7 @@ func TestReconcileOpenItems(t *testing.T) {
 	})
 	t.Run("rerun with nothing new reports MIG-1505", func(t *testing.T) {
 		r := validatedRun(t)
-		present := map[string]decimal.Decimal{"1": d("10"), "2": d("5.5"), "3": d("1.25")}
+		present := map[string]decimal.Decimal{"AR|1": d("10"), "AR|2": d("5.5"), "AR|3": d("1.25")}
 		if err := ReconcileOpenItems(r, records, records, 0, present); err != nil {
 			t.Fatal(err)
 		}

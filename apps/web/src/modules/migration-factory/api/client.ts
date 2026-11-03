@@ -35,6 +35,8 @@ export interface QuarantinedRecord {
   account?: string;
   /** Dimension combination of a quarantined GL balance. */
   dimensions?: string;
+  /** The subledger of a quarantined open item that is a payable ("AP"); absent for a receivable. */
+  ledger?: "AP";
   currency?: string;
   /** Decimal string as extracted (the cost amount for a project line, the balance for a GL balance). */
   amount: string;
@@ -776,6 +778,14 @@ export function recordDecision(planId: string, input: DecisionRequest, key: stri
 /** GET /cutover/plans/{id}/rekeying/{file}: the CSV download of a rolled-back plan's re-keying file. */
 export function rekeyFileUrl(planId: string, file: RekeyFile): string {
   return `/api/v1/cutover/plans/${encodeURIComponent(planId)}/rekeying/${file}`;
+}
+
+/** The CSV exports of a cutover plan (9.49.15). */
+export type ExportFile = "runbook.csv" | "rollback-plan.csv" | "go-no-go.csv" | "decisions.csv" | "reconciliation.csv";
+
+/** GET /cutover/plans/{id}/export/{file}: the CSV download of the runbook, rollback plan, go/no-go checklist, decisions or reconciliation. */
+export function exportFileUrl(planId: string, file: ExportFile): string {
+  return `/api/v1/cutover/plans/${encodeURIComponent(planId)}/export/${file}`;
 }
 
 /** POST /migration/packs/open_orders/runs: open sales and purchase order lines (FR-49.1). */

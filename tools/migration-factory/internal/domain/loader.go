@@ -19,10 +19,12 @@ type LoadPlan struct {
 
 // PlanLoad keeps only records whose xref key is not yet present. A re-run of an extract that was
 // already loaded therefore loads zero records; MIG-1505 reports the count (AC-49.4).
-func PlanLoad(records []Record, system SourceSystem, company, table string, existing map[string]struct{}) LoadPlan {
+//
+// tableOf gives the legacy_xref source table of a record (OpenItemsTable of its side for open_items).
+func PlanLoad(records []Record, system SourceSystem, company string, tableOf func(Record) string, existing map[string]struct{}) LoadPlan {
 	var plan LoadPlan
 	for _, r := range records {
-		if _, ok := existing[XrefKey(system, company, table, r.LegacyID)]; ok {
+		if _, ok := existing[XrefKey(system, company, tableOf(r), r.LegacyID)]; ok {
 			plan.AlreadyPresent++
 			continue
 		}

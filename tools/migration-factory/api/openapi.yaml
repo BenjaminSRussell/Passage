@@ -90,6 +90,9 @@ paths:
         It is staged in the factory and not posted to sales or purchasing (H-S11-1), so the go/no-go keeps
         packs_reconciled open unless both approvers waive it. An open_items run holding payables lines
         (ledger AP) that payables cannot take yet (H-S8-3) is likewise staged for them and needs a waiver.
+        The legacy id of an open item is unique per side: a receivable and a payable with the same id
+        (AX CustTransOpen and VendTransOpen RecIds, SAP BSID and BSIK keys) are two items, held in legacy_xref
+        under open_items.receivable and open_items.payable.
         Records failing the referential, domain or uniqueness rules are quarantined (FR-49.11);
         the run is rejected with MIG-1504 when they exceed quarantineMaxPct. Accepted records
         that legacy_xref already holds by (system, company, table, id) are not loaded again
@@ -459,7 +462,11 @@ paths:
             type: string
         - name: table
           in: query
-          description: legacy_xref source_table, for example open_items or project_wip.
+          description: |
+            legacy_xref source_table, for example open_items.receivable, open_items.payable, open_orders.sales or
+            project_wip. A customer and a vendor open item are two legacy tables whose ids are unique per table, so
+            open_items rows are held under open_items.receivable and open_items.payable; the bare open_items names
+            both sides and returns each match with its table.
           schema:
             type: string
         - name: id
@@ -876,7 +883,9 @@ paths:
         at or after the legacy transaction freeze (T-0 minus 6 hours); earlier runs are dry runs or
         rehearsals and do not count. `parallel_run_signed_off` is met when the month before T-0 (UTC)
         has a parallel run and every parallel run of that month (one per legacy system) is
-        SIGNED_OFF. The other twelve items are attested by the approvers: they show as the pending GO
+        SIGNED_OFF. An open_items run whose load into receivables is not RECONCILED (STAGED, LOADING, PARTIAL, FAILED,
+        UNRECONCILED or MISMATCH) keeps `packs_reconciled` open even when the run is RECONCILED, and no waiver excuses
+        it; a run started without a `load` object has no load to wait for, and the met item's detail names it (not loaded into receivables). The other twelve items are attested by the approvers: they show as the pending GO
         approval confirmed them (`pendingGo`), or UNCONFIRMED when there is none. `systemReady` is
         true when both items the factory evaluates are met and the plan is not rolled back. Reads only.
       x-passage-duty: CutoverManager
@@ -1117,6 +1126,47 @@ paths:
         "404":
           $ref: "#/components/responses/Problem"
         "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/cutover/plans/{id}/export/{file}:
+    get:
+      operationId: getCutoverExport
+      summary: One export of a cutover plan as CSV (9.49.15)
+      description: |
+        The files a cutover manager keeps with the cutover record. `runbook.csv` has the steps (seq,
+        planned_start, offset_min, step, owner, planned_min, go_no_go, pack, status, started_at,
+        started_by, completed_at, completed_by, actual_min, elapsed_min, tone); `rollback-plan.csv` the
+        generated rollback steps (seq, planned_start, offset_min, step, owner, planned_min,
+        decision_point); `go-no-go.csv` the checklist as evaluated now (code, title, source, status,
+        detail, references), with attested items as the pending GO approval confirmed them;
+        `decisions.csv` the decision history (seq, decision, decided_by, decided_at, approvers, reason,
+        plan_version, open_items, waivers); `reconciliation.csv` the control totals of the latest run of
+        every pack and entity of the plan (pack, company, run_id, run_status, started_at, total, key,
+        source, target, delta, tolerance, status), a pack and entity with no run as one row with status
+        NO_RUN; it carries control totals, so it also needs MigrationView (403 otherwise). Times are RFC
+        3339 UTC and amounts have 6 decimals. Cells are quoted per RFC 4180, and a text cell that starts
+        with =, +, -, @, a tab or a carriage return is prefixed with an apostrophe so a spreadsheet does not
+        read it as a formula. The PDF records of 9.49.15 need e-signature (wave 48) and are not served.
+      x-passage-duty: CutoverManager
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - name: file
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [runbook.csv, rollback-plan.csv, go-no-go.csv, decisions.csv, reconciliation.csv]
+      responses:
+        "200":
+          description: The CSV file, with its header row.
+          content:
+            text/csv:
+              schema:
+                type: string
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
@@ -1640,6 +1690,10 @@ components:
         dimensions:
           type: string
           description: Dimension combination of a quarantined gl_balances balance.
+        ledger:
+          type: string
+          enum: [AP]
+          description: Set for a quarantined open item that is a payable; absent for a receivable. A legacy id is unique per side.
         currency:
           type: string
         amount:

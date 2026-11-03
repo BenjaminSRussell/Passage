@@ -12,7 +12,11 @@ import (
 // gl_balances balance is kept in the same shape when quarantined, with its dimension combination
 // in Dimensions and no party.
 type Record struct {
-	LegacyID   string
+	LegacyID string
+	// Ledger is the subledger of an open item, AR or AP; blank is AR. The legacy id is unique per
+	// side (AX CustTransOpen and VendTransOpen RecIds, SAP BSID and BSIK keys are two tables), so the
+	// side is part of the record's key in the extract and in legacy_xref.
+	Ledger     string
 	Party      string
 	Account    string
 	Dimensions string
@@ -58,11 +62,12 @@ func Validate(records []Record, parties map[string]struct{}) (accepted []Record,
 			quarantined = append(quarantined, Quarantined{Record: r, Rule: RuleUniqueness, Reason: "legacy id is blank"})
 			continue
 		}
-		if _, dup := seen[r.LegacyID]; dup {
-			quarantined = append(quarantined, Quarantined{Record: r, Rule: RuleUniqueness, Reason: "legacy id appears twice in the extract"})
+		key := OpenItemKey(r.Side(), r.LegacyID)
+		if _, dup := seen[key]; dup {
+			quarantined = append(quarantined, Quarantined{Record: r, Rule: RuleUniqueness, Reason: "legacy id appears twice on the " + SideName(r.Side()) + " side of the extract"})
 			continue
 		}
-		seen[r.LegacyID] = struct{}{}
+		seen[key] = struct{}{}
 		if _, ok := parties[r.Party]; !ok {
 			quarantined = append(quarantined, Quarantined{Record: r, Rule: RuleReferential, Reason: fmt.Sprintf("party %q is not in master data", r.Party)})
 			continue

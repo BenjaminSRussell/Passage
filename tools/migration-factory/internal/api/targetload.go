@@ -102,7 +102,11 @@ func parseLoad(l *loadRequestDTO, records []extractRecordDTO, sys domain.SourceS
 		} else {
 			x.CashDiscountAmount = decimal.Zero
 		}
-		extras[strings.TrimSpace(r.LegacyID)] = x
+		side := domain.LedgerAR
+		if x.Ledger == domain.LedgerAP {
+			side = domain.LedgerAP
+		}
+		extras[domain.OpenItemKey(side, strings.TrimSpace(r.LegacyID))] = x
 	}
 	return &domain.TargetConfig{LegalEntityID: le, ImportSource: source, Customers: customers}, extras, nil
 }

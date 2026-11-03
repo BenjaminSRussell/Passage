@@ -40,8 +40,55 @@ type PackRun struct {
 	CreatedAt time.Time
 }
 
-// TableOpenItems is the legacy_xref source_table the open_items pack writes.
+// TableOpenItems names the open_items pack in legacy_xref; its rows are held under the source table of
+// their side (OpenItemsTable). Before migration 0016 every row was under this bare name.
 const TableOpenItems = "open_items"
+
+// The legacy_xref source tables of the open_items pack. A customer and a vendor open item come from two
+// legacy tables (AX CustTransOpen and VendTransOpen, SAP BSID and BSIK) whose row ids are unique per
+// table only, so one legacy id may name a receivable and a payable and the two must not collide.
+const (
+	TableOpenItemsReceivable = TableOpenItems + ".receivable"
+	TableOpenItemsPayable    = TableOpenItems + ".payable"
+)
+
+// Side is the subledger of the record: AP when its ledger says so, AR otherwise.
+func (r Record) Side() string {
+	if r.Ledger == LedgerAP {
+		return LedgerAP
+	}
+	return LedgerAR
+}
+
+// OpenItemsTable is the legacy_xref source_table of an open item of the side (AP or AR).
+func OpenItemsTable(ledger string) string {
+	if ledger == LedgerAP {
+		return TableOpenItemsPayable
+	}
+	return TableOpenItemsReceivable
+}
+
+// OpenItemsSide is the side an open_items source table holds, or "" for any other table.
+func OpenItemsSide(table string) string {
+	switch table {
+	case TableOpenItemsReceivable:
+		return LedgerAR
+	case TableOpenItemsPayable:
+		return LedgerAP
+	}
+	return ""
+}
+
+// OpenItemKey is the key of an open item within a run or a company: its side and legacy id.
+func OpenItemKey(side, legacyID string) string { return side + "|" + legacyID }
+
+// SideName is the word for a side in messages.
+func SideName(side string) string {
+	if side == LedgerAP {
+		return "payable"
+	}
+	return "receivable"
+}
 
 // Message returns MIG-1505 for a re-run that loaded nothing new, or "".
 func (r *PackRun) Message() string {
@@ -52,7 +99,7 @@ func (r *PackRun) Message() string {
 }
 
 // ReconcileOpenItems finishes an open_items run once the accepted records are in legacy_xref.
-// loaded is how many records this run inserted; present maps legacy id to the amount
+// loaded is how many records this run inserted; present maps OpenItemKey (side and legacy id) to the amount
 // legacy_xref holds for every accepted record, including ones loaded by earlier runs. It
 // computes the FR-49.2 control totals (count, amount per currency, and amount per (company,
 // account, currency)) of the whole extract against what Passage holds, and moves the run from
@@ -90,7 +137,7 @@ func ReconcileOpenItems(r *PackRun, records, accepted []Record, loaded int, pres
 	}
 	targetCount := 0
 	for _, rec := range accepted {
-		if amt, ok := present[rec.LegacyID]; ok {
+		if amt, ok := present[OpenItemKey(rec.Side(), rec.LegacyID)]; ok {
 			add(rec.Currency, rec.Account, decimal.Zero, amt)
 			targetCount++
 		}

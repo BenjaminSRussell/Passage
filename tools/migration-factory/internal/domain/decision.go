@@ -77,6 +77,28 @@ type PackFact struct {
 	// PayablesUncounted is true for a run stored before the count was kept (migration 0012) and
 	// not backfilled: an open_items run of that kind may hold payables lines, so it counts as staged.
 	PayablesUncounted bool
+	// ReceivablesLoad is the status of an open_items run's load into receivables (target_load), or ""
+	// for a run started without a load object. The load must have run to completion for the pack to
+	// count (S11-b): see ReceivablesLoadOpen.
+	ReceivablesLoad string
+}
+
+// NoReceivablesLoadNote starts the note on a met packs_reconciled item for an open_items run started
+// without a load object (S12-a): its lines are reconciled against legacy_xref only and nothing was sent
+// to receivables. The item stays met (requiring a load for every run is a later decision), but the
+// approvers see it.
+const NoReceivablesLoadNote = "Not loaded into receivables (run started without a load object, reconciled against legacy_xref only): "
+
+// ReceivablesLoadOpen reports why an open_items run's receivables load has not run to completion, or ""
+// when it has or none was asked for. A load that is STAGED (nothing sent), LOADING, PARTIAL (rows still
+// pending), FAILED (the target refused the factory), UNRECONCILED or MISMATCH (the target's totals
+// are unread or differ) leaves the receivables not loaded as the extract says. This is not a staged
+// pack: no waiver excuses it, since the rows it concerns are ones the factory could have posted.
+func ReceivablesLoadOpen(pf PackFact) string {
+	if pf.Pack != PackOpenItems || pf.ReceivablesLoad == "" || pf.ReceivablesLoad == LoadReconciled {
+		return ""
+	}
+	return "its receivables load is " + pf.ReceivablesLoad + ", not RECONCILED with receivables"
 }
 
 // NotPostedRun reports why a run's loaded rows are not all in the target ledger, or "" when they
@@ -246,7 +268,7 @@ func packsReconciled(f ReadinessFacts, waived map[string]string) (status, detail
 		latest[string(pf.Pack)+"|"+pf.Company] = pf
 	}
 	freeze := f.Plan.T0.Add(LegacyFreezeOffsetMin * time.Minute)
-	var missing, stale, notReconciled, waivedNotes []string
+	var missing, stale, notReconciled, waivedNotes, noLoad []string
 	seenWaiver := map[string]bool{}
 	for _, pk := range f.Plan.Packs {
 		for _, e := range f.Plan.Entities {
@@ -260,6 +282,9 @@ func packsReconciled(f ReadinessFacts, waived map[string]string) (status, detail
 			case pf.Status != StatusReconciled:
 				notReconciled = append(notReconciled, fmt.Sprintf("%s/%s is %s", pk, e, pf.Status))
 				refs = append(refs, pf.RunID)
+			case ReceivablesLoadOpen(pf) != "":
+				notReconciled = append(notReconciled, fmt.Sprintf("%s/%s is %s but %s (no waiver excuses a receivables load that did not run)", pk, e, pf.Status, ReceivablesLoadOpen(pf)))
+				refs = append(refs, pf.RunID)
 			case NotPostedRun(pf) != "" && waived[string(pk)] != "":
 				if !seenWaiver[string(pk)] {
 					seenWaiver[string(pk)] = true
@@ -270,10 +295,14 @@ func packsReconciled(f ReadinessFacts, waived map[string]string) (status, detail
 				notReconciled = append(notReconciled, fmt.Sprintf("%s/%s is RECONCILED but %s", pk, e, NotPostedRun(pf)))
 				refs = append(refs, pf.RunID)
 			default:
+				if pf.Pack == PackOpenItems && pf.ReceivablesLoad == "" {
+					noLoad = append(noLoad, fmt.Sprintf("%s/%s", pk, e))
+				}
 				refs = append(refs, pf.RunID)
 			}
 		}
 	}
+	sort.Strings(noLoad)
 	sort.Strings(missing)
 	sort.Strings(stale)
 	sort.Strings(notReconciled)
@@ -294,6 +323,9 @@ func packsReconciled(f ReadinessFacts, waived map[string]string) (status, detail
 	detail = fmt.Sprintf("%d pack/entity runs RECONCILED.", len(refs))
 	if len(waivedNotes) > 0 {
 		detail += " Not posted, waived by both approvers: " + strings.Join(waivedNotes, "; ") + "."
+	}
+	if len(noLoad) > 0 {
+		detail += " " + NoReceivablesLoadNote + strings.Join(noLoad, ", ") + "."
 	}
 	return ItemMet, detail, refs
 }

@@ -74,7 +74,7 @@ export function PackRunDetailPage() {
       key: "dimensions",
       header: run?.pack === "gl_balances" ? "Account and dimensions" : run?.pack === "onhand" ? "Item and dimension" : run?.pack === "open_orders" ? "Party, item and order line" : "Party and account",
       render: (row) =>
-        (run?.pack === "gl_balances" || run?.pack === "onhand" ? [row.account, row.dimensions] : run?.pack === "open_orders" ? [row.party, row.account, row.dimensions] : [row.party, row.account])
+        (run?.pack === "gl_balances" || run?.pack === "onhand" ? [row.account, row.dimensions] : run?.pack === "open_orders" ? [row.party, row.account, row.dimensions] : [row.ledger === "AP" ? "Payable" : undefined, row.party, row.account])
           .filter(Boolean)
           .join(" / ") || dash,
     },

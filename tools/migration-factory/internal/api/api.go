@@ -136,6 +136,7 @@ func (s *Server) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyCutoverManager)).Post("/cutover/plans/{id}/go-no-go", s.recordDecision)
 		r.With(authz.RequireDuty(DutyCutoverManager)).Post("/cutover/plans/{id}/rollback", s.rollback)
 		r.With(authz.RequireDuty(DutyCutoverManager)).Get("/cutover/plans/{id}/rekeying/{file}", s.rekeyFile)
+		r.With(authz.RequireDuty(DutyCutoverManager)).Get("/cutover/plans/{id}/export/{file}", s.exportFile)
 	})
 }
 

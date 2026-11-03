@@ -345,3 +345,45 @@ func TestNotPostedRun_UncountedOpenItemsRunIsStaged(t *testing.T) {
 		t.Fatalf("onhand keeps its own reason: %q", why)
 	}
 }
+
+// S11-b: an open_items run whose receivables load did not run to a reconciled end keeps packs_reconciled
+// open, and no waiver excuses it, even when payables lines are staged and waived.
+func TestEvaluateChecklist_ReceivablesLoadMustHaveRun(t *testing.T) {
+	plan := decisionPlan()
+	plan.Packs = []Pack{PackOpenItems}
+	facts := func(load string, payables bool) ReadinessFacts {
+		f := ReadinessFacts{Plan: plan, Parallel: signedOff()}
+		for _, e := range plan.Entities {
+			f.Packs = append(f.Packs, PackFact{Pack: PackOpenItems, Company: e, RunID: "oi-" + e, Status: StatusReconciled, CreatedAt: decisionT0.Add(2 * time.Hour), ReceivablesLoad: load, PayablesStaged: payables})
+		}
+		return f
+	}
+	for _, load := range []string{"", LoadReconciled} {
+		items, err := EvaluateChecklist(facts(load, false), allAttested(), nil)
+		if err != nil || items[0].Status != ItemMet {
+			t.Fatalf("load %q: %v %s %q", load, err, items[0].Status, items[0].Detail)
+		}
+		// S12-a: a run started without a load object passes, but the approvers are told which ones sent nothing.
+		if flagged := strings.Contains(items[0].Detail, NoReceivablesLoadNote); flagged != (load == "") {
+			t.Fatalf("load %q: no-load note shown %v: %q", load, flagged, items[0].Detail)
+		}
+		if load == "" && !strings.Contains(items[0].Detail, "open_items/"+plan.Entities[0]) {
+			t.Fatalf("the note names the pack and entity: %q", items[0].Detail)
+		}
+	}
+	for _, load := range []string{LoadStaged, LoadLoading, LoadPartial, LoadFailed, LoadUnreconciled, LoadMismatch} {
+		items, err := EvaluateChecklist(facts(load, false), allAttested(), nil)
+		if err != nil || items[0].Status != ItemOpen || !strings.Contains(items[0].Detail, "its receivables load is "+load) {
+			t.Fatalf("load %s: %v %s %q", load, err, items[0].Status, items[0].Detail)
+		}
+		// With payables staged and waived by both approvers, the failed load still holds the item open.
+		items, err = EvaluateChecklist(facts(load, true), allAttested(), []Waiver{{Pack: "open_items", Reason: "AP opened by hand in payables"}})
+		if err != nil || items[0].Status != ItemOpen || !strings.Contains(items[0].Detail, "no waiver excuses") {
+			t.Fatalf("waived, load %s: %v %s %q", load, err, items[0].Status, items[0].Detail)
+		}
+	}
+	// Another pack's field is not read.
+	if why := ReceivablesLoadOpen(PackFact{Pack: PackOnhand, ReceivablesLoad: LoadFailed}); why != "" {
+		t.Fatalf("onhand: %q", why)
+	}
+}

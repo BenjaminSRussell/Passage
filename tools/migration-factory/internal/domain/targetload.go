@@ -168,7 +168,7 @@ type StagedRow struct {
 func StageRows(accepted []Record, extras map[string]TargetExtra, cfg TargetConfig) []StagedRow {
 	out := make([]StagedRow, 0, len(accepted))
 	for i, rec := range accepted {
-		x := extras[rec.LegacyID]
+		x := extras[OpenItemKey(rec.Side(), rec.LegacyID)]
 		st := StagedRow{Seq: i + 1, LegacyID: rec.LegacyID, Ledger: LedgerAR, Status: RowPending}
 		if x.Ledger != "" {
 			st.Ledger = x.Ledger

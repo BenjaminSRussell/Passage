@@ -82,6 +82,7 @@ type quarantineDTO struct {
 	Dimensions string     `json:"dimensions,omitempty"`
 	Currency   string     `json:"currency,omitempty"`
 	Amount     string     `json:"amount"`
+	Ledger     string     `json:"ledger,omitempty"`
 	Released   *recordDTO `json:"released,omitempty"`
 	ReleasedBy string     `json:"releasedBy,omitempty"`
 	ReleasedAt *time.Time `json:"releasedAt,omitempty"`
@@ -138,7 +139,7 @@ func toRecordDTO(r domain.Record) recordDTO {
 
 func toQuarantineDTO(q domain.Quarantined) quarantineDTO {
 	out := quarantineDTO{Seq: q.Seq, LegacyID: q.Record.LegacyID, Rule: q.Rule, Reason: q.Reason, Status: q.Status,
-		Party: q.Record.Party, Account: q.Record.Account, Dimensions: q.Record.Dimensions, Currency: q.Record.Currency, Amount: q.Record.Amount.StringFixed(6),
+		Ledger: q.Record.Ledger, Party: q.Record.Party, Account: q.Record.Account, Dimensions: q.Record.Dimensions, Currency: q.Record.Currency, Amount: q.Record.Amount.StringFixed(6),
 		ReleasedBy: q.ReleasedBy, ReleasedAt: q.ReleasedAt}
 	if q.Released != nil {
 		rel := toRecordDTO(*q.Released)
@@ -192,7 +193,11 @@ func toRecords(in []extractRecordDTO) ([]domain.Record, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%w: record %q amount %q %s", domain.ErrInvalid, r.LegacyID, r.Amount, err)
 		}
-		out = append(out, domain.Record{LegacyID: strings.TrimSpace(r.LegacyID), Party: r.Party, Account: r.Account, Currency: r.Currency, Amount: amt})
+		ledger := ""
+		if strings.ToUpper(strings.TrimSpace(r.Ledger)) == domain.LedgerAP {
+			ledger = domain.LedgerAP
+		}
+		out = append(out, domain.Record{Ledger: ledger, LegacyID: strings.TrimSpace(r.LegacyID), Party: r.Party, Account: r.Account, Currency: r.Currency, Amount: amt})
 	}
 	return out, nil
 }
@@ -200,7 +205,13 @@ func toRecords(in []extractRecordDTO) ([]domain.Record, error) {
 func keyed(records []domain.Record) []domain.Keyed {
 	out := make([]domain.Keyed, len(records))
 	for i, r := range records {
-		out[i] = domain.Keyed{LegacyID: r.LegacyID, Amount: r.Amount}
+		id := r.LegacyID
+		if r.Side() == domain.LedgerAP {
+			// A payable is hashed under its side; a receivable keeps the plain id, so the hash of every
+			// extract stored before the sides were split is unchanged.
+			id = domain.OpenItemKey(domain.LedgerAP, id)
+		}
+		out[i] = domain.Keyed{LegacyID: id, Amount: r.Amount}
 	}
 	return out
 }

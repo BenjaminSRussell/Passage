@@ -56,15 +56,17 @@ func runOpenItems(ctx context.Context, tx pgx.Tx, in OpenItemsRun) (domain.PackR
 	for i, r := range in.Accepted {
 		idsIn[i] = r.LegacyID
 	}
+	// The side is part of the key: a receivable and a payable with the same legacy id are two items.
 	present := map[string]decimal.Decimal{}
-	rows, err := tx.Query(ctx, `select source_id, amount::text from legacy_xref
-		where tenant_id = current_setting('passage.tenant_id', true)::uuid and source_system = $1 and source_company = $2 and source_table = $3 and source_id = any($4)`, sys, company, domain.TableOpenItems, idsIn)
+	rows, err := tx.Query(ctx, `select source_table, source_id, amount::text from legacy_xref
+		where tenant_id = current_setting('passage.tenant_id', true)::uuid and source_system = $1 and source_company = $2
+		  and source_table = any($3) and source_id = any($4)`, sys, company, []string{domain.TableOpenItemsReceivable, domain.TableOpenItemsPayable}, idsIn)
 	if err != nil {
 		return domain.PackRun{}, fmt.Errorf("read legacy_xref: %w", err)
 	}
 	for rows.Next() {
-		var id, raw string
-		if err := rows.Scan(&id, &raw); err != nil {
+		var table, id, raw string
+		if err := rows.Scan(&table, &id, &raw); err != nil {
 			rows.Close()
 			return domain.PackRun{}, err
 		}
@@ -73,19 +75,21 @@ func runOpenItems(ctx context.Context, tx pgx.Tx, in OpenItemsRun) (domain.PackR
 			rows.Close()
 			return domain.PackRun{}, err
 		}
-		present[id] = amt
+		present[domain.OpenItemKey(domain.OpenItemsSide(table), id)] = amt
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return domain.PackRun{}, err
 	}
 	existing := make(map[string]struct{}, len(present))
-	for id := range present {
-		existing[domain.XrefKey(run.SourceSystem, company, domain.TableOpenItems, id)] = struct{}{}
+	for _, r := range in.Accepted {
+		if _, ok := present[domain.OpenItemKey(r.Side(), r.LegacyID)]; ok {
+			existing[domain.XrefKey(run.SourceSystem, company, domain.OpenItemsTable(r.Side()), r.LegacyID)] = struct{}{}
+		}
 	}
-	plan := domain.PlanLoad(in.Accepted, run.SourceSystem, company, domain.TableOpenItems, existing)
+	plan := domain.PlanLoad(in.Accepted, run.SourceSystem, company, func(r domain.Record) string { return domain.OpenItemsTable(r.Side()) }, existing)
 	for _, r := range plan.ToLoad {
-		present[r.LegacyID] = r.Amount
+		present[domain.OpenItemKey(r.Side(), r.LegacyID)] = r.Amount
 	}
 	if err := domain.ReconcileOpenItems(&run, in.Records, in.Accepted, len(plan.ToLoad), present); err != nil {
 		return domain.PackRun{}, err
@@ -95,17 +99,17 @@ func runOpenItems(ctx context.Context, tx pgx.Tx, in OpenItemsRun) (domain.PackR
 		return domain.PackRun{}, err
 	}
 	if n := len(plan.ToLoad); n > 0 {
-		xrefIDs, passageIDs, sourceIDs := make([]string, n), make([]string, n), make([]string, n)
+		xrefIDs, passageIDs, sourceIDs, tables := make([]string, n), make([]string, n), make([]string, n), make([]string, n)
 		amounts, currencies := make([]string, n), make([]string, n)
 		for i, r := range plan.ToLoad {
-			xrefIDs[i], passageIDs[i], sourceIDs[i] = ids.New(), ids.New(), r.LegacyID
+			xrefIDs[i], passageIDs[i], sourceIDs[i], tables[i] = ids.New(), ids.New(), r.LegacyID, domain.OpenItemsTable(r.Side())
 			amounts[i], currencies[i] = r.Amount.String(), r.Currency
 		}
 		tag, err := tx.Exec(ctx, `insert into legacy_xref (tenant_id, xref_id, source_system, source_company, source_table, source_id,
 			passage_entity, passage_id, run_id, amount, currency)
-			select current_setting('passage.tenant_id', true)::uuid, x, $1, $2, $3, s, 'open_item', p, $4, a, c
-			from unnest($5::uuid[], $6::text[], $7::uuid[], $8::numeric[], $9::text[]) as t(x, s, p, a, c)`,
-			sys, company, domain.TableOpenItems, run.RunID, xrefIDs, sourceIDs, passageIDs, amounts, currencies)
+			select current_setting('passage.tenant_id', true)::uuid, x, $1, $2, tb, s, 'open_item', p, $3, a, c
+			from unnest($4::uuid[], $5::text[], $6::text[], $7::uuid[], $8::numeric[], $9::text[]) as t(x, tb, s, p, a, c)`,
+			sys, company, run.RunID, xrefIDs, tables, sourceIDs, passageIDs, amounts, currencies)
 		if err != nil {
 			return domain.PackRun{}, fmt.Errorf("insert legacy_xref: %w", err)
 		}
@@ -208,10 +212,11 @@ type quarantinedRecord struct {
 	Dimensions string `json:"dimensions,omitempty"`
 	Currency   string `json:"currency"`
 	Amount     string `json:"amount"`
+	Ledger     string `json:"ledger,omitempty"`
 }
 
 func recordJSON(r domain.Record) quarantinedRecord {
-	return quarantinedRecord{LegacyID: r.LegacyID, Party: r.Party, Account: r.Account, Dimensions: r.Dimensions, Currency: r.Currency, Amount: r.Amount.String()}
+	return quarantinedRecord{Ledger: r.Ledger, LegacyID: r.LegacyID, Party: r.Party, Account: r.Account, Dimensions: r.Dimensions, Currency: r.Currency, Amount: r.Amount.String()}
 }
 
 const runColumns = `run_id::text, pack, source_system, source_company, cutoff_ts, input_hash, status, records_in, records_loaded,
@@ -318,7 +323,7 @@ func parseRecordJSON(raw []byte) (domain.Record, error) {
 			return domain.Record{}, fmt.Errorf("quarantined record %q amount: %w", rec.LegacyID, err)
 		}
 	}
-	return domain.Record{LegacyID: rec.LegacyID, Party: rec.Party, Account: rec.Account, Dimensions: rec.Dimensions, Currency: rec.Currency, Amount: amt}, nil
+	return domain.Record{Ledger: rec.Ledger, LegacyID: rec.LegacyID, Party: rec.Party, Account: rec.Account, Dimensions: rec.Dimensions, Currency: rec.Currency, Amount: amt}, nil
 }
 
 // RunFilter narrows ListRuns. After is the run id of the last row of the previous page.

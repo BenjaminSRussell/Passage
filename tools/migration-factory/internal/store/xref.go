@@ -26,6 +26,11 @@ func (s *Postgres) LookupXref(ctx context.Context, q XrefQuery) ([]domain.Xref, 
 	err := s.tx(ctx, func(tx pgx.Tx) error {
 		var rows pgx.Rows
 		var err error
+		// The bare open_items names both sides, so a lookup written before the sides were split still finds the item.
+		tables := []string{q.Table}
+		if q.Table == domain.TableOpenItems {
+			tables = []string{domain.TableOpenItemsReceivable, domain.TableOpenItemsPayable, domain.TableOpenItems}
+		}
 		const cols = `xref_id::text, source_system, source_company, source_table, source_id, passage_entity, passage_id::text, run_id::text, created_at, target_confirmed`
 		if q.PassageID != "" {
 			rows, err = tx.Query(ctx, `select `+cols+` from legacy_xref
@@ -33,9 +38,9 @@ func (s *Postgres) LookupXref(ctx context.Context, q XrefQuery) ([]domain.Xref, 
 				order by source_system, source_company, source_table, source_id limit $3`, q.PassageEntity, q.PassageID, MaxListLimit)
 		} else {
 			rows, err = tx.Query(ctx, `select `+cols+` from legacy_xref
-				where tenant_id = current_setting('passage.tenant_id', true)::uuid and source_system = $1 and source_table = $2 and source_id = $3
+				where tenant_id = current_setting('passage.tenant_id', true)::uuid and source_system = $1 and source_table = any($2) and source_id = $3
 				  and ($4 = '' or source_company = $4)
-				order by source_company limit $5`, q.System, q.Table, q.SourceID, q.Company, MaxListLimit)
+				order by source_company, source_table limit $5`, q.System, tables, q.SourceID, q.Company, MaxListLimit)
 		}
 		if err != nil {
 			return err
