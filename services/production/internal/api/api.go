@@ -58,7 +58,7 @@ const (
 	maxBOMDepth       = 12
 	maxBOMLines       = 5000
 	maxOperations     = 500
-	maxCoProducts     = 50
+	maxCoProducts     = domain.MaxCoProducts
 	defaultPageSize   = 50
 	maxPageSize       = 200
 	readyTimeout      = 500 * time.Millisecond

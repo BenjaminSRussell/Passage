@@ -854,23 +854,40 @@ components:
         queueBeforeH: { $ref: '#/components/schemas/Decimal' }
         queueAfterH: { $ref: '#/components/schemas/Decimal' }
         transitH: { $ref: '#/components/schemas/Decimal' }
+    CoProductEdit:
+      type: object
+      description: |
+        One co-product or by-product edit (FR-21.14). add needs itemId and qtyPer (type co-product by
+        default); change sets only the fields it carries; remove carries lineNo only. The planned
+        quantity follows the order quantity. A line with receipts or journals keeps its item and type,
+        cannot be removed and cannot plan below what was received. As at creation, a line never yields
+        the order's own product, an order declares at most 50 lines and a rework order takes none (422).
+      required: [op, lineNo]
+      additionalProperties: false
+      properties:
+        op: { $ref: '#/components/schemas/EditOp' }
+        lineNo: { type: string, maxLength: 20 }
+        type: { type: string, enum: [co-product, by-product] }
+        itemId: { type: string, format: uuid }
+        qtyPer: { $ref: '#/components/schemas/Decimal' }
     OrderEdits:
       type: object
-      description: Line edits apply first, in order, then operation edits; 1 to 200 edits in all.
+      description: Line edits apply first, in order, then operation edits, then co-product edits; 1 to 200 edits in all.
       additionalProperties: false
       properties:
         lines: { type: array, items: { $ref: '#/components/schemas/LineEdit' } }
         operations: { type: array, items: { $ref: '#/components/schemas/OperationEdit' } }
+        coProducts: { type: array, items: { $ref: '#/components/schemas/CoProductEdit' } }
     OrderEditEntry:
       type: object
       properties:
         orderVersion: { type: integer, description: The order version the edit produced. }
         seq: { type: integer, description: Position of the edit in its request. }
-        target: { type: string, enum: [line, operation] }
+        target: { type: string, enum: [line, operation, coproduct] }
         op: { $ref: '#/components/schemas/EditOp' }
         key: { type: string, description: The line number, or the operation number as text. }
-        before: { description: 'The line or operation before the edit; null for an add.', oneOf: [{ $ref: '#/components/schemas/OrderLine' }, { $ref: '#/components/schemas/Operation' }, { type: 'null' }] }
-        after: { description: 'The line or operation after the edit; null for a remove.', oneOf: [{ $ref: '#/components/schemas/OrderLine' }, { $ref: '#/components/schemas/Operation' }, { type: 'null' }] }
+        before: { description: 'The line, operation or co-product before the edit; null for an add.', oneOf: [{ $ref: '#/components/schemas/OrderLine' }, { $ref: '#/components/schemas/Operation' }, { $ref: '#/components/schemas/CoProduct' }, { type: 'null' }] }
+        after: { description: 'The line, operation or co-product after the edit; null for a remove.', oneOf: [{ $ref: '#/components/schemas/OrderLine' }, { $ref: '#/components/schemas/Operation' }, { $ref: '#/components/schemas/CoProduct' }, { type: 'null' }] }
         actor: { type: string }
         traceId: { type: string }
         occurredAt: { type: string, format: date-time }
@@ -2229,6 +2246,9 @@ paths:
         from its schedule start with the changed route and emits
         dev.passage.production.order.scheduled.v1 with reason redate; operation queue and transit
         hours (queueBeforeH, queueAfterH, transitH) can be edited.
+        Co-products (slice 28, FR-21.14): coProducts adds, changes and removes the order's declared
+        co-products and by-products; their planned quantities follow the order quantity, and a line
+        with receipts or journals keeps its item and type and cannot be removed.
       x-passage-duty: production.order.write
       parameters:
         - { $ref: '#/components/parameters/OrderId' }

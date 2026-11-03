@@ -745,7 +745,7 @@ components:
       type: object
       required: [target, op, key]
       properties:
-        target: { type: string, enum: [line, operation] }
+        target: { type: string, enum: [line, operation, coproduct] }
         op: { type: string, enum: [add, remove, change] }
         key: { type: string, description: The line number, or the operation number as text. }
     triggerFeedback:

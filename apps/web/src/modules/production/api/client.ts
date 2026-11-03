@@ -672,20 +672,30 @@ export interface OperationEdit {
   subcontractPrice?: string;
 }
 
+/** One co-product or by-product edit (FR-21.14): add needs itemId and qtyPer; change sends only what changes; remove sends lineNo only. */
+export interface CoProductEdit {
+  op: EditOp;
+  lineNo: string;
+  type?: CoProductType;
+  itemId?: string;
+  qtyPer?: string;
+}
+
 export interface OrderEdits {
   lines?: LineEdit[];
   operations?: OperationEdit[];
+  coProducts?: CoProductEdit[];
 }
 
 /** One audit row of an order edit: the line or operation before and after it. */
 export interface OrderEditEntry {
   orderVersion: number;
   seq: number;
-  target: "line" | "operation";
+  target: "line" | "operation" | "coproduct";
   op: EditOp;
   key: string;
-  before: OrderLine | Operation | null;
-  after: OrderLine | Operation | null;
+  before: OrderLine | Operation | CoProduct | null;
+  after: OrderLine | Operation | CoProduct | null;
   actor: string;
   traceId: string;
   occurredAt: string;
