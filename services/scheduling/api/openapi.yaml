@@ -327,6 +327,47 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/Run' }
         '400': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/orders/{orderId}:schedule:
+    post:
+      operationId: scheduleOrder
+      summary: Schedule every operation of one order
+      description: >
+        Runs the heuristic over all operations of the order (run scope order),
+        with the same rules as createRun: firmed jobs stay, pegs, networks,
+        setup matrices, capacity blocks and secondary resources apply. An
+        order with no operations in scheduling answers 404 SCHED-0135.
+        Idempotent per Idempotency-Key and order. Takes the run duty, like
+        createRun.
+      x-passage-duty: scheduling.run
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          description: The production order id (UUID).
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: All fields are optional; send an empty object for the defaults.
+              properties:
+                finite: { type: boolean, default: true }
+                direction: { type: string, enum: [forward, backward], default: forward }
+                start: { type: string, format: date-time, description: Defaults to now; must not be before today (UTC). }
+                horizonDays: { type: integer, minimum: 30, maximum: 730, default: 365 }
+      responses:
+        '201':
+          description: 'Run completed. An idempotent replay returns 200 with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/runs/{id}:
     get:
       operationId: getRun
@@ -1506,7 +1547,7 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
-        scope: { type: string, enum: [site, selection, move] }
+        scope: { type: string, enum: [site, selection, order, move] }
         mode: { type: string }
         direction: { type: string, enum: [forward, backward] }
         finite: { type: boolean }

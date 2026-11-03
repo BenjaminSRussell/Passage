@@ -175,6 +175,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/operations", a.createOperation)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/operations", a.listOperations)
 	r.With(authz.RequireDuty(dutyRun)).Post("/v1/scheduling/runs", a.createRun)
+	r.With(authz.RequireDuty(dutyRun)).Post("/v1/scheduling/orders/{orderId}:schedule", a.scheduleOrder)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/runs", a.listRuns)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/runs/{id}", a.getRun)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/gantt", a.gantt)
@@ -591,6 +592,74 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 		OperationIDs: req.OperationIDs, Start: start, HorizonDays: horizon, Backward: req.Direction == "backward"}, idem)
 	if err != nil {
 		slog.Error("schedule run failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	status := http.StatusCreated
+	if !created {
+		status = http.StatusOK
+		w.Header().Set("Idempotent-Replayed", "true")
+	}
+	httpx.JSON(w, status, run)
+}
+
+type scheduleOrderRequest struct {
+	Finite      *bool      `json:"finite"`
+	Start       *time.Time `json:"start"`
+	HorizonDays *int       `json:"horizonDays"`
+	Direction   string     `json:"direction"`
+}
+
+// scheduleOrder schedules every operation of one order (scope order, FR-23.11):
+// the run a planner starts from an order without selecting operations. It is a
+// schedule run like POST /runs, so it takes the same duty (scheduling.run): a
+// selection of the same operations must not need more than this command.
+func (a *API) scheduleOrder(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	orderID := strings.ToLower(chi.URLParam(r, "orderId"))
+	if !ids.Valid(orderID) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeOrderHasNoOperations, "no operations are known for that order"))
+		return
+	}
+	var req scheduleOrderRequest
+	body, ok := decodeBody(w, r, &req)
+	if !ok {
+		return
+	}
+	idem, ok := requireIdem(w, r, append([]byte(orderID+"|"), body...))
+	if !ok {
+		return
+	}
+	fields := map[string]string{}
+	if req.Direction != "" && req.Direction != "forward" && req.Direction != "backward" {
+		fields["direction"] = "must be forward or backward"
+	}
+	if req.Start != nil && req.Start.Before(time.Now().UTC().Truncate(24*time.Hour)) {
+		fields["start"] = "must not be before today (FR-23.4: forward scheduling starts today or later)"
+	}
+	horizon := a.cfg.HorizonDays
+	if req.HorizonDays != nil {
+		horizon = *req.HorizonDays
+		if horizon < 30 || horizon > 730 {
+			fields["horizonDays"] = "must be 30 to 730"
+		}
+	}
+	if len(fields) > 0 {
+		invalid(w, r, fields)
+		return
+	}
+	finite := req.Finite == nil || *req.Finite
+	start := time.Now().UTC().Truncate(time.Minute)
+	if req.Start != nil {
+		start = req.Start.UTC()
+	}
+	a.runs.Add(1)
+	run, created, err := a.store.RunSchedule(r.Context(), store.RunRequest{Scope: "order", OrderID: orderID, Mode: "jobs", Finite: finite,
+		Start: start, HorizonDays: horizon, Backward: req.Direction == "backward"}, idem)
+	if err != nil {
+		slog.Error("order schedule run failed", "err", err, "orderId", orderID, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
 		return
 	}

@@ -43,8 +43,11 @@ const (
 	// CodeEngineeringMapped is returned when another resource already stands
 	// for the engineering resource.
 	CodeEngineeringMapped = "SCHED-0132"
-	CodeConcurrentBooking = "SCHED-0001"
-	CodeIdempotencyReuse  = "idempotency_key_reuse"
+	// CodeOrderHasNoOperations is returned by the per-order schedule command
+	// for an order id with no operations in scheduling.
+	CodeOrderHasNoOperations = "SCHED-0135"
+	CodeConcurrentBooking    = "SCHED-0001"
+	CodeIdempotencyReuse     = "idempotency_key_reuse"
 
 	uniqueViolation = "23505"
 	// engineeringIndex keeps one scheduling resource per engineering resource
@@ -168,8 +171,10 @@ type RunRequest struct {
 	Mode         string
 	Finite       bool
 	OperationIDs []string
-	Start        time.Time
-	HorizonDays  int
+	// OrderID is the order of a scope order run: every operation of it.
+	OrderID     string
+	Start       time.Time
+	HorizonDays int
 	// Backward schedules each order from its due date (FR-23.2, BR-23.2).
 	Backward bool
 }
@@ -362,6 +367,27 @@ func (s *Postgres) RunSchedule(ctx context.Context, req RunRequest, idem Idem) (
 		selection := req.OperationIDs
 		if selection == nil {
 			selection = []string{}
+		}
+		if req.Scope == "order" {
+			rows, err := tx.Query(ctx, `select id::text from scheduling_operation where order_id = $1 order by oper_number`, req.OrderID)
+			if err != nil {
+				return err
+			}
+			for rows.Next() {
+				var id string
+				if err := rows.Scan(&id); err != nil {
+					rows.Close()
+					return err
+				}
+				selection = append(selection, id)
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			if len(selection) == 0 {
+				return httpx.NewProblem(http.StatusNotFound, CodeOrderHasNoOperations, "no operations are known for that order")
+			}
 		}
 		ops, err := loadOperations(ctx, tx, "$1::boolean or o.id = any($2::uuid[])", true, req.Scope == "site", selection)
 		if err != nil {

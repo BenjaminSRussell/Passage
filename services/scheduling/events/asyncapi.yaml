@@ -242,7 +242,7 @@ components:
       required: [runId, scope, operations, makespanMinutes, totalLatenessMinutes]
       properties:
         runId: { type: string, format: uuid }
-        scope: { type: string, enum: [site, selection] }
+        scope: { type: string, enum: [site, selection, order] }
         operations: { type: integer }
         makespanMinutes: { type: integer }
         totalLatenessMinutes: { type: integer }

@@ -264,6 +264,7 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | POST | `/v1/scheduling/operations` (Idempotency-Key) | `scheduling.schedule.write` |
 | GET | `/v1/scheduling/operations?orderId&status&limit` | `scheduling.read` |
 | POST | `/v1/scheduling/runs` (Idempotency-Key) | `scheduling.run` |
+| POST | `/v1/scheduling/orders/{orderId}:schedule` (Idempotency-Key; every operation of one order, scope `order`; 404 `SCHED-0135` when scheduling holds no operation of it) | `scheduling.run` |
 | GET | `/v1/scheduling/runs`, `/v1/scheduling/runs/{id}` | `scheduling.read` |
 | GET | `/v1/scheduling/gantt?from&to&resourceIds` (at most 5,000 bars; `outsideCapacity` per bar) | `scheduling.read` |
 | POST | `/v1/scheduling/jobs/{id}:move` (Idempotency-Key unless `dryRun`) | `scheduling.schedule.write` |

@@ -93,7 +93,7 @@ export interface RunWarning {
 
 export interface Run {
   id: string;
-  scope: "site" | "selection" | "move";
+  scope: "site" | "selection" | "order" | "move";
   mode: string;
   direction: string;
   finite: boolean;
@@ -367,6 +367,11 @@ export function getRun(id: string, signal?: AbortSignal): Promise<Run> {
 
 export function startRun(input: NewRun, key: string = newKey()): Promise<Run> {
   return post<Run>("/runs", input, key);
+}
+
+/** Schedules every operation of one order (POST /orders/{orderId}:schedule, scope order). */
+export function scheduleOrder(orderId: string, input: { finite?: boolean; direction?: "forward" | "backward" } = {}, key: string = newKey()): Promise<Run> {
+  return post<Run>(`/orders/${encodeURIComponent(orderId)}:schedule`, input, key);
 }
 
 export function fetchGantt(from: string, to: string, resourceIds: string[] = [], signal?: AbortSignal): Promise<GanttBar[]> {

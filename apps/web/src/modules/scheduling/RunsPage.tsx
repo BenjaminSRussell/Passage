@@ -5,7 +5,7 @@ import { formatDateTime, formatMinutes, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
-export const scopeLabels: Record<Run["scope"], string> = { site: "Whole site", selection: "Selection", move: "Gantt move" };
+export const scopeLabels: Record<Run["scope"], string> = { site: "Whole site", selection: "Selection", order: "One order", move: "Gantt move" };
 export const directionLabels: Record<string, string> = { forward: "Forward", backward: "Backward" };
 
 const columns: DataTableColumn<Run>[] = [
