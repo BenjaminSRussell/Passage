@@ -61,9 +61,7 @@ type Contract struct {
 	CustomerID       string
 	Currency         string
 	TransactionPrice decimal.Decimal
-	// BilledDeferred is what billing booked to 2400 for the contract; nil means the allocated deferred amounts.
-	BilledDeferred *decimal.Decimal
-	ResidualRule   string
+	ResidualRule     string
 	// RatableBasis is DAILY or MONTHLY (§5.29.13); it shaped the RATABLE lines.
 	RatableBasis   string
 	ContractDate   time.Time
@@ -174,10 +172,10 @@ func (s *Postgres) CreateContract(ctx context.Context, c Contract) (Contract, er
 	}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `insert into revenue_contract (tenant_id, id, legal_entity_id, order_id, customer_id, currency,
-			transaction_price, residual_rule, ratable_basis, contract_date, status, version, idempotency_key, request_hash, billed_deferred)
-			values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) returning created_at`,
+			transaction_price, residual_rule, ratable_basis, contract_date, status, version, idempotency_key, request_hash)
+			values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning created_at`,
 			p.TenantID, c.ID, c.LegalEntityID, c.OrderID, c.CustomerID, c.Currency, c.TransactionPrice.String(), c.ResidualRule,
-			c.RatableBasis, c.ContractDate.Format(dateLayout), c.Status, c.Version, c.IdempotencyKey, c.RequestHash, billedText(c.BilledDeferred)).Scan(&c.CreatedAt); err != nil {
+			c.RatableBasis, c.ContractDate.Format(dateLayout), c.Status, c.Version, c.IdempotencyKey, c.RequestHash).Scan(&c.CreatedAt); err != nil {
 			return writeErr(err)
 		}
 		for _, o := range c.Obligations {
@@ -498,20 +496,12 @@ func rollForward(ctx context.Context, tx pgx.Tx, legalEntityID, contractID, curr
 	return domain.NewRollForward(v[0].Sub(v[2]), v[1], v[3]), nil
 }
 
-const billedDeferredOf = `coalesce(c.billed_deferred, (select sum(o.allocated_amount) from performance_obligation o
-  where o.tenant_id = c.tenant_id and o.contract_id = c.id and o.method = any($5::text[])))`
-
-const rollForwardAdditions = `select coalesce(sum(` + billedDeferredOf + `) filter (where c.contract_date < $3::date), 0)::text,
-       coalesce(sum(` + billedDeferredOf + `) filter (where c.contract_date between $3::date and $4::date), 0)::text
-from revenue_contract c
-where c.legal_entity_id = $1::uuid and c.currency = $2 and ($6 = '' or c.id = nullif($6, '')::uuid)`
-
-func billedText(d *decimal.Decimal) any {
-	if d == nil {
-		return nil
-	}
-	return d.String()
-}
+const rollForwardAdditions = `select coalesce(sum(o.allocated_amount) filter (where c.contract_date < $3::date), 0)::text,
+       coalesce(sum(o.allocated_amount) filter (where c.contract_date between $3::date and $4::date), 0)::text
+from performance_obligation o
+join revenue_contract c on c.tenant_id = o.tenant_id and c.id = o.contract_id
+where c.legal_entity_id = $1::uuid and c.currency = $2 and o.method = any($5::text[])
+  and ($6 = '' or c.id = nullif($6, '')::uuid)`
 
 const rollForwardRecognized = `select coalesce(sum(s.amount) filter (where s.recognized_on < $3::date), 0)::text,
        coalesce(sum(s.amount) filter (where s.recognized_on between $3::date and $4::date), 0)::text

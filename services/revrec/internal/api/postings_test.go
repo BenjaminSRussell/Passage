@@ -66,17 +66,10 @@ func (g *ledgerRig) post(t *testing.T, want int) []postingOut {
 	return out.Items
 }
 
-func (g *ledgerRig) bill(t *testing.T, amount, date string) {
+func (g *ledgerRig) bill(t *testing.T, deferred, date string) {
 	t.Helper()
-	invoiceID := ids.New()
-	n := decimal.RequireFromString(amount)
-	if _, err := g.ledger.Post(context.Background(), ledgerclient.Entry{
-		LegalEntityID: entityID, LedgerID: g.ledgerID, DocumentID: invoiceID, PostingDate: date, Currency: "USD",
-		IdempotencyKey: "billing-deferral-" + invoiceID, SourceType: "invoice_deferral",
-		Lines: []ledgerclient.Line{{Account: "1200", Amount: n}, {Account: store.DeferredAccount, Credit: true, Amount: n}},
-	}); err != nil {
-		t.Fatalf("bill %s: %v", amount, err)
-	}
+	n := decimal.RequireFromString(deferred)
+	g.billInvoice(t, n.Add(decimal.NewFromInt(7200)), n, date)
 }
 
 func (g *ledgerRig) revenueEntries() []ledgerclient.Stored {
@@ -199,32 +192,41 @@ func (g *ledgerRig) billInvoice(t *testing.T, gross, deferred decimal.Decimal, d
 	}
 }
 
-// BR-29.1: the bundle is billed 10,800.00 with 2,800.00 on the deferred lines (billing's own line nets) while the SSP allocation puts
-// 3,600.00 on the deferred obligations. Additions come from what billing booked, so the closing balance ties at every month end and the
-// revenue recognized beyond the billing is reported as a contract asset instead of a difference.
-func TestGLReconciliation_BundleDiscountClosingBalanceTiesToWhatBillingBooked(t *testing.T) {
+func TestGLReconciliation_BundleInvoiceBookedAtAllocationTiesAndEndsTheTermAtZero(t *testing.T) {
 	g := newLedgerRig(t)
 	gross, deferred := billedBundle(t)
 	g.billInvoice(t, gross, deferred, "2027-03-10")
-	body := strings.Replace(bundleContract, `"transactionPrice": "10800.00",`, `"transactionPrice": "10800.00", "billedDeferred": "`+deferred.StringFixed(2)+`",`, 1)
-	created := decodeContract(t, call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", body, map[string]string{idempotencyKey: idemKey}))
+	created := decodeContract(t, call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey}))
 	if rec := call(t, g.handler, http.MethodPost, "/v1/revrec/milestones/"+created.Obligations[1].ID+":satisfy", `{"satisfiedOn":"2027-03-25"}`, nil); rec.Code != http.StatusOK {
 		t.Fatalf("satisfy: %d %s", rec.Code, rec.Body)
 	}
 	g.run(t, "2027-03-31")
 	g.post(t, http.StatusOK)
 	march := g.reconcile(t, "2027-03")
-	if !march.Reconciled || march.ClosingDiff != "0.00" || march.ContractAsset != "0.00" || march.GLCredit != "2800.00" ||
+	if !march.Reconciled || march.ClosingDiff != "0.00" || march.GLCredit != "3600.00" ||
 		march.Deferred != fixed(deferred.Sub(decimal.RequireFromString(march.Recognized)), "USD") {
-		t.Fatalf("March %+v, want the closing balance tied to the billed 2800.00 less recognition", march)
+		t.Fatalf("March %+v, want the closing balance tied to the allocated 3600.00 less recognition", march)
 	}
 
 	*g.clock = time.Date(2028, 4, 2, 9, 0, 0, 0, time.UTC)
 	g.run(t, "2028-03-31")
 	g.post(t, http.StatusOK)
 	last := g.reconcile(t, "2028-03")
-	if !last.Reconciled || last.ClosingDiff != "0.00" || last.Recognized != "3600.00" || last.Deferred != "-800.00" || last.GLClosing != "-800.00" || last.ContractAsset != "800.00" {
-		t.Errorf("after the full term %+v, want recognized 3600.00 against billed 2800.00: closing -800.00 on both sides and a contract asset of 800.00", last)
+	if !last.Reconciled || last.Recognized != "3600.00" || last.Deferred != "0.00" || last.GLClosing != "0.00" || last.ClosingDiff != "0.00" {
+		t.Errorf("after the full term %+v, want 3600.00 recognized and 2400 closing at 0.00 on both sides", last)
+	}
+}
+
+func TestGLReconciliation_InvoiceBilledAboveTheAllocationBreaksTheClosingBalance(t *testing.T) {
+	g := newLedgerRig(t)
+	g.billInvoice(t, decimal.RequireFromString("10800.00"), decimal.RequireFromString("2800.00"), "2027-03-10")
+	call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey})
+	g.run(t, "2027-03-31")
+	g.post(t, http.StatusOK)
+
+	rec := g.reconcile(t, "2027-03")
+	if rec.Difference != "0.00" || rec.ClosingDiff != "800.00" || rec.Reconciled {
+		t.Errorf("deferred share 2800.00 against 3600.00 allocated: %+v, want a closing difference of 800.00 and not reconciled", rec)
 	}
 }
 

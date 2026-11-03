@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -60,6 +61,9 @@ func ParseGLProfiles(raw string) (map[string]store.GLProfile, error) {
 			return nil, fmt.Errorf("BILLING_GL_PROFILES entry for %q needs legalEntityId and ledgerId UUIDs, receivableAccount, taxAccount, chargeAccount and deferredRevenueAccounts", p.LegalEntityID)
 		}
 		p.LegalEntityID, p.LedgerID = le, ledger
+		if _, dup := out[le]; dup {
+			return nil, fmt.Errorf("BILLING_GL_PROFILES names legal entity %s twice", le)
+		}
 		out[le] = p
 	}
 	return out, nil
@@ -127,7 +131,9 @@ func glEntry(p store.GLProfile, d store.GLDocument) (ledgerclient.Entry, string)
 // Cr revenue per line account, Cr 2400 for lines on the profile's deferred revenue accounts, Cr charges, Cr tax; a credit note books the
 // mirror. Ledger, accounts and amounts come from the profile and the stored document, never the request, and the ledger key is derived
 // from the document id, so a retry after a lost answer returns the same entry. A document the ledger refuses is recorded with a
-// backed-off next attempt and parked after store.MaxGLAttempts, so it cannot hold up the documents behind it.
+// backed-off next attempt and parked after store.MaxGLAttempts, so it cannot hold up the documents behind it; a call the ledger fails
+// without a verdict is recorded the same way and ends the run, so one document that always fails is skipped by the next call.
+// A credit note waits for the entry of its original (store.DueGLDocuments).
 func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
 	if a.ledger == nil || a.glBooks == nil {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, CodeLedgerNotConfigured, "the general ledger is not configured for this service"))
@@ -194,6 +200,9 @@ func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
 				code = CodeLedgerRefused
 			}
 			parked, rerr := a.glBooks.RecordGLRefusal(ctx, d.ID, code, now, imbalance != "")
+			if errors.Is(rerr, store.ErrGLAlreadyBooked) {
+				continue
+			}
 			if rerr != nil {
 				httpx.Fail(w, r, rerr)
 				return
@@ -204,6 +213,9 @@ func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			slog.ErrorContext(ctx, "general ledger call failed", "op", "post", "documentId", d.ID, "ledgerCode", ledgerclient.CodeOf(err), "err", err, "correlationId", cid)
+			if _, rerr := a.glBooks.RecordGLRefusal(ctx, d.ID, CodeLedgerUnavailable, now, false); rerr != nil && !errors.Is(rerr, store.ErrGLAlreadyBooked) {
+				slog.ErrorContext(ctx, "general ledger failure not recorded", "documentId", d.ID, "err", rerr, "correlationId", cid)
+			}
 			p := httpx.NewProblem(http.StatusBadGateway, CodeLedgerUnavailable, "the general ledger did not answer")
 			p.Errors = map[string]string{"booked": strings.Join(bookedIDs(items), ",")}
 			httpx.Fail(w, r, p)

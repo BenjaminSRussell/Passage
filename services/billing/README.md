@@ -130,6 +130,7 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-superuser role) and skips without i
 | `BIL-0203` | 422 | The profile's ledger belongs to another legal entity |
 | `BIL-0204` | n/a | A document whose lines, charges and tax do not add to its gross is parked, never posted |
 | `BIL-0205` | n/a | The ledger refused a journal without a code |
+| `BIL-0206` | n/a | A credit note is parked because its original invoice is parked; it books after the original does |
 | `BIL-0107` | 422 | A plan change or cancellation falls inside an invoiced period; correct it with a credit note |
 | `BIL-0108` | 422 | The subscription is cancelled (cancel again, or change plan) |
 | `BIL-0109` | 503 | Subscriptions are not available in this deployment |
@@ -159,7 +160,7 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-superuser role) and skips without i
   `dev.passage.billing.creditnote.posted.v1` (the platform type grammar has no hyphens).
 - `journal_posting_id` holds the ledger entry of the document's invoice journal (FR-29.3)
   once `POST /v1/billing/gl-postings` booked it; the event carries null because the journal
-  follows the post. `BILLING_GL_PROFILES` (a JSON array: `legalEntityId`, `ledgerId`,
+  follows the post. `BILLING_GL_PROFILES` (a JSON array, one profile per entity: `legalEntityId`, `ledgerId`,
   `receivableAccount`, `taxAccount`, `chargeAccount`, `deferredRevenueAccounts`; chart value
   `glProfiles`) is required when `LEDGER_URL` is set; the deferred account is 2400. The
   profile's ledger is checked against its entity at each call. `invoice.posted` carries `intercompany=false` until wave 40.

@@ -51,7 +51,7 @@ charts/revrec/          Helm chart (DATABASE_URL from the revrec-db secret, admi
 | GET | `/v1/revrec/roll-forward?legalEntityId=&currency=&period=YYYY-MM` | `revrec.view` | opening, additions, recognized, adjustments, closing |
 | GET | `/v1/revrec/roll-forward?contractId=&period=YYYY-MM` | `revrec.view` | the same for one contract, in its currency (drill-down); 404 when unknown or out of scope |
 | POST | `/v1/revrec/journal-postings` | `revrec.post` | `{legalEntityId, through?, retryRejected?}`; posts every recognized, unposted RATABLE and MILESTONE line through `through` (default and upper bound the last completed month end) as one ledger entry per currency and month, Dr 2400 / Cr 4000 dated the month end, to the ledger configured for the entity in `REVREC_LEDGER_IDS` (never the request); a pending post is retried with the same ledger idempotency key; a post the ledger refuses with a 4xx is marked rejected, its lines released, and listed under `rejected` while the other postings continue; 503 `REV-0200` without `LEDGER_URL`, 422 `REV-0202` for an entity with no configured ledger, 502 `REV-0201` when the ledger does not answer |
-| GET | `/v1/revrec/gl-reconciliation?legalEntityId=&currency=&period=YYYY-MM` | `revrec.view` | revenue recognized through the month end against the ledger's 2400 debits through the same period (`difference`), and the roll-forward's closing deferred balance (`billedDeferred`, what billing booked to 2400, less recognized) against the ledger's closing 2400 balance, credits less debits (`closingDifference`); `contractAsset` is revenue recognized beyond the billed amount; `reconciled` needs both differences at zero |
+| GET | `/v1/revrec/gl-reconciliation?legalEntityId=&currency=&period=YYYY-MM` | `revrec.view` | revenue recognized through the month end against the ledger's 2400 debits through the same period (`difference`), and the roll-forward's closing deferred balance (allocated deferred amounts less recognized) against the ledger's closing 2400 balance, credits less debits (`closingDifference`); `reconciled` needs both differences at zero |
 
 Duties are enforced with `platform/authz` (401 without a principal, 403 `AUTH-0003`
 without the duty). A principal scoped to one legal entity (`X-Passage-Legal-Entity`)
@@ -125,7 +125,8 @@ twice; an unanswered post leaves the posting pending for the next call, a post t
 ledger refuses for good is marked rejected and its lines are released with
 `rejected_posting_id`, then skipped until a request sets `retryRejected`. `REVREC_LEDGER_IDS`
 (`<legalEntityId>=<ledgerId>,...`, chart value `ledgerIds`) names the ledger of each entity and
-is required when `LEDGER_URL` is set. A pending posting on another ledger than the configured
+is required when `LEDGER_URL` is set; it must name the same ledger as billing's `BILLING_GL_PROFILES` for the entity (a
+different one leaves 2400 without billing's credits and shows as a `closingDifference` on the reconciliation). A pending posting on another ledger than the configured
 one is logged and listed under `otherLedger`, never re-targeted. Operator procedure for
 those: if the mapping changed by mistake, restore it and call the endpoint to drain them.
 If the move to the new ledger is intended, first confirm in the old ledger that no entry

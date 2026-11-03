@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -12,9 +13,12 @@ import (
 )
 
 const (
-	MaxGLAttempts = 5
-	DeferredGL    = "2400"
+	MaxGLAttempts      = 5
+	DeferredGL         = "2400"
+	OriginalParkedCode = "BIL-0206"
 )
+
+var ErrGLAlreadyBooked = errors.New("the document already has a ledger entry")
 
 type GLProfile struct {
 	LegalEntityID           string   `json:"legalEntityId"`
@@ -44,13 +48,24 @@ type GLDocument struct {
 
 // DueGLDocuments returns up to limit posted invoices and credit notes of the entity that have no ledger entry, are not parked and
 // whose next attempt is due, oldest first, with the lines as stored; more says that due documents were left for the next call.
+// A credit note is held until its original has its entry, and is parked with OriginalParkedCode while the original is parked, so a
+// mirror is never booked against nothing.
 func (s *Postgres) DueGLDocuments(ctx context.Context, legalEntityID string, now time.Time, limit int) ([]GLDocument, bool, error) {
 	var out []GLDocument
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select id::text from invoice
-			where legal_entity_id = $1::uuid and status in `+postedStatuses+` and journal_posting_id is null and gl_parked_code is null
-			  and (gl_next_attempt_at is null or gl_next_attempt_at <= $2) and gross_amount > 0
-			order by posting_date, created_at, id limit $3`, legalEntityID, now, limit+1)
+		if _, err := tx.Exec(ctx, `update invoice cn set gl_parked_code = $2, gl_last_error = $2
+			from invoice o
+			where cn.tenant_id = o.tenant_id and cn.original_invoice_id = o.id and cn.legal_entity_id = $1::uuid
+			  and cn.status in `+postedStatuses+` and cn.journal_posting_id is null and cn.gl_parked_code is null
+			  and o.journal_posting_id is null and o.gl_parked_code is not null`, legalEntityID, OriginalParkedCode); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `select i.id::text from invoice i
+			left join invoice o on o.tenant_id = i.tenant_id and o.id = i.original_invoice_id
+			where i.legal_entity_id = $1::uuid and i.status in `+postedStatuses+` and i.journal_posting_id is null and i.gl_parked_code is null
+			  and (i.gl_next_attempt_at is null or i.gl_next_attempt_at <= $2) and i.gross_amount > 0
+			  and (i.original_invoice_id is null or o.journal_posting_id is not null)
+			order by i.posting_date, i.created_at, i.id limit $3`, legalEntityID, now, limit+1)
 		if err != nil {
 			return err
 		}
@@ -99,13 +114,17 @@ func (s *Postgres) MarkGLBooked(ctx context.Context, id, entryID string) (bool, 
 }
 
 // RecordGLRefusal counts a refused attempt, schedules the next one with exponential backoff (5 minutes, doubling, at most a day) and
-// parks the document with code once MaxGLAttempts is reached or when park is set.
+// parks the document with code once MaxGLAttempts is reached or when park is set; ErrGLAlreadyBooked says a concurrent call booked it.
 func (s *Postgres) RecordGLRefusal(ctx context.Context, id, code string, now time.Time, park bool) (parked bool, err error) {
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `update invoice set gl_attempt_count = gl_attempt_count + 1, gl_last_error = $2,
+		err := tx.QueryRow(ctx, `update invoice set gl_attempt_count = gl_attempt_count + 1, gl_last_error = $2,
 			gl_next_attempt_at = $3::timestamptz + (5 * least(2 ^ gl_attempt_count, 288)) * interval '1 minute',
 			gl_parked_code = case when $4 or gl_attempt_count + 1 >= $5 then $2 end
 			where id = $1::uuid and journal_posting_id is null returning gl_parked_code is not null`, id, code, now, park, MaxGLAttempts).Scan(&parked)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrGLAlreadyBooked
+		}
+		return err
 	})
 	return parked, err
 }

@@ -309,7 +309,11 @@ paths:
         (`billing-invoice-<id>`, `billing-credit-note-<id>`) makes a retry return the same
         entry. A document the ledger refuses is listed under `failed`, retried later with
         backoff and parked with its reason code after five attempts (`retryParked` offers
-        parked documents again); it never holds up the documents behind it. At most 200
+        parked documents again); it never holds up the documents behind it. A credit note
+        is held until its original has its entry and is parked with BIL-0206 while the
+        original is parked. A ledger failure without a verdict (502 BIL-0201) is recorded
+        on the document the same way, so one document that always fails is skipped by the
+        next call. At most 200
         documents per call; `more` says that due documents remain. 503 BIL-0200 without
         `LEDGER_URL`, 422 BIL-0202 for an entity with no profile, 422 BIL-0203 when the
         profile's ledger belongs to another entity, 502 BIL-0201 when the ledger does not

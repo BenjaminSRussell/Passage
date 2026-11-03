@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
@@ -26,10 +27,14 @@ type gridLine struct{ price, account, taxCode, discount string }
 type refusingLedger struct {
 	*ledgerclient.Fake
 	refuse map[string]error
+	onFail func(documentID string)
 }
 
 func (l *refusingLedger) Post(ctx context.Context, e ledgerclient.Entry) (string, error) {
 	if err := l.refuse[e.DocumentID]; err != nil {
+		if l.onFail != nil {
+			l.onFail(e.DocumentID)
+		}
 		return "", err
 	}
 	return l.Fake.Post(ctx, e)
@@ -38,6 +43,7 @@ func (l *refusingLedger) Post(ctx context.Context, e ledgerclient.Entry) (string
 type glRig struct {
 	handler  http.Handler
 	api      *API
+	admin    *pgxpool.Pool
 	fake     *ledgerclient.Fake
 	ledger   *refusingLedger
 	ledgerID string
@@ -53,7 +59,7 @@ func newGLRig(t *testing.T, configured bool) *glRig {
 	}
 	st := store.New(app)
 	fake := ledgerclient.NewFake()
-	g := &glRig{fake: fake, ledger: &refusingLedger{Fake: fake, refuse: map[string]error{}}, ledgerID: ids.New(), clock: time.Date(2027, 3, 12, 15, 4, 0, 0, time.UTC)}
+	g := &glRig{admin: admin, fake: fake, ledger: &refusingLedger{Fake: fake, refuse: map[string]error{}}, ledgerID: ids.New(), clock: time.Date(2027, 3, 12, 15, 4, 0, 0, time.UTC)}
 	fake.AddLedger(g.ledgerID, leID)
 	tax, err := ParseTaxRates("EXEMPT=0,DE19=19")
 	if err != nil {
@@ -210,7 +216,7 @@ func TestGLPostings_InvoiceJournalIsOneBalancedEntryAndCreditNoteMirrorsIt(t *te
 	}
 }
 
-func TestGLPostings_BundleInvoiceCreditsTheBilledDeferredAmount(t *testing.T) {
+func TestGLPostings_BundleInvoiceBooksTheAllocatedDeferredShare(t *testing.T) {
 	g := newGLRig(t, true)
 	var lines []gridLine
 	for _, l := range testkit.BundleInvoiceLines {
@@ -218,9 +224,9 @@ func TestGLPostings_BundleInvoiceCreditsTheBilledDeferredAmount(t *testing.T) {
 	}
 	id := g.invoice(t, lines...)
 	g.book(t, http.StatusOK, "")
-	want := map[string]string{"Dr 1200": testkit.BundleInvoiceGross, "Cr 4000": "8000.00", "Cr 2400": testkit.BundleInvoiceDeferred}
+	want := map[string]string{"Dr 1200": testkit.BundleInvoiceGross, "Cr 4000": "7200.00", "Cr 2400": testkit.BundleInvoiceDeferred}
 	if got := lineAmounts(g.entryFor(t, id)); !sameAmounts(got, want) {
-		t.Errorf("bundle entry %v, want %v: billing computes the line nets itself", got, want)
+		t.Errorf("bundle entry %v, want %v (BR-29.1: Cr 4000 7,200.00, Cr 2400 3,600.00)", got, want)
 	}
 }
 
@@ -233,6 +239,7 @@ func TestGLPostings_LostLedgerAnswerNeverBooksADocumentTwice(t *testing.T) {
 		t.Fatalf("%d entries after the lost answer, want the one the ledger accepted", len(g.fake.Entries()))
 	}
 	g.fake.LoseAnswers(nil)
+	g.clock = g.clock.Add(time.Hour)
 	if out := g.book(t, http.StatusOK, ""); len(out.Items) != 2 {
 		t.Fatalf("retry booked %d documents, want both", len(out.Items))
 	}
@@ -382,16 +389,105 @@ func TestParseGLProfiles(t *testing.T) {
 	if err != nil || got[le].LedgerID != ledger || got[le].TaxAccount != "2300" || got[le].DeferredRevenueAccounts[0] != "4100" {
 		t.Fatalf("good profile %+v, err %v", got, err)
 	}
+	twice := strings.TrimSuffix(entry(le, ledger, `"4100"`), "]") + "," + strings.TrimPrefix(entry(le, ids.New(), `"4100"`), "[")
 	for name, raw := range map[string]string{
-		"empty":            "",
-		"not an array":     `{}`,
-		"bad entity":       entry("x", ledger, `"4100"`),
-		"no revenue":       entry(le, ledger, ``),
-		"bad account text": entry(le, ledger, `"4 100"`),
-		"no tax account":   `[{"legalEntityId":"` + le + `","ledgerId":"` + ledger + `","receivableAccount":"1200","chargeAccount":"4800","deferredRevenueAccounts":["4100"]}]`,
+		"same entity twice": twice,
+		"empty":             "",
+		"not an array":      `{}`,
+		"bad entity":        entry("x", ledger, `"4100"`),
+		"no revenue":        entry(le, ledger, ``),
+		"bad account text":  entry(le, ledger, `"4 100"`),
+		"no tax account":    `[{"legalEntityId":"` + le + `","ledgerId":"` + ledger + `","receivableAccount":"1200","chargeAccount":"4800","deferredRevenueAccounts":["4100"]}]`,
 	} {
 		if _, err := ParseGLProfiles(raw); err == nil {
 			t.Errorf("%s accepted, want an error", name)
 		}
+	}
+}
+
+func (g *glRig) parkedCode(t *testing.T, id string) string {
+	t.Helper()
+	var code *string
+	if err := g.admin.QueryRow(context.Background(), `select gl_parked_code from invoice where id = $1::uuid`, id).Scan(&code); err != nil {
+		t.Fatal(err)
+	}
+	if code == nil {
+		return ""
+	}
+	return *code
+}
+
+func (g *glRig) creditNote(t *testing.T, original string) string {
+	t.Helper()
+	var cn struct {
+		ID string `json:"id"`
+	}
+	rec := do(g.handler, http.MethodPost, "/v1/billing/credit-notes", "cn-"+original, creditBody(original, "2027-03-20", ""))
+	decode(t, rec, &cn)
+	if rec.Code != http.StatusCreated || do(g.handler, http.MethodPost, "/v1/billing/credit-notes/"+cn.ID+":post", "", "").Code != http.StatusOK {
+		t.Fatalf("credit note %d %s", rec.Code, rec.Body)
+	}
+	return cn.ID
+}
+
+func TestGLPostings_CreditNoteWaitsForItsOriginalAndIsParkedWithIt(t *testing.T) {
+	g := newGLRig(t, true)
+	original := g.invoice(t, gridLine{"1000.00", "4100", "", ""})
+	refused := &ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: ledgerclient.CodePeriodClosed}
+	g.ledger.refuse[original] = refused
+	cn := g.creditNote(t, original)
+
+	if out := g.book(t, http.StatusOK, ""); len(out.Items) != 0 || len(out.Failed) != 1 || out.Failed[0].DocumentID != original {
+		t.Fatalf("first call %+v, want only the original refused and the credit note held", out)
+	}
+	if code := g.parkedCode(t, cn); code != "" {
+		t.Fatalf("credit note parked %q while its original is only backed off, want held", code)
+	}
+	for attempt := 2; attempt <= store.MaxGLAttempts; attempt++ {
+		g.clock = g.clock.AddDate(0, 0, 2)
+		g.book(t, http.StatusOK, "")
+	}
+	g.book(t, http.StatusOK, "")
+	if g.parkedCode(t, original) == "" || g.parkedCode(t, cn) != store.OriginalParkedCode || len(g.fake.Entries()) != 0 {
+		t.Fatalf("original parked %q, credit note %q, %d entries; want both parked, the note with %s, and nothing booked", g.parkedCode(t, original), g.parkedCode(t, cn), len(g.fake.Entries()), store.OriginalParkedCode)
+	}
+
+	delete(g.ledger.refuse, original)
+	if out := g.book(t, http.StatusOK, `,"retryParked":true`); len(out.Items) != 1 || out.Items[0].DocumentID != original {
+		t.Fatalf("retryParked %+v, want the original booked and the credit note still waiting for it", out)
+	}
+	if out := g.book(t, http.StatusOK, ""); len(out.Items) != 1 || out.Items[0].DocumentID != cn {
+		t.Fatalf("next call %+v, want the credit note booked after its original", out)
+	}
+	if b := g.balance(t, "2400"); !b.Net().IsZero() {
+		t.Errorf("2400 nets %s, want 0 with the original and its credit note booked", b.Net())
+	}
+}
+
+func TestGLPostings_LedgerFailureWithoutVerdictIsRecordedAndSkippedNextCall(t *testing.T) {
+	g := newGLRig(t, true)
+	broken := g.invoice(t, gridLine{"10.00", "4000", "", ""})
+	good := g.invoice(t, gridLine{"20.00", "4000", "", ""})
+	g.ledger.refuse[broken] = &ledgerclient.Error{Op: "post", Status: http.StatusServiceUnavailable}
+
+	if rec := do(g.handler, http.MethodPost, "/v1/billing/gl-postings", "", `{"legalEntityId":"`+leID+`"}`); rec.Code != http.StatusBadGateway {
+		t.Fatalf("first call %d, want 502", rec.Code)
+	}
+	if out := g.book(t, http.StatusOK, ""); len(out.Items) != 1 || out.Items[0].DocumentID != good {
+		t.Fatalf("second call %+v, want the failing document backed off and the good one booked", out)
+	}
+}
+
+func TestGLPostings_RefusalOfADocumentBookedMeanwhileIsNotAnError(t *testing.T) {
+	g := newGLRig(t, true)
+	id := g.invoice(t, gridLine{"10.00", "4000", "", ""})
+	g.ledger.refuse[id] = &ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: "LEDGER_CURRENCY_MISMATCH"}
+	g.ledger.onFail = func(documentID string) {
+		if _, err := g.admin.Exec(context.Background(), `update invoice set journal_posting_id = $2::uuid where id = $1::uuid`, documentID, ids.New()); err != nil {
+			t.Error(err)
+		}
+	}
+	if out := g.book(t, http.StatusOK, ""); len(out.Items) != 0 || len(out.Failed) != 0 {
+		t.Errorf("%+v, want a document booked by a concurrent call skipped, not reported", out)
 	}
 }
