@@ -65,6 +65,8 @@ func TestCostLedgerMonth_ReconcilesToGLForPrimaryCosts(t *testing.T) {
 	}
 
 	gl, usd, eur := ledgerclient.NewFake(), ids.New(), ids.New()
+	gl.AddLedger(usd, f.le)
+	gl.AddLedger(eur, f.le)
 	post := func(ledger, date, currency, account, amount string) {
 		t.Helper()
 		if _, err := gl.Post(f.ctx, ledgerclient.Entry{LegalEntityID: f.le, LedgerID: ledger, DocumentID: ids.New(), PostingDate: date, Currency: currency,
@@ -179,12 +181,57 @@ func TestCostLedgerMonth_ReconcilesToGLForPrimaryCosts(t *testing.T) {
 	if _, err := f.st.ReconcileToGL(f.ctx, gl, GLReconcileRequest{LegalEntityID: f.le, LedgerID: eur, Period: "2026-09", Currency: "USD"}); !hasCode(err, CodeLedgerCurrency) {
 		t.Errorf("currency mismatch: %v", err)
 	}
-	if _, err := f.st.ReconcileToGL(f.ctx, failingGL{}, GLReconcileRequest{LegalEntityID: f.le, LedgerID: usd, Period: "2026-09", Currency: "USD"}); !hasCode(err, CodeLedgerRefused) {
+	if _, err := f.st.ReconcileToGL(f.ctx, failingGL{gl}, GLReconcileRequest{LegalEntityID: f.le, LedgerID: usd, Period: "2026-09", Currency: "USD"}); !hasCode(err, CodeLedgerRefused) {
 		t.Errorf("ledger failure: %v", err)
 	}
 }
 
-type failingGL struct{}
+func TestReconcileToGL_YearEndMonthLeavesOutTheClosingEntry(t *testing.T) {
+	f := newLedger(t, 38)
+	cc := f.object(t, "CostCenter", "CC-DEC")
+	if _, _, err := f.st.MirrorJournalLines(f.ctx, ids.New(), "h", MirrorRequest{LegalEntityID: f.le, Lines: []MirrorLine{
+		{JournalLineID: ids.New(), MainAccount: "610100", CostObjectID: cc, Period: "2026-12", Currency: "USD", Amount: dec("1000.00")},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	gl, ledger := ledgerclient.NewFake(), ids.New()
+	gl.AddLedger(ledger, f.le)
+	post := func(date, sourceType, debit, credit string) {
+		t.Helper()
+		if _, err := gl.Post(f.ctx, ledgerclient.Entry{LegalEntityID: f.le, LedgerID: ledger, DocumentID: ids.New(), PostingDate: date, Currency: "USD",
+			IdempotencyKey: ids.New(), SourceType: sourceType, PostClosed: sourceType == YearEndClosingSource,
+			Lines: []ledgerclient.Line{{Account: debit, Amount: dec("1000.00")}, {Account: credit, Credit: true, Amount: dec("1000.00")}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	post("2026-12-10", "cost_booking", "610100", "400000")
+	post("2026-12-31", YearEndClosingSource, "300000", "610100")
+
+	recon, err := f.st.ReconcileToGL(f.ctx, gl, GLReconcileRequest{LegalEntityID: f.le, LedgerID: ledger, Period: "2026-12", Currency: "USD"})
+	if err != nil || !recon.Reconciled || len(recon.Lines) != 1 || !recon.Lines[0].Journal.Equal(dec("1000.00")) || !recon.Lines[0].CostLedger.Equal(dec("1000.00")) {
+		t.Fatalf("year-end month %+v (%v), want one element at 1000.00 on both sides", recon, err)
+	}
+
+	post("2026-12-20", "cost_booking", "610100", "400000")
+	if recon, err := f.st.ReconcileToGL(f.ctx, gl, GLReconcileRequest{LegalEntityID: f.le, LedgerID: ledger, Period: "2026-12"}); err != nil || recon.Reconciled ||
+		!recon.Lines[0].Difference.Equal(dec("1000.00")) {
+		t.Fatalf("an unmirrored booking next to the closing entry: %+v (%v)", recon, err)
+	}
+}
+
+func TestReconcileToGL_RefusesALedgerOfAnotherLegalEntity(t *testing.T) {
+	f := newLedger(t, 38)
+	gl, foreign, unknown := ledgerclient.NewFake(), ids.New(), ids.New()
+	gl.AddLedger(foreign, ids.New())
+	if _, err := f.st.ReconcileToGL(f.ctx, gl, GLReconcileRequest{LegalEntityID: f.le, LedgerID: foreign, Period: "2026-09"}); !hasCode(err, CodeLedgerForeign) {
+		t.Errorf("foreign ledger: %v", err)
+	}
+	if _, err := f.st.ReconcileToGL(f.ctx, gl, GLReconcileRequest{LegalEntityID: f.le, LedgerID: unknown, Period: "2026-09"}); !hasCode(err, CodeLedgerForeign) {
+		t.Errorf("unknown ledger: %v", err)
+	}
+}
+
+type failingGL struct{ *ledgerclient.Fake }
 
 func (failingGL) Balances(context.Context, ledgerclient.BalanceQuery) (ledgerclient.AccountBalances, error) {
 	return ledgerclient.AccountBalances{}, errors.New("ledger down")

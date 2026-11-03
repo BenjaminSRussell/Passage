@@ -24,6 +24,7 @@ type LineFilter struct {
 	DateTo       string
 	Voucher      string
 	SourceSystem string
+	SourceType   string
 	DocumentID   string
 	Dimensions   map[string]string
 	After        *LineCursor
@@ -110,6 +111,9 @@ func (s *Postgres) ListLines(ctx context.Context, f LineFilter) (LinePage, error
 	}
 	if f.SourceSystem != "" {
 		where += " and e.source_system = " + arg(f.SourceSystem) + "::text"
+	}
+	if f.SourceType != "" {
+		where += " and e.source_type = " + arg(f.SourceType) + "::text"
 	}
 	if f.DocumentID != "" {
 		where += " and e.document_id = " + arg(f.DocumentID) + "::uuid"

@@ -189,8 +189,11 @@ paths:
         FR-38.11. Compares Σ primary (Journal-origin) cost entries per element with the general ledger's balances for the
         period, read by the service through the ledger API for the legal entity's configured ledger; the request cannot
         supply balances (an unknown field is a 400). 503 CST-0031 when no ledger is configured, 422 CST-0032 for a legal
-        entity without a ledger, 502 CST-0030 when the ledger refuses or is down, 502 CST-0029 when it holds another
-        currency than the one asked for. Read-only: it stores nothing, so it takes no Idempotency-Key.
+        entity without a ledger, 502 CST-0030 when the ledger refuses or is down, 422 CST-0029 when it holds another
+        currency than the one asked for, CST-0033 (409) when the ledger belongs to another legal entity (422 when it is
+        unknown). The ledger's balances are read over the span of the primary account ranges and the entry that closes the
+        year (source type year_end_closing) is taken out, so a fiscal year-end month compares its own movements; accounts
+        in that span that no primary element maps come back in unmappedAccounts. Read-only: it stores nothing, so it takes no Idempotency-Key.
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/ReconcileRequest' } } }

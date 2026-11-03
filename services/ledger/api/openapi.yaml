@@ -2481,6 +2481,7 @@ paths:
         - { name: date_to, in: query, required: false, schema: { type: string, format: date } }
         - { name: voucher, in: query, required: false, schema: { type: string, maxLength: 30 } }
         - { name: source_system, in: query, required: false, schema: { type: string, maxLength: 64 } }
+        - { name: source_type, in: query, required: false, description: Only the lines of entries with this source type, for example year_end_closing, schema: { type: string, maxLength: 64 } }
         - { name: documentId, in: query, required: false, description: Only the lines of the entry posted for this source document, schema: { type: string, format: uuid } }
         - { name: cursor, in: query, required: false, description: The nextCursor of the previous page, schema: { type: string, pattern: '^[0-9]{1,18}\.[0-9]{1,5}$' } }
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 1000, default: 100 } }
