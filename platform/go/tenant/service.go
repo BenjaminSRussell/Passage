@@ -55,6 +55,12 @@ var (
 // Each grant holds only the narrow duties its caller signs (#333, #341).
 // policies/authz/data.json "service_grants" mirrors it and a test keeps them equal.
 var serviceGrants = map[string]map[string][]string{
+	"billing": {
+		"sales": {"sales.order.record-invoice", "sales.order.record-delivery"},
+	},
+	"fulfillment": {
+		"sales": {"sales.order.record-delivery"},
+	},
 	"batch": {
 		"product": {"product.variants.explode", "product.released.read", "product.jobs.write"},
 	},

@@ -190,6 +190,8 @@
     "Calculate tax": {"permissions": [{"resource": "/v1/tax/calculate", "methods": ["POST"]}]},
     "Calculate withholding tax": {"permissions": [{"resource": "/v1/tax/withholding/calculate", "methods": ["POST"]}]},
     "production.planned.intake": {"flag": true, "permissions": []},
+    "sales.order.record-delivery": {"permissions": [{"resource": "/v1/sales/orders/*:record-progress", "methods": ["POST"]}]},
+    "sales.order.record-invoice": {"permissions": [{"resource": "/v1/sales/orders/*:record-progress", "methods": ["POST"]}]},
     "tax.transaction.record": {"permissions": [{"resource": "/v1/tax/transactions", "methods": ["POST"]}]},
     "tax.settlement.run": {"permissions": [{"resource": "/v1/tax/settlements:run", "methods": ["POST"]}]},
     "tax.recommit.run": {"permissions": [{"resource": "/v1/tax/recommit:run", "methods": ["POST"]}]},
@@ -2557,7 +2559,8 @@
       {"resource": "/v1/sales/intake-errors", "methods": ["GET"]},
       {"resource": "/v1/sales/intake-errors/*", "methods": ["GET"]},
       {"resource": "/v1/sales/delivery-terms", "methods": ["GET"]},
-      {"resource": "/v1/sales/delivery-terms/*", "methods": ["GET"]}
+      {"resource": "/v1/sales/delivery-terms/*", "methods": ["GET"]},
+      {"resource": "/v1/sales/order-progress", "methods": ["GET"]}
     ]},
     "sales.order.write": {"permissions": [
       {"resource": "/v1/sales/orders", "methods": ["POST"]},
@@ -2831,6 +2834,12 @@
     "PlatformAdmin": {"permissions": [{"resource": "/api/v1/agents/kill-switch", "methods": ["GET", "POST"]}]}
   },
   "service_grants": {
+    "billing": {
+      "sales": ["sales.order.record-invoice", "sales.order.record-delivery"]
+    },
+    "fulfillment": {
+      "sales": ["sales.order.record-delivery"]
+    },
     "batch": {
       "product": ["product.variants.explode", "product.released.read", "product.jobs.write"]
     },
