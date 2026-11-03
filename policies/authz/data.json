@@ -1843,7 +1843,24 @@
       {"resource": "/v1/engineering/bom-versions/*:copy", "methods": ["POST"]},
       {"resource": "/v1/engineering/ecrs", "methods": ["POST"]},
       {"resource": "/v1/engineering/ecrs/*:submit", "methods": ["POST"]},
-      {"resource": "/v1/engineering/ecrs/*:cancel", "methods": ["POST"]}
+      {"resource": "/v1/engineering/ecrs/*:cancel", "methods": ["POST"]},
+      {"resource": "/v1/engineering/organizations", "methods": ["POST"]},
+      {"resource": "/v1/engineering/nomenclatures", "methods": ["POST"]},
+      {"resource": "/v1/engineering/categories", "methods": ["POST"]},
+      {"resource": "/v1/engineering/versions", "methods": ["POST"]},
+      {"resource": "/v1/engineering/identifiers", "methods": ["PUT"]},
+      {"resource": "/v1/engineering/release-policies", "methods": ["POST"]},
+      {"resource": "/v1/engineering/site-mappings", "methods": ["PUT"]},
+      {"resource": "/v1/engineering/release-sessions", "methods": ["POST"]},
+      {"resource": "/v1/engineering/readiness-policies", "methods": ["POST"]},
+      {"resource": "/v1/engineering/document-types", "methods": ["POST"]},
+      {"resource": "/v1/engineering/documents", "methods": ["POST"]},
+      {"resource": "/v1/engineering/documents/*:transition", "methods": ["POST"]},
+      {"resource": "/v1/engineering/documents/*/structure", "methods": ["PUT"]},
+      {"resource": "/v1/engineering/ebom-imports", "methods": ["POST"]}
+    ]},
+    "engineering.doc.sign": {"permissions": [
+      {"resource": "/v1/engineering/documents/*:sign", "methods": ["POST"]}
     ]},
     "engineering.eco.approve": {"permissions": [
       {"resource": "/v1/engineering/ecos/*:release", "methods": ["POST"]},
@@ -1883,7 +1900,39 @@
       {"resource": "/v1/engineering/route-versions:active", "methods": ["GET"]},
       {"resource": "/v1/engineering/routes:lead-time", "methods": ["POST"]},
       {"resource": "/v1/engineering/ecrs", "methods": ["GET"]},
-      {"resource": "/v1/engineering/ecrs/*", "methods": ["GET"]}
+      {"resource": "/v1/engineering/ecrs/*", "methods": ["GET"]},
+      {"resource": "/v1/engineering/organizations", "methods": ["GET"]},
+      {"resource": "/v1/engineering/organizations/*", "methods": ["GET"]},
+      {"resource": "/v1/engineering/nomenclatures", "methods": ["GET"]},
+      {"resource": "/v1/engineering/nomenclatures/*", "methods": ["GET"]},
+      {"resource": "/v1/engineering/nomenclatures/*:next", "methods": ["GET"]},
+      {"resource": "/v1/engineering/categories", "methods": ["GET"]},
+      {"resource": "/v1/engineering/categories/*", "methods": ["GET"]},
+      {"resource": "/v1/engineering/versions", "methods": ["GET"]},
+      {"resource": "/v1/engineering/versions/*", "methods": ["GET"]},
+      {"resource": "/v1/engineering/release-policies", "methods": ["GET"]},
+      {"resource": "/v1/engineering/release-policies/*", "methods": ["GET"]},
+      {"resource": "/v1/engineering/release-sessions", "methods": ["GET"]},
+      {"resource": "/v1/engineering/release-sessions/*", "methods": ["GET"]},
+      {"resource": "/v1/engineering/release-lines", "methods": ["GET"]},
+      {"resource": "/v1/engineering/readiness-policies", "methods": ["GET"]},
+      {"resource": "/v1/engineering/readiness-policies/*", "methods": ["GET"]},
+      {"resource": "/v1/engineering/released-products", "methods": ["GET"]},
+      {"resource": "/v1/engineering/released-products/*", "methods": ["GET"]},
+      {"resource": "/v1/engineering/released-products/*:process-policy", "methods": ["GET"]},
+      {"resource": "/v1/engineering/document-types", "methods": ["GET"]},
+      {"resource": "/v1/engineering/document-types/*", "methods": ["GET"]},
+      {"resource": "/v1/engineering/documents", "methods": ["GET"]},
+      {"resource": "/v1/engineering/documents/*", "methods": ["GET"]},
+      {"resource": "/v1/engineering/documents/*/signatures", "methods": ["GET"]},
+      {"resource": "/v1/engineering/documents/*/where-used", "methods": ["GET"]},
+      {"resource": "/v1/engineering/ebom-imports", "methods": ["GET"]},
+      {"resource": "/v1/engineering/ebom-imports/*", "methods": ["GET"]}
+    ]},
+    "engineering.release.accept": {"permissions": [
+      {"resource": "/v1/engineering/release-lines/*:accept", "methods": ["POST"]},
+      {"resource": "/v1/engineering/release-lines/*:reject", "methods": ["POST"]},
+      {"resource": "/v1/engineering/released-products/*/checks/*:sign", "methods": ["POST"]}
     ]},
     "engineering.resource.write": {"permissions": [
       {"resource": "/v1/engineering/calendars", "methods": ["POST"]},
@@ -3027,6 +3076,9 @@
     },
     "projects": {
       "ledger": ["ledger.entry.post", "ledger.balance.read"]
+    },
+    "engineering": {
+      "audit": ["audit.write"]
     },
     "revrec": {
       "ledger": ["ledger.entry.post", "ledger.balance.read"]
