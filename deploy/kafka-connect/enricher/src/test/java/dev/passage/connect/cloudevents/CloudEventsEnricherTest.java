@@ -80,6 +80,7 @@ class CloudEventsEnricherTest {
         assertEquals(TENANT, header(out, "ce_tenantid"));
         assertEquals(LE, header(out, "ce_legalentityid"));
         assertEquals("1.0", header(out, "ce_specversion"));
+        assertEquals("application/cloudevents+json", header(out, "content-type"));
         assertEquals(TENANT, header(out, "tenantid"), "router header is kept");
         assertEquals("agg-1", out.key());
         assertEquals("passage.platform.machineevent", out.topic());
@@ -144,10 +145,13 @@ class CloudEventsEnricherTest {
     void idempotentAndReplacesStaleCeHeaders() {
         SourceRecord in = record(event(), TENANT);
         in.headers().addString("ce_type", "stale");
+        in.headers().addString("content-type", "text/plain");
         SourceRecord once = smt.apply(in);
         SourceRecord twice = smt.apply(once);
         assertEquals(value(once), value(twice));
         assertEquals(1, countHeaders(twice, "ce_type"));
+        assertEquals(1, countHeaders(twice, "content-type"));
+        assertEquals("application/cloudevents+json", header(twice, "content-type"));
         assertEquals("dev.passage.manufacturing.machineevent.recorded.v1", header(twice, "ce_type"));
     }
 

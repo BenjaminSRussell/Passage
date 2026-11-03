@@ -80,18 +80,10 @@ spec:
     status.storage.replication.factor: 3
     config.providers: secrets
     config.providers.secrets.class: io.strimzi.kafka.KubernetesSecretConfigProvider
-  build:
-    output:
-      type: docker
-      image: ghcr.io/benjaminsrussell/passage-connect:debezium-3
-      pushSecret: ghcr-push
-    plugins:
-      - name: debezium-postgres
-        artifacts:
-          - type: maven
-            group: io.debezium
-            artifact: debezium-connector-postgres
-            version: 3.0.7.Final
+  # Built from deploy/kafka-connect/Dockerfile by the connect-image job in .github/workflows/ci.yml:
+  # Strimzi 0.46.0 / Kafka 4.0.0 plus the Debezium Postgres 3.0.7.Final connector and the
+  # passage-cloudevents-enricher SMT. The tag names both versions; bump it with either.
+  image: ghcr.io/benjaminsrussell/passage-connect:debezium-3.0.7-enricher-0.1.0
 ---
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaConnector
@@ -127,7 +119,7 @@ spec:
     topic.creation.machineevent.replication.factor: 3
     topic.creation.machineevent.cleanup.policy: delete
     topic.creation.machineevent.retention.ms: 604800000
-    transforms: outbox
+    transforms: outbox,enrich
     transforms.outbox.type: io.debezium.transforms.outbox.EventRouter
     transforms.outbox.table.field.event.id: id
     transforms.outbox.table.field.event.key: aggregate_id
@@ -136,6 +128,8 @@ spec:
     transforms.outbox.route.topic.replacement: passage.platform.${routedByValue}
     transforms.outbox.table.expand.json.payload: true
     transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
+    transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher
+    transforms.enrich.source.default: passage
     key.converter: org.apache.kafka.connect.storage.StringConverter
     value.converter: org.apache.kafka.connect.json.JsonConverter
     value.converter.schemas.enable: false
@@ -145,9 +139,11 @@ spec:
 # Topic naming: services/metadata writes aggregate_type "entity" and events.Topic
 # maps dev.passage.metadata.entity.published.v1 to passage.metadata.entity, which
 # is also the AsyncAPI channel; PRD FR-4.1 and AC-4.5 use the same name.
-# Outbox payloads are complete CloudEvents (platform/go/outbox), so they pass
-# through unchanged: table.expand.json.payload emits the JSON object and
-# JsonConverter serializes it; tenant_id travels as the tenantid header.
+# Outbox payloads are complete CloudEvents (platform/go/outbox): table.expand.json.payload
+# emits the JSON object, the enrich SMT (deploy/kafka-connect/enricher) fills tenantid
+# from the tenantid header (outbox.tenant_id) and legalentityid from the payload when
+# absent, rejects a non-conforming envelope, and adds content-type and ce_* headers;
+# JsonConverter serializes it.
 # Config keys: https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html
 # The key is aggregate_id (FR-4.1): pgoutput on PG16 does not replicate generated
 # columns such as batch's partition_key.
@@ -180,7 +176,7 @@ spec:
     topic.creation.default.partitions: 12
     topic.creation.default.cleanup.policy: delete
     topic.creation.default.retention.ms: 604800000
-    transforms: outbox
+    transforms: outbox,enrich
     transforms.outbox.type: io.debezium.transforms.outbox.EventRouter
     transforms.outbox.table.field.event.id: id
     transforms.outbox.table.field.event.key: aggregate_id
@@ -189,6 +185,8 @@ spec:
     transforms.outbox.route.topic.replacement: passage.metadata.${routedByValue}
     transforms.outbox.table.expand.json.payload: true
     transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
+    transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher
+    transforms.enrich.source.default: passage
     key.converter: org.apache.kafka.connect.storage.StringConverter
     value.converter: org.apache.kafka.connect.json.JsonConverter
     value.converter.schemas.enable: false
@@ -228,7 +226,7 @@ spec:
     topic.creation.default.partitions: 12
     topic.creation.default.cleanup.policy: delete
     topic.creation.default.retention.ms: 604800000
-    transforms: outbox
+    transforms: outbox,enrich
     transforms.outbox.type: io.debezium.transforms.outbox.EventRouter
     transforms.outbox.table.field.event.id: id
     transforms.outbox.table.field.event.key: aggregate_id
@@ -237,6 +235,8 @@ spec:
     transforms.outbox.route.topic.replacement: passage.receiving.${routedByValue}
     transforms.outbox.table.expand.json.payload: true
     transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
+    transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher
+    transforms.enrich.source.default: passage
     key.converter: org.apache.kafka.connect.storage.StringConverter
     value.converter: org.apache.kafka.connect.json.JsonConverter
     value.converter.schemas.enable: false
@@ -277,7 +277,7 @@ spec:
     topic.creation.default.partitions: 12
     topic.creation.default.cleanup.policy: delete
     topic.creation.default.retention.ms: 604800000
-    transforms: outbox
+    transforms: outbox,enrich
     transforms.outbox.type: io.debezium.transforms.outbox.EventRouter
     transforms.outbox.table.field.event.id: id
     transforms.outbox.table.field.event.key: aggregate_id
@@ -286,6 +286,8 @@ spec:
     transforms.outbox.route.topic.replacement: passage.eam.${routedByValue}
     transforms.outbox.table.expand.json.payload: true
     transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
+    transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher
+    transforms.enrich.source.default: passage
     key.converter: org.apache.kafka.connect.storage.StringConverter
     value.converter: org.apache.kafka.connect.json.JsonConverter
     value.converter.schemas.enable: false

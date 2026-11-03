@@ -16,6 +16,8 @@
     <maven.compiler.release>17</maven.compiler.release>
     <kafka.version>4.0.0</kafka.version>
     <junit.version>5.11.4</junit.version>
+    <!-- Must match the debezium-postgres plugin in deploy/kafka-connect/Dockerfile. -->
+    <debezium.version>3.0.7.Final</debezium.version>
   </properties>
 
   <dependencies>
@@ -35,6 +37,19 @@
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
       <version>${junit.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <!-- The real router and converters, so the chain test runs the SMT on what Connect hands it in production. -->
+    <dependency>
+      <groupId>io.debezium</groupId>
+      <artifactId>debezium-core</artifactId>
+      <version>${debezium.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.kafka</groupId>
+      <artifactId>connect-json</artifactId>
+      <version>${kafka.version}</version>
       <scope>test</scope>
     </dependency>
     <!-- Kafka provided jars log through slf4j; the test classpath needs a binding or at least the API. -->
