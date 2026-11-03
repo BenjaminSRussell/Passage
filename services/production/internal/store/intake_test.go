@@ -162,6 +162,34 @@ func TestIntake_ListPagesNewestFirst(t *testing.T) {
 	}
 }
 
+// The legal entity a firmed event carries is stored on the intake row (and none stays none).
+func TestIntake_StoresTheLegalEntityOfTheFirmedEvent(t *testing.T) {
+	pool, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(93))
+	le := ids.New()
+	with, without := firmedIn(nil), firmedIn(nil)
+	with.LegalEntityID = &le
+	if !record(t, pool, s, ctx, with) || !record(t, pool, s, ctx, without) {
+		t.Fatal("rows not stored")
+	}
+	page, err := s.ListPlannedIntake(ctx, IntakeFilter{})
+	if err != nil || len(page.Items) != 2 {
+		t.Fatalf("rows: %+v %v", page.Items, err)
+	}
+	for _, row := range page.Items {
+		switch row.PlannedOrderID {
+		case with.PlannedOrderID:
+			if row.LegalEntityID == nil || *row.LegalEntityID != le {
+				t.Fatalf("legal entity not stored: %+v", row)
+			}
+		case without.PlannedOrderID:
+			if row.LegalEntityID != nil {
+				t.Fatalf("unexpected legal entity: %+v", row)
+			}
+		}
+	}
+}
+
 // Under the NOSUPERUSER NOBYPASSRLS application role the intake table is granted (select, insert,
 // update) and scoped by tenant.
 func TestIntake_RowLevelSecurity(t *testing.T) {

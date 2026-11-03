@@ -157,6 +157,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyCostRead)).Get("/v1/production/variances", a.varianceReport)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/subcontract-operations", a.subcontractReport)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/operations", a.operationsOverview)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/material-requirements", a.materialRequirements)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/material-requirements/by-item", a.materialItems)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/journals", a.journalInquiry)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/kpi", a.orderKPIs)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/jobs", a.listJobs)

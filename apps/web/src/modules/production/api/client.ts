@@ -1330,6 +1330,78 @@ export async function getOperationsOverview({ limit = 50, ...filter }: Operation
   };
 }
 
+/** One BOM line of an open order with what is still to issue (4.21.14 material requirements). */
+export interface MaterialLineRow {
+  orderId: string;
+  orderNumber: string;
+  orderStatus: ProductionStatus;
+  legalEntityId: string;
+  siteId: string;
+  productId: string;
+  /** The order's delivery date. */
+  dueDate: string | null;
+  lineNumber: string;
+  itemId: string;
+  qtyRequired: string;
+  /** The line's booked consumption: posted picking lists (backflush included), net of reversals and split transfers. */
+  qtyIssued: string;
+  qtyOutstanding: string;
+}
+
+export interface MaterialRequirements {
+  items: MaterialLineRow[];
+  totals: { lines: number; items: number; orders: number };
+  nextCursor?: string;
+}
+
+/** The outstanding demand of one component over the filtered orders. */
+export interface MaterialItemRow {
+  itemId: string;
+  orders: number;
+  lines: number;
+  qtyRequired: string;
+  qtyIssued: string;
+  qtyOutstanding: string;
+  /** The earliest delivery date of the orders still waiting for the item. */
+  earliestDue: string | null;
+}
+
+export interface MaterialItems {
+  items: MaterialItemRow[];
+  nextCursor?: string;
+}
+
+export interface MaterialQuery {
+  itemId?: string;
+  siteId?: string;
+  orderId?: string;
+  orderStatus?: ProductionStatus | "";
+  dueFrom?: string;
+  dueTo?: string;
+  /** Also list fully issued lines and items. */
+  all?: boolean;
+  cursor?: string;
+  limit?: number;
+}
+
+const materialQuery = ({ all, limit = 50, ...filter }: MaterialQuery) => query({ ...filter, all: all ? "true" : undefined, limit });
+
+/** The BOM lines of open orders with required, issued and outstanding quantities (4.21.14). */
+export async function getMaterialRequirements(filter: MaterialQuery = {}, signal?: AbortSignal): Promise<MaterialRequirements> {
+  const body = await requestAt<Partial<MaterialRequirements>>(`${root}/material-requirements?${materialQuery(filter)}`, { signal });
+  return {
+    items: Array.isArray(body.items) ? body.items : [],
+    totals: body.totals ?? { lines: 0, items: 0, orders: 0 },
+    nextCursor: body.nextCursor,
+  };
+}
+
+/** The same demand rolled up per component item. */
+export async function getMaterialItems(filter: MaterialQuery = {}, signal?: AbortSignal): Promise<MaterialItems> {
+  const body = await requestAt<Partial<MaterialItems>>(`${root}/material-requirements/by-item?${materialQuery(filter)}`, { signal });
+  return { items: Array.isArray(body.items) ? body.items : [], nextCursor: body.nextCursor };
+}
+
 /** The dated jobs across orders, by planned start (the load of a resource over a window). */
 export async function getJobs({ limit = 50, ...filter }: JobsQuery = {}, signal?: AbortSignal): Promise<JobPage> {
   const body = await requestAt<Partial<JobPage>>(`${root}/jobs?${query({ ...filter, limit })}`, { signal });

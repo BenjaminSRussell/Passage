@@ -38,8 +38,8 @@ type PlanningStore interface {
 }
 
 type plannedOrderFirmedData struct {
-	// LegalEntityID is not in planning's plannedorder.firmed.v1 yet (handoff, NOT-IMPLEMENTED.md); when
-	// planning adds it, the platform also copies it into the CloudEvents legalentityid extension.
+	// LegalEntityID is planning's plannedorder.firmed.v1 legal_entity_id (wave 22 slice 29); the platform
+	// also copies it into the CloudEvents legalentityid extension, which the consumer reads as a fallback.
 	LegalEntityID      string  `json:"legal_entity_id"`
 	PlannedOrderID     string  `json:"planned_order_id"`
 	PlanVersionID      string  `json:"plan_version_id"`
