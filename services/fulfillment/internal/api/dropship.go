@@ -83,6 +83,16 @@ func (a *API) createDropShip(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, "orderType", "must be JOURNAL, ORDER, SUBSCRIPTION or RETURNED when given")
 		return
 	}
+	// The stored order type (sales' order.confirmed.v1) overrides the caller's value, except
+	// that a caller's JOURNAL is kept (the stricter value wins).
+	stored, err := a.storedOrderTypes(r.Context(), req.OrderID)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if t, ok := stored[strings.ToLower(req.OrderID)]; ok && req.OrderType != domain.OrderTypeJournal {
+		req.OrderType = t
+	}
 	if req.OrderType == domain.OrderTypeJournal {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeJournalOrder, "FUL-0065: a JOURNAL order never ships, so it has no drop-ship"))
 		return

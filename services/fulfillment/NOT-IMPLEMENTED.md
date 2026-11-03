@@ -276,6 +276,43 @@ can only leave quantity for the next run, never release it twice. Known limit: t
 `atpQty` with the order line quantity, so with full ATP required a remainder whose ATP covers it but not the whole
 line is skipped as `atp_short` until full ATP is turned off or the ATP covers the line.
 
+Slice 19 follows sales' events so fulfillment no longer depends on the release caller to know a JOURNAL order or an
+order on hold (BR-27.7, section 5.28.5). The service gets a consumer mode (`fulfillment consume`, the same image;
+`consumer.enabled` in the chart, off by default) built on the platform eventing consumer: consumer
+`fulfillment-order` (Kafka group of the same name) follows `dev.passage.sales.order.confirmed.v1` on
+`passage.sales.order` and `dev.passage.sales.orderhold.applied.v1` / `released.v1` on `passage.sales.orderhold`,
+runs as the service principal `service:fulfillment-order` with the flag duty `fulfillment.order.sync`, reads through the
+`consumer_inbox` (migration 0023, tenant RLS, SELECT and INSERT for `passage_app`), checks the CloudEvents `source` is
+`sales` and dead-letters anything else (and any event that is malformed) to `passage.sales.order.dlq`, and retries
+store errors. It stores `sales_order_type` (order id to type, ordered by the sales order `version`, so an older event
+never turns a newer type back) and `sales_order_hold` (one row per hold, active after applied and inactive after
+released, same ordering; SELECT, INSERT, UPDATE). Both have tenant RLS, enabled and forced. Release now replaces the
+caller's `orderType` of every line with the stored one, except that JOURNAL from either side wins (a stored JOURNAL
+order is skipped as `journal_order` whatever the caller sent, and a caller's JOURNAL is kept over a stored ORDER, so
+the override only ever moves toward not shipping; the stored type may lag a newer sales version), marks the lines of
+an order with an active hold `held`, and `POST /drop-ships` refuses a stored JOURNAL order (or a caller's JOURNAL)
+with FUL-0065. The packing slip post is refused with FUL-0001 while the order has an active hold, and with FUL-0065
+when sales confirmed the order as JOURNAL even if its shipment was released as ORDER before the event arrived.
+Holds are ordered per hold by the sales order `version` the event carries (sales writes the order version after the
+apply or release, so a release is always newer than its apply); a release delivered before its apply leaves the hold
+inactive. An `order.confirmed` without `order_type` is dead-lettered, never read as ORDER. Neither sales event
+carries `legal_entity_id`, so `sales_order_type` and `sales_order_hold` have no legal-entity column or policy: they
+are tenant-scoped and read only by order id inside release, drop-ship creation and post, never listed. An order fulfillment has not heard of keeps today's
+behaviour. The consumer exits at start until its principal is seeded. No new route and no new entity with a screen, so
+no web change; the OpenAPI describes the new FUL-0001 case on the post and the AsyncAPI lists the three consumed
+events, both with zero FAIL lines on the doc gates. Not built: storing or using the per-line `atp_qty`, a hold check on
+pick, pack and auto-pack (the PRD's validation names post only; post is the goods issue, so a held order's packed
+shipment waits at PACKED), a hold check on drop-ship creation and vendor confirmation (a confirmation records a
+shipment the vendor already made), and a hold or order type screen.
+
+Handoffs from slice 19:
+
+| Item | Status | Reason |
+|---|---|---|
+| Authz seed: service principal `fulfillment-order` with duty `fulfillment.order.sync`, issuer-bound to the `fulfillment` service (`platform/go/tenant/serviceprincipal.go` `servicePrincipals` and `servicePrincipalIssuers`, and `policies/authz/data.json` `service_principals`, as for `shopfloor-production`). `fulfillment.order.sync` is a flag duty held only by that principal: no user role, no nav item, no route. | handoff for #313 (authz seed) | The consumer refuses to start until the table has it (`orderSeeded`), and the handlers refuse a principal without the duty. |
+| Deploy: Kafka topics `passage.sales.order`, `passage.sales.orderhold` (already produced by sales' outbox relay) and the dead-letter topic `passage.sales.order.dlq` (create it); ACLs for the Kafka user `fulfillment-consumer` (secret named by `consumer.kafka.secret`): read on the two sales topics, consumer group `fulfillment-order`, write on the dead-letter topic. Then set `consumer.enabled`, `consumer.kafka.brokers` and `consumer.kafka.secret` in the environment values. | handoff to platform / deploy | Nothing is provisioned from this service. The migration is run by the PreSync job as for the API. |
+| Existing orders: only events consumed after the consumer starts are known, so orders confirmed or held earlier stay unknown (caller's type, no hold) until sales republishes them or a replay from the topic start is run (the inbox makes a replay safe). | deviation; handoff to deploy | Start the consumer group from the earliest offset when it is first enabled. |
+
 ## Important gaps (read first)
 
 | Item | Status | Reason |
@@ -285,13 +322,13 @@ line is skipped as `atp_short` until full ATP is turned off or the ATP covers th
 | Posting is a single local transaction, not a Temporal saga. There is no PENDING state, no compensation at step 3, and no 10-minute watchdog. | later slice of PSG-28 | The saga needs the Temporal worker, which is in the eventing-backbone scope. The store is written so that the ledger step can be added as a saga step. |
 | The `short_pick_action` setting is applied when a packing slip posts and leaves a remainder open (slice 13), not at pick time as the PRD parameter table places it (FR-28.2), and a pick below plan does not close or move anything by itself. Sales (wave 27) does not yet consume `shipment.closed` to cancel the order line remainder, nor read its `backorder_shipment_id` (and `shipment.released`'s `backorder_of`) to keep the order lines open instead of counting them as released twice. | deviation; handoff to sales (wave 27) | A post needs every picked unit packed, so the remainder at post is exactly what the picks fell short of and the outcome matches a pick-time action; closing needs something shipped (FUL-0021 otherwise), and the line keeps its pick progress until then. The only difference is timing: the reservation of the remainder is released by `pick.confirmed` (`backordered`) at pick time either way. Slice 7 delivers the manual close, slice 13 the setting and the backorder shipment (see above). |
 | A re-pick of a partially shipped shipment confirms the remainder in one call: the shipment goes to PICKED at once (its lines stay pick-confirmed), so a second confirm-pick before packing is refused (FUL-0001). Lines left out of the call keep their remainder for a later round. | later slice of PSG-28 | Per-line pick status for remainder rounds belongs with pick work per wave (wave 31 brings directed pick work). |
-| Post does not check for an ACTIVE order hold (§5.28.5 validation, FUL-0001 "no active hold"). Holds are only honoured at release (`held` on the release line). | handoff to sales (wave 27) for the hold read; later slice of PSG-28 for the check | The order hold API of wave 27 is not consumed yet. |
+| Post and release honour sales' order holds only after the consumer runs: until `service:fulfillment-order` is seeded and the consumer deployment is enabled, no hold is known and post does not check one (slice 19). Pick, pack and auto-pack do not check holds (the PRD names post only). | handoff (authz seed and deploy, see slice 19 below) | The check itself is built: post is refused with FUL-0001 while the order has an active hold, and release skips its lines as `held`.
 | The cost on each line comes from the caller (`costs[]`), not from wave 20 cost snapshots. | handoff to inventory costing (wave 20) | Cost snapshot ownership is outside this wave. The caller supplies `costSnapshotId` and `unitCost`. |
 | AC-28.4: a short pick leaves the remainder on the shipment (re-picked from `PARTIALLY_SHIPPED`), `pick.confirmed` carries the `backordered` quantity, and the short picks and backorders report shows the open remainder (slice 6). Releasing the unpicked reservation is not done here. | handoff to inventory reservations (wave 16) | Reservations are owned by wave 16; inventory consumes `pick.confirmed` (`backordered`), `shipment.cancelled` and `shipment.closed` (`qty` to unreserve, `picked_unpacked` to put back). No inventory consumer exists yet. |
 | The packaging fee is statistical only. The `packaging_fee_billable` SURCHARGE / FREIGHT line with its own tax code (BR-28.12) is not created here. | handoff to billing (wave 29) | Billing owns invoice lines. The fee lines are on the slip and in `packingslip.posted.v1` (`packaging_fees`), so wave 29 can bill them when `packaging_fee_billable` is set. The setting itself is not modelled here. |
 | Auto-pack takes unit weights per shipment line from the caller (`unitWeights`); a line without one is limited by quantity only. | handoff to product (wave 8) for unit weights | Product weights and packaging units belong to the product master (wave 8). |
 | The ship-to country of the packaging fee comes from the caller (`countryCode` on the post), not from the order's ship-to address. | handoff to sales (wave 27) | The order ship-to is not read yet. Without a country no fee is posted. |
-| Whether an order is a JOURNAL order (never ships) comes from the release caller, not from sales data held here: a JOURNAL order whose lines are offered without `orderType` read as ORDER and **are released and shipped** | handoff to sales (wave 27); later slice of PSG-28 for a fulfillment-side source of truth | This service consumes no sales events and keeps no copy of the order, so it cannot decide the type itself. Sales, when it builds the call to `POST /v1/fulfillment/releases:run` (and `POST /v1/fulfillment/drop-ships`), must set `orderType` on every line to the order's `order_type` (sales `sales_order.order_type`, the `order_type` member of `dev.passage.sales.order.confirmed.v1`), `priority` to the order priority (1 to 9) and `atpQty` to the line's confirmed ATP quantity; a JOURNAL order's lines may also simply not be offered. Sales must also read `shipment.released` line quantities as what was released (a partial release releases less than the order line and a later run the rest), not mark the line fully released. The durable fix is a fulfillment consumer of `order.confirmed.v1` that stores `order_id → order_type` and lets release prefer the stored type (refusing a caller type that contradicts it); no consumer infrastructure exists in this service yet. |
+| Whether an order is a JOURNAL order is now taken from the stored `order.confirmed.v1` type (slice 19); a release or drop-ship for an order fulfillment has not heard of (the event not yet consumed, or the consumer not yet enabled) still takes the caller's `orderType`, and a JOURNAL order whose lines are then offered without it **is released and shipped**. | handoff to sales (wave 27) to keep sending `orderType`, `priority` and `atpQty` on its release call until the consumer is enabled everywhere; authz seed and deploy handoffs below | Sales must also read `shipment.released` line quantities as what was released (a partial release releases less than the order line and a later run the rest), not mark the line fully released. The per-line `atp_qty` of `order.confirmed.v1` (sales slice 22) is optional and not stored or used yet; release still takes `atpQty` from the caller.
 
 Slice 12 adds nested containers, pallet to carton (FR-28.3; `container.parent_container_id` of section 5.28.4).
 Migration 0013 gives `container` a `parent_container_id` (no new table, the

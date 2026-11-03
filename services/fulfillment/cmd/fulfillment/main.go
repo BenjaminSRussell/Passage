@@ -30,12 +30,26 @@ func main() {
 
 func run() error {
 	ctx := context.Background()
-	if err := tenant.ConfigureServiceVerifier(os.Getenv); err != nil {
-		return err
+	consume := len(os.Args) > 1 && os.Args[1] == "consume"
+	if len(os.Args) > 1 && !consume {
+		return fmt.Errorf("unknown command %q (use no argument to serve or \"consume\" to run the sales order consumer)", os.Args[1])
 	}
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		return errors.New("DATABASE_URL is required")
+	}
+	if consume {
+		// The consumer only stores sales' order types: it has no HTTP API, no SSCC or release
+		// settings and no service token verifier.
+		pool, err := dbx.Connect(ctx, dsn)
+		if err != nil {
+			return fmt.Errorf("connect: %w", err)
+		}
+		defer pool.Close()
+		return runConsumer(ctx, os.Getenv, store.New(pool, "", 0), pool)
+	}
+	if err := tenant.ConfigureServiceVerifier(os.Getenv); err != nil {
+		return err
 	}
 	prefix := os.Getenv("GS1_COMPANY_PREFIX")
 	if !gs1Prefix.MatchString(prefix) {
@@ -62,11 +76,10 @@ func run() error {
 		}
 	}
 
+	s := store.New(pool, prefix, ext).WithReleaseDefaults(horizon, fullATP)
 	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
 		return err
 	}
-
-	s := store.New(pool, prefix, ext).WithReleaseDefaults(horizon, fullATP)
 	r := httpx.NewRouter()
 	api.New(s, api.Options{ReleaseHorizonDays: horizon, RequireFullATP: fullATP}).Routes(r)
 

@@ -121,7 +121,46 @@ channels:
     messages:
       trackingUpdated:
         $ref: "#/components/messages/TrackingUpdated"
+  salesOrder:
+    address: passage.sales.order
+    description: |
+      Sales' confirmed orders (w27), consumed by the `fulfillment-order` consumer (service principal
+      `service:fulfillment-order`, duty `fulfillment.order.sync`). Fulfillment keeps the order type per
+      sales order; release and drop-ship creation use it in place of a caller-supplied `orderType` (JOURNAL
+      from either side wins) and the packing slip post refuses a stored JOURNAL order (FUL-0065), so a
+      JOURNAL order never ships. An event without `order_type` is dead-lettered. The consumer keeps the highest sales order `version` and refuses
+      (dead-letters) an event whose CloudEvents `source` is not `sales`.
+    messages:
+      orderConfirmed:
+        $ref: "#/components/messages/OrderConfirmed"
+  salesOrderHold:
+    address: passage.sales.orderhold
+    description: |
+      Sales' order holds (w27), consumed by the same `fulfillment-order` consumer. An active hold
+      (applied, not yet released) stops the packing slip post (FUL-0001) and release skips the order's
+      lines as `held`. The consumer keeps the highest sales order `version` per hold and refuses
+      (dead-letters) an event whose CloudEvents `source` is not `sales`.
+    messages:
+      orderHoldApplied:
+        $ref: "#/components/messages/OrderHoldApplied"
+      orderHoldReleased:
+        $ref: "#/components/messages/OrderHoldReleased"
 operations:
+  receiveOrderHoldApplied:
+    action: receive
+    channel: { $ref: "#/channels/salesOrderHold" }
+    messages:
+      - $ref: "#/channels/salesOrderHold/messages/orderHoldApplied"
+  receiveOrderHoldReleased:
+    action: receive
+    channel: { $ref: "#/channels/salesOrderHold" }
+    messages:
+      - $ref: "#/channels/salesOrderHold/messages/orderHoldReleased"
+  receiveOrderConfirmed:
+    action: receive
+    channel: { $ref: "#/channels/salesOrder" }
+    messages:
+      - $ref: "#/channels/salesOrder/messages/orderConfirmed"
   publishShipmentReleased:
     action: send
     channel: { $ref: "#/channels/shipmentReleased" }
@@ -234,6 +273,27 @@ operations:
       - $ref: "#/channels/trackingUpdated/messages/trackingUpdated"
 components:
   messages:
+    OrderHoldApplied:
+      x-passage-type: dev.passage.sales.orderhold.applied.v1
+      contentType: application/cloudevents+json
+      summary: Sales applied a hold to an order (consumed)
+      description: Published by sales (w27); fulfillment marks the hold active. Only `order_id`, `hold_id`, `hold_type` and `version` are read.
+      payload:
+        $ref: "#/components/schemas/OrderHoldData"
+    OrderHoldReleased:
+      x-passage-type: dev.passage.sales.orderhold.released.v1
+      contentType: application/cloudevents+json
+      summary: Sales released an order hold (consumed)
+      description: Published by sales (w27); fulfillment marks the hold inactive. Same payload as the applied event.
+      payload:
+        $ref: "#/components/schemas/OrderHoldData"
+    OrderConfirmed:
+      x-passage-type: dev.passage.sales.order.confirmed.v1
+      contentType: application/cloudevents+json
+      summary: Sales confirmed an order (consumed)
+      description: Published by sales (w27); fulfillment stores the order type per sales order. Only `order_id`, `order_type` and `version` are read; the per-line `atp_qty` sales adds in a later slice is optional and not stored yet.
+      payload:
+        $ref: "#/components/schemas/OrderConfirmedData"
     ShipmentReleased:
       name: dev.passage.fulfillment.shipment.released.v1
       title: Shipment released
@@ -698,6 +758,32 @@ components:
           description: { type: string }
           event_time: { type: string, format: date-time }
   schemas:
+    OrderHoldData:
+      type: object
+      description: The part of sales' payload fulfillment reads.
+      required: [order_id, hold_id, hold_type, version]
+      properties:
+        order_id: { type: string, format: uuid }
+        hold_id: { type: string, format: uuid }
+        hold_type: { type: string, description: The sales hold type, for example CREDIT. }
+        version:
+          type: integer
+          minimum: 1
+          description: The sales order version; an older event never overwrites a newer one.
+    OrderConfirmedData:
+      type: object
+      description: The part of sales' payload fulfillment reads.
+      required: [order_id, order_type, version]
+      properties:
+        order_id: { type: string, format: uuid }
+        order_type:
+          type: string
+          enum: [ORDER, JOURNAL, SUBSCRIPTION, RETURNED]
+          description: A JOURNAL order never ships (BR-27.7).
+        version:
+          type: integer
+          minimum: 1
+          description: The sales order version; an older event never overwrites a newer one.
     DropShipPayload:
       type: object
       required: [drop_ship_id, drop_ship_number, status, legal_entity_id, order_id, order_line_id, customer_id, product_id, unit, qty, vendor_id, purchase_order_id, purchase_order_line_id, unit_cost, currency, qty_confirmed, qty_closed, journal]

@@ -48,6 +48,8 @@ type fakeStore struct {
 	ssccRows        []store.SSCCRow
 	ssccCalls       int
 	reports         reportCalls
+	orderTypes      map[string]string
+	heldOrders      map[string]bool
 }
 
 func (f *fakeStore) RunRelease(_ context.Context, warehouseID string, groups []domain.ReleaseGroup, idem store.Idem) (store.ReleaseResult, error) {

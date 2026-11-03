@@ -312,6 +312,7 @@ type Store interface {
 	ListSSCCs(ctx context.Context, f SSCCFilter) ([]SSCCRow, error)
 	// ListBackorders is the short picks and backorders report (FR-28.2, backorders.go).
 	ListBackorders(ctx context.Context, f BackorderFilter) ([]BackorderRow, error)
+	SalesOrderStore
 	PackingStore
 	WorkbenchStore
 	WavePickStore
@@ -1062,6 +1063,12 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 			}
 			if sh.Status != domain.StatusPacked {
 				return PackingSlip{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeStatus, domain.ErrStatusNotPacked.Error())
+			}
+			// Section 5.28.5: a post needs no ACTIVE hold on the order, and an order sales
+			// confirmed as JOURNAL never ships even when its shipment was released before
+			// fulfillment heard the type (sales order events, slice 19).
+			if err := checkSalesOrder(ctx, tx, sh.OrderID); err != nil {
+				return PackingSlip{}, err
 			}
 			// cogs_at_shipment is the legal entity's accounting policy (BR-28.1): a post
 			// takes it, and a request that names the other value is refused rather

@@ -536,7 +536,7 @@ paths:
                       carrierCode: { type: string, pattern: '^[A-Za-z0-9_.-]{1,32}$', description: "The order's carrier; every line of one order names the same one." }
                       zone: { type: string, pattern: '^[A-Za-z0-9_.-]{1,32}$', description: The line's pick zone. }
                       trackingRequired: { type: boolean, description: "The product is batch or serial tracked (BR-28.10)." }
-                      orderType: { type: string, enum: [ORDER, JOURNAL, SUBSCRIPTION, RETURNED], description: "order_type of order.confirmed; ORDER when left out. A JOURNAL order never ships, so its lines are skipped (journal_order). Every line of one order names the same type." }
+                      orderType: { type: string, enum: [ORDER, JOURNAL, SUBSCRIPTION, RETURNED], description: "order_type of order.confirmed; ORDER when left out. A JOURNAL order never ships, so its lines are skipped (journal_order). Every line of one order names the same type. The type fulfillment stored from sales' order.confirmed.v1 replaces this value, except that JOURNAL from either side wins." }
                       priority: { type: integer, minimum: 1, maximum: 9, description: "The order priority, 1 first; 5 when left out. Shipments of higher priority orders are created first. Every line of one order names the same one." }
                       atpQty: { $ref: "#/components/schemas/Decimal", description: "Quantity available to promise now, 0 or more. When requireFullAtp is false (request or warehouse rule) and it is below qty, the line is released for atpQty, flagged partial, and a later run releases what is still open; with requireFullAtp true a line above its atpQty is skipped as atp_short. Without atpQty only atpOk decides." }
       responses:
@@ -777,7 +777,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: FUL-0020, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0001 not PACKED, FUL-0065 a JOURNAL order, FUL-0006 a tracking-required line's open batch and serial entries do not cover exactly the quantity it ships, FUL-0014 packaging fee rate missing for a shipped material, FUL-0042 cost missing, FUL-0044 nothing to ship, FUL-0059 cogsAtShipment contradicts the legal entity's cogs_at_shipment policy, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 not PACKED or the order has an active hold (sales orderhold.applied.v1 without its release), FUL-0065 a JOURNAL order (the shipment's type or the type stored from sales' order.confirmed.v1), FUL-0006 a tracking-required line's open batch and serial entries do not cover exactly the quantity it ships, FUL-0014 packaging fee rate missing for a shipped material, FUL-0042 cost missing, FUL-0044 nothing to ship, FUL-0059 cogsAtShipment contradicts the legal entity's cogs_at_shipment policy, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/packing-slips/{id}:cancel:
     post:
@@ -2189,7 +2189,7 @@ paths:
                 purchaseOrderLineId: { type: string, format: uuid }
                 unitCost: { type: string, description: "Purchase order cost per unit, a positive decimal with at most 6 decimals." }
                 currency: { type: string, pattern: "^[A-Z]{3}$" }
-                orderType: { type: string, enum: [ORDER, JOURNAL, SUBSCRIPTION, RETURNED], description: "order_type of order.confirmed; a JOURNAL order never ships and is refused (FUL-0065)." }
+                orderType: { type: string, enum: [ORDER, JOURNAL, SUBSCRIPTION, RETURNED], description: "order_type of order.confirmed; a JOURNAL order never ships and is refused (FUL-0065). The type stored from sales' order.confirmed.v1 replaces this value, except that JOURNAL from either side wins." }
       responses:
         "201":
           description: The OPEN drop-ship; ETag carries its version

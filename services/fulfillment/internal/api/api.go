@@ -219,6 +219,36 @@ func (a *API) runRelease(w http.ResponseWriter, r *http.Request) {
 	if req.RequireFullATP != nil {
 		fullATP = *req.RequireFullATP
 	}
+	// The order type fulfillment stored from sales' order.confirmed.v1 overrides what the
+	// caller names, so a JOURNAL order cannot ship because a caller left the type out. When
+	// the two disagree on JOURNAL the stricter value wins: a caller's JOURNAL is kept even
+	// over a stored ORDER (the stored type may lag a newer sales version), so release only
+	// ever moves toward not shipping. An order fulfillment has not heard of keeps the
+	// caller's value.
+	orderIDs := make([]string, 0, len(lines))
+	for _, l := range lines {
+		orderIDs = append(orderIDs, l.OrderID)
+	}
+	stored, err := a.storedOrderTypes(r.Context(), orderIDs...)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	held, err := a.storedHolds(r.Context(), orderIDs...)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	for i := range lines {
+		key := strings.ToLower(lines[i].OrderID)
+		if t, ok := stored[key]; ok && lines[i].OrderType != domain.OrderTypeJournal {
+			lines[i].OrderType = t
+		}
+		// An active hold sales told us about holds the line, whatever the caller says.
+		if held[key] {
+			lines[i].Held = true
+		}
+	}
 	groups, skipped := domain.Release(lines, domain.ReleaseRule{Today: a.now(), HorizonDays: horizon, RequireFullATP: fullATP})
 	res, err := a.store.RunRelease(r.Context(), req.WarehouseID, groups, idem)
 	if err != nil {

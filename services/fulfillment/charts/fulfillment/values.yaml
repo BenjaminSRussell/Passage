@@ -48,3 +48,21 @@ probes:
 serviceMonitor:
   enabled: false
   interval: 30s
+
+# The sales order consumer (slice 19). It exits at start until
+# service:fulfillment-order is seeded in the service principal table.
+consumer:
+  enabled: false
+  replicaCount: 1
+  kafka:
+    brokers: ""
+    group: fulfillment-order
+    username: fulfillment-consumer
+    secret: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
