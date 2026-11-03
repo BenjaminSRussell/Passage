@@ -14,6 +14,7 @@ import { EcrCreatePage, EcrPage, EcrsPage } from "./ecr";
 import { RouteVersionCreatePage } from "./routeCreate";
 import { RouteVersionEditPage } from "./routeEdit";
 import { CalendarCreatePage, CapabilityCreatePage, ResourceCreatePage, ResourceGroupCreatePage } from "./setup";
+import { DocumentCreatePage, DocumentPage, DocumentsPage, EbomImportPage, EbomPage, OrganizationCreatePage, OrganizationsPage, ReleaseLinesPage } from "./wave09";
 
 /** Every resource, group, capability and calendar write, including Generate days, is under this seeded duty. */
 const dutyResourceWrite = "engineering.resource.write";
@@ -21,6 +22,8 @@ const dutyResourceWrite = "engineering.resource.write";
 /** Raising, submitting and withdrawing an ECR use the BOM write duty; the decisions use the ECR review duty. */
 const dutyBomWrite = "engineering.bom.write";
 const dutyEcrReview = "engineering.ecr.review";
+const dutyReleaseAccept = "engineering.release.accept";
+const dutyDocSign = "engineering.doc.sign";
 
 /** UX only: hides the New buttons from principals without the write duty; the service still enforces it. */
 function useCreateAction(to: string): (() => void) | undefined {
@@ -38,6 +41,10 @@ function EngineeringRoute() {
     onOpenResourceGroups: () => navigate("/engineering/resource-groups"),
     onOpenCapabilities: () => navigate("/engineering/capabilities"),
     onOpenCalendars: () => navigate("/engineering/calendars"),
+    onOpenOrganizations: () => navigate("/engineering/organizations"),
+    onOpenDocuments: () => navigate("/engineering/documents"),
+    onOpenReleases: () => navigate("/engineering/releases"),
+    onOpenEbom: () => navigate("/engineering/ebom"),
   });
 }
 
@@ -246,6 +253,64 @@ function CalendarDetailRoute() {
   return createElement(CalendarDetailPage, { id, onBack: () => navigate("/engineering/calendars"), canGenerate });
 }
 
+function OrganizationsRoute() {
+  const navigate = useNavigate();
+  const onCreate = holdsDuty(usePrincipalDuties(), dutyBomWrite) ? () => navigate("/engineering/organizations/new") : undefined;
+  return createElement(OrganizationsPage, { onCreate });
+}
+
+function OrganizationCreateRoute() {
+  const navigate = useNavigate();
+  return createElement(OrganizationCreatePage, {
+    onCreated: () => navigate("/engineering/organizations"),
+    onCancel: () => navigate("/engineering/organizations"),
+  });
+}
+
+function DocumentsRoute() {
+  const navigate = useNavigate();
+  const onCreate = holdsDuty(usePrincipalDuties(), dutyBomWrite) ? () => navigate("/engineering/documents/new") : undefined;
+  return createElement(DocumentsPage, { onOpen: (id: string) => navigate(`/engineering/documents/${encodeURIComponent(id)}`), onCreate });
+}
+
+function DocumentCreateRoute() {
+  const navigate = useNavigate();
+  return createElement(DocumentCreatePage, {
+    onCreated: (id: string) => navigate(`/engineering/documents/${encodeURIComponent(id)}`),
+    onCancel: () => navigate("/engineering/documents"),
+  });
+}
+
+function DocumentRoute() {
+  const navigate = useNavigate();
+  const { id = "" } = useParams();
+  const duties = usePrincipalDuties();
+  return createElement(DocumentPage, {
+    id,
+    onBack: () => navigate("/engineering/documents"),
+    canWrite: holdsDuty(duties, dutyBomWrite),
+    canSign: holdsDuty(duties, dutyDocSign),
+  });
+}
+
+function ReleasesRoute() {
+  return createElement(ReleaseLinesPage, { canAccept: holdsDuty(usePrincipalDuties(), dutyReleaseAccept) });
+}
+
+function EbomRoute() {
+  const navigate = useNavigate();
+  const onCreate = holdsDuty(usePrincipalDuties(), dutyBomWrite) ? () => navigate("/engineering/ebom/new") : undefined;
+  return createElement(EbomPage, { onCreate });
+}
+
+function EbomImportRoute() {
+  const navigate = useNavigate();
+  return createElement(EbomImportPage, {
+    onCreated: () => navigate("/engineering/ebom"),
+    onCancel: () => navigate("/engineering/ebom"),
+  });
+}
+
 const engineering: PassageModule = {
   id: "engineering",
   title: "Engineering data",
@@ -280,12 +345,24 @@ const engineering: PassageModule = {
     { path: "/engineering/calendars/new", element: createElement(CalendarCreateRoute), handle: { title: "New calendar", duty: dutyResourceWrite } },
     { path: "/engineering/calendars/:id", element: createElement(CalendarDetailRoute), handle: { title: "Calendar" } },
     { path: "/engineering/calendars/:id/days", element: createElement(CalendarRoute), handle: { title: "Calendar days" } },
+    { path: "/engineering/organizations", element: createElement(OrganizationsRoute), handle: { title: "Engineering organizations" } },
+    { path: "/engineering/organizations/new", element: createElement(OrganizationCreateRoute), handle: { title: "New organization", duty: dutyBomWrite } },
+    { path: "/engineering/documents", element: createElement(DocumentsRoute), handle: { title: "Documents" } },
+    { path: "/engineering/documents/new", element: createElement(DocumentCreateRoute), handle: { title: "New document", duty: dutyBomWrite } },
+    { path: "/engineering/documents/:id", element: createElement(DocumentRoute), handle: { title: "Document" } },
+    { path: "/engineering/releases", element: createElement(ReleasesRoute), handle: { title: "Product releases" } },
+    { path: "/engineering/ebom", element: createElement(EbomRoute), handle: { title: "eBOM imports" } },
+    { path: "/engineering/ebom/new", element: createElement(EbomImportRoute), handle: { title: "Import eBOM", duty: dutyBomWrite } },
   ],
   nav: [
     { label: "Overview", to: "/engineering", duty: "engineering.read" },
     { label: "Bills of material", to: "/engineering/boms", duty: "engineering.read" },
     { label: "Change requests", to: "/engineering/ecrs", duty: "engineering.read" },
     { label: "Change orders", to: "/engineering/ecos", duty: "engineering.read" },
+    { label: "Documents", to: "/engineering/documents", duty: "engineering.read" },
+    { label: "Product releases", to: "/engineering/releases", duty: "engineering.read" },
+    { label: "Engineering organizations", to: "/engineering/organizations", duty: "engineering.read" },
+    { label: "eBOM imports", to: "/engineering/ebom", duty: "engineering.read" },
     { label: "Routings", to: "/engineering/routes", duty: "engineering.read" },
     { label: "Resources", to: "/engineering/resources", duty: "engineering.read" },
     { label: "Resource groups", to: "/engineering/resource-groups", duty: "engineering.read" },
