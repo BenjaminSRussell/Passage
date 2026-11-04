@@ -38,7 +38,8 @@ export function validatePost(values: PostValues): { errors: PostErrors; input?: 
   return { errors, input };
 }
 
-const periodLabel = (period: number) => (period === 0 ? "Recognition" : `Period ${period}`);
+/** The journal a booked or refused entry is: 0 the recognition, -1 the termination (POST /v1/leases/gl-postings), otherwise a schedule period. */
+export const periodLabel = (period: number) => (period === 0 ? "Recognition" : period === -1 ? "Termination" : `Period ${period}`);
 
 const bookedColumns: DataTableColumn<LeasePostResult["booked"][number]>[] = [
   { key: "leaseNumber", header: "Lease", mono: true },

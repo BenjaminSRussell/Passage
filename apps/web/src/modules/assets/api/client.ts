@@ -385,12 +385,47 @@ export interface Lease {
   createdAt: string;
   schedule?: LeaseLine[];
   modifications?: LeaseModification[];
+  /** Set once the lease was terminated early (D4c). */
+  termination?: LeaseTermination;
+}
+
+/** The derecognition of an early-terminated lease; gainLoss is positive for a gain. journalId is null until booked. */
+export interface LeaseTermination {
+  id: string;
+  leaseId: string;
+  afterPeriod: number;
+  terminationDate: string;
+  reason: string;
+  currency: string;
+  liabilityDerecognized: Decimal;
+  rouGross: Decimal;
+  rouAccumulated: Decimal;
+  rouCarrying: Decimal;
+  terminationPayment: Decimal;
+  gainLoss: Decimal;
+  journalId: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface TerminateLeaseInput {
+  afterPeriod: number;
+  terminationPayment?: Decimal;
+  reason?: string;
+}
+
+export interface LeaseTerminationResult {
+  termination: LeaseTermination;
+  lease: Lease;
+  /** The AST-0036 info message. */
+  messages: string[];
 }
 
 /** Which journals of a lease are in the general ledger (D4d); null means not booked yet. */
 export interface LeasePostings {
   leaseId: string;
   recognitionJournalId: string | null;
+  terminationJournalId?: string | null;
   periods: { periodNo: number; periodEnd: string; postedJournalId: string | null }[];
 }
 
@@ -797,6 +832,10 @@ export async function getLease(leaseId: string, signal?: AbortSignal): Promise<V
 
 export function modifyLease(leaseId: string, etag: string, input: ModifyLeaseInput, key: string = newKey()): Promise<LeaseModificationResult> {
   return post(`/leases/${id(leaseId)}/modify`, input, key, { "If-Match": etag });
+}
+
+export function terminateLease(leaseId: string, etag: string, input: TerminateLeaseInput, key: string = newKey()): Promise<LeaseTerminationResult> {
+  return post(`/leases/${id(leaseId)}/terminate`, input, key, { "If-Match": etag });
 }
 
 export function getLeasePostings(leaseId: string, signal?: AbortSignal): Promise<LeasePostings> {

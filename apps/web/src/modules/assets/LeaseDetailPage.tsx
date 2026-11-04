@@ -11,6 +11,7 @@ import {
   type LeaseLine,
   type LeaseModification,
   type LeaseModificationResult,
+  type LeaseTermination,
   type LeasePostings,
   type ModifyLeaseInput,
   type Problem,
@@ -92,6 +93,9 @@ function LedgerCard({ lease }: { lease: Lease }) {
   const rows: PostingRow[] = [
     { key: "0", label: "Recognition", date: lease.commencementDate, journalId: postings.recognitionJournalId },
     ...postings.periods.map((p) => ({ key: String(p.periodNo), label: `Period ${p.periodNo}`, date: p.periodEnd, journalId: p.postedJournalId })),
+    ...(lease.termination
+      ? [{ key: "termination", label: "Termination", date: lease.termination.terminationDate, journalId: postings.terminationJournalId ?? null }]
+      : []),
   ];
   const booked = rows.filter((r) => r.journalId).length;
   return (
@@ -99,6 +103,26 @@ function LedgerCard({ lease }: { lease: Lease }) {
       <div className={styles.stack}>
         <p className={styles.note}>{`${booked} of ${rows.length} journals are in the ledger. A period that is booked cannot be remeasured.`}</p>
         <DataTable label="Ledger postings" columns={postingColumns} rows={rows} getRowKey={(r) => r.key} empty={{ title: "No journals" }} />
+      </div>
+    </Card>
+  );
+}
+
+/** The early termination of a lease and what it derecognized (D4c). */
+function TerminationCard({ lease, termination }: { lease: Lease; termination: LeaseTermination }) {
+  const gain = !termination.gainLoss.startsWith("-");
+  return (
+    <Card title="Termination">
+      <div className={styles.stack}>
+        <dl className={styles.details}>
+          <Detail term="Terminated on">{termination.terminationDate} (after period {termination.afterPeriod})</Detail>
+          <Detail term="Liability derecognized">{money(termination.liabilityDerecognized, lease.currency)}</Detail>
+          <Detail term="ROU asset derecognized">{money(termination.rouCarrying, lease.currency)} carrying ({money(termination.rouGross, lease.currency)} cost less {money(termination.rouAccumulated, lease.currency)} depreciation)</Detail>
+          <Detail term="Termination payment">{money(termination.terminationPayment, lease.currency)}</Detail>
+          <Detail term={gain ? "Gain" : "Loss"}>{money(gain ? termination.gainLoss : termination.gainLoss.slice(1), lease.currency)}</Detail>
+          {termination.reason ? <Detail term="Reason">{termination.reason}</Detail> : null}
+        </dl>
+        <p className={styles.note}>{termination.journalId ? "The termination journal is in the ledger." : "The termination journal is booked with the lease postings, after every period up to the termination."}</p>
       </div>
     </Card>
   );
@@ -146,9 +170,14 @@ export function LeaseDetailPage() {
         meta={<StatusBadge status={lease.status} />}
         actions={
           canModify(lease) ? (
-            <Link className={buttonClassName("primary")} to={`/assets/leases/${lease.id}/modify`}>
-              Modify lease
-            </Link>
+            <>
+              <Link className={buttonClassName("primary")} to={`/assets/leases/${lease.id}/modify`}>
+                Modify lease
+              </Link>
+              <Link className={buttonClassName("ghost")} to={`/assets/leases/${lease.id}/terminate`}>
+                Terminate lease
+              </Link>
+            </>
           ) : undefined
         }
       />
@@ -177,6 +206,7 @@ export function LeaseDetailPage() {
           <DataTable label="Remeasurements" columns={modificationColumns(lease.currency)} rows={modifications} getRowKey={(m) => m.id} empty={{ title: "No remeasurements" }} />
         </Card>
       ) : null}
+      {lease.termination ? <TerminationCard lease={lease} termination={lease.termination} /> : null}
       <LedgerCard lease={lease} />
       <Card title="Liability and ROU schedule">
         <div className={styles.stack}>

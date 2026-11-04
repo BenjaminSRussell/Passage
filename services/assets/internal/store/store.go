@@ -79,6 +79,7 @@ type Store interface {
 	MidQuarterTest(ctx context.Context, f MidQuarterFilter) (MidQuarterReport, error)
 
 	ModifyLease(ctx context.Context, leaseID string, in LeaseModificationInput, idempotencyKey string) (LeaseModificationResult, error)
+	TerminateLease(ctx context.Context, leaseID string, in LeaseTerminationInput, idempotencyKey string) (LeaseTerminationResult, error)
 	CreateCountSession(ctx context.Context, in CountSessionInput, idempotencyKey string) (CountSession, error)
 	ListCountSessions(ctx context.Context, f CountFilter) (CountPage, error)
 	GetCountSession(ctx context.Context, id string) (CountSession, error)

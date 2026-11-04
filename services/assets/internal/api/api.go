@@ -82,6 +82,7 @@ type API struct {
 	capex    atomic.Int64
 	// Slice 3: lease remeasurements and count sessions.
 	remeasured atomic.Int64
+	terminated atomic.Int64
 	counted    atomic.Int64
 	// Slice 4: capex decisions.
 	decided atomic.Int64
@@ -109,6 +110,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyLeaseMaintain)).Get("/v1/leases", a.listLeases)
 		r.With(authz.RequireDuty(DutyLeaseMaintain)).Get("/v1/leases/{id}", a.getLease)
 		r.With(authz.RequireDuty(DutyLeaseMaintain)).Post("/v1/leases/{id}/modify", a.modifyLease)
+		r.With(authz.RequireDuty(DutyLeaseMaintain)).Post("/v1/leases/{id}/terminate", a.terminateLease)
 		r.With(authz.RequireDuty(DutyPostJournal)).Post("/v1/leases/gl-postings", a.postLeasesToGL)
 		r.With(authz.RequireDuty(DutyLeaseMaintain)).Get("/v1/leases/{id}/gl-postings", a.getLeasePostings)
 		r.With(requireAny(DutyLeaseMaintain, DutyConfigure)).Get("/v1/leases/posting-profile", a.getLeasePostingProfile)
@@ -179,6 +181,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# TYPE assets_additions_total counter\nassets_additions_total %d\n", a.added.Load())
 		fmt.Fprintf(w, "# TYPE assets_depreciation_runs_posted_total counter\nassets_depreciation_runs_posted_total %d\n", a.runs.Load())
 		fmt.Fprintf(w, "# TYPE assets_capex_requests_total counter\nassets_capex_requests_total %d\n", a.capex.Load())
+		fmt.Fprintf(w, "# TYPE assets_leases_terminated_total counter\nassets_leases_terminated_total %d\n", a.terminated.Load())
 		fmt.Fprintf(w, "# TYPE assets_leases_remeasured_total counter\nassets_leases_remeasured_total %d\n", a.remeasured.Load())
 		fmt.Fprintf(w, "# TYPE assets_count_sessions_total counter\nassets_count_sessions_total %d\n", a.counted.Load())
 		fmt.Fprintf(w, "# TYPE assets_capex_decisions_total counter\nassets_capex_decisions_total %d\n", a.decided.Load())

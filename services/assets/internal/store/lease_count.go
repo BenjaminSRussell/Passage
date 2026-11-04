@@ -133,7 +133,11 @@ func loadLease(ctx context.Context, tx pgx.Tx, tenantID, id string, forUpdate bo
 	if err := mods.Err(); err != nil {
 		return Lease{}, err
 	}
+	mods.Close()
 	markSuperseded(l.Modifications)
+	if l.Termination, err = loadTermination(ctx, tx, tenantID, id); err != nil {
+		return Lease{}, err
+	}
 	return l, nil
 }
 

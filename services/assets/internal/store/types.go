@@ -216,6 +216,8 @@ type Lease struct {
 	CreatedAt        time.Time           `json:"createdAt"`
 	Schedule         []LeaseLine         `json:"schedule,omitempty"`
 	Modifications    []LeaseModification `json:"modifications,omitempty"`
+	// Termination is set once the lease was terminated early (D4c).
+	Termination *LeaseTermination `json:"termination,omitempty"`
 }
 
 // LeaseFilter narrows ListLeases. After is the id of the last lease of the

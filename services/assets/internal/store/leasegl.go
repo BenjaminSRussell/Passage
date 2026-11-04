@@ -30,6 +30,9 @@ const (
 	leaseBookCode  = "LEASE"
 	leaseKindRecog = "Recognition"
 	leaseKindPer   = "Period"
+	leaseKindTerm  = "Termination"
+	// leasePeriodTermination numbers the termination journal in its idempotency key and pending booking; periods start at 1, the recognition is 0.
+	leasePeriodTermination = -1
 )
 
 // LeasePostingProfile maps a legal entity to the accounts of its lease journals. Placeholder marks the built-in default.
@@ -257,9 +260,11 @@ func buildLeaseDocs(ctx context.Context, tx pgx.Tx, tenantID string, in LeaseGLP
 	if err := lrows.Err(); err != nil {
 		return nil, nil, false, err
 	}
+	complete := true
 	for _, l := range lines {
 		end := domain.LeasePeriodEnd(commencement, h.perYear, l.period)
 		if end.After(through) {
+			complete = false
 			break
 		}
 		if len(docs) >= room {
@@ -270,12 +275,40 @@ func buildLeaseDocs(ctx context.Context, tx pgx.Tx, tenantID string, in LeaseGLP
 			Remeasurement: l.remsr.Round(mu), ROUAdjustment: m.rou.Round(mu), PLExcess: m.excess.Round(mu)})
 		if nerr != nil || !m.adjustment.Round(mu).Equal(l.remsr.Round(mu)) {
 			failed = append(failed, LeaseGLFailed{LeaseID: h.id, LeaseNumber: h.number, Period: l.period, Code: domain.CodeLeaseRemeasurementMismatch})
+			complete = false
 			break
 		}
 		d := newDoc(l.period, end, leaseKindPer)
 		netEntry(d, h.currency, net)
 		d.event.Interest, d.event.Payment, d.event.ROUDepreciation, d.event.Remeasurement = l.interest.Round(mu).String(), l.payment.Round(mu).String(), l.dep.Round(mu).String(), l.remsr.Round(mu).String()
 		docs = append(docs, d)
+	}
+	// A terminated lease's derecognition follows its last period in force: it waits until every period up to the termination is booked.
+	if complete {
+		var t struct {
+			afterPeriod                                        int
+			date                                               time.Time
+			liability, gross, accumulated, carrying, pay, gain decimal.Decimal
+		}
+		terr := tx.QueryRow(ctx, `select after_period, termination_date, liability_derecognized, rou_gross, rou_accumulated, rou_carrying, termination_payment, gain_loss
+			from lease_termination where tenant_id = $1 and lease_id = $2 and journal_id is null`, tenantID, h.id).
+			Scan(&t.afterPeriod, &t.date, &t.liability, &t.gross, &t.accumulated, &t.carrying, &t.pay, &t.gain)
+		switch {
+		case errors.Is(terr, pgx.ErrNoRows):
+		case terr != nil:
+			return nil, nil, false, terr
+		case !t.date.After(through):
+			if len(docs) >= room {
+				return docs, failed, true, nil
+			}
+			d := newDoc(leasePeriodTermination, t.date, leaseKindTerm)
+			d.event.Period = t.afterPeriod
+			netEntry(d, h.currency, domain.LeaseTerminationNet(profile.accounts(), domain.Termination{Liability: t.liability.Round(mu), ROUGross: t.gross.Round(mu),
+				ROUAccumulated: t.accumulated.Round(mu), ROUCarrying: t.carrying.Round(mu), Payment: t.pay.Round(mu), GainLoss: t.gain.Round(mu)}))
+			d.event.Liability, d.event.ROUAsset = t.liability.Round(mu).String(), t.carrying.Round(mu).String()
+			d.event.TerminationPayment, d.event.GainLoss = t.pay.Round(mu).String(), t.gain.Round(mu).String()
+			docs = append(docs, d)
+		}
 	}
 	return docs, failed, false, nil
 }
@@ -362,13 +395,20 @@ func (s *Postgres) confirmLeaseDoc(ctx context.Context, tenantID string, d *leas
 			return err
 		}
 		var tag int64
-		if d.period == 0 {
+		switch {
+		case d.period == leasePeriodTermination:
+			ct, err := tx.Exec(ctx, `update lease_termination set journal_id = $3::uuid where tenant_id = $1 and lease_id = $2 and journal_id is null`, tenantID, d.leaseID, entryID)
+			if err != nil {
+				return err
+			}
+			tag = ct.RowsAffected()
+		case d.period == 0:
 			ct, err := tx.Exec(ctx, `update lease set recognition_journal_id = $3::uuid where tenant_id = $1 and id = $2 and recognition_journal_id is null`, tenantID, d.leaseID, entryID)
 			if err != nil {
 				return err
 			}
 			tag = ct.RowsAffected()
-		} else {
+		default:
 			ct, err := tx.Exec(ctx, `update lease_schedule_line set posted_journal_id = $4::uuid where tenant_id = $1 and lease_id = $2 and period_no = $3 and posted_journal_id is null`,
 				tenantID, d.leaseID, d.period, entryID)
 			if err != nil {
@@ -382,7 +422,10 @@ func (s *Postgres) confirmLeaseDoc(ctx context.Context, tenantID string, d *leas
 			var booked *string
 			q := `select recognition_journal_id::text from lease where tenant_id = $1 and id = $2`
 			args := []any{tenantID, d.leaseID}
-			if d.period != 0 {
+			switch {
+			case d.period == leasePeriodTermination:
+				q = `select journal_id::text from lease_termination where tenant_id = $1 and lease_id = $2`
+			case d.period != 0:
 				q = `select posted_journal_id::text from lease_schedule_line where tenant_id = $1 and lease_id = $2 and period_no = $3`
 				args = append(args, d.period)
 			}
@@ -462,6 +505,7 @@ type LeasePostedPeriod struct {
 type LeasePostings struct {
 	LeaseID              string              `json:"leaseId"`
 	RecognitionJournalID *string             `json:"recognitionJournalId"`
+	TerminationJournalID *string             `json:"terminationJournalId"`
 	Periods              []LeasePostedPeriod `json:"periods"`
 }
 
@@ -478,6 +522,9 @@ func (s *Postgres) GetLeasePostings(ctx context.Context, leaseID string) (LeaseP
 			return notFound(CodeLeaseNotFound, "no lease with id "+leaseID)
 		}
 		if err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `select journal_id::text from lease_termination where tenant_id = $1 and lease_id = $2`, p.TenantID, leaseID).Scan(&out.TerminationJournalID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
 		rows, err := tx.Query(ctx, `select period_no, posted_journal_id::text from lease_schedule_line where tenant_id = $1 and lease_id = $2 order by period_no`, p.TenantID, leaseID)
