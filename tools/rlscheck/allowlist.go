@@ -26,6 +26,8 @@ var allowlist = map[string]string{
 	"identity.identity_role_assignments:" + problemExtraPolicy: "permanent: SELECT-only policy gated on passage.policy_compile and identity_operator (0008_policy_bundle_read, #398 review decision)",
 	"close.reopen_expiry:" + problemNotForced:                  "permanent: no passage_app grant; reached only via SECURITY DEFINER functions that scan across tenants by design",
 	"close.reopen_expiry:" + problemNoTenantPol:                "permanent: no passage_app grant; reached only via SECURITY DEFINER functions that scan across tenants by design",
+	"close.accrual_due:" + problemNotForced:                    "permanent: no passage_app grant; maintained by the SECURITY DEFINER accrual_run_track_due() trigger and read only by close_accrual_due_tenants(), which lists due tenants across tenants for the accrual sweeper (0007_slice_b, #460)",
+	"close.accrual_due:" + problemNoTenantPol:                  "permanent: no passage_app grant; maintained by the SECURITY DEFINER accrual_run_track_due() trigger and read only by close_accrual_due_tenants(), which lists due tenants across tenants for the accrual sweeper (0007_slice_b, #460)",
 	"identity.identity_tenants:" + problemExtraPolicy:          "permanent: SELECT-only operator policy gated on identity_operator, whose own policy is tenant-scoped; lets the provisioning operator list tenants",
 	"ledger.description_template:" + problemNullEntity:         "permanent: NULL legal_entity_id is a tenant-wide description template, not a missing scope",
 	"org.address_purpose:" + problemNullEntity:                 "permanent: NULL legal_entity_id is tenant-wide reference data",
