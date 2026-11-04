@@ -40,6 +40,29 @@ paths:
                     items: { $ref: "#/components/schemas/OpenItem" }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/open-items/{ref}:
+    get:
+      operationId: getOpenItem
+      summary: One open item
+      description: |
+        Reads one open item in the caller's legal entities, with its version as the ETag. The migration loader reads
+        the items it loaded through this route to reconcile a run (service duty `receivables.import.read`, which
+        opens nothing else). An unknown id, or one outside the caller's legal entities, is 404 AR-OPEN-ITEM-NOT-FOUND.
+      x-passage-duty: ARView
+      x-passage-duty-alternatives: [receivables.import.read]
+      parameters:
+        - { name: ref, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The open item
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OpenItem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
   /v1/receivables/aging:
     get:
       operationId: agingSnapshot

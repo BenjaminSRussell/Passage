@@ -721,6 +721,11 @@
       {"resource": "/v1/party/vendor-groups", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*/customer", "methods": ["POST"]}
     ]},
+    "party.import.read": {"service_only": true, "permissions": [
+      {"resource": "/v1/party/parties/*", "methods": ["GET"]},
+      {"resource": "/v1/party/customers/*", "methods": ["GET"]},
+      {"resource": "/v1/party/vendors/*", "methods": ["GET"]}
+    ]},
     "party.read": {"permissions": [
       {"resource": "/v1/party/parties/*", "methods": ["GET"]},
       {"resource": "/v1/party/pending-changes/*", "methods": ["GET"]},
@@ -2614,6 +2619,20 @@
     "receivables.import.write": {"service_only": true, "permissions": [
       {"resource": "/v1/receivables/open-items:batch", "methods": ["POST"]}
     ]},
+    "receivables.import.read": {"service_only": true, "permissions": [
+      {"resource": "/v1/receivables/open-items/*", "methods": ["GET"]}
+    ]},
+    "product.import.read": {"service_only": true, "permissions": [
+      {"resource": "/v1/product/products/*", "methods": ["GET"]}
+    ]},
+    "engineering.import.write": {"service_only": true, "permissions": [
+      {"resource": "/v1/engineering/bom-versions", "methods": ["POST"]},
+      {"resource": "/v1/engineering/route-versions", "methods": ["POST"]}
+    ]},
+    "engineering.import.read": {"service_only": true, "permissions": [
+      {"resource": "/v1/engineering/bom-versions/*", "methods": ["GET"]},
+      {"resource": "/v1/engineering/route-versions/*", "methods": ["GET"]}
+    ]},
     "product.import.write": {"service_only": true, "permissions": [
       {"resource": "/v1/product/products", "methods": ["POST"]},
       {"resource": "/v1/product/products/*", "methods": ["PATCH"]},
@@ -3334,9 +3353,10 @@
       "org": ["org.read"]
     },
     "migration": {
-      "party": ["party.import.write"],
-      "product": ["product.import.write"],
-      "receivables": ["receivables.import.write"]
+      "party": ["party.import.write", "party.import.read"],
+      "product": ["product.import.write", "product.import.read"],
+      "receivables": ["receivables.import.write", "receivables.import.read"],
+      "engineering": ["engineering.import.write", "engineering.import.read"]
     },
     "migration-factory": {
       "receivables": ["receivables.import.write", "ARView"]
@@ -3356,7 +3376,7 @@
     "purchasing-inbound": ["purchasing.inbound.apply"],
     "fulfillment-order": ["fulfillment.order.sync"],
     "integration-hub": ["migration.outbound.render", "migration.xref.record"],
-    "migration-loader": ["party.import.write", "product.import.write", "receivables.import.write"],
+    "migration-loader": ["party.import.write", "party.import.read", "product.import.write", "product.import.read", "receivables.import.write", "receivables.import.read", "engineering.import.write", "engineering.import.read"],
     "production-planning": ["production.planned.intake"],
     "receiving-erasure": ["compliance.legal_hold.check"],
     "receiving-ers": ["VendorInvoicePost"],

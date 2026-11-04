@@ -1,6 +1,6 @@
 # Wave 10 AC1 reconciliation
 
-Seeded load of 50k customers, 20k vendors, 100k items and 10k BOMs through the migration pipeline. The cross-reference is Postgres `migration.xref`; the target is the test table `ac1.target` (not the party/product batch APIs, which are unmeasured: #475). Reconciliation compares the raw extract, mapped independently, with a fresh read of `ac1.target`.
+Seeded load of 50k customers, 20k vendors, 100k items and 10k BOMs through the migration pipeline. The cross-reference is Postgres `migration.xref`; the target is the test table `ac1.target` (the real HTTP loader is timed separately: real-loader.md, #475). Reconciliation compares the raw extract, mapped independently, with a fresh read of `ac1.target`.
 
 **Result: PASS**
 

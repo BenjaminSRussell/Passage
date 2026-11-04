@@ -27,8 +27,11 @@ const (
 	dutyRead     = "party.read"
 	dutyPII      = "pii.read"
 	// dutyImport is held by the migration loader (service token from the migration service) to load parties and roles.
-	dutyImport  = "party.import.write"
-	codeInvalid = "PTY-0001"
+	dutyImport = "party.import.write"
+	// dutyImportRead lets the migration loader read back what it loaded (parties, customer and vendor roles) for
+	// reconciliation. It carries no pii.read, so a date of birth stays masked.
+	dutyImportRead = "party.import.read"
+	codeInvalid    = "PTY-0001"
 )
 
 var reportedStatuses = []domain.Status{domain.StatusValid, domain.StatusInvalid, domain.StatusUnverified, domain.StatusFormatOnly}
@@ -100,7 +103,7 @@ func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/party/tax-registrations:validate", a.validate)
 	r.With(authz.RequireAnyDuty(dutyWrite, dutyImport)).Post("/v1/party/parties", a.createParty)
-	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/parties/{id}", a.getParty)
+	r.With(authz.RequireAnyDuty(dutyRead, dutyImportRead)).Get("/v1/party/parties/{id}", a.getParty)
 	r.With(authz.RequireAnyDuty(dutyWrite, dutyImport)).Patch("/v1/party/parties/{id}", a.patchParty)
 	if a.credit != nil {
 		a.registerCredit(r)

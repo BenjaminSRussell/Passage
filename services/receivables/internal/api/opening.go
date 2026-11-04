@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -16,6 +17,28 @@ import (
 // dutyOpeningImport is held by the migration loader's service token (integration
 // handoff H5). It opens only POST /open-items:batch, inside the token's own legal entity.
 const dutyOpeningImport = "receivables.import.write"
+
+// dutyOpeningRead is the migration loader's read-back of the open items it loaded (reconciliation), one by id.
+const dutyOpeningRead = "receivables.import.read"
+
+// getOpenItem handles GET /open-items/{ref}.
+func (a *API) getOpenItem(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id := chi.URLParam(r, "ref")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeOpenItemNotFound, "open item not found"))
+		return
+	}
+	out, err := a.store.GetOpenItem(r.Context(), id)
+	if err != nil {
+		a.fail("get open item", w, r, err)
+		return
+	}
+	w.Header().Set("ETag", etag(out.Version))
+	httpx.JSON(w, http.StatusOK, out)
+}
 
 type openingRowRequest struct {
 	LegacyKey          string          `json:"legacyKey"`

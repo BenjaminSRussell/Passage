@@ -11,6 +11,7 @@ paths:
       operationId: createBomVersion
       summary: Create a BOM version
       x-passage-duty: engineering.bom.write
+      x-passage-duty-alternatives: [engineering.import.write]
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
       requestBody:
@@ -18,7 +19,7 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/BomVersion' } } }
       responses:
         '201':
-          description: BOM version created as draft or active, or the original version on an Idempotency-Key replay. A cycle is ENG-BOM-CYCLE and an overlapping active range is ENG-BOM-OVERLAP, and an inconsistent alternative group is 422 ENG-ALT-CONFLICT (BR-9.16).
+          description: BOM version created as draft or active, or the original version on an Idempotency-Key replay. A caller holding only engineering.import.write (the migration loader) creates drafts; asking it for an active version is 403 AUTH-0003. A cycle is ENG-BOM-CYCLE and an overlapping active range is ENG-BOM-OVERLAP, and an inconsistent alternative group is 422 ENG-ALT-CONFLICT (BR-9.16).
           content: { application/json: { schema: { $ref: '#/components/schemas/BomVersion' } } }
         default: { $ref: '#/components/responses/Problem' }
     get:
@@ -46,6 +47,7 @@ paths:
       operationId: getBomVersion
       summary: Get a BOM version with its lines
       x-passage-duty: engineering.read
+      x-passage-duty-alternatives: [engineering.import.read]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -167,6 +169,7 @@ paths:
       operationId: createRouteVersion
       summary: Create a draft route version
       x-passage-duty: engineering.route.write
+      x-passage-duty-alternatives: [engineering.import.write]
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
       requestBody:
@@ -207,6 +210,7 @@ paths:
       operationId: getRouteVersion
       summary: Get a route version with its operations
       x-passage-duty: engineering.read
+      x-passage-duty-alternatives: [engineering.import.read]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:

@@ -93,6 +93,9 @@ spec:
 {{- with .Values.targets.receivablesUrl }}
             - { name: MIG_TARGET_RECEIVABLES_URL, value: {{ . | quote }} }
 {{- end }}
+{{- with .Values.targets.engineeringUrl }}
+            - { name: MIG_TARGET_ENGINEERING_URL, value: {{ . | quote }} }
+{{- end }}
 {{- if eq (toString .Values.sync.enabled) "false" }}
             - { name: MIG_SYNC_ENABLED, value: "false" }
 {{- end }}

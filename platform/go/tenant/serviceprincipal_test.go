@@ -1,12 +1,14 @@
 package tenant_test
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -97,6 +99,31 @@ func TestServiceTokenActMustBeAKnownServiceActor(t *testing.T) {
 		if (err == nil) != ok {
 			t.Errorf("act %q: err = %v, want accepted=%v", act, err, ok)
 		}
+	}
+}
+
+// A party created by the migration loader takes its number from numbering: party signs that call with the loader as
+// act, and the token carries party's grant only.
+func TestPartyForwardsTheMigrationLoaderToNumberingWithItsOwnGrant(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	signer, err := tenant.NewServiceSigner("party", priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loader, err := tenant.ServicePrincipal("migration-loader", validTenant, validLE)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := signer.Mint("numbering", loader, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := tenant.NewServiceVerifier("numbering", map[string]ed25519.PublicKey{"party": pub}).Verify(token)
+	if err != nil || claims.Act != "service:migration-loader" || strings.Join(claims.Duties, ",") != "numbering.sequence.allocate" {
+		t.Fatalf("claims = %+v err = %v", claims, err)
+	}
+	if _, err := signer.Mint("product", loader, ""); err == nil {
+		t.Fatal("party has no grant to product; it must not reach it as the loader")
 	}
 }
 

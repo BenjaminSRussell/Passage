@@ -1,0 +1,182 @@
+{
+  "criterion": "AC1 (real loader)",
+  "issue": 475,
+  "commit": "5d9e2c74bb617702a1d18612271b3c1d4b90266d-dirty",
+  "host": "vm",
+  "note": "Postgres 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1), services built from this tree on 4 CPUs, one process each, serving as passage_app (RLS on); party numbers from the numbering service; engineering with PASSAGE_ENV=dev (no audit sink, unused by BOM imports); PASSAGE_SERVICE_REPLAY_CACHE_SIZE=2000000",
+  "volumes": {
+    "customers": 50000,
+    "vendors": 20000,
+    "items": 100000,
+    "boms": 10000
+  },
+  "concurrency": 8,
+  "budget": "30m0s",
+  "loadElapsedMs": 466903,
+  "totalElapsedMs": 564903,
+  "ok": true,
+  "entities": [
+    {
+      "entity": "party",
+      "rows": 70000,
+      "elapsedMs": 182211,
+      "status": "succeeded",
+      "created": 70000,
+      "rejected": 0,
+      "reconciliation": {
+        "source": 70000,
+        "target": 70000,
+        "checks": [
+          {
+            "name": "row_count",
+            "ok": true,
+            "detail": "source 70000 target 70000"
+          },
+          {
+            "name": "hash_total",
+            "ok": true,
+            "detail": "order-independent SHA-256 over key and content hash"
+          },
+          {
+            "name": "sample_compare",
+            "ok": true,
+            "detail": "0 sampled keys differ"
+          }
+        ]
+      },
+      "rerunElapsedMs": 26273,
+      "rerunUnchanged": 70000,
+      "rerunReconciled": true
+    },
+    {
+      "entity": "customer",
+      "rows": 50000,
+      "elapsedMs": 61830,
+      "status": "succeeded",
+      "created": 50000,
+      "rejected": 0,
+      "reconciliation": {
+        "source": 50000,
+        "target": 50000,
+        "checks": [
+          {
+            "name": "row_count",
+            "ok": true,
+            "detail": "source 50000 target 50000"
+          },
+          {
+            "name": "hash_total",
+            "ok": true,
+            "detail": "order-independent SHA-256 over key and content hash"
+          },
+          {
+            "name": "sample_compare",
+            "ok": true,
+            "detail": "0 sampled keys differ"
+          }
+        ]
+      },
+      "rerunElapsedMs": 19799,
+      "rerunUnchanged": 50000,
+      "rerunReconciled": true
+    },
+    {
+      "entity": "vendor",
+      "rows": 20000,
+      "elapsedMs": 22480,
+      "status": "succeeded",
+      "created": 20000,
+      "rejected": 0,
+      "reconciliation": {
+        "source": 20000,
+        "target": 20000,
+        "checks": [
+          {
+            "name": "row_count",
+            "ok": true,
+            "detail": "source 20000 target 20000"
+          },
+          {
+            "name": "hash_total",
+            "ok": true,
+            "detail": "order-independent SHA-256 over key and content hash"
+          },
+          {
+            "name": "sample_compare",
+            "ok": true,
+            "detail": "0 sampled keys differ"
+          }
+        ]
+      },
+      "rerunElapsedMs": 7502,
+      "rerunUnchanged": 20000,
+      "rerunReconciled": true
+    },
+    {
+      "entity": "item",
+      "rows": 100000,
+      "elapsedMs": 182997,
+      "status": "succeeded",
+      "created": 100000,
+      "rejected": 0,
+      "reconciliation": {
+        "source": 100000,
+        "target": 100000,
+        "checks": [
+          {
+            "name": "row_count",
+            "ok": true,
+            "detail": "source 100000 target 100000"
+          },
+          {
+            "name": "hash_total",
+            "ok": true,
+            "detail": "order-independent SHA-256 over key and content hash"
+          },
+          {
+            "name": "sample_compare",
+            "ok": true,
+            "detail": "0 sampled keys differ"
+          }
+        ]
+      },
+      "rerunElapsedMs": 39694,
+      "rerunUnchanged": 100000,
+      "rerunReconciled": true
+    },
+    {
+      "entity": "bom",
+      "rows": 10000,
+      "elapsedMs": 17383,
+      "status": "succeeded",
+      "created": 10000,
+      "rejected": 0,
+      "reconciliation": {
+        "source": 10000,
+        "target": 10000,
+        "checks": [
+          {
+            "name": "row_count",
+            "ok": true,
+            "detail": "source 10000 target 10000"
+          },
+          {
+            "name": "hash_total",
+            "ok": true,
+            "detail": "order-independent SHA-256 over key and content hash"
+          },
+          {
+            "name": "sample_compare",
+            "ok": true,
+            "detail": "0 sampled keys differ"
+          }
+        ]
+      },
+      "rerunElapsedMs": 4497,
+      "rerunUnchanged": 10000,
+      "rerunReconciled": true
+    }
+  ],
+  "xref": "postgres migration.xref",
+  "started": "2026-11-04T21:50:04.941903163Z"
+}

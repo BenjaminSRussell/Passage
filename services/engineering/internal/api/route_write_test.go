@@ -42,6 +42,8 @@ func TestCreateRouteVersion(t *testing.T) {
 	}{
 		{"valid draft", `{` + head + `,"operations":` + routeOps + `}`, routeWriter, nil, http.StatusCreated, `"status":"draft"`},
 		{"read duty alone is refused", `{` + head + `,"operations":` + routeOps + `}`, "engineering.read", nil, http.StatusForbidden, "AUTH-0003"},
+		{"migration loader imports a draft", `{` + head + `,"operations":` + routeOps + `}`, "engineering.import.write", nil, http.StatusCreated, `"status":"draft"`},
+		{"import read duty alone is refused", `{` + head + `,"operations":` + routeOps + `}`, "engineering.import.read", nil, http.StatusForbidden, "AUTH-0003"},
 		{"missing operations", `{` + head + `}`, routeWriter, nil, http.StatusBadRequest, "operations"},
 		{"bad date", `{"productId":"BIKE","siteId":"S1","routeCode":"R1","effectiveFrom":"07/01","operations":` + routeOps + `}`, routeWriter, nil, http.StatusBadRequest, "effectiveFrom"},
 		{"end before start", `{` + head + `,"effectiveTo":"2026-01-01","operations":` + routeOps + `}`, routeWriter, nil, http.StatusBadRequest, "effectiveTo"},

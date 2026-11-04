@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"net/http"
+	"reflect"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -86,6 +87,18 @@ func TestCustomer_CreateReadsBackScopedAndEmitsEvent(t *testing.T) {
 	}
 	if got := outboxCount(t, app, "dev.passage.party.customer.created.v1"); got != 1 {
 		t.Fatalf("created events = %d, want 1", got)
+	}
+	// GetCustomer reads the role back in its legal entity only; elsewhere it does not exist.
+	if got, err := s.GetCustomer(asUser(1, legalEntityA, "loader"), c.ID); err != nil || !reflect.DeepEqual(got, c) {
+		t.Fatalf("get = %+v, %v; want %+v", got, err, c)
+	}
+	for name, ctx := range map[string]context.Context{"other legal entity": asUser(1, legalEntityB, "x"), "other tenant": asUser(2, legalEntityA, "x")} {
+		if _, err := s.GetCustomer(ctx, c.ID); problemCode(t, err) != store.CodeCustomerNotFound {
+			t.Errorf("%s get: %v", name, err)
+		}
+	}
+	if _, err := s.GetCustomer(asUser(1, legalEntityA, "x"), "not-a-uuid"); problemCode(t, err) != store.CodeCustomerNotFound {
+		t.Errorf("bad id: %v", err)
 	}
 	// The role is invisible to another legal entity and tenant (RLS as passage_app).
 	for name, ctx := range map[string]context.Context{"other legal entity": asUser(1, legalEntityB, "x"), "other tenant": asUser(2, legalEntityA, "x")} {

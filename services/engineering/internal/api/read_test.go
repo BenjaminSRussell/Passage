@@ -321,6 +321,22 @@ func TestReadRoutes_Authz(t *testing.T) {
 	}
 }
 
+// The migration loader reads back the versions it imported by id, and nothing else.
+func TestReadRoutes_ImportReadOpensOnlyTheDetailRoutes(t *testing.T) {
+	r, _ := newRouter(&fakeStore{routes: routeFixtures()}, approves)
+	if rec := do(r, http.MethodGet, routesPath+"/"+rid(2), "", "engineering.import.read", true); rec.Code != http.StatusOK {
+		t.Fatalf("route detail = %d %s; want 200", rec.Code, rec.Body)
+	}
+	if rec := do(r, http.MethodGet, versions+"/"+rid(99), "", "engineering.import.read", true); rec.Code != http.StatusNotFound {
+		t.Fatalf("bom detail = %d %s; want 404 past the duty check", rec.Code, rec.Body)
+	}
+	for _, path := range []string{routesPath, activePath + "?productId=BIKE&siteId=S1", versions} {
+		if rec := do(r, http.MethodGet, path, "", "engineering.import.read", true); rec.Code != http.StatusForbidden {
+			t.Fatalf("%s = %d %s; want 403", path, rec.Code, rec.Body)
+		}
+	}
+}
+
 func TestReadMetrics(t *testing.T) {
 	r, a := newRouter(&fakeStore{err: errors.New("pg secret detail")}, approves)
 	for _, path := range []string{routesPath, activePath + "?productId=BIKE&siteId=S1", routesPath + "/" + rid(1), versions + "/" + rid(1)} {

@@ -947,15 +947,18 @@ principal_allowed(name, method, resource) if {
 	result.allow
 }
 
-test_migration_service_grant_reaches_only_the_import_write_routes if {
+test_migration_service_grant_reaches_only_the_import_routes if {
 	data.service_grants.migration == {
-		"party": ["party.import.write"],
-		"product": ["product.import.write"],
-		"receivables": ["receivables.import.write"],
+		"party": ["party.import.write", "party.import.read"],
+		"product": ["product.import.write", "product.import.read"],
+		"receivables": ["receivables.import.write", "receivables.import.read"],
+		"engineering": ["engineering.import.write", "engineering.import.read"],
 	}
-	data.duties["party.import.write"].service_only
-	data.duties["product.import.write"].service_only
-	data.duties["receivables.import.write"].service_only
+	every _, duties in data.service_grants.migration {
+		every duty in duties {
+			data.duties[duty].service_only
+		}
+	}
 	allowed("receivables.import.write", "POST", "/v1/receivables/open-items:batch")
 	not allowed("receivables.import.write", "GET", "/v1/receivables/open-items")
 	not allowed("receivables.import.write", "POST", "/v1/receivables/payments")
@@ -993,6 +996,32 @@ test_migration_service_grant_reaches_only_the_import_write_routes if {
 	not allowed("product.import.write", "POST", "/v1/product/jobs/group-change")
 	not allowed("product.import.write", "POST", "/v1/product/gtins")
 	not allowed("product.import.write", "POST", "/v1/party/parties")
+	allowed("party.import.read", "GET", "/v1/party/parties/p1")
+	allowed("party.import.read", "GET", "/v1/party/customers/c1")
+	allowed("party.import.read", "GET", "/v1/party/vendors/v1")
+	not allowed("party.import.read", "GET", "/v1/party/vendors/v1/bank-accounts")
+	not allowed("party.import.read", "GET", "/v1/party/vendors/v1/bank-accounts:reveal")
+	not allowed("party.import.read", "GET", "/v1/party/pending-changes/x1")
+	not allowed("party.import.read", "POST", "/v1/party/parties")
+	not allowed("party.import.read", "PATCH", "/v1/party/parties/p1")
+	allowed("product.import.read", "GET", "/v1/product/products/p1")
+	not allowed("product.import.read", "GET", "/v1/product/products")
+	not allowed("product.import.read", "PATCH", "/v1/product/products/p1")
+	allowed("receivables.import.read", "GET", "/v1/receivables/open-items/o1")
+	not allowed("receivables.import.read", "GET", "/v1/receivables/open-items")
+	not allowed("receivables.import.read", "POST", "/v1/receivables/open-items:batch")
+	not allowed("receivables.import.read", "GET", "/v1/receivables/payments/p1")
+	allowed("engineering.import.write", "POST", "/v1/engineering/bom-versions")
+	allowed("engineering.import.write", "POST", "/v1/engineering/route-versions")
+	not allowed("engineering.import.write", "POST", "/v1/engineering/bom-versions/b1:activate")
+	not allowed("engineering.import.write", "PUT", "/v1/engineering/bom-versions/b1")
+	not allowed("engineering.import.write", "POST", "/v1/engineering/route-versions/r1:activate")
+	not allowed("engineering.import.write", "POST", "/v1/engineering/ecos")
+	not allowed("engineering.import.write", "POST", "/v1/engineering/ebom-imports")
+	allowed("engineering.import.read", "GET", "/v1/engineering/bom-versions/b1")
+	allowed("engineering.import.read", "GET", "/v1/engineering/route-versions/r1")
+	not allowed("engineering.import.read", "GET", "/v1/engineering/bom-versions")
+	not allowed("engineering.import.read", "POST", "/v1/engineering/bom-versions")
 	every _, duties in data.service_grants.migration {
 		every duty in duties {
 			not allowed(duty, "POST", "/v1/ledger/journal-entries")

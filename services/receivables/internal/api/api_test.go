@@ -42,6 +42,15 @@ func (f *fakeStore) CreateOpenItem(context.Context, store.OpenItem) (store.OpenI
 func (f *fakeStore) ListOpenItems(context.Context, store.OpenItemFilter, int) ([]store.OpenItem, error) {
 	return []store.OpenItem{{Currency: "USD", DueDate: "2027-03-01", OpenAmount: decimal.RequireFromString("12.00")}}, nil
 }
+func (f *fakeStore) GetOpenItem(_ context.Context, id string) (store.OpenItem, error) {
+	if id != fakeOpenItemID {
+		return store.OpenItem{}, httpx.NewProblem(http.StatusNotFound, store.CodeOpenItemNotFound, "open item not found")
+	}
+	return store.OpenItem{ID: id, DocumentNumber: "D-1", Currency: "USD", OpenAmount: decimal.RequireFromString("12.00"), Version: 2}, nil
+}
+
+const fakeOpenItemID = "22222222-2222-4222-8222-222222222222"
+
 func (f *fakeStore) CreatePayment(_ context.Context, in store.Payment, _ string) (store.Payment, error) {
 	in.ID, in.Version, in.Status = ids.New(), 1, "RECEIVED"
 	f.payment = in

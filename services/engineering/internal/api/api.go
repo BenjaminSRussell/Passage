@@ -28,17 +28,21 @@ import (
 )
 
 const (
-	readyTimeout        = 500 * time.Millisecond
-	idempotencyKey      = "Idempotency-Key"
-	dutyRead            = "engineering.read"
-	dutyBomWrite        = "engineering.bom.write"
-	dutyEcoApprove      = "engineering.eco.approve"
-	dutyEcoWorkflow     = "engineering.eco.workflow"
-	dutyEcrReview       = "engineering.ecr.review"
-	dutyResourceWrite   = "engineering.resource.write"
-	dutyRouteWrite      = "engineering.route.write"
-	dutyReleaseAccept   = "engineering.release.accept"
-	dutyDocSign         = "engineering.doc.sign"
+	readyTimeout      = 500 * time.Millisecond
+	idempotencyKey    = "Idempotency-Key"
+	dutyRead          = "engineering.read"
+	dutyBomWrite      = "engineering.bom.write"
+	dutyEcoApprove    = "engineering.eco.approve"
+	dutyEcoWorkflow   = "engineering.eco.workflow"
+	dutyEcrReview     = "engineering.ecr.review"
+	dutyResourceWrite = "engineering.resource.write"
+	dutyRouteWrite    = "engineering.route.write"
+	dutyReleaseAccept = "engineering.release.accept"
+	dutyDocSign       = "engineering.doc.sign"
+	// dutyImportWrite and dutyImportRead are held only by the migration loader (service:migration-loader): it creates
+	// draft BOM and route versions from a legacy extract and reads them back by id for reconciliation.
+	dutyImportWrite     = "engineering.import.write"
+	dutyImportRead      = "engineering.import.read"
 	reauthHeader        = "X-Passage-Reauth-Assertion"
 	dateLayout          = "2006-01-02"
 	validationDetail    = "request failed validation"
@@ -113,21 +117,21 @@ func (a *API) Register(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(a.instrument)
 		r.Get("/readyz", a.ready)
-		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/bom-versions", a.createBomVersion)
+		r.With(authz.RequireAnyDuty(dutyBomWrite, dutyImportWrite)).Post("/v1/engineering/bom-versions", a.createBomVersion)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/bom-versions", a.listBomVersions)
-		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/bom-versions/{id}", a.getBomVersion)
+		r.With(authz.RequireAnyDuty(dutyRead, dutyImportRead)).Get("/v1/engineering/bom-versions/{id}", a.getBomVersion)
 		r.With(authz.RequireDuty(dutyBomWrite)).Put("/v1/engineering/bom-versions/{id}", a.updateBomVersion)
 		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/bom-versions/{id}:activate", a.activateBomVersion)
 		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/bom-versions/{id}:cancel", a.cancelBomVersion)
 		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/bom-versions/{id}:copy", a.copyBomVersion)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions", a.listRouteVersions)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions:active", a.activeRouteVersion)
-		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions/{id}", a.getRouteVersion)
+		r.With(authz.RequireAnyDuty(dutyRead, dutyImportRead)).Get("/v1/engineering/route-versions/{id}", a.getRouteVersion)
 		r.With(authz.RequireDuty(dutyRouteWrite)).Put("/v1/engineering/route-versions/{id}", a.updateRouteVersion)
 		r.With(authz.RequireDuty(dutyRouteWrite)).Post("/v1/engineering/route-versions/{id}:activate", a.activateRouteVersion)
 		r.With(authz.RequireDuty(dutyRouteWrite)).Post("/v1/engineering/route-versions/{id}:cancel", a.cancelRouteVersion)
 		r.With(authz.RequireDuty(dutyRouteWrite)).Post("/v1/engineering/route-versions/{id}:copy", a.copyRouteVersion)
-		r.With(authz.RequireDuty(dutyRouteWrite)).Post("/v1/engineering/route-versions", a.createRouteVersion)
+		r.With(authz.RequireAnyDuty(dutyRouteWrite, dutyImportWrite)).Post("/v1/engineering/route-versions", a.createRouteVersion)
 		r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/boms:explode", a.explode)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/boms:where-used", a.whereUsed)
 		r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/routes:lead-time", a.leadTime)
@@ -456,6 +460,11 @@ func (a *API) createBomVersion(w http.ResponseWriter, r *http.Request) {
 	version, fields := body.toDomain()
 	if len(fields) > 0 {
 		invalid(w, r, fields)
+		return
+	}
+	// An import caller loads legacy BOMs as drafts; activating one is an engineering decision (ECO control).
+	if caller, _ := tenant.FromContext(r.Context()); version.Status != domain.StatusDraft && !caller.HasDuty(dutyBomWrite) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "an import caller creates draft BOM versions only; activating one needs duty "+dutyBomWrite))
 		return
 	}
 	created, err := a.store.CreateBomVersion(r.Context(), version, store.Idem{Key: r.Header.Get(idempotencyKey), Hash: hashOf(body)}, checkVersion(version))

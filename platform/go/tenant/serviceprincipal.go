@@ -23,7 +23,7 @@ var servicePrincipals = map[string][]string{
 	"fulfillment-order":       {"fulfillment.order.sync"},
 	"integration-hub":         {"migration.outbound.render", "migration.xref.record"},
 	"pricing-cache":           {"pricing.cache.invalidate"},
-	"migration-loader":        {"party.import.write", "product.import.write", "receivables.import.write"},
+	"migration-loader":        {"party.import.write", "party.import.read", "product.import.write", "product.import.read", "receivables.import.write", "receivables.import.read", "engineering.import.write", "engineering.import.read"},
 	"production-planning":     {"production.planned.intake"},
 	"receiving-erasure":       {"compliance.legal_hold.check"},
 	"receiving-ers":           {"VendorInvoicePost"},
@@ -37,12 +37,14 @@ var servicePrincipals = map[string][]string{
 // as any registered principal (iss "integration-hub" with act
 // "service:migration-loader"), borrowing duties its own grant lacks.
 var servicePrincipalIssuers = map[string][]string{
-	"finreport-ledger":        {"finreport"},
-	"purchasing-inbound":      {"purchasing"},
-	"fulfillment-order":       {"fulfillment"},
-	"integration-hub":         {"integration-hub"},
-	"pricing-cache":           {"pricing"},
-	"migration-loader":        {"migration", "migration-factory"},
+	"finreport-ledger":   {"finreport"},
+	"purchasing-inbound": {"purchasing"},
+	"fulfillment-order":  {"fulfillment"},
+	"integration-hub":    {"integration-hub"},
+	"pricing-cache":      {"pricing"},
+	// party forwards the loader as act on the one onward call a party create makes: the party number from numbering.
+	// Its token holds only party's own grant (numbering.sequence.allocate), so nothing is borrowed (#475).
+	"migration-loader":        {"migration", "migration-factory", "party"},
 	"production-planning":     {"production"},
 	"receiving-erasure":       {"receiving"},
 	"receiving-ers":           {"receiving"},

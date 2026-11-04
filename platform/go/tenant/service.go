@@ -172,9 +172,10 @@ var serviceGrants = map[string]map[string][]string{
 		"org": {"org.read"},
 	},
 	"migration": {
-		"party":       {"party.import.write"},
-		"product":     {"product.import.write"},
-		"receivables": {"receivables.import.write"},
+		"party":       {"party.import.write", "party.import.read"},
+		"product":     {"product.import.write", "product.import.read"},
+		"receivables": {"receivables.import.write", "receivables.import.read"},
+		"engineering": {"engineering.import.write", "engineering.import.read"},
 	},
 	"migration-factory": {
 		"receivables": {"receivables.import.write", "ARView"},

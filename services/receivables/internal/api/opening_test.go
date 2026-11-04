@@ -32,6 +32,30 @@ func TestOpeningImport_NeedsTheImportDuty(t *testing.T) {
 	}
 }
 
+// The loader reads an open item back by id (receivables.import.read); its list and every other route stay closed.
+func TestOpenItemRead_ImportReadDuty(t *testing.T) {
+	h := router(&fakeStore{})
+	for _, duties := range []string{"receivables.import.read", "ARView"} {
+		rec := do(h, http.MethodGet, "/v1/receivables/open-items/"+fakeOpenItemID, "", duties, nil)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"documentNumber":"D-1"`) || rec.Header().Get("ETag") != `"2"` {
+			t.Fatalf("%s: %d %s", duties, rec.Code, rec.Body)
+		}
+	}
+	for path, want := range map[string]int{"/v1/receivables/open-items/" + openingCustomer: http.StatusNotFound, "/v1/receivables/open-items/not-a-uuid": http.StatusNotFound} {
+		if rec := do(h, http.MethodGet, path, "", "receivables.import.read", nil); rec.Code != want {
+			t.Errorf("%s: %d, want %d", path, rec.Code, want)
+		}
+	}
+	for _, c := range []struct{ method, path string }{{http.MethodGet, "/v1/receivables/open-items"}, {http.MethodGet, "/v1/receivables/open-item-imports"}, {http.MethodPost, "/v1/receivables/open-items:batch"}} {
+		if rec := do(h, c.method, c.path, "{}", "receivables.import.read", nil); rec.Code != http.StatusForbidden {
+			t.Errorf("%s %s: %d, want 403", c.method, c.path, rec.Code)
+		}
+	}
+	if rec := do(h, http.MethodGet, "/v1/receivables/open-items/"+fakeOpenItemID, "", "receivables.import.write", nil); rec.Code != http.StatusForbidden {
+		t.Errorf("import write alone reads: %d", rec.Code)
+	}
+}
+
 func TestOpeningImport_RowErrorsAreReportedPerRow(t *testing.T) {
 	f := &fakeStore{}
 	h := router(f)

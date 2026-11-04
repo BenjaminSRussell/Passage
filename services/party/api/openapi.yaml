@@ -73,6 +73,7 @@ paths:
     get:
       operationId: getParty
       x-passage-duty: party.read
+      x-passage-duty-alternatives: [party.import.read]
       description: A merged party answers with its survivor (at most 5 hops), requestedId and redirected true. dob is returned only to callers holding pii.read; others see "••••" when it is set.
       responses:
         '200':
@@ -343,12 +344,26 @@ paths:
     get:
       operationId: getVendor
       x-passage-duty: party.read
+      x-passage-duty-alternatives: [party.import.read]
       description: The vendor role, including vendorGroupId.
       responses:
         '200': { description: The vendor role., content: { application/json: { schema: { $ref: '#/components/schemas/Vendor' } } } }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: 'PTY-VENDOR-NOT-FOUND (unknown id, another tenant or legal entity).', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/party/customers/{id}:
+    parameters:
+      - { name: id, in: path, required: true, description: Customer role id., schema: { type: string, format: uuid } }
+    get:
+      operationId: getCustomer
+      x-passage-duty: party.read
+      x-passage-duty-alternatives: [party.import.read]
+      description: The customer role in the caller's legal entities, with its version as the ETag. The migration loader reads the roles it loaded through this route (service duty party.import.read) to reconcile a run.
+      responses:
+        '200': { description: The customer role., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: '#/components/schemas/Customer' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: 'PTY-CUSTOMER-NOT-FOUND (unknown id, another tenant or legal entity).', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/party/vendors/{id}/bank-accounts:
     parameters:
       - { name: id, in: path, required: true, description: Vendor role id., schema: { type: string, format: uuid } }

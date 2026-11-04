@@ -66,6 +66,7 @@ func (a *API) Register(r chi.Router) {
 	r.Route("/v1/receivables", func(r chi.Router) {
 		r.With(authz.RequireDuty(dutyView)).Get("/open-items", a.listOpenItems)
 		r.With(authz.RequireDuty(dutyOpeningImport)).Post("/open-items:batch", a.importOpeningItems)
+		r.With(authz.RequireAnyDuty(dutyView, dutyOpeningRead)).Get("/open-items/{ref}", a.getOpenItem)
 		r.With(authz.RequireDuty(dutyView)).Get("/open-item-imports", a.listOpeningImports)
 		r.With(authz.RequireDuty(dutyView)).Get("/aging", a.aging)
 		r.With(authz.RequireDuty(dutyPayment)).Post("/payments", a.createPayment)
