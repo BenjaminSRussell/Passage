@@ -36,15 +36,21 @@ def test_fifty_constraint_fixture():
         assert res["feasible"], f"valid[{i}] {sel} -> {res}"
         for key, value in sel.items():
             assert res["assignment"][key] == value
-        # Backtracking without OR-Tools is ~200ms on a laptop and can exceed
-        # that on GitHub-hosted runners (observed ~230ms).
-        assert (perf_counter() - start) < 2.0
+        assert (perf_counter() - start) < _solve_bound()
     for i, sel in enumerate(invalid):
         start = perf_counter()
         res = solve(model, sel)
         assert not res["feasible"], f"invalid[{i}] {sel} should fail"
         assert res["iis"]
-        assert (perf_counter() - start) < 2.0
+        assert (perf_counter() - start) < _solve_bound()
+
+
+def _solve_bound() -> float:
+    # AC-8.2 holds CP-SAT to < 200 ms. The fallback backtracker is ~1 ms mean
+    # locally and can exceed 200 ms on GitHub-hosted runners (observed ~230 ms).
+    if os.environ.get("CONFIGURATOR_REQUIRE_ORTOOLS") == "1":
+        return 0.2
+    return 2.0
 
 
 def test_fixture_file_exists():
