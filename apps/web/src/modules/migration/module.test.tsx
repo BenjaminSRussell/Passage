@@ -63,7 +63,7 @@ const run: MigrationRun = {
   reconciliation: { source: 3, target: 2, checks: [{ name: "row_count", ok: false, detail: "1 rejected" }] },
   createdAt: "2026-10-30T10:00:00Z",
 };
-const spec: MappingSpec = { id: SPEC, entity: "customer", version: 1, checksum: "ab".repeat(32), fieldCount: 2, testCount: 1, createdAt: "2026-10-30T09:00:00Z", mapping: { entity: "customer", version: 1 } };
+const spec: MappingSpec = { id: SPEC, entity: "customer", version: 1, checksum: "ab".repeat(32), fieldCount: 2, testCount: 1, naturalKey: [], createdAt: "2026-10-30T09:00:00Z", mapping: { entity: "customer", version: 1 } };
 
 describe("migration module", () => {
   it("is discovered and keeps every route under its prefix", () => {

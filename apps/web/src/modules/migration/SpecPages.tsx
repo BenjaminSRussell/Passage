@@ -2,8 +2,8 @@ import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
-import { Alert, Button, buttonClassName, Card, DataTable, FormField, PageHeader, Textarea, type DataTableColumn } from "../../shell/ui";
-import { describeProblem, getSpec, listSpecsPage, newKey, publishSpec, type MappingSpec, type Problem } from "./api/client";
+import { Alert, Button, buttonClassName, Card, DataTable, FormField, PageHeader, Select, Textarea, type DataTableColumn } from "../../shell/ui";
+import { describeProblem, getSpec, listProjects, listSpecsPage, newKey, PICKER_LIMIT, publishSpec, type MappingSpec, type MigrationProject, type Problem } from "./api/client";
 import { formatDateTime, parseMappingText } from "./domain";
 import styles from "./pages.module.css";
 import { DUTY_RUN } from "./RunPages";
@@ -13,8 +13,17 @@ import { usePaged } from "./usePaged";
 
 export const DUTY_SPEC_WRITE = "migration.spec.write";
 
-const columns: DataTableColumn<MappingSpec>[] = [
+/** Project names by id, for the list and filter; empty until the projects load (the list still works without them). */
+function useProjectNames(): { names: Map<string, string>; projects: MigrationProject[] } {
+  const state = useLoad((signal) => listProjects({ projectType: "migrate", limit: PICKER_LIMIT }, signal), "spec-projects");
+  const projects = state.data?.items ?? [];
+  return { names: new Map(projects.map((p) => [p.id, p.name])), projects };
+}
+
+const columns = (names: Map<string, string>): DataTableColumn<MappingSpec>[] => [
   { key: "entity", header: "Entity", mono: true },
+  { key: "projectId", header: "Project", render: (row) => (row.projectId ? (names.get(row.projectId) ?? row.projectId.slice(0, 8)) : "All projects") },
+  { key: "naturalKey", header: "Natural key", mono: true, render: (row) => (row.naturalKey?.length ? row.naturalKey.join(", ") : "Not set") },
   { key: "version", header: "Version", align: "end" },
   { key: "fieldCount", header: "Fields", align: "end" },
   { key: "testCount", header: "Tests", align: "end" },
@@ -84,8 +93,12 @@ const rejectColumns: DataTableColumn<RejectCondition>[] = [
 export function SpecsPage() {
   const navigate = useNavigate();
   const canWrite = holdsDuty(usePrincipalDuties(), DUTY_SPEC_WRITE);
-  const state = useLoad((signal) => listSpecsPage({}, signal), "specs");
-  const paged = usePaged(state, "specs", (cursor) => listSpecsPage({ cursor }));
+  const [project, setProject] = useState("");
+  const { names, projects } = useProjectNames();
+  const filter = { projectId: project || undefined };
+  const key = `specs|${project}`;
+  const state = useLoad((signal) => listSpecsPage(filter, signal), key);
+  const paged = usePaged(state, key, (cursor) => listSpecsPage({ ...filter, cursor }));
   return (
     <div className={styles.stack}>
       <PageHeader
@@ -104,6 +117,21 @@ export function SpecsPage() {
           </>
         }
       />
+      <div className={styles.toolbar}>
+        <FormField id="specs-project" label="Project">
+          {(control) => (
+            <Select {...control} value={project} onChange={(event) => setProject(event.target.value)}>
+              <option value="">All specs</option>
+              <option value="none">Tenant-wide only</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </Select>
+          )}
+        </FormField>
+      </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load mapping specs" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
           {state.error.message} ({state.error.code})
@@ -111,7 +139,7 @@ export function SpecsPage() {
       ) : (
         <DataTable
           label="Mapping specs"
-          columns={columns}
+          columns={columns(names)}
           rows={paged.rows}
           getRowKey={(row) => row.id}
           loading={state.loading}
@@ -131,6 +159,8 @@ export function NewSpecPage() {
   const [error, setError] = useState("");
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
+  const [project, setProject] = useState("");
+  const { projects } = useProjectNames();
   const key = useRef(newKey());
 
   async function submit(event: FormEvent) {
@@ -141,7 +171,7 @@ export function NewSpecPage() {
     if (parsed.mapping === undefined) return;
     setBusy(true);
     try {
-      const spec = await publishSpec(parsed.mapping, key.current);
+      const spec = await publishSpec(parsed.mapping, key.current, project || undefined);
       navigate(`/migration/specs/${spec.id}`);
     } catch (e) {
       setFailure(describeProblem(e));
@@ -156,6 +186,27 @@ export function NewSpecPage() {
       <PageHeader title="Publish mapping spec" description="Needs entity, version, fields and at least one test case. Failing mapping tests stop the publish. Publishing the same content again returns the stored version." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
+          <FormField id="spec-project" label="Project (optional)" hint="Leave empty for a spec any project may use. A project's spec is versioned on its own.">
+            {(control) => (
+              <Select
+                {...control}
+                value={project}
+                onChange={(event) => {
+                  setProject(event.target.value);
+                  key.current = newKey();
+                }}
+              >
+                <option value="">No project (tenant-wide)</option>
+                {projects
+                  .filter((p) => p.status === "active")
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+              </Select>
+            )}
+          </FormField>
           <div className={styles.wide}>
             <FormField id="spec-mapping" label="Mapping JSON" error={error}>
               {(control) => (
@@ -244,6 +295,18 @@ export function SpecDetailPage() {
           ) : null
         }
       />
+      <Card title="Scope">
+        <dl className={styles.details}>
+          <div className={styles.entry}>
+            <dt className={styles.term}>Project</dt>
+            <dd className={styles.value}>{spec.projectId ? <Link to={`/migration/projects/${spec.projectId}`}>View the project</Link> : "All projects (tenant-wide)"}</dd>
+          </div>
+          <div className={styles.entry}>
+            <dt className={styles.term}>Natural key</dt>
+            <dd className={styles.value}>{spec.naturalKey?.length ? <span className={styles.mono}>{spec.naturalKey.join(", ")}</span> : "Not set"}</dd>
+          </div>
+        </dl>
+      </Card>
       <Card title="Checksum">
         <code>{spec.checksum}</code>
       </Card>

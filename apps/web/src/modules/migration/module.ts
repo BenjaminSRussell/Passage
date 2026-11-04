@@ -9,6 +9,7 @@ import { NewTemplatePage, TemplateDetailPage, TemplatesPage } from "./TemplatePa
 import { SyncDetailPage, SyncPage } from "./SyncPages";
 import { NewOutboundPage, OutboundDetailPage, OutboundListPage } from "./OutboundPages";
 import { LookupDetailPage, LookupListPage, NewLookupPage } from "./LookupPages";
+import { SettingsPage } from "./SettingsPages";
 import { XrefPage } from "./XrefPages";
 import { NewSpecPage, SpecDetailPage, SpecsPage } from "./SpecPages";
 
@@ -51,6 +52,7 @@ const migration: PassageModule = {
     { path: "/migration/lookups", element: createElement(LookupListPage), handle: { title: "Lookup tables" } },
     { path: "/migration/lookups/new", element: createElement(NewLookupPage), handle: { title: "New lookup table" } },
     { path: "/migration/lookups/:id", element: createElement(LookupDetailPage), handle: { title: "Lookup table" } },
+    { path: "/migration/settings", element: createElement(SettingsPage), handle: { title: "Migration settings" } },
     { path: "/migration/xref", element: createElement(XrefPage), handle: { title: "Legacy key cross-reference" } },
   ],
   nav: [
@@ -65,6 +67,7 @@ const migration: PassageModule = {
     { label: "Data templates", to: "/migration/templates" },
     { label: "Configuration packages", to: "/migration/packages" },
     { label: "Legacy key cross-reference", to: "/migration/xref" },
+    { label: "Migration settings", to: "/migration/settings", duty: "migration.run" },
   ],
 };
 

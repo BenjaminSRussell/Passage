@@ -124,6 +124,17 @@ func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
 		TargetLegalEntityID: req.TargetLegalEntityID, ConnectionProfileID: req.ConnectionProfileID, Status: domain.ProjectActive, CutoverAt: cutover, ScheduleCron: req.ScheduleCron, ScheduleTimezone: req.ScheduleTimezone,
 	}
 	bad := domain.ValidateProject(p, ids.Valid)
+	if bad["scheduleCron"] == "" {
+		msg, err := a.scheduleProblem(r, p.ScheduleCron)
+		if err != nil {
+			a.logFailure(r, "read tenant settings for schedule failed", err)
+			fail(w, r, err)
+			return
+		}
+		if msg != "" {
+			bad["scheduleCron"] = msg
+		}
+	}
 	if !ok {
 		bad["cutoverAt"] = "must be an RFC 3339 timestamp"
 	}
@@ -241,6 +252,15 @@ func (a *API) updateProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, validation(bad))
 		return
 	}
+	cronProblem := ""
+	if req.ScheduleCron != nil {
+		var err error
+		if cronProblem, err = a.scheduleProblem(r, *req.ScheduleCron); err != nil {
+			a.logFailure(r, "read tenant settings for schedule failed", err)
+			fail(w, r, err)
+			return
+		}
+	}
 	var profile store.ConnectionProfile
 	if req.ConnectionProfileID != nil && *req.ConnectionProfileID != "" {
 		if !ids.Valid(*req.ConnectionProfileID) {
@@ -282,6 +302,9 @@ func (a *API) updateProject(w http.ResponseWriter, r *http.Request) {
 			Name: p.Name, Type: p.Type, SourceSystem: p.SourceSystem, SourceLegalEntityID: p.SourceLegalEntityID,
 			TargetLegalEntityID: p.TargetLegalEntityID, ConnectionProfileID: p.ConnectionProfileID, Status: p.Status, CutoverAt: p.CutoverAt, ScheduleCron: p.ScheduleCron, ScheduleTimezone: p.ScheduleTimezone,
 		}, ids.Valid)
+		if cronProblem != "" {
+			fields["scheduleCron"] = cronProblem
+		}
 		if len(fields) > 0 {
 			return validation(fields)
 		}

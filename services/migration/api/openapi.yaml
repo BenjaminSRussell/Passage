@@ -50,7 +50,7 @@ paths:
           description: MIG-RUN-ACTIVE, another run holds the project (one active run per project, BR-10.2); the detail names that run's id, which the run is recorded under when it finishes (GET answers 404 until then), and a claim older than 40 minutes counts as abandoned; MIG-PROJECT-ARCHIVED, the project is archived. No backend is called for an archived project and the run is not recorded.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
-          description: MIG-PROJECT-UNKNOWN, projectId names no migration project; MIG-PROJECT-NOT-MIGRATE, only a migrate project takes runs; MIG-MAP-TEST-FAIL, one or more mapping tests failed (errors maps each failed test name to its reason); MIG-SPEC-UNKNOWN, mappingSpecId names no published spec; MIG-TEMPLATE-UNKNOWN, dataTemplateId names no published template; MIG-TEMPLATE-INVALID, the template does not fit the mapping; idempotency_key_reuse, the key was used with a different request; MIG-NO-CONNECTION, no active connection profile reads the source system (or the project's profile reads another); MIG-CONNECTION-AMBIGUOUS, several do and the run is not under a project that names one; MIG-NO-BINDING, the profile has no active entity binding for the mapping's entity; MIG-MAP-TARGET-UNKNOWN, the mapping writes targets the entity's target API does not take (errors names each). No backend is called.
+          description: MIG-PROJECT-UNKNOWN, projectId names no migration project; MIG-PROJECT-NOT-MIGRATE, only a migrate project takes runs; MIG-MAP-TEST-FAIL, one or more mapping tests failed (errors maps each failed test name to its reason); MIG-SPEC-UNKNOWN, mappingSpecId names no published spec; MIG-SPEC-PROJECT, the spec belongs to another project than projectId (a run from a project's spec without projectId runs under that project); MIG-TEMPLATE-UNKNOWN, dataTemplateId names no published template; MIG-TEMPLATE-INVALID, the template does not fit the mapping; idempotency_key_reuse, the key was used with a different request; MIG-NO-CONNECTION, no active connection profile reads the source system (or the project's profile reads another); MIG-CONNECTION-AMBIGUOUS, several do and the run is not under a project that names one; MIG-NO-BINDING, the profile has no active entity binding for the mapping's entity; MIG-MAP-TARGET-UNKNOWN, the mapping writes targets the entity's target API does not take (errors names each). No backend is called.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '502':
           description: MIG-EXTRACT-FAILED, the legacy system could not be read; the detail carries the classified, credential-free reason.
@@ -92,10 +92,11 @@ paths:
     get:
       operationId: listMappingSpecs
       summary: List mapping specs
-      description: Published mapping versions, newest version first per entity. The mapping body is returned by the single-spec read.
+      description: Published mapping versions, newest version first per entity. The mapping body is returned by the single-spec read. A spec belongs to one migration project or is tenant-wide; projectId narrows the list to one project's specs or, with none, to the tenant-wide ones.
       x-passage-duty: migration.run
       parameters:
         - { name: entity, in: query, schema: { type: string } }
+        - { name: projectId, in: query, description: "A migration project id, or none for the tenant-wide specs. Omitted lists every spec. Anything else is a 400 COM-0001.", schema: { type: string } }
         - { name: cursor, in: query, description: "The nextCursor of the previous page. It holds only the position, so send the same filters again; a cursor from another list is a 400 COM-0001.", schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
       responses:
@@ -106,13 +107,13 @@ paths:
     post:
       operationId: publishMappingSpec
       summary: Publish a mapping spec version
-      description: Parses the mapping and runs its tests (at least one test case is required), then stores it as an immutable version of its entity. Re-publishing identical content returns the stored spec; different content under a used version is a conflict.
+      description: Parses the mapping and runs its tests (at least one test case is required), then stores it as an immutable version of its entity, in the scope of projectId (tenant-wide when omitted). Re-publishing identical content returns the stored spec; different content under a version used in the same scope is a conflict.
       x-passage-duty: migration.spec.write
       parameters:
         - { name: Idempotency-Key, in: header, schema: { type: string } }
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, additionalProperties: false, required: [mapping], properties: { mapping: { type: object, description: "Mapping DSL document with entity, version, fields (a field may name a source format, the codepage_normalize function, or rule expr with an expr expression over source columns: + - * / comparisons && || ! and the functions round, min, max, abs, concat, substr, upper, lower, trim, len, isempty, coalesce, if), optional rejectWhen conditions (field, op, value or values, reason code; op expr takes an expression over mapped targets as value and rejects when it is true) and at least one test." } } } } }
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [mapping], properties: { projectId: { type: string, format: uuid, description: "The active migrate project the spec belongs to. Omitted publishes a tenant-wide spec. A project's specs are versioned on their own: two projects, or one project and the tenant-wide set, can each hold version 1 of an entity." }, mapping: { type: object, description: "Mapping DSL document with entity, version, optional naturalKey (the mapped target columns that identify a record, each produced by a field rule; a row whose key column is empty is rejected MIG-MAP-KEY), fields (a field may name a source format, the codepage_normalize function, or rule expr with an expr expression over source columns: + - * / comparisons && || ! and the functions round, min, max, abs, concat, substr, upper, lower, trim, len, isempty, coalesce, if), optional rejectWhen conditions (field, op, value or values, reason code; op expr takes an expression over mapped targets as value and rejects when it is true) and at least one test." } } } } }
       responses:
         '201':
           description: A new spec version was stored.
@@ -122,11 +123,14 @@ paths:
         '200':
           description: The same content was already stored under this entity and version, or the Idempotency-Key was replayed.
           content: { application/json: { schema: { $ref: '#/components/schemas/MappingSpec' } } }
+        '400':
+          description: COM-0001, the request is malformed or projectId is not a UUID.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '409':
-          description: MIG-SPEC-VERSION-EXISTS, this entity and version already hold different content.
+          description: MIG-SPEC-VERSION-EXISTS, this entity and version already hold different content in this scope; or MIG-PROJECT-ARCHIVED, the project is archived.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
-          description: MIG-MAP-INVALID (including a mapping with no test case), MIG-MAP-TEST-FAIL, or idempotency_key_reuse.
+          description: MIG-MAP-INVALID (including a mapping with no test case or a naturalKey column no field rule produces), MIG-MAP-TEST-FAIL, MIG-PROJECT-UNKNOWN, MIG-PROJECT-NOT-MIGRATE (the project is not a migrate project), or idempotency_key_reuse.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/integration/mapping-specs/{id}:
@@ -1017,6 +1021,36 @@ paths:
           description: MIG-XREF-REF-MISMATCH, a ref's entity is neither the subject entity nor a collection subject entity of the mapping.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/migration-settings:
+    get:
+      operationId: getMigrationSettings
+      summary: Read the tenant's migration settings
+      description: The tenant-wide migration settings. A tenant that never saved them reads the defaults (recurringMinIntervalMin 15) with version 0 and no updatedAt.
+      x-passage-duty: migration.run
+      responses:
+        '200':
+          description: The settings.
+          content: { application/json: { schema: { $ref: '#/components/schemas/MigrationSettings' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    put:
+      operationId: putMigrationSettings
+      summary: Save the tenant's migration settings
+      description: Sets mig.recurring.min_interval_min, the shortest gap a project or binding cron may leave between two scheduled runs (15 to 1,440 minutes). It governs schedules saved afterwards; schedules already stored keep running. Send the version you read (0 when the tenant never saved settings).
+      x-passage-duty: migration.project.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PutMigrationSettings' } } }
+      responses:
+        '200':
+          description: The saved settings with the next version.
+          content: { application/json: { schema: { $ref: '#/components/schemas/MigrationSettings' } } }
+        '400':
+          description: COM-0001, the version is missing or negative, or recurringMinIntervalMin is missing or outside 15 to 1,440.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: MIG-VERSION-CONFLICT, the version is stale; the detail names the current one.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/integration/lookup-tables:
     get:
       operationId: listLookupTables
@@ -1594,7 +1628,7 @@ components:
         connectionProfileId: { type: string, format: uuid, description: Migrate projects only. The connection profile the project reads from. }
         status: { type: string, enum: [active, archived] }
         cutoverAt: { type: string, format: date-time }
-        scheduleCron: { type: string, maxLength: 100, description: "Five-field cron expression (numbers, ranges, lists and steps; no names or macros) for recurring incremental imports, at least 15 minutes between runs (FR-10.16), read in scheduleTimezone. The delta sync scheduler runs it for the bindings of the project's connection profile." }
+        scheduleCron: { type: string, maxLength: 100, description: "Five-field cron expression (numbers, ranges, lists and steps; no names or macros) for recurring incremental imports, at least 15 minutes between runs, or the tenant's recurringMinIntervalMin when that is longer (FR-10.16), read in scheduleTimezone. The delta sync scheduler runs it for the bindings of the project's connection profile." }
         scheduleTimezone: { type: string, maxLength: 64, description: "IANA time zone name the scheduleCron is read in, UTC unless set; a nonexistent local time (02:30 on a spring-forward day) runs once, at the instant it would have shown." }
         version: { type: integer, minimum: 1 }
         createdBy: { type: string }
@@ -1674,9 +1708,24 @@ components:
         defaultCount: { type: integer }
         defaults: { type: object, additionalProperties: { type: string }, description: Present on the single-template read and on publish. }
         createdAt: { type: string, format: date-time }
+    MigrationSettings:
+      type: object
+      required: [recurringMinIntervalMin, version]
+      properties:
+        recurringMinIntervalMin: { type: integer, minimum: 15, maximum: 1440, description: "mig.recurring.min_interval_min: the shortest gap, in minutes, between two scheduled runs of a project or binding cron (FR-10.16). 15 until the tenant saves another value." }
+        version: { type: integer, minimum: 0, description: 0 for a tenant that never saved settings. }
+        updatedBy: { type: string, description: The user who saved the settings. }
+        updatedAt: { type: string, format: date-time }
+    PutMigrationSettings:
+      type: object
+      additionalProperties: false
+      required: [version, recurringMinIntervalMin]
+      properties:
+        version: { type: integer, minimum: 0, description: The version read; 0 creates the settings. }
+        recurringMinIntervalMin: { type: integer, minimum: 15, maximum: 1440, description: Minutes between two scheduled runs, at least. }
     MappingSpec:
       type: object
-      required: [id, entity, version, checksum, fieldCount, testCount, createdAt]
+      required: [id, entity, version, checksum, fieldCount, testCount, naturalKey, createdAt]
       properties:
         id: { type: string, format: uuid }
         entity: { type: string }
@@ -1684,6 +1733,8 @@ components:
         checksum: { type: string, description: SHA-256 of the canonical mapping JSON. }
         fieldCount: { type: integer }
         testCount: { type: integer }
+        projectId: { type: string, format: uuid, description: The migration project the spec belongs to. Absent for a tenant-wide spec. A run from the spec adopts this project. }
+        naturalKey: { type: array, items: { type: string }, description: The mapped columns that identify a record, from the mapping's naturalKey. Empty when the mapping names none. }
         createdAt: { type: string, format: date-time }
         mapping: { type: object, description: Present on the single-spec read only. }
     ConfigPackageRequest:
