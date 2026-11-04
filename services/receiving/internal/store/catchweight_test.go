@@ -22,8 +22,8 @@ func catchArrival(p tenant.Principal, slip string) store.Receipt {
 		LegalEntityID: p.LegalEntityID, VendorID: vendorID, PurchaseOrderID: poID, PackingSlip: slip,
 		Date: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), Currency: "USD", ExchangeRate: decimal.RequireFromString("1"),
 		Lines: []store.Line{{
-			ProductID: productID, OrderedRemaining: decimal.NewFromInt(10), UnitPrice: decimal.RequireFromString("2"),
-			Unit: "CS",
+			ProductID: productID, OrderedRemaining: decimal.NewFromInt(200), UnitPrice: decimal.RequireFromString("2"),
+			Unit: "KG",
 		}},
 	}
 }

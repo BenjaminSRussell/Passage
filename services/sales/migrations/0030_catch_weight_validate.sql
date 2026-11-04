@@ -1,4 +1,4 @@
--- Second half of 0028: VALIDATE CONSTRAINT takes SHARE UPDATE EXCLUSIVE.
+-- Second half of 0029: VALIDATE CONSTRAINT takes SHARE UPDATE EXCLUSIVE.
 SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE sales_order_line VALIDATE CONSTRAINT sales_order_line_catch_weight_check;

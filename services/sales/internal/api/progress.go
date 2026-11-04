@@ -87,8 +87,8 @@ func (a *API) recordProgress(w http.ResponseWriter, r *http.Request) {
 			var actual *decimal.Decimal
 			if l.ActualWeight != nil {
 				w, werr := decimal.NewFromString(*l.ActualWeight)
-				if werr != nil || !w.IsPositive() || w.Exponent() < -quantityPlaces {
-					fields[name+".actualWeight"] = fmt.Sprintf("must be a positive decimal with at most %d places", quantityPlaces)
+				if werr != nil || !w.IsPositive() || !domain.FitsWeightColumn(w) {
+					fields[name+".actualWeight"] = fmt.Sprintf("must be a positive decimal with at most %d places and 14 integer digits", quantityPlaces)
 				} else {
 					actual = &w
 				}

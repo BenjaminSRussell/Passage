@@ -233,7 +233,7 @@ func (t *tenantData) receivedOn(excludeID, purchaseOrderID string, poLineNo int)
 		}
 		for _, l := range other.Lines {
 			if l.POLineNo == poLineNo {
-				total = total.Add(l.CatchUnits())
+				total = total.Add(l.Qty)
 			}
 		}
 	}

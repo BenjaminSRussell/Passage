@@ -356,7 +356,7 @@ func attachOtherReceived(ctx context.Context, tx pgx.Tx, tenantID string, r *Rec
 		if l.POLineNo < 1 {
 			continue
 		}
-		if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(COALESCE(l.cw_qty, l.qty)), 0) FROM receiving_receipt_line l JOIN receiving_receipt r ON r.tenant_id = l.tenant_id AND r.id = l.receipt_id
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(l.qty), 0) FROM receiving_receipt_line l JOIN receiving_receipt r ON r.tenant_id = l.tenant_id AND r.id = l.receipt_id
 			WHERE l.tenant_id = $1 AND r.purchase_order_id = $2 AND l.po_line_no = $3 AND r.id <> $4 AND r.state IN `+receivedStates,
 			tenantID, r.PurchaseOrderID, l.POLineNo, r.ID).Scan(&r.Lines[i].OtherReceived); err != nil {
 			return err
@@ -372,7 +372,7 @@ func (s *Postgres) ReceivedOnPurchaseOrder(ctx context.Context, purchaseOrderID 
 	}
 	out := map[int]decimal.Decimal{}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT l.po_line_no, sum(COALESCE(l.cw_qty, l.qty)) FROM receiving_receipt_line l JOIN receiving_receipt r ON r.tenant_id = l.tenant_id AND r.id = l.receipt_id
+		rows, err := tx.Query(ctx, `SELECT l.po_line_no, sum(l.qty) FROM receiving_receipt_line l JOIN receiving_receipt r ON r.tenant_id = l.tenant_id AND r.id = l.receipt_id
 			WHERE l.tenant_id = $1 AND r.purchase_order_id = $2 AND l.po_line_no IS NOT NULL AND r.state IN `+receivedStates+` GROUP BY l.po_line_no`, tenantID, purchaseOrderID)
 		if err != nil {
 			return err

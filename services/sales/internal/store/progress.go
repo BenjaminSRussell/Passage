@@ -182,7 +182,7 @@ func (s *Postgres) RecordProgress(ctx context.Context, in NewProgress, now time.
 				return problem(http.StatusUnprocessableEntity, CodeProgressQuantity, fmt.Sprintf("line %d: %s", l.LineNo, err))
 			}
 			oldNet := l.LineNet
-			if err := applyCatchWeightProgress(l, in.Kind, req.ActualWeight); err != nil {
+			if err := applyCatchWeightProgress(l, in.Kind, req.Quantity, next.Delivered, req.ActualWeight); err != nil {
 				return err
 			}
 			if !l.LineNet.Equal(oldNet) {
@@ -290,31 +290,40 @@ func (s *Postgres) ListProgress(ctx context.Context, f ProgressFilter) ([]OrderP
 	return out, err
 }
 
-func applyCatchWeightProgress(l *Line, kind string, actual *decimal.Decimal) error {
-	if actual == nil {
+func applyCatchWeightProgress(l *Line, kind string, cases decimal.Decimal, delivered decimal.Decimal, actual *decimal.Decimal) error {
+	if actual != nil {
+		switch {
+		case kind != domain.ProgressDelivered:
+			return problem(http.StatusUnprocessableEntity, domain.CodeCatchWeightInput, "actualWeight applies only to a DELIVERED report")
+		case l.CatchWeight == nil:
+			return problem(http.StatusUnprocessableEntity, domain.CodeCatchWeightInput, fmt.Sprintf("line %d is not a catch-weight item", l.LineNo))
+		}
+		if err := domain.ValidateCatchWeight(*l.CatchWeight, cases, *actual); err != nil {
+			var cw *domain.CatchWeightError
+			if errors.As(err, &cw) {
+				return problem(http.StatusUnprocessableEntity, cw.Code, fmt.Sprintf("line %d: %s", l.LineNo, cw.Detail))
+			}
+			return err
+		}
+	}
+	if kind != domain.ProgressDelivered || l.CatchWeight == nil {
 		return nil
 	}
-	if kind != domain.ProgressDelivered {
-		return problem(http.StatusBadRequest, "COM-0001", "actualWeight applies only to a DELIVERED report")
+	reported := cases.Mul(l.CatchWeight.Nominal)
+	if actual != nil {
+		reported = *actual
 	}
-	if l.CatchWeight == nil {
-		return problem(http.StatusUnprocessableEntity, "COM-0001", fmt.Sprintf("line %d is not a catch-weight item", l.LineNo))
+	total := reported
+	if l.ActualWeight != nil {
+		total = total.Add(*l.ActualWeight)
+	} else {
+		total = total.Add(l.DeliveredQty.Mul(l.CatchWeight.Nominal))
 	}
-	if !l.Quantity.Truncate(0).Equal(l.Quantity) || l.Quantity.LessThan(decimal.NewFromInt(1)) {
-		return problem(http.StatusUnprocessableEntity, "COM-0001", fmt.Sprintf("line %d catch-weight quantity must be a whole number of at least 1", l.LineNo))
-	}
-	if err := domain.ValidateCatchWeight(*l.CatchWeight, int(l.Quantity.IntPart()), *actual); err != nil {
-		var cw *domain.CatchWeightError
-		if errors.As(err, &cw) {
-			return problem(http.StatusUnprocessableEntity, cw.Code, fmt.Sprintf("line %d: %s", l.LineNo, cw.Detail))
-		}
-		return err
-	}
-	net, err := domain.LineNetFor(l.Quantity, l.UnitPrice, l.DiscPct, l.CatchWeight, actual)
+	net, err := domain.LineNetFor(l.Quantity, delivered, l.UnitPrice, l.DiscPct, l.CatchWeight, &total)
 	if err != nil {
 		return problem(http.StatusUnprocessableEntity, CodeProgressQuantity, fmt.Sprintf("line %d: %s", l.LineNo, err))
 	}
-	l.ActualWeight, l.LineNet = actual, net
+	l.ActualWeight, l.LineNet = &total, net
 	return nil
 }
 

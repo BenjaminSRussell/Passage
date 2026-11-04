@@ -32,6 +32,11 @@ const (
 	missingMatch = "If-Match header is required"
 )
 
+const (
+	maxCWQty         = 1_000_000
+	catchWeightScale = "must have at most 6 decimals and 14 integer digits"
+)
+
 var inventoryStatuses = []string{inventoryOK, "QUARANTINE", "BLOCKED"}
 
 type catchWeightSpec struct {
@@ -106,28 +111,40 @@ func inScope(p tenant.Principal, legalEntityID string) error {
 	return httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "legal entity is outside the caller's scope")
 }
 
+func parseCatchWeight(fields map[string]string, name string, spec *catchWeightSpec) domain.CatchWeight {
+	nom, okN := decimalField(fields, name+".nominal", spec.Nominal, true)
+	minv, okMin := decimalField(fields, name+".min", spec.Min, true)
+	maxv, okMax := decimalField(fields, name+".max", spec.Max, true)
+	out := domain.CatchWeight{Nominal: nom, Min: minv, Max: maxv}
+	if okN && okMin && okMax {
+		if err := out.Validate(); err != nil {
+			fields[name] = err.(*domain.Error).Detail
+		}
+	}
+	return out
+}
+
 func parseReceived(fields map[string]string, prefix string, f receivedFields) registerInput {
 	in := registerInput{Batch: f.Batch, Serials: f.Serials, LocationID: f.LocationID, InventoryStatus: f.InventoryStatus}
 	if v, ok := decimalField(fields, prefix+"qty", f.Qty, true); ok {
 		if v.Sign() <= 0 {
 			fields[prefix+"qty"] = "must be greater than zero"
+		} else if !domain.FitsColumn(v) {
+			fields[prefix+"qty"] = catchWeightScale
 		}
 		in.Qty = v
 	}
 	if f.CWQty != nil {
-		if *f.CWQty < 1 {
-			fields[prefix+"cwQty"] = "must be a whole number of at least 1"
+		if *f.CWQty < 1 || *f.CWQty > maxCWQty {
+			fields[prefix+"cwQty"] = fmt.Sprintf("must be a whole number from 1 to %d", maxCWQty)
 		} else {
 			in.CWQty = *f.CWQty
 		}
 	}
 	if f.CatchWeight != nil {
-		nom, _ := decimalField(fields, prefix+"catchWeight.nominal", f.CatchWeight.Nominal, true)
-		minv, _ := decimalField(fields, prefix+"catchWeight.min", f.CatchWeight.Min, true)
-		maxv, _ := decimalField(fields, prefix+"catchWeight.max", f.CatchWeight.Max, true)
-		in.CatchWeight = domain.CatchWeight{Nominal: nom, Min: minv, Max: maxv}
+		in.CatchWeight = parseCatchWeight(fields, prefix+"catchWeight", f.CatchWeight)
 	}
-	if (in.CWQty > 0) != in.CatchWeight.Set() {
+	if (f.CWQty != nil) != (f.CatchWeight != nil) {
 		fields[prefix+"cwQty"] = "catchWeight and cwQty must be sent together"
 	}
 	checkUUID(fields, prefix+"locationId", f.LocationID)
@@ -207,11 +224,10 @@ func registerFn(inputs map[int]registerInput, version int, poQty map[int]decimal
 				if !known {
 					return nil, &domain.Error{Code: domain.CodeInvalidReceipt, Detail: fmt.Sprintf("line %d has no purchase order quantity to check against", lines[i].LineNo)}
 				}
-				checkQty := in.Qty
-				if in.CWQty > 0 {
-					checkQty = decimal.NewFromInt(int64(in.CWQty))
+				if in.CWQty > 0 && !domain.IsWeightUnit(lines[i].Unit) {
+					return nil, &domain.Error{Code: domain.CodeCatchWeightUnit, Detail: fmt.Sprintf("line %d is received in %q; a catch-weight line needs a purchase order line priced per weight unit", lines[i].LineNo, lines[i].Unit)}
 				}
-				if err := checkOpenQuantity(r.Lines[i], checkQty, ordered); err != nil {
+				if err := checkOpenQuantity(r.Lines[i], in.Qty, ordered); err != nil {
 					return nil, err
 				}
 			}
@@ -430,7 +446,7 @@ func (a *API) correctReceipt(w http.ResponseWriter, r *http.Request) {
 			return store.Adjustment{}, err
 		}
 		for _, l := range rec.Lines {
-			if delta := deltas[l.LineNo]; l.POLineNo > 0 && delta.IsPositive() && l.CWQty == 0 {
+			if delta := deltas[l.LineNo]; l.POLineNo > 0 && delta.IsPositive() {
 				ordered, known := poQty[l.LineNo]
 				if !known {
 					return store.Adjustment{}, &domain.Error{Code: domain.CodeInvalidReceipt, Detail: fmt.Sprintf("line %d has no purchase order quantity to check against", l.LineNo)}

@@ -563,8 +563,12 @@ func stepRequestHash(in StatusStepInput) string {
 
 func createRequestHash(in CreateTransactionInput) string {
 	raw, _ := json.Marshal(in.Dims)
-	return fingerprint("CREATE", in.LegalEntityID, in.SourceType, in.SourceID, strings.TrimSpace(in.Reference), in.ProductID, string(raw),
-		in.Qty.String(), in.EnteredQty.String(), in.EnteredUnit, string(in.Status), in.Currency, in.CostPrice.String(), strconv.Itoa(in.CWQty), requestedDate(in.Date))
+	parts := []string{"CREATE", in.LegalEntityID, in.SourceType, in.SourceID, strings.TrimSpace(in.Reference), in.ProductID, string(raw),
+		in.Qty.String(), in.EnteredQty.String(), in.EnteredUnit, string(in.Status), in.Currency, in.CostPrice.String()}
+	if in.CWQty > 0 {
+		parts = append(parts, strconv.Itoa(in.CWQty))
+	}
+	return fingerprint(append(parts, requestedDate(in.Date))...)
 }
 
 // StatusChangeFilter selects audit rows for the status-change inquiry. Empty

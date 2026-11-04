@@ -819,9 +819,14 @@ func checksAtTx(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, point s
 // discount. It is read only for lines with delivered_qty < quantity. SQL round
 // is half away from zero where domain.LineNet rounds half to even, so the
 // figure can differ from a Go recomputation by at most 0.0001 on an exact tie.
-// It assumes line_net is quantity x price less the discount; a line priced
-// another way (such as by catch weight) needs its own delivered net here.
-const undeliveredNetSQL = `(l.line_net - round(l.delivered_qty * l.unit_price * (100 - l.disc_pct) / 100, 4))`
+// A catch-weight line (cw_nominal set) has delivered its recorded actual_weight
+// and keeps the undelivered cases at nominal inside line_net.
+const undeliveredNetSQL = `(l.line_net - round(` + deliveredWeightSQL + ` * l.unit_price * (100 - l.disc_pct) / 100, 4))`
+
+// deliveredWeightSQL is the priced quantity a line (alias l) has delivered:
+// the recorded actual weight of a catch-weight line, else delivered cases at
+// nominal, else delivered_qty.
+const deliveredWeightSQL = `coalesce(l.actual_weight, l.delivered_qty * coalesce(l.cw_nominal, 1))`
 
 // openOrdersTx is the customer's exposure from orders in this service: the net
 // total of the customer's other CONFIRMED ORDER and SUBSCRIPTION orders, and
@@ -874,8 +879,11 @@ func openOrdersTx(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, custo
 // deliveredNotInvoicedSQL is the value of what a line (alias l) has delivered
 // and not invoiced: the delivered less the invoiced quantity at the line's
 // price and discount. It is read only for lines with delivered_qty >
-// invoiced_qty. Like undeliveredNetSQL it assumes a quantity x price line.
-const deliveredNotInvoicedSQL = `round((l.delivered_qty - l.invoiced_qty) * l.unit_price * (100 - l.disc_pct) / 100, 4)`
+// invoiced_qty. A catch-weight line values the uninvoiced cases at the average
+// delivered weight per case.
+const deliveredNotInvoicedSQL = `round(case when l.cw_nominal is null
+	then (l.delivered_qty - l.invoiced_qty) * l.unit_price * (100 - l.disc_pct) / 100
+	else ` + deliveredWeightSQL + ` * (l.delivered_qty - l.invoiced_qty) / l.delivered_qty * l.unit_price * (100 - l.disc_pct) / 100 end, 4)`
 
 // deliveredNotInvoicedTx is the customer's delivered, not yet invoiced goods
 // (BR-27.3 deliveredNotInvoiced) from the lines of the customer's other ORDER

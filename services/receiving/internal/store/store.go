@@ -55,20 +55,11 @@ type Line struct {
 	Amount           decimal.NullDecimal
 	AmountAcct       decimal.NullDecimal
 	// CWQty is the catch-weight count (cases). Qty is the actual weight when
-	// CWQty is set; CatchUnits is the quantity checked against the PO.
-	CWQty       int
-	CWNominal   decimal.Decimal
-	CWMin       decimal.Decimal
-	CWMax       decimal.Decimal
-}
-
-// CatchUnits is the quantity compared to the purchase-order open quantity:
-// cases when the line is catch-weight, otherwise Qty.
-func (l Line) CatchUnits() decimal.Decimal {
-	if l.CWQty > 0 {
-		return decimal.NewFromInt(int64(l.CWQty))
-	}
-	return l.Qty
+	// CWQty is set, in the PO line's weight unit.
+	CWQty     int
+	CWNominal decimal.Decimal
+	CWMin     decimal.Decimal
+	CWMax     decimal.Decimal
 }
 
 type Receipt struct {

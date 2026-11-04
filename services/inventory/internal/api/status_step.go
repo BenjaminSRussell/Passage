@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -26,6 +27,7 @@ const (
 	statusChangesPath    = "/v1/inventory/status-changes"
 	maxReferenceLength   = 60
 	maxQtyDecimals       = 6
+	maxCWQty             = 1_000_000
 )
 
 // namedCommandVerbs maps each custom-method verb to its named backward command.
@@ -222,8 +224,8 @@ func (a *API) registerTransaction(w http.ResponseWriter, r *http.Request, req ap
 	}
 	cwQty := 0
 	if req.CWQty != nil {
-		if *req.CWQty < 1 {
-			fields["cwQty"] = "must be a whole number of at least 1"
+		if *req.CWQty < 1 || *req.CWQty > maxCWQty {
+			fields["cwQty"] = fmt.Sprintf("must be a whole number from 1 to %d", maxCWQty)
 		} else {
 			cwQty = *req.CWQty
 		}

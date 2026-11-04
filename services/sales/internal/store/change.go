@@ -125,6 +125,9 @@ func ApplyChange(o *Order, req ChangeRequest) ([]domain.FieldChange, []int, erro
 		if err := domain.ValidateQuantity(after.Quantity); err != nil {
 			return nil, nil, fmt.Errorf("line %d: %w", c.LineNo, err)
 		}
+		if l.CatchWeight != nil && !domain.WholeCases(after.Quantity) {
+			return nil, nil, fmt.Errorf("line %d is a catch-weight item; quantity must be a whole number of cases", c.LineNo)
+		}
 		if after.UnitPrice.IsNegative() || after.DiscPct.IsNegative() || after.DiscPct.GreaterThan(decimal.NewFromInt(100)) {
 			return nil, nil, fmt.Errorf("line %d price or discount is out of range", c.LineNo)
 		}
@@ -135,7 +138,7 @@ func ApplyChange(o *Order, req ChangeRequest) ([]domain.FieldChange, []int, erro
 		if len(lineDiff) == 0 {
 			continue
 		}
-		net, err := domain.LineNetFor(after.Quantity, after.UnitPrice, after.DiscPct, l.CatchWeight, l.ActualWeight)
+		net, err := domain.LineNetFor(after.Quantity, l.DeliveredQty, after.UnitPrice, after.DiscPct, l.CatchWeight, l.ActualWeight)
 		if err != nil {
 			return nil, nil, fmt.Errorf("line %d: %w", c.LineNo, err)
 		}

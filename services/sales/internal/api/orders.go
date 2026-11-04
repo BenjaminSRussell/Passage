@@ -189,11 +189,11 @@ func buildLine(i int, l orderLineRequest, f map[string]string, path func(string)
 	if !ok {
 		return store.Line{}, false
 	}
-	if spec != nil && (!qty.Truncate(0).Equal(qty) || qty.LessThan(decimal.NewFromInt(1))) {
+	if spec != nil && !domain.WholeCases(qty) {
 		f[path("quantity")] = "catch-weight quantity must be a whole number of at least 1"
 		return store.Line{}, false
 	}
-	net, err := domain.LineNetFor(qty, price, disc, spec, nil)
+	net, err := domain.LineNetFor(qty, decimal.Zero, price, disc, spec, nil)
 	if err != nil {
 		f[path("quantity")] = err.Error()
 		return store.Line{}, false
@@ -208,37 +208,28 @@ func parseCatchWeight(in *catchWeightSpec, f map[string]string, path func(string
 		return nil, true
 	}
 	ok := true
-	nom, minv, maxv := decimal.Zero, decimal.Zero, decimal.Zero
-	var err error
-	if in.Nominal == nil {
-		f[path("catchWeight.nominal")] = "is required"
-		ok = false
-	} else if nom, err = decimal.NewFromString(*in.Nominal); err != nil || !nom.IsPositive() {
-		f[path("catchWeight.nominal")] = "must be a positive decimal"
-		ok = false
+	parse := func(name string, raw *string) decimal.Decimal {
+		if raw == nil {
+			f[path("catchWeight."+name)] = "is required"
+			ok = false
+			return decimal.Zero
+		}
+		d, err := decimal.NewFromString(*raw)
+		if err != nil {
+			f[path("catchWeight."+name)] = "must be a decimal"
+			ok = false
+		}
+		return d
 	}
-	if in.Min == nil {
-		f[path("catchWeight.min")] = "is required"
-		ok = false
-	} else if minv, err = decimal.NewFromString(*in.Min); err != nil || !minv.IsPositive() {
-		f[path("catchWeight.min")] = "must be a positive decimal"
-		ok = false
-	}
-	if in.Max == nil {
-		f[path("catchWeight.max")] = "is required"
-		ok = false
-	} else if maxv, err = decimal.NewFromString(*in.Max); err != nil || !maxv.IsPositive() {
-		f[path("catchWeight.max")] = "must be a positive decimal"
-		ok = false
-	}
+	spec := domain.CatchWeight{Nominal: parse("nominal", in.Nominal), Min: parse("min", in.Min), Max: parse("max", in.Max)}
 	if !ok {
 		return nil, false
 	}
-	if minv.GreaterThan(maxv) {
-		f[path("catchWeight.min")] = "must be less than or equal to catchWeight.max"
+	if err := spec.Validate(); err != nil {
+		f[path("catchWeight")] = err.(*domain.CatchWeightError).Detail
 		return nil, false
 	}
-	return &domain.CatchWeight{Nominal: nom, Min: minv, Max: maxv}, true
+	return &spec, true
 }
 
 // createOrder stores an intake order. A repeat of Idempotency-Key or of

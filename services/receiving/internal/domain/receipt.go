@@ -79,9 +79,9 @@ type ReceiptLine struct {
 	CatchWeight CatchWeight
 }
 
-// CatchUnits is the quantity checked against the purchase order and serials:
-// cases when the line is catch-weight, otherwise Qty.
-func (l ReceiptLine) CatchUnits() decimal.Decimal {
+// SerialUnits is the number of serials a line needs: cases when the line is
+// catch-weight (Qty is then the weight), otherwise Qty.
+func (l ReceiptLine) SerialUnits() decimal.Decimal {
 	if l.CWQty > 0 {
 		return decimal.NewFromInt(int64(l.CWQty))
 	}
@@ -140,11 +140,11 @@ func (r Receipt) Register(recorded map[SerialKey]struct{}) (Receipt, error) {
 				return r, err
 			}
 		}
-		units := l.CatchUnits()
 		allowance := l.OrderedRemaining.Mul(decimal.NewFromInt(1).Add(l.OverDeliveryPct.Div(decimal.NewFromInt(100))))
-		if units.GreaterThan(allowance) {
-			return r, fail(CodeOverDelivery, "line %d quantity %s exceeds allowance %s", l.LineNo, units, allowance)
+		if l.Qty.GreaterThan(allowance) {
+			return r, fail(CodeOverDelivery, "line %d quantity %s exceeds allowance %s", l.LineNo, l.Qty, allowance)
 		}
+		units := l.SerialUnits()
 		if l.BatchTracked && l.Tracking.Batch == "" {
 			return r, fail(CodeInvalidReceipt, "line %d requires a batch", l.LineNo)
 		}
@@ -277,14 +277,15 @@ func (r Receipt) Correct(ctx context.Context, ledger LedgerPoster, profile Posti
 			return "", nil, fail(CodeInvalidReceipt, "line %d corrected quantity must stay positive, cancel the receipt instead", l.LineNo)
 		case next.LessThan(l.InvoicedQty):
 			return "", nil, fail(CodeCorrectionBelow, "line %d has %s invoiced and cannot go below it", l.LineNo, l.InvoicedQty)
-		case l.CWQty > 0:
-			if err := ValidateCatchWeight(l.CatchWeight, l.CWQty, next); err != nil {
-				return "", nil, err
-			}
 		case delta.Sign() > 0 && next.GreaterThan(allowance):
 			return "", nil, fail(CodeOverDelivery, "line %d quantity %s exceeds allowance %s", l.LineNo, next, allowance)
 		case l.SerialTracked:
 			return "", nil, fail(CodeInvalidReceipt, "line %d is serial tracked and cannot be corrected by quantity", l.LineNo)
+		}
+		if l.CWQty > 0 {
+			if err := ValidateCatchWeight(l.CatchWeight, l.CWQty, next); err != nil {
+				return "", nil, err
+			}
 		}
 		amount := amountOf(l.UnitPrice, next)
 		if l.InvoicedQty.Sign() > 0 && next.Equal(l.InvoicedQty) {

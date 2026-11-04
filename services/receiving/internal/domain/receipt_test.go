@@ -151,7 +151,7 @@ func TestReceiptPost_StoresLedgerEntryID(t *testing.T) {
 
 func catchWeightLine(weight string) domain.ReceiptLine {
 	return domain.ReceiptLine{
-		LineNo: 1, ProductID: "p", Qty: dec(weight), CWQty: 10, OrderedRemaining: dec("10"),
+		LineNo: 1, ProductID: "p", Qty: dec(weight), CWQty: 10, OrderedRemaining: dec("200"),
 		CatchWeight: domain.CatchWeight{Nominal: dec("10"), Min: dec("9.8"), Max: dec("11")},
 		UnitPrice:   money.Must("2.00", "USD"),
 	}

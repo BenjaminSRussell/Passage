@@ -2712,6 +2712,10 @@ components:
       type: string
       description: Decimal string at 6 places (never float).
       pattern: "^-?[0-9]+(\\.[0-9]+)?$"
+    WeightQuantity:
+      type: string
+      description: Positive decimal weight or quantity string with at most 6 places (never float).
+      pattern: "^[0-9]+(\\.[0-9]{1,6})?$"
     CreateOrderRequest:
       type: object
       required: [legalEntityId, customerId, invoiceAccountId, currency, requestedShipDate, lines]
@@ -2991,9 +2995,9 @@ components:
           required: [nominal, min, max]
           description: "Catch-weight spec (FR-24.7). quantity is then the catch-weight count (cases, a whole number ≥ 1) and unitPrice is per weight. LineNet is price × cases × nominal until an actual weight is recorded on a DELIVERED report."
           properties:
-            nominal: {$ref: "#/components/schemas/Money"}
-            min: {$ref: "#/components/schemas/Money"}
-            max: {$ref: "#/components/schemas/Money"}
+            nominal: {$ref: "#/components/schemas/WeightQuantity"}
+            min: {$ref: "#/components/schemas/WeightQuantity"}
+            max: {$ref: "#/components/schemas/WeightQuantity"}
     Order:
       type: object
       required: [id, legalEntityId, orderNumber, customerId, invoiceAccountId, orderType, status, currency, version, lines, holds]
@@ -3077,10 +3081,10 @@ components:
           required: [nominal, min, max]
           description: Catch-weight spec (FR-24.7). quantity is the catch-weight count (cases); LineNet is priced per weight.
           properties:
-            nominal: {$ref: "#/components/schemas/Money"}
-            min: {$ref: "#/components/schemas/Money"}
-            max: {$ref: "#/components/schemas/Money"}
-        actualWeight: {$ref: "#/components/schemas/Money", description: "actual catch weight recorded on a DELIVERED :record-progress; LineNet is then price × actualWeight"}
+            nominal: {$ref: "#/components/schemas/WeightQuantity"}
+            min: {$ref: "#/components/schemas/WeightQuantity"}
+            max: {$ref: "#/components/schemas/WeightQuantity"}
+        actualWeight: {$ref: "#/components/schemas/WeightQuantity", description: "total weight of the cases delivered so far (cases reported without a weight count at nominal); LineNet is price × (actualWeight + undelivered cases × nominal)"}
     Hold:
       type: object
       properties:
@@ -3768,7 +3772,7 @@ components:
             properties:
               lineNo: {type: integer, minimum: 1, description: once per report}
               quantity: {$ref: "#/components/schemas/Money", description: "what this report covers (positive, at most 6 places), not the cumulative quantity"}
-              actualWeight: {$ref: "#/components/schemas/Money", description: "DELIVERED only: actual catch weight of the line (FR-24.7). Restates LineNet at price × actualWeight after BR-24.5 (SLS-0061 outside min/max × cases)"}
+              actualWeight: {$ref: "#/components/schemas/WeightQuantity", description: "DELIVERED only, catch-weight lines only: actual weight of the quantity cases this report delivers (a whole number of cases; FR-24.7). Added to the line total; BR-24.5 SLS-0061 when outside min/max × the cases reported, SLS-0062 when the line is not catch-weight, the report is not DELIVERED or the cases are not whole"}
     OrderProgress:
       type: object
       required: [id, legalEntityId, orderId, orderNumber, kind, sourceRef, lines, orderStatus, orderVersion, recordedBy, recordedAt]
