@@ -272,6 +272,9 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | POST | `/v1/scheduling/jobs/{id}:firm` (Idempotency-Key) | `scheduling.schedule.write` |
 | GET | `/v1/scheduling/capacity-load?period&from&weeks&days&resourceIds` | `scheduling.read` |
 | GET | `/v1/scheduling/capacity-load/jobs?resourceId&from&to` | `scheduling.read` |
+| GET | `/v1/scheduling/bottlenecks?status&resourceId&limit` (bottleneck episodes; `bottleneck.detected` is published once when one opens) | `scheduling.read` |
+| GET | `/v1/scheduling/bottlenecks/{id}` (the episode and the materialized weekly load of its resource) | `scheduling.read` |
+| POST | `/v1/scheduling/capacity-load:refresh` (rebuilds the materialized weekly load of every resource) | `scheduling.run` |
 | GET | `/v1/scheduling/runs/{id}/kpis` | `scheduling.read` |
 | GET | `/v1/scheduling/runs/{id}/compare?to` (jobs added, removed and changed between two runs' snapshots; lists cut at 500, counts exact) | `scheduling.read` |
 | POST | `/v1/scheduling/runs/{id}:rollback` (Idempotency-Key; restores the jobs the run placed under a new run of scope `rollback`) | `scheduling.run` |
@@ -380,6 +383,7 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0144` | 409 | Rollback: a job of the run overlaps a booking made since; nothing was changed |
 | `SCHED-0145` | 422 | Rollback: no job of the run can be restored (all firmed, or operation changed or gone, or resource gone) |
 | `SCHED-0146` | 409 | Rollback: a restored job would break a rule as the plan is now (open capacity, a block, the order's sequence and queue times, a peg, a changeover); nothing was changed, `errors` names the jobs |
+| `SCHED-0147` | 404 | Bottleneck episode not found |
 | `precondition_required` | 428 | A campaign command was sent without If-Match |
 
 A dry-run move never fails for a constraint: it returns `feasible: false` and

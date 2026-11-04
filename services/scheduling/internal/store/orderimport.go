@@ -135,7 +135,7 @@ type importedRow struct {
 // event older than the stored order version changes nothing.
 func (s *Postgres) ImportProductionOrder(ctx context.Context, req OrderImportRequest) (OrderImport, error) {
 	var out OrderImport
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.loadTx(&ctx, func(tx pgx.Tx) error {
 		return importOrder(ctx, tx, req, &out)
 	})
 	if err != nil {
@@ -446,6 +446,9 @@ func nonZero(t time.Time) *time.Time {
 // dropJobs deletes the non-firmed jobs of an operation and puts it back to
 // open; it reports whether any job was removed.
 func dropJobs(ctx context.Context, tx pgx.Tx, opID string) (bool, error) {
+	if err := trackOps(ctx, tx, []string{opID}); err != nil {
+		return false, err
+	}
 	tag, err := tx.Exec(ctx, `delete from scheduled_job where job_id = $1::uuid and not firmed`, opID)
 	if err != nil {
 		return false, err
@@ -514,7 +517,7 @@ func (s *Postgres) GetOrderImport(ctx context.Context, orderID string) (OrderImp
 // "reimport:<uuid>" so the record shows the last import was a re-import.
 func (s *Postgres) ReimportProductionOrder(ctx context.Context, orderID string) (OrderImport, error) {
 	var out OrderImport
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.loadTx(&ctx, func(tx pgx.Tx) error {
 		if err := lockOrderImport(ctx, tx, orderID); err != nil {
 			return err
 		}

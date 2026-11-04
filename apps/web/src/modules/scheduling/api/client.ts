@@ -1321,3 +1321,53 @@ export async function compareRuns(id: string, to: string, signal?: AbortSignal):
 export function rollbackRun(id: string, key: string = newKey()): Promise<RunRollback> {
   return post<RunRollback>(`/runs/${encodeURIComponent(id)}:rollback`, {}, key);
 }
+
+/** A stretch during which a resource had bottleneck weeks (AC-23.6, SCHED-0015). */
+export interface BottleneckEpisode {
+  id: string;
+  resourceId: string;
+  resourceCode: string;
+  firstWeek: string;
+  flaggedWeeks: number;
+  peakLoadPct: number;
+  thresholdPct: number;
+  consecutiveWeeks: number;
+  detectedAt: string;
+  closedAt: string | null;
+  currentFlaggedWeeks: number;
+  currentPeakLoadPct: number;
+}
+
+/** One materialized week of a resource; a week without a booking has no row. */
+export interface BottleneckWeek {
+  weekStart: string;
+  openMinutes: number;
+  bookedMinutes: number;
+  loadPct: number;
+  bottleneck: boolean;
+}
+
+export interface BottleneckDetail extends BottleneckEpisode {
+  weeks: BottleneckWeek[];
+}
+
+export type BottleneckStatus = "open" | "closed" | "all";
+
+export function listBottlenecks(status: BottleneckStatus, signal?: AbortSignal): Promise<BottleneckEpisode[]> {
+  return items<BottleneckEpisode>(`/bottlenecks${query({ status, limit: 200 })}`, signal);
+}
+
+export function getBottleneck(id: string, signal?: AbortSignal): Promise<BottleneckDetail> {
+  return send<BottleneckDetail>(`/bottlenecks/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export interface LoadRefresh {
+  resources: number;
+  loadRows: number;
+  openEpisodes: number;
+}
+
+/** Rebuilds the materialized load of every resource (POST /capacity-load:refresh). */
+export function refreshCapacityLoad(): Promise<LoadRefresh> {
+  return post<LoadRefresh>("/capacity-load:refresh", {});
+}

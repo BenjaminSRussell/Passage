@@ -132,3 +132,38 @@ func DayIntervals(r Resource, from time.Time, days int) []Interval {
 func ClippedMinutes(start, end, from, to time.Time) int {
 	return overlapMinutes(start, end, from, to)
 }
+
+// Flagged summarizes the bottleneck weeks of one resource that start on or
+// after a cut-off week: the first and last of them, how many there are, the
+// highest load among them and the weeks themselves in order.
+type Flagged struct {
+	First   time.Time
+	Last    time.Time
+	Weeks   int
+	PeakPct float64
+	Periods []WeekLoad
+}
+
+// FlaggedFrom summarizes the weeks of loads flagged as bottleneck whose start
+// is not before notBefore. Weeks already past are history, not a bottleneck to
+// act on, so they neither open nor keep open a bottleneck episode. ok is false
+// when no such week exists.
+func FlaggedFrom(loads []WeekLoad, notBefore time.Time) (f Flagged, ok bool) {
+	for _, l := range loads {
+		if !l.Bottleneck || l.WeekStart.Before(notBefore) {
+			continue
+		}
+		if f.Weeks == 0 || l.WeekStart.Before(f.First) {
+			f.First = l.WeekStart
+		}
+		if l.WeekStart.After(f.Last) {
+			f.Last = l.WeekStart
+		}
+		f.Weeks++
+		f.Periods = append(f.Periods, l)
+		if l.LoadPct > f.PeakPct {
+			f.PeakPct = l.LoadPct
+		}
+	}
+	return f, f.Weeks > 0
+}

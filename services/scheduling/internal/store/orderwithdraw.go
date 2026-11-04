@@ -9,7 +9,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/services/scheduling/internal/domain"
 	schedevents "github.com/BenjaminSRussell/passage/services/scheduling/internal/events"
 )
@@ -42,7 +41,7 @@ const withdrawnReason = "withdraw"
 func (s *Postgres) WithdrawProductionOrder(ctx context.Context, req OrderWithdrawal) (OrderImport, bool, error) {
 	var out OrderImport
 	changed := false
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.loadTx(&ctx, func(tx pgx.Tx) error {
 		if err := lockOrderImport(ctx, tx, req.OrderID); err != nil {
 			return err
 		}

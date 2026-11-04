@@ -311,6 +311,7 @@ type Store interface {
 	FirmJob(ctx context.Context, jobID string, firmed bool, idem Idem) (Firm, bool, error)
 	CapacityLoad(ctx context.Context, f LoadFilter) ([]domain.WeekLoad, error)
 	LoadStore
+	BottleneckStore
 	DispatchStore
 	RunKPIStore
 	RunSnapshotStore
@@ -326,7 +327,11 @@ type Store interface {
 }
 
 // Postgres implements Store on a pgx pool.
-type Postgres struct{ pool *pgxpool.Pool }
+type Postgres struct {
+	pool           *pgxpool.Pool
+	bnPct, bnWeeks int
+	clock          func() time.Time
+}
 
 // New returns a Postgres store.
 func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
@@ -391,7 +396,7 @@ func rfc(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 func (s *Postgres) RunSchedule(ctx context.Context, req RunRequest, idem Idem) (Run, bool, error) {
 	var out Run
 	created := false
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.loadTx(&ctx, func(tx pgx.Tx) error {
 		if idem.Key != "" {
 			var stored string
 			existing, err := scanRun(tx.QueryRow(ctx, `select idempotency_fingerprint, `+runCols+` from schedule_run where idempotency_key = $1`, idem.Key), &stored)
@@ -442,6 +447,9 @@ func (s *Postgres) RunSchedule(ctx context.Context, req RunRequest, idem Idem) (
 		opIDs, orderIDs := idsOf(ops)
 		prior, err := orderDates(ctx, tx, orderIDs)
 		if err != nil {
+			return err
+		}
+		if err := trackOps(ctx, tx, opIDs); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `delete from scheduled_job where job_id = any($1::uuid[]) and not firmed`, opIDs); err != nil {
@@ -541,7 +549,7 @@ func (s *Postgres) RunSchedule(ctx context.Context, req RunRequest, idem Idem) (
 func (s *Postgres) MoveJob(ctx context.Context, req MoveRequest, idem Idem) (MoveOutcome, bool, error) {
 	var out MoveOutcome
 	replayed := false
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.loadTx(&ctx, func(tx pgx.Tx) error {
 		if !req.DryRun && idem.Key != "" {
 			found, err := replay(ctx, tx, idem, &out)
 			if err != nil || found {
@@ -666,6 +674,9 @@ func (s *Postgres) MoveJob(ctx context.Context, req MoveRequest, idem Idem) (Mov
 		changed := make([]string, 0, len(plan.Changes))
 		for _, c := range plan.Changes {
 			changed = append(changed, c.OperationID)
+		}
+		if err := trackOps(ctx, tx, changed); err != nil {
+			return err
 		}
 		if _, err := tx.Exec(ctx, `delete from scheduled_job where job_id = any($1::uuid[])`, changed); err != nil {
 			return err
@@ -938,6 +949,7 @@ func flagBlockBreach(ctx context.Context, tx pgx.Tx, bars []Bar, resources []dom
 // The job's changeover minutes, cost and cleaning set go on its first segment.
 func writePlacements(ctx context.Context, tx pgx.Tx, runID string, ps []domain.Placement, finite map[string]bool) error {
 	tenantID := tenantOf(ctx)
+	trackPlacements(ctx, ps)
 	batch := &pgx.Batch{}
 	for _, pl := range ps {
 		for i, seg := range pl.Segments {

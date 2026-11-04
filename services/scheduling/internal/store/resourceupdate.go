@@ -10,7 +10,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/scheduling/internal/domain"
 	schedevents "github.com/BenjaminSRussell/passage/services/scheduling/internal/events"
@@ -55,7 +54,7 @@ type ResourceUpdateStore interface {
 func (s *Postgres) UpdateResource(ctx context.Context, id string, version int, patch ResourcePatch, from time.Time, idem Idem) (ResourceUpdate, bool, error) {
 	var out ResourceUpdate
 	replayed := false
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.loadTx(&ctx, func(tx pgx.Tx) error {
 		// Lock the resource before looking up the key, so a retry that raced
 		// the first request waits for it and then replays its answer instead
 		// of failing on the version the first request bumped.
@@ -108,6 +107,7 @@ func (s *Postgres) UpdateResource(ctx context.Context, id string, version int, p
 		if err != nil {
 			return err
 		}
+		trackResources(ctx, id)
 		jobs, err := uncoveredJobs(ctx, tx, upd, from)
 		if err != nil {
 			return err

@@ -851,6 +851,75 @@ no FAIL lines on the doc gates.
 | Rollback re-checks not done: resource efficiency changed since the run (job lengths), network transfer time and maximum wait (BR-23.11), a setup matrix version that changed between the run's day and the restored jobs' day, and jobs restored into the past | later slice of PSG-23 | The checks above cover what the Gantt flags and what runs and moves refuse; efficiency and network waits are not flagged on existing jobs either, and runs themselves accept a start in the past. |
 | Network feasibility report (4.23.14) | later slice of PSG-23 | Not part of this slice. |
 
+## Slice 30: materialized capacity load and bottleneck episodes (PRD 4.23.14, AC-23.6, SCHED-0015)
+
+Weekly load is now also kept as rows. `scheduling_capacity_load` holds, per
+resource and Monday-start UTC week with at least one booking, the open and
+booked minutes, the load and the bottleneck flag (a week with no row is booked
+0). Every transaction that places, moves or removes jobs, or changes a calendar,
+rewrites the rows of the resources it touched before it commits (`Postgres.loadTx`
+collects the resources: `RunSchedule`, `MoveJob`, `RollbackRun` and the order
+import, reimport, withdrawal, operation change and delete and unschedule paths
+through `writePlacements` and the job deletes; capacity override create and
+delete, and resource updates, for the calendar). A resource's rewrite is
+serialized by an advisory lock, so two writers cannot interleave. The rewrite
+takes the locks of all its resources in id order before it reads anything, and
+then writes only rows of the two new tables, which have no foreign key to
+`scheduling_resource`: the key-share lock of a foreign key check waited on
+`UpdateResource`'s `FOR UPDATE` on the resource row while `UpdateResource`
+waited for the advisory lock, a deadlock the review reproduced (40P01) and
+removed (proof in `lockLoad`; concurrency test in `capacityload_test.go`).
+Because the calendar is read after the lock, a resource change that committed
+while the rewrite waited is the one it uses. Primary and
+secondary bookings both count, as in `GET /capacity-load`, which still
+computes on read (the table is checked against it in the store tests after
+every writer). The flag is the one the read gives: above `SCHED_BOTTLENECK_PCT`
+for `SCHED_BOTTLENECK_WEEKS` weeks in a row (the store takes the rule from
+the service configuration).
+
+`scheduling_bottleneck_episode` records a stretch with flagged weeks from the
+current week on. When a rewrite finds such a week and the resource has no open
+episode, it opens one and writes `dev.passage.scheduling.bottleneck.detected.v1`
+(episode, resource id and code, first week, flagged weeks, `periods[]` with
+each flagged week's load, peak load, rule) through the outbox in the same
+transaction; later runs that still find the resource overloaded add nothing.
+When no flagged week is left the episode closes (silently); a new overload
+opens a new episode and sends a new event. Weeks already past neither open nor
+keep an episode open: the episode keeps its last flagged week (`last_week`),
+reads report it closed at the end of that week once it has passed, and the next
+rewrite of the resource records that close before it looks at new weeks, so a
+later overload of the same resource is a new episode with its own event even
+when nothing touched the resource in between. Weeks are UTC weeks (Monday
+00:00 UTC), the same buckets as `GET /capacity-load?period=week`; open and
+booked minutes are both cut at the UTC boundary, so the load % of a week is
+consistent, but a site far from UTC has a few local hours of Sunday or Monday
+counted in the neighbouring week. Open minutes come from the resource's shifts
+in its time zone (DST included) with capacity overrides applied, as on read.
+
+`GET /v1/scheduling/bottlenecks?status&resourceId&limit` lists episodes (open ones
+carry the current flagged weeks and peak), `GET /v1/scheduling/bottlenecks/{id}`
+adds the resource's materialized weeks from the first week on (404 `SCHED-0147`),
+and `POST /v1/scheduling/capacity-load:refresh` (duty `scheduling.run`) rebuilds
+every resource, 50 resources per transaction so a large tenant's runs and moves
+wait for one batch at most: for data that existed before the migration and to
+repair the table. Migration `0022_capacity_load.sql` (both tables with tenant policies;
+grants SELECT, INSERT, DELETE on the load table, which is rewritten by delete
+and insert, and SELECT, INSERT, UPDATE on episodes, which are closed in place).
+Web: a Bottlenecks list (open, closed, all; rebuild button) and an episode detail
+with its weekly load and a link to the jobs of each week; nav entry on
+`scheduling.read`. The OpenAPI and AsyncAPI specs have no FAIL lines on the doc
+gates.
+
+| Item | Status | Reason |
+|---|---|---|
+| `policies/authz/data.json`: resource rows `/v1/scheduling/bottlenecks` (GET) and `/v1/scheduling/bottlenecks/*` (GET) under `scheduling.read`, and resource row `/v1/scheduling/capacity-load:refresh` (POST) under `scheduling.run` | handoff - main session (authz seed) | Existing duties; only the route rows are new (no new duty, nothing for #313). Until seeded the gateway answers 403 for the Bottlenecks pages and the rebuild button. |
+| Kafka topic `passage.scheduling.bottleneck` (outbox aggregate type `bottleneck`) and a consumer that notifies planners | handoff - deploy owner (#313) and a notification wave | Nothing consumes `bottleneck.detected` yet; if topics are created ahead of time this one is new. |
+| `bottleneck.cleared` event | later slice of PSG-23 | The PRD names only `bottleneck.detected`. An episode whose weeks pass is reported closed on read and stored closed on the next rewrite; there is no timer that writes the close at the moment (FR-23.11 job runner), so nothing is published then. |
+| Bookings spanning more than 260 weeks on one resource | accepted | Only the latest 260 weeks are materialized (the oldest history drops out, never the weeks ahead); runs reach 730 days ahead. |
+| Weeks in the resource's local time instead of UTC | decision for Ben | Kept UTC to match the existing weekly `GET /capacity-load` and the bottleneck flag it shows; local weeks would change both. |
+| Reading `GET /capacity-load` from the table, and load by resource group | later slice of PSG-23 | The read still computes from bookings and the calendar, so a request with another threshold or weeks with no bookings is exact; the table serves the episodes. |
+| Operations mode in daily buckets (FR-23.2) | later slice of PSG-23 | Still the one item of FR-23.2 left; `mode` is recorded and both modes place at minute granularity. |
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
@@ -872,7 +941,7 @@ no FAIL lines on the doc gates.
 | 3 | Capacity load by resource and ISO week with bottleneck flag (FR-23.9) | built | `GET /v1/scheduling/capacity-load`; weeks start Monday 00:00 UTC. |
 | 3 | Load by day and drill-down to jobs | built (slice 16) | `period=day` on `GET /capacity-load` and `GET /capacity-load/jobs`. Days are local days of the resource's calendar time zone. |
 | 3 | Load by resource group; US week numbering; weeks in the resource's time zone | later slice of PSG-23 | Groups come from wave 9; weeks start Monday 00:00 UTC (slice 3). |
-| 3 | Materialized CapacityLoad table refreshed per run and move; `bottleneck.detected` event once per episode (AC-23.6, SCHED-0015) | later slice of PSG-23 | Load is computed on read, so it is never stale; the event needs episode state and is not declared in AsyncAPI yet. |
+| 3 | Materialized CapacityLoad table refreshed per run and move; `bottleneck.detected` event once per episode (AC-23.6, SCHED-0015) | built (slice 30) | `scheduling_capacity_load` is rewritten in the transaction of every writer that changes bookings or calendars; `bottleneck.detected` is published when an episode opens (see the slice 30 section). |
 | 4 | CP-SAT job-shop optimizer (FR-23.6, BR-23.9) | built in `services/scheduler-py` | Weighted lateness + lambda x makespan, 2,000-operation window, time limit, `num_workers` 8; ft06 proves 55. |
 | 4 | Optimization runs from the scheduling service (`algorithm: cp-sat`, solver_status, heuristic kept on UNKNOWN, AC-23.9, SCHED-0006) | later slice of PSG-23 | The Go service calls scheduler-opt for campaign sequencing only (slice 6, deliverable 7 below). Schedule runs do not call the job-shop endpoint yet; `schedule_run.algorithm` is constrained to `heuristic` and `solver_status` stays null. scheduler-opt already takes candidate machines and network steps and returns the chosen machines. |
 | 5 | Schedule dates flow to production orders and planning (FR-23.10) | partial — consumers are waves 21 and 22 | `job.scheduled` and `orderdates.changed` are published through the outbox with start, end and late minutes. Production order date updates and the `planning.finite-capacity` flag (AC-23.8) are owned by the consuming waves. |

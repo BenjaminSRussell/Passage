@@ -66,7 +66,7 @@ func run(ctx context.Context, getenv func(string) string, args []string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(store.New(pool), cfg)
+	a := api.New(store.New(pool).WithBottleneck(cfg.BottleneckPct, cfg.BottleneckWeek), cfg)
 	// SCHED_OPT_URL is scheduler-opt (CP-SAT). Unset, cp-sat campaigns keep
 	// the nearest-neighbour sequence and report SCHED-0006 UNAVAILABLE.
 	if c := optimizer.NewClient(getenv("SCHED_OPT_URL")); c != nil {

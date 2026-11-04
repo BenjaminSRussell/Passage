@@ -30,6 +30,8 @@ var (
 // fakeStore answers the Store interface from canned values and records the
 // last move and firm requests so tests can assert what reached the store.
 type fakeStore struct {
+	lastBottleneck store.BottleneckFilter
+
 	conflict    *domain.Conflict
 	replay      bool
 	err         error

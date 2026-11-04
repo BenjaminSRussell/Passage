@@ -758,6 +758,90 @@ paths:
                   truncated: { type: boolean }
         '400': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/bottlenecks:
+    get:
+      operationId: listBottlenecks
+      summary: Bottleneck episodes, newest first
+      description: >
+        An episode opens when a resource gets a bottleneck week (load above
+        `SCHED_BOTTLENECK_PCT` for `SCHED_BOTTLENECK_WEEKS` weeks in a row) from
+        the current week on, and closes when it has none left. The materialized
+        weekly load behind it is rewritten in the transaction of every run, move,
+        rollback, order import or withdrawal, operation change or delete,
+        unschedule, capacity override and resource change, so the answer is never
+        behind committed bookings. An episode whose flagged weeks have all
+        passed is reported closed at the end of its last flagged week, even
+        before the next change to the resource records that.
+      x-passage-duty: scheduling.read
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Only open or only closed episodes; all by default.
+          schema: { type: string, enum: [open, closed, all], default: all }
+        - name: resourceId
+          in: query
+          required: false
+          description: Only the episodes of this resource.
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          required: false
+          description: Most episodes to return.
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Episodes, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/BottleneckEpisode' }
+        '400': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/bottlenecks/{id}:
+    get:
+      operationId: getBottleneck
+      summary: One bottleneck episode with the weekly load of its resource
+      description: The episode and the materialized weeks of its resource from the episode's first week on, at most 104. A week with no booking has no row.
+      x-passage-duty: scheduling.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The episode and its weeks
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BottleneckDetail' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/capacity-load:refresh:
+    post:
+      operationId: refreshCapacityLoad
+      summary: Rebuild the materialized capacity load of every resource
+      description: >
+        Recomputes the weekly load and the bottleneck episodes of all resources
+        from the bookings, 50 resources per transaction so runs and moves wait
+        for one batch at most. Normal writes keep the table current; use this for
+        bookings made before the table existed or to repair it. It changes
+        nothing the bookings do not already say, so repeating it is harmless, and
+        it needs no Idempotency-Key. `bottleneck.detected` is published for an
+        episode it opens.
+      x-passage-duty: scheduling.run
+      responses:
+        '200':
+          description: What was rebuilt
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [resources, loadRows, openEpisodes]
+                properties:
+                  resources: { type: integer, description: Resources rebuilt. }
+                  loadRows: { type: integer, description: Weeks with a booking now held for the tenant. }
+                  openEpisodes: { type: integer, description: Open bottleneck episodes after the rebuild. }
   /v1/scheduling/dispatch-list:
     get:
       operationId: getDispatchList
@@ -2342,6 +2426,40 @@ components:
         finite: { type: boolean }
         firmed: { type: boolean }
         lateMinutes: { type: integer }
+    BottleneckEpisode:
+      type: object
+      required: [id, resourceId, resourceCode, firstWeek, flaggedWeeks, peakLoadPct, thresholdPct, consecutiveWeeks, detectedAt, closedAt, currentFlaggedWeeks, currentPeakLoadPct]
+      properties:
+        id: { type: string, format: uuid }
+        resourceId: { type: string, format: uuid }
+        resourceCode: { type: string }
+        firstWeek: { type: string, format: date, description: Monday of the first flagged week when the episode opened. }
+        flaggedWeeks: { type: integer, description: Flagged weeks when the episode opened. }
+        peakLoadPct: { type: number, description: Highest flagged week when the episode opened, in percent. }
+        thresholdPct: { type: integer }
+        consecutiveWeeks: { type: integer }
+        detectedAt: { type: string, format: date-time }
+        closedAt: { type: [string, 'null'], format: date-time, description: Null while the episode is open; the end of its last flagged week when those weeks passed with no change to the resource. }
+        currentFlaggedWeeks: { type: integer, description: Flagged weeks from the current week on that the materialized load holds now; 0 once closed. }
+        currentPeakLoadPct: { type: number, description: Highest of those weeks, in percent; 0 once closed. }
+    LoadWeek:
+      type: object
+      required: [weekStart, openMinutes, bookedMinutes, loadPct, bottleneck]
+      properties:
+        weekStart: { type: string, format: date }
+        openMinutes: { type: integer }
+        bookedMinutes: { type: integer }
+        loadPct: { type: number }
+        bottleneck: { type: boolean }
+    BottleneckDetail:
+      allOf:
+        - $ref: '#/components/schemas/BottleneckEpisode'
+        - type: object
+          required: [weeks]
+          properties:
+            weeks:
+              type: array
+              items: { $ref: '#/components/schemas/LoadWeek' }
     LoadItem:
       type: object
       properties:
