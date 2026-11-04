@@ -155,8 +155,10 @@ func TestReceiveReturn_RefusesAJournalThatIsNotThisReceipt(t *testing.T) {
 		"no journal at all": `{}`,
 	} {
 		answer = body
-		if _, err := returnsOn(h).ReceiveReturn(h.ctx, in(h.le)); !errors.Is(err, ErrForeignReceipt) {
-			t.Fatalf("%s: %v", name, err)
+		_, err := returnsOn(h).ReceiveReturn(h.ctx, in(h.le))
+		var refused interface{ Refusal() (int, string) }
+		if !errors.Is(err, ErrForeignReceipt) || !errors.As(err, &refused) {
+			t.Fatalf("%s: %v (a foreign journal is a refusal, not an outage)", name, err)
 		}
 	}
 	answer = receiptJournal(strings.ToUpper(h.le), "k", "p1", "4.000000", "POSTED", "MOVEMENT")

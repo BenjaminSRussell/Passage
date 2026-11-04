@@ -223,8 +223,16 @@ type journalBody struct {
 	} `json:"lines"`
 }
 
-// ErrForeignReceipt is a journal under a receipt's key that is not that receipt.
-var ErrForeignReceipt = errors.New("inventory answered a journal that is not this return receipt")
+// ErrForeignReceipt is a journal under a receipt's key that is not that receipt. A retry cannot fix it, so it reports
+// itself as a refusal (the return order answers 422, not 503).
+var ErrForeignReceipt error = foreignReceipt{}
+
+type foreignReceipt struct{}
+
+func (foreignReceipt) Error() string {
+	return "inventory answered a journal that is not this return receipt"
+}
+func (foreignReceipt) Refusal() (int, string) { return http.StatusConflict, "foreign_return_receipt" }
 
 // ReceiveReturn books the accepted quantity into stock through inventory's service-only return-receipt command: one
 // MOVEMENT journal of one line, keyed by the receipt's per-line key, created and posted in one call, so a retry

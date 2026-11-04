@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -90,6 +91,20 @@ func TestRMACreditOperatorRoutes(t *testing.T) {
 				t.Fatalf("status = %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
 			}
 		})
+	}
+	// An all-scope caller (no legal-entity claim) cannot sign the ledger post, so it may not retry or sweep.
+	for _, path := range []string{"/v1/receivables/rma-credits/" + id + ":retry", "/v1/receivables/rma-credits:sweep"} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(""))
+		req.Header.Set("X-Passage-Tenant", testTenant)
+		req.Header.Set("X-Passage-Duties", "ARPaymentPost")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest && rec.Code != http.StatusForbidden {
+			t.Fatalf("%s without a legal-entity claim: %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+	if len(f.rmaRetries) != 2 {
+		t.Fatalf("an unscoped retry reached the store: %v", f.rmaRetries)
 	}
 	if !f.rmaFilter.ParkedOnly || f.rmaFilter.Status != "PENDING" {
 		t.Fatalf("list filter %+v", f.rmaFilter)

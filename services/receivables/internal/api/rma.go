@@ -10,6 +10,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/store"
 )
 
@@ -117,6 +118,20 @@ func (a *API) listRMACredits(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
+// legalEntityScoped refuses a caller without an explicit legal-entity claim: posting a journal signs a ledger token
+// for the credit's legal entity, which an all-scope principal cannot get, so the attempt would only fail and push the
+// credit's backoff out.
+func legalEntityScoped(w http.ResponseWriter, r *http.Request) bool {
+	p, _ := tenant.FromContext(r.Context())
+	if len(tenant.LegalEntityScopeList(p)) == 0 {
+		p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)
+		p.Errors = map[string]string{"X-Passage-Legal-Entity": "posting an RMA credit needs a caller scoped to its legal entity"}
+		httpx.Fail(w, r, p)
+		return false
+	}
+	return true
+}
+
 type rmaRetryRequest struct {
 	PostingDate string `json:"postingDate"`
 }
@@ -131,7 +146,7 @@ func (a *API) rmaCreditAction(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeRMACreditNotFound, "RMA credit not found"))
 		return
 	}
-	if !require(w, r, dutyPayment) {
+	if !require(w, r, dutyPayment) || !legalEntityScoped(w, r) {
 		return
 	}
 	var req rmaRetryRequest
@@ -158,7 +173,7 @@ func (a *API) rmaCreditAction(w http.ResponseWriter, r *http.Request) {
 // sweepRMACredits posts the caller's due PENDING RMA credits: the scheduler's entry point, and the same store call the
 // in-process sweeper (RECEIVABLES_RMA_SWEEP_TENANT_IDS) runs.
 func (a *API) sweepRMACredits(w http.ResponseWriter, r *http.Request) {
-	if !validTenant(w, r) {
+	if !validTenant(w, r) || !legalEntityScoped(w, r) {
 		return
 	}
 	limit, ok := pageLimit(w, r)
