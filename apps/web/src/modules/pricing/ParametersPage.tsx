@@ -8,6 +8,7 @@ import {
   newKey,
   PricingApiError,
   setPricingParameters,
+  type PriceSearchMode,
   type PricingDateBasis,
   type PricingParameters,
   type Problem,
@@ -27,6 +28,10 @@ const TOTAL_BASES: { value: TotalDiscountBasis; label: string }[] = [
   { value: "AFTER_LINE_DISC", label: "After line discounts" },
   { value: "GROSS", label: "Gross, before line discounts" },
 ];
+const SEARCH_MODES: { value: PriceSearchMode; label: string }[] = [
+  { value: "FIRST_MATCH", label: "First match" },
+  { value: "SEARCH_NEXT", label: "Search next" },
+];
 const DEFAULT_BANDS: BandRow[] = [
   { upTo: "10", ending: "0.99" },
   { upTo: "100", ending: "0.95" },
@@ -36,6 +41,19 @@ const DEFAULT_BANDS: BandRow[] = [
 interface BandRow {
   upTo: string;
   ending: string;
+}
+
+interface ThresholdRow {
+  currency: string;
+  amount: string;
+}
+
+const MAX_THRESHOLDS = 30;
+
+function thresholdRows(table: Record<string, string> | undefined): ThresholdRow[] {
+  return Object.entries(table ?? {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([currency, amount]) => ({ currency, amount }));
 }
 
 /** Pricing parameters of one legal entity (PRD 5.26.13). Reading needs pricing.view; saving needs pricing.admin. */
@@ -48,6 +66,8 @@ export function ParametersPage() {
   const [dateBasis, setDateBasis] = useState<PricingDateBasis>("SHIP_DATE");
   const [totalBasis, setTotalBasis] = useState<TotalDiscountBasis>("AFTER_LINE_DISC");
   const [bands, setBands] = useState<BandRow[]>(DEFAULT_BANDS);
+  const [searchMode, setSearchMode] = useState<PriceSearchMode>("FIRST_MATCH");
+  const [thresholds, setThresholds] = useState<ThresholdRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -73,6 +93,8 @@ export function ParametersPage() {
       setDateBasis(params.pricingDateBasis ?? "SHIP_DATE");
       setTotalBasis(params.totalDiscountBasis ?? "AFTER_LINE_DISC");
       setBands(params.smartRoundingBands?.length ? params.smartRoundingBands.map((b) => ({ upTo: b.upTo ?? "", ending: b.ending })) : DEFAULT_BANDS);
+      setSearchMode(params.priceSearchMode ?? "FIRST_MATCH");
+      setThresholds(thresholdRows(params.smallOrderThresholds));
       key.current = newKey();
     } catch (error) {
       setLoaded(null);
@@ -93,8 +115,25 @@ export function ParametersPage() {
     edited();
   }
 
+  function editThreshold(index: number, field: keyof ThresholdRow, value: string) {
+    setThresholds((rows) => rows.map((r, i) => (i === index ? { ...r, [field]: field === "currency" ? value.toUpperCase() : value } : r)));
+    edited();
+  }
+
   async function save() {
     if (!loaded) return;
+    // Two rows of one currency would collapse into one entry of the table and silently lose a value.
+    const seen = new Set<string>();
+    const duplicate = thresholds.map((r) => r.currency.trim()).find((c) => c !== "" && (seen.has(c) || !seen.add(c)));
+    if (duplicate) {
+      setSaved(false);
+      setFailure({
+        code: "COM-0001",
+        message: `The currency ${duplicate} has more than one small order threshold.`,
+        fields: { [`smallOrderThresholds[${duplicate}]`]: "List each currency once." },
+      });
+      return;
+    }
     setBusy(true);
     setFailure(null);
     setSaved(false);
@@ -106,6 +145,8 @@ export function ParametersPage() {
           pricingDateBasis: dateBasis,
           totalDiscountBasis: totalBasis,
           smartRoundingBands: bands.map((b, i) => (i === bands.length - 1 ? { ending: b.ending.trim() } : { upTo: b.upTo.trim(), ending: b.ending.trim() })),
+          priceSearchMode: searchMode,
+          smallOrderThresholds: Object.fromEntries(thresholds.map((r) => [r.currency.trim(), r.amount.trim()])),
           version: loaded.version,
         },
         key.current,
@@ -207,6 +248,80 @@ export function ParametersPage() {
                 </Select>
               )}
             </FormField>
+          </div>
+        </Card>
+      ) : null}
+      {!loading && loaded ? (
+        <Card title="Price search">
+          <div className={styles.form}>
+            <FormField id="pp-search-mode" label="Price search mode" error={fieldError("priceSearchMode")} hint="Search next makes a new condition record continue to the next access when its own is empty. A record that sets it explicitly keeps its value.">
+              {(c) => (
+                <Select
+                  {...c}
+                  value={searchMode}
+                  disabled={!canSave}
+                  onChange={(e) => {
+                    setSearchMode(e.target.value as PriceSearchMode);
+                    edited();
+                  }}
+                >
+                  {SEARCH_MODES.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </FormField>
+          </div>
+        </Card>
+      ) : null}
+      {!loading && loaded ? (
+        <Card title="Small order thresholds">
+          <div className={styles.form}>
+            <span className={styles.note}>An order whose net is below the threshold of its currency takes the surcharge. A currency listed here replaces the reference threshold (250 USD, 200 EUR); 0 switches the surcharge off for it.</span>
+            {fieldError("smallOrderThresholds") ? (
+              <Alert tone="danger" title="Small order thresholds">
+                {fieldError("smallOrderThresholds")}
+              </Alert>
+            ) : null}
+            {thresholds.length === 0 ? <span className={styles.note}>No thresholds set: the reference thresholds apply.</span> : null}
+            {thresholds.map((r, i) => (
+              <div key={i} className={styles.formActions}>
+                <FormField id={`pp-threshold-${i}-currency`} label={`Threshold ${i + 1}: currency`} error={fieldError(`smallOrderThresholds[${r.currency}]`)}>
+                  {(c) => <Input {...c} className={styles.mono} maxLength={3} value={r.currency} disabled={!canSave} onChange={(e) => editThreshold(i, "currency", e.target.value)} />}
+                </FormField>
+                <FormField id={`pp-threshold-${i}-amount`} label={`Threshold ${i + 1}: amount`}>
+                  {(c) => <Input {...c} className={styles.mono} value={r.amount} disabled={!canSave} onChange={(e) => editThreshold(i, "amount", e.target.value)} />}
+                </FormField>
+                {canSave ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      setThresholds((rows) => rows.filter((_, j) => j !== i));
+                      edited();
+                    }}
+                  >
+                    Remove threshold {i + 1}
+                  </Button>
+                ) : null}
+              </div>
+            ))}
+            {canSave && thresholds.length < MAX_THRESHOLDS ? (
+              <div className={styles.formActions}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setThresholds((rows) => [...rows, { currency: "", amount: "" }]);
+                    edited();
+                  }}
+                >
+                  Add threshold
+                </Button>
+              </div>
+            ) : null}
           </div>
         </Card>
       ) : null}

@@ -28,6 +28,7 @@ import { ImportJournalPage } from "./ImportJournalPage";
 import { JournalDetailPage } from "./JournalDetailPage";
 import { JournalsPage } from "./JournalsPage";
 import { ParametersPage } from "./ParametersPage";
+import { TenantParametersPage } from "./TenantParametersPage";
 import { NewAgreementPage } from "./NewAgreementPage";
 import { NewCampaignPage } from "./NewCampaignPage";
 import { NewCommodityBasisPage } from "./NewCommodityBasisPage";
@@ -108,6 +109,7 @@ const pricing: PassageModule = {
     { path: "/pricing/promotions/new", element: createElement(NewPromotionPage), handle: { title: "New promotion" } },
     { path: "/pricing/promotions/:id", element: createElement(PromotionDetailPage), handle: { title: "Promotion" } },
     { path: "/pricing/parameters", element: createElement(ParametersPage), handle: { title: "Pricing parameters" } },
+    { path: "/pricing/tenant-parameters", element: createElement(TenantParametersPage), handle: { title: "Tenant pricing parameters" } },
     { path: "/pricing/simulate", element: createElement(SimulatePage), handle: { title: "Price simulation" } },
     { path: "/pricing/compare", element: createElement(ComparePage), handle: { title: "Compare procedure versions" } },
     { path: "/pricing/price-list", element: createElement(PriceListPage), handle: { title: "Price list by customer" } },
@@ -133,6 +135,7 @@ const pricing: PassageModule = {
     { label: "Trade funds", to: "/pricing/funds", duty: "pricing.view" },
     { label: "Promotions", to: "/pricing/promotions", duty: "pricing.view" },
     { label: "Parameters", to: "/pricing/parameters", duty: "pricing.view" },
+    { label: "Tenant parameters", to: "/pricing/tenant-parameters", duty: "pricing.view" },
     { label: "Price simulation", to: "/pricing/simulate", duty: "pricing.view" },
     { label: "Compare procedure versions", to: "/pricing/compare", duty: "pricing.view" },
     { label: "Price list by customer", to: "/pricing/price-list", duty: "pricing.view" },

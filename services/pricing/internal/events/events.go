@@ -41,6 +41,8 @@ const (
 	ContractClaimApproved = "dev.passage.pricing.contractclaim.approved.v1"
 	// Pricing parameters (PRD 5.26.13): a legal entity's parameters were changed.
 	ParametersChanged = "dev.passage.pricing.parameters.changed.v1"
+	// A tenant's parameters (cache lifetime, campaign kill switch effect) were changed.
+	TenantParametersChanged = "dev.passage.pricing.tenantparameter.changed.v1"
 	// Procedure determination (PRD 5.26.13): the procedure a legal entity and sales channel
 	// price with was set or cleared.
 	ProcedureAssignmentChanged = "dev.passage.pricing.procedureassignment.changed.v1"
@@ -67,8 +69,21 @@ type ParametersChangedData struct {
 	PricingDateBasis   string     `json:"pricing_date_basis"`
 	TotalDiscountBasis string     `json:"total_discount_basis"`
 	SmartRoundingBands []BandData `json:"smart_rounding_bands"`
-	Version            int        `json:"version"`
-	UpdatedBy          string     `json:"updated_by"`
+	// PriceSearchMode and SmallOrderThresholds (currency to decimal string; empty for the
+	// reference table) are the other two values of a legal entity.
+	PriceSearchMode      string            `json:"price_search_mode"`
+	SmallOrderThresholds map[string]string `json:"small_order_thresholds"`
+	Version              int               `json:"version"`
+	UpdatedBy            string            `json:"updated_by"`
+}
+
+// TenantParametersChangedData is the payload of tenantparameter.changed. CacheTTLSeconds is 0
+// when the tenant follows the deployment's PRICING_CACHE_TTL.
+type TenantParametersChangedData struct {
+	CacheTTLSeconds          int    `json:"cache_ttl_seconds"`
+	CampaignKillSwitchEffect string `json:"campaign_kill_switch_effect"`
+	Version                  int    `json:"version"`
+	UpdatedBy                string `json:"updated_by"`
 }
 
 // BandData is one smart rounding band; the last band has no up_to.

@@ -20,6 +20,34 @@ type countingStore struct {
 	err     error
 	// during runs inside a load, to simulate a write committing while it is in flight.
 	during func()
+	// tenantParams and legalParams answer the parameter reads; the *Reads count them.
+	tenantParams TenantParameters
+	legalParams  Parameters
+	tenantReads  int
+	legalReads   int
+	tenantErr    error
+}
+
+func (s *countingStore) GetTenantParameters(context.Context) (TenantParameters, error) {
+	s.tenantReads++
+	return s.tenantParams, s.tenantErr
+}
+
+func (s *countingStore) GetParameters(_ context.Context, le string) (Parameters, error) {
+	s.legalReads++
+	p := s.legalParams
+	p.LegalEntityID = le
+	return p, nil
+}
+
+func (s *countingStore) SetParameters(_ context.Context, in Parameters, v int, _ string) (Parameters, error) {
+	s.legalParams = in
+	return in, nil
+}
+
+func (s *countingStore) SetTenantParameters(_ context.Context, in TenantParameters, v int, _ string) (TenantParameters, error) {
+	s.tenantParams = in
+	return in, nil
 }
 
 func (s *countingStore) ActiveRecords(_ context.Context, _ ActiveQuery) ([]domain.Record, error) {

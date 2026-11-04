@@ -30,3 +30,27 @@ func (f *fakeStore) SetParameters(_ context.Context, in store.Parameters, versio
 	f.params[in.LegalEntityID] = in
 	return in, nil
 }
+
+func (f *fakeStore) GetTenantParameters(context.Context) (store.TenantParameters, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.tenantParams != nil {
+		return *f.tenantParams, nil
+	}
+	return store.DefaultTenantParameters(), nil
+}
+
+func (f *fakeStore) SetTenantParameters(_ context.Context, in store.TenantParameters, version int, _ string) (store.TenantParameters, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cur := store.DefaultTenantParameters()
+	if f.tenantParams != nil {
+		cur = *f.tenantParams
+	}
+	if cur.Version != version {
+		return store.TenantParameters{}, httpx.NewProblem(http.StatusPreconditionFailed, store.CodeVersionConflict, "tenant parameters version does not match")
+	}
+	in.Version = version + 1
+	f.tenantParams = &in
+	return in, nil
+}

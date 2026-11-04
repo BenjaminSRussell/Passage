@@ -53,6 +53,7 @@ func TestEventsMatchAsyncAPI(t *testing.T) {
 		{events.ContractClaimCreated, events.ContractClaimData{}},
 		{events.ContractClaimApproved, events.ContractClaimData{}},
 		{events.ParametersChanged, events.ParametersChangedData{}},
+		{events.TenantParametersChanged, events.TenantParametersChangedData{}},
 		{events.ProcedureAssignmentChanged, events.ProcedureAssignmentChangedData{}},
 		{events.CommodityRunCompleted, events.CommodityRunCompletedData{JournalID: "x"}},
 	}

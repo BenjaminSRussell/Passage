@@ -261,7 +261,7 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 	}
 	a.resolves.Add(1)
 	a.linesPriced.Add(int64(len(lines)))
-	in.Header, in.Lines, in.SmallOrderThreshold, in.Procedure = header, lines, domain.SmallOrderThreshold(header.Currency), proc
+	in.Header, in.Lines, in.SmallOrderThreshold, in.Procedure = header, lines, domain.ThresholdFor(params.SmallOrderThresholds, header.Currency), proc
 	in.TotalDiscountBasis = params.TotalDiscountBasis
 	res, free := domain.ResolveWithFreeGoods(in, rules)
 	a.respond(w, r, res, free, r.URL.Query().Get("explain") == "true")
@@ -329,7 +329,7 @@ func (a *API) simulate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	res := domain.Resolve(domain.Input{Header: header, Lines: lines, Records: records, Procedure: proc,
-		SmallOrderThreshold: domain.SmallOrderThreshold(header.Currency), TotalDiscountBasis: params.TotalDiscountBasis})
+		SmallOrderThreshold: domain.ThresholdFor(params.SmallOrderThresholds, header.Currency), TotalDiscountBasis: params.TotalDiscountBasis})
 	a.respond(w, r, res, nil, r.URL.Query().Get("explain") != "false")
 }
 
@@ -461,8 +461,9 @@ type recordDTO struct {
 	DiscPct2      string `json:"discPct2"`
 	ValidFrom     string `json:"validFrom"`
 	ValidTo       string `json:"validTo"`
-	SearchNext    bool   `json:"searchNext"`
-	Exclusive     bool   `json:"exclusive"`
+	// SearchNext left out takes the legal entity's price_search_mode (SEARCH_NEXT is true).
+	SearchNext *bool `json:"searchNext"`
+	Exclusive  bool  `json:"exclusive"`
 	// CampaignID optionally groups the record under a campaign (FR-26.2, FR-26.10).
 	CampaignID string `json:"campaignId"`
 }
@@ -525,7 +526,7 @@ func toRecord(dto recordDTO) (domain.Record, *httpx.Problem) {
 	rec := domain.Record{ID: dto.ID, Type: domain.ConditionType(dto.Type), CustomerKind: domain.CustomerKind(dto.CustomerKind), CustomerKey: dto.CustomerKey,
 		ProductKind: domain.ProductKind(dto.ProductKind), ProductKey: dto.ProductKey, Variant: dto.Variant, Currency: dto.Currency, Unit: dto.Unit,
 		FromQuantity: from, Amount: amount, DiscPct1: p1, DiscPct2: p2, ValidFrom: validFrom, ValidTo: validTo,
-		SearchNext: dto.SearchNext, Exclusive: dto.Exclusive, CampaignID: dto.CampaignID}
+		SearchNext: dto.SearchNext != nil && *dto.SearchNext, Exclusive: dto.Exclusive, CampaignID: dto.CampaignID}
 	if dto.CampaignID != "" && !ids.Valid(dto.CampaignID) {
 		fields["campaignId"] = "must be a UUID"
 	}
@@ -549,6 +550,15 @@ func (a *API) createRecord(w http.ResponseWriter, r *http.Request) {
 	if err := httpx.Decode(r, &dto); err != nil {
 		httpx.Fail(w, r, err)
 		return
+	}
+	if dto.SearchNext == nil {
+		next, err := a.searchNextDefault(r, dto.LegalEntityID)
+		if err != nil {
+			slog.Error("get pricing parameters failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+			httpx.Fail(w, r, err)
+			return
+		}
+		dto.SearchNext = &next
 	}
 	rec, problem := toRecord(dto)
 	if !ids.Valid(dto.LegalEntityID) {

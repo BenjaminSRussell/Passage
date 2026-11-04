@@ -102,3 +102,106 @@ func BandSpecs(bands []SmartBand) []BandSpec {
 	}
 	return out
 }
+
+// Price search mode (PRD 5.26.13 price_search_mode, BR-26.1 step 5): the default of a new
+// condition record's searchNext flag when the caller sends none.
+const (
+	SearchModeFirstMatch = "FIRST_MATCH"
+	SearchModeNext       = "SEARCH_NEXT"
+)
+
+// ValidSearchMode reports whether s is a price search mode.
+func ValidSearchMode(s string) bool { return s == SearchModeFirstMatch || s == SearchModeNext }
+
+// MaxThresholdCurrencies bounds the small order threshold table of a legal entity.
+const MaxThresholdCurrencies = 30
+
+// ParseThresholds validates the small order threshold table of a legal entity (PRD 5.26.13
+// small_order_threshold, FR-26.6): currency code to a decimal of at least 0 with at most six
+// places. A currency in the table replaces the reference threshold of SmallOrderThreshold;
+// 0 switches the surcharge off for that currency. A fault is keyed smallOrderThresholds[CUR].
+func ParseThresholds(in map[string]string) (map[string]decimal.Decimal, map[string]string) {
+	faults := map[string]string{}
+	if len(in) > MaxThresholdCurrencies {
+		faults["smallOrderThresholds"] = fmt.Sprintf("must hold at most %d currencies", MaxThresholdCurrencies)
+		return nil, faults
+	}
+	out := make(map[string]decimal.Decimal, len(in))
+	for cur, raw := range in {
+		key := "smallOrderThresholds[" + cur + "]"
+		if !validCurrencyCode(cur) {
+			faults[key] = "currency must be three uppercase letters"
+			continue
+		}
+		v, err := decimal.NewFromString(raw)
+		switch {
+		case err != nil || v.IsNegative():
+			faults[key] = "must be a decimal of at least 0"
+		case !v.Equal(v.Round(6)): // "200.5000000" is 200.5; trailing zeros are not places
+			faults[key] = "must have at most six decimal places"
+		case v.GreaterThan(decimal.NewFromInt(1_000_000_000)):
+			faults[key] = "must not exceed 1000000000"
+		default:
+			out[cur] = v
+		}
+	}
+	if len(faults) > 0 {
+		return nil, faults
+	}
+	return out, nil
+}
+
+func validCurrencyCode(c string) bool {
+	if len(c) != 3 {
+		return false
+	}
+	for _, r := range c {
+		if r < 'A' || r > 'Z' {
+			return false
+		}
+	}
+	return true
+}
+
+// CanonicalThresholds renders a validated table in its stored form ("200.50" and "200.5" are one
+// value), so equal tables compare equal. A nil result is the reference table.
+func CanonicalThresholds(in map[string]decimal.Decimal) map[string]string {
+	out := make(map[string]string, len(in))
+	for cur, v := range in {
+		out[cur] = v.String()
+	}
+	return out
+}
+
+// ThresholdFor returns the small order threshold of a currency: the legal entity's table when
+// it names the currency, else the reference threshold (SmallOrderThreshold).
+func ThresholdFor(table map[string]string, currency string) decimal.Decimal {
+	if raw, ok := table[currency]; ok {
+		if v, err := decimal.NewFromString(raw); err == nil {
+			return v
+		}
+	}
+	return SmallOrderThreshold(currency)
+}
+
+// Campaign kill switch effect (PRD 5.26.13 campaign_kill_switch_effect, FR-26.10). Every
+// replica that takes a kill or restore empties its own snapshots at once, so the next resolve
+// there sees it. NEXT_RESOLVE leaves the other replicas to their snapshot lifetime;
+// IMMEDIATE_CACHE_FLUSH has every replica empty its snapshots when it reads campaign.killed or
+// campaign.restored.
+const (
+	KillEffectNextResolve = "NEXT_RESOLVE"
+	KillEffectFlush       = "IMMEDIATE_CACHE_FLUSH"
+)
+
+// ValidKillEffect reports whether s is a campaign kill switch effect.
+func ValidKillEffect(s string) bool { return s == KillEffectNextResolve || s == KillEffectFlush }
+
+// Bounds of the per-tenant snapshot lifetime (PRD 5.26.13 cache_ttl_seconds).
+const (
+	MinCacheTTLSeconds = 10
+	MaxCacheTTLSeconds = 600
+)
+
+// ValidCacheTTL reports whether n is a snapshot lifetime in seconds the tenant may set.
+func ValidCacheTTL(n int) bool { return n >= MinCacheTTLSeconds && n <= MaxCacheTTLSeconds }

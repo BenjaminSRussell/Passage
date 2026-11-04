@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/pricing/internal/domain"
 )
@@ -31,6 +32,25 @@ type Cache struct {
 	gen     uint64
 	entries map[string]snapshot
 	loading map[string]*loadCall
+
+	// params holds the parameters the store served, per tenant: a legal entity's row (key
+	// tenant|scope|legal entity) and the tenant's own row (key tenant). pgen counts the
+	// invalidations, so a read that began before one is not kept.
+	params map[string]paramEntry
+	pgen   uint64
+}
+
+// paramTTL bounds how long a replica keeps parameters it read. A change made on this replica
+// drops them at once, and one made on another replica is announced by parameters.changed
+// (InvalidateParameters); without the event the bound is this lifetime, the shortest a
+// snapshot may live (10 s, PRD 5.26.13 cache_ttl_seconds).
+const paramTTL = 10 * time.Second
+
+type paramEntry struct {
+	tenantID string
+	legal    Parameters
+	tenant   TenantParameters
+	expires  time.Time
 }
 
 // snapshot holds the records bucketed for the engine; resolves share it read-only.
@@ -42,12 +62,19 @@ type snapshot struct {
 // NewCache wraps s with a snapshot cache of the given TTL. A TTL of zero or less disables
 // the cache: every resolve reads the store.
 func NewCache(s Store, ttl time.Duration) *Cache {
-	return &Cache{Store: s, ttl: ttl, now: time.Now, entries: map[string]snapshot{}, loading: map[string]*loadCall{}}
+	return &Cache{Store: s, ttl: ttl, now: time.Now, entries: map[string]snapshot{}, loading: map[string]*loadCall{},
+		params: map[string]paramEntry{}}
 }
+
+// callerScope is the legal-entity scope row security applies to the caller: exactly the
+// passage.legal_entity_scopes a store transaction sets (dbx.LegalEntityScopes). Keying on the raw
+// claim would let two callers with no claim share a copy although only the one holding the
+// all-scope duty may read every legal entity's rows ('*' against the empty list).
+func callerScope(p tenant.Principal) string { return dbx.LegalEntityScopes(p) }
 
 func cacheKey(ctx context.Context, q ActiveQuery) string {
 	p, _ := tenant.FromContext(ctx)
-	return strings.Join([]string{p.TenantID, p.LegalEntityID, q.LegalEntityID, q.Currency, q.CustomerGroupID, dayStr(q.AsOf)}, "|")
+	return strings.Join([]string{p.TenantID, callerScope(p), q.LegalEntityID, q.Currency, q.CustomerGroupID, dayStr(q.AsOf)}, "|")
 }
 
 // ActiveRecords serves a fresh snapshot and loads one otherwise. Callers get their own
@@ -79,6 +106,7 @@ func (c *Cache) ActiveRecordSet(ctx context.Context, q ActiveQuery) (*domain.Rec
 		return domain.NewRecordSet(records), nil
 	}
 	key := cacheKey(ctx, q)
+	ttl := c.snapshotTTL(ctx)
 	c.mu.Lock()
 	now := c.now()
 	if hit, ok := c.entries[key]; ok && now.Before(hit.expires) {
@@ -119,11 +147,20 @@ func (c *Cache) ActiveRecordSet(ctx context.Context, q ActiveQuery) (*domain.Rec
 		if len(c.entries) >= maxCacheEntries {
 			c.entries = map[string]snapshot{}
 		}
-		c.entries[key] = snapshot{set: call.set, expires: now.Add(c.ttl)}
+		c.entries[key] = snapshot{set: call.set, expires: now.Add(ttl)}
 	}
 	c.mu.Unlock()
 	close(call.done)
 	return call.set, err
+}
+
+// snapshotTTL is the snapshot lifetime of the caller's tenant: its cache_ttl_seconds when it set
+// one, else the deployment's. A tenant whose parameters cannot be read gets the deployment's.
+func (c *Cache) snapshotTTL(ctx context.Context) time.Duration {
+	if tp, err := c.GetTenantParameters(ctx); err == nil && tp.CacheTTLSeconds > 0 {
+		return time.Duration(tp.CacheTTLSeconds) * time.Second
+	}
+	return c.ttl
 }
 
 // loadCall is one snapshot load that concurrent misses of the same key wait for.
@@ -184,4 +221,98 @@ func (c *Cache) SetCampaignKilled(ctx context.Context, id string, version int, k
 func (c *Cache) ReviseCampaign(ctx context.Context, rev domain.CampaignRevision, idempotencyKey string) (domain.Campaign, error) {
 	defer c.Flush()
 	return c.Store.ReviseCampaign(ctx, rev, idempotencyKey)
+}
+
+func paramKey(ctx context.Context, legalEntityID string) string {
+	p, _ := tenant.FromContext(ctx)
+	return strings.Join([]string{p.TenantID, callerScope(p), legalEntityID}, "|")
+}
+
+// GetParameters serves a legal entity's parameters from this replica's copy while it is fresh:
+// a resolve reads them on every call (the date basis, the total discount basis, the
+// threshold). Callers of different legal-entity scopes never share a copy, since row
+// security decides what a caller reads.
+func (c *Cache) GetParameters(ctx context.Context, legalEntityID string) (Parameters, error) {
+	if c.ttl <= 0 {
+		return c.Store.GetParameters(ctx, legalEntityID)
+	}
+	key := paramKey(ctx, legalEntityID)
+	c.mu.Lock()
+	if hit, ok := c.params[key]; ok && c.now().Before(hit.expires) {
+		c.mu.Unlock()
+		return hit.legal, nil
+	}
+	gen := c.pgen
+	c.mu.Unlock()
+	got, err := c.Store.GetParameters(ctx, legalEntityID)
+	if err == nil {
+		p, _ := tenant.FromContext(ctx)
+		c.keepParams(key, gen, paramEntry{tenantID: p.TenantID, legal: got})
+	}
+	return got, err
+}
+
+// GetTenantParameters serves the tenant's parameters like GetParameters.
+func (c *Cache) GetTenantParameters(ctx context.Context) (TenantParameters, error) {
+	if c.ttl <= 0 {
+		return c.Store.GetTenantParameters(ctx)
+	}
+	p, _ := tenant.FromContext(ctx)
+	c.mu.Lock()
+	if hit, ok := c.params[p.TenantID]; ok && c.now().Before(hit.expires) {
+		c.mu.Unlock()
+		return hit.tenant, nil
+	}
+	gen := c.pgen
+	c.mu.Unlock()
+	got, err := c.Store.GetTenantParameters(ctx)
+	if err == nil {
+		c.keepParams(p.TenantID, gen, paramEntry{tenantID: p.TenantID, tenant: got})
+	}
+	return got, err
+}
+
+func (c *Cache) keepParams(key string, gen uint64, e paramEntry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.pgen != gen {
+		return
+	}
+	if len(c.params) >= maxCacheEntries {
+		c.params = map[string]paramEntry{}
+	}
+	e.expires = c.now().Add(paramTTL)
+	c.params[key] = e
+}
+
+// InvalidateParameters drops the parameters this replica holds for a tenant (all its legal
+// entities, and its own row). It is the handler of parameters.changed.
+func (c *Cache) InvalidateParameters(tenantID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pgen++
+	for k, e := range c.params {
+		if e.tenantID == tenantID {
+			delete(c.params, k)
+		}
+	}
+}
+
+// SetParameters drops the tenant's copies after the store call, whether or not it succeeded:
+// a lost race may mean the stored version moved.
+func (c *Cache) SetParameters(ctx context.Context, in Parameters, version int, idempotencyKey string) (Parameters, error) {
+	p, _ := tenant.FromContext(ctx)
+	defer c.InvalidateParameters(p.TenantID)
+	return c.Store.SetParameters(ctx, in, version, idempotencyKey)
+}
+
+// SetTenantParameters drops the tenant's copies and its snapshots after the store call: a new
+// snapshot lifetime applies to the snapshots loaded from now on.
+func (c *Cache) SetTenantParameters(ctx context.Context, in TenantParameters, version int, idempotencyKey string) (TenantParameters, error) {
+	p, _ := tenant.FromContext(ctx)
+	defer func() {
+		c.InvalidateParameters(p.TenantID)
+		c.Flush()
+	}()
+	return c.Store.SetTenantParameters(ctx, in, version, idempotencyKey)
 }

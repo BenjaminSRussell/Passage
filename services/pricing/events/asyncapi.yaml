@@ -50,10 +50,12 @@ channels:
         $ref: "#/components/messages/FundUsageRecorded"
   parameters:
     address: passage.pricing.parameters
-    description: A legal entity's pricing parameters changed (PRD 5.26.13).
+    description: A legal entity's or a tenant's pricing parameters changed (PRD 5.26.13).
     messages:
       parametersChanged:
         $ref: "#/components/messages/ParametersChanged"
+      tenantParametersChanged:
+        $ref: "#/components/messages/TenantParametersChanged"
   procedureAssignment:
     address: passage.pricing.procedureassignment
     description: The pricing procedure of a legal entity and sales channel was set or cleared (PRD 5.26.13).
@@ -240,9 +242,15 @@ operations:
   publishParametersChanged:
     action: send
     channel: {$ref: "#/channels/parameters"}
-    summary: A legal entity's pricing parameters (journal_four_eyes, pricing_date_basis, total_discount_basis, smart_rounding_bands) were changed (PricingAdmin).
+    summary: A legal entity's pricing parameters (journal_four_eyes, pricing_date_basis, total_discount_basis, smart_rounding_bands, price_search_mode, small_order_thresholds) were changed (PricingAdmin).
     messages:
       - {$ref: "#/channels/parameters/messages/parametersChanged"}
+  publishTenantParametersChanged:
+    action: send
+    channel: {$ref: "#/channels/parameters"}
+    summary: A tenant's pricing parameters (cache_ttl_seconds, campaign_kill_switch_effect) were changed (PricingAdmin).
+    messages:
+      - {$ref: "#/channels/parameters/messages/tenantParametersChanged"}
   publishProcedureAssignmentChanged:
     action: send
     channel: {$ref: "#/channels/procedureAssignment"}
@@ -486,6 +494,12 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/ParametersChanged"
+    TenantParametersChanged:
+      name: dev.passage.pricing.tenantparameter.changed.v1
+      title: Pricing tenant parameters changed
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/TenantParametersChanged"
     ProcedureAssignmentChanged:
       name: dev.passage.pricing.procedureassignment.changed.v1
       title: Pricing procedure assignment changed
@@ -835,13 +849,26 @@ components:
     ParametersChanged:
       type: object
       description: A legal entity's pricing parameters after a change (PRD 5.26.13).
-      required: [legal_entity_id, journal_four_eyes, pricing_date_basis, total_discount_basis, smart_rounding_bands, version, updated_by]
+      required: [legal_entity_id, journal_four_eyes, pricing_date_basis, total_discount_basis, smart_rounding_bands, price_search_mode, small_order_thresholds, version, updated_by]
       properties:
         legal_entity_id: {type: string, format: uuid}
         journal_four_eyes: {type: boolean, description: "True when the user who created a price journal cannot post it."}
         pricing_date_basis: {type: string, enum: [SHIP_DATE, ORDER_DATE, DELIVERY_DATE], description: "Document date used as the pricing date when the caller sends none (BR-26.2)."}
         total_discount_basis: {type: string, enum: [AFTER_LINE_DISC, GROSS], description: "Amount TOTAL_DISC applies to."}
         smart_rounding_bands: {$ref: "#/components/schemas/SmartRoundingBands"}
+        price_search_mode: {type: string, enum: [FIRST_MATCH, SEARCH_NEXT], description: "Default of search_next on a new condition record (BR-26.1 step 5)."}
+        small_order_thresholds: {type: object, additionalProperties: {type: string}, description: "Small order surcharge threshold per currency (FR-26.6), decimal strings. Empty means the reference table (250 USD, 200 EUR)."}
+        version: {type: integer, minimum: 1}
+        updated_by: {type: string}
+    TenantParametersChanged:
+      type: object
+      description: >
+        A tenant's pricing parameters after a change (PRD 5.26.13). Replicas read it to drop the
+        parameters and snapshots they hold for the tenant.
+      required: [cache_ttl_seconds, campaign_kill_switch_effect, version, updated_by]
+      properties:
+        cache_ttl_seconds: {type: integer, minimum: 0, maximum: 600, description: "Record snapshot lifetime, 10 to 600; 0 when the tenant follows the deployment's PRICING_CACHE_TTL."}
+        campaign_kill_switch_effect: {type: string, enum: [NEXT_RESOLVE, IMMEDIATE_CACHE_FLUSH], description: "IMMEDIATE_CACHE_FLUSH has every replica empty its snapshots when it reads campaign.killed or campaign.restored."}
         version: {type: integer, minimum: 1}
         updated_by: {type: string}
     SmartRoundingBands:

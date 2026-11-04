@@ -30,6 +30,10 @@ type parametersRequest struct {
 	PricingDateBasis   *string           `json:"pricingDateBasis"`
 	TotalDiscountBasis *string           `json:"totalDiscountBasis"`
 	SmartRoundingBands []domain.BandSpec `json:"smartRoundingBands"`
+	// PriceSearchMode (FIRST_MATCH or SEARCH_NEXT) and SmallOrderThresholds (currency to
+	// decimal string; an empty object is the reference table) are required too.
+	PriceSearchMode      *string           `json:"priceSearchMode"`
+	SmallOrderThresholds map[string]string `json:"smallOrderThresholds"`
 	// Version is the version read (0 when the legal entity has no stored parameters).
 	Version int `json:"version"`
 }
@@ -43,19 +47,27 @@ type parametersView struct {
 	PricingDateBasis   string            `json:"pricingDateBasis"`
 	TotalDiscountBasis string            `json:"totalDiscountBasis"`
 	SmartRoundingBands []domain.BandSpec `json:"smartRoundingBands"`
-	Version            int               `json:"version"`
-	UpdatedBy          string            `json:"updatedBy,omitempty"`
-	UpdatedAt          *time.Time        `json:"updatedAt,omitempty"`
+	// PriceSearchMode is the default of searchNext on a new condition record; the
+	// SmallOrderThresholds of a currency replace the reference threshold (250 USD, 200 EUR).
+	PriceSearchMode      string            `json:"priceSearchMode"`
+	SmallOrderThresholds map[string]string `json:"smallOrderThresholds"`
+	Version              int               `json:"version"`
+	UpdatedBy            string            `json:"updatedBy,omitempty"`
+	UpdatedAt            *time.Time        `json:"updatedAt,omitempty"`
 }
 
 func parametersResponse(p store.Parameters) parametersView {
 	if p.PricingDateBasis == "" { // a store with nothing for the entity
 		d := store.DefaultParameters(p.LegalEntityID)
 		p.PricingDateBasis, p.TotalDiscountBasis, p.SmartRoundingBands = d.PricingDateBasis, d.TotalDiscountBasis, d.SmartRoundingBands
+		p.PriceSearchMode = d.PriceSearchMode
+	}
+	if p.SmallOrderThresholds == nil {
+		p.SmallOrderThresholds = map[string]string{}
 	}
 	return parametersView{LegalEntityID: p.LegalEntityID, JournalFourEyes: p.JournalFourEyes, PricingDateBasis: p.PricingDateBasis,
-		TotalDiscountBasis: p.TotalDiscountBasis, SmartRoundingBands: p.SmartRoundingBands, Version: p.Version,
-		UpdatedBy: p.UpdatedBy, UpdatedAt: p.UpdatedAt}
+		TotalDiscountBasis: p.TotalDiscountBasis, SmartRoundingBands: p.SmartRoundingBands, PriceSearchMode: p.PriceSearchMode,
+		SmallOrderThresholds: p.SmallOrderThresholds, Version: p.Version, UpdatedBy: p.UpdatedBy, UpdatedAt: p.UpdatedAt}
 }
 
 func (a *API) getParameters(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +82,7 @@ func (a *API) getParameters(w http.ResponseWriter, r *http.Request) {
 	if !legalEntityInScope(w, r, le) {
 		return
 	}
-	p, err := a.store.GetParameters(r.Context(), le)
+	p, err := a.uncached().GetParameters(r.Context(), le)
 	if err != nil {
 		slog.Error("get pricing parameters failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -112,6 +124,18 @@ func (a *API) setParameters(w http.ResponseWriter, r *http.Request) {
 			fields[k] = v
 		}
 	}
+	if req.PriceSearchMode == nil {
+		fields["priceSearchMode"] = "is required"
+	} else if !domain.ValidSearchMode(*req.PriceSearchMode) {
+		fields["priceSearchMode"] = "must be FIRST_MATCH or SEARCH_NEXT"
+	}
+	if req.SmallOrderThresholds == nil {
+		fields["smallOrderThresholds"] = "is required (an empty object keeps the reference thresholds)"
+	} else if _, faults := domain.ParseThresholds(req.SmallOrderThresholds); faults != nil {
+		for k, v := range faults {
+			fields[k] = v
+		}
+	}
 	if req.Version < 0 {
 		fields["version"] = "must be the version read, or 0 when none was stored"
 	}
@@ -124,7 +148,8 @@ func (a *API) setParameters(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := a.store.SetParameters(r.Context(), store.Parameters{LegalEntityID: req.LegalEntityID,
 		JournalFourEyes: *req.JournalFourEyes, PricingDateBasis: *req.PricingDateBasis, TotalDiscountBasis: *req.TotalDiscountBasis,
-		SmartRoundingBands: req.SmartRoundingBands}, req.Version, r.Header.Get(idempotencyKey))
+		SmartRoundingBands: req.SmartRoundingBands, PriceSearchMode: *req.PriceSearchMode,
+		SmallOrderThresholds: req.SmallOrderThresholds}, req.Version, r.Header.Get(idempotencyKey))
 	if err != nil {
 		slog.Error("set pricing parameters failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -149,6 +174,28 @@ func legalEntityInScope(w http.ResponseWriter, r *http.Request, legalEntityID st
 func (a *API) registerParameterRoutes(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Get(parametersPath, a.getParameters)
 	r.With(authz.RequireDuty(dutyAdmin)).Put(parametersPath, a.setParameters)
+	r.With(authz.RequireDuty(dutyView)).Get(tenantParametersPath, a.getTenantParameters)
+	r.With(authz.RequireDuty(dutyAdmin)).Put(tenantParametersPath, a.setTenantParameters)
+}
+
+// uncached is the store behind the replica's cache. The parameter pages read through it, so the
+// version an administrator edits is the stored one even when another replica changed it moments
+// ago (a cached copy could be up to its lifetime old and make the next PUT a 412).
+func (a *API) uncached() store.Store {
+	if c, ok := a.store.(*store.Cache); ok && c.Store != nil {
+		return c.Store
+	}
+	return a.store
+}
+
+// searchNextDefault is the value of searchNext a new condition record takes when the caller
+// sends none: true under the legal entity's price_search_mode SEARCH_NEXT (BR-26.1 step 5).
+func (a *API) searchNextDefault(r *http.Request, legalEntityID string) (bool, error) {
+	if !ids.Valid(legalEntityID) {
+		return false, nil
+	}
+	p, err := a.entityParameters(r, legalEntityID)
+	return p.PriceSearchMode == domain.SearchModeNext, err
 }
 
 // entityParameters reads the parameters the engine needs for a legal entity: one primary

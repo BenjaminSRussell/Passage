@@ -27,26 +27,27 @@ const (
 // fakeStore mirrors the Postgres store's rules (overlap via domain.Conflict, state, version).
 // Journal and rebate behaviour lives in fake_journal_test.go.
 type fakeStore struct {
-	mu         sync.Mutex
-	records    map[string]store.Entry
-	seq        int
-	keys       []string // Idempotency-Key values received by lifecycle commands
-	lastList   store.Filter
-	pingErr    error
-	exportErr  error // returned by ExportRecords before it starts
-	journals   map[string]*store.Journal
-	agreements map[string]domain.RebateAgreement
-	periods    map[string]*fakePeriod
-	accruals   map[string]store.Accrual
-	comm       commissionState
-	fund       fundState
-	camp       campaignState
-	claims     []store.VendorClaim
-	free       freeGoodsState
-	comd       commodityState
-	params     map[string]store.Parameters
-	assigns    map[string]store.ProcedureAssignment
-	brk        brokerState
+	mu           sync.Mutex
+	records      map[string]store.Entry
+	seq          int
+	keys         []string // Idempotency-Key values received by lifecycle commands
+	lastList     store.Filter
+	pingErr      error
+	exportErr    error // returned by ExportRecords before it starts
+	journals     map[string]*store.Journal
+	agreements   map[string]domain.RebateAgreement
+	periods      map[string]*fakePeriod
+	accruals     map[string]store.Accrual
+	comm         commissionState
+	fund         fundState
+	camp         campaignState
+	claims       []store.VendorClaim
+	free         freeGoodsState
+	comd         commodityState
+	params       map[string]store.Parameters
+	tenantParams *store.TenantParameters
+	assigns      map[string]store.ProcedureAssignment
+	brk          brokerState
 }
 
 func newFake() *fakeStore {

@@ -1412,12 +1412,17 @@ export interface PricingParameters {
   totalDiscountBasis: TotalDiscountBasis;
   /** Smart rounding table of journal adjustments, lowest band first; the last band has no upTo. */
   smartRoundingBands: SmartRoundingBand[];
+  /** Default of searchNext on a new condition record that leaves it out (BR-26.1 step 5). */
+  priceSearchMode?: PriceSearchMode;
+  /** SURCHARGE threshold per currency (FR-26.6); a currency not named keeps the reference threshold (250 USD, 200 EUR). */
+  smallOrderThresholds?: Record<string, string>;
   /** 0 when the legal entity has no stored parameters. */
   version: number;
   updatedBy?: string;
   updatedAt?: string;
 }
 
+export type PriceSearchMode = "FIRST_MATCH" | "SEARCH_NEXT";
 export type PricingDateBasis = "SHIP_DATE" | "ORDER_DATE" | "DELIVERY_DATE";
 export type TotalDiscountBasis = "AFTER_LINE_DISC" | "GROSS";
 export interface SmartRoundingBand {
@@ -1429,10 +1434,37 @@ export function getPricingParameters(legalEntityId: string, signal?: AbortSignal
   return send<PricingParameters>(`/parameters${query({ legalEntityId })}`, {}, signal);
 }
 
-export type PricingParametersInput = Omit<PricingParameters, "updatedBy" | "updatedAt">;
+export type PricingParametersInput = Omit<PricingParameters, "updatedBy" | "updatedAt" | "priceSearchMode" | "smallOrderThresholds"> & {
+  priceSearchMode: PriceSearchMode;
+  smallOrderThresholds: Record<string, string>;
+};
 
 export function setPricingParameters(body: PricingParametersInput, key: string = newKey()): Promise<PricingParameters> {
   return send<PricingParameters>("/parameters", { method: "PUT", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) });
+}
+
+// ---- Pricing parameters per tenant (PRD 5.26.13, scope tenant).
+
+export type CampaignKillSwitchEffect = "NEXT_RESOLVE" | "IMMEDIATE_CACHE_FLUSH";
+
+export interface PricingTenantParameters {
+  /** Lifetime of the tenant's record snapshots, 10 to 600 seconds; 0 follows the deployment. */
+  cacheTtlSeconds: number;
+  campaignKillSwitchEffect: CampaignKillSwitchEffect;
+  /** 0 when the tenant has no stored parameters. */
+  version: number;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export function getPricingTenantParameters(signal?: AbortSignal): Promise<PricingTenantParameters> {
+  return send<PricingTenantParameters>("/tenant-parameters", {}, signal);
+}
+
+export type PricingTenantParametersInput = Omit<PricingTenantParameters, "updatedBy" | "updatedAt">;
+
+export function setPricingTenantParameters(body: PricingTenantParametersInput, key: string = newKey()): Promise<PricingTenantParameters> {
+  return send<PricingTenantParameters>("/tenant-parameters", { method: "PUT", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) });
 }
 
 // ---- Procedure determination (PRD 5.26.13, reference_procedure): which procedure each sales channel prices with.

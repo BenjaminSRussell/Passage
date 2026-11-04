@@ -32,15 +32,23 @@ type Parameters struct {
 	// SmartRoundingBands is the effective smart rounding table of price journal adjustments
 	// (FR-26.7); the PRD default table when none was stored.
 	SmartRoundingBands []domain.BandSpec
-	Version            int
-	UpdatedBy          string
-	UpdatedAt          *time.Time
+	// PriceSearchMode is the default of searchNext on a new condition record: FIRST_MATCH
+	// (default) or SEARCH_NEXT (BR-26.1 step 5).
+	PriceSearchMode string
+	// SmallOrderThresholds is the SURCHARGE threshold per currency (FR-26.6) as decimal
+	// strings; a currency it does not name keeps the reference threshold, and an empty table
+	// is the reference table.
+	SmallOrderThresholds map[string]string
+	Version              int
+	UpdatedBy            string
+	UpdatedAt            *time.Time
 }
 
 // DefaultParameters are the parameters of a legal entity with nothing stored (version 0).
 func DefaultParameters(legalEntityID string) Parameters {
 	return Parameters{LegalEntityID: legalEntityID, PricingDateBasis: domain.DateBasisShip,
-		TotalDiscountBasis: domain.TotalBasisAfterLineDisc, SmartRoundingBands: domain.DefaultBandSpecs()}
+		TotalDiscountBasis: domain.TotalBasisAfterLineDisc, SmartRoundingBands: domain.DefaultBandSpecs(),
+		PriceSearchMode: domain.SearchModeFirstMatch, SmallOrderThresholds: map[string]string{}}
 }
 
 // GetParameters returns the parameters of a legal entity, or the defaults when none are stored.
@@ -73,7 +81,10 @@ func (s *Postgres) SetParameters(ctx context.Context, in Parameters, version int
 	if len(in.SmartRoundingBands) == 0 {
 		in.SmartRoundingBands = d.SmartRoundingBands
 	}
-	if !domain.ValidDateBasis(in.PricingDateBasis) || !domain.ValidTotalBasis(in.TotalDiscountBasis) {
+	if in.PriceSearchMode == "" {
+		in.PriceSearchMode = d.PriceSearchMode
+	}
+	if !domain.ValidDateBasis(in.PricingDateBasis) || !domain.ValidTotalBasis(in.TotalDiscountBasis) || !domain.ValidSearchMode(in.PriceSearchMode) {
 		return Parameters{}, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, "parameter basis is not allowed")
 	}
 	bands, faults := domain.ParseBands(in.SmartRoundingBands)
@@ -81,13 +92,28 @@ func (s *Postgres) SetParameters(ctx context.Context, in Parameters, version int
 		return Parameters{}, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, "smart rounding bands are invalid")
 	}
 	in.SmartRoundingBands = domain.BandSpecs(bands)
+	thresholds, faults := domain.ParseThresholds(in.SmallOrderThresholds)
+	if faults != nil {
+		return Parameters{}, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, "small order thresholds are invalid")
+	}
+	in.SmallOrderThresholds = domain.CanonicalThresholds(thresholds)
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		bandsJSON, err := json.Marshal(in.SmartRoundingBands)
 		if err != nil {
 			return err
 		}
+		// An empty table is stored as NULL (the reference table); encoding/json sorts the keys,
+		// so equal tables hash alike.
+		var thresholdsStored any
+		thresholdsJSON := []byte("{}")
+		if len(in.SmallOrderThresholds) > 0 {
+			if thresholdsJSON, err = json.Marshal(in.SmallOrderThresholds); err != nil {
+				return err
+			}
+			thresholdsStored = string(thresholdsJSON)
+		}
 		hash := commandHash("parameters-set", in.LegalEntityID, strconv.FormatBool(in.JournalFourEyes), strconv.Itoa(version),
-			in.PricingDateBasis, in.TotalDiscountBasis, string(bandsJSON))
+			in.PricingDateBasis, in.TotalDiscountBasis, string(bandsJSON), in.PriceSearchMode, string(thresholdsJSON))
 		if ok, err := replayJSON(ctx, tx, p.TenantID, idempotencyKey, hash, &out); err != nil || ok {
 			return err
 		}
@@ -100,17 +126,20 @@ func (s *Postgres) SetParameters(ctx context.Context, in Parameters, version int
 		var tag pgconn.CommandTag
 		if version == 0 {
 			tag, err = tx.Exec(ctx, `insert into pricing_parameter (tenant_id, legal_entity_id, journal_four_eyes, pricing_date_basis,
-					total_discount_basis, smart_rounding_bands, updated_by)
-				values ($1, $2, $3, $4, $5, $6::jsonb, $7) on conflict (tenant_id, legal_entity_id) do nothing`,
-				p.TenantID, in.LegalEntityID, in.JournalFourEyes, in.PricingDateBasis, in.TotalDiscountBasis, stored, p.UserID)
+					total_discount_basis, smart_rounding_bands, updated_by, price_search_mode, small_order_thresholds)
+				values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9::jsonb) on conflict (tenant_id, legal_entity_id) do nothing`,
+				p.TenantID, in.LegalEntityID, in.JournalFourEyes, in.PricingDateBasis, in.TotalDiscountBasis, stored, p.UserID,
+				in.PriceSearchMode, thresholdsStored)
 			if err != nil {
 				return err
 			}
 		} else {
 			tag, err = tx.Exec(ctx, `update pricing_parameter set journal_four_eyes = $3, pricing_date_basis = $6, total_discount_basis = $7,
-					smart_rounding_bands = $8::jsonb, version = version + 1, updated_by = $4, updated_at = now()
+					smart_rounding_bands = $8::jsonb, price_search_mode = $9, small_order_thresholds = $10::jsonb,
+					version = version + 1, updated_by = $4, updated_at = now()
 				where tenant_id = $5 and legal_entity_id = $1 and version = $2`,
-				in.LegalEntityID, version, in.JournalFourEyes, p.UserID, p.TenantID, in.PricingDateBasis, in.TotalDiscountBasis, stored)
+				in.LegalEntityID, version, in.JournalFourEyes, p.UserID, p.TenantID, in.PricingDateBasis, in.TotalDiscountBasis, stored,
+				in.PriceSearchMode, thresholdsStored)
 			if err != nil {
 				return err
 			}
@@ -125,7 +154,8 @@ func (s *Postgres) SetParameters(ctx context.Context, in Parameters, version int
 		}
 		if err := enqueueEvent(ctx, tx, "parameters", in.LegalEntityID, pevents.ParametersChanged, pevents.ParametersChangedData{
 			LegalEntityID: out.LegalEntityID, JournalFourEyes: out.JournalFourEyes, PricingDateBasis: out.PricingDateBasis,
-			TotalDiscountBasis: out.TotalDiscountBasis, SmartRoundingBands: bandData(out.SmartRoundingBands), Version: out.Version, UpdatedBy: out.UpdatedBy}); err != nil {
+			TotalDiscountBasis: out.TotalDiscountBasis, SmartRoundingBands: bandData(out.SmartRoundingBands), PriceSearchMode: out.PriceSearchMode,
+			SmallOrderThresholds: out.SmallOrderThresholds, Version: out.Version, UpdatedBy: out.UpdatedBy}); err != nil {
 			return err
 		}
 		return rememberJSON(ctx, tx, p.TenantID, idempotencyKey, hash, out)
@@ -135,10 +165,12 @@ func (s *Postgres) SetParameters(ctx context.Context, in Parameters, version int
 
 func loadParameters(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string) (Parameters, error) {
 	out := DefaultParameters(legalEntityID)
-	var bands []byte
-	err := tx.QueryRow(ctx, `select journal_four_eyes, pricing_date_basis, total_discount_basis, smart_rounding_bands, version, updated_by, updated_at
+	var bands, thresholds []byte
+	err := tx.QueryRow(ctx, `select journal_four_eyes, pricing_date_basis, total_discount_basis, smart_rounding_bands, price_search_mode,
+			small_order_thresholds, version, updated_by, updated_at
 		from pricing_parameter where tenant_id = $1 and legal_entity_id = $2`, tenantID, legalEntityID).
-		Scan(&out.JournalFourEyes, &out.PricingDateBasis, &out.TotalDiscountBasis, &bands, &out.Version, &out.UpdatedBy, &out.UpdatedAt)
+		Scan(&out.JournalFourEyes, &out.PricingDateBasis, &out.TotalDiscountBasis, &bands, &out.PriceSearchMode, &thresholds,
+			&out.Version, &out.UpdatedBy, &out.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DefaultParameters(legalEntityID), nil
 	}
@@ -148,6 +180,11 @@ func loadParameters(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID stri
 	if bands != nil {
 		out.SmartRoundingBands = nil
 		if err := json.Unmarshal(bands, &out.SmartRoundingBands); err != nil {
+			return out, err
+		}
+	}
+	if thresholds != nil {
+		if err := json.Unmarshal(thresholds, &out.SmallOrderThresholds); err != nil {
 			return out, err
 		}
 	}

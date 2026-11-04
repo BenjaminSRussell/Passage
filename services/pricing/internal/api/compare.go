@@ -102,7 +102,7 @@ func (a *API) compare(w http.ResponseWriter, r *http.Request) {
 		}
 		procs[i] = &p
 	}
-	in := domain.Input{Header: header, Lines: lines, SmallOrderThreshold: domain.SmallOrderThreshold(header.Currency),
+	in := domain.Input{Header: header, Lines: lines, SmallOrderThreshold: domain.ThresholdFor(params.SmallOrderThresholds, header.Currency),
 		TotalDiscountBasis: params.TotalDiscountBasis}
 	if req.Records != nil {
 		in.Records = inline

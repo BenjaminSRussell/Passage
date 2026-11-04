@@ -302,7 +302,9 @@ testdata/               fixtures
 | PUT | `/v1/pricing/procedure-assignments` | pricing.admin | body `{legalEntityId, salesChannel, procedureName, version}`; the procedure needs an ACTIVE version (PRC-0063); 412 on a stale version |
 | DELETE | `/v1/pricing/procedure-assignments?legalEntityId=&salesChannel=&version=` | pricing.admin | 204; the channel falls back to the default or the reference order |
 | GET | `/v1/pricing/parameters?legalEntityId=` | pricing.view | stored parameters or the defaults at version 0; 403 AUTH-0003 outside the caller's legal-entity scope |
-| PUT | `/v1/pricing/parameters` | pricing.admin | body `{legalEntityId, journalFourEyes, version}` (all required); 412 conflict_version; `parameters.changed`; `Idempotency-Key` honoured |
+| PUT | `/v1/pricing/parameters` | pricing.admin | body `{legalEntityId, journalFourEyes, pricingDateBasis, totalDiscountBasis, smartRoundingBands, priceSearchMode, smallOrderThresholds, version}` (all required); 412 conflict_version; `parameters.changed`; `Idempotency-Key` honoured |
+| GET | `/v1/pricing/tenant-parameters` | pricing.view | the tenant's `cacheTtlSeconds` and `campaignKillSwitchEffect`, or the defaults at version 0 |
+| PUT | `/v1/pricing/tenant-parameters` | pricing.admin | body `{cacheTtlSeconds (0 or 10-600), campaignKillSwitchEffect, version}` (all required); 412 conflict_version; `tenantparameter.changed`; `Idempotency-Key` honoured |
 | GET | `/healthz`, `/readyz`, `/metrics` | none | `/metrics` on the admin port |
 
 ## Error codes
@@ -366,6 +368,7 @@ Written to `outbox` in the same transaction as the change (see `events/asyncapi.
 - `dev.passage.pricing.procedure.activated.v1` (names the superseded version)
 - `dev.passage.pricing.procedureassignment.changed.v1` (a procedure was assigned to a sales channel, changed or cleared)
 - `dev.passage.pricing.parameters.changed.v1` (a legal entity's parameters after a change, with the version and the user: the audit record)
+- `dev.passage.pricing.tenantparameter.changed.v1` (the tenant's parameters after a change; replicas drop their cached copies on it)
 - `dev.passage.pricing.brokercontract.created.v1` and `.closed.v1`; `dev.passage.pricing.royaltyagreement.created.v1` and `.closed.v1`
 - `dev.passage.pricing.contractaccrual.posted.v1` (one per broker or royalty accrual, credit or minimum royalty shortfall, with `posting_date`; Dr 6210 / Cr 2175 broker, Dr 6220 / Cr 2176 royalty by default)
 - `dev.passage.pricing.contractclaim.created.v1` and `.approved.v1` (broker and royalty claims BC-n / RY-n for w19 AP)
@@ -378,7 +381,10 @@ writes `condition-record` and `rebate-accrual`. Naming is a handoff to the kerne
 12-factor env vars, validated at startup: `PASSAGE_ENV`, `SERVICE_NAME`, `HTTP_ADDR`,
 `ADMIN_ADDR`, `DATABASE_URL`, `PRICING_MAX_LINES` (500), `PRICING_EXPLAIN_MAX_BYTES` (65536).
 `PRICING_CACHE_TTL` (60s; a duration or whole seconds, 10s to 600s, 0 turns the record snapshot
-cache off).
+cache off). Optional replica cache consumer (chart `cacheConsumer`): `KAFKA_BROKERS` starts it
+when the service principal `pricing-cache` holds `pricing.cache.invalidate`; `KAFKA_USERNAME`,
+`KAFKA_PASSWORD` (or `KAFKA_PASSWORD_FILE`) and `KAFKA_TLS_CA_FILE` as for every consumer. Each
+replica reads under the group `pricing-cache-<HOSTNAME>`; `KAFKA_GROUP` is ignored.
 
 ## Run and test
 

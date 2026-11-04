@@ -667,7 +667,10 @@ paths:
         totalDiscountBasis (AFTER_LINE_DISC, or GROSS to apply TOTAL_DISC to the line amounts at
         the unit price before line discounts) and smartRoundingBands (the table of price journal
         smart rounding; the PRD default 0-10 .99, 10-100 .95, 100 and up whole when none is
-        stored). A legal entity outside the caller's scope is 403 AUTH-0003.
+        stored), priceSearchMode (FIRST_MATCH, or SEARCH_NEXT to make searchNext true on a new
+        condition record that leaves it out) and smallOrderThresholds (the SURCHARGE threshold per
+        currency; a currency it does not name keeps the reference threshold, 250 USD and 200 EUR,
+        and 0 switches the surcharge off for that currency). A legal entity outside the caller's scope is 403 AUTH-0003.
       x-passage-duty: pricing.view
       parameters:
         - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
@@ -688,7 +691,7 @@ paths:
         412 conflict_version. The change writes dev.passage.pricing.parameters.changed.v1 to the
         outbox in the same transaction (the audit record: value, version and the user). Every
         value is required, since the PUT replaces them all (a body with only journalFourEyes, as
-        before slice 18, is 422 naming the missing fields). A change applies from the next resolve
+        before slice 18, or without priceSearchMode and smallOrderThresholds before slice 19, is 422 naming the missing fields). A change applies from the next resolve
         whatever its pricing date: the parameters are not effective-dated. A legal entity outside the caller's
         scope is 403 AUTH-0003. A retry with the same Idempotency-Key replays the first response.
       x-passage-duty: pricing.admin
@@ -700,13 +703,15 @@ paths:
           application/json:
             schema:
               type: object
-              required: [legalEntityId, journalFourEyes, pricingDateBasis, totalDiscountBasis, smartRoundingBands, version]
+              required: [legalEntityId, journalFourEyes, pricingDateBasis, totalDiscountBasis, smartRoundingBands, priceSearchMode, smallOrderThresholds, version]
               properties:
                 legalEntityId: {type: string, format: uuid}
                 journalFourEyes: {type: boolean}
                 pricingDateBasis: {type: string, enum: [SHIP_DATE, ORDER_DATE, DELIVERY_DATE]}
                 totalDiscountBasis: {type: string, enum: [AFTER_LINE_DISC, GROSS]}
                 smartRoundingBands: {$ref: "#/components/schemas/SmartRoundingBands"}
+                priceSearchMode: {type: string, enum: [FIRST_MATCH, SEARCH_NEXT]}
+                smallOrderThresholds: {$ref: "#/components/schemas/SmallOrderThresholds"}
                 version: {type: integer, minimum: 0}
       responses:
         "200":
@@ -714,6 +719,60 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/PricingParameters"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/tenant-parameters:
+    get:
+      operationId: getPricingTenantParameters
+      summary: Read the pricing parameters of the tenant.
+      description: >
+        Returns the stored tenant parameters, or the defaults at version 0 when none are stored
+        (PRD 5.26.13, scope tenant): cacheTtlSeconds (10 to 600, the lifetime of this tenant's
+        record snapshots; 0 follows the deployment's PRICING_CACHE_TTL) and
+        campaignKillSwitchEffect (NEXT_RESOLVE by default; IMMEDIATE_CACHE_FLUSH has every
+        replica empty its snapshots when it reads campaign.killed or campaign.restored, FR-26.10).
+        The replica that takes a kill or restore always empties its own snapshots.
+      x-passage-duty: pricing.view
+      responses:
+        "200":
+          description: The tenant parameters.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PricingTenantParameters"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    put:
+      operationId: setPricingTenantParameters
+      summary: Set the pricing parameters of the tenant at the expected version.
+      description: >
+        version is the version read (0 when none was stored); a different stored version is
+        412 conflict_version. The change writes dev.passage.pricing.tenantparameter.changed.v1 to
+        the outbox in the same transaction (the audit record) and empties this replica's
+        snapshots at once; other replicas drop theirs when they read the event, or within the
+        snapshot lifetime. Every value is required, since the PUT replaces them all. A retry
+        with the same Idempotency-Key replays the first response.
+      x-passage-duty: pricing.admin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cacheTtlSeconds, campaignKillSwitchEffect, version]
+              properties:
+                cacheTtlSeconds: {type: integer, description: "0, or 10 to 600."}
+                campaignKillSwitchEffect: {type: string, enum: [NEXT_RESOLVE, IMMEDIATE_CACHE_FLUSH]}
+                version: {type: integer, minimum: 0}
+      responses:
+        "200":
+          description: The stored tenant parameters.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PricingTenantParameters"}
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
@@ -2970,7 +3029,7 @@ components:
         discPct2: {type: string, description: "0-100; must be 0 for SURCHARGE."}
         validFrom: {type: string, format: date}
         validTo: {type: string, format: date}
-        searchNext: {type: boolean}
+        searchNext: {type: boolean, description: "Left out, a new condition record or journal CREATE line takes the legal entity's priceSearchMode (SEARCH_NEXT is true); an inline simulate or compare record takes false."}
         exclusive: {type: boolean}
         campaignId: {type: string, format: uuid, description: "Optional campaign (FR-26.2, FR-26.10). On create the campaign must exist in the record's legal entity (404 PRC-0041, 422). In resolve the record applies only while the campaign is live and targets the customer's group; at one access a campaign record outranks a plain one (BR-26.1 step 4)."}
     SimulateRequest:
@@ -3385,14 +3444,32 @@ components:
           ending: {type: string, description: "Decimal string, 0 to 0.9999."}
     PricingParameters:
       type: object
-      required: [legalEntityId, journalFourEyes, pricingDateBasis, totalDiscountBasis, smartRoundingBands, version]
+      required: [legalEntityId, journalFourEyes, pricingDateBasis, totalDiscountBasis, smartRoundingBands, priceSearchMode, smallOrderThresholds, version]
       properties:
         legalEntityId: {type: string, format: uuid}
         journalFourEyes: {type: boolean}
         pricingDateBasis: {type: string, enum: [SHIP_DATE, ORDER_DATE, DELIVERY_DATE], description: "Default SHIP_DATE."}
         totalDiscountBasis: {type: string, enum: [AFTER_LINE_DISC, GROSS], description: "Default AFTER_LINE_DISC."}
         smartRoundingBands: {$ref: "#/components/schemas/SmartRoundingBands"}
+        priceSearchMode: {type: string, enum: [FIRST_MATCH, SEARCH_NEXT], description: "Default FIRST_MATCH. The default of searchNext on a new condition record that leaves it out."}
+        smallOrderThresholds: {$ref: "#/components/schemas/SmallOrderThresholds"}
         version: {type: integer, minimum: 0, description: "0 when the legal entity has no stored parameters."}
+        updatedBy: {type: string}
+        updatedAt: {type: string, format: date-time}
+    SmallOrderThresholds:
+      type: object
+      description: >
+        The SURCHARGE threshold per currency (FR-26.6): a currency code to a decimal string of at
+        least 0 with at most six places, at most 30 currencies. An empty object is the reference
+        table (250 USD, 200 EUR); 0 switches the surcharge off for that currency.
+      additionalProperties: {type: string}
+    PricingTenantParameters:
+      type: object
+      required: [cacheTtlSeconds, campaignKillSwitchEffect, version]
+      properties:
+        cacheTtlSeconds: {type: integer, description: "10 to 600; 0 follows the deployment's PRICING_CACHE_TTL."}
+        campaignKillSwitchEffect: {type: string, enum: [NEXT_RESOLVE, IMMEDIATE_CACHE_FLUSH], description: "Default NEXT_RESOLVE."}
+        version: {type: integer, minimum: 0, description: "0 when the tenant has no stored parameters."}
         updatedBy: {type: string}
         updatedAt: {type: string, format: date-time}
     Journal:
