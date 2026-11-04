@@ -419,6 +419,23 @@ components:
         balance: { $ref: "#/components/schemas/Decimal" }
         lastShippedAt: { type: [string, "null"], format: date-time }
         lastReturnedAt: { type: [string, "null"], format: date-time }
+    ReturnableMovementKind:
+      type: string
+      enum: [SHIPPED, SHIPMENT_CANCELLED, RETURNED, ADJUSTED]
+    ReturnableMovement:
+      type: object
+      required: [id, customerId, containerType, kind, qty, balanceAfter, reference, reason, actor, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        containerType: { type: string }
+        kind: { $ref: "#/components/schemas/ReturnableMovementKind" }
+        qty: { $ref: "#/components/schemas/Decimal" }
+        balanceAfter: { $ref: "#/components/schemas/Decimal" }
+        reference: { type: [string, "null"], description: "Packing slip id of SHIPPED and SHIPMENT_CANCELLED, or the caller's own reference." }
+        reason: { type: [string, "null"] }
+        actor: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
     WaveShipment:
       type: object
       required: [id, shipmentNumber, orderId, customerId, status, plannedShipDate, lineCount]
@@ -1337,6 +1354,71 @@ paths:
                             chargeDue: { type: boolean }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+  /v1/fulfillment/returnable-packaging/movements:
+    get:
+      operationId: listReturnableMovements
+      summary: Movements behind the returnable packaging balances, newest first (FR-28.16)
+      description: >-
+        Every change of a balance: containers that left on a packing slip (SHIPPED), came back when the slip
+        was cancelled (SHIPMENT_CANCELLED), a return receipt (RETURNED) and a manual correction (ADJUSTED).
+        qty is signed and balanceAfter is the balance the change left. Balances that existed before the
+        history was kept have no earlier rows.
+      x-passage-duty: WarehouseView
+      parameters:
+        - { name: customerId, in: query, schema: { type: string, format: uuid } }
+        - { name: containerType, in: query, schema: { type: string } }
+        - { name: kind, in: query, schema: { $ref: "#/components/schemas/ReturnableMovementKind" } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ReturnableMovement" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/fulfillment/returnable-packaging:adjust:
+    post:
+      operationId: adjustReturnable
+      summary: Correct a returnable packaging balance by hand (FR-28.16)
+      description: >-
+        An opening balance, a count at the customer or a pallet lost in transit. delta is a signed, non-zero
+        whole number of containers; reason is required and the movement keeps who made it. Needs
+        ReturnablePackagingMaintain (WarehouseReceive is its segregation-of-duties conflict, not a second
+        duty). The container type must be a returnable one. A correction that would take the balance below
+        zero is refused.
+      x-passage-duty: ReturnablePackagingMaintain
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customerId, containerType, delta, reason]
+              additionalProperties: false
+              properties:
+                customerId: { type: string, format: uuid }
+                containerType: { type: string }
+                delta: { type: string, pattern: '^-?[1-9][0-9]{0,8}$', description: "Signed whole number of containers, not zero." }
+                reason: { type: string, minLength: 3, maxLength: 200 }
+                reference: { type: string, maxLength: 100, description: "Optional reference such as a count sheet." }
+      responses:
+        "201":
+          description: The movement that was written
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReturnableMovement" }
+        "400": { description: "FUL-0050 validation, FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { description: "The caller lacks ReturnablePackagingMaintain", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0015 the balance would become negative, FUL-0069 the container type is unknown or not returnable, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/returnable-packaging:return:
     post:
       operationId: returnPackaging

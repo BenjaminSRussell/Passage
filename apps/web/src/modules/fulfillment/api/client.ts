@@ -292,6 +292,22 @@ export interface ReturnableBalance {
   lastReturnedAt: string | null;
 }
 
+export type ReturnableMovementKind = "SHIPPED" | "SHIPMENT_CANCELLED" | "RETURNED" | "ADJUSTED";
+
+/** One change of a customer's returnable balance (FR-28.16); qty is signed. */
+export interface ReturnableMovement {
+  id: string;
+  customerId: string;
+  containerType: string;
+  kind: ReturnableMovementKind;
+  qty: string;
+  balanceAfter: string;
+  reference: string | null;
+  reason: string | null;
+  actor: string | null;
+  createdAt: string;
+}
+
 /** One short-picked shipment line of the short picks and backorders report (FR-28.2). */
 export interface BackorderRow {
   shipmentLineId: string;
@@ -849,6 +865,19 @@ export function listReturnableBalances(filter: { customerId?: string } = {}, sig
 /** Records returnable containers received back from a customer; more than the balance is FUL-0015. */
 export function returnPackaging(input: { customerId: string; containerType: string; qty: string }, key: string): Promise<ReturnableBalance> {
   return command<ReturnableBalance>("/returnable-packaging:return", input, key);
+}
+
+/** The movements behind the returnable balances, newest first (FR-28.16). */
+export function listReturnableMovements(filter: { customerId?: string; containerType?: string; kind?: string; limit?: number } = {}, signal?: AbortSignal): Promise<ReturnableMovement[]> {
+  return items<ReturnableMovement>(`/returnable-packaging/movements${query(filter)}`, signal);
+}
+
+/** Corrects a returnable balance by a signed whole number of containers, with a reason (ReturnablePackagingMaintain). */
+export function adjustReturnable(
+  input: { customerId: string; containerType: string; delta: string; reason: string; reference?: string },
+  key: string,
+): Promise<ReturnableMovement> {
+  return command<ReturnableMovement>("/returnable-packaging:adjust", input, key);
 }
 
 /** Delivered-not-invoiced balance (GL 1405) of a legal entity as of a date, with its slips (FR-28.12). */

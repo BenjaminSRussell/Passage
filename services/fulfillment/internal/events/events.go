@@ -35,6 +35,9 @@ var (
 	DropShipCancelled = events.Type(Context, "dropship", "cancelled", 1)
 	DropShipClosed    = events.Type(Context, "dropship", "closed", 1)
 
+	ReturnableReturned = events.Type(Context, "returnablepackaging", "returned", 1)
+	ReturnableAdjusted = events.Type(Context, "returnablepackaging", "adjusted", 1)
+
 	ExceptionRaised   = events.Type(Context, "exception", "raised", 1)
 	ExceptionResolved = events.Type(Context, "exception", "resolved", 1)
 )
@@ -44,7 +47,7 @@ func All() []string {
 	return []string{
 		ShipmentReleased, PickConfirmed, PackingSlipPosted, PackingSlipCancelled,
 		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, ContainerNested, ContainerUnnested, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked, WarehouseSettingChanged, LegalEntitySettingChanged, WarehouseReleaseRuleChanged,
-		DropShipCreated, DropShipConfirmed, DropShipCancelled, DropShipClosed, ExceptionRaised, ExceptionResolved,
+		DropShipCreated, DropShipConfirmed, DropShipCancelled, DropShipClosed, ExceptionRaised, ExceptionResolved, ReturnableReturned, ReturnableAdjusted,
 	}
 }
 
@@ -348,6 +351,21 @@ type PackagingFee struct {
 type ReturnableMove struct {
 	ContainerType string `json:"container_type"`
 	Qty           string `json:"qty"`
+}
+
+// ReturnableMovementData is published when a customer's returnable packaging balance
+// changes outside a packing slip: a return receipt (returnablepackaging.returned, qty
+// negative) or a manual correction (returnablepackaging.adjusted, qty signed, reason
+// required). Wave 30 reads them to credit packaging a customer sent back.
+type ReturnableMovementData struct {
+	MovementID    string `json:"movement_id"`
+	CustomerID    string `json:"customer_id"`
+	ContainerType string `json:"container_type"`
+	Kind          string `json:"kind"`
+	Qty           string `json:"qty"`
+	BalanceAfter  string `json:"balance_after"`
+	Reference     string `json:"reference,omitempty"`
+	Reason        string `json:"reason,omitempty"`
 }
 
 // PackingSlipPostedData carries the shipped lines at cost and the journal

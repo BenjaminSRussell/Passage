@@ -1198,7 +1198,7 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 			if err != nil {
 				return PackingSlip{}, err
 			}
-			if err := moveBalances(ctx, tx, p.TenantID, sh.CustomerID, returnables, 1); err != nil {
+			if err := moveBalances(ctx, tx, p.TenantID, sh.CustomerID, returnables, 1, slip.ID); err != nil {
 				return PackingSlip{}, err
 			}
 			for _, pl := range slip.Lines {
@@ -1319,7 +1319,7 @@ func (s *Postgres) CancelPackingSlip(ctx context.Context, slipID string, idem Id
 			if err != nil {
 				return PackingSlip{}, err
 			}
-			if err := moveBalances(ctx, tx, p.TenantID, sh.CustomerID, returnables, -1); err != nil {
+			if err := moveBalances(ctx, tx, p.TenantID, sh.CustomerID, returnables, -1, orig.ID); err != nil {
 				return PackingSlip{}, err
 			}
 			if _, err := tx.Exec(ctx, `update packing_slip set status = 'CANCELLED' where tenant_id = $1 and id = $2`, p.TenantID, orig.ID); err != nil {

@@ -16,6 +16,7 @@ import { ProductPackagingPage } from "./ProductPackagingPage";
 import { ReleasePage } from "./ReleasePage";
 import { ReleaseRulesPage } from "./ReleaseRulesPage";
 import { ReturnableAgingPage } from "./ReturnableAgingPage";
+import { ReturnableMovementsPage } from "./ReturnableMovementsPage";
 import { ReturnablePackagingPage } from "./ReturnablePackagingPage";
 import { ScanPage } from "./ScanPage";
 import { ShipmentDetailPage } from "./ShipmentDetailPage";
@@ -57,6 +58,7 @@ const fulfillment: PassageModule = {
     { path: "/fulfillment/warehouse-settings", element: createElement(WarehouseSettingsPage), handle: { title: "Warehouse settings" } },
     { path: "/fulfillment/release-rules", element: createElement(ReleaseRulesPage), handle: { title: "Release rules" } },
     { path: "/fulfillment/legal-entity-settings", element: createElement(LegalEntitySettingsPage), handle: { title: "Posting settings" } },
+    { path: "/fulfillment/returnable-movements", element: createElement(ReturnableMovementsPage), handle: { title: "Returnable packaging movements" } },
     { path: "/fulfillment/returnable-aging", element: createElement(ReturnableAgingPage), handle: { title: "Returnable packaging aging" } },
   ],
   nav: [
@@ -77,6 +79,7 @@ const fulfillment: PassageModule = {
     { label: "Packaging materials", to: "/fulfillment/packaging-materials", duty: "WarehouseView" },
     { label: "Packaging fees", to: "/fulfillment/packaging-fees", duty: "PackagingFeeMaintain" },
     { label: "Returnable packaging", to: "/fulfillment/returnable-packaging", duty: "WarehouseView" },
+    { label: "Returnable movements", to: "/fulfillment/returnable-movements", duty: "WarehouseView" },
     { label: "Returnable aging", to: "/fulfillment/returnable-aging", duty: "WarehouseView" },
     { label: "Warehouse settings", to: "/fulfillment/warehouse-settings", duty: "WarehouseView" },
     { label: "Release rules", to: "/fulfillment/release-rules", duty: "WarehouseView" },

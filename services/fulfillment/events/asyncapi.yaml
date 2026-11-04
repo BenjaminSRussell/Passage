@@ -56,6 +56,16 @@ channels:
     messages:
       exceptionResolved:
         $ref: "#/components/messages/ExceptionResolved"
+  returnablePackagingReturned:
+    address: passage.fulfillment.returnablepackaging
+    messages:
+      returnablePackagingReturned:
+        $ref: "#/components/messages/ReturnablePackagingReturned"
+  returnablePackagingAdjusted:
+    address: passage.fulfillment.returnablepackaging
+    messages:
+      returnablePackagingAdjusted:
+        $ref: "#/components/messages/ReturnablePackagingAdjusted"
   warehouseReleaseRuleChanged:
     address: passage.fulfillment.warehousereleaserule
     messages:
@@ -229,6 +239,16 @@ operations:
     channel: { $ref: "#/channels/exceptionResolved" }
     messages:
       - $ref: "#/channels/exceptionResolved/messages/exceptionResolved"
+  publishReturnablePackagingReturned:
+    action: send
+    channel: { $ref: "#/channels/returnablePackagingReturned" }
+    messages:
+      - $ref: "#/channels/returnablePackagingReturned/messages/returnablePackagingReturned"
+  publishReturnablePackagingAdjusted:
+    action: send
+    channel: { $ref: "#/channels/returnablePackagingAdjusted" }
+    messages:
+      - $ref: "#/channels/returnablePackagingAdjusted/messages/returnablePackagingAdjusted"
   publishWarehouseReleaseRuleChanged:
     action: send
     channel: { $ref: "#/channels/warehouseReleaseRuleChanged" }
@@ -546,6 +566,40 @@ components:
           order_line_id: { type: string, format: uuid }
           note: { type: string }
           resolved_by: { type: string }
+    ReturnablePackagingReturned:
+      name: dev.passage.fulfillment.returnablepackaging.returned.v1
+      title: Returnable packaging returned
+      summary: A customer's return receipt lowered a returnable packaging balance (BR-28.13).
+      contentType: application/json
+      payload:
+        type: object
+        required: [movement_id, customer_id, container_type, kind, qty, balance_after]
+        properties:
+          movement_id: { type: string, format: uuid }
+          customer_id: { type: string, format: uuid }
+          container_type: { type: string }
+          kind: { type: string, enum: [RETURNED] }
+          qty: { type: string, description: "Signed whole number of containers; negative lowers the balance." }
+          balance_after: { type: string }
+          reference: { type: string, description: "The caller's own reference; omitted when none." }
+          reason: { type: string, description: "Why the balance was corrected; omitted on a return receipt." }
+    ReturnablePackagingAdjusted:
+      name: dev.passage.fulfillment.returnablepackaging.adjusted.v1
+      title: Returnable packaging balance adjusted
+      summary: A logistics admin corrected a returnable packaging balance by hand, with a reason (FR-28.16).
+      contentType: application/json
+      payload:
+        type: object
+        required: [movement_id, customer_id, container_type, kind, qty, balance_after]
+        properties:
+          movement_id: { type: string, format: uuid }
+          customer_id: { type: string, format: uuid }
+          container_type: { type: string }
+          kind: { type: string, enum: [ADJUSTED] }
+          qty: { type: string, description: "Signed whole number of containers; negative lowers the balance." }
+          balance_after: { type: string }
+          reference: { type: string, description: "The caller's own reference; omitted when none." }
+          reason: { type: string, description: "Why the balance was corrected; omitted on a return receipt." }
     WarehouseReleaseRuleChanged:
       name: dev.passage.fulfillment.warehousereleaserule.changed.v1
       title: Warehouse release rule changed
