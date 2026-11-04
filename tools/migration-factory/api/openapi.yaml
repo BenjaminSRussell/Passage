@@ -876,7 +876,8 @@ paths:
       summary: Start a runbook step so the runbook times it against its planned duration (FR-49.6)
       description: |
         Records the start time and the user. A step starts once (MIG-0001 on a second start or a
-        done step) and obeys the go/no-go sequencing of completion (CUT-1601). A rolled-back
+        done step) and obeys the go/no-go sequencing of completion (CUT-1601) and, in a per-entity
+        runbook, the per-entity prerequisites (CUT-1609, see expandByEntity). A rolled-back
         plan's steps cannot be started (MIG-0004). When `version` is given and the plan has moved
         on, the request is rejected with MIG-0006. No event is written; completion writes
         dev.passage.cutover.step.completed.v1.
@@ -929,7 +930,8 @@ paths:
       description: |
         Writes dev.passage.cutover.step.completed.v1. Without `actualDurationMin` the duration
         is measured in whole minutes from the step's start; a step that was never started needs
-        it (MIG-0001). When `version` is given and the plan has moved on, the request is
+        it (MIG-0001). In a per-entity runbook a step waits for its prerequisites (CUT-1609, see
+        expandByEntity). When `version` is given and the plan has moved on, the request is
         rejected with MIG-0006. A rolled-back plan's steps cannot be completed (MIG-0004).
       x-passage-duty: CutoverStepOwner
       parameters:
@@ -2427,6 +2429,19 @@ components:
             recorded duration) become this plan's planned durations (FR-49.6). Entries in
             `rehearsalDurationsMin` override them. 422 when that plan has no measured duration, 404 when it
             does not exist.
+        expandByEntity:
+          type: boolean
+          default: false
+          description: |
+            Generate the per-entity runbook (D5a, the `fx-cutover-plan` shape). The plan-wide pack load
+            steps are replaced by, for each legal entity, a freeze, an extract, a load and a reconcile step
+            per pack, an entity reconciliation, a controller sign-off and a hypercare check: 15 plan-wide
+            steps, plus 2 per entity and pack, plus 5 per entity (3 entities and 9 packs give 84). At most
+            50 entities (MIG-0001 above). None of the per-entity steps is a go/no-go step, but each waits
+            for its own entity's earlier steps (CUT-1609 on start and complete): the extract for the freeze,
+            each pack load for the freeze and the extract, a pack reconcile for that load, the entity
+            reconciliation for every pack reconcile, the sign-off for the entity reconciliation and the
+            hypercare check for the sign-off. The plan-wide go/no-go steps wait for every entity's sign-off.
     Step:
       type: object
       required: [seq, offsetMin, name, owner, plannedDurationMin, actualDurationMin, status, goNoGo]
@@ -2451,6 +2466,9 @@ components:
           type: boolean
         pack:
           type: string
+        entity:
+          type: string
+          description: The legal entity a per-entity step covers (a plan generated with expandByEntity); absent for plan-wide steps.
         completedBy:
           type: string
         completedAt:
