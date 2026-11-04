@@ -105,6 +105,8 @@ type operationRequest struct {
 	SecondaryResourceIDs []string          `json:"secondaryResourceIds"`
 	SetupGroup           *string           `json:"setupGroup"`
 	SetupMinutes         *int              `json:"setupMinutes"`
+	QueueBeforeMinutes   *int              `json:"queueBeforeMinutes"`
+	QueueAfterMinutes    *int              `json:"queueAfterMinutes"`
 	Attributes           map[string]string `json:"attributes"`
 	NetworkID            *string           `json:"networkId"`
 }
@@ -476,6 +478,19 @@ func (a *API) createOperation(w http.ResponseWriter, r *http.Request) {
 			fields["setupMinutes"] = fmt.Sprintf("must be 0 to %d", maxWeekMinutes)
 		}
 	}
+	queueBefore, queueAfter := 0, 0
+	if req.QueueBeforeMinutes != nil {
+		queueBefore = *req.QueueBeforeMinutes
+		if queueBefore < 0 || queueBefore > maxWeekMinutes {
+			fields["queueBeforeMinutes"] = fmt.Sprintf("must be 0 to %d", maxWeekMinutes)
+		}
+	}
+	if req.QueueAfterMinutes != nil {
+		queueAfter = *req.QueueAfterMinutes
+		if queueAfter < 0 || queueAfter > maxWeekMinutes {
+			fields["queueAfterMinutes"] = fmt.Sprintf("must be 0 to %d", maxWeekMinutes)
+		}
+	}
 	if msg := validAttributes(req.Attributes); msg != "" {
 		fields["attributes"] = msg
 	}
@@ -492,7 +507,7 @@ func (a *API) createOperation(w http.ResponseWriter, r *http.Request) {
 	}
 	op, created, err := a.store.CreateOperation(r.Context(), store.Operation{OrderID: req.OrderID, OperNumber: req.OperNumber,
 		Minutes: req.Minutes, DueAt: req.DueAt, ReadyAt: req.ReadyAt, Priority: priority, ResourceIDs: req.ResourceIDs,
-		SecondaryResourceIDs: req.SecondaryResourceIDs, SetupGroup: group, SetupMinutes: setupMinutes, Attributes: req.Attributes, NetworkID: req.NetworkID}, idem)
+		SecondaryResourceIDs: req.SecondaryResourceIDs, SetupGroup: group, SetupMinutes: setupMinutes, QueueBeforeMinutes: queueBefore, QueueAfterMinutes: queueAfter, Attributes: req.Attributes, NetworkID: req.NetworkID}, idem)
 	if err != nil {
 		slog.Error("create operation failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)

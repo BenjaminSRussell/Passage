@@ -64,6 +64,8 @@ const op: Operation = {
   secondaryResourceIds: [TOOL],
   setupGroup: null,
   setupMinutes: 0,
+  queueBeforeMinutes: 0,
+  queueAfterMinutes: 0,
   attributes: {},
   networkId: null,
   status: "scheduled",
@@ -82,6 +84,7 @@ describe("validateOperationEdit", () => {
     expect(validateOperationEdit({ ...same, minutes: "90" }, op, idsByCode).patch).toEqual({ minutes: 90 });
     expect(validateOperationEdit({ ...same, priority: "5" }, op, idsByCode).patch).toEqual({ priority: 5 });
     expect(validateOperationEdit({ ...same, dueAt: "2026-11-06T08:30" }, op, idsByCode).patch).toEqual({ dueAt: "2026-11-06T08:30:00Z" });
+    expect(validateOperationEdit({ ...same, queueBeforeMinutes: "30", queueAfterMinutes: "45" }, op, idsByCode).patch).toEqual({ queueBeforeMinutes: 30, queueAfterMinutes: 45 });
     expect(validateOperationEdit({ ...same, candidates: "fill-1, MIX-1" }, op, idsByCode).patch).toEqual({ resourceIds: [FILL, MIX] });
   });
   it("mirrors the service rules", () => {
@@ -91,6 +94,8 @@ describe("validateOperationEdit", () => {
     }
     expect(validateOperationEdit({ ...same, priority: "1001" }, op, idsByCode).errors.priority).toBeTruthy();
     expect(validateOperationEdit({ ...same, setupMinutes: "-1" }, op, idsByCode).errors.setupMinutes).toBeTruthy();
+    expect(validateOperationEdit({ ...same, queueBeforeMinutes: "-1" }, op, idsByCode).errors.queueBeforeMinutes).toBeTruthy();
+    expect(validateOperationEdit({ ...same, queueAfterMinutes: "10081" }, op, idsByCode).errors.queueAfterMinutes).toBeTruthy();
     expect(validateOperationEdit({ ...same, candidates: "" }, op, idsByCode).errors.candidates).toBeTruthy();
     expect(validateOperationEdit({ ...same, candidates: "NOPE" }, op, idsByCode).errors.candidates).toMatch(/No resource/);
     expect(validateOperationEdit({ ...same, candidates: "MIX-1, MIX-1" }, op, idsByCode).errors.candidates).toMatch(/twice/);

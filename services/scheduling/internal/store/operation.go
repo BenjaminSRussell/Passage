@@ -32,6 +32,10 @@ type OperationPatch struct {
 	ReadyAt      *time.Time
 	Priority     *int
 	SetupMinutes *int
+	// QueueBeforeMinutes and QueueAfterMinutes change the waits around the
+	// operation (FR-23.3).
+	QueueBeforeMinutes *int
+	QueueAfterMinutes  *int
 	// ResourceIDs replaces the candidate resources, in priority order.
 	ResourceIDs []string
 }
@@ -39,7 +43,7 @@ type OperationPatch struct {
 // reschedules reports whether the change makes the operation's placement stale:
 // everything but the priority, which only orders the next run.
 func (p OperationPatch) reschedules() bool {
-	return p.Minutes != nil || p.DueAt != nil || p.ReadyAt != nil || p.SetupMinutes != nil || p.ResourceIDs != nil
+	return p.Minutes != nil || p.DueAt != nil || p.ReadyAt != nil || p.SetupMinutes != nil || p.QueueBeforeMinutes != nil || p.QueueAfterMinutes != nil || p.ResourceIDs != nil
 }
 
 // OperationUpdate is the changed operation. JobsRemoved is true when its
@@ -177,6 +181,12 @@ func (s *Postgres) UpdateOperation(ctx context.Context, id string, version int, 
 		if patch.SetupMinutes != nil {
 			cur.SetupMinutes = *patch.SetupMinutes
 		}
+		if patch.QueueBeforeMinutes != nil {
+			cur.QueueBeforeMinutes = *patch.QueueBeforeMinutes
+		}
+		if patch.QueueAfterMinutes != nil {
+			cur.QueueAfterMinutes = *patch.QueueAfterMinutes
+		}
 		if patch.ResourceIDs != nil {
 			var known int
 			if err := tx.QueryRow(ctx, `select count(*) from scheduling_resource where id = any($1::uuid[])`, patch.ResourceIDs).Scan(&known); err != nil {
@@ -199,14 +209,15 @@ func (s *Postgres) UpdateOperation(ctx context.Context, id string, version int, 
 			}
 		}
 		upd, err := scanOperation(tx.QueryRow(ctx, `update scheduling_operation set minutes = $2, due_at = $3, ready_at = $4, priority = $5, setup_minutes = $6,
-				candidate_resource_ids = $7::uuid[], version = version + 1, updated_at = now() where id = $1::uuid returning `+opCols,
-			id, cur.Minutes, cur.DueAt, cur.ReadyAt, cur.Priority, cur.SetupMinutes, cur.ResourceIDs), nil)
+				queue_before_minutes = $8, queue_after_minutes = $9, candidate_resource_ids = $7::uuid[], version = version + 1, updated_at = now() where id = $1::uuid returning `+opCols,
+			id, cur.Minutes, cur.DueAt, cur.ReadyAt, cur.Priority, cur.SetupMinutes, cur.ResourceIDs, cur.QueueBeforeMinutes, cur.QueueAfterMinutes), nil)
 		if err != nil {
 			return err
 		}
 		out = OperationUpdate{Operation: upd, JobsRemoved: removed}
 		data := schedevents.OperationUpdatedData{OperationID: upd.ID, OrderID: upd.OrderID, OperNumber: upd.OperNumber, Minutes: upd.Minutes,
-			Priority: upd.Priority, ResourceIDs: upd.ResourceIDs, Version: upd.Version, JobsRemoved: removed}
+			Priority: upd.Priority, ResourceIDs: upd.ResourceIDs, Version: upd.Version, JobsRemoved: removed,
+			QueueBeforeMinutes: upd.QueueBeforeMinutes, QueueAfterMinutes: upd.QueueAfterMinutes}
 		if upd.DueAt != nil {
 			d := rfc(*upd.DueAt)
 			data.DueAt = &d

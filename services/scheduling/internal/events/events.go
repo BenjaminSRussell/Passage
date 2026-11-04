@@ -247,6 +247,10 @@ type OperationUpdatedData struct {
 	ResourceIDs []string `json:"resourceIds"`
 	Version     int      `json:"version"`
 	JobsRemoved bool     `json:"jobsRemoved"`
+	// QueueBeforeMinutes and QueueAfterMinutes are the elapsed waits around
+	// the operation (FR-23.3).
+	QueueBeforeMinutes int `json:"queueBeforeMinutes"`
+	QueueAfterMinutes  int `json:"queueAfterMinutes"`
 }
 
 // OperationDeletedData announces a removed operation and whether its jobs left

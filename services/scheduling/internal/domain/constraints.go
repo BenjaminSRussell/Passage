@@ -376,6 +376,11 @@ func (e *engine) attempt(chain []Operation, fixed []Placement, start time.Time, 
 				prev, frozen = p, false
 			}
 		}
+		if prev != nil {
+			// The wait between the operation right before (placed now or
+			// fixed) and this one (FR-23.3).
+			ready = latest(ready, prev.End.Add(queueWait(prev, op)))
+		}
 		var net *ResourceNetwork
 		if op.Network != "" && prev != nil {
 			n, ok := e.nets[op.Network]
@@ -411,6 +416,11 @@ func (e *engine) placeOp(op Operation, ready time.Time, prev *Placement, frozen 
 	var overEdge NetworkEdge
 	shortest := time.Duration(-1)
 	var secondary *Conflict
+	var queue time.Duration
+	queueOver := false
+	if prev != nil {
+		queue = queueWait(prev, op)
+	}
 	for _, rid := range op.Candidates {
 		c, ok := e.caps[rid]
 		if !ok {
@@ -434,7 +444,11 @@ func (e *engine) placeOp(op Operation, ready time.Time, prev *Placement, frozen 
 		}
 		cand := newPlacement(op, rid, s.segs).withSlot(s)
 		if net != nil && !edge.WaitOK(prev.End, cand.Start) {
-			if late := cand.Start.Sub(prev.End) - minutes(*edge.MaxWaitMinutes); shortest < 0 || late < shortest {
+			// A queue longer than the edge's maximum wait breaks it however
+			// late the predecessor runs, so it asks for no delay (FR-23.3).
+			if queue > minutes(*edge.MaxWaitMinutes) {
+				queueOver = true
+			} else if late := cand.Start.Sub(prev.End) - minutes(*edge.MaxWaitMinutes); shortest < 0 || late < shortest {
 				shortest = late
 			}
 			if !overFound || betterCandidate(cand, rid, over, over.ResourceID, e.caps, e.booked) {
@@ -458,6 +472,10 @@ func (e *engine) placeOp(op Operation, ready time.Time, prev *Placement, frozen 
 			ws = append(ws, Warning{Code: CodeNetworkWait, OperationID: op.ID,
 				Detail: fmt.Sprintf("wait %d min exceeds network %s maximum %d min; the predecessor is frozen, move it later",
 					minutesBetween(prev.End, over.Start), net.Code, *overEdge.MaxWaitMinutes)})
+		case overFound && shortest < 0 && queueOver:
+			return Placement{}, nil, &stop{network: true,
+				reason: fmt.Sprintf("%s %s: queue time %d min between the operations is longer than the maximum wait of network %s for operation %s",
+					CodeNetworkInfeasible, FlagNetworkInfeasible, int(queue/time.Minute), net.Code, op.ID)}
 		case overFound:
 			step := shortest
 			if step < networkStep {

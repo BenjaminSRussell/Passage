@@ -21,6 +21,8 @@ export interface Values {
   secondaryResourceIds: string[];
   setupGroup: string;
   setupMinutes: string;
+  queueBeforeMinutes: string;
+  queueAfterMinutes: string;
   attributes: string;
   networkId: string;
 }
@@ -38,6 +40,8 @@ export const emptyOperation: Values = {
   secondaryResourceIds: [],
   setupGroup: "",
   setupMinutes: "",
+  queueBeforeMinutes: "",
+  queueAfterMinutes: "",
   attributes: "",
   networkId: "",
 };
@@ -88,6 +92,10 @@ export function validateOperation(values: Values): { errors: Errors; input?: New
   if (setupGroup !== "" && !CODE.test(setupGroup)) errors.setupGroup = "Use 1 to 32 capital letters, digits, _ or -.";
   const setupMinutes = optionalWhole(values.setupMinutes, 0, WEEK_MINUTES);
   if (setupMinutes === null) errors.setupMinutes = `Enter 0 to ${WEEK_MINUTES.toLocaleString("en-US")} minutes.`;
+  const queueBefore = optionalWhole(values.queueBeforeMinutes, 0, WEEK_MINUTES);
+  if (queueBefore === null) errors.queueBeforeMinutes = `Enter 0 to ${WEEK_MINUTES.toLocaleString("en-US")} minutes.`;
+  const queueAfter = optionalWhole(values.queueAfterMinutes, 0, WEEK_MINUTES);
+  if (queueAfter === null) errors.queueAfterMinutes = `Enter 0 to ${WEEK_MINUTES.toLocaleString("en-US")} minutes.`;
   const { attributes, error: attributesError } = parseAttributes(values.attributes);
   if (attributesError) errors.attributes = attributesError;
   if (Object.keys(errors).length > 0 || operNumber === null || minutes === null) return { errors };
@@ -98,6 +106,8 @@ export function validateOperation(values: Values): { errors: Errors; input?: New
   if (values.secondaryResourceIds.length > 0) input.secondaryResourceIds = values.secondaryResourceIds;
   if (setupGroup !== "") input.setupGroup = setupGroup;
   if (setupMinutes !== undefined && setupMinutes !== null) input.setupMinutes = setupMinutes;
+  if (queueBefore !== undefined && queueBefore !== null) input.queueBeforeMinutes = queueBefore;
+  if (queueAfter !== undefined && queueAfter !== null) input.queueAfterMinutes = queueAfter;
   if (Object.keys(attributes).length > 0) input.attributes = attributes;
   if (values.networkId !== "") input.networkId = values.networkId;
   return { errors, input };
@@ -112,6 +122,8 @@ const fieldNames: Record<string, keyof Values> = {
   secondaryResourceIds: "secondaryResourceIds",
   setupGroup: "setupGroup",
   setupMinutes: "setupMinutes",
+  queueBeforeMinutes: "queueBeforeMinutes",
+  queueAfterMinutes: "queueAfterMinutes",
   attributes: "attributes",
   networkId: "networkId",
 };
@@ -182,7 +194,7 @@ export function NewOperationPage() {
     }
   }
 
-  const field = (name: "orderId" | "operNumber" | "minutes" | "priority" | "setupGroup" | "setupMinutes", props: { inputMode?: "numeric" } = {}) =>
+  const field = (name: "orderId" | "operNumber" | "minutes" | "priority" | "setupGroup" | "setupMinutes" | "queueBeforeMinutes" | "queueAfterMinutes", props: { inputMode?: "numeric" } = {}) =>
     function Control(control: { id: string }) {
       return <Input {...control} {...props} value={values[name]} onChange={(event) => update({ [name]: event.target.value })} invalid={Boolean(errors[name])} />;
     };
@@ -290,6 +302,12 @@ export function NewOperationPage() {
             </FormField>
             <FormField id="operation-setup-minutes" label="Route setup (minutes)" optional hint="Used when the matrix has no entry for a changeover." error={errors.setupMinutes}>
               {field("setupMinutes", { inputMode: "numeric" })}
+            </FormField>
+            <FormField id="operation-queue-before" label="Queue before (minutes)" optional hint="Elapsed wait in front of the operation; no resource is booked." error={errors.queueBeforeMinutes}>
+              {field("queueBeforeMinutes", { inputMode: "numeric" })}
+            </FormField>
+            <FormField id="operation-queue-after" label="Queue after (minutes)" optional hint="Elapsed wait behind the operation, before the next one may start." error={errors.queueAfterMinutes}>
+              {field("queueAfterMinutes", { inputMode: "numeric" })}
             </FormField>
             <FormField
               id="operation-network"

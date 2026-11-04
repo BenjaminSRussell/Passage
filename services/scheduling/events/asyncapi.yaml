@@ -189,7 +189,7 @@ components:
     OperationUpdated:
       title: Operation updated
       summary: >-
-        An operation's duration, dates, priority, setup minutes or candidate resources changed. When jobsRemoved is true
+        An operation's duration, dates, priority, setup minutes, queue times or candidate resources changed. When jobsRemoved is true
         its non-firmed jobs left the schedule and the operation is open again; consumers holding its dates from
         job.scheduled drop them until the next run places it.
       name: dev.passage.scheduling.operation.updated.v1
@@ -514,7 +514,7 @@ components:
         version: { type: integer }
     OperationUpdatedData:
       type: object
-      required: [operationId, orderId, operNumber, minutes, dueAt, readyAt, priority, resourceIds, version, jobsRemoved]
+      required: [operationId, orderId, operNumber, minutes, dueAt, readyAt, priority, resourceIds, version, jobsRemoved, queueBeforeMinutes, queueAfterMinutes]
       properties:
         operationId: { type: string, format: uuid }
         orderId: { type: string, format: uuid }
@@ -529,6 +529,8 @@ components:
           items: { type: string, format: uuid }
         version: { type: integer }
         jobsRemoved: { type: boolean }
+        queueBeforeMinutes: { type: integer, minimum: 0, maximum: 10080, description: Elapsed wait in front of the operation in minutes (FR-23.3); no resource is booked. }
+        queueAfterMinutes: { type: integer, minimum: 0, maximum: 10080, description: Elapsed wait behind the operation in minutes (FR-23.3); no resource is booked. }
     OperationDeletedData:
       type: object
       required: [operationId, orderId, operNumber, jobsRemoved]

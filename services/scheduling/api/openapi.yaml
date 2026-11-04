@@ -384,10 +384,10 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
     patch:
       operationId: updateOperation
-      summary: Change an operation's duration, dates, priority, setup minutes or candidate resources (FR-23.4)
+      summary: Change an operation's duration, dates, priority, setup minutes, queue times or candidate resources (FR-23.4)
       description: >
-        Send at least one of minutes, dueAt, readyAt, priority, setupMinutes or
-        resourceIds (the candidates, replacing the list, in priority order and
+        Send at least one of minutes, dueAt, readyAt, priority, setupMinutes,
+        queueBeforeMinutes, queueAfterMinutes or resourceIds (the candidates, replacing the list, in priority order and
         none of them a secondary resource of the operation: 422 SCHED-0139).
         The order, operation number, secondary resources, setup group, network
         and attributes are fixed when the operation is created. A change to
@@ -1769,6 +1769,8 @@ components:
             are refused with SCHED-0107 (422).
         setupGroup: { type: string, minLength: 1, maxLength: 32, description: "Setup group that drives changeovers against the resource's setup matrix (FR-23.15)." }
         setupMinutes: { type: integer, minimum: 0, maximum: 10080, default: 0, description: 'Route setup time, used when the matrix has no entry for a pair (SCHED-0012).' }
+        queueBeforeMinutes: { type: integer, minimum: 0, maximum: 10080, default: 0, description: "Elapsed wait in front of the operation (FR-23.3). No resource is booked while it waits; the next operation of the order starts no earlier than this one's end plus its queue after plus the next one's queue before." }
+        queueAfterMinutes: { type: integer, minimum: 0, maximum: 10080, default: 0, description: "Elapsed wait behind the operation (FR-23.3). No resource is booked while it waits; the next operation of the order starts no earlier than this one's end plus its queue after plus the next one's queue before." }
         attributes:
           type: object
           maxProperties: 20
@@ -1793,6 +1795,8 @@ components:
           items: { type: string, format: uuid }
         setupGroup: { type: [string, 'null'] }
         setupMinutes: { type: integer }
+        queueBeforeMinutes: { type: integer, description: Elapsed wait in front of the operation, in minutes. }
+        queueAfterMinutes: { type: integer, description: Elapsed wait behind the operation, in minutes. }
         attributes:
           type: object
           additionalProperties: { type: string }
@@ -1810,6 +1814,8 @@ components:
         readyAt: { type: string, format: date-time }
         priority: { type: integer, minimum: 0, maximum: 1000 }
         setupMinutes: { type: integer, minimum: 0, maximum: 10080 }
+        queueBeforeMinutes: { type: integer, minimum: 0, maximum: 10080, description: Elapsed wait in front of the operation, in minutes. }
+        queueAfterMinutes: { type: integer, minimum: 0, maximum: 10080, description: Elapsed wait behind the operation, in minutes. }
         resourceIds:
           type: array
           minItems: 1

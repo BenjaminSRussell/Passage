@@ -69,6 +69,24 @@ type Operation struct {
 	// Secondaries are resources booked for the same segments as the primary
 	// (tools, crews, BR-23.4). They are never candidates of the operation.
 	Secondaries []string
+	// QueueBefore and QueueAfter are the wait in front of and behind the
+	// operation, in elapsed minutes (FR-23.3). No resource is booked while it
+	// waits; the next operation of the order starts no earlier than this one's
+	// end plus its QueueAfter plus the next one's QueueBefore.
+	QueueBefore int
+	QueueAfter  int
+}
+
+// queueGap is the wait between the end of prev and the start of next in the
+// same order: prev's queue after plus next's queue before.
+func queueGap(prev, next Operation) time.Duration {
+	return minutes(prev.QueueAfter + next.QueueBefore)
+}
+
+// queueWait is queueGap behind a placed predecessor, whose queue after rides
+// on the placement.
+func queueWait(prev *Placement, next Operation) time.Duration {
+	return minutes(prev.QueueAfter + next.QueueBefore)
 }
 
 // Busy is booked time on a resource held by one job. Group and Setup are the
@@ -116,6 +134,10 @@ type Placement struct {
 	CleaningSetID     string
 	// Secondaries are the resources booked with the primary (BR-23.4).
 	Secondaries []string
+	// QueueAfter is the operation's elapsed wait behind the job in minutes
+	// (FR-23.3), carried so the next operation of the order keeps it also
+	// when this job is fixed (firmed or outside the run's selection).
+	QueueAfter int
 }
 
 // withSlot copies the changeover a slot was priced with onto the placement.
@@ -328,7 +350,7 @@ func startCandidates(busy []Busy, ready time.Time) []time.Time {
 
 func newPlacement(op Operation, resourceID string, segs []Segment) Placement {
 	pl := Placement{OperationID: op.ID, OrderID: op.OrderID, OperNumber: op.OperNumber, ResourceID: resourceID,
-		Segments: segs, Start: segs[0].Start, End: segs[len(segs)-1].End, Secondaries: op.Secondaries}
+		Segments: segs, Start: segs[0].Start, End: segs[len(segs)-1].End, Secondaries: op.Secondaries, QueueAfter: op.QueueAfter}
 	if !op.DueAt.IsZero() && pl.End.After(op.DueAt) {
 		pl.LateMinutes = minutesBetween(op.DueAt, pl.End)
 	}
@@ -570,10 +592,22 @@ func PlanMove(in MoveInput) MovePlan {
 		return MovePlan{Conflict: &Conflict{Code: CodeNotCandidate, Detail: "resource is not a candidate for the operation"}}
 	}
 	at := in.At
-	for _, op := range in.Order {
+	var before *Operation
+	for i, op := range in.Order {
 		if op.OperNumber < mv.OperNumber {
+			if before == nil || op.OperNumber > before.OperNumber {
+				before = &in.Order[i]
+			}
 			if pl, ok := in.Current[op.ID]; ok && pl.End.After(at) {
 				at = pl.End
+			}
+		}
+	}
+	if before != nil {
+		// The wait between the operation before and the moved one (FR-23.3).
+		if pl, ok := in.Current[before.ID]; ok {
+			if t := pl.End.Add(queueGap(*before, *mv)); t.After(at) {
+				at = t
 			}
 		}
 	}
@@ -656,13 +690,18 @@ func PlanMove(in MoveInput) MovePlan {
 	// number) on their resources so the first starts no earlier than pred and
 	// each later one no earlier than the one before it ends. Operations that
 	// already start late enough and keep their changeover stay as they are.
-	push := func(chain []Operation, pred time.Time, firmedDetail string) ([]Placement, *Conflict) {
+	push := func(chain []Operation, pred time.Time, predOp *Operation, firmedDetail string) ([]Placement, *Conflict) {
 		var out []Placement
-		for _, op := range chain {
+		for i := range chain {
+			op := chain[i]
 			cur, ok := in.Current[op.ID]
 			if !ok {
 				continue
 			}
+			if predOp != nil {
+				pred = pred.Add(queueGap(*predOp, op))
+			}
+			predOp = &chain[i]
 			ready := cur.Start
 			if pred.After(ready) {
 				ready = pred
@@ -699,7 +738,7 @@ func PlanMove(in MoveInput) MovePlan {
 	}
 
 	successors := byOperNumber(slices.DeleteFunc(slices.Clone(in.Order), func(op Operation) bool { return op.OperNumber <= mv.OperNumber }))
-	pushed, conf := push(successors, moved.End, "move would push a firmed successor; unfirm it first")
+	pushed, conf := push(successors, moved.End, mv, "move would push a firmed successor; unfirm it first")
 	if conf != nil {
 		return MovePlan{Conflict: conf}
 	}
@@ -730,7 +769,7 @@ func PlanMove(in MoveInput) MovePlan {
 					ready = e
 				}
 			}
-			dep, conf := push(chain, ready, "a firmed job would have to move; unfirm it first")
+			dep, conf := push(chain, ready, nil, "a firmed job would have to move; unfirm it first")
 			if conf != nil {
 				conf.Detail = fmt.Sprintf("pegged order %s: %s", oid, conf.Detail)
 				return MovePlan{Conflict: conf}

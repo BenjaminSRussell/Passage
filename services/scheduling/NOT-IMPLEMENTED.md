@@ -714,13 +714,50 @@ naming the block.
 |---|---|---|
 | `policies/authz/data.json`: new flag duty `"scheduling.constraints.override": {"flag": true, "permissions": []}` (after `scheduling.capacity.write`), and `"scheduling.constraints.override"` added to `flag_duties` in `policies/authz/authz_test.rego` `test_flag_duties_grant_no_routes`; the duty for #313 | handoff - main session (authz seed) and #313 | A flag duty, like `production.order.bom-after-release`: the handler checks it with `HasDuty` (`api.DutyOverrideConstraints`) on top of the `:move` route row already seeded under `scheduling.schedule.write`. It must grant no route: a route row would let a holder of only the override duty move jobs. Until it is seeded the override answers 403 `SCHED-0141` and every other move works. PRD 4.23.17 flags it for segregation of duties with *Maintain capacity* (`scheduling.capacity.write`); there is no SoD mechanism in the seed, so that is a role-assignment rule for identity. The web move form does not read duties, so the override button is offered after a capacity refusal; gating it needs the principal's duties in the web shell. |
 
+## Slice 27: queue times between operations (PRD 4.23.3, FR-23.3)
+
+An operation carries `queueBeforeMinutes` and `queueAfterMinutes` (0 to 10,080,
+default 0), set on `POST /operations` and `PATCH /operations/{id}` (a change
+takes the non-firmed jobs off the schedule like a change of minutes). They are
+elapsed minutes of real time in which no resource is booked (across a DST
+change the local clock shows an hour more or less): the next operation of an
+order starts no earlier than the previous one's end plus the previous one's
+queue after plus its own queue before, and the wait runs through closed time.
+Runs (forward and backward: the backward search leaves room for the waits, and
+a latest start inside the hour after the run start, or a queue that makes the
+order miss its due date, falls back to forward as BR-23.2 says), `:schedule`
+and Gantt moves all apply it. The predecessor's queue after holds also when
+that predecessor keeps its slot (firmed, or outside a selection run). A moved
+operation snaps to the wait after its predecessor (an override does not
+override the queue: it is not a capacity rule), pushed successors keep the
+wait between them, and a firmed successor the wait would push refuses the move
+(SCHED-0008). Pegged dependents wait for their parent
+order's end only (no queue before on their first operation). A network step
+counts the queue as part of its wait, so a maximum wait smaller than the queue
+makes the step infeasible at once (SCHED-0009 naming the queue, without
+delaying the predecessor), or the SCHED-0010 warning behind a frozen
+predecessor; the edge's transfer minutes run alongside the queue, not after
+it. Event
+`operation.updated` carries both values (AsyncAPI documents them). Migration
+`0019_operation_queue_times.sql` adds two columns to `scheduling_operation`
+(no new table, so no new grant). Web: both fields on the new-operation form and
+the operation detail page (shown and editable, validated 0 to 10,080). The
+OpenAPI and AsyncAPI specs have no FAIL lines on the doc gates. No authz seed
+needed: existing routes and duties. Not built: the first operation's queue
+before from the run start (it only applies between operations of an order), a
+queue taken from the production route (the order intake from wave 21 leaves it
+0 until the event carries it), overlap quantity (BR-23.5), transit time
+between resources other than the network transfer minutes, and the daily
+bucket mode.
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
 |---|---|---|---|
 | 1 | Forward operation scheduling, finite and infinite | built | `domain.Schedule`; `finite: false` runs ignore bookings but keep calendar time. |
 | 1 | Backward scheduling and the BR-23.2 fallback to forward with `late_minutes` (FR-23.2) | built (slice 10) | `direction: backward` on `POST /runs`; `domain.placeBackward` searches the latest start of each order's first operation that still ends by the order's earliest due date, using the forward engine so calendars, bookings, blocks, changeovers and networks apply unchanged. A latest start before run start + 1 h, or an order that cannot end on time, is placed forward; late orders carry `late_minutes` and a SCHED-0003 warning. Orders without a due date are placed forward. Operations after the first are placed as early as possible after it (no slack is spread between them), lateness is measured against the due timestamp, not end-of-day of the delivery date, and moves and the CP-SAT campaign path are unchanged. |
-| 1 | Job scheduling (queue-before, setup, process, overlap, transport, queue-after; FR-23.3) and operations mode in daily buckets (FR-23.2) | later slice of PSG-23 | An operation is one block of process minutes. `mode` is accepted and recorded, and both modes place at minute granularity. Setup that must not split (BR-23.3), overlap quantity (BR-23.5) and transit time are not modelled. |
+| 1 | Job scheduling (queue-before, setup, process, overlap, transport, queue-after; FR-23.3) | partial (slice 27) | Queue before and queue after are built (slice 27); setup that must not split is built (BR-23.3). Overlap quantity (BR-23.5) and transit time apart from the network edge's transfer minutes are not modelled; queue times from the production route are a handoff to wave 21. |
+| 1 | Operations mode in daily buckets (FR-23.2) | later slice of PSG-23 | `mode` is accepted and recorded, and both modes place at minute granularity. |
 | 1 | Duration from route times and efficiency (BR-23.1) | built (slices 18 and 21) | Minutes come from the planned hours of wave 21's process and setup jobs (already route time times quantity); the scheduling resource's `efficiencyPct` stretches or shrinks them when the job is placed (slice 21). Efficiency from wave 9 resources and per-day overrides remain a handoff (row below). |
 | 1 | Secondary resources booked with the primary (BR-23.4, SCHED-0005) | built (slice 12) | `Operation.Secondaries`, `domain/secondary.go`, `scheduled_job_secondary`. A primary job and a secondary booking on the same resource are kept apart by the scheduler (it sees both as busy time), not by a database constraint, because the two live in different tables. Secondary resources are an explicit list per operation; choosing them by capability or resource group is wave 9. Not yet: secondary bookings as their own bars on the secondary resource's Gantt row (they show on the primary bar, in the jobs table and in the load), in the block-utilization inquiry and in the setup changeover sequencing of the secondary resource; secondaries only for setup or only for process (a secondary is held for the whole job, changeover included); and `ScheduledJob.secondary_resource_ids` on the stored job row (the list lives on the operation and the booking rows). The CP-SAT model does not book secondaries yet. |
 | 1 | Resource selection by resource group and capability with level and expiry (FR-23.2, FR-23.12, SCHED-0004 for capabilities) | handoff — wave 9 (resources, groups, capabilities) | Candidates are explicit resource ids in priority order. Slice 1 keeps its own `scheduling_resource` table with a weekly calendar; wave 9 resources, calendars, efficiency % and capacity-per-day overrides replace it. |
@@ -786,7 +823,7 @@ naming the block.
 | Gantt print, campaign sheet, cleanout record documents (4.23.15) | later slice of PSG-23 | No document templates yet. |
 | Feature flags `scheduling.cp-sat`, `scheduling.propagate-dependents`; config `SCHED_OPT_TIME_LIMIT_S` | later slice of PSG-23 | No flag client; CP-SAT is chosen per campaign with its sequence rule and switched off by leaving `SCHED_OPT_URL` empty, propagation is chosen per move with `propagate`, and the campaign solver limit is fixed at 20 s. |
 | Site parameters (default method and direction, drag snap, propagation limit) | built (slice 24) as tenant-wide parameters | `GET/PATCH /v1/scheduling/parameters`; see the slice 24 section. |
-| Site parameters per site; resource selection rule, safety/queue time, horizon days and the default start | later slice of PSG-23 (per-site parameters are a handoff to wave 9, sites) | The parameters are one row per tenant. Selection stays least finish, no safety or queue time is added, and the horizon is `SCHED_HORIZON_DAYS`. |
+| Site parameters per site; resource selection rule, safety/queue time, horizon days and the default start | later slice of PSG-23 (per-site parameters are a handoff to wave 9, sites) | The parameters are one row per tenant. Selection stays least finish, no default safety or queue time is added (queue times are per operation, slice 27), and the horizon is `SCHED_HORIZON_DAYS`. |
 | Extension points `scheduling.constraint`, `scheduling.objective` | later slice of PSG-23 | |
 | `ScheduledJob.overlap_qty`; `ScheduleRun.time_limit_s`, `started_at`, `objective_value` | later slice of PSG-23 | Columns arrive with the features that fill them. |
 | Rollback by re-pointing to a previous run | later slice of PSG-23 | A run replaces the jobs it schedules; earlier runs stay as history rows only. |

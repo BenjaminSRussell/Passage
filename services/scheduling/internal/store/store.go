@@ -98,13 +98,17 @@ type Operation struct {
 	ResourceIDs []string   `json:"resourceIds"`
 	// SecondaryResourceIDs are booked with the primary for the whole job
 	// (BR-23.4).
-	SecondaryResourceIDs []string          `json:"secondaryResourceIds"`
-	SetupGroup           *string           `json:"setupGroup"`
-	SetupMinutes         int               `json:"setupMinutes"`
-	Attributes           map[string]string `json:"attributes"`
-	NetworkID            *string           `json:"networkId"`
-	Status               string            `json:"status"`
-	CreatedAt            time.Time         `json:"createdAt"`
+	SecondaryResourceIDs []string `json:"secondaryResourceIds"`
+	SetupGroup           *string  `json:"setupGroup"`
+	SetupMinutes         int      `json:"setupMinutes"`
+	// QueueBeforeMinutes and QueueAfterMinutes are the elapsed waits in front
+	// of and behind the operation (FR-23.3); no resource is booked for them.
+	QueueBeforeMinutes int               `json:"queueBeforeMinutes"`
+	QueueAfterMinutes  int               `json:"queueAfterMinutes"`
+	Attributes         map[string]string `json:"attributes"`
+	NetworkID          *string           `json:"networkId"`
+	Status             string            `json:"status"`
+	CreatedAt          time.Time         `json:"createdAt"`
 	// Version starts at 1 and rises with every change; PATCH and DELETE need it
 	// in If-Match.
 	Version   int        `json:"version"`

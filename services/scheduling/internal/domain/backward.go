@@ -62,8 +62,11 @@ func (e *engine) placeBackward(chain []Operation, fixed []Placement, start time.
 	ok, first, last := e.probe(chain, fixed, start, time.Time{})
 	if ok && !last.After(due) {
 		total := 0
-		for _, op := range chain {
+		for k, op := range chain {
 			total += e.fastestMinutes(op)
+			if k > 0 {
+				total += int(queueGap(chain[k-1], op) / time.Minute)
+			}
 		}
 		lo, hi := first, due.Add(-minutes(total))
 		for lo.Before(hi) {

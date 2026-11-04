@@ -53,6 +53,9 @@ export interface Operation {
   setupGroup: string | null;
   /** Route setup time, used when the matrix has no entry for a pair (SCHED-0012). */
   setupMinutes: number;
+  /** Elapsed wait in front of and behind the operation; no resource is booked (FR-23.3). */
+  queueBeforeMinutes: number;
+  queueAfterMinutes: number;
   /** Product or order attributes that capacity block conditions match on (FR-23.17). */
   attributes: Record<string, string>;
   /** Network governing the step from the order's previous operation into this one (FR-23.13). */
@@ -71,6 +74,8 @@ export interface OperationPatch {
   readyAt?: string;
   priority?: number;
   setupMinutes?: number;
+  queueBeforeMinutes?: number;
+  queueAfterMinutes?: number;
   /** Replaces the candidate resources, in priority order. */
   resourceIds?: string[];
 }
@@ -107,6 +112,8 @@ export interface NewOperation {
   secondaryResourceIds?: string[];
   setupGroup?: string;
   setupMinutes?: number;
+  queueBeforeMinutes?: number;
+  queueAfterMinutes?: number;
   attributes?: Record<string, string>;
   networkId?: string;
 }
