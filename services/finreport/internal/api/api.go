@@ -83,6 +83,7 @@ type API struct {
 	store     Store
 	linePage  int                    // drill level 2 default page size (REPORTING_PAGE_SIZE)
 	traceLink func(id string) string // trace viewer link of a line (REPORTING_TRACE_URL)
+	verifier  Verifier               // balance verification against the ledger; nil when LEDGER_URL is not set
 }
 
 // New returns the API over st with the default reporting tunables.
@@ -128,6 +129,9 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutySchedule)).Get("/schedules", a.listSchedules)
 		r.With(authz.RequireDuty(DutySchedule)).Get("/schedules/{code}", a.getSchedule)
 		r.With(authz.RequireDuty(DutySchedule)).Put("/schedules/{code}", a.putSchedule)
+		r.With(authz.RequireDuty(DutyVerify)).Post("/balance-verifications", a.createVerification)
+		r.With(authz.RequireDuty(DutyAudit)).Get("/balance-verifications", a.listVerifications)
+		r.With(authz.RequireDuty(DutyAudit)).Get("/balance-verifications/{id}", a.getVerification)
 		r.With(authz.RequireDuty(DutyAudit)).Get("/audit-trail", a.auditTrail)
 		r.With(authz.RequireDuty(DutyAudit)).Get("/audit-trail:export", a.exportAuditTrail)
 	})

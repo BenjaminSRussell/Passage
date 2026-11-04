@@ -1,4 +1,4 @@
-# NOT-IMPLEMENTED: PSG-15 (wave 15), after slice 9
+# NOT-IMPLEMENTED: PSG-15 (wave 15), after slice 10
 
 Every deliverable bullet of PSG-15, and every acceptance criterion that slices 1
 to 7 do not fully meet, is listed here. Status is either **later slice of PSG-15**
@@ -22,7 +22,7 @@ platform change outside the wave's owned paths).
 | FR | Status | Reason |
 | --- | --- | --- |
 | FR-15.1 read model fed by `journal.posted/reversed/balance.rebuilt/year-end.closed` | Slice 8 (consumer core): `consumer.HandleJournalPosted` applies a `dev.passage.ledger.journal.posted.v1` event (source `/passage/ledger/ledger`) through `store.ApplyEntry`. It runs as the service principal `service:finreport-ledger` that the platform eventing consumer puts in the context, narrowed to the entry's legal entity (never all-scope); it fetches the entry's lines through `LineSource` (lines whose count differs from `lineCount` are retried), and the store, in one transaction, writes them to `reporting_journal_line`, upserts their accounting-currency amounts into `reporting_balance` (`currency_type` `acct`) and advances `reporting_hwm`. The read model holds exactly the entries up to the mark (BR-15.6): the ledger keys `journal.posted` by entry id, so one ledger's entries arrive through several partitions and out of order; an entry ahead of the mark waits in `reporting_entry_pending` (migration 0010, lines included) and is applied, with every waiting successor, as soon as the gap closes. A replay changes nothing. Nothing is dead-lettered for arriving early, so a slow partition cannot stop a ledger; an entry that never arrives shows as `entriesPending` on `GET /lag` and in the lag panel. Reversals arrive as `journal.posted` (lines carry `reversalOfEntryId`) and need no handler; negative postings (storno, BR-11.16) are stored as a negative amount on the side they reduce. A ledger `passage://` source link is stored as its Passage route, any other unsafe link is dropped (a link never refuses an entry). `reporting_entry_applied` records each entry and whether it was a closing entry. Malformed events and read-model refusals are `eventing.Permanent`. **Blocking handoff** to wave 11: `journal.posted` must carry `legalEntityId` (`JournalPostedData` in `services/ledger/internal/events`; `events.New` copies it to the `legalentityid` extension). Without it the consumer refuses every event: a service principal holds no all-scope duty, so with no entity it can neither mint the ledger token nor pass row-level security. **Slice 9 (transport)**: the `LineSource` HTTP client (`internal/ledgerlines`: `GET /v1/ledger/journal-lines?ledger=&documentId=&limit=1000`, signed with the service token for audience `ledger`, duty `ledger.entry.lookup`, scoped to the entry's legal entity; keeps the lines of `entryId` only because a reversal shares its original's documentId; follows `nextCursor`, at most 1,000 pages; maps `debitCredit`, `amountAcct`, `negativePosting`, `reversalOfEntryId`, `dimensions`, `sourceUri`, `traceId`; a ledger 400 or 404, such as a ledger outside the event's legal entity, is dead-lettered at once, while 401, 403, 429 and 5xx are retried) and the `consume` command of `cmd/finreport` (same image, `args: [consume]`): `eventing.NewConsumer` named `finreport-ledger` (inbox and service principal), Kafka group `reporting-balances` (override with `KAFKA_GROUP`) on `passage.ledger.journal`, dead-letter `passage.ledger.journal.dlq`, `Idempotent: true` over the platform inbox (`consumer_inbox`, migration 0011, tenant RLS, SELECT and INSERT for `passage_app`), admin port 9090 with `/healthz`, `/readyz` (Kafka ping) and `/metrics`; helm `consumer-deployment.yaml` (`consumer.enabled`, `serviceIdentity`, `serviceUrls.ledger`). The consumer cannot start until the **authz seed** below lands: like the production and purchasing consumers it stops at start with "service principal service:finreport-ledger with duty ledger.entry.lookup is not seeded" (and `eventing.NewConsumer` refuses a principal that is not in `tenant.ServicePrincipalTable()`), and the signer refuses a missing service grant (the HTTP client's tests replace the signer for that reason). Not yet exercised against a live Kafka and ledger. **Later slice of PSG-15**: backfill of a ledger whose entries predate the consumer (until then its first entry waits for entry 1), and the `balance.rebuilt` and `year-end.closed` handlers. **Handoff** to wave 11 for a reporting-currency (`rpt`) and transaction-currency amount on `LedgerLine` (only `amount` and `amountAcct` exist, so `rpt` and `txn` balances are not written) and for the posting service on the event: a year-end closing counts as closing only with source system `close` and type `year_end_closing`, both caller-supplied, while the ledger itself trusts `posted_by_service`. The fiscal period is the ledger's `periodKey` year and month until wave 14's calendar API (no opening period 0 is written). | Consumer core, ledger client and Kafka wiring are built; they run once the authz seed and the wave 11 `legalEntityId` land. |
-| FR-15.1 lag SLO and nightly zero-diff verify against `ledger.Balance` | **later slice of PSG-15** | The consumer core exists (slice 8); the verify job needs the ledger balance API client and the platform job runner. |
+| FR-15.1 lag SLO and nightly zero-diff verify against `ledger.Balance` | Partial (slice 10): the verify itself. `POST /balance-verifications` (new duty `reporting.balance.verify`, `Idempotency-Key`; the caller must also hold the ledger duty `ledger.balance.read`, because the ledger only sees finreport's service duty and would otherwise show its balances to a user it would refuse) reads, in one statement, the read model's mark, the entries waiting ahead of it (`reporting_entry_pending`) and the net per account (accounting currency, every period, closing entries included); then the ledger's trial balance (`GET /v1/ledger/balances?ledger=` with no filter: accounting currency, every period, year-end closings included, posted entries only, nets debit minus credit with negative postings on the reversed side as in the read model; signed as the service for the legal entity that owns the read-model rows, `internal/ledgerbalances`); then the mark again. `domain.Verify` compares them (difference = read model minus ledger, an account one side lacks counts as zero) and the check is stored in `balance_verification` (migration 0012, RLS, legal-entity scope, append-only) with `balance.verified.v1` (no amounts; `legal_entity_id` sets the `legalentityid` extension) in the same transaction. Status `matched`, `differs`, or `inconclusive` when the mark moved during the ledger read or entries waited ahead of it before or after (never reported as a mismatch). At most 500 differing accounts are stored; `diffCount` is the full number. `GET /balance-verifications` (summaries, no amounts) and `/{id}` (duty `reporting.audit.view`; the ledger amounts are withheld, `diffsWithheld: true`, from a caller without `ledger.balance.read`). Web: Ledger verification page (check a ledger, past checks) and a check page with the differing accounts. The API pods get `LEDGER_URL` and the signing key from the chart when `serviceIdentity.signingKeySecret` is set; without them the routes answer 503 (REPORT-0036), as does a request finreport cannot sign (grant not seeded, or a legacy ledger with no owning entity). A ledger that does not answer, refuses or answers something that is not this ledger's unfiltered trial balance is 502 REPORT-0036 (the cause is logged, not returned); a ledger 404 is 422. **Known limit**: with a steady mark and nothing waiting, an entry the consumer has not received at all still shows as `differs`, because the ledger's trial balance does not say which posting sequence it reflects (**handoff** to wave 11 below). **Later slice of PSG-15**: the nightly run over every ledger (needs the platform job runner and a service principal that runs without an end user), the `lag.exceeded` alert from `REPORTING_MAX_LAG_S`, and comparing per period or per dimension combination (the check compares account totals only; the ledger's `group_by` and period filters are the way to extend it). | Until the authz seed below lands, `POST` answers 403 for every user (no role can hold the unseeded duty) and, past it, 503 REPORT-0036 (the signer has no `finreport` to `ledger` grant for `ledger.balance.read`). |
 | FR-15.2 max 2,000 rows, expression validation on save | Done (`Validate`: limits, references, cycles, syntax; division by zero renders blank and is tested). Row formats bold, indent, print zero and page break are stored; underline is not modelled, and page break has no effect until PDF rendering exists (**later slice of PSG-15**). | Rendering outputs are not built. |
 | BR-15.3 sign presentation and `raw:` calculations | Done (credit rows show `-net`; `raw:` uses stored net). | n/a |
 | FR-15.3 columns: currency type, ledger override, variance/percent, comparative templates | Period expressions, CALC (variance and percent as expressions such as `C2-C1` or `(C2-C1)/C1*100`) and per-column currency type (empty = the run's) done. Currency filter within a currency type, column dimension filter, column format, `ledger_code_override` (BR-15.10, REPORT-0005), comparative templates and variance presets are **later slice of PSG-15**. | Multi-ledger columns need the chart-of-accounts compatibility check; the read model has no transaction currency code yet. |
@@ -51,7 +51,7 @@ platform change outside the wave's owned paths).
 | Events: `statement.failed`, `distribution.sent`, `lag.exceeded` | **later slice of PSG-15**. A cash flow run refused with REPORT-0008 / REPORT-0009 answers 422 and writes no `statement.failed`: runs are synchronous and nothing is stored. | Their producers (async runs, distribution, lag monitor) are not built yet. |
 | `statement.generated.v1`, `definition.published.v1`, `hierarchy.unassigned.v1` | Done: written to the outbox in the same transaction. `hierarchy.unassigned.v1` is raised at publish of a non-strict hierarchy; raising it when a new account or dimension value arrives needs the master-data events (see deliverable 6). | n/a |
 | Retire event | Retire writes no event; PRD §2.15.5 names none. From slice 6 a retire writes a `definition_retired` audit entry in the same transaction. | n/a |
-| Jobs: `reporting-balance-consumer` (built: slice 8 handler, slice 9 `consume` command; waits on the authz seed), `reporting-balance-verify`, `statement-schedules`, `library-retention-sweep`, `audit-completeness-check`, `hierarchy-membership-refresh` | **later slice of PSG-15**. The schedule model exists (slice 3) and `domain.Schedule.NextRun` gives the next firing in the schedule's zone; the job that fires them does not. | Depend on the consumer and the platform job runner. |
+| Jobs: `reporting-balance-consumer` (built: slice 8 handler, slice 9 `consume` command; waits on the authz seed), `reporting-balance-verify` (the check exists as `POST /balance-verifications` since slice 10; the nightly runner does not), `statement-schedules`, `library-retention-sweep`, `audit-completeness-check`, `hierarchy-membership-refresh` | **later slice of PSG-15**. The schedule model exists (slice 3) and `domain.Schedule.NextRun` gives the next firing in the schedule's zone; the job that fires them does not. | Depend on the consumer and the platform job runner. |
 | Schedules: delete, owner and "last run" | No delete (PRD §2.15.5 lists GET and PUT only; `enabled: false` pauses). `updatedBy` records the last editor; "last run" on the Schedules screen needs the firing job (**later slice of PSG-15**). | n/a |
 | `POST` publish, validate, retire, install and hierarchy publish: `Idempotency-Key` | Not taken. Validate is stateless. Publish (definitions and hierarchies) is safe to repeat: a second call finds no draft and answers 404, so it never creates a second version. Retire succeeds again on a retired code. Install skips codes already in use. Import and run creation persist the key (`idempotency_keys` table and `statement_run.idempotency_key`). | PRD §2.15.5 asks for a key on import and runs only. |
 | Row-set / column-set / tree endpoints | **later slice of PSG-15** (slice 7 adds `accounts`, an explicit account list on `account_range` rows, used by hierarchy runs) | Not needed by the first evaluation path. The definition list (`GET /definitions`), retire (slice 2) and run list (`GET /runs`, newest first, no cursor) are built. |
@@ -171,6 +171,64 @@ ledger client (built in slice 9), together with the wave 11 change.
 | Rego pin | Main session (`policies/authz/authz_test.rego`) | `data.service_principals["finreport-ledger"] == ["ledger.entry.lookup"]`, `data.service_grants.finreport == {"ledger": ["ledger.entry.lookup"]}`, `allowed("ledger.entry.lookup", "GET", "/v1/ledger/journal-lines")`, `not allowed("ledger.entry.lookup", "GET", "/v1/ledger/journal-entries/e1")` |
 | `legalEntityId` on `dev.passage.ledger.journal.posted.v1` (and AsyncAPI) | Wave 11 (`services/ledger`) | Blocking: the consumer refuses events without it. |
 | Kafka consumer group `reporting-balances` on `passage.ledger.journal` (chart value `consumer.kafka.group`), dead-letter topic `passage.ledger.journal.dlq`, Kafka secret `consumer.kafka.secret` (keys `password`, `ca.crt`), ledger accepting finreport's service public key (key id `serviceIdentity.keyId`), finreport's signing key secret `serviceIdentity.signingKeySecret` (key `signing-key`), `consumer.enabled=true` | deploy/ | Deployment is not in this wave's paths; the chart defaults to the consumer off. |
+
+## Handoffs from slice 10 (authz seed, exact rows)
+
+New duty `reporting.balance.verify` ("Verify the reporting balances against the ledger"), enforced in the service on `POST /v1/reporting/balance-verifications` and not yet in `policies/authz/data.json`. The web nav item is gated on the existing `reporting.audit.view`; the page's check action is enforced by the service (403 shows as an error on the page). `TestEveryServiceDutyIsSeeded` in identity fails until the duty row exists (`ledger.balance.read`, which the service also checks with `HasDuty`, is already seeded).
+
+`policies/authz/data.json` `duties`: add the new duty, and replace `reporting.audit.view` with this (two GET rows added):
+
+```json
+"reporting.balance.verify": {"permissions": [{"resource": "/v1/reporting/balance-verifications", "methods": ["POST"]}]},
+"reporting.audit.view": {"permissions": [
+  {"resource": "/v1/reporting/audit-trail", "methods": ["GET"]},
+  {"resource": "/v1/reporting/audit-trail:export", "methods": ["GET"]},
+  {"resource": "/v1/reporting/balance-verifications", "methods": ["GET"]},
+  {"resource": "/v1/reporting/balance-verifications/*", "methods": ["GET"]}
+]},
+```
+
+`policies/authz/data.json` `service_grants` (replaces the slice 8 row; the existing `ledger.balance.read` duty already routes `GET /v1/ledger/balances`):
+
+```json
+"finreport": {"ledger": ["ledger.entry.lookup", "ledger.balance.read"]},
+```
+
+`platform/go/tenant/service.go` `serviceGrants` (the mirror the platform test keeps equal; `ledger.balance.read` is already in `readDuties`):
+
+```go
+"finreport": {"ledger": {"ledger.entry.lookup", "ledger.balance.read"}},
+```
+
+`policies/authz/authz_test.rego`: the slice 8 pin `test_finreport_ledger_consumer_reads_only_journal_lines` asserts the old grant and must change with it; the consumer principal `finreport-ledger` stays `["ledger.entry.lookup"]`:
+
+```rego
+test_finreport_ledger_consumer_reads_only_journal_lines if {
+	data.service_principals["finreport-ledger"] == ["ledger.entry.lookup"]
+	data.service_grants.finreport == {"ledger": ["ledger.entry.lookup", "ledger.balance.read"]}
+	data.duties["ledger.entry.lookup"].service_only
+	allowed("ledger.entry.lookup", "GET", "/v1/ledger/journal-lines")
+	not allowed("ledger.entry.lookup", "GET", "/v1/ledger/journal-entries/e1")
+	allowed("ledger.balance.read", "GET", "/v1/ledger/balances")
+}
+
+test_reporting_balance_verification_routes if {
+	allowed("reporting.balance.verify", "POST", "/v1/reporting/balance-verifications")
+	not allowed("reporting.balance.verify", "GET", "/v1/reporting/balance-verifications")
+	allowed("reporting.audit.view", "GET", "/v1/reporting/balance-verifications")
+	allowed("reporting.audit.view", "GET", "/v1/reporting/balance-verifications/v1")
+	not allowed("reporting.audit.view", "POST", "/v1/reporting/balance-verifications")
+}
+```
+
+Other handoffs:
+
+| Owner | Handoff |
+| --- | --- |
+| Role catalog (wave 2) | grant `reporting.balance.verify` to the finance controller role (who also needs `ledger.balance.read` to run a check) |
+| Wave 11 (`services/ledger`) | return the posting sequence the trial balance reflects on `GET /v1/ledger/balances` (the ledger's `next_sequence - 1`, read in the same transaction as the balances). With it a check can tell "read model behind" (inconclusive) from a real difference; today a steady mark with nothing waiting is reported as `differs` even when an entry has not reached the consumer yet. |
+| Deploy (deploy/) | give the finreport API deployment the same `serviceIdentity.signingKeySecret` as the consumer, and have the ledger accept finreport's public key (the chart now mounts it into the API pods when set) |
+| PRD catalog | `REPORT-0035` (balance verification not found) and `REPORT-0036` (the ledger could not be read, or verification is not configured), added by this slice |
 
 ## Handoffs from slice 9 (authz seed, exact rows)
 

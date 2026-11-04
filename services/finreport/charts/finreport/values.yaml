@@ -25,7 +25,10 @@ reporting:
   # {traceId} slot, e.g. https://grafana.example/explore?traceId={traceId}.
   # Empty shows trace ids without a link.
   traceUrl: ""
-# Service identity the consumer signs ledger requests with (PASSAGE_SERVICE_NAME=finreport).
+# Service identity the consumer and the API sign ledger requests with
+# (PASSAGE_SERVICE_NAME=finreport). When signingKeySecret is set, the API pods
+# also mount it and get LEDGER_URL, which turns on balance verification
+# (POST /balance-verifications); without it those routes answer 503.
 # The ledger must hold finreport's public key and the platform must seed the
 # finreport-ledger principal and the finreport to ledger grant (NOT-IMPLEMENTED.md).
 serviceIdentity:

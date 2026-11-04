@@ -20,7 +20,19 @@ channels:
     messages:
       hierarchyUnassigned:
         $ref: '#/components/messages/HierarchyUnassigned'
+  balanceVerified:
+    address: passage.reporting.balance
+    messages:
+      balanceVerified:
+        $ref: '#/components/messages/BalanceVerified'
 operations:
+  publishBalanceVerified:
+    action: send
+    channel:
+      $ref: '#/channels/balanceVerified'
+    summary: The read model of a ledger was compared with the ledger trial balance (FR-15.1); written to the outbox in the transaction that stores the check
+    messages:
+      - $ref: '#/channels/balanceVerified/messages/balanceVerified'
   publishHierarchyUnassigned:
     action: send
     channel:
@@ -103,3 +115,22 @@ components:
           member_kind: {type: string, enum: [main_account_category, main_account, dimension_value]}
           owner_user_id: {type: string, description: Hierarchy owner to notify}
           actor: {type: string, description: User id of the publisher}
+    BalanceVerified:
+      name: dev.passage.reporting.balance.verified.v1
+      title: Balance verified
+      summary: A balance verification stored its result; subscribers alert on status differs. Account amounts are not in the event.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [verification_id, ledger_id, status, hwm_before, hwm_after, entries_pending, accounts_compared, diff_count, actor]
+        properties:
+          verification_id: {type: string, format: uuid}
+          ledger_id: {type: string, format: uuid}
+          legal_entity_id: {type: string, format: uuid, description: Legal entity that owns the ledger's reporting data (also the legalentityid extension); absent for a legacy ledger}
+          status: {type: string, enum: [matched, differs, inconclusive], description: inconclusive when the read model's mark moved during the check or entries waited ahead of it}
+          hwm_before: {type: integer, format: int64}
+          hwm_after: {type: integer, format: int64}
+          entries_pending: {type: integer, description: Most entries seen waiting ahead of the mark}
+          accounts_compared: {type: integer}
+          diff_count: {type: integer, description: Accounts whose net differs between the read model and the ledger}
+          actor: {type: string, description: User id that ran the check}

@@ -185,6 +185,40 @@ export interface LagRow {
   entriesPending?: number;
 }
 
+export const VERIFICATION_STATUSES = ["matched", "differs", "inconclusive"] as const;
+export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
+
+/** One account whose net differs between the read model and the ledger (readModel minus ledger). */
+export interface VerificationDiff {
+  account: string;
+  readModel: string;
+  ledger: string;
+  difference: string;
+}
+
+/** A stored comparison of a ledger's read model with its trial balance (FR-15.1), as the list serves it. */
+export interface VerificationSummary {
+  id: string;
+  ledgerId: string;
+  legalEntityId?: string;
+  status: VerificationStatus;
+  hwmBefore: number;
+  hwmAfter: number;
+  /** Entries seen waiting ahead of the read model's mark (they make the check inconclusive). */
+  entriesPending: number;
+  accountsCompared: number;
+  /** Accounts that differ; diffs holds the first 500. */
+  diffCount: number;
+  requestedBy: string;
+  verifiedAt: string;
+}
+
+/** One stored check with its differing accounts; they are withheld from a user without ledger.balance.read. */
+export interface Verification extends VerificationSummary {
+  diffs: VerificationDiff[];
+  diffsWithheld?: boolean;
+}
+
 export interface CalendarPeriod {
   year: number;
   no: number;
@@ -356,6 +390,20 @@ export function drillLines(
 
 export async function getLag(signal?: AbortSignal): Promise<LagRow[]> {
   return (await get<{ items: LagRow[] }>("/lag", signal)).items;
+}
+
+export async function listVerifications(ledgerId: string, signal?: AbortSignal): Promise<VerificationSummary[]> {
+  const query = ledgerId ? `?ledgerId=${seg(ledgerId)}` : "";
+  return (await get<{ items: VerificationSummary[] }>(`/balance-verifications${query}`, signal)).items;
+}
+
+export function getVerification(id: string, signal?: AbortSignal): Promise<Verification> {
+  return get<Verification>(`/balance-verifications/${seg(id)}`, signal);
+}
+
+/** Checks one ledger. The key makes a retried click return the same check. */
+export async function createVerification(ledgerId: string, key: string): Promise<Verification> {
+  return (await send<Verification>("/balance-verifications", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify({ ledgerId }) })).body;
 }
 
 /** Starts a run. The key makes a retried click return the same run. */

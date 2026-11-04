@@ -40,6 +40,8 @@ func TestGrants_AppRoleLocksDraftsButCannotWriteReadModelOrRewriteAppendOnly(t *
 		`update reporting_journal_line set debit = debit`,
 		`insert into reporting_hwm(tenant_id, ledger_id, posting_sequence) values ('` + testkit.TenantID(1) + `', '` + ledger + `', 1)`,
 		`delete from reporting_balance`,
+		`update balance_verification set status = status`,
+		`delete from balance_verification`,
 		`update outbox set type = type`,
 		`select count(*) from outbox`,
 	} {

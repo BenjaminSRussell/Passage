@@ -6,6 +6,21 @@ keys and on to the journal lines, their source documents and traces. Phase 2
 exit wave. Reads from its own `reporting` database, fed by ledger
 events.
 
+## Slice 10: ledger verification
+
+`POST /v1/reporting/balance-verifications` (duty `reporting.balance.verify`,
+plus the ledger duty `ledger.balance.read`, `Idempotency-Key` required)
+compares the net per account of the read model (accounting currency, every
+period) with the ledger's trial balance and stores the result in
+`balance_verification` (migration 0012). `matched`, `differs`, or
+`inconclusive` when the read model's high-water mark moved while the ledger
+was read or entries waited ahead of it. `GET /balance-verifications[/{id}]`
+(duty `reporting.audit.view`) lists and shows the checks; the ledger amounts
+of a check are withheld from a caller without `ledger.balance.read`. `balance.verified.v1` goes to the outbox in the same
+transaction. The API reads the ledger with `LEDGER_URL` and the service signing
+key (the chart sets both when `serviceIdentity.signingKeySecret` is set);
+without them the routes answer 503. See NOT-IMPLEMENTED.md for the authz seed.
+
 ## Status: slice 6
 
 Slice 6 adds the audit trail report (FR-15.10; on top of slices 1 to 5, below):

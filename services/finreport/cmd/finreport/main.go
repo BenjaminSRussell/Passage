@@ -4,7 +4,7 @@
 //
 //	DATABASE_URL       required, Postgres URL for the passage_reporting database
 //	MIGRATE_ON_START   "true" applies migrations at startup (dev only; not in consume mode)
-//	LEDGER_URL, KAFKA_*, PASSAGE_SERVICE_*   consume mode only (see consumer.go)
+//	LEDGER_URL, PASSAGE_SERVICE_*   balance verification when serving, and the consumer; KAFKA_* consume mode only
 //	HTTP_ADDR          listen address, default :8080
 //	REPORTING_*        tunables, validated at startup (see internal/config)
 package main
@@ -21,10 +21,13 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/api"
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/config"
+	"github.com/BenjaminSRussell/passage/services/finreport/internal/ledgerbalances"
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/store"
+	"github.com/BenjaminSRussell/passage/services/finreport/internal/verify"
 	"github.com/BenjaminSRussell/passage/services/finreport/migrations"
 )
 
@@ -80,13 +83,45 @@ func runWith(ctx context.Context, getenv func(string) string, consume bool) erro
 	if addr == "" {
 		addr = ":8080"
 	}
-	return httpx.Serve(ctx, addr, newHandler(store.New(pool), cfg))
+	st := store.New(pool)
+	return httpx.Serve(ctx, addr, newHandler(st, cfg, withVerifier(verifier(getenv, st))))
+}
+
+// verifier builds the balance verification service when the ledger can be read
+// (LEDGER_URL and a service signing key); without them the verification routes
+// answer 503 and the rest of the API is unaffected.
+func verifier(getenv func(string) string, st *store.Postgres) api.Verifier {
+	if getenv("LEDGER_URL") == "" {
+		slog.Info("balance verification disabled: LEDGER_URL is not set")
+		return nil
+	}
+	signer, err := tenant.ServiceSignerFromEnv(getenv)
+	if err == nil {
+		var c *ledgerbalances.Client
+		if c, err = ledgerbalances.New(getenv("LEDGER_URL"), signer, nil); err == nil {
+			return &verify.Service{Store: st, Ledger: c}
+		}
+	}
+	slog.Warn("balance verification disabled", "error", err)
+	return nil
+}
+
+func withVerifier(v api.Verifier) func(*api.API) {
+	return func(a *api.API) {
+		if v != nil {
+			a.WithVerifier(v)
+		}
+	}
 }
 
 // newHandler mounts the reporting API on the platform router, which already
 // installs the tenant middleware and the health endpoints.
-func newHandler(st api.Store, cfg config.Reporting) http.Handler {
+func newHandler(st api.Store, cfg config.Reporting, opts ...func(*api.API)) http.Handler {
 	router := httpx.NewRouter()
-	api.New(st).WithConfig(cfg).Register(router)
+	a := api.New(st).WithConfig(cfg)
+	for _, o := range opts {
+		o(a)
+	}
+	a.Register(router)
 	return router
 }
