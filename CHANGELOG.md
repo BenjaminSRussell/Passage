@@ -15,6 +15,12 @@ release may change public APIs.
   tokens (skipped without `PASSAGE_TEST_DATABASE_URL` or under `-short`). A demo-plant seed (`go run ./cmd/demoplant`
   in `services/production`) writes five orders across the lifecycle and can book them in a ledger; see the
   production README.
+- Opt-in 50k-item MRP run through the planning API on Postgres 16 (#479, wave 22 AC2):
+  `PASSAGE_PLANNING_API_SCALE_ITEMS=50000 go test -run TestRunAPI_ScalePostgres ./internal/api/` in
+  `services/planning`. Measured 8 min 4 s end to end on a shared 4-vCPU VM, only without the router's 30 s
+  request timeout; numbers and caveats in `services/planning/README.md`. The plan-run route now accepts
+  bodies up to 128 MiB and `RunPlan` sends its rows in batches of 10,000 (one unbounded batch ran out of
+  memory at 50k items). ADR-0002 (Proposed) records the frePPLe comparison decision for AC4.
 - Local ledger performance benchmark as a proxy for wave 11 AC4 (#476): `make bench-ledger` posts balanced
   entries and reads trial balances against a throwaway Postgres 16 cluster and reports lines/s and p50/p95/p99;
   results and the hardware caveat are in `services/ledger/README.md`. It does not meet or replace AC4.
