@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS release_line (
   product_id text NOT NULL,
   engineering_version text NOT NULL,
   legal_entity_id text NOT NULL,
+  engineering_le_id text NOT NULL DEFAULT '',
   status text NOT NULL CHECK (status IN ('pending', 'sent', 'accepted', 'rejected', 'failed')),
   reason text NOT NULL DEFAULT '',
   accepted_by text NOT NULL DEFAULT '',
@@ -221,11 +222,13 @@ CREATE TABLE IF NOT EXISTS eco_document_replacement (
   PRIMARY KEY (tenant_id, eco_id, new_document_id),
   FOREIGN KEY (tenant_id, eco_id) REFERENCES eco (tenant_id, id)
 );
+-- actor_legal_entity is the signer's legal-entity claim, replayed to mint the audit.write service token; the
+-- row belongs to the tenant, not to a legal entity, so it carries no legal-entity scope policy.
 CREATE TABLE IF NOT EXISTS audit_outbox (
   id uuid PRIMARY KEY,
   tenant_id uuid NOT NULL,
   user_id text NOT NULL,
-  legal_entity_id text NOT NULL DEFAULT '',
+  actor_legal_entity text NOT NULL DEFAULT '',
   payload jsonb NOT NULL,
   attempts integer NOT NULL DEFAULT 0,
   next_attempt_at timestamptz NOT NULL DEFAULT now(),
@@ -273,7 +276,7 @@ BEGIN
     'release_policy', 'site_mapping', 'release_session', 'release_line', 'readiness_policy',
     'released_product', 'readiness_check_result', 'document_type', 'document', 'document_original',
     'document_link', 'document_structure', 'document_signature', 'eco_document_replacement',
-    'product_identifier', 'ebom_import', 'ebom_exception'
+    'product_identifier', 'ebom_import', 'ebom_exception', 'audit_outbox'
   ] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
@@ -281,6 +284,50 @@ BEGIN
   END LOOP;
 END
 $$;
+-- Legal-entity scope (passage.legal_entity_scopes). A release line is also visible to the engineering
+-- entity that sent it; accepting or rejecting it is still checked against legal_entity_id in the store.
+DO $$
+DECLARE
+  t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['engineering_organization', 'released_product'] LOOP
+    EXECUTE format('CREATE POLICY %I ON %I AS RESTRICTIVE USING (current_setting(''passage.legal_entity_scopes'', true) = ''*'' OR legal_entity_id = ANY (string_to_array(current_setting(''passage.legal_entity_scopes'', true), '','')))', t || '_legal_entity_scope', t);
+  END LOOP;
+END
+$$;
+CREATE POLICY release_line_legal_entity_scope ON release_line AS RESTRICTIVE
+  USING (current_setting('passage.legal_entity_scopes', true) = '*'
+         OR legal_entity_id = ANY (string_to_array(current_setting('passage.legal_entity_scopes', true), ','))
+         OR engineering_le_id = ANY (string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
+-- The audit relay claims due records across tenants. The function runs as the table owner; it can see
+-- every tenant's rows only when that owner bypasses row-level security, which engineering_audit_can_scan()
+-- reports so the relay can refuse loudly instead of idling.
+DO $do$
+BEGIN
+  EXECUTE format($f$
+    CREATE OR REPLACE FUNCTION engineering_audit_claim(max_rows int, lease_secs float8)
+      RETURNS TABLE (id uuid, tenant_id uuid, user_id text, actor_legal_entity text, attempts int, payload jsonb)
+      LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, %1$I, pg_temp
+      AS $body$
+        WITH due AS (
+          SELECT o.id FROM audit_outbox o
+          WHERE o.delivered_at IS NULL AND o.next_attempt_at <= pg_catalog.now()
+          ORDER BY o.next_attempt_at LIMIT max_rows FOR UPDATE SKIP LOCKED)
+        UPDATE audit_outbox o SET next_attempt_at = pg_catalog.now() + pg_catalog.make_interval(secs => lease_secs)
+        FROM due WHERE o.id = due.id
+        RETURNING o.id, o.tenant_id, o.user_id, o.actor_legal_entity, o.attempts, o.payload
+      $body$;
+    CREATE OR REPLACE FUNCTION engineering_audit_can_scan()
+      RETURNS boolean
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, %1$I, pg_temp
+      AS $body$
+        SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_user AND (rolsuper OR rolbypassrls))
+      $body$;
+  $f$, current_schema());
+END
+$do$;
+REVOKE ALL ON FUNCTION engineering_audit_claim(int, float8) FROM PUBLIC;
+REVOKE ALL ON FUNCTION engineering_audit_can_scan() FROM PUBLIC;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
@@ -290,6 +337,7 @@ BEGIN
     EXECUTE 'GRANT SELECT, INSERT ON document_signature TO passage_app';
     EXECUTE 'GRANT SELECT, INSERT, UPDATE ON audit_outbox TO passage_app';
     EXECUTE 'GRANT USAGE, SELECT ON SEQUENCE release_number_seq TO passage_app';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION engineering_audit_claim(int, float8), engineering_audit_can_scan() TO passage_app';
   END IF;
 END
 $$;

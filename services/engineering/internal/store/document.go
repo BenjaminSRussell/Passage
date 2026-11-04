@@ -236,6 +236,9 @@ func (s *Postgres) TransitionDocument(ctx context.Context, id, to, actor string,
 		if err := typ.Network.CanTransition(doc.Status, to, ""); err != nil {
 			return err
 		}
+		if err := doc.CanLeaveRelease(typ, to); err != nil {
+			return err
+		}
 		awaitingEco := false
 		if to == domain.DocReleased {
 			prev, err := previousReleased(ctx, tx, p.TenantID, doc.Number, doc.ID)
@@ -258,6 +261,9 @@ func (s *Postgres) TransitionDocument(ctx context.Context, id, to, actor string,
 		if typ.Network.RequiresSignature(doc.Status, to) {
 			if sig == nil || sig.RecordID != doc.ID || sig.Transition != to {
 				return &domain.Error{Code: domain.CodeDocReauth, Detail: "this transition requires a Part 11 signature for this document"}
+			}
+			if sig.OriginalsHash != domain.HashRecord(doc) || sig.DocumentNumber != doc.Number || sig.DocumentVersion != doc.Version {
+				return &domain.Error{Code: domain.CodeDocState, Detail: "the document changed after it was presented for signature; sign it again"}
 			}
 			if awaitingEco {
 				signed, err := hasReleaseSignature(ctx, tx, p.TenantID, doc.ID)

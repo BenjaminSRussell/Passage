@@ -20,11 +20,21 @@ import (
 	"github.com/BenjaminSRussell/passage/services/engineering/internal/store"
 )
 
-type reauthFunc func(context.Context, string, domain.Reauth) error
+type reauthFunc func(context.Context, string, domain.Reauth) (string, error)
 
-func (f reauthFunc) Verify(ctx context.Context, actor string, auth domain.Reauth) error {
+func (f reauthFunc) Verify(ctx context.Context, actor string, auth domain.Reauth) (string, error) {
 	return f(ctx, actor, auth)
 }
+
+const (
+	leENG  = "00000000-0000-0000-00e1-000000000001"
+	leUSMF = "00000000-0000-0000-00a5-000000000003"
+)
+
+// signer is the header pair of a signer scoped to the engineering legal entity.
+var signer = []string{"X-Passage-User", "carol", "X-Passage-Legal-Entity", leENG}
+
+func signHeaders(extra ...string) []string { return append(append([]string{}, signer...), extra...) }
 
 type recordingAuditor struct {
 	sigs []domain.Signature
@@ -43,12 +53,24 @@ func (r *recordingAuditor) RecordSignature(ctx context.Context, sig domain.Signa
 
 func TestCreateOrganization(t *testing.T) {
 	r, _ := newRouter(&fakeStore{}, approves)
-	rec := do(r, http.MethodPost, "/v1/engineering/organizations", `{"legalEntityId":"ENG1","code":"ENG","name":"Engineering"}`, allDuties, true)
+	rec := do(r, http.MethodPost, "/v1/engineering/organizations", `{"legalEntityId":"`+leENG+`","code":"ENG","name":"Engineering"}`, allDuties, true)
 	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"code":"ENG"`) {
 		t.Fatalf("create org = %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(r, http.MethodPost, "/v1/engineering/organizations", `{"legalEntityId":"ENG1","code":"ENG","name":"Engineering"}`, "engineering.read", true); rec.Code != http.StatusForbidden {
+	if rec := do(r, http.MethodPost, "/v1/engineering/organizations", `{"legalEntityId":"`+leENG+`","code":"ENG","name":"Engineering"}`, "engineering.read", true); rec.Code != http.StatusForbidden {
 		t.Fatalf("missing write duty = %d", rec.Code)
+	}
+	if rec := do(r, http.MethodPost, "/v1/engineering/organizations", `{"legalEntityId":"ENG1","code":"ENG","name":"Engineering"}`, allDuties, true); rec.Code != http.StatusBadRequest {
+		t.Fatalf("legal entity code instead of id = %d; want 400 (principals carry legal-entity UUIDs)", rec.Code)
+	}
+	if rec := do(r, http.MethodPost, "/v1/engineering/release-policies", `{"code":"RP","requireAcceptance":{"USMF":true}}`, allDuties, true); rec.Code != http.StatusBadRequest {
+		t.Fatalf("acceptance keyed by a legal entity code = %d; want 400", rec.Code)
+	}
+	if rec := do(r, http.MethodPost, "/v1/engineering/readiness-policies", `{"code":"RDY","checks":[{"key":"qa","kind":"maybe","mandatory":true}]}`, allDuties, true); rec.Code != http.StatusBadRequest {
+		t.Fatalf("unknown readiness check kind = %d; want 400", rec.Code)
+	}
+	if rec := do(r, http.MethodGet, "/v1/engineering/release-lines?legalEntityId=USMF", "", allDuties, true); rec.Code != http.StatusBadRequest {
+		t.Fatalf("release-line filter by code = %d; want 400", rec.Code)
 	}
 }
 
@@ -83,7 +105,7 @@ func signRouter(f *fakeStore, reauth api.Reauthenticator) http.Handler {
 func TestSignDocument_DefaultReauthenticatorFailsClosed(t *testing.T) {
 	f := signableStore()
 	r := signRouter(f, nil)
-	rec := do(r, http.MethodPost, "/v1/engineering/documents/"+signedDocID+":sign", `{"printedName":"Carol Kane"}`, allDuties, true, "X-Passage-User", "carol", "X-Passage-Reauth-Assertion", "anything")
+	rec := do(r, http.MethodPost, "/v1/engineering/documents/"+signedDocID+":sign", `{"printedName":"Carol Kane"}`, allDuties, true, signHeaders("X-Passage-Reauth-Assertion", "anything")...)
 	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), domain.CodeDocReauthUnavailable) {
 		t.Fatalf("default sign = %d %s; want 503 %s", rec.Code, rec.Body.String(), domain.CodeDocReauthUnavailable)
 	}
@@ -95,21 +117,21 @@ func TestSignDocument_DefaultReauthenticatorFailsClosed(t *testing.T) {
 func TestSignDocument_ReauthIsBoundToTheRecord(t *testing.T) {
 	f := signableStore()
 	var seen domain.Reauth
-	r := signRouter(f, reauthFunc(func(_ context.Context, actor string, auth domain.Reauth) error {
+	r := signRouter(f, reauthFunc(func(_ context.Context, actor string, auth domain.Reauth) (string, error) {
 		seen = auth
 		if auth.Assertion != "step-up-token" || auth.UserID != actor {
-			return &domain.Error{Code: domain.CodeDocReauth, Detail: "no step-up"}
+			return "", &domain.Error{Code: domain.CodeDocReauth, Detail: "no step-up"}
 		}
-		return nil
+		return "oidc-step-up", nil
 	}))
 	path := "/v1/engineering/documents/" + signedDocID + ":sign"
-	if rec := do(r, http.MethodPost, path, `{"printedName":"Carol Kane"}`, allDuties, true, "X-Passage-User", "carol"); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), domain.CodeDocReauth) {
+	if rec := do(r, http.MethodPost, path, `{"printedName":"Carol Kane"}`, allDuties, true, signer...); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), domain.CodeDocReauth) {
 		t.Fatalf("missing proof = %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(r, http.MethodPost, path, `{}`, "engineering.read,engineering.bom.write", true, "X-Passage-User", "carol", "X-Passage-Reauth-Assertion", "step-up-token"); rec.Code != http.StatusForbidden {
+	if rec := do(r, http.MethodPost, path, `{}`, "engineering.read,engineering.bom.write", true, signHeaders("X-Passage-Reauth-Assertion", "step-up-token")...); rec.Code != http.StatusForbidden {
 		t.Fatalf("missing sign duty = %d %s", rec.Code, rec.Body.String())
 	}
-	rec := do(r, http.MethodPost, path, `{"printedName":"Carol Kane","method":"password"}`, allDuties, true, "X-Passage-User", "carol", "X-Passage-Reauth-Assertion", "step-up-token")
+	rec := do(r, http.MethodPost, path, `{"printedName":"Carol Kane","method":"password"}`, allDuties, true, signHeaders("X-Passage-Reauth-Assertion", "step-up-token")...)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"released"`) {
 		t.Fatalf("sign = %d %s", rec.Code, rec.Body.String())
 	}
@@ -120,14 +142,47 @@ func TestSignDocument_ReauthIsBoundToTheRecord(t *testing.T) {
 	if len(sigs) != 1 || sigs[0].SignerID != "carol" || sigs[0].PrintedName != "Carol Kane" || sigs[0].Meaning != "Approved for release" || sigs[0].RecordID != signedDocID || sigs[0].OriginalsHash != seen.RecordHash {
 		t.Fatalf("stored signatures = %+v; want one bound to the verified hash %s", sigs, seen.RecordHash)
 	}
+	if sigs[0].Method != "oidc-step-up" || seen.Method != "password" {
+		t.Fatalf("signature method = %q (client asked %q); want the method the verifier proved, not the client's claim", sigs[0].Method, seen.Method)
+	}
+}
+
+func TestSignDocument_DevReauthIsMarkedUnverified(t *testing.T) {
+	f := signableStore()
+	r := signRouter(f, api.DevReauth{})
+	rec := do(r, http.MethodPost, "/v1/engineering/documents/"+signedDocID+":sign", `{"printedName":"Carol Kane","method":"password"}`, allDuties, true, signer...)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("dev sign = %d %s", rec.Code, rec.Body.String())
+	}
+	if sigs := f.w().sigs; len(sigs) != 1 || sigs[0].Method != domain.AuthDevUnverified {
+		t.Fatalf("dev signatures = %+v; want method %s so they never pass for re-authenticated ones", sigs, domain.AuthDevUnverified)
+	}
+}
+
+func TestSignDocument_RefusesASignerWithoutLegalEntity(t *testing.T) {
+	f := signableStore()
+	called := false
+	r := signRouter(f, reauthFunc(func(context.Context, string, domain.Reauth) (string, error) {
+		called = true
+		return "oidc-step-up", nil
+	}))
+	path := "/v1/engineering/documents/" + signedDocID + ":sign"
+	rec := do(r, http.MethodPost, path, `{}`, allDuties, true, "X-Passage-User", "carol")
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), domain.CodeDocSignScope) || called || f.w().transits != 0 {
+		t.Fatalf("sign without a legal entity = %d %s (verifier called=%v); want 403 %s before anything is written", rec.Code, rec.Body.String(), called, domain.CodeDocSignScope)
+	}
+	long := `{"printedName":"` + strings.Repeat("x", 201) + `"}`
+	if rec := do(r, http.MethodPost, path, long, allDuties, true, signer...); rec.Code != http.StatusBadRequest {
+		t.Fatalf("oversized printed name = %d; want 400", rec.Code)
+	}
 }
 
 func TestSignDocument_OnlySignatureTransitions(t *testing.T) {
 	f := signableStore()
-	r := signRouter(f, reauthFunc(func(context.Context, string, domain.Reauth) error { return nil }))
+	r := signRouter(f, reauthFunc(func(context.Context, string, domain.Reauth) (string, error) { return "oidc-step-up", nil }))
 	path := "/v1/engineering/documents/" + signedDocID + ":sign"
 	for _, to := range []string{"cancelled", "in_work", "obsolete", "in_review"} {
-		rec := do(r, http.MethodPost, path, `{"to":"`+to+`"}`, allDuties, true, "X-Passage-User", "carol")
+		rec := do(r, http.MethodPost, path, `{"to":"`+to+`"}`, allDuties, true, signer...)
 		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), domain.CodeDocNotSignable) {
 			t.Fatalf("sign to %s = %d %s; want 422 %s", to, rec.Code, rec.Body.String(), domain.CodeDocNotSignable)
 		}
@@ -136,7 +191,7 @@ func TestSignDocument_OnlySignatureTransitions(t *testing.T) {
 		t.Fatalf("a refused sign must not transition: %d", f.w().transits)
 	}
 	f.w().doc.Originals = nil
-	if rec := do(r, http.MethodPost, path, `{}`, allDuties, true, "X-Passage-User", "carol"); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), domain.CodeDocNoOriginals) {
+	if rec := do(r, http.MethodPost, path, `{}`, allDuties, true, signer...); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), domain.CodeDocNoOriginals) {
 		t.Fatalf("sign without originals = %d %s", rec.Code, rec.Body.String())
 	}
 }
@@ -178,7 +233,7 @@ func TestImportEbom(t *testing.T) {
 
 func TestAcceptReleaseLineDuty(t *testing.T) {
 	lineID := ecoID
-	f := &fakeStore{wave: &wave09State{line: domain.ReleaseLine{ID: lineID, Status: domain.LineSent, LegalEntityID: "USMF"}}}
+	f := &fakeStore{wave: &wave09State{line: domain.ReleaseLine{ID: lineID, Status: domain.LineSent, LegalEntityID: leUSMF}}}
 	r, _ := newRouter(f, approves)
 	if rec := do(r, http.MethodPost, "/v1/engineering/release-lines/"+lineID+":accept", `{}`, "engineering.read,engineering.bom.write", true, "X-Passage-User", "bob"); rec.Code != http.StatusForbidden {
 		t.Fatalf("missing accept duty = %d %s", rec.Code, rec.Body.String())
@@ -296,19 +351,21 @@ func TestCreateReleaseSession_CreatorIsThePrincipal(t *testing.T) {
 	f := &fakeStore{}
 	r, _ := newRouter(f, approves)
 	body := func(extra string) string {
-		return `{"policyId":"` + ecoID + `","engineeringLeId":"ENG1","productId":"P","versionCode":"V-01","legalEntities":["USMF"]` + extra + `}`
+		return `{"policyId":"` + ecoID + `","engineeringLeId":"` + leENG + `","productId":"P","versionCode":"V-01","legalEntities":["` + leUSMF + `"]` + extra + `}`
 	}
 	if rec := do(r, http.MethodPost, "/v1/engineering/release-sessions", body(`,"createdBy":"someone-else"`), allDuties, true, "X-Passage-User", "rita"); rec.Code != http.StatusBadRequest {
 		t.Fatalf("body createdBy = %d %s; want 400", rec.Code, rec.Body.String())
 	}
 	rec := do(r, http.MethodPost, "/v1/engineering/release-sessions", body(""), allDuties, true, "X-Passage-User", "rita")
-	if rec.Code != http.StatusCreated || f.w().sessionIn.CreatedBy != "rita" || f.w().sessionIn.EngineeringLEID != "ENG1" {
+	if rec.Code != http.StatusCreated || f.w().sessionIn.CreatedBy != "rita" || f.w().sessionIn.EngineeringLEID != leENG {
 		t.Fatalf("create = %d %s; input %+v", rec.Code, rec.Body.String(), f.w().sessionIn)
 	}
 	for name, bad := range map[string]string{
-		"no engineering entity": `{"policyId":"` + ecoID + `","productId":"P","versionCode":"V-01","legalEntities":["USMF"]}`,
-		"duplicate entities":    `{"policyId":"` + ecoID + `","engineeringLeId":"ENG1","productId":"P","versionCode":"V-01","legalEntities":["USMF","USMF"]}`,
-		"unknown source":        `{"policyId":"` + ecoID + `","engineeringLeId":"ENG1","productId":"P","versionCode":"V-01","legalEntities":["USMF"],"source":"cron"}`,
+		"no engineering entity":   `{"policyId":"` + ecoID + `","productId":"P","versionCode":"V-01","legalEntities":["` + leUSMF + `"]}`,
+		"duplicate entities":      `{"policyId":"` + ecoID + `","engineeringLeId":"` + leENG + `","productId":"P","versionCode":"V-01","legalEntities":["` + leUSMF + `","` + strings.ToUpper(leUSMF) + `"]}`,
+		"legal entity code":       `{"policyId":"` + ecoID + `","engineeringLeId":"` + leENG + `","productId":"P","versionCode":"V-01","legalEntities":["USMF"]}`,
+		"engineering entity code": `{"policyId":"` + ecoID + `","engineeringLeId":"ENG1","productId":"P","versionCode":"V-01","legalEntities":["` + leUSMF + `"]}`,
+		"unknown source":          `{"policyId":"` + ecoID + `","engineeringLeId":"` + leENG + `","productId":"P","versionCode":"V-01","legalEntities":["` + leUSMF + `"],"source":"cron"}`,
 	} {
 		if rec := do(r, http.MethodPost, "/v1/engineering/release-sessions", bad, allDuties, true, "X-Passage-User", "rita"); rec.Code != http.StatusBadRequest {
 			t.Fatalf("%s = %d %s; want 400", name, rec.Code, rec.Body.String())

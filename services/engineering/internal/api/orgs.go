@@ -31,7 +31,7 @@ func (a *API) createOrganization(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields := map[string]string{}
-	validID("legalEntityId", body.LegalEntityID, fields)
+	body.LegalEntityID = legalEntityID("legalEntityId", body.LegalEntityID, fields)
 	validID("code", body.Code, fields)
 	if n := len(body.Name); n == 0 || n > 200 {
 		fields["name"] = "must be 1 to 200 characters"
@@ -248,7 +248,7 @@ func (a *API) createEngineeringVersion(w http.ResponseWriter, r *http.Request) {
 	fields := map[string]string{}
 	validID("productId", body.ProductID, fields)
 	validID("versionCode", body.VersionCode, fields)
-	validID("engineeringLeId", body.EngineeringLEID, fields)
+	body.EngineeringLEID = legalEntityID("engineeringLeId", body.EngineeringLEID, fields)
 	checkUUID("categoryId", body.CategoryID, fields)
 	checkUUID("bomVersionId", body.BOMVersionID, fields)
 	checkUUID("routeVersionId", body.RouteVersionID, fields)

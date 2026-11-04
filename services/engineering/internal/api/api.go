@@ -46,6 +46,8 @@ const (
 	maxReleaseEntities  = 100
 	maxFindNumber       = 99999
 	maxOriginals        = 50
+	maxPrintedName      = 200
+	maxReadinessChecks  = 100
 	maxStorageKey       = 512
 	maxDocumentChildren = 500
 	maxLines            = 5000

@@ -17,6 +17,8 @@ const (
 	DocCancelled = "cancelled"
 
 	AuthPassword = "password"
+	// AuthDevUnverified is the method DevReauth records: no re-authentication took place.
+	AuthDevUnverified = "dev-unverified"
 )
 
 // DocumentType is FR-8.20 settings used by engineering (FR-9.24/9.25).
@@ -128,6 +130,15 @@ func (n StatusNetwork) CanTransition(from, to, duty string) error {
 	return errf(CodeDocState, "cannot move a document from %s to %s", from, to)
 }
 
+// CanLeaveRelease enforces FR-9.25 on the way out: a released version of a change-controlled type is
+// made obsolete only by the ECO that releases its successor.
+func (d Document) CanLeaveRelease(typ DocumentType, to string) error {
+	if typ.ChangeControlled && d.Status == DocReleased && to != DocReleased {
+		return errf(CodeDocEcoRequired, "Document type %s is change-controlled; %s %s is made obsolete by the ECO that releases its successor.", typ.Code, d.Number, d.Version)
+	}
+	return nil
+}
+
 func (n StatusNetwork) RequiresSignature(from, to string) bool {
 	for _, t := range n.Transitions {
 		if t.From == from && t.To == to {
@@ -186,6 +197,8 @@ func SignDocument(typ DocumentType, doc Document, to, method, actor, printedName
 	}, nil
 }
 
+// HashRecord is the SHA-256 of the canonical signed record: id, number, part, version, type and the
+// originals (key, digest, size) sorted by key.
 func HashRecord(doc Document) string {
 	type original struct {
 		Key  string `json:"key"`
@@ -202,10 +215,11 @@ func HashRecord(doc Document) string {
 	raw, _ := json.Marshal(struct {
 		ID        string     `json:"id"`
 		Number    string     `json:"number"`
+		Part      string     `json:"part"`
 		Version   string     `json:"version"`
 		Type      string     `json:"type"`
 		Originals []original `json:"originals"`
-	}{doc.ID, doc.Number, doc.Version, doc.TypeCode, files})
+	}{doc.ID, doc.Number, doc.Part, doc.Version, doc.TypeCode, files})
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }

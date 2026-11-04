@@ -65,6 +65,7 @@ func TestDocumentSign_Part11Manifestation(t *testing.T) {
 		},
 		"document id":   func(d *Document) { d.ID = "d3" },
 		"number":        func(d *Document) { d.Number = "DRW-2" },
+		"part":          func(d *Document) { d.Part = "001" },
 		"version":       func(d *Document) { d.Version = "03" },
 		"document type": func(d *Document) { d.TypeCode = "SPC" },
 	}

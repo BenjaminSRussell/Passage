@@ -123,7 +123,7 @@ export function OrganizationCreatePage({ onCreated, onCancel }: { onCreated?: (i
       <Card>
         <form className={styles.form} onSubmit={submit}>
           <div className={styles.field}>
-            <FormField id="new-org-le" label="Legal entity" error={fields.legalEntityId}>
+            <FormField id="new-org-le" label="Legal entity" hint="The legal entity id (a UUID)." error={fields.legalEntityId}>
               {(control) => <Input {...control} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} required maxLength={64} />}
             </FormField>
           </div>

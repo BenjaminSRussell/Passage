@@ -94,6 +94,7 @@ const (
 	CodeDocNoOriginals       = "ENG-DOC-NO-ORIGINALS"
 	CodeDocUnsigned          = "ENG-DOC-UNSIGNED"
 	CodeDocReauthUnavailable = "ENG-DOC-REAUTH-UNAVAILABLE"
+	CodeDocSignScope         = "ENG-DOC-SIGN-SCOPE"
 	CodeReleaseScope         = "ENG-RELEASE-SCOPE"
 	CodeEbomPartUnknown      = "ENG-EBOM-PART-UNKNOWN"
 	CodeEbomRevisionReleased = "ENG-EBOM-REVISION-RELEASED"

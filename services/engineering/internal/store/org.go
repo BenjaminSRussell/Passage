@@ -19,6 +19,9 @@ func (s *Postgres) CreateOrganization(ctx context.Context, o domain.EngineeringO
 	if o.ID == "" {
 		o.ID = ids.New()
 	}
+	if p, _ := tenant.FromContext(ctx); !ActsForLegalEntity(p, o.LegalEntityID) {
+		return o, outOfScope(o.LegalEntityID)
+	}
 	return createOnce(s, ctx, idem, o.ID, o, func(ctx context.Context, tx pgx.Tx, tenantID string, v domain.EngineeringOrganization) error {
 		_, err := tx.Exec(ctx, `insert into engineering_organization (tenant_id, id, legal_entity_id, code, name) values ($1, $2, $3, $4, $5)`,
 			tenantID, v.ID, v.LegalEntityID, v.Code, v.Name)
@@ -129,6 +132,9 @@ func (s *Postgres) ListCategories(ctx context.Context, afterID string, limit int
 func (s *Postgres) CreateEngineeringVersion(ctx context.Context, v domain.EngineeringVersion, idem Idem) (domain.EngineeringVersion, error) {
 	if v.ID == "" {
 		v.ID = ids.New()
+	}
+	if p, _ := tenant.FromContext(ctx); !ActsForLegalEntity(p, v.EngineeringLEID) {
+		return v, outOfScope(v.EngineeringLEID)
 	}
 	return createOnce(s, ctx, idem, v.ID, v, func(ctx context.Context, tx pgx.Tx, tenantID string, row domain.EngineeringVersion) error {
 		var owner string

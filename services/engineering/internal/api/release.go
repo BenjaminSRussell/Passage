@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -42,6 +41,14 @@ func (a *API) createReleasePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	fields := map[string]string{}
 	validID("code", body.Code, fields)
+	if len(body.RequireAcceptance) > maxReleaseEntities {
+		fields["requireAcceptance"] = fmt.Sprintf("must list at most %d legal entities", maxReleaseEntities)
+	}
+	acceptance := make(map[string]bool, len(body.RequireAcceptance))
+	for le, required := range body.RequireAcceptance {
+		acceptance[legalEntityID("requireAcceptance", le, fields)] = required
+	}
+	body.RequireAcceptance = acceptance
 	if len(fields) > 0 {
 		invalid(w, r, fields)
 		return
@@ -95,8 +102,8 @@ func (a *API) putSiteMapping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields := map[string]string{}
-	validID("engineeringLeId", req.EngineeringLEID, fields)
-	validID("operationalLeId", req.OperationalLEID, fields)
+	req.EngineeringLEID = legalEntityID("engineeringLeId", req.EngineeringLEID, fields)
+	req.OperationalLEID = legalEntityID("operationalLeId", req.OperationalLEID, fields)
 	if len(fields) > 0 {
 		invalid(w, r, fields)
 		return
@@ -172,7 +179,7 @@ func (a *API) createReleaseSession(w http.ResponseWriter, r *http.Request) {
 	if body.CreatedBy != "" {
 		fields["createdBy"] = "is the signed-in user and cannot be set"
 	}
-	validID("engineeringLeId", body.EngineeringLEID, fields)
+	body.EngineeringLEID = legalEntityID("engineeringLeId", body.EngineeringLEID, fields)
 	switch body.Source {
 	case "", domain.ReleaseManual, domain.ReleaseEco, domain.ReleaseJob:
 	default:
@@ -187,11 +194,13 @@ func (a *API) createReleaseSession(w http.ResponseWriter, r *http.Request) {
 		fields["legalEntities"] = fmt.Sprintf("must list 1 to %d legal entities", maxReleaseEntities)
 	}
 	seen := map[string]bool{}
-	for _, le := range body.LegalEntities {
-		if n := len(strings.TrimSpace(le)); n == 0 || n > maxIDLength || seen[le] {
-			fields["legalEntities"] = "each legal entity must be 1 to 64 characters and listed once"
+	for i, le := range body.LegalEntities {
+		id := legalEntityID("legalEntities", le, fields)
+		if seen[id] {
+			fields["legalEntities"] = "each legal entity must be listed once"
 		}
-		seen[le] = true
+		seen[id] = true
+		body.LegalEntities[i] = id
 	}
 	if len(fields) > 0 {
 		invalid(w, r, fields)
@@ -241,6 +250,13 @@ func (a *API) listReleaseLines(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	f := store.ReleaseLineFilter{Status: q.Get("status"), LegalEntityID: q.Get("legalEntityId")}
+	if f.LegalEntityID != "" {
+		fields := map[string]string{}
+		if f.LegalEntityID = legalEntityID("legalEntityId", f.LegalEntityID, fields); len(fields) > 0 {
+			invalid(w, r, fields)
+			return
+		}
+	}
 	switch f.Status {
 	case "", domain.LinePending, domain.LineSent, domain.LineAccepted, domain.LineRejected, domain.LineFailed:
 	default:
@@ -307,6 +323,22 @@ func (a *API) createReadinessPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	fields := map[string]string{}
 	validID("code", body.Code, fields)
+	if len(body.Checks) > maxReadinessChecks {
+		fields["checks"] = fmt.Sprintf("must list at most %d checks", maxReadinessChecks)
+	}
+	keys := map[string]bool{}
+	for i, c := range body.Checks {
+		field := fmt.Sprintf("checks[%d]", i)
+		switch {
+		case len(c.Key) == 0 || len(c.Key) > maxIDLength:
+			fields[field] = fmt.Sprintf("key must be 1 to %d characters", maxIDLength)
+		case keys[c.Key]:
+			fields[field] = "key is listed twice"
+		case c.Kind != domain.CheckAuto && c.Kind != domain.CheckManual:
+			fields[field] = "kind must be auto or manual"
+		}
+		keys[c.Key] = true
+	}
 	if len(fields) > 0 {
 		invalid(w, r, fields)
 		return
@@ -360,9 +392,16 @@ func (a *API) listReleasedProducts(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
-	legalEntityID := r.URL.Query().Get("legalEntityId")
+	legalEntity := r.URL.Query().Get("legalEntityId")
+	if legalEntity != "" {
+		fields := map[string]string{}
+		if legalEntity = legalEntityID("legalEntityId", legalEntity, fields); len(fields) > 0 {
+			invalid(w, r, fields)
+			return
+		}
+	}
 	listPage(a, w, r, "list released products", &a.bomFailed, func(ctx context.Context, after string, limit int) (store.Page[store.ReleasedProduct], error) {
-		return a.store.ListReleasedProducts(ctx, legalEntityID, after, limit)
+		return a.store.ListReleasedProducts(ctx, legalEntity, after, limit)
 	}, bodyFromReleasedProduct)
 }
 

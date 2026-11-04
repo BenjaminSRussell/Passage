@@ -1202,7 +1202,7 @@ paths:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
         - { name: status, in: query, schema: { type: string, enum: [pending, sent, accepted, rejected, failed] } }
-        - { name: legalEntityId, in: query, schema: { type: string, maxLength: 64 } }
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
       responses:
         '200':
           description: One page of release lines ordered by id.
@@ -1293,7 +1293,7 @@ paths:
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
-        - { name: legalEntityId, in: query, schema: { type: string, maxLength: 64 } }
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
       responses:
         '200':
           description: One page of released products ordered by id.
@@ -1450,16 +1450,16 @@ paths:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: X-Passage-Reauth-Assertion, in: header, required: false, schema: { type: string }, description: 'Step-up proof from re-authentication of the signer (21 CFR 11.200), bound to the document id and record hash. No step-up issuer is configured yet, so outside PASSAGE_ENV=dev every sign is refused with 503 ENG-DOC-REAUTH-UNAVAILABLE; the web form never asks the user to type it.' }
       requestBody:
-        content: { application/json: { schema: { type: object, properties: { printedName: { type: string }, method: { type: string }, to: { type: string } } } } }
+        content: { application/json: { schema: { type: object, properties: { printedName: { type: string, maxLength: 200 }, method: { type: string, maxLength: 64, description: 'Requested re-authentication method, passed to the verifier as a hint. The signature records the method the verifier proved, never this value (dev-unverified under PASSAGE_ENV=dev).' }, to: { type: string } } } } }
       responses:
         '200':
-          description: The signed document. Records meaning, timestamp, record id and the record hash (id, number, version, type and the sorted originals) in an append-only signature, and queues the audit change in the same transaction; a relay delivers it to the audit service with retry and backoff. A successor of a released change-controlled version stays in_review, signed, until its approved ECO releases it.
+          description: The signed document. Records meaning, timestamp, record id and the record hash (id, number, part, version, type and the sorted originals) in an append-only signature, and queues the audit change in the same transaction; a relay delivers it to the audit service with retry and backoff. A successor of a released change-controlled version stays in_review, signed, until its approved ECO releases it.
           content: { application/json: { schema: { $ref: '#/components/schemas/Document' } } }
         '403':
-          description: ENG-DOC-REAUTH, missing or mismatched re-authentication; ENG-DOC-SIGNER, the last editor cannot independently review their own document.
+          description: ENG-DOC-REAUTH, missing or mismatched re-authentication; ENG-DOC-SIGNER, the last editor cannot independently review their own document; ENG-DOC-SIGN-SCOPE, the signer has no legal-entity scope, so the audit record could not be delivered on their behalf.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '409':
-          description: ENG-DOC-ECO-REQUIRED, a change-controlled successor needs an approved ECO that lists it; ENG-DOC-STATE, it is already signed and waits for its ECO.
+          description: ENG-DOC-ECO-REQUIRED, a change-controlled successor needs an approved ECO that lists it; ENG-DOC-STATE, it is already signed and waits for its ECO, or the stored record no longer hashes to the value presented for signature.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
           description: ENG-DOC-NOT-SIGNABLE, the requested move needs no signature (only transitions of the status network that carry one are signed); ENG-DOC-NO-ORIGINALS, a type signed on release needs at least one original.
@@ -1913,7 +1913,7 @@ components:
       required: [legalEntityId, code, name]
       properties:
         id: { type: string, format: uuid }
-        legalEntityId: { type: string, maxLength: 64 }
+        legalEntityId: { type: string, format: uuid, description: The caller must be scoped to it (403 ENG-RELEASE-SCOPE). }
         code: { type: string, maxLength: 64 }
         name: { type: string, maxLength: 200 }
     Nomenclature:
@@ -1960,7 +1960,7 @@ components:
         id: { type: string, format: uuid }
         productId: { type: string, maxLength: 64 }
         versionCode: { type: string, maxLength: 64 }
-        engineeringLeId: { type: string, maxLength: 64 }
+        engineeringLeId: { type: string, format: uuid }
         categoryId: { type: string, format: uuid }
         bomVersionId: { type: string, format: uuid }
         routeVersionId: { type: string, format: uuid }
@@ -1987,14 +1987,14 @@ components:
         copyAttributes: { type: boolean }
         copyOrderSettings: { type: boolean }
         copyDocuments: { type: boolean }
-        requireAcceptance: { type: object, additionalProperties: { type: boolean } }
+        requireAcceptance: { type: object, description: Keyed by legal-entity UUID., additionalProperties: { type: boolean } }
     SiteMapping:
       type: object
       additionalProperties: false
       required: [engineeringLeId, operationalLeId]
       properties:
-        engineeringLeId: { type: string, maxLength: 64 }
-        operationalLeId: { type: string, maxLength: 64 }
+        engineeringLeId: { type: string, format: uuid }
+        operationalLeId: { type: string, format: uuid }
         engineeringSite: { type: string }
         operationalSite: { type: string }
     ReleaseLine:
@@ -2004,7 +2004,7 @@ components:
         sessionId: { type: string, format: uuid }
         productId: { type: string }
         engineeringVersion: { type: string }
-        legalEntityId: { type: string }
+        legalEntityId: { type: string, format: uuid }
         status: { type: string, enum: [pending, sent, accepted, rejected, failed] }
         reason: { type: string }
         acceptedBy: { type: string }
@@ -2016,16 +2016,16 @@ components:
       required: [policyId, engineeringLeId, productId, versionCode, legalEntities]
       properties:
         id: { type: string, format: uuid }
-        number: { type: string, description: Generated as REL-{yyyy}-{#####} from a sequence when omitted. }
+        number: { type: string, description: 'Generated as REL-{yyyy}-{#####} from a sequence when omitted.' }
         createdBy: { type: string, readOnly: true, description: The signed-in user; a request that sets it is refused with 400. }
         source: { type: string, enum: [manual, eco, job] }
         policyId: { type: string, format: uuid }
         ecoId: { type: string, format: uuid }
         readinessPolicyId: { type: string, format: uuid, description: Evaluates each received product; falls back to the engineering category's policy. }
-        engineeringLeId: { type: string, maxLength: 64, description: The owning engineering legal entity. The caller must be scoped to it, and to every receiving entity that accepts without review (403 ENG-RELEASE-SCOPE). }
+        engineeringLeId: { type: string, format: uuid, description: 'The owning engineering legal entity. The caller must be scoped to it, and to every receiving entity that accepts without review (403 ENG-RELEASE-SCOPE). Lines are visible to this entity and to their receiving entity.' }
         productId: { type: string, maxLength: 64 }
         versionCode: { type: string, maxLength: 64 }
-        legalEntities: { type: array, minItems: 1, items: { type: string } }
+        legalEntities: { type: array, minItems: 1, maxItems: 100, items: { type: string, format: uuid } }
         lines: { type: array, items: { $ref: '#/components/schemas/ReleaseLine' } }
     ReadinessPolicy:
       type: object
@@ -2041,15 +2041,15 @@ components:
           items:
             type: object
             properties:
-              key: { type: string }
-              kind: { type: string }
+              key: { type: string, maxLength: 64 }
+              kind: { type: string, enum: [auto, manual] }
               mandatory: { type: boolean }
     ReleasedProduct:
       type: object
       properties:
         id: { type: string, format: uuid }
         productId: { type: string }
-        legalEntityId: { type: string }
+        legalEntityId: { type: string, format: uuid }
         engineeringVersion: { type: string }
         sessionId: { type: string, format: uuid }
         state: { type: string }
@@ -2117,8 +2117,8 @@ components:
         printedName: { type: string }
         meaning: { type: string }
         signedAt: { type: string, format: date-time }
-        originalsHash: { type: string, description: 'sha256 of the canonical record: id, number, version, type and the originals sorted by key (name kept for compatibility).' }
-        method: { type: string }
+        originalsHash: { type: string, description: 'sha256 of the canonical record: id, number, part, version, type and the originals sorted by key (name kept for compatibility).' }
+        method: { type: string, description: The re-authentication method the verifier proved; dev-unverified marks a PASSAGE_ENV=dev signature with no re-authentication. }
     DocumentWhereUsed:
       type: object
       properties:

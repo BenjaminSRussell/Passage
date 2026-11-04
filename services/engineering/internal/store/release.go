@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -134,16 +133,10 @@ func (s *Postgres) ListReadinessPolicies(ctx context.Context, afterID string, li
 		})
 }
 
+// ActsForLegalEntity is the platform scope check (canonical legal-entity UUIDs, fail closed), the same one
+// the restrictive legal-entity policies on release_line and released_product apply.
 func ActsForLegalEntity(p tenant.Principal, legalEntity string) bool {
-	if p.LegalEntityID == "" {
-		return tenant.IsTenantAdmin(p)
-	}
-	for _, part := range strings.Split(p.LegalEntityID, ",") {
-		if strings.TrimSpace(part) == legalEntity {
-			return true
-		}
-	}
-	return false
+	return tenant.InLegalEntityScope(p, legalEntity)
 }
 
 func outOfScope(legalEntity string) error {
@@ -166,7 +159,7 @@ func (s *Postgres) CreateReleaseSession(ctx context.Context, in ReleaseSessionIn
 			rec = loaded
 			return err
 		}
-		if in.EngineeringLEID != "" && !ActsForLegalEntity(p, in.EngineeringLEID) {
+		if !ActsForLegalEntity(p, in.EngineeringLEID) {
 			return outOfScope(in.EngineeringLEID)
 		}
 		if in.Number == "" {
@@ -199,9 +192,9 @@ func (s *Postgres) CreateReleaseSession(ctx context.Context, in ReleaseSessionIn
 			if err := applyAcceptedLine(ctx, tx, p, policy, in, &lines[i]); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, `insert into release_line (tenant_id, id, session_id, product_id, engineering_version, legal_entity_id, status, reason, accepted_by, retries, copied_bom_version_id, copied_route_version_id)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, nullif($11, '')::uuid, nullif($12, '')::uuid)`,
-				p.TenantID, lines[i].ID, session.ID, lines[i].ProductID, lines[i].EngineeringVersion, lines[i].LegalEntityID, lines[i].Status, lines[i].Reason, lines[i].AcceptedBy, lines[i].Retries, lines[i].CopiedBOMVersionID, lines[i].CopiedRouteVersionID); err != nil {
+			if _, err := tx.Exec(ctx, `insert into release_line (tenant_id, id, session_id, product_id, engineering_version, legal_entity_id, engineering_le_id, status, reason, accepted_by, retries, copied_bom_version_id, copied_route_version_id)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, nullif($12, '')::uuid, nullif($13, '')::uuid)`,
+				p.TenantID, lines[i].ID, session.ID, lines[i].ProductID, lines[i].EngineeringVersion, lines[i].LegalEntityID, session.EngineeringLEID, lines[i].Status, lines[i].Reason, lines[i].AcceptedBy, lines[i].Retries, lines[i].CopiedBOMVersionID, lines[i].CopiedRouteVersionID); err != nil {
 				return err
 			}
 			if lines[i].Status == domain.LineAccepted {
@@ -631,6 +624,9 @@ func (s *Postgres) SignReadinessCheck(ctx context.Context, releasedProductID, ke
 		loaded, err := getReleasedProduct(ctx, tx, p.TenantID, releasedProductID)
 		if err != nil {
 			return err
+		}
+		if !ActsForLegalEntity(p, loaded.LegalEntityID) {
+			return outOfScope(loaded.LegalEntityID)
 		}
 		signed, err := domain.SignManualCheck(loaded.Checks, key, signer, loaded.SessionCreator)
 		if err != nil {

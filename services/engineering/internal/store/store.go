@@ -171,6 +171,7 @@ type Store interface {
 	GetEbomImport(ctx context.Context, id string) (EbomImportRecord, error)
 	ListEbomImports(ctx context.Context, afterID string, limit int) (Page[EbomImportRecord], error)
 
+	CanScanAudit(ctx context.Context) (bool, error)
 	ClaimAudit(ctx context.Context, limit int, lease time.Duration) ([]AuditJob, error)
 	CompleteAudit(ctx context.Context, id string) error
 	FailAudit(ctx context.Context, id string, attempts int, cause error, retryAfter time.Duration) error
@@ -736,6 +737,17 @@ func (s *Postgres) CreateEco(ctx context.Context, e domain.Eco, idem Idem) (doma
 			}
 			if knownDocs != len(docIDs) {
 				return httpx.NewProblem(http.StatusNotFound, "ENG-DOC-NOTFOUND", "a replaced or replacing document does not exist")
+			}
+			newDocs := make([]string, 0, len(e.Documents))
+			for _, r := range e.Documents {
+				newDocs = append(newDocs, r.NewDocumentID)
+			}
+			var taken int
+			if err := tx.QueryRow(ctx, `select count(*) from document where tenant_id = $1 and id = any($2::uuid[]) and (eco_id is not null or status not in ('in_work', 'in_review'))`, p.TenantID, newDocs).Scan(&taken); err != nil {
+				return err
+			}
+			if taken > 0 {
+				return &domain.Error{Code: domain.CodeDocState, Detail: "a replacing document is already bound to an ECO or is no longer in work or in review"}
 			}
 		}
 		for _, r := range e.Documents {

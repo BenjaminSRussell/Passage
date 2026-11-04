@@ -265,6 +265,21 @@ func (a *API) signDocument(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	fields := map[string]string{}
+	if len(body.PrintedName) > maxPrintedName {
+		fields["printedName"] = fmt.Sprintf("must be at most %d characters", maxPrintedName)
+	}
+	if len(body.Method) > maxIDLength {
+		fields["method"] = fmt.Sprintf("must be at most %d characters", maxIDLength)
+	}
+	if len(fields) > 0 {
+		invalid(w, r, fields)
+		return
+	}
+	if store.SignerLegalEntity(p) == "" {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, domain.CodeDocSignScope, "signing needs a legal-entity scope: the audit record is delivered under the signer's legal entity"))
+		return
+	}
 	to := body.To
 	if to == "" {
 		to = domain.DocReleased
@@ -279,16 +294,22 @@ func (a *API) signDocument(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, "sign document", err, &a.bomFailed)
 		return
 	}
-	sig, err := domain.SignDocument(typ, doc, to, body.Method, p.UserID, body.PrintedName, a.now())
+	sig, err := domain.SignDocument(typ, doc, to, "", p.UserID, body.PrintedName, a.now())
 	if err != nil {
 		a.fail(w, r, "sign document", err, &a.bomFailed)
 		return
 	}
 	auth := domain.Reauth{UserID: p.UserID, Assertion: r.Header.Get(reauthHeader), Method: body.Method, DocumentID: doc.ID, RecordHash: sig.OriginalsHash}
-	if err := a.reauth.Verify(r.Context(), p.UserID, auth); err != nil {
+	method, err := a.reauth.Verify(r.Context(), p.UserID, auth)
+	if err != nil {
 		a.fail(w, r, "reauth", err, &a.bomFailed)
 		return
 	}
+	if method == "" {
+		a.fail(w, r, "reauth", &domain.Error{Code: domain.CodeDocReauth, Detail: "signature rejected: the re-authentication named no verified method"}, &a.bomFailed)
+		return
+	}
+	sig.Method = method
 	signed, err := a.store.TransitionDocument(r.Context(), id, to, p.UserID, &sig)
 	if err != nil {
 		a.fail(w, r, "sign document", err, &a.bomFailed)

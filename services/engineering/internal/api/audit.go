@@ -34,9 +34,10 @@ type Auditor interface {
 }
 
 // Reauthenticator is the step-up seam (21 CFR 11.200): it proves the actor just re-authenticated,
-// with a proof bound to the document and record hash in auth.
+// with a proof bound to the document and record hash in auth. It returns the authentication method it
+// verified; that, never the client's claim, is the method the signature records.
 type Reauthenticator interface {
-	Verify(ctx context.Context, actor string, auth domain.Reauth) error
+	Verify(ctx context.Context, actor string, auth domain.Reauth) (method string, err error)
 }
 
 // NopAuditor discards records; it is bound only when PASSAGE_ENV=dev and AUDIT_URL is unset.
@@ -46,17 +47,19 @@ func (NopAuditor) RecordSignature(context.Context, domain.Signature) error { ret
 
 type FailClosedReauth struct{}
 
-func (FailClosedReauth) Verify(context.Context, string, domain.Reauth) error {
-	return httpx.NewProblem(http.StatusServiceUnavailable, domain.CodeDocReauthUnavailable, "signing is unavailable: no re-authentication service is configured")
+func (FailClosedReauth) Verify(context.Context, string, domain.Reauth) (string, error) {
+	return "", httpx.NewProblem(http.StatusServiceUnavailable, domain.CodeDocReauthUnavailable, "signing is unavailable: no re-authentication service is configured")
 }
 
+// DevReauth verifies nothing; it is bound only when PASSAGE_ENV=dev, and every signature it admits records
+// the method domain.AuthDevUnverified so it can never pass for a re-authenticated one.
 type DevReauth struct{}
 
-func (DevReauth) Verify(_ context.Context, actor string, auth domain.Reauth) error {
+func (DevReauth) Verify(_ context.Context, actor string, auth domain.Reauth) (string, error) {
 	if actor == "" || auth.UserID != actor {
-		return &domain.Error{Code: domain.CodeDocReauth, Detail: "signature rejected: re-authentication failed"}
+		return "", &domain.Error{Code: domain.CodeDocReauth, Detail: "signature rejected: re-authentication failed"}
 	}
-	return nil
+	return domain.AuthDevUnverified, nil
 }
 
 type auditChange struct {
@@ -149,12 +152,12 @@ func (r *AuditRelay) Drain(ctx context.Context) (int, error) {
 		callCtx := tenant.With(ctx, tenant.Principal{TenantID: job.TenantID, UserID: job.UserID, LegalEntityID: job.LegalEntityID})
 		if err := r.auditor.RecordSignature(callCtx, job.Signature); err != nil {
 			slog.ErrorContext(ctx, "audit delivery failed", "signature", job.ID, "attempts", job.Attempts+1, "err", err)
-			if failErr := r.store.FailAudit(ctx, job.ID, job.Attempts+1, err, auditBackoff(job.Attempts+1)); failErr != nil {
+			if failErr := r.store.FailAudit(callCtx, job.ID, job.Attempts+1, err, auditBackoff(job.Attempts+1)); failErr != nil {
 				return delivered, failErr
 			}
 			continue
 		}
-		if err := r.store.CompleteAudit(ctx, job.ID); err != nil {
+		if err := r.store.CompleteAudit(callCtx, job.ID); err != nil {
 			return delivered, err
 		}
 		delivered++
@@ -165,6 +168,9 @@ func (r *AuditRelay) Drain(ctx context.Context) (int, error) {
 func (r *AuditRelay) Run(ctx context.Context, every time.Duration) {
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
+	if ok, err := r.store.CanScanAudit(ctx); err != nil || !ok {
+		slog.ErrorContext(ctx, "audit relay cannot read every tenant's queued signatures: the owner of engineering_audit_claim must bypass row-level security; signature records stay queued", "err", err)
+	}
 	for {
 		if _, err := r.Drain(ctx); err != nil && ctx.Err() == nil {
 			slog.ErrorContext(ctx, "audit relay pass failed", "err", err)
