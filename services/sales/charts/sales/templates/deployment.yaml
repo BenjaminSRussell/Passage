@@ -79,6 +79,16 @@ spec:
               value: {{ .Values.upstream.productUrl | quote }}
             - name: PRODUCTION_URL
               value: {{ .Values.upstream.productionUrl | quote }}
+            - name: BILLING_URL
+              value: {{ .Values.upstream.billingUrl | quote }}
+            - name: FULFILLMENT_URL
+              value: {{ .Values.upstream.fulfillmentUrl | quote }}
+            - name: INVENTORY_URL
+              value: {{ .Values.upstream.inventoryUrl | quote }}
+            - name: RECEIVABLES_URL
+              value: {{ .Values.upstream.receivablesUrl | quote }}
+            - name: SALES_RETURN_OFFSET_ACCOUNT
+              value: {{ .Values.upstream.returnOffsetAccount | quote }}
 {{- if .Values.fieldCrypt.keysSecret }}
             - { name: FIELDCRYPT_KEYS_FILE, value: /var/run/passage/field-crypt/keys }
             - { name: FIELDCRYPT_CURRENT_KEY_ID, value: {{ .Values.fieldCrypt.currentKeyId | quote }} }

@@ -159,6 +159,14 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | GET | `/v1/sales/intake-errors`, `/v1/sales/intake-errors/{id}` | `sales.order.read` | Channel orders refused at intake (`legalEntityId`, `channel`, `status`, `errorCode`, `limit`), most recently seen first; a retry of the same payload raises `attempts` and reopens a resolved row. The payload is not kept, only its hash |
 | POST | `/v1/sales/intake-errors/{id}:resolve` | `sales.order.write` | Close an OPEN intake error with a `note` (`If-Match`; `SLS-0116` when already resolved) |
 | POST | `/v1/sales/alternative-items:evaluate` | `sales.order.read` | Stateless: when the ordered product cannot ship the whole quantity by the requested date, the applicable alternatives that can, each with its available quantity and promise, from ATP buckets in the request |
+| GET / POST | `/v1/sales/return-orders` | `sales.order.read` / `sales.order.write` | List (`legalEntityId`, `customerId`, `status`, `limit`); create a REQUESTED RMA (`Idempotency-Key`, numbered `RMA-`) from a billing invoice: customer, currency and net unit prices come from `originalInvoiceId`, quantity is capped at invoiced less what billing credit notes credited and other live RMAs return (`SLS-0123`) |
+| GET | `/v1/sales/return-orders/{id}` | `sales.order.read` | The RMA with lines; ETag = version |
+| POST | `/v1/sales/return-orders/{id}:authorize` | `sales.order.write` | `If-Match`; REQUESTED → AUTHORIZED with 30-day validity; the creator may not authorize (`AUTH-0003`) |
+| POST | `/v1/sales/return-orders/{id}:receive` | `sales.order.write` | `If-Match`; AUTHORIZED → RECEIVED into quarantine, lines left out receive 0 (`SLS-0120` if expired, stored as EXPIRED) |
+| POST | `/v1/sales/return-orders/{id}:inspect` | `sales.order.write` | `If-Match`; body `lines[]` of `lineNo`, `quantityAccepted`, `disposition` for every received line (no lines or no body when nothing was received); RECEIVED → INSPECTED. RETURN_TO_STOCK on a line without site, warehouse or return cost is `SLS-0119`; a CURRENT_COST line's cost is read here (`SLS-0122` when the product has no on-hand average) |
+| POST | `/v1/sales/return-orders/{id}:disposition` | `sales.order.write` | `If-Match`; INSPECTED → DISPOSITIONED, then the accepted RETURN_TO_STOCK quantity is restocked through inventory's service-only `POST /internal/v1/inventory/return-receipts` (duty `inventory.return-receipt.post`) under key `rma-receive:<lineId>` at the return cost method; the answer is trusted only as that receipt (POSTED MOVEMENT of the legal entity, one line with the key, product and quantity) (repeat on DISPOSITIONED to retry; `SLS-0124` 503) |
+| POST | `/v1/sales/return-orders/{id}:credit` | `sales.order.write` | `If-Match`; credit from accepted quantities is stored (CREDITED), receivables posts the note, then CLOSED (repeat on CREDITED to retry; `SLS-0121` when receivables is not configured, `SLS-0124` on an outage). The restocking floor applies once per note; a return with nothing to credit closes with net 0 and no credit note |
+| POST | `/v1/sales/return-orders/{id}:reject` | `sales.order.write` | `If-Match`; REQUESTED or AUTHORIZED → REJECTED before any goods are received (`SLS-0119` otherwise); the quantity is returnable again |
 | GET | `/readyz` | none | Postgres `SELECT` within 500 ms |
 
 ## Rules implemented
@@ -365,6 +373,13 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0114` | 403 | Only the user who requested a change can withdraw it |
 | `SLS-0115` | 404 | Intake error not found |
 | `SLS-0116` | 409 | Intake error is already resolved |
+| `SLS-0119` | 409 | Return order is not in the status the command requires |
+| `SLS-0120` | 409 | Return order has expired |
+| `SLS-0121` | 503 | Receivables is not configured; the credit note cannot be posted |
+| `SLS-0122` | 422 | Original invoice unknown, not posted, or not of this legal entity, customer or product |
+| `SLS-0123` | 422 | Return quantity exceeds what the invoice still allows |
+| `SLS-0124` | 503 / 422 | A peer (billing, fulfillment, inventory, receivables) is unavailable or refused; the return order keeps its state |
+| `SLS-0125` | 404 | Return order not found |
 | `idempotency_key_reuse` | 422 | Same `Idempotency-Key` with a different body (kernel) |
 | `COM-0001` | 400 | Request failed validation; field errors in `errors` |
 | `AUTH-0001` | 401 | Missing or malformed tenant |

@@ -1351,6 +1351,122 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/rma-credits:
+    post:
+      operationId: postRMACredit
+      summary: Post an RMA credit note (AC-30.5)
+      description: |
+        Sales calls this, with a service token, after a return order is dispositioned. The customer
+        and currency come from the original invoice's open item and the ledger from the legal
+        entity's configured ledger (`RECEIVABLES_RMA_LEDGERS`); none is taken from the body. The
+        return value (gross) is refused (422 AR-RMA-INVOICE) above the invoice amount less the gross
+        of earlier RMA credits on it; the open amount does not bound it, so a paid or settled invoice
+        is still returnable and its credit leaves the customer a credit balance. The credit is
+        recorded PENDING, then Dr 4000 gross / Cr 4200 restocking / Cr 1200 net is posted under the
+        journal key `rma-credit:{legalEntityId}:{document}`, and the CREDIT_NOTE open item (negative
+        net, `CN-{rmaNumber}`) is created in the transaction that marks the credit POSTED. A ledger
+        outage backs off (503 AR-RMA-GL) and the sweeper or a repeat posts it later; a ledger refusal
+        parks the credit (409 AR-RMA-PARKED) until an operator retries it. A repeat of the same RMA
+        returns the stored values; a repeat with other amounts is 422 idempotency_key_reuse.
+      x-passage-duty: ar.rmacredit.post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RMACreditRequest" }
+      responses:
+        "201":
+          description: Credit note posted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RMACreditNote" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listRMACredits
+      summary: List RMA credits, newest first (PENDING and parked ones for the operator)
+      x-passage-duty: ARView
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [PENDING, POSTED] } }
+        - { name: parked, in: query, description: true lists only credits the ledger refused, schema: { type: boolean } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: RMA credits
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/RMACreditView" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/rma-credits:sweep:
+    post:
+      operationId: sweepRMACredits
+      summary: Post the caller's due PENDING RMA credits
+      description: |
+        The scheduler's entry point; the in-process sweeper (`RECEIVABLES_RMA_SWEEP_TENANT_IDS`,
+        every `RECEIVABLES_RMA_SWEEP_INTERVAL`, default 5m) runs the same pass per tenant and legal
+        entity. Posts, oldest first and at most 200 (or `limit`), the unparked PENDING credits whose
+        backoff ran out and that are older than 2 minutes. A failure is recorded on the credit
+        (backoff, or park on a ledger refusal) and the pass goes on.
+      x-passage-duty: ARPaymentPost
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Sweep result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [posted, failed, parked]
+                properties:
+                  posted: { type: integer }
+                  failed: { type: integer }
+                  parked: { type: integer }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/rma-credits/{id}:retry:
+    post:
+      operationId: retryRMACredit
+      summary: Unpark, optionally re-date, and post an RMA credit now
+      description: |
+        For a credit that is not POSTED: clears the park and the backoff and posts the journal now.
+        `postingDate` re-dates a parked credit (one the ledger refused, for example for a closed
+        period); re-dating a credit that is only waiting for the ledger is 409 AR-RMA-STATE. The
+        ledger key stays the same, so an entry the ledger already holds under it answers an
+        idempotency conflict and parks the credit again rather than posting twice. A POSTED credit
+        is 409 AR-RMA-STATE.
+      x-passage-duty: ARPaymentPost
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                postingDate: { type: string, format: date }
+      responses:
+        "200":
+          description: Credit posted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RMACreditView" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
 components:
   securitySchemes:
     bearerAuth:
@@ -2143,3 +2259,50 @@ components:
           type: array
           description: The OPEN deductions a split created; present on a single read of a SPLIT deduction.
           items: { $ref: "#/components/schemas/Deduction" }
+    RMACreditRequest:
+      type: object
+      additionalProperties: false
+      required: [rmaId, rmaNumber, legalEntityId, invoiceNumber, postingDate, gross, restocking, net]
+      properties:
+        rmaId: { type: string, format: uuid }
+        rmaNumber: { type: string, minLength: 1, maxLength: 40 }
+        legalEntityId: { type: string, format: uuid }
+        invoiceNumber: { type: string, minLength: 1, description: The original invoice; its open item decides the customer and currency }
+        postingDate: { type: string, format: date }
+        gross: { $ref: "#/components/schemas/Money" }
+        restocking: { $ref: "#/components/schemas/Money" }
+        net: { $ref: "#/components/schemas/Money" }
+    RMACreditView:
+      type: object
+      required: [id, rmaId, rmaNumber, legalEntityId, documentNumber, creditOpenItemId, customerId, currency, postingDate, gross, restocking, net, status, glAttempts, glParked, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        rmaId: { type: string, format: uuid }
+        rmaNumber: { type: string }
+        legalEntityId: { type: string, format: uuid }
+        documentNumber: { type: string }
+        creditOpenItemId: { type: string, format: uuid, description: The CREDIT_NOTE open item's id; the item exists once the credit is POSTED }
+        customerId: { type: string, format: uuid }
+        currency: { type: string }
+        postingDate: { type: string, format: date }
+        gross: { $ref: "#/components/schemas/Money" }
+        restocking: { $ref: "#/components/schemas/Money" }
+        net: { $ref: "#/components/schemas/Money" }
+        status: { type: string, enum: [PENDING, POSTED] }
+        journalPostingId: { type: string }
+        glAttempts: { type: integer }
+        glNextAttemptAt: { type: string, format: date-time }
+        glParked: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    RMACreditNote:
+      type: object
+      required: [openItemId, documentNumber, journalPostingId, customerId, currency, gross, restocking, net]
+      properties:
+        openItemId: { type: string, format: uuid }
+        documentNumber: { type: string }
+        journalPostingId: { type: string }
+        customerId: { type: string, format: uuid }
+        currency: { type: string }
+        gross: { $ref: "#/components/schemas/Money" }
+        restocking: { $ref: "#/components/schemas/Money" }
+        net: { $ref: "#/components/schemas/Money" }

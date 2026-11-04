@@ -29,6 +29,8 @@ const (
 const (
 	AccountBank            = "1000"
 	AccountReceivable      = "1200"
+	AccountSalesReturns    = "4000"
+	AccountRestocking      = "4200"
 	AccountDownPayment     = "2190"
 	AccountSecurityDeposit = "2195"
 )

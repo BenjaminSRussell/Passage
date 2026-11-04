@@ -1,0 +1,115 @@
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/BenjaminSRussell/passage/platform/ids"
+)
+
+func rmaBody(le, gross, restocking, net string) string {
+	return `{"rmaId":"` + ids.New() + `","rmaNumber":"RMA-0000001","legalEntityId":"` + le + `","invoiceNumber":"INV-30001","postingDate":"2027-03-01",
+		"gross":"` + gross + `","restocking":"` + restocking + `","net":"` + net + `"}`
+}
+
+func TestPostRMACredit_Validation(t *testing.T) {
+	h := router(&fakeStore{})
+	tests := []struct {
+		name   string
+		body   string
+		duties string
+		status int
+		field  string
+	}{
+		{"payment duty is not enough", rmaBody(testLE, "400.00", "60.00", "340.00"), "ARPaymentPost", http.StatusForbidden, ""},
+		{"view duty is not enough", rmaBody(testLE, "400.00", "60.00", "340.00"), "ARView", http.StatusForbidden, ""},
+		{"legal entity outside the caller's scope", rmaBody("00000000-0000-0000-0000-0000000000ff", "400.00", "60.00", "340.00"), "ar.rmacredit.post", http.StatusForbidden, ""},
+		{"missing invoice number", strings.Replace(rmaBody(testLE, "400.00", "60.00", "340.00"), `"invoiceNumber":"INV-30001"`, `"invoiceNumber":""`, 1), "ar.rmacredit.post", http.StatusBadRequest, "invoiceNumber"},
+		{"bad posting date", strings.Replace(rmaBody(testLE, "400.00", "60.00", "340.00"), "2027-03-01", "03/01/2027", 1), "ar.rmacredit.post", http.StatusBadRequest, "postingDate"},
+		{"negative net", rmaBody(testLE, "100.00", "200.00", "-100.00"), "ar.rmacredit.post", http.StatusUnprocessableEntity, "amounts"},
+		{"negative restocking", rmaBody(testLE, "100.00", "-10.00", "110.00"), "ar.rmacredit.post", http.StatusUnprocessableEntity, "amounts"},
+		{"gross is not restocking plus net", rmaBody(testLE, "400.00", "60.00", "300.00"), "ar.rmacredit.post", http.StatusUnprocessableEntity, "amounts"},
+		{"zero net", rmaBody(testLE, "60.00", "60.00", "0"), "ar.rmacredit.post", http.StatusUnprocessableEntity, "amounts"},
+		{"valid", rmaBody(testLE, "400.00", "60.00", "340.00"), "ar.rmacredit.post", http.StatusCreated, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := do(h, http.MethodPost, "/v1/receivables/rma-credits", tc.body, tc.duties, nil)
+			if rec.Code != tc.status {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
+			}
+			if tc.field != "" {
+				var p struct {
+					Errors map[string]string `json:"errors"`
+				}
+				if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil || p.Errors[tc.field] == "" {
+					t.Fatalf("want field error %q, got %s", tc.field, rec.Body.String())
+				}
+			}
+		})
+	}
+}
+
+func TestPostRMACredit_RejectsCallerSuppliedCustomerAndLedger(t *testing.T) {
+	h := router(&fakeStore{})
+	body := strings.Replace(rmaBody(testLE, "400.00", "60.00", "340.00"), `"rmaNumber"`, `"customerId":"`+ids.New()+`","ledgerId":"`+ids.New()+`","rmaNumber"`, 1)
+	rec := do(h, http.MethodPost, "/v1/receivables/rma-credits", body, "ar.rmacredit.post", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for body fields the service now derives: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRMACreditOperatorRoutes(t *testing.T) {
+	f := &fakeStore{}
+	h := router(f)
+	id := ids.New()
+	tests := []struct {
+		name, method, path, body, duties string
+		status                           int
+	}{
+		{"list needs ARView", http.MethodGet, "/v1/receivables/rma-credits", "", "ARImport", http.StatusForbidden},
+		{"list parked", http.MethodGet, "/v1/receivables/rma-credits?status=PENDING&parked=true", "", "ARView", http.StatusOK},
+		{"list bad status", http.MethodGet, "/v1/receivables/rma-credits?status=OPEN", "", "ARView", http.StatusBadRequest},
+		{"list bad parked", http.MethodGet, "/v1/receivables/rma-credits?parked=yes", "", "ARView", http.StatusBadRequest},
+		{"list other legal entity", http.MethodGet, "/v1/receivables/rma-credits?legalEntityId=00000000-0000-0000-0000-0000000000ff", "", "ARView", http.StatusForbidden},
+		{"retry needs ARPaymentPost", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", "", "ARView", http.StatusForbidden},
+		{"retry service duty is not enough", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", "", "ar.rmacredit.post", http.StatusForbidden},
+		{"retry bad date", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", `{"postingDate":"03/01/2027"}`, "ARPaymentPost", http.StatusBadRequest},
+		{"retry unknown action", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":post", "", "ARPaymentPost", http.StatusNotFound},
+		{"retry re-dated", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", `{"postingDate":"2027-04-01"}`, "ARPaymentPost", http.StatusOK},
+		{"retry as is", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", "", "ARPaymentPost", http.StatusOK},
+		{"sweep needs ARPaymentPost", http.MethodPost, "/v1/receivables/rma-credits:sweep", "", "ARView", http.StatusForbidden},
+		{"sweep", http.MethodPost, "/v1/receivables/rma-credits:sweep", "", "ARPaymentPost", http.StatusOK},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := do(h, tc.method, tc.path, tc.body, tc.duties, nil)
+			if rec.Code != tc.status {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
+			}
+		})
+	}
+	// An all-scope caller (no legal-entity claim) cannot sign the ledger post, so it may not retry or sweep.
+	for _, path := range []string{"/v1/receivables/rma-credits/" + id + ":retry", "/v1/receivables/rma-credits:sweep"} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(""))
+		req.Header.Set("X-Passage-Tenant", testTenant)
+		req.Header.Set("X-Passage-Duties", "ARPaymentPost")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest && rec.Code != http.StatusForbidden {
+			t.Fatalf("%s without a legal-entity claim: %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+	if len(f.rmaRetries) != 2 {
+		t.Fatalf("an unscoped retry reached the store: %v", f.rmaRetries)
+	}
+	if !f.rmaFilter.ParkedOnly || f.rmaFilter.Status != "PENDING" {
+		t.Fatalf("list filter %+v", f.rmaFilter)
+	}
+	if len(f.rmaRetries) != 2 || f.rmaRetries[0] != id+"|2027-04-01" || f.rmaRetries[1] != id+"|" {
+		t.Fatalf("retries forwarded %v", f.rmaRetries)
+	}
+}

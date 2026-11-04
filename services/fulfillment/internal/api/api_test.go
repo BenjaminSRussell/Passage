@@ -401,6 +401,17 @@ func TestPackingSlips_ListAndGet(t *testing.T) {
 	}
 }
 
+func TestPackingSlipGet_ServiceReadDutyOnly(t *testing.T) {
+	h := newServer(t, &fakeStore{})
+	path := "/v1/fulfillment/packing-slips/" + ids.New()
+	if rec := do(t, h, http.MethodGet, path, "", map[string]string{"X-Passage-Duties": "fulfillment.packing-slip.read"}); rec.Code != http.StatusOK {
+		t.Fatalf("service duty: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, h, http.MethodGet, path, "", map[string]string{"X-Passage-Duties": "fulfillment.shipment.read"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("the shipment read duty is not enough for a packing slip: %d", rec.Code)
+	}
+}
+
 func boolStr(b bool) string {
 	if b {
 		return "true"

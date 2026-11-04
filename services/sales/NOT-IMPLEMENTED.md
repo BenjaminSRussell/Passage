@@ -774,13 +774,47 @@ before. (d) The item's `invoicedAt` is renamed `lastChangedAt`: it is
 offered Preview to a reader, but the preview is the same POST under
 `sales.order.write` and was refused; both actions now need the duty.
 
+Wave 30 AC3 adds return orders (`return_order` / `return_order_line`, migration
+0037): create in REQUESTED from a billing invoice (customer, currency, net unit
+price and the returnable quantity, invoiced less billing credit notes' creditedQty
+and other live RMAs per product, come from the invoice; 422 `SLS-0123` above it), `:authorize` by a user other
+than the creator (30-day validity), `:receive` into quarantine (lines left out
+receive 0), `:inspect` (accepted quantity and disposition per received line; no
+lines when nothing was received; RETURN_TO_STOCK refused on a line without site,
+warehouse or return cost; CURRENT_COST read here), `:reject` (REQUESTED or
+AUTHORIZED only),
+`:disposition` (restocks the accepted RETURN_TO_STOCK quantity after the state
+commit through inventory's service-only return-receipt command
+(duty `inventory.return-receipt.post`; sales no longer holds the general journal
+duties), key `rma-receive:<lineId>`, at the ORIGINAL_COST packing
+slip cost, the CURRENT_COST on-hand average or ZERO) and `:credit` (credit from
+accepted quantities, or the whole expected quantity of a line created
+CREDIT_ONLY that nothing came back for; stored as CREDITED, receivables posts the
+note, then CLOSED). A failed restock or credit post leaves the stored state and
+is retried by repeating the command. Credit computes restocking (BR-30.3: 15% on
+RETURN_TO_STOCK, 0% on CREDIT_ONLY, with a 25.00 USD / 20.00 EUR floor applied
+once per note to the RETURN_TO_STOCK lines together and never above their value);
+a note with nothing to credit closes the RMA with net 0 and no credit note.
+Events: `returnorder.{authorized,received,inspected,dispositioned,credited}.v1`.
+AC-30.5 is covered by `internal/store/rma_e2e_test.go`. Peers are wired from
+`BILLING_URL`, `FULFILLMENT_URL`, `INVENTORY_URL` (with
+`SALES_RETURN_OFFSET_ACCOUNT`, the MOVEMENT journal's offset account) and
+`RECEIVABLES_URL`; a missing peer answers 503. Not built: SCRAP / REPAIR /
+REPLACE / REJECT_RETURN_TO_CUSTOMER, tax lines, a physical quarantine stock
+status (receive records the quantity only), per-slip cost when one product
+shipped on several packing slips at different costs (the first slip's cost is
+used), and a different return price per invoice line of the same product (the
+weighted average net unit price is used), and an event for `:reject` (the
+REJECTED status is visible on read and list only). Duties stay `sales.order.read` /
+`sales.order.write`.
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
 |---|---|---|---|
 | 1 | Quotation → order conversion, quotation lifecycle (`:send`, `:convert`, expiry, probability) | implemented in part | Built: priced quotations with validity (default +30 days, at most 365) and win probability (default 50), `SQ-` numbering per legal entity, list and read, `:send` (DRAFT, still valid), `:lose` with a reason, and `:convert` of all or selected open lines into one DRAFT order (channel `QUOTE`) at the quoted price and discount under the quotation's row lock, with the converted lines naming the order and `quotation.converted` in the same transaction; later conversions take the remaining lines. Slice 12 adds `POST /quotations:expire`, which sets EXPIRED (see slice 12 above). Not built: the scheduler that calls it hourly (handoff, below), CANCELLED, editing a quotation's lines or pricing them through the w26 resolver (lines are entered with prices and fixed at creation), `price_explain_ref` on quotation and order lines (FR-27.1 "preserving explain refs"; the w26 explain reference does not exist on either line yet), the quotation document (PDF, email, UBL JSON; PRD §5.27.15) and the lost/expired notice, the `quotation_expiry_days` and `quotation_probability_default` parameters (constants 30 and 50), a listing check at quotation entry (the check runs at conversion), and the customer group on the converted order (group listing entries apply only to orders that name it). `:send` and `:convert` are versioned by `If-Match` rather than the PRD's `Idempotency-Key`: a retry with the old ETag is refused (412) instead of replayed, as for holds. |
 | 1 | Sales agreements, release orders, commitment decrement (FR-27.10, BR-27.9, AC-27.9 `AGREEMENT_EXHAUSTED`) | implemented in part | Built: one-product quantity commitments at an agreed price with validity, `SA-` numbering, list and read with release history, and `:release-order`, which under the agreement's row lock refuses a release beyond the remaining quantity (`SLS-0008`) or outside the validity period (`SLS-0029`), creates a DRAFT order (channel `AGREEMENT`) of one line at the agreement price and stores the release, all in one transaction. Not built: commitments by amount or for several products, the `overdelivery_pct` parameter (0 is applied), re-pricing of already released draft orders when the agreement price changes (BR-27.9; a revised price applies to later releases only), `agreement_line_id` on the order line (the link is `agreement_release.sales_order_id`), returning quantity when a released order's lines are reduced by PATCH (only whole-order cancellation returns), and the agreement confirmation document (PRD §5.27.15). |
-| 1 | Order types JOURNAL / SUBSCRIPTION / RETURNED behaviour | JOURNAL implemented (slice 20); later slice of PSG-27 for SUBSCRIPTION and RETURNED | JOURNAL orders take no credit check, no allocation quota and no promise, and count for no exposure (BR-27.7); reservation is w16. The subscription and returned flows are not implemented. RETURNED order flow is wave 30. |
+| 1 | Order types JOURNAL / SUBSCRIPTION / RETURNED behaviour | JOURNAL implemented (slice 20); RETURNED RMA implemented as wave 30 AC3; later slice of PSG-27 for SUBSCRIPTION | JOURNAL orders take no credit check, no allocation quota and no promise, and count for no exposure (BR-27.7); reservation is w16. The subscription flow is not implemented. RETURNED goods are credited through `/v1/sales/return-orders` (wave 30 AC3), not through a RETURNED sales order type. |
 | 2 | Cumulative ATP on stored supply and demand (`atp_bucket` projection, lag < 30 s, planning batch-end marker) | later slice of PSG-27 | Only the pure cumulative/promise computation and a stateless `POST /v1/sales/atp:check` exist. The projection needs supply/demand events from w16/w17/w21/w22. |
 | 2 | Delivery date control per line (NONE / SALES_LEAD_TIME / ATP / CTP; transport days; receiving calendar; past-date warning; fence-end TIME_FENCE) (FR-27.3, BR-27.2) | implemented in part (slice 21) | Built: `delivery_date_control_default` and `sales_lead_time_days` per legal entity (parameters), an optional `deliveryDateControl` per order line (NONE or SALES_LEAD_TIME), applied at confirm, at the release that confirms and when a PATCH re-promises a line: the confirmed ship date is the requested date, today when that is past (SLS-0003 warning), and with SALES_LEAD_TIME never earlier than today plus the lead time (SLS-0057 notice); a supplementary line takes its parent line's control. Customer delivery terms (`/delivery-terms`: transport days 0 to 60, receiving ISO weekdays) are copied onto the order at confirm (`confirmedDeliveryTerms`, columns `confirmed_transport_days` / `confirmed_receiving_days`) and give each line its `confirmedReceiptDate` (confirmed ship date plus the copied transport days, rolled to the next copied receiving day), also on `order.confirmed` lines; a later change of the customer's terms does not move a confirmed order's receipt dates, and a re-promised ship date carries its receipt date with it. Web: delivery terms list, create and change pages, the parameters fields, a control select on the new-order line, receipt and control columns on the order. Not built: ATP and CTP controls (refused with 400 until the ATP projection and the w23 CTP API exist; the PRD default ATP is NONE here), TIME_FENCE / SLS-0004 (needs the ATP fence), a calendar from w6/w48 (the receiving weekdays are sales-owned; holidays are not modelled), a lead time per product or customer (one value per legal entity), changing a line's control by PATCH, the SLS-0003 / SLS-0057 notices on a PATCH (the version diff shows the moved date), a receipt date stored per line (it is computed from the stored ship date and the order's copied terms, so it cannot be queried in SQL), and quota period start winning over a later lead-time date when allocation moves a line (the quota date is used). |
 | 2 | Schedule lines persisted per line (`order_schedule_line`, partial delivery split, AC-27.8 backorder list) | implemented in part | Built: see slice 8 above. Not built: `partial_delivery_allowed` / `overdelivery` parameters per customer (the caller chooses `completeOnly` per promise), manual split or merge of schedule lines, quantities delivered per schedule line (shipments are wave 28, which will drive the status of a schedule line), and a cancel-remainder action (`remaining_qty = 0` needs delivered quantities). A PATCH that changes a line's quantity or date resets its schedule to one line at the confirmed date, dropping a split, until the projection re-promises it. |

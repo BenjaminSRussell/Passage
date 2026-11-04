@@ -2716,6 +2716,250 @@ paths:
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
+  /v1/sales/return-orders:
+    get:
+      summary: List return orders (RMA), newest first (FR-30.11)
+      operationId: listReturnOrders
+      x-passage-duty: sales.order.read
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: customerId, in: query, schema: {type: string, format: uuid}}
+        - {name: status, in: query, schema: {type: string, enum: [REQUESTED, AUTHORIZED, RECEIVED, INSPECTED, DISPOSITIONED, CREDITED, CLOSED, REJECTED, EXPIRED]}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: return orders in the caller's legal-entity scope
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/ReturnOrder"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    post:
+      summary: Create a return order (RMA) in REQUESTED (FR-30.11)
+      description: |
+        The original invoice is required. Customer, currency and each line's net unit price come from the
+        billing invoice; a line's quantity may not exceed what the invoice billed, less what billing credit
+        notes already credited (the invoice line's creditedQty) and what other live RMAs already return of
+        the product (422 SLS-0123). ORIGINAL_COST resolves the shipment's unit cost from
+        the packing slip. A body price or currency is refused (400).
+      operationId: createReturnOrder
+      x-passage-duty: sales.order.write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateReturnOrderRequest"}
+      responses:
+        "201":
+          description: created; ETag carries the version
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReturnOrder"}
+        "200":
+          description: a repeat of the Idempotency-Key with the same body returns the stored RMA
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReturnOrder"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/sales/return-orders/{id}:
+    get:
+      summary: One return order
+      operationId: getReturnOrder
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: the RMA; ETag carries the version
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReturnOrder"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/sales/return-orders/{id}:authorize:
+    post:
+      summary: Authorize an RMA (REQUESTED → AUTHORIZED, 30-day validity); the creator may not authorize it (403 AUTH-0003)
+      operationId: authorizeReturnOrder
+      x-passage-duty: sales.order.write
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: authorized
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReturnOrder"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/return-orders/{id}:receive:
+    post:
+      summary: Receive returned goods into quarantine (lines left out receive 0; stock is booked after inspection)
+      operationId: receiveReturnOrder
+      x-passage-duty: sales.order.write
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required: [lineNo, quantity]
+                    properties:
+                      lineNo: {type: integer, minimum: 1}
+                      quantity: {$ref: "#/components/schemas/Money"}
+      responses:
+        "200":
+          description: received
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReturnOrder"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/return-orders/{id}:inspect:
+    post:
+      summary: Record inspection per received line (RECEIVED → INSPECTED)
+      description: |
+        Every received line must be inspected and a line that received nothing may not be; an RMA that
+        received nothing (credit-only lines no goods came back for) is inspected with no lines or no body.
+        RETURN_TO_STOCK is refused (409 SLS-0119) on a line with no site, warehouse or return cost (a line
+        created CREDIT_ONLY at ORIGINAL_COST). A CURRENT_COST line restocked here gets the on-hand average
+        cost read now; a product with none at the site and warehouse is 422 SLS-0122, and the RMA stays
+        RECEIVED so the line can be inspected CREDIT_ONLY.
+      operationId: inspectReturnOrder
+      x-passage-duty: sales.order.write
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required: [lineNo, quantityAccepted, disposition]
+                    properties:
+                      lineNo: {type: integer, minimum: 1}
+                      quantityAccepted: {$ref: "#/components/schemas/Money"}
+                      disposition: {type: string, enum: [CREDIT_ONLY, RETURN_TO_STOCK]}
+      responses:
+        "200":
+          description: inspected
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReturnOrder"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/sales/return-orders/{id}:disposition:
+    post:
+      summary: Confirm dispositions and restock the accepted RETURN_TO_STOCK quantity (INSPECTED → DISPOSITIONED); repeat on a DISPOSITIONED RMA to retry a failed restock (503 SLS-0124)
+      operationId: dispositionReturnOrder
+      x-passage-duty: sales.order.write
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: dispositioned
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReturnOrder"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/return-orders/{id}:credit:
+    post:
+      summary: Post the credit note (restocking, AR, GL) and close the RMA (AC-30.5); repeat on a CREDITED RMA to retry a failed post (503 SLS-0124)
+      description: |
+        The restocking charge is each line's percentage (RETURN_TO_STOCK 15%, CREDIT_ONLY 0%, or the line's
+        restockingPct), with the 25.00 USD / 20.00 EUR floor applied once per note to the RETURN_TO_STOCK
+        lines together and never above their value. A return that leaves nothing to credit (no goods
+        accepted and no credit-only line, or a charge equal to the value) closes with net 0 and no credit
+        note, without asking receivables.
+      operationId: creditReturnOrder
+      x-passage-duty: sales.order.write
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: credited and closed
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReturnOrder"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/sales/return-orders/{id}:reject:
+    post:
+      summary: Reject an RMA before any goods are received (REQUESTED or AUTHORIZED → REJECTED); its quantity is returnable again
+      operationId: rejectReturnOrder
+      x-passage-duty: sales.order.write
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: rejected
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReturnOrder"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
 components:
   parameters:
     IdempotencyKey:
@@ -4015,3 +4259,78 @@ components:
         orderVersion: {type: integer, description: the order version the report produced}
         recordedBy: {type: string}
         recordedAt: {type: string, format: date-time}
+    CreateReturnOrderRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, originalInvoiceId, returnReasonCode, lines]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        customerId: {type: string, format: uuid, description: optional; when given it must be the invoice's customer}
+        originalInvoiceId: {type: string, format: uuid}
+        returnReasonCode: {type: string, minLength: 1, maxLength: 40}
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 2000
+          items:
+            type: object
+            additionalProperties: false
+            required: [lineNo, productId, quantity, disposition]
+            properties:
+              lineNo: {type: integer, minimum: 1}
+              productId: {type: string, format: uuid}
+              siteId: {type: string, format: uuid}
+              warehouseId: {type: string, format: uuid}
+              quantity: {$ref: "#/components/schemas/Money"}
+              unit: {type: string}
+              disposition: {type: string, enum: [CREDIT_ONLY, RETURN_TO_STOCK], description: the intended disposition; inspection decides the final one}
+              returnCostMethod: {type: string, enum: [ORIGINAL_COST, CURRENT_COST, ZERO]}
+              restockingPct: {$ref: "#/components/schemas/Money"}
+    ReturnOrder:
+      type: object
+      required: [id, legalEntityId, rmaNumber, customerId, returnReasonCode, status, currency, version, lines]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        rmaNumber: {type: string}
+        customerId: {type: string, format: uuid}
+        originalInvoiceId: {type: string, format: uuid}
+        originalInvoiceNumber: {type: string}
+        returnReasonCode: {type: string}
+        status: {type: string, enum: [REQUESTED, AUTHORIZED, RECEIVED, INSPECTED, DISPOSITIONED, CREDITED, CLOSED, REJECTED, EXPIRED]}
+        currency: {type: string}
+        expiresAt: {type: string, format: date}
+        version: {type: integer}
+        gross: {$ref: "#/components/schemas/Money"}
+        restocking: {$ref: "#/components/schemas/Money"}
+        net: {$ref: "#/components/schemas/Money"}
+        creditNoteId: {type: string}
+        journalPostingId: {type: string}
+        createdBy: {type: string}
+        updatedBy: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        lines:
+          type: array
+          items:
+            type: object
+            required: [id, lineNo, productId, quantityExpected, quantityReceived, unit, unitPrice, returnCostMethod]
+            properties:
+              id: {type: string, format: uuid}
+              lineNo: {type: integer}
+              productId: {type: string, format: uuid}
+              siteId: {type: string, format: uuid}
+              warehouseId: {type: string, format: uuid}
+              quantityExpected: {$ref: "#/components/schemas/Money"}
+              quantityReceived: {$ref: "#/components/schemas/Money"}
+              quantityAccepted: {$ref: "#/components/schemas/Money"}
+              unit: {type: string}
+              unitPrice: {$ref: "#/components/schemas/Money"}
+              unitCost: {$ref: "#/components/schemas/Money"}
+              creditOnly: {type: boolean}
+              disposition: {type: string, enum: [CREDIT_ONLY, RETURN_TO_STOCK]}
+              returnCostMethod: {type: string, enum: [ORIGINAL_COST, CURRENT_COST, ZERO]}
+              restockingPct: {$ref: "#/components/schemas/Money"}
+              restockingAmount: {$ref: "#/components/schemas/Money"}
+              inventoryReceiptId: {type: string}
+              creditNoteLineId: {type: string}
