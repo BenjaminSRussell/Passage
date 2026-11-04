@@ -12,6 +12,8 @@ import { RoyaltiesPage } from "./RoyaltiesPage";
 import { RoyaltyDetailPage } from "./RoyaltyDetailPage";
 import { CampaignDetailPage } from "./CampaignDetailPage";
 import { CampaignsPage } from "./CampaignsPage";
+import { ComparePage } from "./ComparePage";
+import { PriceListPage } from "./PriceListPage";
 import { CommissionSettlementPage } from "./CommissionSettlementPage";
 import { CommissionTransactionsPage } from "./CommissionTransactionsPage";
 import { CommodityBasesPage } from "./CommodityBasesPage";
@@ -55,7 +57,7 @@ const pricing: PassageModule = {
   id: "pricing",
   title: "Pricing",
   description:
-    "Trade agreements, campaigns, free goods, broker contracts and royalty agreements, commodity index pricing, pricing procedures, price journals, customer and vendor rebates, commissions, trade funds, promotions, journal CSV import, commission settlement and the explanation behind every price.",
+    "Trade agreements, campaigns, free goods, broker contracts and royalty agreements, commodity index pricing, pricing procedures, price journals, customer and vendor rebates, commissions, trade funds, promotions, journal CSV import, commission settlement, price lists by customer, procedure version comparison and the explanation behind every price.",
   routes: [
     { path: "/pricing", element: createElement(WorkspacePage), handle: { title: "Pricing workspace" } },
     { path: "/pricing/agreements", element: createElement(AgreementsPage), handle: { title: "Trade agreements" } },
@@ -107,6 +109,8 @@ const pricing: PassageModule = {
     { path: "/pricing/promotions/:id", element: createElement(PromotionDetailPage), handle: { title: "Promotion" } },
     { path: "/pricing/parameters", element: createElement(ParametersPage), handle: { title: "Pricing parameters" } },
     { path: "/pricing/simulate", element: createElement(SimulatePage), handle: { title: "Price simulation" } },
+    { path: "/pricing/compare", element: createElement(ComparePage), handle: { title: "Compare procedure versions" } },
+    { path: "/pricing/price-list", element: createElement(PriceListPage), handle: { title: "Price list by customer" } },
   ],
   nav: [
     { label: "Overview", to: "/pricing", duty: "pricing.view" },
@@ -130,6 +134,8 @@ const pricing: PassageModule = {
     { label: "Promotions", to: "/pricing/promotions", duty: "pricing.view" },
     { label: "Parameters", to: "/pricing/parameters", duty: "pricing.view" },
     { label: "Price simulation", to: "/pricing/simulate", duty: "pricing.view" },
+    { label: "Compare procedure versions", to: "/pricing/compare", duty: "pricing.view" },
+    { label: "Price list by customer", to: "/pricing/price-list", duty: "pricing.view" },
   ],
 };
 

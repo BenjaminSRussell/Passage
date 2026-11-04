@@ -29,6 +29,7 @@ const (
 	dutyMaintain     = "pricing.maintain"
 	resolvePath      = "/v1/pricing/resolve"
 	simulatePath     = "/v1/pricing/simulate"
+	comparePath      = "/v1/pricing/compare"
 	recordsPath      = "/v1/pricing/condition-records"
 	idempotencyKey   = "Idempotency-Key"
 	dateLayout       = "2006-01-02"
@@ -85,6 +86,8 @@ func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyView)).Post(resolvePath, a.resolve)
 	r.With(authz.RequireDuty(dutyView)).Post(simulatePath, a.simulate)
+	r.With(authz.RequireDuty(dutyView)).Post(comparePath, a.compare)
+	r.With(authz.RequireDuty(dutyView)).Get(priceListPath, a.priceList)
 	r.With(authz.RequireDuty(dutyMaintain)).Post(recordsPath, a.createRecord)
 	r.With(authz.RequireDuty(dutyView)).Get(recordsPath, a.listRecords)
 	r.With(authz.RequireDuty(dutyView)).Get(recordsPath+"/{id}", a.getRecord)
@@ -272,18 +275,10 @@ func (a *API) simulate(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, problem)
 		return
 	}
-	records := make([]domain.Record, 0, len(req.Records))
-	for i, dto := range req.Records {
-		rec, p := toRecord(dto)
-		if p != nil {
-			httpx.Fail(w, r, p)
-			return
-		}
-		rec.Status = domain.StatusActive
-		if rec.ID == "" {
-			rec.ID = fmt.Sprintf("inline-%d", i+1)
-		}
-		records = append(records, rec)
+	records, problem := inlineRecords(req.Records)
+	if problem != nil {
+		httpx.Fail(w, r, problem)
+		return
 	}
 	// A simulation names a legal entity only to choose the procedure it prices with.
 	var proc *domain.Procedure
@@ -302,6 +297,32 @@ func (a *API) simulate(w http.ResponseWriter, r *http.Request) {
 	res := domain.Resolve(domain.Input{Header: header, Lines: lines, Records: records, Procedure: proc,
 		SmallOrderThreshold: domain.SmallOrderThreshold(header.Currency)})
 	a.respond(w, r, res, nil, r.URL.Query().Get("explain") != "false")
+}
+
+// MaxInlineRecords caps the condition records a simulate or compare body may carry. The 4 MiB body
+// limit alone would let one request price 500 lines against tens of thousands of records (twice, for
+// a comparison), so the cap keeps a stateless what-if as cheap as a resolve.
+const MaxInlineRecords = 1000
+
+// inlineRecords validates the records of a simulate or compare body and makes them ACTIVE, naming
+// the ones without an id inline-1, inline-2, ...
+func inlineRecords(dtos []recordDTO) ([]domain.Record, *httpx.Problem) {
+	if len(dtos) > MaxInlineRecords {
+		return nil, validation(map[string]string{"records": fmt.Sprintf("must hold at most %d records", MaxInlineRecords)})
+	}
+	records := make([]domain.Record, 0, len(dtos))
+	for i, dto := range dtos {
+		rec, p := toRecord(dto)
+		if p != nil {
+			return nil, p
+		}
+		rec.Status = domain.StatusActive
+		if rec.ID == "" {
+			rec.ID = fmt.Sprintf("inline-%d", i+1)
+		}
+		records = append(records, rec)
+	}
+	return records, nil
 }
 
 // buildInput validates a resolve body. Too many lines is PRC-0009; other faults are 422 field errors.
@@ -352,10 +373,20 @@ func (a *API) buildInput(req resolveRequest) (domain.Header, []domain.Line, *htt
 }
 
 func (a *API) respond(w http.ResponseWriter, r *http.Request, res domain.Result, free []domain.FreeGoodsProposal, explain bool) {
-	body, ref, err := domain.ExplainTrace(res)
+	out, err := a.responseOf(res, free, explain)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+// responseOf builds the wire form of a priced document; the trace is left out when explain is false
+// or the explanation is larger than the configured limit.
+func (a *API) responseOf(res domain.Result, free []domain.FreeGoodsProposal, explain bool) (resolveResponse, error) {
+	body, ref, err := domain.ExplainTrace(res)
+	if err != nil {
+		return resolveResponse{}, err
 	}
 	out := resolveResponse{Currency: res.Currency, Lines: make([]lineView, len(res.Lines)), Subtotal: res.Subtotal,
 		TotalDiscount: res.TotalDiscount, Surcharge: res.Surcharge, OrderNet: res.OrderNet, Applied: res.Applied, Procedure: res.Procedure, ExplainRef: ref, FreeGoods: free}
@@ -375,7 +406,7 @@ func (a *API) respond(w http.ResponseWriter, r *http.Request, res domain.Result,
 			out.Trace = res.Trace
 		}
 	}
-	httpx.JSON(w, http.StatusOK, out)
+	return out, nil
 }
 
 type recordDTO struct {

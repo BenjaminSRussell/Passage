@@ -255,6 +255,80 @@ async function items<T>(path: string, signal?: AbortSignal): Promise<T[]> {
   return body.items;
 }
 
+export interface CompareRequest extends ResolveRequest {
+  /** The baseline procedure version. */
+  procedureIdA: string;
+  /** The version compared with the baseline. */
+  procedureIdB: string;
+}
+
+export interface LineComparison {
+  lineNo: number;
+  netUnitPriceA: string;
+  netUnitPriceB: string;
+  netUnitPriceDelta: string;
+  lineNetA: string;
+  lineNetB: string;
+  lineNetDelta: string;
+  errorCodeA?: string;
+  errorCodeB?: string;
+  appliedOnlyA: string[];
+  appliedOnlyB: string[];
+  changed: boolean;
+}
+
+export interface Comparison {
+  identical: boolean;
+  subtotalDelta: string;
+  totalDiscountDelta: string;
+  surchargeDelta: string;
+  orderNetDelta: string;
+  changedLines: number;
+  lines: LineComparison[];
+}
+
+export interface CompareResponse {
+  a: ResolveResponse;
+  b: ResolveResponse;
+  /** Deltas are version B minus version A. */
+  comparison: Comparison;
+}
+
+/** POST /compare - price one request under two procedure versions (FR-26.13); DRAFT versions are allowed. */
+export function comparePrices(body: CompareRequest): Promise<CompareResponse> {
+  return post<CompareResponse>("/compare?explain=false", body);
+}
+
+export type PriceListScope = "CUSTOMER" | "GROUP" | "ALL";
+
+export interface PriceListItem extends ConditionRecord {
+  scope: PriceListScope;
+}
+
+export interface PriceListQuery {
+  legalEntityId: string;
+  customerId: string;
+  customerGroupId?: string;
+  currency: string;
+  asOf: string;
+  type?: ConditionType | "";
+}
+
+export interface PriceList {
+  items: PriceListItem[];
+  /** True when more records apply than the service returns (it caps the list at 1000 entries). */
+  truncated: boolean;
+}
+
+/** GET /price-list - the ACTIVE records that apply to a customer on a date, most specific first. */
+export async function getPriceList(q: PriceListQuery, signal?: AbortSignal): Promise<PriceList> {
+  const body = await send<{ items?: PriceListItem[]; truncated?: boolean }>(`/price-list${query({ ...q })}`, {}, signal);
+  if (!Array.isArray(body.items)) {
+    throw new PricingApiError(0, "COM-0001", "The response has no items");
+  }
+  return { items: body.items, truncated: body.truncated === true };
+}
+
 // ---- Price journals (FR-26.9): mass create, update and delete; validate, post atomically, reverse.
 
 export const JOURNAL_STATUSES = ["OPEN", "VALIDATED", "POSTED", "REVERSED"] as const;

@@ -61,6 +61,8 @@ describe("pricing module", () => {
       "/pricing/promotions/:id",
       "/pricing/parameters",
       "/pricing/simulate",
+      "/pricing/compare",
+      "/pricing/price-list",
     ]);
   });
 
@@ -87,6 +89,8 @@ describe("pricing module", () => {
       "/pricing/funds": "pricing.view",
       "/pricing/promotions": "pricing.view",
       "/pricing/simulate": "pricing.view",
+      "/pricing/compare": "pricing.view",
+      "/pricing/price-list": "pricing.view",
     });
   });
 

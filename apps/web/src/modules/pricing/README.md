@@ -53,6 +53,8 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | `/pricing/promotions/:id` | Plan, baseline weeks, actuals and effectiveness; record actuals | `GET /promotions/{id}`, `:actuals` |
 | `/pricing/parameters` | Pricing parameters of a legal entity: `journalFourEyes` (default off), saved at the version read; read with pricing.view, the save is offered only with pricing.admin | `GET`/`PUT /parameters` |
 | `/pricing/simulate` | Simulation / explain: price lines and read the access-by-access trace | `POST /resolve?explain=true` |
+| `/pricing/compare` | Compare procedure versions: one tuple under two versions, line by line | `GET /procedures`, `POST /compare` |
+| `/pricing/price-list` | Price list by customer: the active agreements that apply on a date | `GET /price-list` |
 
 - `api/client.ts` calls `/api/v1/pricing/...` (the BFF rewrites to `/v1/pricing/...`). Problem
   details surface as `PricingApiError` with the stable code and field errors. Commands send an

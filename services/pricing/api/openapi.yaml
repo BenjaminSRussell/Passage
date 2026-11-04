@@ -132,6 +132,74 @@ paths:
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/compare:
+    post:
+      operationId: comparePrices
+      summary: Price one request under two procedure versions and report what differs (FR-26.13).
+      description: >
+        Both versions are stored procedure versions of the request's legal entity, DRAFT included, so a
+        draft can be tried against the active version before it is activated. The request is priced against
+        the inline `records` when they are present and against the legal entity's ACTIVE records as of the
+        pricing date otherwise. Nothing is stored. Explains by default; pass ?explain=false to omit the traces.
+        The deltas are version B minus version A. A version outside the caller's legal entities is 404 PRC-0042;
+        one of another legal entity the caller may read is 422.
+      parameters:
+        - name: explain
+          in: query
+          required: false
+          schema: {type: string, enum: ["true", "false"]}
+      x-passage-duty: pricing.view
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CompareRequest"}
+      responses:
+        "200":
+          description: Both priced documents and their line-by-line comparison.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CompareResponse"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/price-list:
+    get:
+      operationId: getCustomerPriceList
+      summary: Price list by customer, the ACTIVE condition records that apply to a customer on a date (PRD 5.26.14).
+      description: >
+        Returns the records keyed to the customer, to the customer's group (when customerGroupId is
+        given) or to all customers, ordered by product, variant, unit, condition type, scope (CUSTOMER,
+        GROUP, ALL) and from-quantity. Records of a killed, expired or non-targeted campaign are left out,
+        as in resolve. It is an inquiry: POST /resolve decides which condition wins a given line.
+        At most 1000 items are returned, in that order; `truncated` is true when more apply (narrow with type).
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: customerId, in: query, required: true, schema: {type: string}}
+        - {name: customerGroupId, in: query, required: false, schema: {type: string}}
+        - {name: currency, in: query, required: true, schema: {type: string, pattern: "^[A-Z]{3}$"}}
+        - {name: asOf, in: query, required: true, description: "Pricing date, YYYY-MM-DD.", schema: {type: string, format: date}}
+        - {name: type, in: query, required: false, description: "Comma-separated condition types; all types when omitted.", schema: {type: string}}
+      responses:
+        "200":
+          description: The applicable records, most specific agreement first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, truncated]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 1000
+                    items: {$ref: "#/components/schemas/PriceListItem"}
+                  truncated: {type: boolean, description: "True when more than 1000 records apply and the list was cut."}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/condition-records:
     get:
       operationId: listConditionRecords
@@ -2742,7 +2810,67 @@ components:
           properties:
             records:
               type: array
+              maxItems: 1000
+              description: "Inline condition records, at most 1000 (422 with a records field error beyond that)."
               items: {$ref: "#/components/schemas/RecordInput"}
+    CompareRequest:
+      allOf:
+        - $ref: "#/components/schemas/SimulateRequest"
+        - type: object
+          required: [procedureIdA, procedureIdB]
+          properties:
+            procedureIdA: {type: string, format: uuid, description: "The baseline procedure version."}
+            procedureIdB: {type: string, format: uuid, description: "The version compared with the baseline; must differ from A and belong to the same legal entity."}
+          description: "procedure and salesChannel choose a procedure for resolve and are rejected here (422): the versions are named by procedureIdA and procedureIdB."
+    LineComparison:
+      type: object
+      required: [lineNo, netUnitPriceA, netUnitPriceB, netUnitPriceDelta, lineNetA, lineNetB, lineNetDelta, appliedOnlyA, appliedOnlyB, changed]
+      properties:
+        lineNo: {type: integer}
+        netUnitPriceA: {type: string}
+        netUnitPriceB: {type: string}
+        netUnitPriceDelta: {type: string, description: "B minus A."}
+        lineNetA: {type: string}
+        lineNetB: {type: string}
+        lineNetDelta: {type: string, description: "B minus A."}
+        errorCodeA: {type: string, description: "Set when version A found no price for the line."}
+        errorCodeB: {type: string, description: "Set when version B found no price for the line."}
+        appliedOnlyA:
+          type: array
+          description: "Conditions (TYPE:record) that version A applied and B did not."
+          items: {type: string}
+        appliedOnlyB:
+          type: array
+          description: "Conditions (TYPE:record) that version B applied and A did not."
+          items: {type: string}
+        changed: {type: boolean}
+    Comparison:
+      type: object
+      required: [identical, subtotalDelta, totalDiscountDelta, surchargeDelta, orderNetDelta, changedLines, lines]
+      properties:
+        identical: {type: boolean}
+        subtotalDelta: {type: string}
+        totalDiscountDelta: {type: string}
+        surchargeDelta: {type: string}
+        orderNetDelta: {type: string}
+        changedLines: {type: integer}
+        lines:
+          type: array
+          items: {$ref: "#/components/schemas/LineComparison"}
+    CompareResponse:
+      type: object
+      required: [a, b, comparison]
+      properties:
+        a: {$ref: "#/components/schemas/ResolveResponse"}
+        b: {$ref: "#/components/schemas/ResolveResponse"}
+        comparison: {$ref: "#/components/schemas/Comparison"}
+    PriceListItem:
+      allOf:
+        - $ref: "#/components/schemas/ConditionRecord"
+        - type: object
+          required: [scope]
+          properties:
+            scope: {type: string, enum: [CUSTOMER, GROUP, ALL], description: "Why the record applies to the customer."}
     ConditionRecordInput:
       allOf:
         - $ref: "#/components/schemas/RecordInput"
