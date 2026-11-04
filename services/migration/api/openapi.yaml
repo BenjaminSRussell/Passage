@@ -112,7 +112,7 @@ paths:
         - { name: Idempotency-Key, in: header, schema: { type: string } }
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, additionalProperties: false, required: [mapping], properties: { mapping: { type: object, description: "Mapping DSL document with entity, version, fields (a field may name a source format or the codepage_normalize function), optional rejectWhen conditions (field, op, value or values, reason code) and at least one test." } } } } }
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [mapping], properties: { mapping: { type: object, description: "Mapping DSL document with entity, version, fields (a field may name a source format, the codepage_normalize function, or rule expr with an expr expression over source columns: + - * / comparisons && || ! and the functions round, min, max, abs, concat, substr, upper, lower, trim, len, isempty, coalesce, if), optional rejectWhen conditions (field, op, value or values, reason code; op expr takes an expression over mapped targets as value and rejects when it is true) and at least one test." } } } } }
       responses:
         '201':
           description: A new spec version was stored.

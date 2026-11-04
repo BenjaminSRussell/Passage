@@ -244,6 +244,42 @@ describe("mapping specs", () => {
     expect(rows.map((r) => r.textContent)).toEqual(["CUST-NO-GROUPgroupis empty", "CUST-BAD-GROUPgroupis not one of 10, 20", "CUST-TEMPidmatches ^TMP"]);
   });
 
+  it("lists the field rules of a spec, with the expression of an expr rule and an expr reject condition", async () => {
+    const mapping = {
+      entity: "item",
+      version: 1,
+      fields: [
+        { source: "SKU", target: "sku", type: "string" },
+        { rule: "concat", sources: ["A", "B"], target: "ab", type: "string" },
+        { rule: "const", value: "EA", target: "uom", type: "string" },
+        { rule: "expr", expr: "round(QTY * PRICE, 2)", target: "value", type: "decimal" },
+        { source: "ACTIVE", fn: "ax_noyes", target: "active", type: "bool" },
+      ],
+      rejectWhen: [{ field: "value", op: "expr", value: "value > 1000", code: "ITEM-VALUE-HIGH" }],
+    };
+    handler = () => json(200, { ...spec, mapping });
+    renderAt(`/migration/specs/${SPEC}`);
+    const table = await screen.findByRole("table", { name: "Field rules" });
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(rows.map((r) => r.textContent)).toEqual([
+      "skustringcopySKU",
+      "abstringconcatA + B",
+      'uomstringconst"EA"',
+      "valuedecimalexprround(QTY * PRICE, 2)",
+      "activeboolcopy (ax_noyes)ACTIVE",
+    ]);
+    const reject = await screen.findByRole("table", { name: "Reject conditions" });
+    expect(reject).toHaveTextContent("ITEM-VALUE-HIGHvalueis true: value > 1000");
+    expect(violations(table.closest("main") ?? document.body)).toEqual([]);
+  });
+
+  it("shows no field rules card for a spec whose mapping has no fields", async () => {
+    handler = () => json(200, { ...spec, mapping: { entity: "customer", version: 1 } });
+    renderAt(`/migration/specs/${SPEC}`);
+    expect(await screen.findByText("Checksum")).toBeInTheDocument();
+    expect(screen.queryByText("Field rules")).not.toBeInTheDocument();
+  });
+
   it("shows no reject conditions card for a spec without rejectWhen", async () => {
     handler = () => json(200, spec);
     renderAt(`/migration/specs/${SPEC}`);

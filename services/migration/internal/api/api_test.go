@@ -474,11 +474,15 @@ func TestPublishSpec_Rejections(t *testing.T) {
 	failing := `{"entity":"customer","version":1,"fields":[{"source":"Name","target":"name","type":"string","required":true}],"tests":[{"name":"uppercase","input":{"Name":"a"},"expect":{"name":"A"}}]}`
 	unknownOp := `{"entity":"customer","version":1,"fields":[{"source":"Name","target":"name","type":"string"}],"rejectWhen":[{"field":"name","op":"like","value":"x","code":"CUST-X"}],"tests":[{"name":"ok","input":{"Name":"a"},"expect":{"name":"a"}}]}`
 	rejectedByCondition := `{"entity":"customer","version":1,"fields":[{"source":"Name","target":"name","type":"string"}],"rejectWhen":[{"field":"name","op":"match","value":"^TMP","code":"CUST-TEMP"}],"tests":[{"name":"temp loads","input":{"Name":"TMP-1"},"expect":{"name":"TMP-1"}}]}`
+	badExpr := `{"entity":"customer","version":1,"fields":[{"rule":"expr","expr":"Qty *","target":"n","type":"decimal"}],"tests":[{"name":"ok","input":{"Qty":"1"},"expect":{"n":"1"}}]}`
+	exprFails := `{"entity":"customer","version":1,"fields":[{"rule":"expr","expr":"Qty * 2","target":"n","type":"decimal"}],"tests":[{"name":"doubles","input":{"Qty":"2"},"expect":{"n":"5"}}]}`
 	for name, tc := range map[string]struct {
 		payload string
 		status  int
 		want    string
 	}{
+		"expression syntax":     {`{"mapping":` + badExpr + `}`, http.StatusUnprocessableEntity, "ends early"},
+		"expression fails test": {`{"mapping":` + exprFails + `}`, http.StatusUnprocessableEntity, "doubles"},
 		"missing":               {`{}`, http.StatusBadRequest, `"mapping"`},
 		"malformed":             {`{`, http.StatusBadRequest, "COM-0001"},
 		"invalid":               {`{"mapping":{"entity":"x","version":0,"fields":[]}}`, http.StatusUnprocessableEntity, domain.CodeMapInvalid},
@@ -499,6 +503,19 @@ func TestPublishSpec_Rejections(t *testing.T) {
 	r2 := router(s, rowsExtractor{}, domain.NewMemLoader())
 	if rec, _ := publish(t, r2, specMapping); rec.Code != http.StatusInternalServerError {
 		t.Fatalf("store error: %d", rec.Code)
+	}
+}
+
+func TestPublishSpec_ExpressionRuleStoresAndEchoesTheDocument(t *testing.T) {
+	r := router(store.NewMem(), rowsExtractor{}, domain.NewMemLoader())
+	doc := `{"entity":"customer","version":1,"fields":[{"source":"Name","target":"name","type":"string"},{"rule":"expr","expr":"concat(upper(Name), '-', len(Name))","target":"label","type":"string"}],"rejectWhen":[{"field":"label","op":"expr","value":"len(label) > 20","code":"CUST-LABEL-LONG"}],"tests":[{"name":"label","input":{"Name":"acme"},"expect":{"name":"acme","label":"ACME-4"}},{"name":"long","input":{"Name":"a very long customer name"},"expectRejects":["CUST-LABEL-LONG"]}]}`
+	rec, spec := publish(t, r, doc)
+	if rec.Code != http.StatusCreated || spec.Fields != 2 {
+		t.Fatalf("publish: %d %s", rec.Code, rec.Body)
+	}
+	get := do(r, http.MethodGet, specsPath+"/"+spec.ID, "", duties, true)
+	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `concat(upper(Name)`) || !strings.Contains(get.Body.String(), `"op":"expr"`) {
+		t.Fatalf("the stored mapping must keep both expressions: %d %s", get.Code, get.Body)
 	}
 }
 
