@@ -3,7 +3,7 @@
 -- (nominal/min/max per unit) is stored so a later quantity correction can
 -- re-check the band. Nullable so non-catch-weight lines are unchanged.
 -- receiving_receipt_line is a live table, so this file only changes the
--- catalog: nullable columns and a NOT VALID check. 0020 validates the check.
+-- catalog: nullable columns and a NOT VALID check. 0021 validates the check.
 SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE receiving_receipt_line ADD COLUMN IF NOT EXISTS cw_qty int;
