@@ -2425,7 +2425,8 @@
       {"resource": "/v1/pricing/workspace", "methods": ["GET"]},
       {"resource": "/v1/pricing/procedure-assignments", "methods": ["GET"]},
       {"resource": "/v1/pricing/compare", "methods": ["POST"]},
-      {"resource": "/v1/pricing/price-list", "methods": ["GET"]}
+      {"resource": "/v1/pricing/price-list", "methods": ["GET"]},
+      {"resource": "/v1/pricing/price-list/net-prices", "methods": ["GET"]}
     ]},
     "product.configuration.read": {"service_only": true, "permissions": [{"resource": "/v1/product/saved-configurations/*", "methods": ["GET"]}]},
     "product.configure": {"permissions": [{"resource": "/v1/product/configuration-models/*:solve", "methods": ["POST"]}]},
