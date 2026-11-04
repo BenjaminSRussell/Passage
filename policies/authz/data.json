@@ -250,7 +250,8 @@
       {"resource": "/v1/hub/subscriptions/*:resume", "methods": ["POST"]},
       {"resource": "/v1/hub/subscriptions/*:replay", "methods": ["POST"]},
       {"resource": "/v1/hub/subscriptions/*:test", "methods": ["POST"]},
-      {"resource": "/v1/hub/deliveries/*:replay", "methods": ["POST"]}
+      {"resource": "/v1/hub/deliveries/*:replay", "methods": ["POST"]},
+      {"resource": "/v1/hub/subscriptions/*:rotate", "methods": ["POST"]}
     ]},
     "hub.delivery.read": {"permissions": [
       {"resource": "/v1/hub/subscriptions", "methods": ["GET"]},
