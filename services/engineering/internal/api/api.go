@@ -28,24 +28,34 @@ import (
 )
 
 const (
-	readyTimeout      = 500 * time.Millisecond
-	idempotencyKey    = "Idempotency-Key"
-	dutyRead          = "engineering.read"
-	dutyBomWrite      = "engineering.bom.write"
-	dutyEcoApprove    = "engineering.eco.approve"
-	dutyEcoWorkflow   = "engineering.eco.workflow"
-	dutyEcrReview     = "engineering.ecr.review"
-	dutyResourceWrite = "engineering.resource.write"
-	dutyRouteWrite    = "engineering.route.write"
-	dateLayout        = "2006-01-02"
-	validationDetail  = "request failed validation"
-	maxIDLength       = 64
-	maxLines          = 5000
-	maxOperations     = 500
-	maxNumberLength   = 40
-	maxReasonLength   = 200
-	maxDecimalExp     = 15
-	minDecimalExp     = -12
+	readyTimeout        = 500 * time.Millisecond
+	idempotencyKey      = "Idempotency-Key"
+	dutyRead            = "engineering.read"
+	dutyBomWrite        = "engineering.bom.write"
+	dutyEcoApprove      = "engineering.eco.approve"
+	dutyEcoWorkflow     = "engineering.eco.workflow"
+	dutyEcrReview       = "engineering.ecr.review"
+	dutyResourceWrite   = "engineering.resource.write"
+	dutyRouteWrite      = "engineering.route.write"
+	dutyReleaseAccept   = "engineering.release.accept"
+	dutyDocSign         = "engineering.doc.sign"
+	reauthHeader        = "X-Passage-Reauth-Assertion"
+	dateLayout          = "2006-01-02"
+	validationDetail    = "request failed validation"
+	maxIDLength         = 64
+	maxReleaseEntities  = 100
+	maxFindNumber       = 99999
+	maxOriginals        = 50
+	maxPrintedName      = 200
+	maxReadinessChecks  = 100
+	maxStorageKey       = 512
+	maxDocumentChildren = 500
+	maxLines            = 5000
+	maxOperations       = 500
+	maxNumberLength     = 40
+	maxReasonLength     = 200
+	maxDecimalExp       = 15
+	minDecimalExp       = -12
 )
 
 var (
@@ -57,6 +67,7 @@ var (
 type API struct {
 	store        store.Store
 	approver     domain.Approver
+	reauth       Reauthenticator
 	now          func() time.Time
 	bomCreated   atomic.Int64
 	bomFailed    atomic.Int64
@@ -88,7 +99,14 @@ type API struct {
 }
 
 func New(s store.Store, approver domain.Approver, now func() time.Time) *API {
-	return &API{store: s, approver: approver, now: now, stats: routeStats{routes: map[string]*routeStat{}}}
+	return &API{store: s, approver: approver, reauth: FailClosedReauth{}, now: now, stats: routeStats{routes: map[string]*routeStat{}}}
+}
+
+func (a *API) WithReauth(r Reauthenticator) *API {
+	if r != nil {
+		a.reauth = r
+	}
+	return a
 }
 
 func (a *API) Register(r chi.Router) {
@@ -147,6 +165,51 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/resource-groups/{id}", a.getResourceGroup)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/calendars", a.listCalendars)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/calendars/{id}", a.getCalendar)
+		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/organizations", a.createOrganization)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/organizations", a.listOrganizations)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/organizations/{id}", a.getOrganization)
+		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/nomenclatures", a.createNomenclature)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/nomenclatures", a.listNomenclatures)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/nomenclatures/{id}", a.getNomenclature)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/nomenclatures/{id}:next", a.nextNomenclature)
+		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/categories", a.createCategory)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/categories", a.listCategories)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/categories/{id}", a.getCategory)
+		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/versions", a.createEngineeringVersion)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/versions", a.listEngineeringVersions)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/versions/{id}", a.getEngineeringVersion)
+		r.With(authz.RequireDuty(dutyBomWrite)).Put("/v1/engineering/identifiers", a.putIdentifier)
+		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/release-policies", a.createReleasePolicy)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/release-policies", a.listReleasePolicies)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/release-policies/{id}", a.getReleasePolicy)
+		r.With(authz.RequireDuty(dutyBomWrite)).Put("/v1/engineering/site-mappings", a.putSiteMapping)
+		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/release-sessions", a.createReleaseSession)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/release-sessions", a.listReleaseSessions)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/release-sessions/{id}", a.getReleaseSession)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/release-lines", a.listReleaseLines)
+		r.With(authz.RequireDuty(dutyReleaseAccept)).Post("/v1/engineering/release-lines/{id}:accept", a.decideReleaseLine(true))
+		r.With(authz.RequireDuty(dutyReleaseAccept)).Post("/v1/engineering/release-lines/{id}:reject", a.decideReleaseLine(false))
+		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/readiness-policies", a.createReadinessPolicy)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/readiness-policies", a.listReadinessPolicies)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/readiness-policies/{id}", a.getReadinessPolicy)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/released-products", a.listReleasedProducts)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/released-products/{id}", a.getReleasedProduct)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/released-products/{id}:process-policy", a.processPolicy)
+		r.With(authz.RequireDuty(dutyReleaseAccept)).Post("/v1/engineering/released-products/{id}/checks/{key}:sign", a.signReadinessCheck)
+		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/document-types", a.createDocumentType)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/document-types", a.listDocumentTypes)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/document-types/{code}", a.getDocumentType)
+		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/documents", a.createDocument)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/documents", a.listDocuments)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/documents/{id}", a.getDocument)
+		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/documents/{id}:transition", a.transitionDocument)
+		r.With(authz.RequireDuty(dutyDocSign)).Post("/v1/engineering/documents/{id}:sign", a.signDocument)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/documents/{id}/signatures", a.listSignatures)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/documents/{id}/where-used", a.documentWhereUsed)
+		r.With(authz.RequireDuty(dutyBomWrite)).Put("/v1/engineering/documents/{id}/structure", a.setDocumentStructure)
+		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/ebom-imports", a.importEbom)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/ebom-imports", a.listEbomImports)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/ebom-imports/{id}", a.getEbomImport)
 	})
 }
 
@@ -700,22 +763,31 @@ type replacementBody struct {
 	NewVersionID string `json:"newVersionId"`
 }
 
+type documentReplacementBody struct {
+	OldDocumentID string `json:"oldDocumentId"`
+	NewDocumentID string `json:"newDocumentId"`
+}
+
 type ecoBody struct {
-	ID             string            `json:"id,omitempty"`
-	Number         string            `json:"number"`
-	State          string            `json:"state,omitempty"`
-	ReleaseDate    string            `json:"releaseDate,omitempty"`
-	DecidedBy      string            `json:"decidedBy,omitempty"`
-	CreatedBy      string            `json:"createdBy,omitempty"`
-	DecisionReason string            `json:"decisionReason,omitempty"`
-	EcrID          string            `json:"ecrId,omitempty"`
-	Replaces       []replacementBody `json:"replaces"`
+	ID             string                    `json:"id,omitempty"`
+	Number         string                    `json:"number"`
+	State          string                    `json:"state,omitempty"`
+	ReleaseDate    string                    `json:"releaseDate,omitempty"`
+	DecidedBy      string                    `json:"decidedBy,omitempty"`
+	CreatedBy      string                    `json:"createdBy,omitempty"`
+	DecisionReason string                    `json:"decisionReason,omitempty"`
+	EcrID          string                    `json:"ecrId,omitempty"`
+	Replaces       []replacementBody         `json:"replaces"`
+	Documents      []documentReplacementBody `json:"documents,omitempty"`
 }
 
 func bodyFromEco(e domain.Eco) ecoBody {
-	body := ecoBody{ID: e.ID, Number: e.Number, State: string(e.State), ReleaseDate: formatDate(e.ReleaseDate), DecidedBy: e.DecidedBy, CreatedBy: e.CreatedBy, DecisionReason: e.DecisionReason, EcrID: e.EcrID, Replaces: make([]replacementBody, len(e.Replaces))}
+	body := ecoBody{ID: e.ID, Number: e.Number, State: string(e.State), ReleaseDate: formatDate(e.ReleaseDate), DecidedBy: e.DecidedBy, CreatedBy: e.CreatedBy, DecisionReason: e.DecisionReason, EcrID: e.EcrID, Replaces: make([]replacementBody, len(e.Replaces)), Documents: make([]documentReplacementBody, len(e.Documents))}
 	for i, r := range e.Replaces {
 		body.Replaces[i] = replacementBody{OldVersionID: r.OldVersionID, NewVersionID: r.NewVersionID}
+	}
+	for i, r := range e.Documents {
+		body.Documents[i] = documentReplacementBody{OldDocumentID: r.OldDocumentID, NewDocumentID: r.NewDocumentID}
 	}
 	return body
 }
@@ -732,8 +804,8 @@ func (b ecoBody) toDomain() (domain.Eco, map[string]string) {
 		eco.EcrID = b.EcrID
 	}
 	eco.ReleaseDate = optionalDate("releaseDate", b.ReleaseDate, fields)
-	if len(b.Replaces) == 0 || len(b.Replaces) > maxLines {
-		fields["replaces"] = fmt.Sprintf("must contain 1 to %d replacements", maxLines)
+	if (len(b.Replaces) == 0 && len(b.Documents) == 0) || len(b.Replaces) > maxLines || len(b.Documents) > maxLines {
+		fields["replaces"] = fmt.Sprintf("must contain 1 to %d BOM or document replacements", maxLines)
 	}
 	seen := map[string]bool{}
 	for _, r := range b.Replaces {
@@ -742,6 +814,14 @@ func (b ecoBody) toDomain() (domain.Eco, map[string]string) {
 		}
 		seen[r.NewVersionID] = true
 		eco.Replaces = append(eco.Replaces, domain.Replacement{OldVersionID: r.OldVersionID, NewVersionID: r.NewVersionID})
+	}
+	seenDoc := map[string]bool{}
+	for _, r := range b.Documents {
+		if !ids.Valid(r.OldDocumentID) || !ids.Valid(r.NewDocumentID) || r.OldDocumentID == r.NewDocumentID || seenDoc[r.NewDocumentID] {
+			fields["documents"] = "each document replacement needs two different valid document ids and a new document used once"
+		}
+		seenDoc[r.NewDocumentID] = true
+		eco.Documents = append(eco.Documents, domain.DocumentReplacement{OldDocumentID: r.OldDocumentID, NewDocumentID: r.NewDocumentID})
 	}
 	return eco, fields
 }
@@ -909,11 +989,11 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, operation string, err
 func problemFrom(de *domain.Error) *httpx.Problem {
 	status := http.StatusUnprocessableEntity
 	switch de.Code {
-	case domain.CodeEcoState, domain.CodeEcrState, domain.CodeEcrConverted, domain.CodeEcrNotApproved, domain.CodeRouteState, domain.CodeRouteOverlap, domain.CodeBomState, domain.CodeBomInEco, domain.CodeBomVersionConflict, domain.CodeRouteConflict, domain.CodeResInUse, domain.CodeResConflict:
+	case domain.CodeEcoState, domain.CodeEcrState, domain.CodeEcrConverted, domain.CodeEcrNotApproved, domain.CodeRouteState, domain.CodeRouteOverlap, domain.CodeBomState, domain.CodeBomInEco, domain.CodeBomVersionConflict, domain.CodeRouteConflict, domain.CodeResInUse, domain.CodeResConflict, domain.CodeDocEcoRequired, domain.CodeDocSigned, domain.CodeDocState, domain.CodeReleaseState, domain.CodeEbomRevisionReleased:
 		status = http.StatusConflict
 	case domain.CodeEcoApproverUnavailable:
 		status = http.StatusServiceUnavailable
-	case domain.CodeEcoSelfApproval, domain.CodeEcrSelfApproval, domain.CodeEcrNotRequester, domain.CodeEcoCreatorUnknown, domain.CodeEcoBackdateDuty:
+	case domain.CodeEcoSelfApproval, domain.CodeEcrSelfApproval, domain.CodeEcrNotRequester, domain.CodeEcoCreatorUnknown, domain.CodeEcoBackdateDuty, domain.CodeDocReauth, domain.CodeDocSignerSame, domain.CodeReadinessSelfSign, domain.CodeOwnedField, domain.CodeReleaseScope:
 		status = http.StatusForbidden
 	}
 	return httpx.NewProblem(status, de.Code, de.Detail)

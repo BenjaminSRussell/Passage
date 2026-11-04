@@ -33,6 +33,27 @@ channels:
     address: passage.engineering.calendar
     messages:
       generated: { $ref: '#/components/messages/calendarGenerated' }
+  passage.engineering.releasesession:
+    address: passage.engineering.releasesession
+    messages:
+      created: { $ref: '#/components/messages/releaseSessionCreated' }
+  passage.engineering.releaseline:
+    address: passage.engineering.releaseline
+    messages:
+      accepted: { $ref: '#/components/messages/releaseLineAccepted' }
+  passage.engineering.releasedproduct:
+    address: passage.engineering.releasedproduct
+    messages:
+      changed: { $ref: '#/components/messages/releasedProductChanged' }
+  passage.engineering.document:
+    address: passage.engineering.document
+    messages:
+      signed: { $ref: '#/components/messages/documentSigned' }
+      released: { $ref: '#/components/messages/documentReleased' }
+  passage.engineering.ebom:
+    address: passage.engineering.ebom
+    messages:
+      imported: { $ref: '#/components/messages/ebomImported' }
 operations:
   onBomVersionActivated:
     action: send
@@ -82,6 +103,30 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.engineering.calendar' }
     messages: [{ $ref: '#/channels/passage.engineering.calendar/messages/generated' }]
+  onReleaseSessionCreated:
+    action: send
+    channel: { $ref: '#/channels/passage.engineering.releasesession' }
+    messages: [{ $ref: '#/channels/passage.engineering.releasesession/messages/created' }]
+  onReleaseLineAccepted:
+    action: send
+    channel: { $ref: '#/channels/passage.engineering.releaseline' }
+    messages: [{ $ref: '#/channels/passage.engineering.releaseline/messages/accepted' }]
+  onReleasedProductChanged:
+    action: send
+    channel: { $ref: '#/channels/passage.engineering.releasedproduct' }
+    messages: [{ $ref: '#/channels/passage.engineering.releasedproduct/messages/changed' }]
+  onDocumentSigned:
+    action: send
+    channel: { $ref: '#/channels/passage.engineering.document' }
+    messages: [{ $ref: '#/channels/passage.engineering.document/messages/signed' }]
+  onDocumentReleased:
+    action: send
+    channel: { $ref: '#/channels/passage.engineering.document' }
+    messages: [{ $ref: '#/channels/passage.engineering.document/messages/released' }]
+  onEbomImported:
+    action: send
+    channel: { $ref: '#/channels/passage.engineering.ebom' }
+    messages: [{ $ref: '#/channels/passage.engineering.ebom/messages/imported' }]
 components:
   messages:
     bomVersionActivated:
@@ -205,3 +250,75 @@ components:
           to: { type: string, format: date }
           openDays: { type: integer }
       x-passage-type: dev.passage.engineering.calendar.generated.v1
+    releaseSessionCreated:
+      name: releaseSessionCreated
+      title: Product-release session created
+      payload:
+        type: object
+        required: [sessionId, number, source]
+        properties:
+          sessionId: { type: string }
+          number: { type: string }
+          source: { type: string }
+      x-passage-type: dev.passage.engineering.releasesession.created.v1
+    releaseLineAccepted:
+      name: releaseLineAccepted
+      title: Product-release line accepted
+      payload:
+        type: object
+        required: [lineId, sessionId, legalEntityId, acceptedBy]
+        properties:
+          lineId: { type: string }
+          sessionId: { type: string }
+          legalEntityId: { type: string }
+          acceptedBy: { type: string }
+      x-passage-type: dev.passage.engineering.releaseline.accepted.v1
+    releasedProductChanged:
+      name: releasedProductChanged
+      title: Released product readiness changed
+      payload:
+        type: object
+        required: [releasedProductId, productId, legalEntityId, state]
+        properties:
+          releasedProductId: { type: string }
+          productId: { type: string }
+          legalEntityId: { type: string }
+          state: { type: string }
+      x-passage-type: dev.passage.engineering.releasedproduct.changed.v1
+    documentSigned:
+      name: documentSigned
+      title: Document electronically signed
+      payload:
+        type: object
+        required: [documentId, recordId, signerId, meaning, signedAt]
+        properties:
+          documentId: { type: string }
+          recordId: { type: string }
+          signerId: { type: string }
+          meaning: { type: string }
+          signedAt: { type: string, format: date-time }
+      x-passage-type: dev.passage.engineering.document.signed.v1
+    documentReleased:
+      name: documentReleased
+      title: Document released
+      payload:
+        type: object
+        required: [documentId, number, version]
+        properties:
+          documentId: { type: string }
+          number: { type: string }
+          version: { type: string }
+      x-passage-type: dev.passage.engineering.document.released.v1
+    ebomImported:
+      name: ebomImported
+      title: Engineering BOM imported
+      payload:
+        type: object
+        required: [importId, partNumber, revision, added, exceptions]
+        properties:
+          importId: { type: string }
+          partNumber: { type: string }
+          revision: { type: string }
+          added: { type: integer }
+          exceptions: { type: integer }
+      x-passage-type: dev.passage.engineering.ebom.imported.v1

@@ -36,6 +36,65 @@ describe("engineering module", () => {
     expect(engineering.nav.find((n) => n.label === "Change orders")).toMatchObject({ to: "/engineering/ecos", duty: "engineering.read" });
   });
 
+  it("declares Wave 09 organization, document, release and eBOM routes", () => {
+    expect(engineering.routes.map((r) => r.path)).toEqual(
+      expect.arrayContaining([
+        "/engineering/organizations",
+        "/engineering/organizations/new",
+        "/engineering/documents",
+        "/engineering/documents/new",
+        "/engineering/documents/:id",
+        "/engineering/releases",
+        "/engineering/ebom",
+        "/engineering/ebom/new",
+      ]),
+    );
+    expect(engineering.routes.find((r) => r.path === "/engineering/documents/new")?.handle).toMatchObject({ duty: "engineering.bom.write" });
+    expect(engineering.nav.find((n) => n.label === "Documents")).toMatchObject({ to: "/engineering/documents", duty: "engineering.read" });
+    expect(engineering.nav.find((n) => n.label === "Product releases")).toMatchObject({ to: "/engineering/releases", duty: "engineering.read" });
+  });
+
+  it("gates document sign and release accept on their duties", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).endsWith("/signatures")) return { ok: true, status: 200, json: async () => ({ items: [] }) };
+        if (String(url).includes("/documents/")) return { ok: true, status: 200, json: async () => ({ id: "d1", typeCode: "DRW", number: "DRW-1", status: "in_review" }) };
+        return { ok: true, status: 200, json: async () => ({ items: [{ id: "l1", productId: "BIKE", engineeringVersion: "A", legalEntityId: "USMF", status: "sent" }] }) };
+      }),
+    );
+    const doc = engineering.routes.find((r) => r.path === "/engineering/documents/:id")!.element;
+    const reader = render(
+      <PrincipalProvider duties={["engineering.read"]}>
+        <MemoryRouter>{doc}</MemoryRouter>
+      </PrincipalProvider>,
+    );
+    expect(await screen.findByText("DRW-1")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sign and release" })).toBeNull();
+    reader.unmount();
+    render(
+      <PrincipalProvider duties={["engineering.read", "engineering.doc.sign"]}>
+        <MemoryRouter>{doc}</MemoryRouter>
+      </PrincipalProvider>,
+    );
+    expect(await screen.findByRole("button", { name: "Sign and release" })).toBeInTheDocument();
+    const releases = engineering.routes.find((r) => r.path === "/engineering/releases")!.element;
+    const releaseReader = render(
+      <PrincipalProvider duties={["engineering.read"]}>
+        <MemoryRouter>{releases}</MemoryRouter>
+      </PrincipalProvider>,
+    );
+    expect(await screen.findByText("BIKE")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
+    releaseReader.unmount();
+    render(
+      <PrincipalProvider duties={["engineering.read", "engineering.release.accept"]}>
+        <MemoryRouter>{releases}</MemoryRouter>
+      </PrincipalProvider>,
+    );
+    expect(await screen.findByRole("button", { name: "Accept" })).toBeInTheDocument();
+  });
+
   it("declares the ECR routes and nav entry, with New gated on the BOM write duty", () => {
     expect(engineering.routes.map((r) => r.path)).toEqual(expect.arrayContaining(["/engineering/ecrs", "/engineering/ecrs/new", "/engineering/ecrs/:id"]));
     expect(engineering.routes.find((r) => r.path === "/engineering/ecrs/new")?.handle).toMatchObject({ duty: "engineering.bom.write" });

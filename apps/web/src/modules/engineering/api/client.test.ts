@@ -17,6 +17,10 @@ import {
   getEcr,
   createEcr,
   actOnEcr,
+  listDocuments,
+  signDocument,
+  acceptReleaseLine,
+  importEbom,
 } from "./client";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -171,5 +175,20 @@ describe("engineering client", () => {
     expect(init?.body).toBe('{"reason":"no"}');
     await actOnEcr("a", "submit");
     expect(fetchMock.mock.calls[fetchMock.mock.calls.length - 1][1]?.body).toBe("{}");
+  });
+
+  it("signs a document without a client-supplied assertion and accepts a release line", async () => {
+    const fetchMock = stub({ ok: true, status: 200, json: async () => ({ id: "d1", status: "released" }) });
+    await signDocument("d/1", { printedName: "Carol Kane", method: "password" });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/v1/engineering/documents/d%2F1:sign");
+    expect(new Headers(init?.headers).get("X-Passage-Reauth-Assertion")).toBeNull();
+    expect(init?.body).toBe('{"printedName":"Carol Kane","method":"password"}');
+    await acceptReleaseLine("l1");
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe("/api/v1/engineering/release-lines/l1:accept");
+    await listDocuments("DRW-1");
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe("/api/v1/engineering/documents?number=DRW-1");
+    await importEbom({ source: "cad", partNumber: "BIKE", revision: "A", lines: [{ partNumber: "WHEEL", quantity: "1" }] }, "k1");
+    expect(new Headers(fetchMock.mock.calls.at(-1)?.[1]?.headers).get("Idempotency-Key")).toBe("k1");
   });
 });

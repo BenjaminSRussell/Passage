@@ -108,6 +108,17 @@ func requireName(value string, fields map[string]string) {
 	}
 }
 
+// legalEntityID validates a legal-entity id and returns it canonical: a non-nil UUID, the only form a
+// platform principal's legal-entity scope and the legal-entity row policies match.
+func legalEntityID(field, value string, fields map[string]string) string {
+	id, ok := ids.Canonical(strings.TrimSpace(value))
+	if !ok || id == ids.Nil {
+		fields[field] = "must be a legal-entity UUID"
+		return value
+	}
+	return id
+}
+
 func checkUUID(field, value string, fields map[string]string) {
 	if value != "" && !ids.Valid(value) {
 		fields[field] = "must be a UUID"
