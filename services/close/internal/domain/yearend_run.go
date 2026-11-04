@@ -20,6 +20,7 @@ const (
 	EventCloseTaskReassigned = "dev.passage.close.task.reassigned.v1"
 	EventAllocationCompleted = "dev.passage.close.allocation.completed.v1"
 	EventAccrualScheduled    = "dev.passage.close.accrual.scheduled.v1"
+	EventAccrualCancelled    = "dev.passage.close.accrual.cancelled.v1"
 	EventRegroupingCompleted = "dev.passage.close.regrouping.completed.v1"
 	maxDimensionAttributes   = 5
 )

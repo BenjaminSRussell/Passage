@@ -147,23 +147,25 @@ type AccrualDefinition struct {
 }
 
 type AccrualRun struct {
-	ID            string              `json:"id"`
-	LegalEntityID string              `json:"legalEntityId"`
-	LedgerID      string              `json:"ledgerId"`
-	SchemeCode    string              `json:"schemeCode"`
-	Amount        string              `json:"amount"`
-	Currency      string              `json:"currency"`
-	StartDate     string              `json:"startDate"`
-	Status        string              `json:"status"`
-	DebitAccount  string              `json:"debitAccount"`
-	CreditAccount string              `json:"creditAccount"`
-	AutoReverse   bool                `json:"autoReverse"`
-	Occurrences   []AccrualOccurrence `json:"occurrences"`
-	EntryIDs      map[string]string   `json:"entryIds"`
-	CreatedBy     string              `json:"createdBy"`
-	LastError     string              `json:"lastError,omitempty"`
-	NextDue       *time.Time          `json:"nextDue,omitempty"`
-	TenantID      string              `json:"-"`
+	ID               string              `json:"id"`
+	LegalEntityID    string              `json:"legalEntityId"`
+	LedgerID         string              `json:"ledgerId"`
+	SchemeCode       string              `json:"schemeCode"`
+	Amount           string              `json:"amount"`
+	Currency         string              `json:"currency"`
+	StartDate        string              `json:"startDate"`
+	Status           string              `json:"status"`
+	DebitAccount     string              `json:"debitAccount"`
+	CreditAccount    string              `json:"creditAccount"`
+	AutoReverse      bool                `json:"autoReverse"`
+	Occurrences      []AccrualOccurrence `json:"occurrences"`
+	EntryIDs         map[string]string   `json:"entryIds"`
+	CreatedBy        string              `json:"createdBy"`
+	LastError        string              `json:"lastError,omitempty"`
+	CancelledBy      string              `json:"cancelledBy,omitempty"`
+	ReversalsPending bool                `json:"-"`
+	NextDue          *time.Time          `json:"nextDue,omitempty"`
+	TenantID         string              `json:"-"`
 }
 
 type StoredRegroupingRule struct {
@@ -221,6 +223,13 @@ type AllocationCompleted struct {
 	LedgerID string `json:"ledgerId"`
 	EntryID  string `json:"entryId"`
 	Reversed bool   `json:"reversed"`
+}
+
+type AccrualCancelled struct {
+	RunID      string `json:"runId"`
+	SchemeCode string `json:"schemeCode"`
+	LedgerID   string `json:"ledgerId"`
+	Actor      string `json:"actor"`
 }
 
 type AccrualScheduled struct {

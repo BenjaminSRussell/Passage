@@ -242,7 +242,10 @@ func (m *memAccruals) SaveAccrualRun(_ context.Context, in domain.AccrualRun, ke
 	if m.runs == nil {
 		m.runs, m.byKey = map[string]domain.AccrualRun{}, map[string]string{}
 	}
-	if _, known := m.runs[in.ID]; known && in.ID != "" {
+	if prior, known := m.runs[in.ID]; known && in.ID != "" {
+		if prior.Status == "cancelled" {
+			in.Status = "cancelled"
+		}
 		m.runs[in.ID] = in
 		return in, nil
 	}
@@ -259,13 +262,13 @@ func (m *memAccruals) AccrualRun(_ context.Context, id string) (domain.AccrualRu
 func (m *memAccruals) DueAccrualRuns(context.Context) ([]domain.AccrualRun, error) {
 	var out []domain.AccrualRun
 	for _, run := range m.runs {
-		if run.Status == "scheduled" {
+		if run.Status == "scheduled" || (run.Status == "cancelled" && run.ReversalsPending) {
 			out = append(out, run)
 		}
 	}
 	return out, nil
 }
-func (m *memAccruals) CancelAccrualRun(_ context.Context, id string) (domain.AccrualRun, error) {
+func (m *memAccruals) CancelAccrualRun(_ context.Context, id, _ string) (domain.AccrualRun, error) {
 	run, ok := m.runs[id]
 	if !ok {
 		return run, &domain.Error{Code: domain.CodeNoRun, Detail: "accrual run not found"}
@@ -276,6 +279,15 @@ func (m *memAccruals) CancelAccrualRun(_ context.Context, id string) (domain.Acc
 	run.Status = "cancelled"
 	m.runs[id] = run
 	return run, nil
+}
+func (m *memAccruals) RenewAccrualLease(context.Context, string) error   { return nil }
+func (m *memAccruals) ClearAccrualFailure(context.Context, string) error { return nil }
+func (m *memAccruals) AccrualRunByKey(_ context.Context, key, _ string) (domain.AccrualRun, bool, error) {
+	id, ok := m.byKey[key]
+	if !ok || key == "" {
+		return domain.AccrualRun{}, false, nil
+	}
+	return m.runs[id], true, nil
 }
 func (m *memAccruals) RecordAccrualFailure(_ context.Context, id, message string, park bool) error {
 	if park {
@@ -721,7 +733,7 @@ func TestAccrualMonthEndPostsOnlyDueOccurrencesAndTheSweeperPostsTheRest(t *test
 		t.Fatalf("only the January occurrence is due on 15 February, posted %v", got)
 	}
 	replay := f.sendAs("bob", http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-31"}`, "close.accrual.run", "accrual-eom")
-	if replay.Code != http.StatusCreated || len(f.ledger.Entries()) != 1 {
+	if replay.Code != http.StatusOK || len(f.ledger.Entries()) != 1 {
 		t.Fatalf("replay must not post again: %d, %d entries", replay.Code, len(f.ledger.Entries()))
 	}
 
@@ -945,5 +957,29 @@ func TestAccrualSweepParksAClosedPeriodAndCancelStopsARun(t *testing.T) {
 	}
 	if rec := f.sendAs("bob", http.MethodPost, "/v1/close/accrual-runs/not-a-uuid:cancel", "", "close.accrual.run", ""); rec.Code != http.StatusNotFound {
 		t.Fatalf("bad id: %d", rec.Code)
+	}
+}
+
+func TestAccrualApplyReplayReturnsTheStoredRunEvenAfterTheMonthCloses(t *testing.T) {
+	f := newSliceB()
+	ledger := testkit.TenantID(7)
+	putAccrualScheme(f, "rent", `{"ledgerId":"`+ledger+`","debitAccount":"6100","creditAccount":"2100","amount":"120.00","occurrences":2}`)
+	body := `{"ledgerId":"` + ledger + `","startDate":"2026-01-01"}`
+	first := f.sendAs("bob", http.MethodPost, "/v1/close/accrual-schemes/rent:apply", body, "close.accrual.run", "accrual-replay")
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first: %d %s", first.Code, first.Body)
+	}
+	closed := fakeStore{spans: []domain.Span{span(testkit.TenantID(8), domain.Row{Module: domain.ModuleAll, Status: domain.StatusClosed})}}
+	a := api.New(closed).WithLedgers(fakeLedger{owner: testkit.TenantID(9)}).WithYearEnd(&memoryRuns{}, f.ledger).
+		WithSliceB(f.periods, f.checks, f.allocs, f.accrual, f.regroup, nil).WithClock(func() time.Time { return *f.clock })
+	r := httpx.NewRouter()
+	a.Register(r)
+	f.router = r
+	again := f.sendAs("bob", http.MethodPost, "/v1/close/accrual-schemes/rent:apply", body, "close.accrual.run", "accrual-replay")
+	var stored, replayed domain.AccrualRun
+	_ = json.Unmarshal(first.Body.Bytes(), &stored)
+	_ = json.Unmarshal(again.Body.Bytes(), &replayed)
+	if again.Code != http.StatusOK || replayed.ID != stored.ID {
+		t.Fatalf("replay: %d %s", again.Code, again.Body)
 	}
 }

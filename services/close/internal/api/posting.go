@@ -475,6 +475,14 @@ func (a *API) applyAccrual(w http.ResponseWriter, r *http.Request) {
 		a.yearEndFailed(w, r, "accrual ledger lookup failed", err)
 		return
 	}
+	hash := store.HashRequest(http.MethodPost, r.URL.Path, hashKey(req.LedgerID, info.Currency, req.StartDate))
+	if stored, replayed, err := a.accruals.AccrualRunByKey(r.Context(), r.Header.Get(idempotencyHeader), hash); err != nil {
+		fail(w, r, err)
+		return
+	} else if replayed {
+		httpx.JSON(w, http.StatusOK, stored)
+		return
+	}
 	if req.Currency != "" && req.Currency != info.Currency {
 		fail(w, r, unprocessable("currency must be the ledger currency "+info.Currency))
 		return
@@ -517,7 +525,6 @@ func (a *API) applyAccrual(w http.ResponseWriter, r *http.Request) {
 		}
 		break
 	}
-	hash := store.HashRequest(http.MethodPost, r.URL.Path, hashKey(req.LedgerID, info.Currency, req.StartDate))
 	saved, err := a.accruals.SaveAccrualRun(r.Context(), run, r.Header.Get(idempotencyHeader), hash)
 	if err != nil {
 		fail(w, r, err)
@@ -550,7 +557,7 @@ func (a *API) advanceAccrual(ctx context.Context, run domain.AccrualRun, today t
 	for _, o := range run.Occurrences {
 		date, reverseOn := o.Date.Format(dateLayout), o.ReverseOn.Format(dateLayout)
 		occKey, revKey := "occ-"+date, "rev-"+reverseOn
-		if run.EntryIDs[occKey] == "" && !o.Date.After(today) {
+		if run.EntryIDs[occKey] == "" && !o.Date.After(today) && run.Status != "cancelled" {
 			if err := a.requireOpenPeriod(ctx, run.LegalEntityID, run.LedgerID, date); err != nil {
 				return run, err
 			}
@@ -596,17 +603,24 @@ func (a *API) advanceAccrual(ctx context.Context, run domain.AccrualRun, today t
 			next = &d
 		}
 	}
+	cancelled := run.Status == "cancelled"
 	for _, o := range run.Occurrences {
-		if run.EntryIDs["occ-"+o.Date.Format(dateLayout)] == "" {
+		posted := run.EntryIDs["occ-"+o.Date.Format(dateLayout)] != ""
+		if !posted && !cancelled {
 			consider(o.Date)
 		}
-		if run.AutoReverse && run.EntryIDs["rev-"+o.ReverseOn.Format(dateLayout)] == "" {
+		if run.AutoReverse && (posted || !cancelled) && run.EntryIDs["rev-"+o.ReverseOn.Format(dateLayout)] == "" {
 			consider(o.ReverseOn)
 		}
 	}
-	run.Status, run.NextDue = "scheduled", next
-	if next == nil {
-		run.Status = "posted"
+	run.NextDue = next
+	if cancelled {
+		run.ReversalsPending = next != nil
+	} else {
+		run.Status = "scheduled"
+		if next == nil {
+			run.Status = "posted"
+		}
 	}
 	return run, persist()
 }
@@ -617,7 +631,8 @@ func permanentPeriodRefusal(err error) bool {
 }
 
 func (a *API) cancelAccrual(w http.ResponseWriter, r *http.Request) {
-	if _, ok := a.principal(w, r); !ok {
+	p, ok := a.principalWithUser(w, r)
+	if !ok {
 		return
 	}
 	if a.accruals == nil {
@@ -629,7 +644,7 @@ func (a *API) cancelAccrual(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, notFound("accrual run not found"))
 		return
 	}
-	out, err := a.accruals.CancelAccrualRun(r.Context(), id)
+	out, err := a.accruals.CancelAccrualRun(r.Context(), id, p.UserID)
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -645,6 +660,10 @@ func (a *API) PostDueAccruals(ctx context.Context) (int, error) {
 	completed := 0
 	for _, run := range runs {
 		runCtx := tenant.With(ctx, tenant.Principal{TenantID: run.TenantID, LegalEntityID: run.LegalEntityID, UserID: run.CreatedBy})
+		if err := a.accruals.RenewAccrualLease(runCtx, run.ID); err != nil {
+			slog.Error("accrual lease could not be renewed", "runId", run.ID, "err", err)
+			continue
+		}
 		updated, err := a.advanceAccrual(runCtx, run, a.today())
 		if err != nil {
 			park := ledgerclient.Rejected(err) || permanentPeriodRefusal(err)
@@ -653,6 +672,9 @@ func (a *API) PostDueAccruals(ctx context.Context) (int, error) {
 				slog.Error("accrual failure could not be recorded", "runId", run.ID, "err", recordErr)
 			}
 			continue
+		}
+		if err := a.accruals.ClearAccrualFailure(runCtx, run.ID); err != nil {
+			slog.Error("accrual failure counter could not be cleared", "runId", run.ID, "err", err)
 		}
 		if updated.Status == "posted" {
 			completed++

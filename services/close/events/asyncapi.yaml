@@ -36,6 +36,8 @@ channels:
     messages:
       accrualScheduled:
         $ref: '#/components/messages/accrualScheduled'
+      accrualCancelled:
+        $ref: '#/components/messages/accrualCancelled'
   passage.close.regrouping:
     address: passage.close.regrouping
     messages:
@@ -84,6 +86,12 @@ operations:
       $ref: '#/channels/passage.close.accrual'
     messages:
       - $ref: '#/channels/passage.close.accrual/messages/accrualScheduled'
+  onAccrualCancelled:
+    action: send
+    channel:
+      $ref: '#/channels/passage.close.accrual'
+    messages:
+      - $ref: '#/channels/passage.close.accrual/messages/accrualCancelled'
   onRegroupingCompleted:
     action: send
     channel:
@@ -179,6 +187,18 @@ components:
           schemeCode: { type: string }
           ledgerId: { type: string, format: uuid }
       x-passage-type: dev.passage.close.accrual.scheduled.v1
+    accrualCancelled:
+      name: accrualCancelled
+      title: Accrual run cancelled
+      payload:
+        type: object
+        required: [runId, schemeCode, ledgerId, actor]
+        properties:
+          runId: { type: string, format: uuid }
+          schemeCode: { type: string }
+          ledgerId: { type: string, format: uuid }
+          actor: { type: string }
+      x-passage-type: dev.passage.close.accrual.cancelled.v1
     regroupingCompleted:
       name: regroupingCompleted
       title: Regrouping posted or reversed

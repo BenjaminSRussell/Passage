@@ -75,6 +75,8 @@ CREATE TABLE IF NOT EXISTS accrual_run (
   attempts int NOT NULL DEFAULT 0,
   next_attempt_at timestamptz NOT NULL DEFAULT now(),
   last_error text NOT NULL DEFAULT '',
+  cancelled_by text NOT NULL DEFAULT '',
+  reversals_pending boolean NOT NULL DEFAULT false,
   idempotency_key text NOT NULL,
   request_hash text NOT NULL,
   created_by text NOT NULL,
@@ -143,7 +145,7 @@ BEGIN
       LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, %1$I, pg_temp
       AS $body$
     BEGIN
-      IF NEW.status = 'scheduled'::text THEN
+      IF NEW.status = 'scheduled'::text OR (NEW.status = 'cancelled'::text AND NEW.reversals_pending) THEN
         INSERT INTO accrual_due(tenant_id, run_id, next_attempt_at) VALUES (NEW.tenant_id, NEW.id, NEW.next_attempt_at)
         ON CONFLICT (tenant_id, run_id) DO UPDATE SET next_attempt_at = EXCLUDED.next_attempt_at;
       ELSE

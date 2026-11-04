@@ -498,7 +498,7 @@ func TestPostDueAccruals_ParksARunWhoseMonthIsClosed(t *testing.T) {
 
 func TestCancelAccrualRun_StopsTheSweepAndBlocksLateProgress(t *testing.T) {
 	s, a, fake, run := dueAccrualFixture(t)
-	cancelled, err := s.CancelAccrualRun(principal(1), run.ID)
+	cancelled, err := s.CancelAccrualRun(principal(1), run.ID, "dana")
 	if err != nil || cancelled.Status != "cancelled" {
 		t.Fatalf("cancel: %+v %v", cancelled, err)
 	}
@@ -506,8 +506,116 @@ func TestCancelAccrualRun_StopsTheSweepAndBlocksLateProgress(t *testing.T) {
 		t.Fatalf("a cancelled run is not swept: %d %v", done, err)
 	}
 	run.Status = "posted"
-	if _, err := s.SaveAccrualRun(principal(1), run, "", ""); code(err) != domain.CodeInvalidTransition {
-		t.Fatalf("progress on a cancelled run must be refused: %v", err)
+	run.EntryIDs = map[string]string{"occ-2026-01-31": "je-9"}
+	saved, err := s.SaveAccrualRun(principal(1), run, "", "")
+	if err != nil || saved.Status != "cancelled" {
+		t.Fatalf("a cancelled run stays cancelled: %+v %v", saved, err)
+	}
+	got, err := s.AccrualRun(principal(1), run.ID)
+	if err != nil || got.EntryIDs["occ-2026-01-31"] != "je-9" || got.CancelledBy != "dana" {
+		t.Fatalf("a posted entry is never dropped: %+v %v", got, err)
+	}
+}
+
+type cancellingLedger struct {
+	pgLedger
+	cancel func()
+}
+
+func (c cancellingLedger) Post(ctx context.Context, e ledgerclient.Entry) (string, error) {
+	id, err := c.pgLedger.Post(ctx, e)
+	c.cancel()
+	return id, err
+}
+
+func TestPostDueAccruals_CancelDuringAPostKeepsTheEntryAndStillReversesIt(t *testing.T) {
+	admin, app := migrated(t)
+	s := store.New(app)
+	ctx := principal(1)
+	registerJan(t, s, ctx)
+	if _, err := s.RegisterPeriod(ctx, domain.PeriodRegistration{LegalEntityID: entityID, LedgerID: ledgerID, FiscalPeriodID: "00000000-0000-0000-0000-0000000000b2", Actor: "test",
+		Start: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), End: time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC)}); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-time.Hour)
+	run, err := s.SaveAccrualRun(ctx, domain.AccrualRun{LegalEntityID: entityID, LedgerID: ledgerID, SchemeCode: "RENT", Amount: "10.00", Currency: "USD", DebitAccount: "6100", CreditAccount: "2100", AutoReverse: true,
+		StartDate: "2026-01-31", Status: "scheduled", EntryIDs: map[string]string{}, CreatedBy: "bob", NextDue: &past,
+		Occurrences: []domain.AccrualOccurrence{
+			{Date: time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC), Amount: decimal.NewFromInt(5), ReverseOn: time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC)},
+			{Date: time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC), Amount: decimal.NewFromInt(5), ReverseOn: time.Date(2026, 3, 31, 0, 0, 0, 0, time.UTC)},
+		}}, "acc-mid", "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := ledgerclient.NewFake()
+	now := time.Date(2026, 1, 31, 9, 0, 0, 0, time.UTC)
+	ledger := cancellingLedger{pgLedger{fake}, func() {
+		if _, err := s.CancelAccrualRun(ctx, run.ID, "dana"); err != nil {
+			t.Error(err)
+		}
+	}}
+	a := api.New(s).WithYearEnd(s, ledger).WithSliceB(s, s, s, s, s, nil).WithClock(func() time.Time { return now })
+	if _, err := a.PostDueAccruals(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.AccrualRun(ctx, run.ID)
+	if err != nil || got.Status != "cancelled" || got.EntryIDs["occ-2026-01-31"] == "" || len(fake.Entries()) != 1 {
+		t.Fatalf("after the cancel: %+v entries %d %v", got, len(fake.Entries()), err)
+	}
+	var events int
+	if err := admin.QueryRow(context.Background(), `select count(*) from outbox where type = $1`, domain.EventAccrualCancelled).Scan(&events); err != nil || events != 1 {
+		t.Fatalf("cancel events = %d %v", events, err)
+	}
+	if _, err := admin.Exec(context.Background(), `update accrual_run set next_attempt_at = now() - interval '1 minute' where id = $1`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	now = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
+	if _, err := a.PostDueAccruals(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.AccrualRun(ctx, run.ID)
+	if got.EntryIDs["rev-2026-02-28"] == "" || got.EntryIDs["occ-2026-02-28"] != "" || len(fake.Entries()) != 2 {
+		t.Fatalf("the posted entry is reversed and nothing new posts: %+v entries %d", got, len(fake.Entries()))
+	}
+}
+
+func TestAccrualBackoffSurvivesPartialProgressAndLeaseRenews(t *testing.T) {
+	admin, app := migrated(t)
+	s := store.New(app)
+	ctx := principal(1)
+	past := time.Now().Add(-time.Hour)
+	run, err := s.SaveAccrualRun(ctx, domain.AccrualRun{LegalEntityID: entityID, LedgerID: ledgerID, SchemeCode: "RENT", Amount: "10.00", Currency: "USD", DebitAccount: "6100", CreditAccount: "2100",
+		StartDate: "2026-01-31", Status: "scheduled", Occurrences: []domain.AccrualOccurrence{}, EntryIDs: map[string]string{}, CreatedBy: "u", NextDue: &past}, "acc-b", "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := s.SaveAccrualRun(ctx, run, "", ""); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RecordAccrualFailure(ctx, run.ID, "ledger down", false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var attempts int
+	if err := admin.QueryRow(context.Background(), `select attempts from accrual_run where id = $1`, run.ID).Scan(&attempts); err != nil || attempts != 2 {
+		t.Fatalf("partial progress must not reset the backoff counter, attempts = %d %v", attempts, err)
+	}
+	if err := s.ClearAccrualFailure(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := admin.QueryRow(context.Background(), `select attempts from accrual_run where id = $1`, run.ID).Scan(&attempts); err != nil || attempts != 0 {
+		t.Fatalf("a clean pass clears it, attempts = %d %v", attempts, err)
+	}
+	if _, err := admin.Exec(context.Background(), `update accrual_run set next_attempt_at = now() where id = $1`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RenewAccrualLease(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	var secs float64
+	if err := admin.QueryRow(context.Background(), `select extract(epoch from next_attempt_at - now()) from accrual_run where id = $1`, run.ID).Scan(&secs); err != nil || secs < 200 {
+		t.Fatalf("lease renewed for %v seconds %v", secs, err)
 	}
 }
 
