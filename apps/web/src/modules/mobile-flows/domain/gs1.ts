@@ -1,7 +1,7 @@
 // GS1 application identifier parser (BR-32.1). Pure: no I/O, no React.
 // Shared by the flow designer's virtual scanner and the warehouse-mobile app.
 
-export type ScanClass = "LP" | "GTIN" | "LOCATION" | "ANY";
+export type ScanClass = "LP" | "GTIN" | "LOT" | "LOCATION" | "ANY";
 
 export const GS = "\u001d";
 
@@ -286,13 +286,14 @@ const LP_FORMAT = /^LP[0-9A-Z-]{3,20}$/;
 const LOCATION_FORMAT = /^[A-Z0-9]{1,4}(-[A-Z0-9]{1,4}){1,3}$/;
 
 /** Scan class names as the MOB-0101 message words them. */
-export const CLASS_LABEL: Record<ScanClass, string> = { LP: "LP", GTIN: "GTIN", LOCATION: "location", ANY: "any barcode" };
+export const CLASS_LABEL: Record<ScanClass, string> = { LP: "LP", GTIN: "GTIN", LOT: "lot", LOCATION: "location", ANY: "any barcode" };
 
 /** What the worker scanned, in the words of the MOB-0101 message. */
 export function describeScan(c: Classified): string {
   if (c.gs1) {
     if (c.gs1.fields["00"]) return "LP";
     if (c.gs1.fields["01"]) return "GTIN";
+    if (c.gs1.fields["10"]) return "lot";
     return `AI ${c.gs1.order[0] ?? "?"}`;
   }
   if (LP_FORMAT.test(c.value)) return "LP";
@@ -308,6 +309,8 @@ export function matchScanClass(expected: ScanClass, c: Classified): string | nul
     if (fields["00"] || (c.kind === "plain" && LP_FORMAT.test(c.value))) return null;
   } else if (expected === "GTIN") {
     if (fields["01"] || (c.kind === "plain" && /^\d{8}$|^\d{12,14}$/.test(c.value) && mod10Valid(c.value))) return null;
+  } else if (expected === "LOT") {
+    if (fields["10"]) return null;
   } else if (expected === "LOCATION") {
     if (c.kind === "plain" && LOCATION_FORMAT.test(c.value)) return null;
   }

@@ -52,6 +52,20 @@ func TestPostInvoiceAdjustment_CreditReversesTheDifferenceAndDebitsVendor(t *tes
 	}
 }
 
+func TestPostInvoiceAdjustment_ServiceLineGoesToExpense(t *testing.T) {
+	ledger := &domain.FakeLedger{}
+	in := adjustment(domain.AdjustmentCredit, domain.AdjustmentLine{InvoiceLineNo: 1, Amount: dec("4.00")})
+	in.Original[0].Service = true
+	profile := testProfile
+	profile.Expense = "6000"
+	if _, err := domain.PostInvoiceAdjustment(context.Background(), in, domain.FakePeriods{Status: domain.PeriodOpen}, ledger, profile); err != nil {
+		t.Fatal(err)
+	}
+	if ledger.Balance("6000").String() != "-4" || !ledger.Balance("1400").IsZero() || ledger.Balance("2000").String() != "4" {
+		t.Fatalf("expense %s inventory %s vendor %s", ledger.Balance("6000"), ledger.Balance("1400"), ledger.Balance("2000"))
+	}
+}
+
 func TestPostInvoiceAdjustment_CreditCeilingIsInvoicedPlusDebitsMinusCredits(t *testing.T) {
 	tests := []struct {
 		name   string

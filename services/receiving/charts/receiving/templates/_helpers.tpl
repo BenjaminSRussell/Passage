@@ -43,6 +43,10 @@
   value: {{ .Values.serviceUrls.inventory | default (printf "http://inventory.%s.svc:8080" .Release.Namespace) | quote }}
 - name: PARTY_URL
   value: {{ .Values.serviceUrls.party | default (printf "http://party.%s.svc:8080" .Release.Namespace) | quote }}
+- name: ORG_URL
+  value: {{ .Values.serviceUrls.org | default (printf "http://org.%s.svc:8080" .Release.Namespace) | quote }}
+- name: TAX_URL
+  value: {{ .Values.serviceUrls.tax | quote }}
 - name: COMPLIANCE_URL
   value: {{ .Values.serviceUrls.compliance | default (printf "http://compliance-compliance.%s.svc:8080" .Release.Namespace) | quote }}
 - name: LEGAL_ENTITY_COUNTRIES
@@ -57,4 +61,12 @@
   value: {{ .Values.postingProfile.ppvAccount | quote }}
 - name: POSTING_ACCOUNT_VENDOR_CONTROL
   value: {{ .Values.postingProfile.vendorControlAccount | quote }}
+- name: POSTING_ACCOUNT_EXPENSE
+  value: {{ .Values.postingProfile.expenseAccount | quote }}
+- name: POSTING_ACCOUNT_INPUT_TAX
+  value: {{ .Values.postingProfile.inputTaxAccount | quote }}
+{{- if .Values.tax.rules }}
+- name: TAX_RULES
+  value: {{ .Values.tax.rules | quote }}
+{{- end }}
 {{- end }}

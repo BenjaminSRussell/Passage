@@ -199,7 +199,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-001' }
-        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 receipt not POSTED; RCV-COR-001 correction below the invoiced quantity; RCV-IDM-001 an earlier ledger posting touching the receipt is unfinished or differs (errors.pendingKey and errors.createdAt name it); COM-0410.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 receipt not POSTED; RCV-SVC-001 receipt of an accepted service entry sheet; RCV-COR-001 correction below the invoiced quantity; RCV-IDM-001 an earlier ledger posting touching the receipt is unfinished or differs (errors.pendingKey and errors.createdAt name it); COM-0410.' }
         '412': { $ref: '#/components/responses/Problem', description: 'COM-0412' }
         '422': { $ref: '#/components/responses/Problem', description: 'RCV-VAL-001, RCV-OVR-001, PER-AP-001, COM-0409.' }
         '428': { $ref: '#/components/responses/Problem', description: 'COM-0428' }
@@ -228,7 +228,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-001' }
-        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 already cancelled or has invoiced quantity; RCV-IDM-001 an earlier ledger posting touching the receipt is unfinished or differs (errors.pendingKey and errors.createdAt name it); COM-0410.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 already cancelled or has invoiced quantity; RCV-SVC-001 receipt of an accepted service entry sheet; RCV-IDM-001 an earlier ledger posting touching the receipt is unfinished or differs (errors.pendingKey and errors.createdAt name it); COM-0410.' }
         '412': { $ref: '#/components/responses/Problem', description: 'COM-0412' }
         '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001, RCV-VAL-001 posting date before the receipt date, COM-0409.' }
         '428': { $ref: '#/components/responses/Problem', description: 'COM-0428' }
@@ -365,6 +365,24 @@ paths:
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-007' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/ers-self-bills/{id}:
+    get:
+      operationId: getErsSelfBill
+      x-passage-duty: APInquire
+      description: Returns the self-billing PDF issued to the vendor for a posted ERS invoice. The path id is the invoice id.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The self-billing document.
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-009' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
   /v1/receiving/service-entry-sheets:
     post:
       operationId: createServiceEntrySheet
@@ -419,7 +437,10 @@ paths:
     post:
       operationId: acceptServiceEntrySheet
       x-passage-duty: ServiceEntryAccept
-      description: Accepts a PENDING sheet. The user who entered the sheet cannot decide it (403 AP-SES-002). Writes dev.passage.receiving.serviceentrysheet.decided.v1 to the outbox.
+      description: >-
+        Accepts a PENDING sheet. The user who entered the sheet cannot decide it (403 AP-SES-002). Posts Dr expense / Cr GR/IR
+        through the ledger, opens GR/IR items on a synthetic POSTED service receipt (packing slip SES-{sheet id}) so ERS and
+        vendor invoices can settle it as ERS-{sheet id}, and writes serviceentrysheet.decided and receipt.posted to the outbox.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -434,6 +455,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003; AP-SES-002 the decider entered the sheet.' }
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-008' }
         '409': { $ref: '#/components/responses/Problem', description: 'AP-SES-003 the sheet is not PENDING.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 the AP period is not open.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
   /v1/receiving/service-entry-sheets/{id}:reject:
     post:
@@ -618,7 +640,7 @@ paths:
         journal (the GR/IR clearings fixed when the invoice was drawn, so the entry equals the one a normal post would have made)
         under the invoice's own idempotency key, sets the status to POSTED, records the releasing user and time, and writes
         dev.passage.payables.invoice.posted.v1. The duty is separate from VendorInvoicePost (segregation of duties), and the user
-        who posted the invoice cannot release it (AP-AUD-003). The caller needs an authenticated user.
+        who posted the invoice cannot release it (AP-AUD-003). An ERS invoice whose self-billing parties lack an address, country or name in the master data stays blocked with 422 AP-ERS-005. The caller needs an authenticated user.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
         - name: id
@@ -643,7 +665,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003; AP-AUD-003 the releaser posted the invoice.' }
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-005 invoice not found.' }
         '409': { $ref: '#/components/responses/Problem', description: 'AP-AUD-002 the invoice is not blocked for audit (also a second release); RCV-IDM-001; COM-0410.' }
-        '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 closed AP period; RCV-VAL-001 other legal entity; COM-0409.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 closed AP period; RCV-VAL-001 other legal entity; AP-ERS-005 self-billing party data incomplete; COM-0409.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
   /v1/receiving/invoices/{id}:reject-audit-block:
     post:
@@ -695,7 +717,7 @@ paths:
         cannot be invoiced again and an invoiced line is skipped. Idempotent per receipt (ALREADY_SETTLED). The invoice goes
         through the stochastic audit block like any other (status AUDIT_BLOCKED in the result). At most 100 invoices are created
         per run and 1000 GR/IR items scanned (hasMore); a failure stops the run and a repeat continues. Quantity discrepancies
-        are not handled. BR-18.9: a receipt line whose recorded unit price differs (at 6 decimals) from the PO line's current net price is skipped (PRICE_CHANGED, detail AP-ERS-001 with old and new price) until a buyer confirms the current price (PUT /v1/receiving/receipts/{id}/lines/{lineNo}/ers-price-confirmation); a later PO price change needs a new confirmation. Writes dev.passage.payables.invoice.posted.v1 (source ERS) or
+        are not handled. A receipt whose legal entity country has no tax rule (or a supplier in another country or with no country, or no tax service) is skipped TAX_NOT_DETERMINED. A vendor whose party has no address with a country, or a legal entity without a name or country in the org master, is skipped PARTY_DATA_INCOMPLETE (detail names the gap); both skips leave the receipt open for a later run. BR-18.9: a receipt line whose recorded unit price differs (at 6 decimals) from the PO line's current net price is skipped (PRICE_CHANGED, detail AP-ERS-001 with old and new price) until a buyer confirms the current price (PUT /v1/receiving/receipts/{id}/lines/{lineNo}/ers-price-confirmation); a later PO price change needs a new confirmation. Writes dev.passage.payables.invoice.posted.v1 (source ERS) or
         invoice.sampled.v1 per invoice.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1274,6 +1296,8 @@ components:
         decidedBy: { type: string }
         decidedAt: { type: string, format: date-time }
         rejectReason: { type: string }
+        receiptId: { type: string, format: uuid, description: Present after accept; the synthetic POSTED service receipt that holds the GR/IR items. }
+        ledgerEntryId: { type: string, description: Present after accept; the ledger journal of the Dr expense / Cr GR/IR accrual. }
         lines:
           type: array
           items:
@@ -1504,7 +1528,7 @@ components:
             required: [sourceRef, reason]
             properties:
               sourceRef: { type: string, description: The receipt number. }
-              reason: { type: string, enum: [RECEIPT_NOT_POSTED, OTHER_LEGAL_ENTITY, NOT_ERS_VENDOR, PO_NOT_FOUND, PO_FORBIDDEN, PO_NOT_APPROVED, CURRENCY_MISMATCH, OTHER_VENDOR, NO_PO_LINE, AMBIGUOUS_PO_LINE, ALREADY_INVOICED, PARTIALLY_INVOICED, ALREADY_SETTLED, PLAN_SETTLED, LINE_INVOICED] }
+              reason: { type: string, enum: [RECEIPT_NOT_POSTED, OTHER_LEGAL_ENTITY, NOT_ERS_VENDOR, PO_NOT_FOUND, PO_FORBIDDEN, PO_NOT_APPROVED, CURRENCY_MISMATCH, OTHER_VENDOR, NO_PO_LINE, AMBIGUOUS_PO_LINE, ALREADY_INVOICED, PARTIALLY_INVOICED, ALREADY_SETTLED, PLAN_SETTLED, LINE_INVOICED, PRICE_CHANGED, PRICE_CONFIRMED_BY_RUNNER, TAX_NOT_DETERMINED, PARTY_DATA_INCOMPLETE] }
         hasMore: { type: boolean, description: True when the run stopped at 100 invoices or at the scan bound; run again. }
     ErsVendorRequest:
       type: object

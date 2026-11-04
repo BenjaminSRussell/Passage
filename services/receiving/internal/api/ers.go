@@ -23,17 +23,19 @@ const (
 	ersScanPages = 5
 	priceScale   = 6
 
-	skipNotPosted     = "RECEIPT_NOT_POSTED"
-	skipNotErs        = "NOT_ERS_VENDOR"
-	skipNoOrder       = "PO_NOT_FOUND"
-	skipOrderDenied   = "PO_FORBIDDEN"
-	skipOrderOpen     = "PO_NOT_APPROVED"
-	skipNoPOLine      = "NO_PO_LINE"
-	skipManyPOLines   = "AMBIGUOUS_PO_LINE"
-	skipPlanSettled   = "PLAN_SETTLED"
-	skipPartial       = "PARTIALLY_INVOICED"
-	skipPriceChange   = "PRICE_CHANGED"
-	skipSelfConfirmed = "PRICE_CONFIRMED_BY_RUNNER"
+	skipNotPosted       = "RECEIPT_NOT_POSTED"
+	skipNotErs          = "NOT_ERS_VENDOR"
+	skipNoOrder         = "PO_NOT_FOUND"
+	skipOrderDenied     = "PO_FORBIDDEN"
+	skipOrderOpen       = "PO_NOT_APPROVED"
+	skipNoPOLine        = "NO_PO_LINE"
+	skipManyPOLines     = "AMBIGUOUS_PO_LINE"
+	skipPlanSettled     = "PLAN_SETTLED"
+	skipPartial         = "PARTIALLY_INVOICED"
+	skipPriceChange     = "PRICE_CHANGED"
+	skipSelfConfirmed   = "PRICE_CONFIRMED_BY_RUNNER"
+	skipTaxUndefined    = "TAX_NOT_DETERMINED"
+	skipPartyIncomplete = "PARTY_DATA_INCOMPLETE"
 )
 
 type ersRunRequest struct {
@@ -130,7 +132,15 @@ func (r *ersRun) ersVendor(vendorID string) (bool, error) {
 	return enabled, err
 }
 
-func matchPOLine(po domain.PurchaseOrder, productID string) (domain.PurchaseOrderLine, string) {
+func matchPOLine(po domain.PurchaseOrder, productID string, poLineNo int) (domain.PurchaseOrderLine, string) {
+	if poLineNo > 0 {
+		for _, l := range po.Lines {
+			if l.Usable() && l.LineNo == poLineNo {
+				return l, ""
+			}
+		}
+		return domain.PurchaseOrderLine{}, skipNoPOLine
+	}
 	var found []domain.PurchaseOrderLine
 	for _, l := range po.Lines {
 		if l.Usable() && strings.EqualFold(l.ProductID, productID) {
@@ -147,7 +157,7 @@ func matchPOLine(po domain.PurchaseOrder, productID string) (domain.PurchaseOrde
 }
 
 func (r *ersRun) invoiceFor(rec store.Receipt, po domain.PurchaseOrder, rejected int, confirmed map[int]store.PriceConfirmation) (store.Invoice, string, string) {
-	number := "ERS-" + rec.Number
+	number := ersInvoiceNumber(rec)
 	if rejected > 0 {
 		number = fmt.Sprintf("%s-R%d", number, rejected)
 	}
@@ -171,7 +181,7 @@ func (r *ersRun) invoiceFor(rec store.Receipt, po domain.PurchaseOrder, rejected
 		if l.InvoicedQty.IsPositive() {
 			continue
 		}
-		poLine, reason := matchPOLine(po, l.ProductID)
+		poLine, reason := matchPOLine(po, l.ProductID, l.POLineNo)
 		if reason != "" {
 			return store.Invoice{}, reason, ""
 		}
@@ -233,7 +243,7 @@ func (r *ersRun) receipt(receiptID string) error {
 		r.skip(ref, skipOtherVendor)
 		return nil
 	}
-	rejected, err := r.api.store.RejectedInvoiceCount(r.ctx, rec.VendorID, "ERS-"+rec.Number)
+	rejected, err := r.api.store.RejectedInvoiceCount(r.ctx, rec.VendorID, ersInvoiceNumber(rec))
 	if err != nil {
 		return err
 	}
@@ -247,6 +257,14 @@ func (r *ersRun) receipt(receiptID string) error {
 		return nil
 	}
 	posted, err := r.api.submitInvoice(r.ctx, r.groups, r.principal, in)
+	if errors.Is(err, domain.ErrTaxNotDetermined) {
+		r.skip(ref, skipTaxUndefined)
+		return nil
+	}
+	if errors.Is(err, domain.ErrSelfBillPartyIncomplete) {
+		r.skipWithDetail(ref, skipPartyIncomplete, err.Error())
+		return nil
+	}
 	var domainErr *domain.Error
 	if errors.As(err, &domainErr) {
 		reasons := map[string]string{domain.CodeDuplicateInvoice: skipAlreadySettled, domain.CodePlanSettled: skipPlanSettled, domain.CodeOverInvoice: skipLineInvoiced}
