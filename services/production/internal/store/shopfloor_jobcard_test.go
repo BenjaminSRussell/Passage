@@ -270,3 +270,57 @@ func TestAdjustShopfloorJobCard_KeepsFinishedOperationFinished(t *testing.T) {
 		t.Fatalf("adjust reopened the finished operation: %s", op.Status)
 	}
 }
+
+func TestAdjustShopfloorJobCard_EndedOrderRefusesAndReversesNothing(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(9412))
+	st := startedOrder(t, s, ctx, routedOrder(t, "key-sf-jobcard-ended", ids.New(), 10))
+	reg := ids.New()
+	if _, _, err := s.PostShopfloorJobCard(ctx, shopfloorCard(reg, st.orderID, ShopfloorJobCard{})); err != nil {
+		t.Fatal(err)
+	}
+	st.refresh()
+	st.must(domain.CmdReportFinished, func(tr *Transition) { tr.Good = d("100") })
+	if ended := st.must(domain.CmdEnd, nil); ended.Status != domain.Ended {
+		t.Fatalf("order not ended: %s", ended.Status)
+	}
+	changed, err := s.AdjustShopfloorJobCard(ctx, reg, d("1"), "t")
+	if changed || !errors.Is(err, ErrJobCardRefused) {
+		t.Fatalf("changed=%v err=%v, want ErrJobCardRefused", changed, err)
+	}
+	if got := sfLaborActual(st); !got.Equal(d("52")) {
+		t.Fatalf("labor %s, want 52 untouched", got)
+	}
+}
+
+func TestAdjustShopfloorJobCard_RejectsMalformedRegistrationID(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(9413))
+	if _, err := s.AdjustShopfloorJobCard(ctx, "not-a-uuid%", d("1"), "t"); !errors.Is(err, ErrJobCardRefused) {
+		t.Fatalf("err=%v, want ErrJobCardRefused", err)
+	}
+}
+
+func TestPostShopfloorJobCard_KeepsRAFEndedFlagsSoReversalReopens(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(9414))
+	st := startedOrder(t, s, ctx, routedOrder(t, "key-sf-jobcard-raf", ids.New(), 10))
+	st.must(domain.CmdReportFinished, func(tr *Transition) { tr.Good = d("100") })
+	if jobs, ops := endedByRAF(t, s, st.orderID); jobs != 1 || ops != 1 {
+		t.Fatalf("RAF flags: %d jobs, %d operations", jobs, ops)
+	}
+	if _, posted, err := s.PostShopfloorJobCard(ctx, shopfloorCard(ids.New(), st.orderID, ShopfloorJobCard{})); err != nil || !posted {
+		t.Fatalf("card: posted=%v err=%v", posted, err)
+	}
+	if jobs, ops := endedByRAF(t, s, st.orderID); jobs != 1 || ops != 1 {
+		t.Fatalf("a late card cleared the RAF flags: %d jobs, %d operations", jobs, ops)
+	}
+	st.refresh()
+	st.must(domain.CmdResetStatus, func(tr *Transition) { tr.ResetTo = domain.Started })
+	if op := st.refresh().Operations[0]; op.Status == domain.OperFinished {
+		t.Fatalf("RAF reversal left the operation finished: %+v", op)
+	}
+	if jobs, ops := endedByRAF(t, s, st.orderID); jobs != 0 || ops != 0 {
+		t.Fatalf("flags after the reversal: %d jobs, %d operations", jobs, ops)
+	}
+}

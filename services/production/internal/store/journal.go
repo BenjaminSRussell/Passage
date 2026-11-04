@@ -876,7 +876,7 @@ func autoPost(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, in 
 	if err != nil {
 		return err
 	}
-	return postJournal(ctx, tx, tenantID, h, &j, postOptions{overDuty: true, rafTolerancePct: rafTolerancePct, actor: actor, key: key})
+	return postJournal(ctx, tx, tenantID, h, &j, postOptions{overDuty: true, rafTolerancePct: rafTolerancePct, actor: actor, key: key, allowFinished: in.AllowFinished})
 }
 
 // reverseJournals reverses the posted journals of the given types that are
@@ -1159,17 +1159,17 @@ func checkJobOpen(ctx context.Context, tx pgx.Tx, tenantID, orderID string, oper
 // it is finished (FR-21.6 "unless reopened" still applies through :reopen).
 func applyJobFeedback(ctx context.Context, tx pgx.Tx, tenantID, orderID string, l JournalLine, keepFinished bool) error {
 	if _, err := tx.Exec(ctx, `update production_job set hours_reported = hours_reported + $5, qty_good = qty_good + $6, qty_error = qty_error + $7,
-			ended_by_raf = false, status = case when $8 or ($9 and status = 'finished') then 'finished' else 'started' end
+			ended_by_raf = case when $9 then ended_by_raf else false end, status = case when $8 or ($9 and status = 'finished') then 'finished' else 'started' end
 		where tenant_id = $1 and order_id = $2 and oper_number = $3 and job_type = $4`,
 		tenantID, orderID, *l.OperNumber, *l.JobType, l.Qty.String(), l.QtyGood.String(), l.QtyError.String(), l.Finished, keepFinished); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `update production_operation o set hours_reported = hours_reported + $4,
-			qty_good = qty_good + $5, qty_error = qty_error + $6, ended_by_raf = false,
+			qty_good = qty_good + $5, qty_error = qty_error + $6, ended_by_raf = case when $7 then ended_by_raf else false end,
 			status = case when not exists (select 1 from production_job j where j.tenant_id = o.tenant_id and j.order_id = o.order_id
 				and j.oper_number = o.oper_number and j.job_type in ('setup', 'process') and j.status <> 'finished') then 'finished' else 'started' end
 		where o.tenant_id = $1 and o.order_id = $2 and o.oper_number = $3`,
-		tenantID, orderID, *l.OperNumber, l.Qty.String(), l.QtyGood.String(), l.QtyError.String())
+		tenantID, orderID, *l.OperNumber, l.Qty.String(), l.QtyGood.String(), l.QtyError.String(), keepFinished)
 	return err
 }
 
