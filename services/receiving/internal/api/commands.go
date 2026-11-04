@@ -347,6 +347,13 @@ func (a *API) postReceipt(w http.ResponseWriter, r *http.Request) {
 	writeReceipt(w, http.StatusOK, posted)
 }
 
+func refuseServiceReceipt(rec store.Receipt) error {
+	if rec.Source != domain.ReceiptSourceService {
+		return nil
+	}
+	return &domain.Error{Code: domain.CodeServiceReceipt, Detail: "a receipt created by an accepted service entry sheet cannot be corrected or cancelled"}
+}
+
 func (a *API) correctReceipt(w http.ResponseWriter, r *http.Request) {
 	cmd, ok := a.command(w, r)
 	if !ok {
@@ -394,6 +401,9 @@ func (a *API) correctReceipt(w http.ResponseWriter, r *http.Request) {
 	}
 	corrected, err := a.store.Correct(ctx, cmd.id, func(rec store.Receipt) (store.Adjustment, error) {
 		if err := checkVersion(rec.Version, cmd.version); err != nil {
+			return store.Adjustment{}, err
+		}
+		if err := refuseServiceReceipt(rec); err != nil {
 			return store.Adjustment{}, err
 		}
 		for _, l := range rec.Lines {
@@ -463,6 +473,9 @@ func (a *API) cancelReceipt(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	cancelled, err := a.store.Cancel(ctx, cmd.id, func(rec store.Receipt) (store.Adjustment, error) {
 		if err := checkVersion(rec.Version, cmd.version); err != nil {
+			return store.Adjustment{}, err
+		}
+		if err := refuseServiceReceipt(rec); err != nil {
 			return store.Adjustment{}, err
 		}
 		if rec.State != domain.Posted {

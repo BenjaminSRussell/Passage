@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -35,7 +37,7 @@ func TestLoadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := config{reopenDefaultDays: 3, reopenApprovers: 2, lockWaitMS: 5000, reopenSweepEvery: time.Minute}
+	want := config{reopenDefaultDays: 3, reopenApprovers: 2, lockWaitMS: 5000, reopenSweepEvery: time.Minute, accrualSweepEvery: time.Minute}
 	if got != want {
 		t.Fatalf("defaults: got %+v, want %+v", got, want)
 	}
@@ -46,7 +48,7 @@ func TestLoadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want = config{reopenDefaultDays: 30, reopenApprovers: 3, lockWaitMS: 30000, reopenSweepEvery: 15 * time.Second}
+	want = config{reopenDefaultDays: 30, reopenApprovers: 3, lockWaitMS: 30000, reopenSweepEvery: 15 * time.Second, accrualSweepEvery: 15 * time.Second}
 	if got != want {
 		t.Fatalf("overrides: got %+v, want %+v", got, want)
 	}
@@ -56,6 +58,7 @@ func TestLoadConfig(t *testing.T) {
 		{"CLOSE_LOCK_WAIT_MS", "500"}, {"CLOSE_LOCK_WAIT_MS", "30001"}, {"CLOSE_LOCK_WAIT_MS", "5.5"},
 		{"CLOSE_REOPEN_DEFAULT_DAYS", "0"}, {"CLOSE_REOPEN_DEFAULT_DAYS", "31"}, {"CLOSE_REOPEN_DEFAULT_DAYS", "-1"},
 		{"CLOSE_REOPEN_SWEEP_INTERVAL", "abc"}, {"CLOSE_REOPEN_SWEEP_INTERVAL", "10"}, {"CLOSE_REOPEN_SWEEP_INTERVAL", "0s"}, {"CLOSE_REOPEN_SWEEP_INTERVAL", "-5s"},
+		{"CLOSE_ACCRUAL_SWEEP_INTERVAL", "abc"}, {"CLOSE_ACCRUAL_SWEEP_INTERVAL", "0s"},
 	}
 	for _, tc := range invalid {
 		t.Run(tc.key+"="+tc.value, func(t *testing.T) {
@@ -106,5 +109,37 @@ func TestRun_MalformedServicePublicKeysStopStartup(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "PASSAGE_SERVICE_PUBLIC_KEYS") {
 		t.Fatalf("err = %v, want the malformed public keys to stop startup", err)
+	}
+}
+
+func TestLoadConfig_AccrualSweepIntervalOverrides(t *testing.T) {
+	got, err := loadConfig(func(k string) string {
+		return map[string]string{"CLOSE_REOPEN_SWEEP_INTERVAL": "10s", "CLOSE_ACCRUAL_SWEEP_INTERVAL": "2s"}[k]
+	})
+	if err != nil || got.reopenSweepEvery != 10*time.Second || got.accrualSweepEvery != 2*time.Second {
+		t.Fatalf("got %+v %v", got, err)
+	}
+}
+
+func TestSweepEvery_CallsWorkOnEachTickUntilCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var calls atomic.Int32
+	done := make(chan struct{})
+	go func() {
+		sweepEvery(ctx, 5*time.Millisecond, "test", func(context.Context) (int, error) {
+			if calls.Add(1) == 3 {
+				cancel()
+			}
+			return 1, errors.New("boom")
+		})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("sweep did not stop after cancel")
+	}
+	if calls.Load() < 3 {
+		t.Fatalf("work ran %d times", calls.Load())
 	}
 }

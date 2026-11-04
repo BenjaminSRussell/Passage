@@ -101,7 +101,7 @@ func loadInvoiceBase(ctx context.Context, tx pgx.Tx, tenantID, invoiceID string)
 	if err != nil {
 		return InvoiceBase{}, err
 	}
-	lines, err := tx.Query(ctx, `SELECT line_no, amount, standard_cost FROM receiving_vendor_invoice_line WHERE tenant_id = $1 AND invoice_id = $2 ORDER BY line_no`, tenantID, invoiceID)
+	lines, err := tx.Query(ctx, `SELECT line_no, amount, standard_cost, service FROM receiving_vendor_invoice_line WHERE tenant_id = $1 AND invoice_id = $2 ORDER BY line_no`, tenantID, invoiceID)
 	if err != nil {
 		return InvoiceBase{}, err
 	}
@@ -110,7 +110,7 @@ func loadInvoiceBase(ctx context.Context, tx pgx.Tx, tenantID, invoiceID string)
 	byNo := map[int]int{}
 	for lines.Next() {
 		var l domain.InvoiceLineState
-		if err := lines.Scan(&l.LineNo, &l.Amount, &l.StandardCost); err != nil {
+		if err := lines.Scan(&l.LineNo, &l.Amount, &l.StandardCost, &l.Service); err != nil {
 			return InvoiceBase{}, err
 		}
 		byNo[l.LineNo] = len(base.Lines)

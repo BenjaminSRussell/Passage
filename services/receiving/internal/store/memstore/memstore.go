@@ -55,6 +55,8 @@ type tenantData struct {
 	payees          map[string]store.OneTimePayee
 	captures        map[string]store.Capture
 	sheets          map[string]store.ServiceSheet
+	selfBills       map[string]store.SelfBill
+	selfBillSeq     map[string]int
 	ersPrices       map[string]store.PriceConfirmation
 	ersPriceHistory []string
 
@@ -95,7 +97,7 @@ func (s *Store) with(ctx context.Context, fn func(*tenantData) error) error {
 	if t == nil {
 		t = &tenantData{receipts: map[string]store.Receipt{}, serials: map[domain.SerialKey]struct{}{}, keys: map[string]*claim{}, invoices: map[string]struct{}{},
 			invoiceDocs: map[string]store.Invoice{}, adjustments: map[string]store.InvoiceAdjustment{}, settlements: map[string]store.Settlement{},
-			ersVendors: map[string]bool{}, auditRates: map[string]domain.AuditPolicy{}, payees: map[string]store.OneTimePayee{}, captures: map[string]store.Capture{}, sheets: map[string]store.ServiceSheet{}}
+			ersVendors: map[string]bool{}, auditRates: map[string]domain.AuditPolicy{}, payees: map[string]store.OneTimePayee{}, captures: map[string]store.Capture{}, sheets: map[string]store.ServiceSheet{}, selfBills: map[string]store.SelfBill{}}
 		s.tenants[p.TenantID] = t
 	}
 	return fn(t)
@@ -154,6 +156,9 @@ func (t *tenantData) newArrival(in store.Receipt) (store.Receipt, error) {
 	}
 	if in.ExchangeRate.Sign() == 0 {
 		in.ExchangeRate = decimal.NewFromInt(1)
+	}
+	if in.Source == "" {
+		in.Source = domain.ReceiptSourceProduct
 	}
 	in.State, in.Version, in.Number, in.CreatedAt = domain.Arrived, 1, fmt.Sprintf("RCV-%08d", t.counter+1), time.Now().UTC()
 	for i := range in.Lines {
@@ -227,7 +232,7 @@ func (t *tenantData) receivedOn(excludeID, purchaseOrderID string, poLineNo int)
 		return total
 	}
 	for _, other := range t.receipts {
-		if other.ID == excludeID || other.PurchaseOrderID != purchaseOrderID || !slices.Contains([]domain.ReceiptState{domain.Registered, domain.Posted, domain.Corrected}, other.State) {
+		if other.ID == excludeID || other.PurchaseOrderID != purchaseOrderID || other.Source == domain.ReceiptSourceService || !slices.Contains([]domain.ReceiptState{domain.Registered, domain.Posted, domain.Corrected}, other.State) {
 			continue
 		}
 		for _, l := range other.Lines {
@@ -901,6 +906,7 @@ func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.Invo
 					ReceiptID: k.ReceiptID, LineNo: k.LineNo, ReceivedQty: item.ReceivedQty, InvoicedQty: item.InvoicedQty,
 					ReceivedAmount: money.Amount{Value: item.ReceivedAmount, Currency: item.Currency},
 					ClearedAmount:  money.Amount{Value: item.ClearedAmount, Currency: item.Currency},
+					Service:        t.receipts[k.ReceiptID].Source == domain.ReceiptSourceService,
 				}, g
 			}
 			items[i] = working[k]
@@ -916,6 +922,9 @@ func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.Invo
 		}
 		if !outcome.Blocked {
 			if err := s.markDone(ctx, in.ID, outcome.LedgerEntryID != ""); err != nil {
+				return err
+			}
+			if err := s.putSelfBill(t, in, outcome.SelfBill); err != nil {
 				return err
 			}
 		}
@@ -941,6 +950,7 @@ func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.Invo
 		}
 		in.Lines = slices.Clone(in.Lines)
 		for i := range in.Lines {
+			in.Lines[i].Service = items[i].Service
 			if i < len(outcome.Clearings) {
 				in.Lines[i].GrirCleared = outcome.Clearings[i]
 			}

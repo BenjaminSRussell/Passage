@@ -135,6 +135,7 @@ segregation_grants := [
 	["VendorInvoicePost", "POST", "/v1/receiving/ers-settlements:run"],
 	["VendorInvoicePost", "POST", "/v1/receiving/invoice-captures"],
 	["APInquire", "GET", "/v1/receiving/invoice-captures/c1"],
+	["APInquire", "GET", "/v1/receiving/ers-self-bills/i1"],
 	["ServiceEntryMaintain", "POST", "/v1/receiving/service-entry-sheets"],
 	["ServiceEntryMaintain", "GET", "/v1/receiving/service-entry-sheets/s1"],
 	["ServiceEntryAccept", "GET", "/v1/receiving/service-entry-sheets/s1"],
@@ -586,6 +587,22 @@ test_service_grants_allow_only_their_declared_routes if {
 	allowed("period.check", "GET", "/v1/close/periods:resolve")
 	not allowed("period.check", "POST", "/v1/close/periods:resolve")
 	allowed("period.maintain", "PUT", "/v1/close/periods/p-1")
+	allowed("period.maintain", "GET", "/v1/close/periods")
+	allowed("period.maintain", "PATCH", "/v1/close/periods/p-1/modules/gl")
+	not allowed("period.maintain", "POST", "/v1/close/periods/p-1/modules/gl:request-reopen")
+	allowed("period.reopen", "POST", "/v1/close/periods/p-1/modules/gl:request-reopen")
+	allowed("period.reopen", "POST", "/v1/close/reopen-requests/r-1:approve")
+	allowed("close.checklist.write", "POST", "/v1/close/runs")
+	allowed("close.checklist.read", "GET", "/v1/close/runs/r-1/tasks")
+	allowed("close.allocation.run", "POST", "/v1/close/allocation-runs")
+	allowed("close.allocation.run", "POST", "/v1/close/allocation-runs/r-1:post")
+	not allowed("close.allocation.write", "POST", "/v1/close/allocation-runs")
+	allowed("close.accrual.run", "POST", "/v1/close/accrual-schemes/rent:apply")
+	allowed("close.accrual.run", "POST", "/v1/close/accrual-runs/r-1:cancel")
+	not allowed("close.accrual.write", "POST", "/v1/close/accrual-schemes/rent:apply")
+	not allowed("close.accrual.write", "POST", "/v1/close/accrual-runs/r-1:cancel")
+	not allowed("close.accrual.run", "PUT", "/v1/close/accrual-schemes/rent")
+	allowed("close.regrouping.run", "POST", "/v1/close/regroupings")
 	data.service_grants.ledger.fx == ["fx.rate.lookup"]
 	allowed("fx.rate.lookup", "GET", "/v1/fx/rates")
 	not allowed("fx.rate.lookup", "POST", "/v1/fx/rates")
@@ -1181,6 +1198,10 @@ test_compliance_hold_check_is_service_only_and_granted_to_receiving if {
 	data.duties["compliance.legal_hold.check"].service_only
 	data.service_grants.receiving.compliance == ["compliance.legal_hold.check"]
 	data.service_principals["receiving-erasure"] == ["compliance.legal_hold.check"]
+}
+
+test_receiving_may_calculate_and_record_input_tax if {
+	data.service_grants.receiving.tax == ["Calculate tax", "tax.transaction.record"]
 }
 
 test_compliance_erasure_and_retention_duties if {

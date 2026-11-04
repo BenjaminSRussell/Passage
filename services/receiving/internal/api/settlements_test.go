@@ -61,8 +61,9 @@ func newRigPorts(st *memstore.Store, periods domain.PeriodStatus, mutate func(*a
 	rg := &rig{st: st, ledger: &domain.FakeLedger{}}
 	ports := api.Ports{
 		Periods: domain.FakePeriods{Status: periods}, Ledger: rg.ledger,
-		Profile:       domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
+		Profile:       domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000", Expense: "6000", InputTax: "1570"},
 		ResolveMinAge: time.Nanosecond,
+		Tax:           testTax, SelfBillParties: testParties,
 	}
 	mutate(&ports)
 	a := api.New(rg.st, ports)

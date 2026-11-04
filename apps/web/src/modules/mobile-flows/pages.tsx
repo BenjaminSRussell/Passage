@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Alert, Button, Card, FormField, Input, PageHeader, Select, Textarea } from "../../shell/ui";
-import { describeFlowError, saveDraft } from "./api/client";
+import { describeFlowError, FlowApiError, publishFlow, saveDraft } from "./api/client";
 import { CORE_FLOWS, RECEIVE_PUTAWAY_FLOW } from "./domain/coreFlows";
 import { type FlowDraft, type GraphIssue, validateFlow } from "./domain/flowGraph";
 import { checkScan, type Classified, classifyScan, type ScanClass, type ScanVerdict } from "./domain/gs1";
@@ -10,7 +10,7 @@ import styles from "./pages.module.css";
 /** The designer opens on the bundled receive/put-away flow; any bundled core flow can be loaded as a starting point. */
 const SAMPLE: FlowDraft = RECEIVE_PUTAWAY_FLOW;
 
-const SCAN_CLASS_LABELS: Record<ScanClass, string> = { LP: "LP", GTIN: "GTIN", LOCATION: "Location", ANY: "Any barcode" };
+const SCAN_CLASS_LABELS: Record<ScanClass, string> = { LP: "LP", GTIN: "GTIN", LOT: "Lot", LOCATION: "Location", ANY: "Any barcode" };
 
 /** Flow designer: edit the graph as JSON, validate it (MOB-0113), save a draft, test single scans and run the whole flow. */
 export function FlowDesigner() {
@@ -20,6 +20,7 @@ export function FlowDesigner() {
   const [message, setMessage] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const savedDraft = useRef<{ text: string; flowId: string; version: number } | null>(null);
   const [scan, setScan] = useState("");
   const [expected, setExpected] = useState<ScanClass>("LP");
   const [simulated, setSimulated] = useState<{ classified: Classified; verdict: ScanVerdict | null } | null>(null);
@@ -44,7 +45,7 @@ export function FlowDesigner() {
     }
   }
 
-  async function onSave() {
+  async function persist(publish: boolean) {
     setFailure(null);
     setMessage(null);
     const flow = parse();
@@ -54,13 +55,32 @@ export function FlowDesigner() {
     if (found.length > 0) return;
     setBusy(true);
     try {
-      const saved = await saveDraft(flow, crypto.randomUUID());
-      setMessage(`Saved ${saved.code} as draft version ${saved.version}.`);
+      const reusable = savedDraft.current?.text === text ? savedDraft.current : null;
+      const saved = reusable ?? (await saveDraft(flow, crypto.randomUUID()));
+      savedDraft.current = { text, flowId: saved.flowId, version: saved.version };
+      if (!publish) {
+        setMessage(`Saved ${flow.code} as draft version ${saved.version}.`);
+        return;
+      }
+      const published = await publishFlow(saved.flowId, crypto.randomUUID(), `"${saved.version}"`);
+      savedDraft.current = null;
+      setMessage(`Published ${published.code} version ${published.version}. Devices pick this up within 60 s, with no app update.`);
     } catch (e) {
+      if (e instanceof FlowApiError && (e.status === 409 || e.status === 412)) {
+        savedDraft.current = null;
+      }
       setFailure(describeFlowError(e));
     } finally {
       setBusy(false);
     }
+  }
+
+  async function onSave() {
+    await persist(false);
+  }
+
+  async function onPublish() {
+    await persist(true);
   }
 
   /** Replaces the editor with a bundled core flow (FR-32.4). */
@@ -72,6 +92,7 @@ export function FlowDesigner() {
     setIssues([]);
     setMessage(null);
     setFailure(null);
+    savedDraft.current = null;
   }
 
   function onSimulate() {
@@ -108,6 +129,9 @@ export function FlowDesigner() {
             <Button variant="primary" loading={busy} onClick={onSave}>
               Save draft
             </Button>
+            <Button variant="primary" loading={busy} onClick={onPublish}>
+              Publish
+            </Button>
           </div>
         </div>
       </Card>
@@ -128,7 +152,7 @@ export function FlowDesigner() {
         </p>
       ) : null}
       {failure ? (
-        <Alert tone="danger" title="Could not save the draft" live="alert">
+        <Alert tone="danger" title="Could not save or publish the flow" live="alert">
           {failure}
         </Alert>
       ) : null}

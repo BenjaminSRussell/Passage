@@ -27,6 +27,8 @@ spec:
           grirAccount: "2100"
           ppvAccount: "5200"
           vendorControlAccount: "2000"
+          expenseAccount: "6000"
+          inputTaxAccount: "1570"
   destination:
     server: https://kubernetes.default.svc
     namespace: hello-ledger
