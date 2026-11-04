@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createAnthropicProvider } from "../src/providers/anthropic.js";
 import { createOpenAICompatibleProvider } from "../src/providers/openai.js";
 import type { ModelProvider } from "../src/runtime/engine.js";
@@ -182,6 +182,60 @@ describe("provider failure handling (BR-47.9)", () => {
     await expect(p.complete({ system: "s", user: "u", allowedTools: ALLOWED })).rejects.toMatchObject({ code: "AGT-0206", outage: true });
   });
 
+  it.each([500, 503, 429, 400, 401])("HTTP %i is unbilled: the provider answered, so the run's hold is released", async (status) => {
+    const p = createAnthropicProvider({ apiKey: "k", model: "m", fetchFn: fakeFetch(status, { error: "x" }, []) });
+    await expect(p.complete({ system: "s", user: "u", allowedTools: ALLOWED })).rejects.toMatchObject({ code: "AGT-0206", unbilled: true });
+  });
+
+  const throwing = (err: unknown) => (async () => Promise.reject(err)) as unknown as typeof fetch;
+  const connectError = (code: string) => {
+    const cause = Object.assign(new Error(`connect ${code}`), { code });
+    return new TypeError("fetch failed", { cause });
+  };
+
+  it.each([
+    ["ECONNREFUSED", connectError("ECONNREFUSED")],
+    ["ENOTFOUND", connectError("ENOTFOUND")],
+    ["ECONNREFUSED inside an AggregateError", new TypeError("fetch failed", { cause: Object.assign(new AggregateError([connectError("ECONNREFUSED").cause]), { code: "ECONNREFUSED" }) })],
+  ])("a connection never made (%s) is an unbilled outage", async (code, err) => {
+    const p = createAnthropicProvider({ apiKey: "k", model: "m", fetchFn: throwing(err) });
+    const failure = await p.complete({ system: "s", user: "u", allowedTools: ALLOWED }).catch((e: unknown) => e);
+    expect(failure).toMatchObject({ code: "AGT-0206", outage: true, unbilled: true });
+    expect((failure as Error).message).toContain(code.split(" ")[0]);
+  });
+
+  it.each([
+    ["a timeout", new DOMException("The operation was aborted due to timeout", "TimeoutError"), "timed out"],
+    ["a connection reset", connectError("ECONNRESET"), "failed before a response"],
+    ["an unknown transport error", new TypeError("fetch failed"), "failed before a response"],
+  ])("%s is an outage that may have been billed, told apart from a refused connection", async (_name, err, message) => {
+    const p = createAnthropicProvider({ apiKey: "k", model: "m", fetchFn: throwing(err) });
+    const failure = await p.complete({ system: "s", user: "u", allowedTools: ALLOWED }).catch((e: unknown) => e);
+    expect(failure).toMatchObject({ code: "AGT-0206", outage: true, unbilled: false });
+    expect((failure as Error).message).toContain(message);
+  });
+
+  it("a real timeout from the abort signal is not unbilled", async () => {
+    const hanging = ((_url: unknown, init?: RequestInit) =>
+      new Promise((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal?.reason)))) as unknown as typeof fetch;
+    const p = createAnthropicProvider({ apiKey: "k", model: "m", fetchFn: hanging, timeoutMs: 5 });
+    const failure = await p.complete({ system: "s", user: "u", allowedTools: ALLOWED }).catch((e: unknown) => e);
+    expect(failure).toMatchObject({ outage: true, unbilled: false });
+    expect((failure as Error).message).toContain("provider request timed out");
+  });
+
+  it("a connection dropped mid-response is an outage that may have been billed", async () => {
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"content":'));
+        controller.error(new Error("socket hang up"));
+      },
+    });
+    const dropping = (async () => new Response(body, { status: 200 })) as unknown as typeof fetch;
+    const p = createAnthropicProvider({ apiKey: "k", model: "m", fetchFn: dropping });
+    await expect(p.complete({ system: "s", user: "u", allowedTools: ALLOWED })).rejects.toMatchObject({ outage: true, unbilled: false });
+  });
+
   it("an explanation without a proposal is a valid answer (the model may refuse)", async () => {
     const body = { content: [{ type: "tool_use", name: "propose_action", input: { text: "I cannot post without approval." } }] };
     const p = createAnthropicProvider({ apiKey: "k", model: "m", fetchFn: fakeFetch(200, body, []) });
@@ -250,5 +304,28 @@ describe("runAgent through each adapter", () => {
     const result = await runAgent(makeDeps({ provider, tools, approvals: new FakeApprovals({ decision: "APPROVED", approverUserId: APPROVER }) }), makeRequest());
     expect(result).toMatchObject({ status: "FAILED", code: "AGT-0206" });
     expect(tools.calls).toHaveLength(0);
+  });
+
+  it("a 503 or a refused connection releases the run's hold with zero; a timeout leaves it for the sweep", async () => {
+    const refused = (async () => Promise.reject(new TypeError("fetch failed", { cause: Object.assign(new Error("refused"), { code: "ECONNREFUSED" }) }))) as unknown as typeof fetch;
+    const timedOut = (async () => Promise.reject(new DOMException("timeout", "TimeoutError"))) as unknown as typeof fetch;
+    const cases: Array<[typeof fetch, Array<[number, number]>]> = [
+      [fakeFetch(503, {}, []), [[0, 0]]],
+      [refused, [[0, 0]]],
+      [timedOut, []],
+    ];
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      for (const [fetchFn, expected] of cases) {
+        const settled: Array<[number, number]> = [];
+        const provider = createAnthropicProvider({ apiKey: "k", model: "m", fetchFn });
+        const deps = makeDeps({ provider, tools: new FakeTools({}), approvals: new FakeApprovals({ decision: "APPROVED", approverUserId: APPROVER }) });
+        deps.budgets = { ...deps.budgets, settle: async (_h, u) => (settled.push([u.tokensIn, u.tokensOut]), "OK") };
+        await expect(runAgent(deps, makeRequest())).resolves.toMatchObject({ status: "FAILED", code: "AGT-0206" });
+        expect(settled).toEqual(expected);
+      }
+    } finally {
+      stderr.mockRestore();
+    }
   });
 });

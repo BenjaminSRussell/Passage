@@ -39,7 +39,7 @@ const DEFAULT_OUTAGE_WINDOW_MS = 60_000;
 /** While failed over, one call per interval tries the primary first (9.47.16 probe cadence). */
 const DEFAULT_PRIMARY_RETRY_MS = 30_000;
 
-function isOutage(err: unknown): boolean {
+function isOutage(err: unknown): err is ProviderError {
   return err instanceof ProviderError && err.outage;
 }
 
@@ -69,12 +69,15 @@ export function createFailoverProvider(opts: FailoverOptions): FailoverProvider 
     return opts.residencyAllows(s.region, opts.residencyRegion) ? s : undefined;
   };
   const failedOver = (now: number): boolean => outageSince !== undefined && now - outageSince >= windowMs;
-  const viaSecondary = async (req: Parameters<ModelProvider["complete"]>[0]): Promise<ModelResponse> => {
+  // `primaryError` is the outage the primary just raised in this call, if it was tried. The pause
+  // is unbilled only when no provider was asked, or the primary's own failure was unbilled.
+  const viaSecondary = async (req: Parameters<ModelProvider["complete"]>[0], primaryError?: ProviderError): Promise<ModelResponse> => {
     const secondary = secondaryUsable();
     if (!secondary) {
       throw new ProviderError(
         `provider ${opts.primary.name} is unavailable and no residency-compliant secondary is configured; run paused`,
         true,
+        primaryError?.unbilled ?? true,
       );
     }
     servedBy = secondary.name;
@@ -99,7 +102,7 @@ export function createFailoverProvider(opts: FailoverOptions): FailoverProvider 
       } catch (err) {
         if (!isOutage(err)) throw err;
         outageSince ??= now;
-        if (failedOver(now)) return viaSecondary(req);
+        if (failedOver(now)) return viaSecondary(req, err);
         throw err;
       }
     },

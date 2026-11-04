@@ -11,10 +11,12 @@ const REQ = { system: "s", user: "u", allowedTools: ["passage.ap.invoice.post"] 
 class Flaky implements ModelProvider {
   calls = 0;
   down = false;
+  /** Whether the outage proves nothing was billed (a 503) or not (a timeout). */
+  unbilled = true;
   constructor(private readonly name: string) {}
   async complete(): Promise<ModelResponse> {
     this.calls += 1;
-    if (this.down) throw providerUnavailable(`${this.name} returned 503`);
+    if (this.down) throw providerUnavailable(this.unbilled ? `${this.name} returned 503` : `${this.name} timed out`, this.unbilled);
     return proposal(0.9);
   }
 }
@@ -70,6 +72,21 @@ describe("createFailoverProvider (BR-47.9)", () => {
     advance(60_000);
     await expect(provider.complete(REQ)).rejects.toThrow(/paused/);
     expect(secondaryP.calls).toBe(0);
+  });
+
+  it("a pause is unbilled when no provider was asked, and follows the primary's failure when it was tried", async () => {
+    const { provider, primaryP, advance } = setup({ residencyRegion: null, withSecondary: false });
+    primaryP.down = true;
+    primaryP.unbilled = false;
+    await expect(provider.complete(REQ)).rejects.toMatchObject({ unbilled: false });
+    advance(60_000);
+    await expect(provider.complete(REQ)).rejects.toMatchObject({ message: expect.stringMatching(/paused/), unbilled: false });
+    const before = primaryP.calls;
+    await expect(provider.complete(REQ)).rejects.toMatchObject({ message: expect.stringMatching(/paused/), unbilled: true });
+    expect(primaryP.calls).toBe(before);
+    primaryP.unbilled = true;
+    advance(30_000);
+    await expect(provider.complete(REQ)).rejects.toMatchObject({ message: expect.stringMatching(/paused/), unbilled: true });
   });
 
   it("pauses when no secondary is configured", async () => {

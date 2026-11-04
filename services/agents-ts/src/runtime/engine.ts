@@ -5,11 +5,13 @@ import {
 } from "../domain/audit.js";
 import { selfApprovalBlocked, canCallTool } from "../domain/authz.js";
 import {
+  assertPromptWithinCap,
   assertRunWithinCap,
   estimateTokens,
   outputBudgetForCall,
   type BudgetState,
 } from "../domain/budget.js";
+import { ProviderError, proposeTool } from "../providers/wire.js";
 import type { Money } from "../domain/money.js";
 import {
   decideDisposition,
@@ -187,7 +189,8 @@ export interface RunResult {
   tokensIn: number;
   tokensOut: number;
   estimated: boolean;
-  budgetState: BudgetState;
+  /** UNKNOWN when the hold could not be settled: the month's state is known again once the sweep charges it. */
+  budgetState: BudgetState | "UNKNOWN";
   /** Real values, for the UI only. Never stored or sent back to a provider. */
   displayText: string;
   /** Set when the run committed but the audit write then failed. */
@@ -206,8 +209,11 @@ const UNAUDITABLE_INPUT = '{"withheld":"AGT-0210"}';
 const MAX_SETTLE_ATTEMPTS = 3;
 
 interface RunLedger {
-  providerCalled: boolean;
+  /** Set before the provider call; cleared when the provider error proves nothing was billed. */
+  mayHaveSpent: boolean;
   charged: BudgetState | undefined;
+  /** The last settle failure, once charging the usage has been tried and failed. */
+  settleError: string | undefined;
   tokensIn: number;
   tokensOut: number;
   estimated: boolean;
@@ -230,32 +236,50 @@ export async function runAgent(
     tokensOut: cap,
     ttlMs: RUN_TIMEOUT_MS,
   });
-  const release = (): Promise<BudgetState> =>
-    deps.budgets.settle(hold, { tokensIn: 0, tokensOut: 0 }).catch(() => "OK");
+  const ledger: RunLedger = {
+    mayHaveSpent: false,
+    charged: undefined,
+    settleError: undefined,
+    tokensIn: 0,
+    tokensOut: 0,
+    estimated: false,
+  };
+  const settleWithRetry = async (usage: ModelUsage): Promise<BudgetState> => {
+    let last: unknown;
+    for (let attempt = 0; attempt < MAX_SETTLE_ATTEMPTS; attempt += 1) {
+      try {
+        return await deps.budgets.settle(hold, usage);
+      } catch (err) {
+        last = err;
+      }
+    }
+    ledger.settleError = last instanceof Error ? last.message : String(last);
+    throw last;
+  };
+  /** Releases the hold with zero; on failure the hold is left for the full-cap sweep. */
+  const release = (): Promise<BudgetState | "UNKNOWN"> =>
+    settleWithRetry({ tokensIn: 0, tokensOut: 0 }).catch(() => {
+      logRunError(req, "hold release failed; hold left for the full-cap sweep", ledger.settleError ?? "unknown");
+      return "UNKNOWN" as const;
+    });
   try {
     await deps.audit.startRun(req);
   } catch (err) {
     await release();
     throw err;
   }
-  const ledger: RunLedger = { providerCalled: false, charged: undefined, tokensIn: 0, tokensOut: 0, estimated: false };
   const charge = async (usage: ModelUsage): Promise<void> => {
-    let last: unknown;
-    for (let attempt = 0; attempt < MAX_SETTLE_ATTEMPTS; attempt += 1) {
-      try {
-        ledger.charged = await deps.budgets.settle(hold, usage);
-        return;
-      } catch (err) {
-        last = err;
-      }
-    }
-    throw last;
+    ledger.charged = await settleWithRetry(usage);
   };
-  const settleRemainder = async (): Promise<BudgetState> => {
+  const settleRemainder = async (): Promise<BudgetState | "UNKNOWN"> => {
     if (ledger.charged !== undefined) return ledger.charged;
-    if (!ledger.providerCalled) return release();
-    logRunError(req, "model usage not charged; hold left for the full-cap sweep", "settle failed");
-    return "OK";
+    if (!ledger.mayHaveSpent) return release();
+    if (ledger.settleError !== undefined) {
+      logRunError(req, "settling model usage failed; hold left for the full-cap sweep", ledger.settleError);
+    } else {
+      logRunError(req, "provider call ended without usage; hold left for the full-cap sweep", "no settle attempted");
+    }
+    return "UNKNOWN";
   };
   let result: RunResult;
   try {
@@ -290,11 +314,10 @@ export async function runAgent(
       await deps.audit.finishRun(req, result, message);
       return { ...result, postCommitError: message };
     } catch (retry) {
-      const finished = await deps.audit.runStatus(req).then(
-        (status) => status !== undefined && status !== "RUNNING",
-        () => false,
-      );
-      if (finished) return result;
+      // Either write may have landed with its response lost: the stored status says which.
+      const stored = await deps.audit.runStatus(req).catch(() => undefined);
+      if (stored === "FAILED_AFTER_COMMIT") return { ...result, postCommitError: message };
+      if (stored !== undefined && stored !== "RUNNING") return result;
       logRunError(req, "run left RUNNING after commit", String(retry));
       return { ...result, postCommitError: message };
     }
@@ -436,19 +459,36 @@ async function executeRun(
     assertNoPii(prompt);
     // AC-47.6: once halted, no provider call is made at all, not only no tool call.
     if (halted()) return killed("kill switch activated");
-    const promptTokens = estimateTokens(prompt) + estimateTokens(req.agent.systemPrompt);
+    // The schema every adapter sends with the call (wire.ts), counted as input.
+    const toolsText =
+      req.agent.allowedTools.length > 0 ? JSON.stringify(proposeTool(req.agent.allowedTools)) : "";
+    // Input is bounded by bytes against the input hold left, so no script can overshoot it;
+    // chars/4 only sizes the output allowance, which the provider then enforces.
+    assertPromptWithinCap(
+      [req.agent.systemPrompt, prompt, toolsText],
+      req.runTokenCap - ledger.tokensIn,
+    );
+    const promptTokens =
+      estimateTokens(prompt) + estimateTokens(req.agent.systemPrompt) + estimateTokens(toolsText);
     const maxOutputTokens = outputBudgetForCall(
       req.runTokenCap,
       ledger.tokensIn + ledger.tokensOut,
       promptTokens,
     );
-    ledger.providerCalled = true;
-    const response = await deps.provider.complete({
-      system: req.agent.systemPrompt,
-      user: prompt,
-      allowedTools: req.agent.allowedTools,
-      maxOutputTokens,
-    });
+    ledger.mayHaveSpent = true;
+    let response: ModelResponse;
+    try {
+      response = await deps.provider.complete({
+        system: req.agent.systemPrompt,
+        user: prompt,
+        allowedTools: req.agent.allowedTools,
+        maxOutputTokens,
+      });
+    } catch (err) {
+      // An HTTP error status or a connection never made: the hold is released with zero.
+      if (err instanceof ProviderError && err.unbilled) ledger.mayHaveSpent = false;
+      throw err;
+    }
 
     const metered = response.usage !== undefined && isMeteredUsage(response.usage);
     ledger.estimated = !metered;

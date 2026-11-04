@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AgentError } from "../src/errors.js";
 import { runAgent, RUN_TIMEOUT_MS, type AuditPort, type BudgetRequest, type RunDeps } from "../src/runtime/engine.js";
 import { openAgentStore, PgAgentStore } from "../src/store/pg.js";
+import { proposeTool, providerRejected, providerUnavailable } from "../src/providers/wire.js";
 import { APPROVER, FakeApprovals, FakeTools, makeDeps, makeRequest, postDescriptor, proposal, ScriptedProvider, testAudit, testBudgets } from "./fakes.js";
 import { fixture, ownerUrl, type Fixture } from "./pgHelper.js";
 
@@ -145,12 +146,129 @@ describe("run start validation and post-commit failures (no database)", () => {
     expect(settled).toEqual([0]);
   });
 
-  it("the provider is told to generate no more than the cap less the estimated prompt", async () => {
+  it("the provider is told to generate no more than the cap less the estimated prompt and tool schema", async () => {
     const { deps, provider } = committingRun({});
     const request = makeRequest({ runTokenCap: 5_000 });
     await runAgent(deps, request);
-    const promptTokens = Math.ceil(provider.seen[0]!.user.length / 4) + Math.ceil(request.agent.systemPrompt.length / 4);
+    const tools = JSON.stringify(proposeTool(request.agent.allowedTools));
+    const promptTokens = [provider.seen[0]!.user, request.agent.systemPrompt, tools].reduce((n, s) => n + Math.ceil(s.length / 4), 0);
     expect(provider.seen[0]!.maxOutputTokens).toBe(5_000 - promptTokens);
+  });
+
+  const bytesSent = (request: ReturnType<typeof makeRequest>, user: string): number =>
+    Buffer.byteLength(request.agent.systemPrompt) + Buffer.byteLength(user) + Buffer.byteLength(JSON.stringify(proposeTool(request.agent.allowedTools)));
+
+  it("a CJK or emoji prompt that fits by chars/4 but not by byte length is refused before any provider call, with the hold released", async () => {
+    const settled: number[] = [];
+    const { deps, provider } = committingRun({ budgets: { ...testBudgets, settle: async (_h, u) => (settled.push(u.tokensIn), "OK") } });
+    const prompt = "請求書INV-7を仕訳してください。😀".repeat(40);
+    const probe = makeRequest({ prompt });
+    const bytes = bytesSent(probe, prompt);
+    const charsEstimate = [prompt, probe.agent.systemPrompt, JSON.stringify(proposeTool(probe.agent.allowedTools))].reduce((n, s) => n + Math.ceil(s.length / 4), 0);
+    const cap = bytes - 1;
+    expect(charsEstimate * 2).toBeLessThan(cap);
+    const result = await runAgent(deps, makeRequest({ prompt, runTokenCap: cap }));
+    expect(provider.seen).toHaveLength(0);
+    expect(result).toMatchObject({ status: "FAILED", code: "AGT-0202" });
+    expect(result.reason).toContain(`${bytes} bytes`);
+    expect(settled).toEqual([0]);
+  });
+
+  it("the tool schema counts towards the byte bound: a cap that covers system text and prompt alone is refused", async () => {
+    const { deps, provider } = committingRun({});
+    const probe = makeRequest();
+    const withoutTools = Buffer.byteLength(probe.agent.systemPrompt) + Buffer.byteLength(probe.prompt);
+    const result = await runAgent(deps, makeRequest({ runTokenCap: withoutTools + 10 }));
+    expect(provider.seen).toHaveLength(0);
+    expect(result).toMatchObject({ status: "FAILED", code: "AGT-0202" });
+  });
+
+  it("a prompt whose bytes exactly meet the cap is sent", async () => {
+    const provider = new ScriptedProvider([{ ...proposal(0.8), usage: { tokensIn: 10, tokensOut: 10 } }]);
+    const { deps } = committingRun({ provider });
+    const probe = makeRequest();
+    // The pseudonymized prompt is what is sent: measure it from a first run, then rerun at that cap.
+    const first = committingRun({});
+    await runAgent(first.deps, probe);
+    const cap = bytesSent(probe, first.provider.seen[0]!.user);
+    const result = await runAgent(deps, makeRequest({ runTokenCap: cap }));
+    expect(provider.seen).toHaveLength(1);
+    expect(result.status).toBe("COMMITTED");
+  });
+
+  it.each([
+    ["a 503", providerUnavailable("provider returned 503", true)],
+    ["a 429", providerRejected("provider rate-limited the request (429)", true)],
+    ["a 400", providerRejected("provider rejected the request with 400", true)],
+    ["a refused connection", providerUnavailable("provider connection failed (ECONNREFUSED)", true)],
+  ])("a provider that answered with %s releases the hold with zero", async (_name, error) => {
+    const settled: Array<[number, number]> = [];
+    const { deps } = committingRun({
+      provider: { complete: async () => Promise.reject(error) },
+      budgets: { ...testBudgets, settle: async (_h, u) => (settled.push([u.tokensIn, u.tokensOut]), "SOFT") },
+    });
+    const result = await runAgent(deps, makeRequest());
+    expect(result).toMatchObject({ status: "FAILED", code: "AGT-0206", budgetState: "SOFT" });
+    expect(settled).toEqual([[0, 0]]);
+  });
+
+  it.each([
+    ["a timeout", providerUnavailable("provider request timed out")],
+    ["a mid-response drop", providerUnavailable("provider connection dropped while reading the response")],
+  ])("%s keeps the hold for the sweep, reports UNKNOWN and logs that no settle was tried", async (_name, error) => {
+    const settled: number[] = [];
+    const written: string[] = [];
+    const { deps } = committingRun({
+      provider: { complete: async () => Promise.reject(error) },
+      budgets: { ...testBudgets, settle: async (_h, u) => (settled.push(u.tokensIn), "OK") },
+    });
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => (written.push(String(chunk)), true));
+    let result;
+    try {
+      result = await runAgent(deps, makeRequest());
+    } finally {
+      stderr.mockRestore();
+    }
+    expect(result).toMatchObject({ status: "FAILED", code: "AGT-0206", budgetState: "UNKNOWN" });
+    expect(settled).toEqual([]);
+    expect(written.map((l) => JSON.parse(l))).toEqual([
+      expect.objectContaining({ message: "provider call ended without usage; hold left for the full-cap sweep", error: "no settle attempted" }),
+    ]);
+  });
+
+  it("a settle that keeps failing reports budgetState UNKNOWN and logs the settle error", async () => {
+    const written: string[] = [];
+    const { deps } = committingRun({ budgets: { ...testBudgets, settle: async () => Promise.reject(new Error("budget db down")) } });
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => (written.push(String(chunk)), true));
+    let result;
+    try {
+      result = await runAgent(deps, makeRequest());
+    } finally {
+      stderr.mockRestore();
+    }
+    expect(result).toMatchObject({ status: "FAILED", budgetState: "UNKNOWN" });
+    expect(written.map((l) => JSON.parse(l))).toEqual([
+      expect.objectContaining({ message: "settling model usage failed; hold left for the full-cap sweep", error: "budget db down" }),
+    ]);
+  });
+
+  it("a hold release that keeps failing reports budgetState UNKNOWN and is logged as a failed release", async () => {
+    const written: string[] = [];
+    const attempts: number[] = [];
+    const { deps } = committingRun({
+      killSwitch: { isHalted: (() => { let n = 0; return () => (n += 1) > 1; })() },
+      budgets: { ...testBudgets, settle: async (_h, u) => (attempts.push(u.tokensIn), Promise.reject(new Error("budget db down"))) },
+    });
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => (written.push(String(chunk)), true));
+    let result;
+    try {
+      result = await runAgent(deps, makeRequest());
+    } finally {
+      stderr.mockRestore();
+    }
+    expect(result).toMatchObject({ status: "KILLED", budgetState: "UNKNOWN" });
+    expect(attempts).toEqual([0, 0, 0]);
+    expect(written.map((l) => JSON.parse(l).message)).toEqual(["hold release failed; hold left for the full-cap sweep"]);
   });
 
   it("an escape from the run records the tokens already charged on the FAILED audit row", async () => {
@@ -207,6 +325,22 @@ describe("run start validation and post-commit failures (no database)", () => {
     }
     expect(result).toMatchObject({ status: "COMMITTED" });
     expect(result.postCommitError).toBeUndefined();
+    expect(written.map((l) => JSON.parse(l).message)).toEqual(["audit write failed after commit"]);
+  });
+
+  it("a FAILED_AFTER_COMMIT write whose response was lost still returns postCommitError", async () => {
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => (written.push(String(chunk)), true));
+    let result;
+    try {
+      const { deps } = committingRun({
+        audit: { ...testAudit, finishRun: async () => Promise.reject(new Error("connection lost")), runStatus: async () => "FAILED_AFTER_COMMIT" },
+      });
+      result = await runAgent(deps, makeRequest());
+    } finally {
+      spy.mockRestore();
+    }
+    expect(result).toMatchObject({ status: "COMMITTED", postCommitError: "connection lost" });
     expect(written.map((l) => JSON.parse(l).message)).toEqual(["audit write failed after commit"]);
   });
 
@@ -301,10 +435,11 @@ describe.runIf(ownerUrl)("persisted audit and token budget in Postgres", () => {
     }
   });
 
-  it("concurrent runs through the engine never charge more than the limit, and an overrun is bounded by the input estimate error", async () => {
+  it("concurrent runs through the engine never charge more than the limit, and an overrun is bounded by what a provider over-reports", async () => {
     const t = tenant(29);
-    const limit = 1_000;
-    const cap = 100;
+    // The cap must cover the byte length of system text, prompt and tool schema, or no call is made.
+    const cap = 1_000;
+    const limit = 10 * cap;
     await store.setBudget(t, "2026-10", { limitIn: limit, limitOut: limit, softPct: 80 });
     const runAll = (tokensIn: number, tenantId: string, label: string) =>
       Promise.allSettled(
