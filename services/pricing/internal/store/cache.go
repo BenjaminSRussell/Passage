@@ -178,3 +178,10 @@ func (c *Cache) SetCampaignKilled(ctx context.Context, id string, version int, k
 	defer c.Flush()
 	return c.Store.SetCampaignKilled(ctx, id, version, killed, idempotencyKey)
 }
+
+// ReviseCampaign flushes after the store call: validity and target group change which
+// campaign records a resolve keeps (FR-26.10).
+func (c *Cache) ReviseCampaign(ctx context.Context, rev domain.CampaignRevision, idempotencyKey string) (domain.Campaign, error) {
+	defer c.Flush()
+	return c.Store.ReviseCampaign(ctx, rev, idempotencyKey)
+}

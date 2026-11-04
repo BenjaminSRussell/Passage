@@ -215,6 +215,34 @@ export async function listConditionRecords(filter: RecordFilter = {}, signal?: A
   return body.items;
 }
 
+/** The CSV file of the trade agreements export, as the service wrote it. */
+export interface RecordsExport {
+  csv: string;
+  filename: string;
+  /** Rows in the file, without the header. */
+  count: number;
+  /** True when more records matched than the file holds. */
+  truncated: boolean;
+}
+
+/** GET /condition-records:export - the records that match the filter as CSV (up to 50000 rows). */
+export async function exportConditionRecords(filter: RecordFilter = {}, signal?: AbortSignal): Promise<RecordsExport> {
+  const q = new URLSearchParams();
+  for (const [name, value] of Object.entries(filter)) {
+    if (value !== undefined && value !== "" && name !== "limit") q.set(name, String(value));
+  }
+  const text = q.toString();
+  const res = await sendRaw(`/condition-records:export${text ? `?${text}` : ""}`, { headers: { Accept: "text/csv" } }, signal);
+  const csv = await res.text();
+  const disposition = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "");
+  return {
+    csv,
+    filename: disposition?.[1] ?? "trade-agreements.csv",
+    count: Math.max(parseCsv(csv).filter((row) => row.some((cell) => cell !== "")).length - 1, 0),
+    truncated: res.headers.get("X-Passage-Truncated") === "true",
+  };
+}
+
 export function getConditionRecord(id: string, signal?: AbortSignal): Promise<ConditionRecord> {
   return send<ConditionRecord>(`/condition-records/${encodeURIComponent(id)}`, {}, signal);
 }
@@ -550,6 +578,11 @@ export function reviseRebateAgreement(id: string, body: { version: number; name?
 /** POST /rebates/agreements/{id}:close - end an ACTIVE agreement on closeDate (the last day invoices accrue). */
 export function closeRebateAgreement(id: string, version: number, closeDate: string, key: string = newKey()): Promise<RebateAgreement> {
   return post<RebateAgreement>(`/rebates/agreements/${encodeURIComponent(id)}:close`, { version, closeDate }, key);
+}
+
+/** POST /rebates/agreements/{id}:reopen - make a CLOSED agreement ACTIVE again with a later last day. */
+export function reopenRebateAgreement(id: string, version: number, validTo: string, key: string = newKey()): Promise<RebateAgreement> {
+  return post<RebateAgreement>(`/rebates/agreements/${encodeURIComponent(id)}:reopen`, { version, validTo }, key);
 }
 
 /** GET /rebates/accruals - accrual rows of an agreement, optionally for one period (2027-03, 2027-Q1, 2027). */
@@ -937,6 +970,21 @@ export function createCampaign(body: CampaignInput, key: string = newKey()): Pro
 /** POST /campaigns/{id}:kill - the campaign's records drop out of the next resolve. */
 export function killCampaign(id: string, version: number, key: string = newKey()): Promise<Campaign> {
   return post<Campaign>(`/campaigns/${encodeURIComponent(id)}:kill`, { version }, key);
+}
+
+/** The terms POST /campaigns/{id}:revise may change; an omitted field stays as it is. */
+export interface CampaignRevision {
+  name?: string;
+  validFrom?: string;
+  validTo?: string;
+  /** An empty string means every customer. */
+  targetCustomerGroup?: string;
+  budget?: string;
+}
+
+/** POST /campaigns/{id}:revise - change name, validity, target group or budget; the next resolve uses them. */
+export function reviseCampaign(id: string, version: number, change: CampaignRevision, key: string = newKey()): Promise<Campaign> {
+  return post<Campaign>(`/campaigns/${encodeURIComponent(id)}:revise`, { version, ...change }, key);
 }
 
 /** POST /campaigns/{id}:restore - the records rejoin the next resolve inside the campaign validity. */

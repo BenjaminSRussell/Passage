@@ -68,6 +68,9 @@ Built in slice 5:
   targeted campaign, only when the request's `customerGroupId` is the target group. `:kill` and
   `:restore` (versioned, `Idempotency-Key`) take effect on the next resolve
   (`campaign_kill_switch_effect` NEXT_RESOLVE) and write `campaign.killed` / `campaign.restored`.
+  `:revise` (versioned, `Idempotency-Key`) changes the name, validity, target group or budget of a
+  live or killed campaign (the currency never changes) and writes `campaign.revised`; it never
+  changes how a day before today priced (a started campaign keeps its start and target group).
   The budget is recorded, not enforced (see NOT-IMPLEMENTED.md).
 - **Pricing procedures** (FR-26.1): versioned procedures per legal entity and name (AX_STANDARD,
   SAP_RVAA01, ...). Each version holds steps 10–990 in increasing order with exactly one PRICE
@@ -222,6 +225,7 @@ testdata/               fixtures
 | GET | `/v1/pricing/condition-records/{id}` | pricing.view | |
 | POST | `/v1/pricing/condition-records/{id}:activate` | pricing.maintain | body `{version}`; overlap check; `Idempotency-Key` honoured |
 | POST | `/v1/pricing/condition-records/{id}:withdraw` | pricing.maintain | body `{version, reason}`; `Idempotency-Key` honoured |
+| GET | `/v1/pricing/condition-records:export?legalEntityId=&status=&type=&customer=&product=&campaignId=&asOf=&validToFrom=&validToTo=` | pricing.view | streamed CSV of the matching records, at most 50000 rows; `X-Passage-Truncated: true` when more matched; formula-like text cells get a leading apostrophe |
 | POST | `/v1/pricing/condition-records:expire` | pricing.maintain | record expiry job for the scheduler: body `{legalEntityId, asOf}`; ACTIVE records with valid_to before asOf become EXPIRED and write `conditionrecord.withdrawn` with reason EXPIRED; a rerun expires nothing; asOf at most tomorrow (UTC) |
 | GET | `/v1/pricing/workspace?legalEntityId=&asOf=` | pricing.view | workspace tiles: exact record, journal, campaign and open-claim counts, and the month's rebate accruals per party role and currency; all entities in scope without legalEntityId |
 | GET | `/v1/pricing/journals?legalEntityId=&status=&limit=` | pricing.view | price journal log, newest first, no lines |
@@ -234,6 +238,7 @@ testdata/               fixtures
 | GET | `/v1/pricing/rebates/agreements?legalEntityId=&partyRole=` | pricing.rebate.view | |
 | POST | `/v1/pricing/rebates/agreements` | pricing.rebate.maintain | `Idempotency-Key` honoured; `partyRole` CUSTOMER (default) or VENDOR with `vendorId` |
 | GET | `/v1/pricing/rebates/agreements/{id}` | pricing.rebate.view | |
+| POST | `/v1/pricing/rebates/agreements/{id}:reopen` | pricing.rebate.maintain | body `{version, validTo}`; CLOSED only (409 PRC-0031); `validTo` after the close date; booked accruals stay; `Idempotency-Key` honoured |
 | GET | `/v1/pricing/rebates/accruals?agreementId=&period=` | pricing.rebate.view | period such as 2027-03, 2027-Q1 or 2027 |
 | POST | `/v1/pricing/rebates/accruals` | pricing.rebate.maintain | one posted invoice line; 201 new, 200 already accrued (stand-in for the invoice.posted consumer) |
 | POST | `/v1/pricing/rebates/vendor-accruals` | pricing.rebate.maintain | one posted vendor invoice line on a VENDOR agreement (Dr 2160 / Cr 5100); 201 new, 200 already accrued; PRC-0045 for a CUSTOMER agreement |
@@ -287,6 +292,7 @@ testdata/               fixtures
 | GET | `/v1/pricing/campaigns/{id}` | pricing.view | |
 | POST | `/v1/pricing/campaigns/{id}:kill` | pricing.maintain | body `{version}`; next resolve drops the campaign's records; `Idempotency-Key` honoured |
 | POST | `/v1/pricing/campaigns/{id}:restore` | pricing.maintain | body `{version}`; `Idempotency-Key` honoured |
+| POST | `/v1/pricing/campaigns/{id}:revise` | pricing.maintain | body `{version, name?, validFrom?, validTo?, targetCustomerGroup?, budget?}`; days before today keep their pricing (422); `Idempotency-Key` honoured |
 | GET | `/v1/pricing/procedures?legalEntityId=` | pricing.view | by name, newest version first |
 | POST | `/v1/pricing/procedures` | pricing.admin | DRAFT with the next version number; `Idempotency-Key` honoured |
 | GET | `/v1/pricing/procedures/{id}` | pricing.view | |

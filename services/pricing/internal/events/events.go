@@ -17,11 +17,15 @@ const (
 	// Campaigns (FR-26.10): the kill switch set (killed) or cleared (restored).
 	CampaignKilled   = "dev.passage.pricing.campaign.killed.v1"
 	CampaignRestored = "dev.passage.pricing.campaign.restored.v1"
+	// CampaignRevised: name, validity, target customer group or budget changed.
+	CampaignRevised = "dev.passage.pricing.campaign.revised.v1"
 	// Pricing procedures (FR-26.1): a version became ACTIVE.
 	ProcedureActivated = "dev.passage.pricing.procedure.activated.v1"
 	// Rebate agreements (FR-26.11): revised, and closed early.
 	RebateAgreementRevised = "dev.passage.pricing.rebateagreement.revised.v1"
 	RebateAgreementClosed  = "dev.passage.pricing.rebateagreement.closed.v1"
+	// RebateAgreementReopened: a CLOSED agreement became ACTIVE again with a later end date.
+	RebateAgreementReopened = "dev.passage.pricing.rebateagreement.reopened.v1"
 	// Vendor rebate claims (FR-26.15): a period claim was created, and approved for w19 AP.
 	VendorRebateClaimCreated  = "dev.passage.pricing.vendorrebateclaim.created.v1"
 	VendorRebateClaimApproved = "dev.passage.pricing.vendorrebateclaim.approved.v1"
@@ -90,6 +94,21 @@ type CampaignStatusData struct {
 	LegalEntityID string `json:"legal_entity_id"`
 	Killed        bool   `json:"killed"`
 	Version       int    `json:"version"`
+}
+
+// CampaignRevisedData is the payload of campaign.revised: the campaign's terms after the
+// change. Validity and target group gate resolve, so caches drop their snapshot for the legal entity.
+type CampaignRevisedData struct {
+	CampaignID          string `json:"campaign_id"`
+	LegalEntityID       string `json:"legal_entity_id"`
+	Name                string `json:"name"`
+	ValidFrom           string `json:"valid_from"`
+	ValidTo             string `json:"valid_to"`
+	TargetCustomerGroup string `json:"target_customer_group"`
+	Budget              string `json:"budget"`
+	Currency            string `json:"currency"`
+	Killed              bool   `json:"killed"`
+	Version             int    `json:"version"`
 }
 
 // ProcedureActivatedData is the payload of procedure.activated. SupersededID names the

@@ -5,7 +5,7 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | Route | Page | Calls |
 |---|---|---|
 | `/pricing` | Workspace: exact tiles (active, drafts, expiring in 30 days, journals to post, live campaigns, vendor claims to approve, customer and vendor rebates accrued this month per currency), the expiring list (active agreements ending in the next 30 days, soonest first), and the record expiry run (BR-26.9) for a legal entity and day | `GET /workspace`, `GET /condition-records?status=ACTIVE&validToFrom=&validToTo=`, `POST /condition-records:expire` |
-| `/pricing/agreements` | Trade agreements grid with status, type, customer, product, as-of and ends-between filters | `GET /condition-records` |
+| `/pricing/agreements` | Trade agreements grid with status, type, customer, product, as-of and ends-between filters, and Export CSV of every match | `GET /condition-records`, `GET /condition-records:export` |
 | `/pricing/agreements/new` | Create a DRAFT agreement, optionally in a campaign; `?copy=<id>` starts from an existing one, `?campaign=<id>` fills the campaign | `POST /condition-records` |
 | `/pricing/agreements/:id` | Detail with its campaign, activate (overlap 409 shown) and withdraw | `GET`, `:activate`, `:withdraw` |
 | `/pricing/free-goods` | Free goods rules (FR-26.22) with status | `GET /free-goods-rules` |
@@ -19,7 +19,7 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | `/pricing/commodity/calculations/:id` | Preview a run, run it (creates a VALIDATED price journal, link to review), run history, withdraw | `GET /commodity/calculations/{id}`, `:preview`, `:run`, `GET …/runs`, `:withdraw` |
 | `/pricing/campaigns` | Campaigns with target group, validity, budget and status (live, scheduled, ended, killed) | `GET /campaigns` |
 | `/pricing/campaigns/new` | Create a campaign: validity, target customer group, budget and currency | `POST /campaigns` |
-| `/pricing/campaigns/:id` | Terms, the campaign's agreements, kill and restore at the campaign version | `GET /campaigns/{id}`, `GET /condition-records?campaignId=`, `:kill`, `:restore` |
+| `/pricing/campaigns/:id` | Terms, the campaign's agreements, edit (name, validity, group, budget), kill and restore at the campaign version | `GET /campaigns/{id}`, `GET /condition-records?campaignId=`, `:revise`, `:kill`, `:restore` |
 | `/pricing/procedures` | Procedure designer: versions with status and step order | `GET /procedures` |
 | `/pricing/procedures/new` | Save a DRAFT version from the reference steps; `?from=<id>` copies a version into the next one | `POST /procedures` |
 | `/pricing/procedures/:id` | A DRAFT's step editor (step, type, CEL requirement, exclusion group and mode, statistical, account key), save at its revision and activate; other versions read-only (PRC-0008 shown) | `GET /procedures/{id}`, `:revise`, `:activate` |

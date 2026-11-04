@@ -301,6 +301,43 @@ paths:
         "403": {$ref: "#/components/responses/Problem"}
         "404": {description: "campaignId names no campaign the caller can see (PRC-0041).", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
         "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/condition-records:export:
+    get:
+      operationId: exportConditionRecords
+      summary: Export the trade agreements that match the filters as CSV (§5.26.14).
+      description: >
+        Takes the filters of the list (not its limit): up to 50000 rows ordered like the list, and the
+        header X-Passage-Truncated: true when more matched. Rows are streamed as they are read; a failure
+        after the first bytes aborts the connection, so a short file is never presented as complete.
+        Columns: recordId, type, customerKind, customerKey, productKind, productKey, variant, currency,
+        unit, fromQuantity, amount, discPct1, discPct2, validFrom, validTo, searchNext, exclusive,
+        campaignId, status, version; the names that also exist in the price journal CSV import have the
+        same format. A text cell that starts with =, +, -, @, a tab or a carriage return gets a leading
+        apostrophe (spreadsheet formula injection); numbers, negative ones included, are written as they are.
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: legalEntityId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: status, in: query, required: false, schema: {type: string, enum: [DRAFT, ACTIVE, EXPIRED, WITHDRAWN]}}
+        - {name: type, in: query, required: false, schema: {type: string, enum: [PRICE, LINE_DISC, MULTILINE_DISC, TOTAL_DISC, SURCHARGE]}}
+        - {name: customer, in: query, required: false, description: "Exact customer or customer-group key.", schema: {type: string}}
+        - {name: product, in: query, required: false, description: "Exact product or product-group key.", schema: {type: string}}
+        - {name: campaignId, in: query, required: false, description: "Records of one campaign (FR-26.10).", schema: {type: string, format: uuid}}
+        - {name: asOf, in: query, required: false, description: "Records valid on this date (YYYY-MM-DD).", schema: {type: string, format: date}}
+        - {name: validToFrom, in: query, required: false, description: "Records whose last valid day is on or after this date.", schema: {type: string, format: date}}
+        - {name: validToTo, in: query, required: false, description: "Records whose last valid day is on or before this date.", schema: {type: string, format: date}}
+      responses:
+        "200":
+          description: The CSV file, with a header row.
+          headers:
+            Content-Disposition: {description: "attachment; filename=trade-agreements-YYYY-MM-DD.csv", schema: {type: string}}
+            X-Passage-Truncated: {description: "true when more than 50000 records matched and the file holds the first 50000.", schema: {type: string}}
+          content:
+            text/csv:
+              schema: {type: string}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "500": {$ref: "#/components/responses/Problem"}
   /v1/pricing/condition-records/{id}:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -842,6 +879,36 @@ paths:
       responses:
         "200":
           description: The closed agreement; version incremented.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RebateAgreement"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/rebates/agreements/{id}:reopen:
+    post:
+      operationId: reopenRebateAgreement
+      summary: Make a CLOSED rebate agreement ACTIVE again with a later last day (FR-26.11).
+      description: >
+        validTo must be later than the close date the agreement carries; invoices dated after the old
+        close date accrue again up to it, and the accruals already booked stay. 409 PRC-0031 when the
+        agreement is not CLOSED; 412 on a stale version. Writes dev.passage.pricing.rebateagreement.reopened.v1
+        in the same transaction; a repeated Idempotency-Key replays the first response.
+      x-passage-duty: pricing.rebate.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RebateAgreementReopen"}
+      responses:
+        "200":
+          description: The reopened agreement; version incremented.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/RebateAgreement"}
@@ -2445,6 +2512,39 @@ paths:
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/campaigns/{id}:revise:
+    post:
+      operationId: reviseCampaign
+      summary: Change a campaign's name, validity, target customer group or budget (FR-26.10).
+      description: >
+        An omitted field stays as it is; an empty targetCustomerGroup means every customer. The merged
+        campaign is validated as on create (422), the currency never changes, and a killed campaign may
+        be revised. A revise never changes how a day before today priced (422 COM-0001 naming the field):
+        once the campaign has started its validFrom and targetCustomerGroup are fixed and validTo may not
+        fall before yesterday (or change at all once the campaign has ended); a campaign that has not
+        started may not get a validFrom in the past. The new validity and target group gate the next resolve. 404 PRC-0041 when unknown;
+        412 on a stale version. Writes dev.passage.pricing.campaign.revised.v1 in the same transaction; a
+        repeated Idempotency-Key replays the first response.
+      x-passage-duty: pricing.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CampaignRevise"}
+      responses:
+        "200":
+          description: The revised campaign; version incremented.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Campaign"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/campaigns/{id}:kill:
     post:
       operationId: killCampaign
@@ -2629,6 +2729,17 @@ components:
             id: {type: string, format: uuid}
             killed: {type: boolean, description: "Kill switch; a killed campaign's records take no part in resolve."}
             version: {type: integer, minimum: 1}
+    CampaignRevise:
+      type: object
+      required: [version]
+      description: Change at least one of name, validFrom, validTo, targetCustomerGroup or budget.
+      properties:
+        version: {type: integer, minimum: 1}
+        name: {type: string, minLength: 1, maxLength: 120}
+        validFrom: {type: string, format: date}
+        validTo: {type: string, format: date, description: "Inclusive; not before validFrom."}
+        targetCustomerGroup: {type: string, maxLength: 64, description: "Empty means every customer."}
+        budget: {type: string, description: "Planned spend, decimal at least 0, in the campaign currency."}
     CampaignInput:
       type: object
       required: [legalEntityId, name, validFrom, validTo, budget, currency]
@@ -3344,6 +3455,12 @@ components:
           type: array
           minItems: 1
           items: {$ref: "#/components/schemas/Tier"}
+    RebateAgreementReopen:
+      type: object
+      required: [version, validTo]
+      properties:
+        version: {type: integer, minimum: 1}
+        validTo: {type: string, format: date, description: "The new last day; later than the close date."}
     RebateAgreementClose:
       type: object
       required: [version, closeDate]

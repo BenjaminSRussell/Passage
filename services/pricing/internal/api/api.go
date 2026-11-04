@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"sync/atomic"
@@ -25,15 +26,16 @@ import (
 )
 
 const (
-	dutyView         = "pricing.view"
-	dutyMaintain     = "pricing.maintain"
-	resolvePath      = "/v1/pricing/resolve"
-	simulatePath     = "/v1/pricing/simulate"
-	comparePath      = "/v1/pricing/compare"
-	recordsPath      = "/v1/pricing/condition-records"
-	idempotencyKey   = "Idempotency-Key"
-	dateLayout       = "2006-01-02"
-	validationDetail = "request is invalid"
+	dutyView          = "pricing.view"
+	dutyMaintain      = "pricing.maintain"
+	resolvePath       = "/v1/pricing/resolve"
+	simulatePath      = "/v1/pricing/simulate"
+	comparePath       = "/v1/pricing/compare"
+	recordsPath       = "/v1/pricing/condition-records"
+	recordsExportPath = "/v1/pricing/condition-records:export"
+	idempotencyKey    = "Idempotency-Key"
+	dateLayout        = "2006-01-02"
+	validationDetail  = "request is invalid"
 	// DefaultMaxLines and DefaultExplainMaxBytes match PRICING_MAX_LINES and PRICING_EXPLAIN_MAX_BYTES.
 	DefaultMaxLines        = 500
 	DefaultExplainMaxBytes = 65536
@@ -91,6 +93,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Get(netPriceListPath, a.netPriceList)
 	r.With(authz.RequireDuty(dutyMaintain)).Post(recordsPath, a.createRecord)
 	r.With(authz.RequireDuty(dutyView)).Get(recordsPath, a.listRecords)
+	r.With(authz.RequireDuty(dutyView)).Get(recordsExportPath, a.exportRecords)
 	r.With(authz.RequireDuty(dutyView)).Get(recordsPath+"/{id}", a.getRecord)
 	r.With(authz.RequireDuty(dutyMaintain)).Post(recordsPath+"/{id}:activate", a.activateRecord)
 	r.With(authz.RequireDuty(dutyMaintain)).Post(recordsPath+"/{id}:withdraw", a.withdrawRecord)
@@ -539,11 +542,9 @@ func (a *API) createRecord(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, viewOf(e))
 }
 
-func (a *API) listRecords(w http.ResponseWriter, r *http.Request) {
-	if !validTenant(w, r) {
-		return
-	}
-	q := r.URL.Query()
+// recordFilter reads the condition record filters shared by the list and the CSV export.
+// The second result maps each invalid query parameter to its message; it is never nil.
+func recordFilter(q url.Values) (store.Filter, map[string]string) {
 	f := store.Filter{LegalEntityID: q.Get("legalEntityId"), Status: q.Get("status"), Type: q.Get("type"), Customer: q.Get("customer"),
 		Product: q.Get("product"), CampaignID: q.Get("campaignId")}
 	fields := map[string]string{}
@@ -583,7 +584,15 @@ func (a *API) listRecords(w http.ResponseWriter, r *http.Request) {
 	if f.ValidToFrom != nil && f.ValidToTo != nil && f.ValidToTo.Before(*f.ValidToFrom) {
 		fields["validToTo"] = "must not be before validToFrom"
 	}
-	if raw := q.Get("limit"); raw != "" {
+	return f, fields
+}
+
+func (a *API) listRecords(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	f, fields := recordFilter(r.URL.Query())
+	if raw := r.URL.Query().Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > store.MaxListLimit {
 			fields["limit"] = fmt.Sprintf("must be an integer from 1 to %d", store.MaxListLimit)

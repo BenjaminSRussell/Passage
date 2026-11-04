@@ -62,12 +62,14 @@ channels:
         $ref: "#/components/messages/ProcedureAssignmentChanged"
   campaign:
     address: passage.pricing.campaign
-    description: Campaign kill switch set or cleared (FR-26.10).
+    description: Campaign kill switch set or cleared, or its terms revised (FR-26.10).
     messages:
       campaignKilled:
         $ref: "#/components/messages/CampaignKilled"
       campaignRestored:
         $ref: "#/components/messages/CampaignRestored"
+      campaignRevised:
+        $ref: "#/components/messages/CampaignRevised"
   freeGoodsRule:
     address: passage.pricing.freegoodsrule
     description: Free goods rule created or withdrawn (FR-26.22).
@@ -92,12 +94,14 @@ channels:
         $ref: "#/components/messages/CommodityRunCompleted"
   rebateAgreement:
     address: passage.pricing.rebateagreement
-    description: Rebate agreement revised or closed early (FR-26.11).
+    description: Rebate agreement revised, closed early or reopened (FR-26.11).
     messages:
       rebateAgreementRevised:
         $ref: "#/components/messages/RebateAgreementRevised"
       rebateAgreementClosed:
         $ref: "#/components/messages/RebateAgreementClosed"
+      rebateAgreementReopened:
+        $ref: "#/components/messages/RebateAgreementReopened"
   procedure:
     address: passage.pricing.procedure
     description: Pricing procedure version activated (FR-26.1).
@@ -257,6 +261,12 @@ operations:
     summary: A killed campaign was restored; its records rejoin the next resolve within its validity.
     messages:
       - {$ref: "#/channels/campaign/messages/campaignRestored"}
+  publishCampaignRevised:
+    action: send
+    channel: {$ref: "#/channels/campaign"}
+    summary: A campaign's name, validity, target customer group or budget changed; the next resolve uses the new terms.
+    messages:
+      - {$ref: "#/channels/campaign/messages/campaignRevised"}
   publishFreeGoodsRuleCreated:
     action: send
     channel: {$ref: "#/channels/freeGoodsRule"}
@@ -311,6 +321,12 @@ operations:
     summary: A rebate agreement was closed early; invoices dated after valid_to no longer accrue.
     messages:
       - {$ref: "#/channels/rebateAgreement/messages/rebateAgreementClosed"}
+  publishRebateAgreementReopened:
+    action: send
+    channel: {$ref: "#/channels/rebateAgreement"}
+    summary: A closed rebate agreement was reopened with a later valid_to; invoices up to it accrue again.
+    messages:
+      - {$ref: "#/channels/rebateAgreement/messages/rebateAgreementReopened"}
   publishVendorRebateClaimCreated:
     action: send
     channel: {$ref: "#/channels/vendorRebateClaim"}
@@ -488,6 +504,12 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/CampaignStatus"
+    CampaignRevised:
+      name: dev.passage.pricing.campaign.revised.v1
+      title: Campaign revised
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/CampaignRevised"
     FreeGoodsRuleCreated:
       name: dev.passage.pricing.freegoodsrule.created.v1
       title: Free goods rule created
@@ -576,6 +598,12 @@ components:
     RebateAgreementClosed:
       name: dev.passage.pricing.rebateagreement.closed.v1
       title: Rebate agreement closed
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/RebateAgreementEvent"
+    RebateAgreementReopened:
+      name: dev.passage.pricing.rebateagreement.reopened.v1
+      title: Rebate agreement reopened
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/RebateAgreementEvent"
@@ -791,8 +819,9 @@ components:
     RebateAgreementEvent:
       type: object
       description: >
-        A rebate agreement after a revise (name, end date, tiers before the first accrual) or an early
-        close (FR-26.11). After a close, valid_to is the close date and no invoice dated later accrues.
+        A rebate agreement after a revise (name, end date, tiers before the first accrual), an early
+        close or a reopen (FR-26.11). After a close, valid_to is the close date and no invoice dated later
+        accrues; after a reopen, status is ACTIVE and valid_to the new last day.
         Ids only.
       required: [agreement_id, legal_entity_id, party_role, status, valid_from, valid_to, version]
       properties:
@@ -834,6 +863,23 @@ components:
       properties:
         campaign_id: {type: string, format: uuid}
         legal_entity_id: {type: string, format: uuid}
+        killed: {type: boolean}
+        version: {type: integer, minimum: 1}
+    CampaignRevised:
+      type: object
+      description: >
+        A campaign's terms after a revise (FR-26.10). Validity and target group gate resolve, so caches
+        drop their snapshot for the legal entity.
+      required: [campaign_id, legal_entity_id, name, valid_from, valid_to, target_customer_group, budget, currency, killed, version]
+      properties:
+        campaign_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        name: {type: string}
+        valid_from: {type: string, format: date}
+        valid_to: {type: string, format: date}
+        target_customer_group: {type: string, description: "Empty means every customer."}
+        budget: {type: string, description: "Planned spend, decimal."}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
         killed: {type: boolean}
         version: {type: integer, minimum: 1}
     FundStatus:
