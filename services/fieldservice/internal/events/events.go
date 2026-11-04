@@ -14,8 +14,11 @@ const Context = "service"
 var (
 	CaseOpened      = events.Type(Context, "case", "opened", 1)
 	WorkOrderPosted = events.Type(Context, "workorder", "posted", 1)
-	SLAWarning      = events.Type(Context, "sla", "warning", 1)
-	SLABreached     = events.Type(Context, "sla", "breached", 1)
+	// WorkOrderCompleted is dev.passage.service.workorder.completed.v1 (PRD 8.45.5): the
+	// work order reached COMPLETED, by the technician's complete action or by hand.
+	WorkOrderCompleted = events.Type(Context, "workorder", "completed", 1)
+	SLAWarning         = events.Type(Context, "sla", "warning", 1)
+	SLABreached        = events.Type(Context, "sla", "breached", 1)
 
 	// AgreementChanged is dev.passage.service.agreement.changed.v1: an agreement
 	// moved between DRAFT, ACTIVE, SUSPENDED, CANCELED and EXPIRED (FR-45.3).
@@ -235,4 +238,31 @@ type DispatchPublishedData struct {
 	PublishedAt   string            `json:"publishedAt"`
 	Actor         string            `json:"actor"`
 	Assignments   []DispatchedOrder `json:"assignments"`
+}
+
+// WorkOrderCompletedData is the payload of dev.passage.service.workorder.completed.v1
+// (PRD 8.45.5: workOrderId, technicianId, lines[], firstTimeFix, durationMinutes).
+// Quantities are decimal strings. Inventory issues the PART lines' ConsumedQty from the
+// technician's truck; DurationMinutes is the time IN_PROGRESS by device time (0 when
+// the work order was completed by hand without an action log).
+type WorkOrderCompletedData struct {
+	WorkOrderID     string          `json:"workOrderId"`
+	Number          string          `json:"number"`
+	CustomerPartyID string          `json:"customerId"`
+	LegalEntityID   string          `json:"legalEntityId"`
+	CaseID          *string         `json:"caseId"`
+	TechnicianID    *string         `json:"technicianId"`
+	FirstTimeFix    bool            `json:"firstTimeFix"`
+	DurationMinutes int             `json:"durationMinutes"`
+	CompletedAt     string          `json:"completedAt"`
+	Lines           []CompletedLine `json:"lines"`
+}
+
+// CompletedLine is one work-order line at completion; ConsumedQty is what the technician
+// reported using (PART lines), "0" for the other kinds.
+type CompletedLine struct {
+	LineID      string `json:"lineId"`
+	Kind        string `json:"kind"`
+	Qty         string `json:"qty"`
+	ConsumedQty string `json:"consumedQty"`
 }

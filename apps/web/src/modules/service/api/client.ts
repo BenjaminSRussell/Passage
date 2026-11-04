@@ -44,8 +44,8 @@ export type Decimal = string;
  * posting, never by hand.
  */
 export const NEXT_STATUSES: Record<WorkOrderStatus, WorkOrderStatus[]> = {
-  UNSCHEDULED: ["SCHEDULED", "CANCELED"],
-  SCHEDULED: ["DISPATCHED", "CANCELED"],
+  UNSCHEDULED: ["CANCELED"],
+  SCHEDULED: ["CANCELED"],
   DISPATCHED: ["TRAVELING", "CANCELED"],
   TRAVELING: ["IN_PROGRESS", "CANCELED"],
   IN_PROGRESS: ["ON_HOLD", "COMPLETED", "CANCELED"],
@@ -288,6 +288,12 @@ export interface WorkOrder {
   assignedStart?: string | null;
   assignedEnd?: string | null;
   assignmentPinned?: boolean;
+  /** Completion data (BR-45.6, SVC-WO-001). */
+  signatureExempt?: boolean;
+  signedBy?: string | null;
+  signedAt?: string | null;
+  signatureRef?: string | null;
+  technicianNote?: string;
   version: number;
 }
 
@@ -537,6 +543,58 @@ export function transitionWorkOrder(workOrderId: string, etag: string, to: WorkO
     body: JSON.stringify({ to }),
     headers: { "If-Match": etag },
   });
+}
+
+// --- Technician action log (BR-45.6, FR-45.8) ---
+
+export const ACTION_KINDS = ["TRAVEL_START", "WORK_START", "HOLD", "RESUME", "PART_USED", "SIGNATURE", "NOTE", "COMPLETE"] as const;
+export type ActionKind = (typeof ACTION_KINDS)[number];
+
+export type ActionOutcome = "APPLIED" | "SUPERSEDED" | "REJECTED";
+
+export interface WorkOrderAction {
+  id: string;
+  workOrderId: string;
+  technicianId: string;
+  kind: ActionKind;
+  deviceTime: string;
+  receivedAt: string;
+  payload: { lineId?: string; qty?: Decimal; signedBy?: string; signatureRef?: string; text?: string };
+  outcome: ActionOutcome;
+  reasonCode?: string;
+  reason?: string;
+}
+
+export interface ActionInput {
+  id: string;
+  kind: ActionKind;
+  deviceTime: string;
+  lineId?: string;
+  qty?: Decimal;
+  signedBy?: string;
+  signatureRef?: string;
+  text?: string;
+}
+
+export interface ActionSyncResult {
+  results: { id: string; kind: ActionKind; outcome: ActionOutcome; code?: string; reason?: string; duplicate: boolean }[];
+  applied: number;
+  duplicates: number;
+  superseded: number;
+  rejected: number;
+  /** SVC-SYNC-001 when status conflicts were resolved. */
+  message?: string;
+  workOrder: WorkOrder;
+}
+
+/** The action log of a work order in merge order (device time, then receipt). */
+export function listWorkOrderActions(workOrderId: string, signal?: AbortSignal): Promise<{ items: WorkOrderAction[] }> {
+  return json<{ items: WorkOrderAction[] }>(`/work-orders/${id(workOrderId)}/actions`, {}, signal);
+}
+
+/** Merges a batch of a technician's actions; every action id is idempotent. */
+export function recordWorkOrderActions(workOrderId: string, technicianId: string, actions: ActionInput[]): Promise<ActionSyncResult> {
+  return json<ActionSyncResult>(`/work-orders/${id(workOrderId)}/actions`, { method: "POST", body: JSON.stringify({ technicianId, actions }) });
 }
 
 /** Posts a COMPLETED work order to billing and warranty cost (FR-45.10, BR-45.4). */

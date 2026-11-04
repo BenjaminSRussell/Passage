@@ -66,7 +66,7 @@ charts/fieldservice     Helm chart (deployment, service, optional ServiceMonitor
 | GET | `/v1/service/cases` (`status`, `slaState`, `customerPartyId`), `/v1/service/cases/{id}` | SvcInquire |
 | POST | `/v1/service/work-orders` | SvcWoMaintain |
 | GET | `/v1/service/work-orders` (`status`, `territoryId`, `caseId`, `customerPartyId`), `/v1/service/work-orders/{id}` | SvcInquire |
-| POST | `/v1/service/work-orders/{id}:transition` | SvcWoMaintain (If-Match) |
+| POST | `/v1/service/work-orders/{id}:transition` (not to SCHEDULED or DISPATCHED; completing needs the signature) | SvcWoMaintain (If-Match) |
 | POST | `/v1/service/work-orders/{id}:post` | SvcBillingPost (If-Match, Idempotency-Key) |
 | POST | `/v1/service/cases/{id}:transition` | SvcCaseMaintain (If-Match; Idempotency-Key optional) |
 | POST | `/v1/service/sla:scan` (`limit`, 1 to 5000, default 500) | SvcCaseMaintain |
@@ -108,6 +108,8 @@ charts/fieldservice     Helm chart (deployment, service, optional ServiceMonitor
 | POST | `/v1/service/work-orders/{id}:assign`, `:unassign` | SvcDispatch (If-Match) |
 | GET | `/v1/service/dispatch/board` (`territoryId`, `date`, `timeZone`) | SvcInquire |
 | POST | `/v1/service/dispatch/publish` | SvcDispatch (Idempotency-Key) |
+| POST | `/v1/service/work-orders/{id}/actions` (a batch of the technician's offline actions; each action id idempotent) | SvcTechnician |
+| GET | `/v1/service/work-orders/{id}/actions` (the log in merge order) | SvcInquire |
 | GET | `/v1/service/dispatch/runs` (`territoryId`), `/v1/service/dispatch/runs/{id}` | SvcInquire |
 Lists are newest first (activities: earliest due first, undated last) and page with `cursor` (the previous page's `nextCursor`)
 and `limit` (1 to 200, default 50); they see only the caller's legal entities.
@@ -377,6 +379,15 @@ Problem details use `application/problem+json`; `type` is `https://passage.dev/p
 | `SVC-DSP-006` | 422 | The visit is outside the technician's shift |
 | `SVC-DSP-007` | 422 | The visit overlaps another booking or leaves less than the 5 minute buffer |
 | `SVC-DSP-008` | 422 | The day would exceed the technician's daily maximum |
+| `SVC-WO-001` | 422 | Completing needs the customer's signature (unless the work order is `signatureExempt`); as an action it is REJECTED, not an HTTP error |
+| `SVC-WO-002` | 422 | Posting needs every PART line consumed (from the action log) |
+| `SVC-SYNC-001` | 200 | Message on an action batch: offline actions merged and status conflicts resolved |
+| `SVC-SYNC-002` | action | REJECTED: the status move cannot follow the work order's state, or it is not worked from the device |
+| `SVC-SYNC-003` | action | REJECTED: the work order is not assigned to this technician |
+| `SVC-SYNC-004` | action | REJECTED: not a PART line of the work order, or the quantity would exceed the line |
+| `SVC-SYNC-003` | 403 | The caller is neither the technician's worker (user id = `workerId`) nor office staff with `SvcWoMaintain`; the whole batch is refused |
+| `SVC-SYNC-005` | 422 | An action id was already used for another action (another work order, technician, kind, device time or payload) |
+| `SVC-SYNC-006` | action | REJECTED: the device time is more than 5 minutes before the work order was created (check the device clock) |
 | `SVC-DSP-009` | 422 | Nothing scheduled to dispatch on that territory-day (or an unreadable day) |
 | `SVC-DSP-010` | 404 | Dispatch run not found |
 | `SVC-ENT-001` | — | Info in the entitlement trace: no agreement matched, fallback profile applied |

@@ -95,6 +95,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerClaims(r)
 	a.registerIntake(r)
 	a.registerDispatch(r)
+	a.registerActions(r)
 }
 
 // Metrics serves the service counters in Prometheus text format.
@@ -376,6 +377,9 @@ type workOrderRequest struct {
 	Address        string     `json:"address"`
 	Latitude       *float64   `json:"latitude"`
 	Longitude      *float64   `json:"longitude"`
+	// SignatureExempt is set when the incident type's rule waives the customer
+	// signature at completion (SVC-WO-001).
+	SignatureExempt bool `json:"signatureExempt"`
 }
 
 func (a *API) createWorkOrder(w http.ResponseWriter, r *http.Request) {
@@ -422,7 +426,8 @@ func (a *API) createWorkOrder(w http.ResponseWriter, r *http.Request) {
 	in := store.WorkOrder{CustomerPartyID: req.CustomerPartyID, LegalEntityID: req.LegalEntityID, TerritoryID: req.TerritoryID,
 		CaseID: req.CaseID, AgreementID: req.AgreementID, IncidentTypeID: req.IncidentTypeID,
 		EstDurationMinutes: req.EstDurationMinutes, Currency: req.Currency, Lines: req.Lines,
-		RequiredSkills: sc.RequiredSkills, WindowStart: sc.WindowStart, WindowEnd: sc.WindowEnd, Address: sc.Address, Latitude: sc.Latitude, Longitude: sc.Longitude}
+		RequiredSkills: sc.RequiredSkills, WindowStart: sc.WindowStart, WindowEnd: sc.WindowEnd, Address: sc.Address, Latitude: sc.Latitude, Longitude: sc.Longitude,
+		SignatureExempt: req.SignatureExempt}
 	created, replayed, err := a.store.CreateWorkOrder(r.Context(), in, key, requestHash)
 	if err != nil {
 		a.fail(w, r, "create work order", err)
@@ -490,8 +495,8 @@ func (a *API) transitionWorkOrder(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	if !oneOf(req.To, "SCHEDULED", "DISPATCHED", "TRAVELING", "IN_PROGRESS", "ON_HOLD", "COMPLETED", "CANCELED") {
-		validationFailed(w, r, map[string]string{"to": "must be a status that can be requested by hand"})
+	if !oneOf(req.To, "TRAVELING", "IN_PROGRESS", "ON_HOLD", "COMPLETED", "CANCELED") {
+		validationFailed(w, r, map[string]string{"to": "must be TRAVELING, IN_PROGRESS, ON_HOLD, COMPLETED or CANCELED; SCHEDULED comes from :assign and DISPATCHED from publishing"})
 		return
 	}
 	wo, err := a.store.TransitionWorkOrder(r.Context(), id, version, domain.WOStatus(req.To))

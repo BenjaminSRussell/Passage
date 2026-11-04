@@ -18,6 +18,11 @@ channels:
     messages:
       workOrderPosted:
         $ref: "#/components/messages/WorkOrderPosted"
+  workOrderCompleted:
+    address: passage.service.workorder.completed
+    messages:
+      workOrderCompleted:
+        $ref: "#/components/messages/WorkOrderCompleted"
   slaAlerts:
     address: passage.service.sla
     messages:
@@ -73,6 +78,12 @@ operations:
     summary: A completed service work order was posted to billing and warranty cost.
     messages:
       - $ref: "#/channels/workOrderPosted/messages/workOrderPosted"
+  publishWorkOrderCompleted:
+    action: send
+    channel: { $ref: "#/channels/workOrderCompleted" }
+    summary: A work order was completed by the technician's complete action or by hand; inventory issues the consumed parts from the truck (BR-45.6).
+    messages:
+      - $ref: "#/channels/workOrderCompleted/messages/workOrderCompleted"
   publishSLAWarning:
     action: send
     channel: { $ref: "#/channels/slaAlerts" }
@@ -145,6 +156,40 @@ components:
           agreementId: { type: [string, "null"], format: uuid }
           responseDue: { type: string, format: date-time }
           resolutionDue: { type: string, format: date-time }
+    WorkOrderCompleted:
+      name: dev.passage.service.workorder.completed.v1
+      contentType: application/cloudevents+json
+      summary: A work order reached COMPLETED.
+      description: |
+        Written in the transaction that completes the work order: the merge of a COMPLETE action, or a manual
+        transition. `consumedQty` is the sum of the technician's applied PART_USED actions per line; inventory
+        issues it from the truck once per work order. `durationMinutes` is the time IN_PROGRESS by device time
+        (0 for a manual completion without an action log).
+      payload:
+        type: object
+        required: [workOrderId, number, customerId, legalEntityId, caseId, technicianId, firstTimeFix, durationMinutes, completedAt, lines]
+        additionalProperties: false
+        properties:
+          workOrderId: { type: string, format: uuid }
+          number: { type: string, example: SWO-000001 }
+          customerId: { type: string, format: uuid }
+          legalEntityId: { type: string, format: uuid }
+          caseId: { type: [string, "null"], format: uuid }
+          technicianId: { type: [string, "null"], format: uuid }
+          firstTimeFix: { type: boolean }
+          durationMinutes: { type: integer, minimum: 0 }
+          completedAt: { type: string, format: date-time }
+          lines:
+            type: array
+            items:
+              type: object
+              required: [lineId, kind, qty, consumedQty]
+              additionalProperties: false
+              properties:
+                lineId: { type: string, format: uuid }
+                kind: { type: string, enum: [LABOR, PART, TRAVEL, FEE] }
+                qty: { type: string, description: Planned quantity as a decimal string. }
+                consumedQty: { type: string, description: Reported consumption as a decimal string; "0" when none. }
     WorkOrderPosted:
       name: dev.passage.service.workorder.posted.v1
       contentType: application/cloudevents+json

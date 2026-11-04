@@ -53,7 +53,16 @@ type WorkOrder struct {
 	AssignedStart    *time.Time `json:"assignedStart,omitempty"`
 	AssignedEnd      *time.Time `json:"assignedEnd,omitempty"`
 	AssignmentPinned bool       `json:"assignmentPinned"`
-	postKey          string
+	// Completion data (BR-45.6, SVC-WO-001): the customer signature captured on the
+	// device (SignatureRef points into the object store), whether the incident type
+	// exempts the order from it, and the technician's note.
+	SignatureExempt bool       `json:"signatureExempt"`
+	SignedBy        *string    `json:"signedBy,omitempty"`
+	SignedAt        *time.Time `json:"signedAt,omitempty"`
+	SignatureRef    *string    `json:"signatureRef,omitempty"`
+	TechnicianNote  string     `json:"technicianNote"`
+	noteAt          *time.Time
+	postKey         string
 }
 
 // CreateWorkOrder stores a work order in UNSCHEDULED status.
@@ -96,11 +105,11 @@ func (s *Postgres) CreateWorkOrder(ctx context.Context, in WorkOrder, key, reque
 		out.RequiredSkills = in.RequiredSkills
 		_, err = tx.Exec(ctx, `insert into service_work_order (tenant_id, id, number, case_id, agreement_id, customer_party_id, legal_entity_id,
 			territory_id, incident_type_id, est_duration_minutes, currency, status, lines, version, idempotency_key, request_hash,
-			required_skills, window_start, window_end, address, geo_lat, geo_lon)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1, $14, $15, $16, $17, $18, $19, $20, $21)`,
+			required_skills, window_start, window_end, address, geo_lat, geo_lon, signature_exempt)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
 			tid, out.ID, number, in.CaseID, in.AgreementID, in.CustomerPartyID, in.LegalEntityID, in.TerritoryID, in.IncidentTypeID,
 			in.EstDurationMinutes, in.Currency, out.Status, lines, nullable(key), requestHash,
-			in.RequiredSkills, in.WindowStart, in.WindowEnd, in.Address, in.Latitude, in.Longitude)
+			in.RequiredSkills, in.WindowStart, in.WindowEnd, in.Address, in.Latitude, in.Longitude, in.SignatureExempt)
 		return err
 	})
 	if err != nil {
@@ -160,6 +169,16 @@ func (s *Postgres) GetWorkOrder(ctx context.Context, id string) (WorkOrder, erro
 // COMPLETED stamps completed_at and sets first_time_fix; DISPATCHED stops the
 // response clock of the order's case if nobody has responded yet (BR-45.2).
 func (s *Postgres) TransitionWorkOrder(ctx context.Context, id string, version int, to domain.WOStatus) (WorkOrder, error) {
+	if to == domain.WOScheduled || to == domain.WODispatched {
+		return WorkOrder{}, unprocessable(CodeWOInvalid, fmt.Sprintf("a work order is never moved to %s by hand: SCHEDULED comes from :assign and DISPATCHED from publishing the territory-day", to))
+	}
+	return s.move(ctx, id, version, to, true)
+}
+
+// move is the status machine without the guard on SCHEDULED and DISPATCHED; fixtures in
+// tests reach those states through it. A completion needs the customer's signature
+// (SVC-WO-001) when requireSignature is set.
+func (s *Postgres) move(ctx context.Context, id string, version int, to domain.WOStatus, requireSignature bool) (WorkOrder, error) {
 	tid := tenantOf(ctx)
 	var wo WorkOrder
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -177,6 +196,9 @@ func (s *Postgres) TransitionWorkOrder(ctx context.Context, id string, version i
 		if !domain.CanTransition(domain.WOStatus(current.Status), to) {
 			return unprocessable(CodeWOInvalid, fmt.Sprintf("a work order cannot move from %s to %s", current.Status, to))
 		}
+		if requireSignature && to == domain.WOCompleted && !current.SignatureExempt && current.SignedAt == nil {
+			return unprocessable(domain.CodeSignatureRequired, "the customer's signature is required to complete this work order")
+		}
 		now := time.Now().UTC()
 		if _, err := tx.Exec(ctx, `update service_work_order set status = $3, version = version + 1, updated_at = $4,
 			completed_at = case when $3 = 'COMPLETED' then $4 else completed_at end,
@@ -190,7 +212,13 @@ func (s *Postgres) TransitionWorkOrder(ctx context.Context, id string, version i
 			}
 		}
 		wo, err = getWorkOrder(ctx, tx, tid, id)
-		return err
+		if err != nil {
+			return err
+		}
+		if to == domain.WOCompleted {
+			return enqueueCompleted(ctx, tx, tid, wo, now)
+		}
+		return nil
 	})
 	return wo, err
 }
@@ -214,6 +242,15 @@ func (s *Postgres) PostWorkOrder(ctx context.Context, id string, version int, ke
 		}
 		if current.Version != version {
 			return versionConflict(current.Version)
+		}
+		if current.Status == string(domain.WOCompleted) {
+			consumed, err := consumedQty(ctx, tx, tid, id)
+			if err != nil {
+				return err
+			}
+			if open := domain.PartsOutstanding(current.Lines, consumed); len(open) > 0 {
+				return unprocessable(domain.CodePartsNotConsumed, fmt.Sprintf("parts lines not consumed; cannot post (%d outstanding): consume or remove them", len(open)))
+			}
 		}
 		cover, err := agreementCover(ctx, tx, tid, current)
 		if err != nil {
@@ -315,7 +352,7 @@ func versionConflict(current int) error {
 const workOrderColumns = `id::text, number, case_id::text, agreement_id::text, customer_party_id::text, legal_entity_id::text,
 	territory_id::text, incident_type_id::text, est_duration_minutes, currency, status, lines, posting, version, coalesce(post_key, ''),
 	follow_up_of::text, completed_at, first_time_fix, required_skills, window_start, window_end, address, geo_lat::float8, geo_lon::float8,
-	technician_id::text, assigned_start, assigned_end, assignment_pinned`
+	technician_id::text, assigned_start, assigned_end, assignment_pinned, signature_exempt, signed_by, signed_at, signature_ref, technician_note, note_at`
 
 func scanWorkOrder(row pgx.Row) (WorkOrder, error) {
 	var wo WorkOrder
@@ -323,7 +360,8 @@ func scanWorkOrder(row pgx.Row) (WorkOrder, error) {
 	if err := row.Scan(&wo.ID, &wo.Number, &wo.CaseID, &wo.AgreementID, &wo.CustomerPartyID, &wo.LegalEntityID, &wo.TerritoryID,
 		&wo.IncidentTypeID, &wo.EstDurationMinutes, &wo.Currency, &wo.Status, &lines, &posting, &wo.Version, &wo.postKey,
 		&wo.FollowUpOf, &wo.CompletedAt, &wo.FirstTimeFix, &wo.RequiredSkills, &wo.WindowStart, &wo.WindowEnd, &wo.Address, &wo.Latitude,
-		&wo.Longitude, &wo.TechnicianID, &wo.AssignedStart, &wo.AssignedEnd, &wo.AssignmentPinned); err != nil {
+		&wo.Longitude, &wo.TechnicianID, &wo.AssignedStart, &wo.AssignedEnd, &wo.AssignmentPinned, &wo.SignatureExempt, &wo.SignedBy, &wo.SignedAt,
+		&wo.SignatureRef, &wo.TechnicianNote, &wo.noteAt); err != nil {
 		return wo, err
 	}
 	if wo.RequiredSkills == nil {

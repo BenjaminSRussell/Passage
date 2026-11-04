@@ -298,7 +298,7 @@ func TestStore_BoardAndSchedulingData(t *testing.T) {
 
 	// A follow-up keeps the skills and the address of the visit it follows.
 	for _, to := range []domain.WOStatus{domain.WODispatched, domain.WOTraveling, domain.WOInProgress, domain.WOCompleted} {
-		if wo, err = d.s.TransitionWorkOrder(d.ctx, wo.ID, wo.Version, to); err != nil {
+		if wo, err = d.s.moveWorkOrder(d.ctx, wo.ID, wo.Version, to); err != nil {
 			t.Fatal(err)
 		}
 	}
