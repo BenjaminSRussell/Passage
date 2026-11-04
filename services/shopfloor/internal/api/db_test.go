@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -625,5 +626,118 @@ func TestHTTP_JobReopen(t *testing.T) {
 	_ = json.Unmarshal(list.Body.Bytes(), &got)
 	if list.Code != http.StatusOK || len(got.Items) != 1 || got.Items[0].Reason != "Late count of 12 pieces" || got.Items[0].ReopenedBy != "supervisor-1" || got.Items[0].GoodQty.String() != "98" {
 		t.Fatalf("reopenings: %d %s", list.Code, list.Body.String())
+	}
+}
+
+// D2a': a rate dated from the second day prices that day and later days at the new rate, and
+// the first day at the worker's base rate, in one calculation.
+func TestHTTP_DatedCostRatePricesEachDay(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	h := newRouter(store.New(app))
+	key := func(k string) map[string]string { return map[string]string{"Idempotency-Key": k} }
+
+	body := `{"partyId":"` + jobID + `","name":"Rate Worker","badgeId":"B-RATE","costRate":"20","currency":"USD"}`
+	rec := callWith(t, h, http.MethodPost, "/v1/shopfloor/workers", body, allDuty, key("rate-w"))
+	var w store.Worker
+	_ = json.Unmarshal(rec.Body.Bytes(), &w)
+	if rec.Code != http.StatusCreated || w.ID == "" {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	rates := "/v1/shopfloor/workers/" + w.ID + "/cost-rates"
+	if rec := callWith(t, h, http.MethodPost, rates, `{"effectiveFrom":"2026-10-21","costRate":"25"}`, allDuty, key("rate-1")); rec.Code != http.StatusCreated {
+		t.Fatalf("add rate: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := callWith(t, h, http.MethodPost, rates, `{"effectiveFrom":"2026-10-21","costRate":"26"}`, allDuty, key("rate-2")); rec.Code != http.StatusConflict {
+		t.Fatalf("same date again: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := call(t, h, http.MethodGet, rates, "", allDuty); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"costRate":"25"`) {
+		t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
+	}
+	regs := fmt.Sprintf(`{"items":[
+		{"id":"0195f0a0-0000-7000-8000-0000000000b1","workerId":%q,"kind":"clock-in","startedAt":"2026-10-20T09:00:00Z"},
+		{"id":"0195f0a0-0000-7000-8000-0000000000b2","workerId":%q,"kind":"clock-out","startedAt":"2026-10-20T17:00:00Z"},
+		{"id":"0195f0a0-0000-7000-8000-0000000000b3","workerId":%q,"kind":"clock-in","startedAt":"2026-10-21T09:00:00Z"},
+		{"id":"0195f0a0-0000-7000-8000-0000000000b4","workerId":%q,"kind":"clock-out","startedAt":"2026-10-21T17:00:00Z"}]}`, w.ID, w.ID, w.ID, w.ID)
+	if rec := call(t, h, http.MethodPost, "/v1/shopfloor/registrations", regs, allDuty); rec.Code != http.StatusOK {
+		t.Fatalf("registrations: %d %s", rec.Code, rec.Body.String())
+	}
+	rangeBody := fmt.Sprintf(`{"workerId":%q,"from":"2026-10-20","to":"2026-10-21"}`, w.ID)
+	var calc struct {
+		Days []struct {
+			WorkDate string `json:"workDate"`
+			PayLines []struct {
+				Type   string `json:"type"`
+				Amount string `json:"amount"`
+			} `json:"payLines"`
+		} `json:"days"`
+	}
+	rec = callWith(t, h, http.MethodPost, "/v1/shopfloor/pay:calculate", rangeBody, allDuty, key("rate-c"))
+	_ = json.Unmarshal(rec.Body.Bytes(), &calc)
+	got := map[string]string{}
+	for _, d := range calc.Days {
+		for _, l := range d.PayLines {
+			if l.Type == "base" {
+				got[d.WorkDate] = l.Amount
+			}
+		}
+	}
+	if rec.Code != http.StatusOK || got["2026-10-20"] != "160" || got["2026-10-21"] != "200" {
+		t.Fatalf("calculate: %d base amounts %v: %s", rec.Code, got, rec.Body.String())
+	}
+
+	// A rate dated in the past, added after the calculation, makes only the days it prices stale:
+	// the 20th (now priced from 2026-10-01) must be recalculated before approval; the 21st keeps
+	// the rate of the 21st, set before the calculation.
+	if rec := callWith(t, h, http.MethodPost, rates, `{"effectiveFrom":"2026-10-01","costRate":"22"}`, allDuty, key("rate-3")); rec.Code != http.StatusCreated {
+		t.Fatalf("past-dated rate: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = callWith(t, h, http.MethodPost, "/v1/shopfloor/pay:approve", rangeBody, allDuty, key("rate-a1"))
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "SF-0104") ||
+		!strings.Contains(rec.Body.String(), "2026-10-20") || strings.Contains(rec.Body.String(), "2026-10-21") {
+		t.Fatalf("approve after a past-dated rate: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := callWith(t, h, http.MethodPost, "/v1/shopfloor/pay:calculate", rangeBody, allDuty, key("rate-c2")); rec.Code != http.StatusOK {
+		t.Fatalf("recalculate: %d %s", rec.Code, rec.Body.String())
+	}
+	approvedBase := func(rec *httptest.ResponseRecorder) map[string]string {
+		var out struct {
+			Days []struct {
+				WorkDate string `json:"workDate"`
+				PayLines []struct {
+					Type   string `json:"type"`
+					Amount string `json:"amount"`
+				} `json:"payLines"`
+			} `json:"days"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		m := map[string]string{}
+		for _, d := range out.Days {
+			for _, l := range d.PayLines {
+				if l.Type == "base" {
+					m[d.WorkDate] = l.Amount
+				}
+			}
+		}
+		return m
+	}
+	rec = callWith(t, h, http.MethodPost, "/v1/shopfloor/pay:approve", rangeBody, allDuty, key("rate-a2"))
+	if got := approvedBase(rec); rec.Code != http.StatusOK || got["2026-10-20"] != "176" || got["2026-10-21"] != "200" {
+		t.Fatalf("approve: %d %v %s", rec.Code, got, rec.Body.String())
+	}
+
+	// Approved days keep their lines (slice 22 rule): another past-dated rate neither reprices them
+	// nor makes them stale, and a recalculation is refused (SF-0102); only pay:revise reprices.
+	if rec := callWith(t, h, http.MethodPost, rates, `{"effectiveFrom":"2026-10-15","costRate":"30"}`, allDuty, key("rate-4")); rec.Code != http.StatusCreated {
+		t.Fatalf("second past-dated rate: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = callWith(t, h, http.MethodPost, "/v1/shopfloor/pay:approve", rangeBody, allDuty, key("rate-a3"))
+	if got := approvedBase(rec); rec.Code != http.StatusOK || got["2026-10-20"] != "176" || got["2026-10-21"] != "200" {
+		t.Fatalf("approved days after a later rate: %d %v %s", rec.Code, got, rec.Body.String())
+	}
+	if rec := callWith(t, h, http.MethodPost, "/v1/shopfloor/pay:calculate", rangeBody, allDuty, key("rate-c3")); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "SF-0102") {
+		t.Fatalf("recalculate approved days: %d %s", rec.Code, rec.Body.String())
 	}
 }

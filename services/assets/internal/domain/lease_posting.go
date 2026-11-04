@@ -22,6 +22,10 @@ type LeaseAccounts struct {
 	DepreciationExpense string
 	PaymentClearing     string
 	RemeasurementGain   string
+	// TerminationGainLoss takes the gain (credit) or loss (debit) of an early termination; ExemptLeaseExpense the
+	// payments of a lease under a short-term or low-value election.
+	TerminationGainLoss string
+	ExemptLeaseExpense  string
 }
 
 // LeasePeriodAmounts are the amounts of one schedule line to book. Remeasurement

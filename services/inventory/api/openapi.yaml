@@ -221,10 +221,22 @@ paths:
       description: |
         Inventory transactions with their origin. status matches the issue or the receipt status;
         from and to bound the physical date (inclusive). journalId is set for journal lines,
-        reference (the blocking id) for blocking legs.
+        reference (the blocking id) for blocking legs. site, warehouse, location, batch, serial,
+        inventoryStatus, owner and segment keep the transactions whose dimension set holds every
+        named value (the drill-down from an on-hand row); a value over 100 characters is a 400.
+        legalEntity only narrows: a caller sees no rows outside its legal-entity scope.
       x-passage-duty: inventory.read
       parameters:
         - { name: product, in: query, schema: { type: string, format: uuid } }
+        - { name: legalEntity, in: query, description: Only transactions of this legal entity, schema: { type: string, format: uuid } }
+        - { name: site, in: query, description: Only transactions whose dimension set has this site, schema: { type: string, maxLength: 100 } }
+        - { name: warehouse, in: query, description: Only transactions whose dimension set has this warehouse, schema: { type: string, maxLength: 100 } }
+        - { name: location, in: query, description: Only transactions whose dimension set has this location, schema: { type: string, maxLength: 100 } }
+        - { name: batch, in: query, description: Only transactions whose dimension set has this batch, schema: { type: string, maxLength: 100 } }
+        - { name: serial, in: query, description: Only transactions whose dimension set has this serial number, schema: { type: string, maxLength: 100 } }
+        - { name: inventoryStatus, in: query, description: Only transactions whose dimension set has this inventory status, schema: { type: string, maxLength: 100 } }
+        - { name: owner, in: query, description: Only transactions of stock owned by this vendor id, schema: { type: string, maxLength: 100 } }
+        - { name: segment, in: query, description: 'Only transactions of this segment (SALES_ORDER:<ref> or PROJECT:<ref>)', schema: { type: string, maxLength: 100 } }
         - { name: status, in: query, schema: { $ref: '#/components/schemas/TransactionStatus' } }
         - { name: sourceType, in: query, schema: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE, TRANSFER_IN, PURCH_LINE, RECEIPT_LINE, SALES_LINE, PROD_LINE] } }
         - { name: from, in: query, schema: { type: string, format: date } }
@@ -1010,6 +1022,9 @@ paths:
         inventory.count.approve; otherwise 403 INV-CNT-001 and nothing is written. Uncounted lines are
         skipped; a sheet with no counted line is INV-CNT-005. The COUNT journal posts like an
         ADJUSTMENT (inventory against the adjustment account) with the negative policy applied.
+        A vendor-owned line (plan includeVendorOwned) posts quantity only: RECEIVED for a gain,
+        DEDUCTED for a loss, value 0, no GL amount and no ownership.changed (BR-16.14); its tolerance
+        is the percent one.
         Requires If-Match. Posting a POSTED sheet returns it unchanged. A sheet with an outstanding
         recount is refused (409 INV-CNT-006); a plan with fourEyes needs the sheet APPROVED first
         (409 INV-CNT-008); an APPROVED sheet posts its above-tolerance variances without the
@@ -2370,6 +2385,9 @@ paths:
         in physical stock is INV-SER-001. A line cannot receive beyond its ordered quantity
         (INV-CNS-002); an unknown line is INV-CNS-001, a fully received order INV-CNS-003. The order
         becomes PARTIALLY_RECEIVED or RECEIVED. receiptDate defaults to today. Requires If-Match.
+        A row held by an unfinished sheet of a freezeStock plan that includes vendor-owned stock is
+        refused (409 INV-CNT-002); on a plan without the freeze the receipt flags the counted line
+        for recount (BR-16.8).
       x-passage-duty: inventory.consignment.write
       parameters:
         - $ref: '#/components/parameters/ConsignmentId'
@@ -2391,6 +2409,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
@@ -3249,6 +3268,7 @@ components:
         toleranceValue: { $ref: '#/components/schemas/Decimal' }
         blind: { type: boolean, default: false }
         minDaysSinceCount: { type: integer, minimum: 1, maximum: 3650, description: 'Select only rows whose last posted count is at least this many days old, or that were never counted; absent counts every selected row' }
+        includeVendorOwned: { type: boolean, description: 'Count vendor-owned (consignment) stock too; its variance posts quantity only, with no value and no GL entry. Default false' }
         freezeStock: { type: boolean, default: false, description: 'While a sheet of the plan is OPEN, COUNTED or APPROVED, refuse movements of its rows (409 INV-CNT-002): journal postings (including other COUNT journals), transfer ship / receive, blocking and release, and status steps that change physical stock. Reservations are not refused.' }
         fourEyes: { type: boolean, default: false, description: 'The sheet needs :submit and a separate :approve by someone who did not count before it posts (INV-CNT-007)' }
         locationFrom: { type: string, maxLength: 60, description: 'Inclusive lower bound of the location dimension, compared byte-wise (C collation)' }
@@ -3271,6 +3291,7 @@ components:
         freezeStock: { type: boolean, description: 'Without it, a movement of a counted row after counting flags the line for recount (recountSource MOVEMENT, BR-16.8)' }
         fourEyes: { type: boolean }
         minDaysSinceCount: { type: integer, description: Age filter in days; absent when the plan has none }
+        includeVendorOwned: { type: boolean, description: Whether the plan counts vendor-owned stock too }
         locationFrom: { type: string }
         locationTo: { type: string }
         abcClass: { type: string, enum: [A, B, C] }

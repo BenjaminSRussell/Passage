@@ -82,3 +82,25 @@ func (f *fakeStore) CloseAgreement(_ context.Context, id string, version int, cl
 	f.agreements[a.ID] = a
 	return a, nil
 }
+
+func (f *fakeStore) ReopenAgreement(_ context.Context, id string, version int, validTo time.Time, _ string) (domain.RebateAgreement, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	a, ok := f.agreements[id]
+	if !ok {
+		return a, httpx.NewProblem(http.StatusNotFound, store.CodeAgreementNotFound, "no rebate agreement "+id)
+	}
+	if a.Version != version {
+		return a, httpx.NewProblem(http.StatusPreconditionFailed, store.CodeVersionConflict, "rebate agreement version does not match")
+	}
+	if a.Status != domain.AgreementClosed {
+		return a, httpx.NewProblem(http.StatusConflict, store.CodeStateInvalid, "rebate agreement is "+a.Status)
+	}
+	if !validTo.After(a.ValidTo) {
+		return a, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, "validTo must be after the close date")
+	}
+	a.Status, a.ValidTo = domain.AgreementActive, validTo
+	a.Version++
+	f.agreements[a.ID] = a
+	return a, nil
+}

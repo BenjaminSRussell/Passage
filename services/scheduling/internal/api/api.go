@@ -21,6 +21,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -31,16 +32,20 @@ import (
 )
 
 const (
-	readyTimeout     = 500 * time.Millisecond
-	idempotencyKey   = "Idempotency-Key"
-	dutyRead         = "scheduling.read"
-	dutyRun          = "scheduling.run"
-	dutySchedule     = "scheduling.schedule.write"
-	dutyCapacity     = "scheduling.capacity.write"
-	validationDetail = "request failed validation"
-	maxBody          = 4 << 20
-	maxSelection     = 5000
-	maxRunTimeZone   = 64
+	readyTimeout   = 500 * time.Millisecond
+	idempotencyKey = "Idempotency-Key"
+	dutyRead       = "scheduling.read"
+	dutyRun        = "scheduling.run"
+	dutySchedule   = "scheduling.schedule.write"
+	dutyCapacity   = "scheduling.capacity.write"
+	// DutyOverrideConstraints lets a planner commit a Gantt move over capacity
+	// violations (PRD 4.23.14, Override scheduling constraints). It is checked
+	// in the handler, on top of the route's dutySchedule.
+	DutyOverrideConstraints = "scheduling.constraints.override"
+	validationDetail        = "request failed validation"
+	maxBody                 = 4 << 20
+	maxSelection            = 5000
+	maxRunTimeZone          = 64
 )
 
 var resourceCode = regexp.MustCompile(`^[A-Z0-9][A-Z0-9_-]{0,31}$`)
@@ -101,6 +106,10 @@ type operationRequest struct {
 	SecondaryResourceIDs []string          `json:"secondaryResourceIds"`
 	SetupGroup           *string           `json:"setupGroup"`
 	SetupMinutes         *int              `json:"setupMinutes"`
+	QueueBeforeMinutes   *int              `json:"queueBeforeMinutes"`
+	QueueAfterMinutes    *int              `json:"queueAfterMinutes"`
+	Quantity             *string           `json:"quantity"`
+	OverlapQuantity      *string           `json:"overlapQuantity"`
 	Attributes           map[string]string `json:"attributes"`
 	NetworkID            *string           `json:"networkId"`
 }
@@ -128,6 +137,11 @@ type moveRequest struct {
 	DryRun     bool      `json:"dryRun"`
 	// Propagate also re-plans the orders pegged to the moved order (FR-23.8).
 	Propagate bool `json:"propagate"`
+	// OverrideConstraints commits (or previews) the move over capacity
+	// violations of the moved job: SCHED-0002 and SCHED-0005. It needs the
+	// scheduling.constraints.override duty; double booking, a firmed job and a
+	// resource that is not a candidate are never overridden.
+	OverrideConstraints bool `json:"overrideConstraints"`
 }
 
 type violation struct {
@@ -137,9 +151,13 @@ type violation struct {
 }
 
 type moveResponse struct {
-	DryRun     bool           `json:"dryRun"`
-	Feasible   bool           `json:"feasible"`
+	DryRun   bool `json:"dryRun"`
+	Feasible bool `json:"feasible"`
+	// Violations are empty when the move is feasible, except under
+	// overrideConstraints, where they list the violations committed over and
+	// Overridden is true.
 	Violations []violation    `json:"violations"`
+	Overridden bool           `json:"overridden"`
 	Changes    []store.Change `json:"changes"`
 	OrderID    string         `json:"orderId,omitempty"`
 	OrderStart time.Time      `json:"orderStart,omitempty"`
@@ -191,6 +209,11 @@ func (a *API) Register(r chi.Router) {
 	// Slice 17: run measures and the late orders inquiry (PRD 4.23.14).
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/runs/{id}/kpis", a.runKPIs)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/late-orders", a.lateOrders)
+	// Slice 29: run comparison and rollback to a previous run (PRD 4.23.14).
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/runs/{id}/compare", a.compareRuns)
+	r.With(authz.RequireDuty(dutyRun)).Post("/v1/scheduling/runs/{id}:rollback", a.rollbackRun)
+	// Slice 25: the dispatch list of a resource for a day or shift (PRD 4.23.15).
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/dispatch-list", a.dispatchList)
 
 	// Slice 18: production orders received from wave 21 (FR-23.10).
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/order-imports", a.listOrderImports)
@@ -236,6 +259,10 @@ func (a *API) Register(r chi.Router) {
 
 	// Slice 8: campaign proposals from scheduled orders sharing a key (FR-23.14).
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/campaign-proposals", a.campaignProposals)
+
+	// Slice 24: scheduling parameters, the defaults of runs and moves (PRD 4.23.13).
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/parameters", a.getParameters)
+	r.With(authz.RequireDuty(dutySetup)).Patch("/v1/scheduling/parameters", a.updateParameters)
 }
 
 // Metrics serves Prometheus text on the admin port.
@@ -457,6 +484,43 @@ func (a *API) createOperation(w http.ResponseWriter, r *http.Request) {
 			fields["setupMinutes"] = fmt.Sprintf("must be 0 to %d", maxWeekMinutes)
 		}
 	}
+	queueBefore, queueAfter := 0, 0
+	if req.QueueBeforeMinutes != nil {
+		queueBefore = *req.QueueBeforeMinutes
+		if queueBefore < 0 || queueBefore > maxWeekMinutes {
+			fields["queueBeforeMinutes"] = fmt.Sprintf("must be 0 to %d", maxWeekMinutes)
+		}
+	}
+	if req.QueueAfterMinutes != nil {
+		queueAfter = *req.QueueAfterMinutes
+		if queueAfter < 0 || queueAfter > maxWeekMinutes {
+			fields["queueAfterMinutes"] = fmt.Sprintf("must be 0 to %d", maxWeekMinutes)
+		}
+	}
+	var quantity, overlap *string
+	if req.Quantity != nil {
+		q, msg := parseQuantity(*req.Quantity, false)
+		if msg != "" {
+			fields["quantity"] = msg
+		} else {
+			s := q.StringFixed(4)
+			quantity = &s
+		}
+	}
+	if req.OverlapQuantity != nil {
+		o, msg := parseQuantity(*req.OverlapQuantity, false)
+		switch {
+		case msg != "":
+			fields["overlapQuantity"] = msg
+		case quantity == nil && fields["quantity"] == "":
+			fields["overlapQuantity"] = "needs a quantity"
+		case quantity != nil && o.GreaterThan(decimal.RequireFromString(*quantity)):
+			fields["overlapQuantity"] = "must not exceed the quantity"
+		case quantity != nil:
+			s := o.StringFixed(4)
+			overlap = &s
+		}
+	}
 	if msg := validAttributes(req.Attributes); msg != "" {
 		fields["attributes"] = msg
 	}
@@ -473,7 +537,7 @@ func (a *API) createOperation(w http.ResponseWriter, r *http.Request) {
 	}
 	op, created, err := a.store.CreateOperation(r.Context(), store.Operation{OrderID: req.OrderID, OperNumber: req.OperNumber,
 		Minutes: req.Minutes, DueAt: req.DueAt, ReadyAt: req.ReadyAt, Priority: priority, ResourceIDs: req.ResourceIDs,
-		SecondaryResourceIDs: req.SecondaryResourceIDs, SetupGroup: group, SetupMinutes: setupMinutes, Attributes: req.Attributes, NetworkID: req.NetworkID}, idem)
+		SecondaryResourceIDs: req.SecondaryResourceIDs, SetupGroup: group, SetupMinutes: setupMinutes, QueueBeforeMinutes: queueBefore, QueueAfterMinutes: queueAfter, Quantity: quantity, OverlapQuantity: overlap, Attributes: req.Attributes, NetworkID: req.NetworkID}, idem)
 	if err != nil {
 		slog.Error("create operation failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -547,11 +611,7 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 	if req.Scope != "selection" && req.Scope != "site" {
 		fields["scope"] = "must be selection or site"
 	}
-	mode := req.Mode
-	if mode == "" {
-		mode = "jobs"
-	}
-	if mode != "jobs" && mode != "operations" {
+	if req.Mode != "" && req.Mode != "jobs" && req.Mode != "operations" {
 		fields["mode"] = "must be jobs or operations"
 	}
 	if req.Direction != "" && req.Direction != "forward" && req.Direction != "backward" {
@@ -584,17 +644,19 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 		invalid(w, r, fields)
 		return
 	}
-	finite := true
-	if req.Finite != nil {
-		finite = *req.Finite
+	def, err := a.resolveRunDefaults(r, req.Mode, req.Direction, req.Finite)
+	if err != nil {
+		slog.Error("read scheduling parameters failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
 	}
 	start := time.Now().UTC().Truncate(time.Minute)
 	if req.Start != nil {
 		start = req.Start.UTC()
 	}
 	a.runs.Add(1)
-	run, created, err := a.store.RunSchedule(r.Context(), store.RunRequest{Scope: req.Scope, Mode: mode, Finite: finite,
-		OperationIDs: req.OperationIDs, Start: start, HorizonDays: horizon, Backward: req.Direction == "backward"}, idem)
+	run, created, err := a.store.RunSchedule(r.Context(), store.RunRequest{Scope: req.Scope, Mode: def.Mode, Finite: def.Finite,
+		OperationIDs: req.OperationIDs, Start: start, HorizonDays: horizon, Backward: def.Backward}, idem)
 	if err != nil {
 		slog.Error("schedule run failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -655,14 +717,21 @@ func (a *API) scheduleOrder(w http.ResponseWriter, r *http.Request) {
 		invalid(w, r, fields)
 		return
 	}
-	finite := req.Finite == nil || *req.Finite
+	// The per-order command always runs in jobs mode; direction and finite
+	// default from the parameters.
+	def, err := a.resolveRunDefaults(r, "jobs", req.Direction, req.Finite)
+	if err != nil {
+		slog.Error("read scheduling parameters failed", "err", err, "orderId", orderID, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
 	start := time.Now().UTC().Truncate(time.Minute)
 	if req.Start != nil {
 		start = req.Start.UTC()
 	}
 	a.runs.Add(1)
-	run, created, err := a.store.RunSchedule(r.Context(), store.RunRequest{Scope: "order", OrderID: orderID, Mode: "jobs", Finite: finite,
-		Start: start, HorizonDays: horizon, Backward: req.Direction == "backward"}, idem)
+	run, created, err := a.store.RunSchedule(r.Context(), store.RunRequest{Scope: "order", OrderID: orderID, Mode: "jobs", Finite: def.Finite,
+		Start: start, HorizonDays: horizon, Backward: def.Backward}, idem)
 	if err != nil {
 		slog.Error("order schedule run failed", "err", err, "orderId", orderID, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -799,9 +868,16 @@ func (a *API) moveJob(w http.ResponseWriter, r *http.Request) {
 		invalid(w, r, fields)
 		return
 	}
+	if req.OverrideConstraints {
+		actor, ok := tenant.FromContext(r.Context())
+		if !ok || !actor.HasDuty(DutyOverrideConstraints) {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "SCHED-0141", "overriding scheduling constraints needs the "+DutyOverrideConstraints+" duty"))
+			return
+		}
+	}
 	a.moves.Add(1)
 	out, replayed, err := a.store.MoveJob(r.Context(), store.MoveRequest{JobID: jobID, ResourceID: strings.ToLower(req.ResourceID),
-		Start: req.Start.UTC(), HorizonDays: a.cfg.HorizonDays, DryRun: req.DryRun, Propagate: req.Propagate}, idem)
+		Start: req.Start.UTC(), HorizonDays: a.cfg.HorizonDays, DryRun: req.DryRun, Propagate: req.Propagate, Override: req.OverrideConstraints}, idem)
 	if err != nil {
 		slog.Error("move job failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -825,7 +901,15 @@ func (a *API) moveJob(w http.ResponseWriter, r *http.Request) {
 	if deps == nil {
 		deps = []store.DependentChange{}
 	}
-	httpx.JSON(w, http.StatusOK, moveResponse{DryRun: req.DryRun, Feasible: true, Violations: []violation{}, Changes: out.Changes,
+	violations := make([]violation, 0, len(out.Overridden))
+	for _, v := range out.Overridden {
+		violations = append(violations, violation{Code: v.Code, Detail: v.Detail, JobID: v.JobID})
+	}
+	if len(violations) > 0 {
+		slog.Warn("move committed over constraint violations", "dryRun", req.DryRun, "jobId", jobID, "violations", len(violations),
+			"correlationId", middleware.GetReqID(r.Context()))
+	}
+	httpx.JSON(w, http.StatusOK, moveResponse{DryRun: req.DryRun, Feasible: true, Violations: violations, Overridden: len(violations) > 0, Changes: out.Changes,
 		OrderID: out.OrderID, OrderStart: out.OrderStart, OrderEnd: out.OrderEnd, Dependents: deps, Truncated: out.Truncated, Run: out.Run})
 }
 
@@ -1089,4 +1173,28 @@ func (a *API) listRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// quantityText is the plain decimal form the OpenAPI pattern allows: digits
+// with an optional fraction, no sign, exponent or bare point.
+var quantityText = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?$`)
+
+// parseQuantity reads a decimal quantity string: at most 4 decimals and 14
+// integer digits, positive (or zero when allowZero). The message is empty when
+// it is valid.
+func parseQuantity(s string, allowZero bool) (decimal.Decimal, string) {
+	s = strings.TrimSpace(s)
+	if !quantityText.MatchString(s) {
+		return decimal.Zero, "must be a decimal number"
+	}
+	q, err := decimal.NewFromString(s)
+	switch {
+	case err != nil:
+		return q, "must be a decimal number"
+	case q.IsNegative() || (q.IsZero() && !allowZero):
+		return q, "must be greater than zero"
+	case q.Exponent() < -4 || q.GreaterThanOrEqual(decimal.New(1, 14)):
+		return q, "must have at most 4 decimals and 14 integer digits"
+	}
+	return q, ""
 }

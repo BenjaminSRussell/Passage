@@ -3,6 +3,60 @@
 Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
 (Shop Floor Execution, Time Registration & IoT), PRD section 4.25.
 
+## Slice 23: idle downtime and dated cost rates (FR-25.11, BR-25.6, D2a')
+
+**Idle downtime** (migration `0022_idle_downtime.sql`: `downtime_record.cause`, `down` or `idle`, default `down`; no new table or
+grant). `POST andon:sweep` first opens an idle downtime for every machine whose latest state report is RUNNING and that has
+sent no count for its idle threshold, starting at the last count (or at the start of that RUNNING stretch, the first RUNNING
+report after the latest other state), unless the machine already has a downtime open (one open downtime per machine) or its
+events are being ingested right now (`for update skip locked`). The result carries `idleOpened`. The record is an ordinary
+downtime: it can be coded with a reason, the 10-minute andon of FR-25.11 applies to it, and it feeds nothing into OEE a second
+time (OEE already counts the gap as IDLE from the events). At ingest, a count or a state report that leaves RUNNING (DOWN, SETUP,
+OFF) ends an open idle downtime at that event's time; a DOWN report ends it and opens a down downtime; an alarm, a measurement,
+a repeated RUNNING report or an explicit IDLE report leaves it open (a RUNNING heartbeat is not production, and ending the
+record there would let the next sweep open a second one over the same gap). The threshold is the machine's
+`idle_threshold_s` (default 300 s, 30 to 3600), the same one OEE uses. The sweep locks the candidate machines first
+(`skip locked`) and reads their events again after the lock, so an ingest that committed in between is seen. On the web the downtime list shows an open idle downtime as Idle.
+
+**Dated cost rates** (migration `0023_worker_cost_rate.sql`, table `worker_cost_rate`: tenant-scoped with forced row-level
+security, SELECT and INSERT grants because rows are append-only). `POST workers/{id}/cost-rates` (`effectiveFrom` date between
+2000-01-01 and 2099-12-31, `costRate` non-negative decimal with up to 6 decimals, optional `note`; `Idempotency-Key`; duty
+`shopfloor.setup.maintain`) and `GET workers/{id}/cost-rates` (newest first; `shopfloor.view`). One rate per worker and date
+(SF-0170, 409): a change takes effect on a later date. The worker's own sign-in user cannot set it (SF-0106, 403). Each rate
+publishes `dev.passage.shopfloor.workercostrate.set.v1`. `pay:calculate` (and so `pay:revise`) prices every line of a day (base,
+overtime, shift premium, paid absence) at the latest rate dated on or before that day, and a day before the first dated rate at the
+worker's own `costRate`, so a raise reprices only the days from its date when they are recalculated. The currency stays on the
+worker. Nothing is rewritten when a rate is added. A calculated day priced by a rate added after its calculation (the
+latest rate dated on or before it is newer than the calculation) is stale for `pay:approve` (SF-0104) until it is
+recalculated, so a past-dated rate is never approved over by mistake. Approved days keep their lines and stay approved
+(slice 22 rule); `pay:calculate` refuses them (SF-0102) and only an explicit `pay:revise` reprices them. On the web the worker page
+has a cost rate history card (list and add form).
+
+## Slice 22: worker maintenance (D2a')
+
+A supervisor edits a worker and deactivates one who left (migration `0021_worker_maintenance.sql`: the
+`deactivated_at`, `deactivated_by` and `deactivation_reason` columns of `worker`; no new table, so no new grant).
+All three routes use the existing duty `shopfloor.setup.maintain`, `If-Match` on the worker version (SF-0143, 412)
+and an `Idempotency-Key`, and publish `dev.passage.shopfloor.worker.saved.v1` through the outbox.
+
+- `PUT workers/{id}` replaces name, badge, sign-in user, cost rate and currency (the party link never changes).
+  A badge held by another worker is SF-0105; a null badge removes it. An inactive worker can be edited. The worker's
+  own sign-in user cannot edit the worker (SF-0106, 403): unlinking the user would get round the own-approval rule, and
+  the cost rate is the worker's pay. The currency cannot change once a day of the worker is approved (SF-0169, 422),
+  since a revision of that day would mix currencies in it.
+- `POST workers/{id}:deactivate` (body `reason`, 1 to 500 characters) marks the worker inactive and records who, when and
+  why. The badge then fails with SF-0001 and registrations with SF-0101. A worker who is clocked in or has an open job
+  start is SF-0166 (close the open time first); an inactive worker is SF-0167.
+- `POST workers/{id}:reactivate` makes the worker active again and clears the record; an active worker is SF-0168.
+- The pay of days already worked is not blocked by deactivation: `pay:calculate`, `pay:approve`, `pay:revise` and the
+  export still run for an inactive worker (earlier they refused it with SF-0101, which would have stranded the final pay).
+  A change of cost rate rewrites no pay line: approved days keep their lines and stay approved (the edit does not make
+  them stale), and days already calculated keep theirs until a supervisor recalculates them. Slice 23 adds dated rates:
+  a recalculation, or a `pay:revise` of an approved day, prices each day at the rate effective on its own date.
+- Registrations lock the row of every worker in the batch (for share; for update when the batch opens a job), so a
+  punch that races a deactivation either is seen by it (SF-0166) or sees the inactive worker (SF-0101); an inactive
+  worker is never left clocked in.
+
 ## Slice 16: a worker's home resource and "my jobs" (D2a')
 
 A worker has an optional home resource, the machine or work centre the worker normally runs
@@ -55,6 +109,22 @@ advisory locks (as a batch closing a bundle does) before the job locks. The work
 the finish (an offline replay) is not SF-0113: it is stored and the server's bundle stops are corrected to zero length
 (`registration.corrected`), so the bundle's hours count once. A start that began after the finish but was stored
 before the event arrived is closed at 0.00 h and its stop also carries `job-finished-conflict` for supervisor review.
+
+## Slice 21: process message categories (FR-25.17, BR-25.13)
+
+`process_category` (migration `0020`) is the tenant's category master. A row overrides the built-in default of the same
+code (`phase-start` through `custom`) or adds a code of its own (lowercase letters, digits, hyphens, up to 32), and carries
+the destinations (`ebr`, `journal`, `quality`, `kafka`, `webhook`), `rejectOutOfLimit` and characteristic definitions (name,
+type, unit, limits, required). `POST`/`GET process-categories` and `GET`/`PUT process-categories/{id}` (create with an
+`Idempotency-Key`, update with `If-Match`; the code never changes; duties `shopfloor.setup.maintain` and `shopfloor.view`)
+publish `dev.passage.shopfloor.processcategory.saved.v1`. The list returns the tenant's rows and the built-in defaults no row
+overrides (`builtIn: true`). `POST process-messages` resolves the category first: a master row wins, else the default,
+else SF-0164; an inactive row is SF-0165. The definitions then govern the values they name (unit and limits come from the
+definition, a different type or a missing required value is SF-0115), and a category that rejects out-of-limit values
+refuses a value outside the limits with SF-0114. Messages already stored keep the routing they were received with, and
+a replay of a stored (source, sourceMessageId) still answers 200 with the stored message after its category was deactivated
+or tightened. The database checks `process_message.category_code` against the code format (it no longer lists the built-in
+codes), so the API's resolve step is what keeps an unknown code out.
 
 ## Slice 20: andon sweep, scrap rate and quality fail alerts (FR-25.11)
 
@@ -551,8 +621,9 @@ OpenAPI and AsyncAPI files in step with the router and the published event types
 |---|---|
 | POST `/v1/shopfloor/workers` | `shopfloor.setup.maintain` (Maintain shop floor setup) |
 | GET `/v1/shopfloor/workers`, `/workers/{id}` | `shopfloor.view` (View shop floor) |
-| POST and PUT `/time-profiles`, `/pay-agreements`, `/absence-codes`; POST `/workers/{id}:assign-setup` and `:assign-resource` | `shopfloor.setup.maintain` |
-| GET `/time-profiles`, `/pay-agreements`, `/absence-codes` and their `{id}` | `shopfloor.view` |
+| POST and PUT `/time-profiles`, `/pay-agreements`, `/absence-codes`; PUT `/workers/{id}`; POST `/workers/{id}:assign-setup`, `:assign-resource`, `:deactivate` and `:reactivate` | `shopfloor.setup.maintain` |
+| POST `/workers/{id}/cost-rates` | `shopfloor.setup.maintain` |
+| GET `/time-profiles`, `/pay-agreements`, `/absence-codes` and their `{id}`; GET `/workers/{id}/cost-rates` | `shopfloor.view` |
 | POST `/v1/shopfloor/registrations` | `shopfloor.time.register` (Register time) |
 | GET `/v1/shopfloor/registrations` | `shopfloor.view` |
 | POST `/v1/shopfloor/pay:calculate` | `shopfloor.pay.calculate` (Calculate time registrations) |
@@ -578,6 +649,8 @@ OpenAPI and AsyncAPI files in step with the router and the published event types
 | GET `/v1/shopfloor/jobs`, `/jobs/{id}`; POST `/jobs/{id}:feedback` | `shopfloor.time.register`; an `override` also needs `shopfloor.check.override` (shop floor supervisor; not in the PRD duty table) |
 | POST `/v1/shopfloor/process-messages`, `/process-messages/{id}:reprocess`, `/process-messages/{id}:delete` | `shopfloor.process.create` (Create process messages: manual, reprocess/delete with reason) |
 | GET `/v1/shopfloor/process-messages`, `/process-messages/{id}` | `shopfloor.view` |
+| POST `/v1/shopfloor/process-categories`, PUT `/process-categories/{id}` | `shopfloor.setup.maintain` |
+| GET `/v1/shopfloor/process-categories`, `/process-categories/{id}` | `shopfloor.view` |
 | POST `/v1/shopfloor/process-messages/{id}/deliveries/{destination}:report`, `/process-messages:retry-due` | `shopfloor.process.deliver` (consuming context and scheduler service identities) |
 
 Duties are checked by the platform `authz` middleware. The OPA decision point replaces the
@@ -599,7 +672,7 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0101` | 422 (404 on GET) | Worker not found or inactive |
 | `SF-0102` | 422 | Approved days cannot be recalculated; a correction is required |
 | `SF-0103` | 422 | No calculated days in the approval range |
-| `SF-0104` | 422 | Registrations arrived after calculation; recalculate before approving |
+| `SF-0104` | 422 | Registrations, or the dated cost rate pricing the day, changed after calculation; recalculate before approving |
 | `SF-0105` | 409 | Badge already assigned to another worker |
 | `SF-0106` | 403 | You cannot approve your own time registrations (segregation of duties) |
 | `SF-0107` | 409 | A concurrent request used the same `Idempotency-Key`; retry |
@@ -648,6 +721,13 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0161` | 422 | Quantity feedback on a job whose operation production finished; reopen the operation in production |
 | `SF-0162` | 404 | No open andon alert has that id (unknown, or already cleared) |
 | `SF-0163` | 422 | Only a quality-fail alert is cleared by hand; a downtime or scrap-rate alert clears itself after 5 minutes |
+| `SF-0164` | 404 or 422 | The process category does not exist (404 on a read or change; 422 when a message names a code that is neither a built-in default nor a master row) |
+| `SF-0165` | 422 | The process category is inactive; its messages are refused |
+| `SF-0166` | 409 | The worker is clocked in or has an open job start and cannot be deactivated |
+| `SF-0167` | 409 | The worker is already inactive |
+| `SF-0168` | 409 | The worker is already active |
+| `SF-0169` | 422 | The worker's currency cannot change once a day of the worker is approved |
+| `SF-0170` | 409 | The worker already has a cost rate effective on that date; set the change from a later date |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Warnings on an accepted registration (`items[].warnings`, the request succeeds):

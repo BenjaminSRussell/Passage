@@ -14,11 +14,16 @@ export const EVENT_TYPES = [
   "dev.passage.hub.subscription.deleted.v1",
   "dev.passage.hub.subscription.paused.v1",
   "dev.passage.hub.subscription.resumed.v1",
+  "dev.passage.hub.subscription.secretrotated.v1",
   "dev.passage.hub.webhook.delivered.v1",
   "dev.passage.hub.webhook.deadlettered.v1",
   "dev.passage.hub.apiclient.registered.v1",
   "dev.passage.hub.apiclient.updated.v1",
   "dev.passage.hub.apiclient.revoked.v1",
+  "dev.passage.hub.catalogentry.published.v1",
+  "dev.passage.hub.catalogentry.updated.v1",
+  "dev.passage.hub.catalogentry.deprecated.v1",
+  "dev.passage.hub.catalogentry.retired.v1",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 

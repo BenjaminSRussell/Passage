@@ -76,3 +76,15 @@ test("a failing head blocks only its own aggregate", () => {
   assert.equal(eligible.includes("a2"), false);
   assert.equal(eligible.includes("b1"), true);
 });
+
+test("during a rotation's grace period the header carries a signature per secret and either secret verifies it", () => {
+  const header = sign("whsec_new_secret_value", now, body, "whsec_old_secret_value");
+  assert.equal(header.match(/v1=/g)?.length, 2);
+  assert.equal(verify(header, "whsec_new_secret_value", body, now), true);
+  assert.equal(verify(header, "whsec_old_secret_value", body, now), true);
+  assert.equal(verify(header, "whsec_third", body, now), false);
+  assert.equal(verify(header, "whsec_old_secret_value", body + " ", now), false);
+  // Without a previous secret the header is the single-signature form it always was.
+  assert.equal(sign(secret, now, body), `t=${now},v1=${sign(secret, now, body).split("v1=")[1]}`);
+  assert.equal(sign(secret, now, body, undefined).match(/v1=/g)?.length, 1);
+});

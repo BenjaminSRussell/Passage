@@ -168,7 +168,10 @@ func checkRecurringVersion(r RecurringJournal, want int) error {
 
 // ListRecurring returns the recurring journals of the caller's scope, ordered
 // by next run date then name; status filters when set.
-func (s *Postgres) ListRecurring(ctx context.Context, status string) ([]RecurringJournal, error) {
+// recurringListLimit is the page size of the recurring journal list when none is asked.
+const recurringListLimit = 200
+
+func (s *Postgres) ListRecurring(ctx context.Context, status string, page Page) ([]RecurringJournal, error) {
 	p, err := principalOf(ctx)
 	if err != nil {
 		return nil, err
@@ -176,7 +179,8 @@ func (s *Postgres) ListRecurring(ctx context.Context, status string) ([]Recurrin
 	out := []RecurringJournal{}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, recurringSelect+` where r.tenant_id = $1 and ($2 = '' or r.status = $2)
-			order by r.next_run_date nulls last, r.name, r.id`, p.TenantID, status)
+			and (cardinality($4::text[]) = 0 or (coalesce(r.next_run_date, 'infinity'::date), r.name, r.id) > ($4[1]::date, $4[2], $4[3]::uuid))
+			order by coalesce(r.next_run_date, 'infinity'::date), r.name, r.id limit $3`, p.TenantID, status, page.pageLimit(recurringListLimit), page.keys())
 		if err != nil {
 			return err
 		}

@@ -9,6 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
 )
@@ -27,10 +28,17 @@ type TransactionFilter struct {
 	ProductID  string
 	Status     domain.Status
 	SourceType string
-	From       *time.Time
-	To         *time.Time
-	Cursor     string
-	Limit      int
+	// LegalEntityID narrows to one legal entity. It never widens: row-level
+	// security still keeps the rows to the caller's legal-entity scope.
+	LegalEntityID string
+	// Dims keeps the transactions whose dimension set holds every named
+	// dimension at the given value: the drill-down from an on-hand row. An
+	// empty map does not filter.
+	Dims   map[string]string
+	From   *time.Time
+	To     *time.Time
+	Cursor string
+	Limit  int
 }
 
 // TransactionRow is one inventory transaction with its origin. JournalID is
@@ -65,24 +73,41 @@ func (s *Postgres) ListTransactions(ctx context.Context, f TransactionFilter) ([
 	if limit <= 0 || limit > maxListLimit {
 		limit = 100
 	}
+	if f.ID != "" && !ids.Valid(f.ID) {
+		return []TransactionRow{}, nil // no transaction has this id; comparing as uuid would fail
+	}
 	var cursor *string
 	if f.Cursor != "" {
 		cursor = &f.Cursor
 	}
 	p, _ := tenant.FromContext(ctx)
+	// dimension_set.dims has no index the query can use: jsonb containment is
+	// not leakproof, so under row-level security Postgres will not run it as
+	// an index condition. The product index carries the drill-down (product
+	// and legal entity compare as uuid so it applies); the containment test
+	// filters the product's rows.
+	dims, err := json.Marshal(map[string]string(f.Dims))
+	if err != nil {
+		return nil, err
+	}
+	if len(f.Dims) == 0 {
+		dims = []byte("{}")
+	}
 	out := []TransactionRow{}
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+transactionColumns+transactionFrom+`
 			where t.tenant_id = $1
-			  and ($2 = '' or t.product_id::text = $2)
+			  and ($2 = '' or t.product_id = nullif($2, '')::uuid)
 			  and ($3 = '' or t.issue_status = $3 or t.receipt_status = $3)
 			  and ($4 = '' or o.source_type = $4)
 			  and ($5::date is null or t.physical_date >= $5::date)
 			  and ($6::date is null or t.physical_date <= $6::date)
 			  and ($7::uuid is null or t.id < $7::uuid)
-			  and ($9 = '' or t.id::text = $9)
+			  and ($9 = '' or t.id = nullif($9, '')::uuid)
+			  and ($10 = '' or t.legal_entity_id = nullif($10, '')::uuid)
+			  and ($11 = '{}' or d.dims @> $11::jsonb)
 			order by t.id desc
-			limit $8`, p.TenantID, f.ProductID, string(f.Status), f.SourceType, f.From, f.To, cursor, limit, f.ID)
+			limit $8`, p.TenantID, f.ProductID, string(f.Status), f.SourceType, f.From, f.To, cursor, limit, f.ID, f.LegalEntityID, string(dims))
 		if err != nil {
 			return err
 		}

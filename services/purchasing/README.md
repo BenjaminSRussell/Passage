@@ -35,6 +35,7 @@ migrations/            0001_init.sql (tables, sequences, RLS, outbox, idempotenc
                        0007_reprice.sql (invoiced-line reprice hand-over mark, trade-priced line index)
                        0008_scheduling_agreement.sql (scheduling agreements, schedule lines, releases and release lines)
                        0018_delivery_schedule.sql (delivery schedule rows per PO line)
+                       0023_inbound_changes.sql (stable id on PO lines, consumer inbox, log of changes other services asked of POs)
 api/openapi.yaml       OpenAPI 3.1 for every route
 events/asyncapi.yaml   AsyncAPI 3 for every event emitted
 charts/purchasing/     Helm chart (probes on /healthz and /readyz, DATABASE_URL from a secret)
@@ -82,6 +83,8 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | GET `/purchase-orders/{id}` | PurchaseOrderInquire, or the service-only `procurement.purchase-order.lookup` (receiving's signed token, #305) | ETag = row version |
 | PATCH `/purchase-orders/{id}` | PurchaseOrderMaintain | If-Match (row version) required; whole order as on create, `lineNo` names an existing line; see the change rules below |
 | GET `/purchase-order-lines` | PurchaseOrderInquire | Open supply: lines of CONFIRMED POs with quantity left to receive, by delivery date; `warehouseId`, `siteId`, `productId`, `legalEntityId`, `dueFrom`, `dueTo`, `limit`, `cursor` (opaque `<date>|<po id>|<line no>`). Master planning (wave 22) reads it per warehouse |
+| GET `/inbound-changes` | PurchaseOrderInquire | Changes other services asked of purchase orders (slice 18), newest first; `source` (PLANNING_MESSAGE, DROPSHIP_CLOSED), `status` (APPLIED, REFUSED, IGNORED), `purchaseOrderId`, `legalEntityId`, `limit`, `cursor` |
+| GET `/inbound-changes/{id}` | PurchaseOrderInquire | One change |
 | POST `/purchase-orders/{id}:submit` / `:cancel` | PurchaseOrderMaintain | Idempotency-Key and If-Match required |
 | POST `/purchase-orders/{id}:approve` / `:reject` / `:confirm` | PurchaseOrderConfirm | Idempotency-Key and If-Match required; approve and reject stand in for the wave 4 approval task |
 | POST `/purchase-orders/{id}:reprice` | PurchaseOrderInquire (preview) / PurchaseOrderConfirm (apply) | Subsequent price change on one CONFIRMED PO; `{"apply": false}` previews (ETag = row version); apply needs If-Match and Idempotency-Key |
@@ -105,6 +108,7 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | POST `/model-service-specs`, GET `/model-service-specs`, GET `/model-service-specs/{id}`, PUT `/model-service-specs/{id}` | ProcurementPolicyMaintain (reads also PurchaseOrderInquire) | Model service specifications (FR-17.23, SAP ML10-ML12): a reusable outline in one currency per legal entity; POST needs an Idempotency-Key (409 PRC-SRV-006 for a duplicate code), PUT needs If-Match (412 PRC-SRV-007); writes `modelservicespec.created.v1` and `modelservicespec.changed.v1` |
 | PUT `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan/rows/{seq}/settlement` | `procurement.invoicing-plan.settle` | Receiving's service token only (#289; 403 for a person, and identity refuses to assign the service-only duty). Body `settlementRef` and `amount`; flips an OPEN row to INVOICED at the settled amount (a reprice in between is absorbed by the other OPEN rows), idempotent per row and reference, records who settled it in `purchase_invoicing_plan_row_settlement`; bumps the PO row version |
 | GET `/requisition-lines` | PurchaseOrderMaintain | Consolidation queue: OPEN lines of APPROVED requisitions; `sourcing` = NEEDS_SOURCING (no preferred vendor) or HAS_VENDOR, `vendorId`, `limit`, `cursor` |
+| POST `/requisition-lines/{id}:split` | PurchaseOrderMaintain | Idempotency-Key and If-Match (the requisition version) required; body `{"quantities": [...]}` cuts one new OPEN line per quantity out of an OPEN line of an APPROVED requisition, the original keeps the rest (FR-17.3); `requisition.split.v1` |
 | POST `/requisitions:consolidate` | PurchaseOrderMaintain | Idempotency-Key required; one DRAFT PO per legal entity × vendor × currency × site × delivery window (`windowDays`, default 7, 1–60); `vendorId` per line overrides the preferred vendor |
 | POST `/agreements` | AgreementMaintain | Idempotency-Key required; purchase agreement, EFFECTIVE unless `status` = DRAFT; max 500 lines |
 | GET `/agreements` | AgreementMaintain | Newest first; `status`, `vendorId`, `limit`, `cursor`; each row carries `maxPctReleased` |
@@ -468,6 +472,40 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   and body; a replay returns the original resource, a different body (or endpoint)
   with the same key is `idempotency_key_reuse`.
 
+## Inbound changes from planning and fulfillment (slice 18)
+
+`purchasing consume` (a second process from the same image; Helm `consumer.enabled`) follows two topics with the
+platform at-least-once consumer (inbox `consumer_inbox`, retries, one dead-letter topic `passage.procurement.inbound.dlq` for both source topics)
+and runs as the service principal `service:purchasing-inbound` with the duty `purchasing.inbound.apply`. It does not
+start until that principal is seeded in `platform/go/tenant` and `policies/authz/data.json` (see NOT-IMPLEMENTED.md).
+
+| Event | Effect on the purchase order |
+|---|---|
+| fulfillment `dropship.closed.v1` (topic `passage.fulfillment.dropship`) | The PO line named by `purchase_order_line_id` (the `id` of a line of `GET /purchase-orders/{id}`) is lowered by what the closing adds: `qty_closed` is the drop-ship's running closed total (a drop-ship can be closed more than once, for example when sales cuts the order back and the buyer later closes the rest), so the line goes down by `qty_closed` less the closings of that drop-ship already recorded. A line left with nothing and no receipts is cancelled, and the PO with it when it was the last open line. The drop-ship id with the total is the idempotency key. |
+| fulfillment `dropship.cancelled.v1` (same topic, slice 19) | The same line is lowered by the quantity the vendor will never ship: `qty` (the drop-ship's ordered quantity) less `qty_confirmed` and less what earlier closings of that drop-ship took off. A line left with nothing and no receipts is cancelled, the PO with it when it was the last open line. The drop-ship id is the idempotency key. |
+| planning `message.applied.v1` (topic `passage.planning.plan`, planning's plan channel, beside its other plan and message events, which are skipped) | `supply_ref` names the PO (by number) and `item_id` the line. `postpone` and `advance` move the delivery date to `suggested_date` (a postpone must be later, an advance earlier); `decrease` and `increase` take or add `qty` (the message quantity is the delta); `cancel` cancels the line. With several open lines of the item a date move is narrowed to the line whose open quantity equals `qty`; otherwise the message is refused as ambiguous. A `warehouse_id` narrows the lines to that warehouse. The message id is the idempotency key. Any other action, a `supply_ref` that is no PO of the legal entity (a planned order, production or transfer) and a plan with no legal entity record nothing. |
+
+Every change goes through the PO change management path (FR-17.8): the next version, confirmed at once or waiting for
+re-approval when a rule fires (a quantity increase over 5 %); totals, percentage charges and tax follow the new
+quantity. Only a CONFIRMED order takes a change; one in review or cancelled is recorded as refused. A purchasing rule
+that stops a change (the received/invoiced floor PRC-PO-007, a line drawn on an agreement PRC-PO-010, a service
+specification above the line, an ambiguous line) never retries and never dead-letters: it is recorded as `REFUSED`
+with its code for a buyer to settle: `POST /inbound-changes/{id}:retry` runs the stored request again against the order as
+it is now (the same planning and change path, as the caller, who needs `PurchaseOrderMaintain`; the row becomes APPLIED or
+IGNORED and `RETRIED`, or stays REFUSED with the new reason and one more `attempts`), and `:acknowledge` marks it dealt
+with by hand (`ACKNOWLEDGED`, order untouched). Either needs the change to be REFUSED and unsettled (409 PRC-INB-008
+otherwise), writes `inboundchange.resolved.v1` and takes an `Idempotency-Key`; `GET /inbound-changes?status=REFUSED&resolution=NONE`
+is the buyer's queue. A refused change also writes `inboundchange.refused.v1` with `buyer_id`, the user who made the order,
+for the notification service (wave 4) to route; purchasing sends no notification itself. The consumer runs with the legal-entity scope of the event, because its
+principal carries none.
+
+`purchase_inbound_change` keeps one row per request (`status` APPLIED, REFUSED or IGNORED; the quantity and date before
+and after; the PO version it went into and whether it waits for re-approval; who applied the message) and
+`inboundchange.recorded.v1` is written with it (a retry rewrites the row in place, so one request keeps one row and one key). Codes recorded on a row besides those of the PO edit: PRC-INB-001
+action is not for a PO, -002 no open line (of the item in that warehouse), -003 more than one open line, -004 quantity
+(nothing to take off or add, more than the line holds, a line with receipts to zero), -005 date (none, the same, the wrong
+direction), -006 the order is not CONFIRMED, -007 no change (the line already had that quantity and date), -008 (the 409 of settling a change that is not an unsettled REFUSED one).
+
 ## Error codes
 
 Problems are RFC 9457 with `code` set to the stable value below. Domain and
@@ -502,6 +540,9 @@ store codes are returned as the `code` field.
 | PRC-ACTION-001 | 404 | Unknown custom action on a requisition, purchase order, agreement, scheduling agreement or RFQ |
 | PRC-REQ-005 | 422 | A PO line names a requisition line of another legal entity |
 | PRC-REQ-LINE-NOT-FOUND | 404 | Requisition line not found |
+| PRC-REQ-006 | 409 | A requisition line is held by a running RFQ (DRAFT, SENT, REPLIES_OPEN, CLOSED): it cannot be ordered, put on a second RFQ or split |
+| PRC-REQ-007 | 422 | A split asks for quantities the line cannot give up: they must leave a quantity above zero on the original line |
+| PRC-REQ-008 | 422 | A PO line names a requisition line but orders another quantity or unit than the line's (order it whole in its unit, or split the requisition line first) |
 | PRC-CONS-001 | 422 | Consolidation window outside 1–60 days |
 | PRC-CONS-002 | 422 | A consolidation line has no vendor (needs sourcing) |
 | PRC-AGR-NOT-FOUND | 404 | Purchase agreement or agreement line not found |
@@ -579,13 +620,15 @@ store codes are returned as the `code` field.
 | PRC-SA-003 | 422 | A release would lower cumulative released below the previous release without a cumulative reset |
 | PRC-SA-NOT-FOUND | 404 | Scheduling agreement not found (or outside the caller's legal entity scope) |
 | PRC-SA-REL-NOT-FOUND | 404 | The scheduling agreement has no release with that number |
+| PRC-INB-NOT-FOUND | 404 | Inbound change not found (or outside the caller's legal entity scope) |
 | idempotency_key_reuse | 422 | Idempotency key reused with a different body or on another endpoint |
 
 ## Dependencies
 
 Allowed set only: platform kernel, chi (through the kernel), pgx/v5,
 shopspring/decimal, and `pgregory.net/rapid` for property tests (already in the
-platform go.mod).
+platform go.mod). The inbound consumer (slice 18) adds the platform `eventing` package and its Kafka client (franz-go),
+which arrive through the platform module.
 
 ## Web module
 

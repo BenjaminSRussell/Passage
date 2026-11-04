@@ -27,7 +27,8 @@ func All() []string {
 // posted quantity and value (financial statuses SOLD / PURCHASED), moved by
 // journals and by blocking and transfer legs; BucketReservedPhysical is moved
 // by reservations; BucketReceived by vendor-owned consignment receipts and
-// BucketDeducted by the vendor-owned leg of an ownership change (FR-16.17);
+// count gains, BucketDeducted by the vendor-owned leg of an ownership change
+// and vendor-owned count losses (FR-16.17, quantity only);
 // BucketOnOrder and BucketOrdered by the supply and demand pair of a transfer order.
 // A registration or status move through transactions:apply or a named
 // backward command names the bucket of the status it reached, which may be any

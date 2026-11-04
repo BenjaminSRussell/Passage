@@ -33,15 +33,17 @@ type JournalName struct {
 	DescriptionLanguage string    `json:"descriptionLanguage"`
 	Active              bool      `json:"active"`
 	UpdatedAt           time.Time `json:"updatedAt"`
+	// LockVersion is the entity tag: PUT of an existing journal name sends it in If-Match.
+	LockVersion int `json:"lockVersion"`
 }
 
 const journalNameColumns = `code, name, requires_approval, self_approval_allowed, reversal_reason_required,
-	allow_recon_accounts, lines_limit, active, updated_at, posting_restriction, description_language`
+	allow_recon_accounts, lines_limit, active, updated_at, posting_restriction, description_language, lock_version`
 
 func scanJournalName(row pgx.Row, extra ...any) (JournalName, error) {
 	var n JournalName
 	err := row.Scan(append([]any{&n.Code, &n.Name, &n.RequiresApproval, &n.SelfApprovalAllowed, &n.ReversalReasonRequired,
-		&n.AllowReconAccounts, &n.LinesLimit, &n.Active, &n.UpdatedAt, &n.PostingRestriction, &n.DescriptionLanguage}, extra...)...)
+		&n.AllowReconAccounts, &n.LinesLimit, &n.Active, &n.UpdatedAt, &n.PostingRestriction, &n.DescriptionLanguage, &n.LockVersion}, extra...)...)
 	return n, err
 }
 
@@ -93,7 +95,7 @@ func (s *Postgres) GetJournalName(ctx context.Context, code string) (JournalName
 // the name is new, so the API can answer 201 or 200. A change applies to the
 // next action on each batch: submit reads the workflow flag, approve the
 // self-approval flag, post the reconciliation override.
-func (s *Postgres) PutJournalName(ctx context.Context, code string, in JournalName) (JournalName, bool, error) {
+func (s *Postgres) PutJournalName(ctx context.Context, code string, ifMatch int, in JournalName) (JournalName, bool, error) {
 	p, err := principalOf(ctx)
 	if err != nil {
 		return JournalName{}, false, err
@@ -107,6 +109,15 @@ func (s *Postgres) PutJournalName(ctx context.Context, code string, in JournalNa
 	var out JournalName
 	var created bool
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var current int
+		err := tx.QueryRow(ctx, `select lock_version from journal_name where tenant_id = $1 and code = $2 for update`,
+			p.TenantID, code).Scan(&current)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err := checkLock(err == nil, current, ifMatch, "journal name"); err != nil {
+			return err
+		}
 		row := tx.QueryRow(ctx, `insert into journal_name (tenant_id, code, name, requires_approval, self_approval_allowed,
 				reversal_reason_required, allow_recon_accounts, lines_limit, active, posting_restriction, description_language)
 			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -114,13 +125,15 @@ func (s *Postgres) PutJournalName(ctx context.Context, code string, in JournalNa
 				self_approval_allowed = excluded.self_approval_allowed, reversal_reason_required = excluded.reversal_reason_required,
 				allow_recon_accounts = excluded.allow_recon_accounts, lines_limit = excluded.lines_limit,
 				active = excluded.active, posting_restriction = excluded.posting_restriction,
-				description_language = excluded.description_language, updated_at = now()
+				description_language = excluded.description_language,
+				`+lockedUpdate("journal_name", 12, "name", "requires_approval", "self_approval_allowed", "reversal_reason_required",
+			"allow_recon_accounts", "lines_limit", "active", "posting_restriction", "description_language")+`
 			returning `+journalNameColumns+`, (xmax = 0)`, p.TenantID, code, in.Name, in.RequiresApproval,
 			in.SelfApprovalAllowed, in.ReversalReasonRequired, in.AllowReconAccounts, in.LinesLimit, in.Active,
-			in.PostingRestriction, in.DescriptionLanguage)
+			in.PostingRestriction, in.DescriptionLanguage, ifMatch)
 		var scanErr error
 		out, scanErr = scanJournalName(row, &created)
-		return scanErr
+		return lockLost(scanErr, ifMatch, "journal name")
 	})
 	if err != nil {
 		return JournalName{}, false, err

@@ -60,7 +60,10 @@ describe("pricing module", () => {
       "/pricing/promotions/new",
       "/pricing/promotions/:id",
       "/pricing/parameters",
+      "/pricing/tenant-parameters",
       "/pricing/simulate",
+      "/pricing/compare",
+      "/pricing/price-list",
     ]);
   });
 
@@ -76,6 +79,7 @@ describe("pricing module", () => {
       "/pricing/procedure-determination": "pricing.view",
       "/pricing/journals": "pricing.view",
       "/pricing/parameters": "pricing.view",
+      "/pricing/tenant-parameters": "pricing.view",
       "/pricing/rebates": "pricing.rebate.view",
       "/pricing/rebates/claims": "pricing.rebate.view",
       "/pricing/brokers": "pricing.rebate.view",
@@ -87,6 +91,8 @@ describe("pricing module", () => {
       "/pricing/funds": "pricing.view",
       "/pricing/promotions": "pricing.view",
       "/pricing/simulate": "pricing.view",
+      "/pricing/compare": "pricing.view",
+      "/pricing/price-list": "pricing.view",
     });
   });
 

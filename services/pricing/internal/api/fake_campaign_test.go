@@ -220,3 +220,25 @@ func (f *fakeStore) ActivateProcedure(_ context.Context, id string, key string) 
 	}
 	return p, nil
 }
+
+func (f *fakeStore) ReviseCampaign(_ context.Context, rev domain.CampaignRevision, _ string) (domain.Campaign, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	st := f.campaignData()
+	c, ok := st.campaigns[rev.ID]
+	if !ok {
+		return domain.Campaign{}, notFoundCampaign(rev.ID)
+	}
+	if c.Version != rev.Version {
+		return domain.Campaign{}, httpx.NewProblem(http.StatusPreconditionFailed, store.CodeVersionConflict, "campaign version does not match")
+	}
+	next := rev.Apply(c)
+	if fields := domain.ValidateCampaign(next); len(fields) > 0 {
+		p := httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, "request is invalid")
+		p.Errors = fields
+		return domain.Campaign{}, p
+	}
+	next.Version++
+	st.campaigns[rev.ID] = next
+	return next, nil
+}

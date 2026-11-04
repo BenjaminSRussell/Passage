@@ -4,6 +4,7 @@ import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, For
 import {
   describeProblem,
   fetchGantt,
+  getParameters,
   firmJob,
   listResources,
   moveJob,
@@ -30,6 +31,15 @@ interface Proposal {
   start: string;
   /** Also push the orders pegged to this one (FR-23.8). */
   propagate: boolean;
+  /** Go over capacity violations of the moved job; set only after a refused preview. Needs the override duty. */
+  override: boolean;
+}
+
+/** The violations a planner with the override duty may commit over (SCHED-0002, SCHED-0005). */
+const OVERRIDABLE = new Set(["SCHED-0002", "SCHED-0005"]);
+
+function moveBody(p: Proposal, dryRun: boolean) {
+  return { start: p.start, resourceId: p.resourceId, dryRun, ...(p.propagate ? { propagate: true } : {}), ...(p.override ? { overrideConstraints: true } : {}) };
 }
 
 interface Preview {
@@ -53,6 +63,10 @@ export function WorkspacePage() {
     return { resources, bars };
   }, `${from}|${days}`);
 
+  // The drag grid is a scheduling parameter; the board works on the 5-minute default while it loads or when it cannot be read.
+  const parameters = useLoad((signal) => getParameters(signal), "parameters");
+  const limits = { orders: parameters.data?.propagationOrders ?? 500, levels: parameters.data?.propagationLevels ?? 5 };
+
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [violations, setViolations] = useState<Record<string, string>>({});
@@ -70,7 +84,7 @@ export function WorkspacePage() {
 
   function select(job: GanttBar, start = job.start) {
     const whole = jobs.find((j) => j.jobId === job.jobId) ?? job;
-    setProposal({ job: whole, resourceId: whole.resourceId, start, propagate });
+    setProposal({ job: whole, resourceId: whole.resourceId, start, propagate, override: false });
     setPreview(null);
     setViolations({});
     setFailure(null);
@@ -83,9 +97,9 @@ export function WorkspacePage() {
     setFailure(null);
     setNotice("");
     try {
-      const response = await moveJob(next.job.jobId, { start: next.start, resourceId: next.resourceId, dryRun: true, ...(next.propagate ? { propagate: true } : {}) });
+      const response = await moveJob(next.job.jobId, moveBody(next, true));
       setPreview({ proposal: next, response, key: newKey() });
-      setViolations(response.feasible ? {} : Object.fromEntries(response.violations.map((v) => [v.jobId ?? next.job.jobId, `${v.detail} (${v.code})`])));
+      setViolations(response.feasible && !response.overridden ? {} : Object.fromEntries(response.violations.map((v) => [v.jobId ?? next.job.jobId, `${v.detail} (${v.code})`])));
     } catch (error) {
       setPreview(null);
       setFailure(describeProblem(error));
@@ -98,7 +112,7 @@ export function WorkspacePage() {
     const whole = jobs.find((j) => j.jobId === bar.jobId) ?? bar;
     // A drag moves the job's first segment by the dragged distance.
     const offset = Date.parse(start) - Date.parse(bar.start);
-    const next = { job: whole, resourceId: whole.resourceId, start: new Date(Date.parse(whole.start) + offset).toISOString().replace(".000Z", "Z"), propagate };
+    const next = { job: whole, resourceId: whole.resourceId, start: new Date(Date.parse(whole.start) + offset).toISOString().replace(".000Z", "Z"), propagate, override: false };
     setProposal(next);
     void runPreview(next);
   }
@@ -109,12 +123,13 @@ export function WorkspacePage() {
     setFailure(null);
     try {
       const { proposal: p } = preview;
-      const done = await moveJob(p.job.jobId, { start: p.start, resourceId: p.resourceId, dryRun: false, ...(p.propagate ? { propagate: true } : {}) }, preview.key);
+      const done = await moveJob(p.job.jobId, moveBody(p, false), preview.key);
       setPreview(null);
       setProposal(null);
       const pegged = done.dependents?.length ? ` ${done.dependents.length} pegged order(s) moved with it.` : "";
+      const over = done.overridden ? ` It went over ${done.violations.length} constraint violation(s); the move run records them.` : "";
       setNotice(
-        `Move saved. ${done.changes.length} operation(s) rescheduled${done.orderEnd ? `; the order now ends ${formatDateTime(done.orderEnd)}` : ""}.${pegged}`,
+        `Move saved.${over} ${done.changes.length} operation(s) rescheduled${done.orderEnd ? `; the order now ends ${formatDateTime(done.orderEnd)}` : ""}.${pegged}`,
       );
       board.reload();
     } catch (error) {
@@ -166,7 +181,14 @@ export function WorkspacePage() {
     {
       key: "outsideCapacity",
       header: "Capacity",
-      render: (row) => (row.outsideCapacity ? <Badge tone="danger">Outside open capacity</Badge> : "Inside"),
+      render: (row) =>
+        row.outsideCapacity ? (
+          <Badge tone="danger">Outside open capacity</Badge>
+        ) : row.blockBreach ? (
+          <Badge tone="danger">Inside a block it does not match</Badge>
+        ) : (
+          "Inside"
+        ),
     },
     { key: "firmed", header: "Firmed", render: (row) => (row.firmed ? <Badge tone="info">Firmed</Badge> : "No") },
     {
@@ -238,7 +260,7 @@ export function WorkspacePage() {
           <label htmlFor="gantt-propagate">Move pegged orders too</label>
         </span>
         <span id="gantt-propagate-hint" className={styles.note}>
-          Orders pegged to the moved order are pushed behind it, up to 500 orders or 5 levels.
+          {`Orders pegged to the moved order are pushed behind it, up to ${limits.orders} orders or ${limits.levels} levels (scheduling parameters).`}
         </span>
       </div>
       <Alert tone="success" live="status">
@@ -281,11 +303,12 @@ export function WorkspacePage() {
             days={days}
             selectedJobId={proposal?.job.jobId}
             violations={violations}
+            snapMinutes={parameters.data?.dragSnapMinutes}
             onSelect={(bar) => select(bar)}
             onDrop={onDrop}
           />
           <p className={styles.note}>
-            Outlines: amber is late, dashed is firmed, red breaks a constraint. The table lists the same jobs for keyboard use.
+            Outlines: amber is late, dashed is firmed, red breaks a constraint, dotted red sits in a capacity block it does not match. The table lists the same jobs for keyboard use.
           </p>
           {proposal ? (
             <div ref={formRef}>
@@ -297,7 +320,7 @@ export function WorkspacePage() {
                         {...control}
                         value={proposal.resourceId}
                         onChange={(event) => {
-                          setProposal({ ...proposal, resourceId: event.target.value });
+                          setProposal({ ...proposal, resourceId: event.target.value, override: false });
                           setPreview(null);
                         }}
                       >
@@ -319,7 +342,7 @@ export function WorkspacePage() {
                         onChange={(event) => {
                           const start = fromUtcInput(event.target.value);
                           if (start) {
-                            setProposal({ ...proposal, start });
+                            setProposal({ ...proposal, start, override: false });
                             setPreview(null);
                           }
                         }}
@@ -332,7 +355,7 @@ export function WorkspacePage() {
                     </Button>
                     {preview?.response.feasible ? (
                       <Button variant="primary" loading={busy === "commit"} onClick={confirm}>
-                        Confirm move
+                        {preview.response.overridden ? "Confirm move over constraints" : "Confirm move"}
                       </Button>
                     ) : null}
                     <Button
@@ -356,6 +379,33 @@ export function WorkspacePage() {
                         </li>
                       ))}
                     </ul>
+                    {preview.proposal.override ? (
+                      <p className={styles.note}>
+                        Even with the override this move cannot be saved: double booking, a booked secondary resource, a slot beyond the planning horizon and the jobs the move pushes are never overridden.
+                      </p>
+                    ) : preview.response.violations.length > 0 && preview.response.violations.every((v) => OVERRIDABLE.has(v.code)) ? (
+                      <div className={styles.formActions}>
+                        <Button
+                          size="sm"
+                          loading={busy === "preview"}
+                          onClick={() => void runPreview({ ...preview.proposal, override: true })}
+                        >
+                          Preview with override
+                        </Button>
+                        <span className={styles.note}>Needs the Override scheduling constraints duty. The job is placed at the start you chose, over the closed time.</span>
+                      </div>
+                    ) : null}
+                  </Alert>
+                ) : null}
+                {preview?.response.feasible && preview.response.overridden ? (
+                  <Alert tone="warning" title="This move goes over constraints">
+                    <ul className={styles.messages}>
+                      {preview.response.violations.map((v) => (
+                        <li key={`${v.code}-${v.jobId ?? ""}`}>
+                          {v.detail} ({v.code})
+                        </li>
+                      ))}
+                    </ul>
                   </Alert>
                 ) : null}
                 {preview?.response.feasible ? (
@@ -365,7 +415,7 @@ export function WorkspacePage() {
                     </p>
                     {preview.response.truncated ? (
                       <Alert tone="warning" title="Not every pegged order was re-planned">
-                        Propagation stopped at 500 orders or 5 pegging levels (SCHED-0007). Run the site schedule to re-plan the rest.
+                        {`Propagation stopped at ${limits.orders} orders or ${limits.levels} pegging levels (SCHED-0007). Run the site schedule to re-plan the rest.`}
                       </Alert>
                     ) : null}
                     {preview.proposal.propagate ? (

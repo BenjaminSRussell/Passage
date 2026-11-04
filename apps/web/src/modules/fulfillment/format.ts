@@ -1,4 +1,4 @@
-import type { ReleaseSkip, ShipmentStatus, TrackingStatus, WaveGroupBy } from "./api/client";
+import type { DeliveryTolerance, ReleaseSkip, ShipmentStatus, TrackingStatus, WaveGroupBy } from "./api/client";
 
 export const dash = "—";
 
@@ -173,3 +173,30 @@ export const EXCEPTION_KIND_LABELS: Record<string, string> = {
   PACKED_BEYOND_KEPT: "Packed beyond the kept quantity",
   DROPSHIP_CONFIRMED_BEYOND_KEPT: "Vendor shipped beyond the kept quantity",
 };
+
+/** Percentage of the planned quantity a pick may exceed: 0 to 100 with at most 4 decimals. */
+export const PERCENT = /^\d{1,3}(\.\d{1,4})?$/;
+
+/**
+ * The tolerance for a product shipped to a customer (BR-28.7): the most specific saved scope wins -
+ * product and customer, then product, then customer, then the general one; "0" when none is saved.
+ */
+export function resolveTolerance(list: readonly DeliveryTolerance[], productId: string, customerId: string): string {
+  const rank = (t: DeliveryTolerance) => (t.productId ? 2 : 0) + (t.customerId ? 1 : 0);
+  const applies = list.filter((t) => (t.productId === null || t.productId === productId) && (t.customerId === null || t.customerId === customerId));
+  applies.sort((a, b) => rank(b) - rank(a));
+  return applies[0]?.overdeliveryPct ?? "0";
+}
+
+/** Most a line may pick: planned plus pct percent of it, cut to 6 decimals (the service's rule, exactly). */
+export function pickCeiling(planned: string, pct: string): string {
+  const [pw = "0", pf = ""] = planned.split(".");
+  const [qw = "0", qf = ""] = pct.split(".");
+  const qty = BigInt(`${pw}${pf.padEnd(6, "0").slice(0, 6)}`);
+  const rate = BigInt(`${qw}${qf.padEnd(4, "0").slice(0, 4)}`);
+  const hundred = 100n * 10000n;
+  const scaled = (qty * (hundred + rate)) / hundred;
+  const digits = scaled.toString().padStart(7, "0");
+  const frac = digits.slice(-6).replace(/0+$/, "");
+  return `${digits.slice(0, -6)}${frac ? `.${frac}` : ""}`;
+}

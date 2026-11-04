@@ -49,6 +49,7 @@ var (
 	OrderProgressRecorded = events.Type(Context, "orderprogress", "recorded", 1)
 
 	OrderRemainderCancelled = events.Type(Context, "order", "remaindercancelled", 1)
+	OrderClosed             = events.Type(Context, "order", "closed", 1)
 )
 
 // All lists every event type this service publishes.
@@ -58,7 +59,7 @@ func All() []string {
 		QuotationConverted, QuotationExpired, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
 		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted, ParametersChanged, IntakeErrorRecorded, IntakeErrorResolved,
 		OrderChangeRequested, OrderChangeApproved, OrderChangeRejected, OrderChangeWithdrawn, ChangePolicyChanged,
-		DeliveryTermsCreated, DeliveryTermsChanged, OrderProgressRecorded, OrderRemainderCancelled}
+		DeliveryTermsCreated, DeliveryTermsChanged, OrderProgressRecorded, OrderRemainderCancelled, OrderClosed}
 }
 
 // PromisedSlice is one schedule line of an ATP promise.
@@ -250,7 +251,11 @@ type RemainderLine struct {
 // OrderRemainderCancelledData is the data member of order.remaindercancelled.v1:
 // the undelivered remainder of a partly shipped order, or of one of its lines,
 // was closed. Status is SHIPPED or INVOICED, or PARTIALLY_SHIPPED after a
-// one-line close while another line still has quantity to deliver.
+// one-line close while another line still has quantity to deliver, or
+// CONFIRMED when a PATCH removed lines of a confirmed order (each kept at 0) or
+// lowered, raised or reopened a line (kept at the new quantity; cancelled 0 for
+// a raise or reopen), and CANCELLED when a confirmed order was cancelled whole
+// (every line kept at 0). KeptQty is always the line's whole current ceiling.
 type OrderRemainderCancelledData struct {
 	OrderID       string          `json:"order_id"`
 	LegalEntityID string          `json:"legal_entity_id"`
@@ -453,8 +458,13 @@ type ChangePolicyChangedData struct {
 	LegalEntityID    string `json:"legal_entity_id"`
 	CustomerID       string `json:"customer_id"`
 	ApprovalRequired bool   `json:"approval_required"`
-	Actor            string `json:"actor"`
-	Version          int    `json:"version"`
+	// ApprovalThreshold is the amount below which a change needs no approval,
+	// empty when every change does; ThresholdCurrency is its currency.
+	ApprovalThreshold string   `json:"approval_threshold,omitempty"`
+	ThresholdCurrency string   `json:"threshold_currency,omitempty"`
+	ApproverIDs       []string `json:"approver_ids"`
+	Actor             string   `json:"actor"`
+	Version           int      `json:"version"`
 }
 
 // IntakeErrorData is the data member of intakeerror.recorded.v1 and
@@ -511,4 +521,15 @@ type OrderProgressData struct {
 	OrderStatus    string         `json:"order_status"`
 	Actor          string         `json:"actor"`
 	Version        int            `json:"version"`
+}
+
+// OrderClosedData is the data member of order.closed.v1: an INVOICED order was
+// moved to CLOSED by the nightly auto-close (BR-27.5).
+type OrderClosedData struct {
+	OrderID        string `json:"order_id"`
+	LegalEntityID  string `json:"legal_entity_id"`
+	Version        int    `json:"version"`
+	PreviousStatus string `json:"previous_status"`
+	GraceDays      int    `json:"grace_days"`
+	Actor          string `json:"actor"`
 }

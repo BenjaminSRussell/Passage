@@ -105,7 +105,7 @@ export function previewDescription(template: string, bindings: Record<string, st
   return { text: chars.slice(0, MAX_DESCRIPTION - 1).join("") + "…", truncated: true };
 }
 
-function TemplateForm({ id, initial, existing }: { id: string; initial: TemplateDraft; existing: boolean }) {
+function TemplateForm({ id, initial, existing, lockVersion }: { id: string; initial: TemplateDraft; existing: boolean; lockVersion?: number }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [values, setValues] = useState<TemplateDraft>(initial);
@@ -125,7 +125,7 @@ function TemplateForm({ id, initial, existing }: { id: string; initial: Template
     if (Object.keys(found).length > 0) return;
     setBusy(true);
     try {
-      await putDescriptionTemplate(id, toTemplateInput(values));
+      await putDescriptionTemplate(id, toTemplateInput(values), lockVersion);
       await queryClient.invalidateQueries({ queryKey: ["ledger", "description-templates"] });
       navigate("/ledger/description-templates");
     } catch (error) {
@@ -255,7 +255,7 @@ export function EditDescriptionTemplatePage() {
           </div>
         </Card>
       ) : (
-        <TemplateForm id={id} initial={toDraft(result.data)} existing />
+        <TemplateForm id={id} initial={toDraft(result.data)} existing lockVersion={result.data.lockVersion} />
       )}
     </div>
   );

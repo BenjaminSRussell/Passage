@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -100,13 +101,31 @@ func ValidateProject(p Project, isID func(string) bool) map[string]string {
 
 // ScheduleCronProblem says why expr cannot schedule runs ("" when it can, or when it is empty: no schedule).
 func ScheduleCronProblem(expr string) string {
+	return ScheduleCronProblemMin(expr, MinScheduleMinutes)
+}
+
+// ScheduleCronProblemMin is ScheduleCronProblem for a tenant whose `mig.recurring.min_interval_min` is minMinutes
+// (at least MinScheduleMinutes; a smaller value is read as the floor).
+func ScheduleCronProblemMin(expr string, minMinutes int) string {
 	if expr == "" {
 		return ""
 	}
+	minMinutes = max(minMinutes, MinScheduleMinutes)
 	if gap, ok := CronMinInterval(expr); !ok {
 		return "must be a five-field cron expression (minute hour day month weekday) of at most 100 characters"
-	} else if gap < MinScheduleMinutes {
-		return "must leave at least 15 minutes between runs"
+	} else if gap < minMinutes {
+		return fmt.Sprintf("must leave at least %d minutes between runs", minMinutes)
+	}
+	return ""
+}
+
+// MaxRecurringMinIntervalMin is the longest minimum gap a tenant can set (one day).
+const MaxRecurringMinIntervalMin = 1440
+
+// RecurringMinIntervalProblem says why n cannot be a tenant's `mig.recurring.min_interval_min` ("" when it can).
+func RecurringMinIntervalProblem(n int) string {
+	if n < MinScheduleMinutes || n > MaxRecurringMinIntervalMin {
+		return fmt.Sprintf("must be between %d and %d minutes", MinScheduleMinutes, MaxRecurringMinIntervalMin)
 	}
 	return ""
 }
@@ -138,7 +157,7 @@ func ScheduleTimezoneProblem(name string) string {
 var cronBounds = [5][2]int{{0, 59}, {0, 23}, {1, 31}, {1, 12}, {0, 7}}
 
 // MinScheduleMinutes is the shortest gap FR-10.16 allows between two scheduled runs (`mig.recurring.min_interval_min`
-// defaults to 15; the per-tenant setting is not read yet).
+// defaults to 15 and is the floor of the per-tenant setting, see ScheduleCronProblemMin).
 const MinScheduleMinutes = 15
 
 const maxCronLength = 100

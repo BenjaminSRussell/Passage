@@ -17,8 +17,10 @@ import {
   type WorkOrder,
   type WorkOrderStatus,
 } from "./api/client";
+import { ActionLogPanel } from "./ActionLogPanel";
 import { ActivityPanel } from "./ActivitiesPage";
 import { CoverageBadge } from "./badges";
+import { SchedulingPanel } from "./SchedulingPanel";
 import { Details } from "./Details";
 import { dash, duration, formatDateTime, money, sentence, shortId } from "./format";
 import styles from "./pages.module.css";
@@ -179,11 +181,15 @@ export function WorkOrderDetailPage() {
             ["Estimate", duration(wo.estDurationMinutes)],
             ["Currency", wo.currency],
             ["Completed", formatDateTime(wo.completedAt), true],
+            ["Signature", wo.signedBy ? `${wo.signedBy}, ${formatDateTime(wo.signedAt)}` : wo.signatureExempt ? "Not required" : "Not captured"],
+            ["Technician note", wo.technicianNote || dash],
             ["First-time fix", wo.firstTimeFix === true ? "Yes" : wo.firstTimeFix === false ? "No, a follow-up was needed" : dash],
             ["Follow-up of", wo.followUpOf ? <Link to={`/service/work-orders/${wo.followUpOf}`}>{shortId(wo.followUpOf)}</Link> : dash],
           ]}
         />
       </Card>
+      <SchedulingPanel key={wo.id} workOrder={wo} etag={etag} onSaved={setLatest} onConflict={state.reload} />
+      <ActionLogPanel key={`actions-${wo.id}`} workOrder={wo} onSynced={setLatest} />
       <Card title="Lines" headingLevel={3}>
         <DataTable label="Work order lines" columns={lineColumns} rows={wo.lines} getRowKey={(row) => row.id} empty={{ title: "No lines", description: "This work order has nothing to bill." }} />
       </Card>

@@ -58,6 +58,17 @@ spec:
               value: {{ .Values.config.pricingExplainMaxBytes | quote }}
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: {{ .Values.config.otelEndpoint | quote }}
+            {{- if .Values.cacheConsumer.enabled }}
+            - name: KAFKA_BROKERS
+              value: {{ required "cacheConsumer.brokers is required when cacheConsumer.enabled" .Values.cacheConsumer.brokers | quote }}
+            - name: KAFKA_USERNAME
+              value: {{ .Values.cacheConsumer.username | quote }}
+            - name: KAFKA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "cacheConsumer.secret is required when cacheConsumer.enabled" .Values.cacheConsumer.secret }}
+                  key: password
+            {{- end }}
           startupProbe:
             httpGet:
               path: /healthz

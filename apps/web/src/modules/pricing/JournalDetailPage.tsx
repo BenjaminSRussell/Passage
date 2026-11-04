@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
 import {
   describeProblem,
+  exportJournalAudit,
   getPriceJournal,
   newKey,
   postPriceJournal,
@@ -14,6 +15,7 @@ import {
   type JournalLine,
   type Problem,
 } from "./api/client";
+import { downloadCsv } from "./download";
 import { describePercent } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -62,6 +64,9 @@ export function JournalDetailPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [done, setDone] = useState("");
   const key = useRef(newKey());
+  const [extracting, setExtracting] = useState(false);
+  const [extracted, setExtracted] = useState("");
+  const [extractFailure, setExtractFailure] = useState<Problem | null>(null);
 
   if (state.error) {
     return (
@@ -111,6 +116,22 @@ export function JournalDetailPage() {
     }
   }
 
+  /** Downloads the audit extract (PRD §5.26.15): every line with before and after values. */
+  async function downloadAudit(j: Journal) {
+    setExtracting(true);
+    setExtracted("");
+    setExtractFailure(null);
+    try {
+      const file = await exportJournalAudit(j.id);
+      downloadCsv(file.filename, file.csv);
+      setExtracted(`Downloaded ${file.filename}.`);
+    } catch (error) {
+      setExtractFailure(describeProblem(error));
+    } finally {
+      setExtracting(false);
+    }
+  }
+
   const lines = journal.lines ?? [];
   return (
     <div className={styles.stack}>
@@ -135,6 +156,11 @@ export function JournalDetailPage() {
                 Reverse journal
               </Button>
             ) : null}
+            {journal.status === "POSTED" || journal.status === "REVERSED" ? (
+              <Button variant="secondary" loading={extracting} onClick={() => void downloadAudit(journal)}>
+                Download audit extract
+              </Button>
+            ) : null}
             <Link className={buttonClassName("ghost")} to="/pricing/journals">
               All journals
             </Link>
@@ -144,6 +170,14 @@ export function JournalDetailPage() {
       <Alert tone="success" live="status">
         {done}
       </Alert>
+      <Alert tone="success" live="status">
+        {extracted}
+      </Alert>
+      {extractFailure ? (
+        <Alert tone="danger" title="Could not download the audit extract" live="alert">
+          {extractFailure.message} ({extractFailure.code})
+        </Alert>
+      ) : null}
       {failure ? (
         <Alert tone="danger" title={failure.code === "PRC-0005" ? "Nothing was posted" : "The action failed"} live="alert">
           {failure.message} ({failure.code})

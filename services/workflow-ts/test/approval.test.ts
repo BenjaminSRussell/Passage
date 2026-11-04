@@ -4,10 +4,9 @@ import { Worker } from "@temporalio/worker";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import type { WorkflowHandle } from "@temporalio/client";
 import {
+  approvalDecisionSignal,
   approvalStateQuery,
-  approveSignal,
   approvalWorkflow,
-  delegateSignal,
   validateInput,
   type ApprovalInput,
   type ApprovalState,
@@ -47,15 +46,15 @@ describe("approval workflow", () => {
         }],
       });
 
-      await handle.signal(approveSignal, "alice");
+      await handle.signal(approvalDecisionSignal, { action: "approve", actor: "alice", scope: [] });
       await waitForLevel(handle, "director");
-      await handle.signal(delegateSignal, "bob", "dana");
-      await handle.signal(approveSignal, "dana");
+      await handle.signal(approvalDecisionSignal, { action: "delegate", actor: "bob", scope: [], delegate: "dana" });
+      await handle.signal(approvalDecisionSignal, { action: "approve", actor: "dana", scope: [] });
       await waitForLevel(handle, "controller");
 
       await environment.sleep(3_600_001);
       await waitForApprover(handle, "cfo");
-      await handle.signal(approveSignal, "cfo");
+      await handle.signal(approvalDecisionSignal, { action: "approve", actor: "cfo", scope: [] });
 
       const result = await handle.result();
       expect(result.status).toBe("approved");
@@ -70,31 +69,27 @@ describe("approval workflow", () => {
   }, 30_000);
 });
 
-describe("party decision without a registered activity", () => {
-  it("fails the workflow with a clear error instead of retrying forever", async () => {
+describe("approval decision in the first activation", () => {
+  it("applies a decision signalled with the start, before the workflow named the approver", async () => {
     const environment = await TestWorkflowEnvironment.createTimeSkipping();
     try {
-      const taskQueue = "approval-unbuilt-test";
+      const taskQueue = "approval-first-activation";
       const worker = await Worker.create({
         connection: environment.nativeConnection,
         taskQueue,
-        activities: { unrelated: async () => undefined },
         workflowsPath: fileURLToPath(new URL("../src/workflows.ts", import.meta.url)),
       });
       await worker.runUntil(async () => {
-        const handle = await environment.client.workflow.start(approvalWorkflow, {
-          workflowId: "approval:unbuilt-1",
+        const handle = await environment.client.workflow.signalWithStart(approvalWorkflow, {
+          workflowId: "approval:first-activation",
           taskQueue,
-          args: [{
-            requestId: "unbuilt-1",
-            entityType: "credit_limit",
-            requester: "rita",
-            partyChange: { changeId: "chg-9", tenantId: "t1", legalEntityId: "le1" },
-            levels: [{ id: "l1", approver: "alice", escalationApprover: "finance", slaMs: 3_600_000 }],
-          }],
+          args: [{ requestId: "first-activation", entityType: "purchase-requisition", levels: [{ id: "l1", approver: "alice", escalationApprover: "cfo", slaMs: 3_600_000 }] }],
+          signal: approvalDecisionSignal,
+          signalArgs: [{ action: "reject", actor: "alice", scope: [] }],
         });
-        await handle.signal(approveSignal, "alice");
-        await expect(handle.result()).rejects.toHaveProperty("cause.message", expect.stringContaining("not built"));
+        const result = await handle.result();
+        expect(result.status).toBe("rejected");
+        expect(result.history).toEqual([{ action: "rejected", levelId: "l1", actor: "alice" }]);
       });
     } finally {
       await environment.teardown();

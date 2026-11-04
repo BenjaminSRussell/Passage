@@ -13,6 +13,8 @@ serviceMonitor: { enabled: false }
 # Tunables are validated at startup (internal/config); defaults follow PRD §2.15.13.
 reporting:
   maxLagSeconds: 30
+  # Seconds the lag stays above maxLagSeconds before lag.exceeded (lag-check job).
+  lagAlertSeconds: 60
   cellKeyLimit: 50000
   pageSize: 500
   retentionClosedYears: 7
@@ -25,3 +27,31 @@ reporting:
   # {traceId} slot, e.g. https://grafana.example/explore?traceId={traceId}.
   # Empty shows trace ids without a link.
   traceUrl: ""
+# Service identity the consumer and the API sign ledger requests with
+# (PASSAGE_SERVICE_NAME=finreport). When signingKeySecret is set, the API pods
+# also mount it and get LEDGER_URL, which turns on balance verification
+# (POST /balance-verifications); without it those routes answer 503.
+# The ledger must hold finreport's public key and the platform must seed the
+# finreport-ledger principal and the finreport to ledger grant (NOT-IMPLEMENTED.md).
+serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""
+serviceUrls:
+  ledger: ""
+# Kafka consumer of dev.passage.ledger.journal.posted.v1 (FR-15.1): one pod per
+# partition set; ordering across partitions is handled by the read model.
+consumer:
+  enabled: false
+  replicaCount: 1
+  kafka:
+    brokers: ""
+    group: reporting-balances
+    username: finreport-consumer
+    secret: ""
+# Lag alert (FR-15.1): `finreport lag-check` every minute for each tenant
+# listed; one lag.exceeded.v1 per episode. Runs as an in-process system actor,
+# so it needs no authz seed and no signing key.
+lagCheck:
+  enabled: false
+  schedule: "* * * * *"
+  tenantIds: []

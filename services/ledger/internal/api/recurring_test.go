@@ -27,7 +27,8 @@ type recurringFake struct {
 	genNew    bool
 }
 
-func (f *fakeStore) ListRecurring(_ context.Context, _ string) ([]store.RecurringJournal, error) {
+func (f *fakeStore) ListRecurring(_ context.Context, _ string, page store.Page) ([]store.RecurringJournal, error) {
+	f.listPage = page
 	return f.rec.list, f.err
 }
 

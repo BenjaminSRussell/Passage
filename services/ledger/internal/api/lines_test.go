@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -14,7 +15,18 @@ import (
 
 func (f *fakeStore) ListLines(_ context.Context, in store.LineFilter) (store.LinePage, error) {
 	f.lineFilters = append(f.lineFilters, in)
+	if n := len(f.linePages); n > 0 {
+		return f.linePages[min(len(f.lineFilters)-1, n-1)], f.err
+	}
 	return f.linePage, f.err
+}
+
+func (f *fakeStore) PlanLineExport(_ context.Context, in store.LineFilter, n int) (store.LineExportPlan, error) {
+	if n != maxExportRows {
+		return store.LineExportPlan{}, errors.New("plan asked for the wrong cap")
+	}
+	f.planFilter = &in
+	return f.linePlan, f.planErr
 }
 
 const (

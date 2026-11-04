@@ -46,6 +46,9 @@ describe("planning module", () => {
       "/planning/runs/compare",
       "/planning/runs/new",
       "/planning/forecast",
+      "/planning/allocation-keys",
+      "/planning/allocation-keys/new",
+      "/planning/allocation-keys/:code",
       "/planning/calculators",
       "/planning/coverage-groups",
       "/planning/coverage-groups/new",
@@ -79,6 +82,7 @@ describe("planning module", () => {
     expect(duties["/planning/runs/new"]).toBe("planning.run");
     expect(duties["/planning/forecast"]).toBe("planning.read");
     expect(duties["/planning/calculators"]).toBe("planning.read");
+    expect(duties["/planning/allocation-keys"]).toBe("planning.read");
     expect(duties["/planning/net-requirements"]).toBe("planning.read");
     expect(duties["/planning/supply-schedule"]).toBe("planning.read");
     expect(duties["/planning/coverage-groups"]).toBe("planning.read");

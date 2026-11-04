@@ -73,6 +73,11 @@ channels:
     messages:
       orderUnscheduled:
         $ref: '#/components/messages/OrderUnscheduled'
+  parameters:
+    address: passage.scheduling.parameters
+    messages:
+      parametersUpdated:
+        $ref: '#/components/messages/ParametersUpdated'
 operations:
   publishRunCompleted:
     action: send
@@ -164,12 +169,27 @@ operations:
     messages:
       - $ref: '#/channels/order/messages/orderUnscheduled'
     summary: A planner took an order off the schedule
+  publishParametersUpdated:
+    action: send
+    channel: { $ref: '#/channels/parameters' }
+    messages:
+      - $ref: '#/channels/parameters/messages/parametersUpdated'
+    summary: The tenant's scheduling parameters changed
 components:
   messages:
+    ParametersUpdated:
+      title: Scheduling parameters updated
+      summary: >-
+        The tenant's scheduling parameters (default mode, direction and finite, drag snap, propagation limits)
+        changed; runs and moves after the event use the new values.
+      name: dev.passage.scheduling.parameters.updated.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/ParametersUpdatedData'
     OperationUpdated:
       title: Operation updated
       summary: >-
-        An operation's duration, dates, priority, setup minutes or candidate resources changed. When jobsRemoved is true
+        An operation's duration, dates, priority, setup minutes, queue times or candidate resources changed. When jobsRemoved is true
         its non-firmed jobs left the schedule and the operation is open again; consumers holding its dates from
         job.scheduled drop them until the next run places it.
       name: dev.passage.scheduling.operation.updated.v1
@@ -298,11 +318,12 @@ components:
       required: [runId, scope, operations, makespanMinutes, totalLatenessMinutes]
       properties:
         runId: { type: string, format: uuid }
-        scope: { type: string, enum: [site, selection, order] }
+        scope: { type: string, enum: [site, selection, order, rollback] }
         operations: { type: integer }
         makespanMinutes: { type: integer }
         totalLatenessMinutes: { type: integer }
         solverStatus: { type: [string, 'null'] }
+        rolledBackToRunId: { type: string, format: uuid, description: The run a rollback restored; present for scope rollback only. }
     JobScheduledData:
       type: object
       required: [jobId, orderId, operNumber, orderRef, operationRef, resourceId, start, end, changeoverMinutes, runId, firmed]
@@ -494,7 +515,7 @@ components:
         version: { type: integer }
     OperationUpdatedData:
       type: object
-      required: [operationId, orderId, operNumber, minutes, dueAt, readyAt, priority, resourceIds, version, jobsRemoved]
+      required: [operationId, orderId, operNumber, minutes, dueAt, readyAt, priority, resourceIds, version, jobsRemoved, queueBeforeMinutes, queueAfterMinutes, quantity, overlapQuantity]
       properties:
         operationId: { type: string, format: uuid }
         orderId: { type: string, format: uuid }
@@ -509,6 +530,10 @@ components:
           items: { type: string, format: uuid }
         version: { type: integer }
         jobsRemoved: { type: boolean }
+        queueBeforeMinutes: { type: integer, minimum: 0, maximum: 10080, description: Elapsed wait in front of the operation in minutes (FR-23.3); no resource is booked. }
+        queueAfterMinutes: { type: integer, minimum: 0, maximum: 10080, description: Elapsed wait behind the operation in minutes (FR-23.3); no resource is booked. }
+        quantity: { type: [string, 'null'], description: Order quantity the operation works on as a decimal string; null when not set. }
+        overlapQuantity: { type: [string, 'null'], description: Part of the quantity that must be through before the next operation may start (BR-23.5); null when there is no overlap. }
     OperationDeletedData:
       type: object
       required: [operationId, orderId, operNumber, jobsRemoved]
@@ -530,3 +555,14 @@ components:
           type: array
           description: Operation numbers a firmed job holds; they stay where they are.
           items: { type: integer }
+    ParametersUpdatedData:
+      type: object
+      required: [defaultMode, defaultDirection, defaultFinite, dragSnapMinutes, propagationOrders, propagationLevels, version]
+      properties:
+        defaultMode: { type: string, enum: [jobs, operations] }
+        defaultDirection: { type: string, enum: [forward, backward] }
+        defaultFinite: { type: boolean }
+        dragSnapMinutes: { type: integer }
+        propagationOrders: { type: integer }
+        propagationLevels: { type: integer }
+        version: { type: integer }

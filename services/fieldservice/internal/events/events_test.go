@@ -80,6 +80,15 @@ func TestPayloadsMatchAsyncAPI(t *testing.T) {
 	if got, want := keysOf(t, AgreementVisitRecordedData{}), requiredOf(t, "AgreementVisitRecorded"); !reflect.DeepEqual(got, want) {
 		t.Errorf("AgreementVisitRecordedData keys %v, AsyncAPI requires %v", got, want)
 	}
+	if got, want := keysOf(t, AssignmentChangedData{}), requiredOf(t, "AssignmentChanged"); !reflect.DeepEqual(got, want) {
+		t.Errorf("AssignmentChangedData keys %v, AsyncAPI requires %v", got, want)
+	}
+	if got, want := keysOf(t, DispatchPublishedData{}), requiredOf(t, "DispatchPublished"); !reflect.DeepEqual(got, want) {
+		t.Errorf("DispatchPublishedData keys %v, AsyncAPI requires %v", got, want)
+	}
+	if AssignmentChanged != "dev.passage.service.assignment.changed.v1" || DispatchPublished != "dev.passage.service.dispatch.published.v1" {
+		t.Errorf("event types %s, %s", AssignmentChanged, DispatchPublished)
+	}
 	if AgreementChanged != "dev.passage.service.agreement.changed.v1" || AgreementVisitRecorded != "dev.passage.service.agreementvisit.recorded.v1" {
 		t.Errorf("event types %s, %s", AgreementChanged, AgreementVisitRecorded)
 	}

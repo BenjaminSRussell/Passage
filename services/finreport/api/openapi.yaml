@@ -235,7 +235,7 @@ paths:
         '400': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
         '409':
-          description: idempotency_key_in_flight - the same key is being processed; retry
+          description: REPORT-0004 REPORT_STALE - the read model of the ledger is further behind than reporting.max_lag_seconds; repeat with allowStale true to accept a stale result. Also idempotency_key_in_flight - the same key is being processed; retry
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
@@ -448,14 +448,24 @@ paths:
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
-  /v1/reporting/lag:
+  /v1/reporting/balance-verifications:
     get:
-      operationId: getLag
-      summary: Read-model high-water mark per ledger (FR-15.1)
-      x-passage-duty: reporting.statement.view
+      operationId: listBalanceVerifications
+      summary: Balance verifications against the ledger, newest first (FR-15.1)
+      x-passage-duty: reporting.audit.view
+      parameters:
+        - name: ledgerId
+          in: query
+          required: false
+          description: Only checks of this ledger
+          schema: {type: string, format: uuid}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 200}
       responses:
         '200':
-          description: Lag rows
+          description: Stored checks, newest first
           content:
             application/json:
               schema:
@@ -464,7 +474,132 @@ paths:
                 properties:
                   items:
                     type: array
+                    items: {$ref: '#/components/schemas/BalanceVerificationSummary'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '503':
+          description: Balance verification is not configured (REPORT-0036); LEDGER_URL or the service signing key is missing
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+    post:
+      operationId: createBalanceVerification
+      summary: Compare the read model of a ledger with the ledger trial balance (FR-15.1)
+      description: >-
+        Reads the net per account of the read model (accounting currency, every period) and the ledger's trial
+        balance (GET /v1/ledger/balances, acting as the service for the ledger's legal entity), and stores the
+        comparison. A difference is a result (status differs), not an error. If the read model's high-water mark
+        moved while the ledger was read, or entries of the ledger wait ahead of the mark, the status is
+        inconclusive: repeat the check. Writes balance.verified.v1 to the outbox in the same transaction.
+        The ledger sees only the finreport service's duty, so the caller must also hold the ledger duty
+        ledger.balance.read (403 AUTH-0003 otherwise).
+      x-passage-duty: reporting.balance.verify
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ledgerId]
+              additionalProperties: false
+              properties:
+                ledgerId: {type: string, format: uuid}
+                legalEntityId: {type: string, format: uuid, description: Optional assertion; must equal the legal entity that owns the ledger}
+      responses:
+        '201':
+          description: Stored check
+          headers:
+            Location:
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BalanceVerification'}
+        '200':
+          description: Replay - the check stored for this Idempotency-Key and the same request
+          headers:
+            Location:
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BalanceVerification'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403':
+          description: AUTH-0003 - the caller lacks reporting.balance.verify or ledger.balance.read
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '404':
+          description: REPORT-0031 - the caller sees no read-model rows of the ledger
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '422':
+          description: Invalid body, idempotency_key_reuse, REPORT-0032 (legal entity mismatch) or REPORT-0036 (the ledger does not know the ledger)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '502':
+          description: REPORT-0036 - the ledger did not answer, refused (401, 403, 429, 5xx) or answered something that is not the ledger's trial balance; nothing is stored, retry with the same Idempotency-Key
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '503':
+          description: REPORT-0036 - balance verification is not configured (no LEDGER_URL or signing key) or finreport cannot sign a ledger request for this ledger (service grant not seeded, or no single owning legal entity)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /v1/reporting/balance-verifications/{id}:
+    get:
+      operationId: getBalanceVerification
+      summary: One stored balance verification with its differing accounts
+      description: >-
+        The differing accounts carry ledger balances; a caller without ledger.balance.read gets them withheld
+        (diffs empty, diffsWithheld true).
+      x-passage-duty: reporting.audit.view
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: The check
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BalanceVerification'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404':
+          description: REPORT-0035 - the check does not exist or is outside the caller's legal-entity scope
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '503':
+          description: Balance verification is not configured (REPORT-0036)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /v1/reporting/lag:
+    get:
+      operationId: getLag
+      summary: Read-model high-water mark per ledger (FR-15.1)
+      x-passage-duty: reporting.statement.view
+      responses:
+        '200':
+          description: Lag rows and the lag gate in force
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, maxLagSeconds]
+                properties:
+                  items:
+                    type: array
                     items: {$ref: '#/components/schemas/LagRow'}
+                  maxLagSeconds: {type: integer, description: The lag gate (reporting.max_lag_seconds); a row with a larger lagSeconds is stale}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
   /v1/reporting/definitions/{code}:retire:
     parameters:
       - $ref: '#/components/parameters/Code'
@@ -715,6 +850,283 @@ paths:
         '412': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
         '428': {$ref: '#/components/responses/Problem'}
+  /v1/reporting/row-sets:
+    get:
+      operationId: listRowSets
+      summary: RowSets ordered by code (FR-15.2)
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: RowSets
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/RowSet'}
+  /v1/reporting/row-sets/{code}:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    get:
+      operationId: getRowSet
+      summary: Read a row set
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: The row set
+          headers:
+            ETag:
+              description: RowSet revision, echoed in If-Match to replace it
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RowSet'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: putRowSet
+      summary: Create or replace a row set (idempotent)
+      description: >-
+        The rows follow the row rules of a definition: at most 2,000, unique codes, totals over known rows, no cycles. Field errors answer 422 REPORT-0038 for the code and name and
+        REPORT-0002 for expressions and references. updatedBy is read-only and
+        ignored when sent.
+      x-passage-duty: reporting.definition.maintain
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: Required when the row set exists; the ETag last read. Missing gives 428, stale gives 412 conflict_version. Without If-Match the PUT only creates; when two requests create the same code at once, one succeeds and the other answers 409 conflict_version.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RowSet'}
+      responses:
+        '200':
+          description: Saved row set
+          headers:
+            ETag:
+              description: New revision
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RowSet'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
+  /v1/reporting/trees:
+    get:
+      operationId: listTrees
+      summary: Reporting trees ordered by code (FR-15.4)
+      description: >-
+        Maintainers and statement runners (the run form picks a tree and a unit from this list,
+        which carries every tree's units) list trees; reading one tree and changing it take
+        reporting.definition.maintain.
+      x-passage-duty: reporting.definition.maintain or reporting.statement.run
+      responses:
+        '200':
+          description: Trees
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Tree'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /v1/reporting/trees/{code}:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    get:
+      operationId: getTree
+      summary: Read a reporting tree
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: The tree
+          headers:
+            ETag:
+              description: Tree revision, echoed in If-Match to replace it
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Tree'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: putTree
+      summary: Create or replace a reporting tree (idempotent)
+      description: >-
+        A tree groups the values of one dimension attribute into reporting units with parents
+        for roll-up (FR-15.4). At most 500 units nested up to 10 levels; unit codes are unique;
+        every parent exists; a unit without child units lists at least one value; a dimension
+        value belongs to at most one unit, so a roll-up never counts it twice. Field errors
+        answer 422 REPORT-0039. updatedBy is read-only and ignored when sent. A statement run
+        names a tree and a unit (POST /runs with tree).
+      x-passage-duty: reporting.definition.maintain
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: Required when the tree exists; the ETag last read. Missing gives 428, stale gives 412 conflict_version. Without If-Match the PUT only creates; when two requests create the same code at once, one succeeds and the other answers 409 conflict_version.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Tree'}
+      responses:
+        '200':
+          description: Saved tree
+          headers:
+            ETag:
+              description: New revision
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Tree'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
+  /v1/reporting/column-sets:
+    get:
+      operationId: listColumnSets
+      summary: ColumnSets ordered by code (FR-15.3)
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: ColumnSets
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ColumnSet'}
+  /v1/reporting/column-sets/{code}:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    get:
+      operationId: getColumnSet
+      summary: Read a column set
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: The column set
+          headers:
+            ETag:
+              description: ColumnSet revision, echoed in If-Match to replace it
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ColumnSet'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: putColumnSet
+      summary: Create or replace a column set (idempotent)
+      description: >-
+        The columns follow the column rules of a definition: at most 60, supported period expressions, CALC columns over known columns, no cycles. Field errors answer 422 REPORT-0038 for the code and name and
+        REPORT-0002 for expressions and references. updatedBy is read-only and
+        ignored when sent.
+      x-passage-duty: reporting.definition.maintain
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: Required when the column set exists; the ETag last read. Missing gives 428, stale gives 412 conflict_version. Without If-Match the PUT only creates; when two requests create the same code at once, one succeeds and the other answers 409 conflict_version.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ColumnSet'}
+      responses:
+        '200':
+          description: Saved column set
+          headers:
+            ETag:
+              description: New revision
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ColumnSet'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
+  /v1/reporting/column-set-templates:
+    get:
+      operationId: listColumnSetTemplates
+      summary: Comparative column sets the service ships (FR-15.3)
+      description: >-
+        Period against prior year, year to date against prior year to date,
+        period against prior period, and all of them, each with variance and
+        variance percent CALC columns (current minus comparative, and that over
+        the comparative times 100, on displayed values: blank when the
+        comparative is zero, sign reversed when it is below zero). Save one under a tenant code with
+        PUT /column-sets/{code} to edit it, or name it as the columnSet of
+        a compose request.
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: Templates ordered by code
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ColumnSet'}
+  /v1/reporting/definitions:compose:
+    post:
+      operationId: composeDefinition
+      summary: Build a definition draft body from a row set and a column set
+      description: >-
+        Copies the rows of the row set and the columns of the column set (a
+        stored one, else a shipped template of that code) into a draft body and
+        validates it. Nothing is stored: save the body with PUT /definitions/{code}.
+        An unknown set answers 404 REPORT-0037, an invalid result 422.
+      x-passage-duty: reporting.definition.maintain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name, rowSet, columnSet]
+              properties:
+                code: {type: string}
+                name: {type: string}
+                kind: {type: string, enum: [trial_balance, balance_sheet, income_statement, cash_flow, custom], description: Defaults to custom}
+                includeAdjustmentPeriods: {type: boolean}
+                rowSet: {type: string, description: Code of a stored row set}
+                columnSet: {type: string, description: Code of a stored column set or of a shipped template}
+      responses:
+        '200':
+          description: The draft body, version 0
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Definition'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
   /v1/reporting/audit-trail:
     get:
       operationId: listAuditTrail
@@ -960,6 +1372,29 @@ components:
         periodExpr: {type: string, pattern: '^(P|P-[0-9]+|YTD|PY|PYTD|Q|FY|CALC)$'}
         currencyType: {type: string, enum: [acct, rpt, txn], description: Omitted means the run's currency type}
         calcExpression: {type: string}
+    RowSet:
+      type: object
+      required: [code, name, rows]
+      properties:
+        code: {type: string, pattern: '^[A-Z][A-Z0-9-]{1,29}$'}
+        name: {type: string, minLength: 1, maxLength: 120}
+        rows:
+          type: array
+          maxItems: 2000
+          items: {$ref: '#/components/schemas/Row'}
+        updatedBy: {type: string, readOnly: true}
+    ColumnSet:
+      type: object
+      required: [code, name, columns]
+      properties:
+        code: {type: string, pattern: '^[A-Z][A-Z0-9-]{1,29}$'}
+        name: {type: string, minLength: 1, maxLength: 120}
+        description: {type: string, maxLength: 500}
+        columns:
+          type: array
+          maxItems: 60
+          items: {$ref: '#/components/schemas/Column'}
+        updatedBy: {type: string, readOnly: true}
     RunRequest:
       type: object
       required: [definition, ledgerId, currencyType, period, calendar]
@@ -976,6 +1411,8 @@ components:
           items: {$ref: '#/components/schemas/Period'}
         includeAdjustmentPeriods: {type: boolean, description: Counts adjustment periods in P-n, YTD, Q and FY even when the definition does not}
         hierarchy: {$ref: '#/components/schemas/HierarchyRun'}
+        tree: {$ref: '#/components/schemas/TreeRun'}
+        allowStale: {type: boolean, default: false, description: "Accepts a read model behind reporting.max_lag_seconds. The run completes with a REPORT-0004 warning in checks instead of being refused with 409 REPORT-0004."}
     HierarchyRun:
       type: object
       required: [code]
@@ -992,6 +1429,45 @@ components:
         normalBalance: {type: string, enum: [debit, credit], description: How amounts are presented; debit when omitted}
         accountFrom: {type: string, description: Dimension hierarchies only; with accountTo, limits the rows to this account range}
         accountTo: {type: string}
+    Tree:
+      type: object
+      required: [code, name, attribute, units]
+      properties:
+        code: {type: string, pattern: '^[A-Z][A-Z0-9-]{1,29}$'}
+        name: {type: string, minLength: 1, maxLength: 120}
+        attribute: {type: string, description: The dimension attribute the units group, such as profit_center}
+        units:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: {$ref: '#/components/schemas/TreeUnit'}
+        updatedBy: {type: string, readOnly: true}
+    TreeUnit:
+      type: object
+      required: [code, name]
+      properties:
+        code: {type: string, pattern: '^[A-Z0-9][A-Z0-9_.-]{0,29}$'}
+        name: {type: string, minLength: 1, maxLength: 120}
+        parent: {type: string, description: Code of the parent unit; omitted for a top-level unit}
+        values:
+          type: array
+          maxItems: 200
+          description: Values of the tree's dimension attribute that belong to this unit itself; the unit also covers the values of every unit below it
+          items: {type: string, minLength: 1, maxLength: 60}
+    TreeRun:
+      type: object
+      required: [code]
+      description: >-
+        Limits the run to the balances whose dimension attribute value belongs to a unit of a
+        reporting tree, rolled up over the units below it (FR-15.4). One run per unit gives one
+        report per unit; the run of a parent unit is the roll-up of its children. Without
+        unit the run covers the whole tree and carries a REPORT-0041 warning when the ledger
+        has balances for values the tree does not list or without a value. The rows and
+        columns come from the definition; a cash flow definition cannot be limited to a unit
+        (REPORT-0040), nor can an unknown tree or unit.
+      properties:
+        code: {type: string, description: Tree code}
+        unit: {type: string, description: Unit code; omitted or empty means the whole tree}
     Period:
       type: object
       required: [year, no, quarter]
@@ -1021,6 +1497,13 @@ components:
           properties:
             code: {type: string}
             version: {type: integer}
+        tree:
+          type: object
+          description: Present when the run is limited to a unit of a reporting tree
+          properties:
+            code: {type: string}
+            unit: {type: string, description: Empty for the whole tree}
+            revision: {type: integer, description: Tree revision the run used}
         cellCount: {type: integer}
         requestedBy: {type: string}
         startedAt: {type: string, format: date-time}
@@ -1106,12 +1589,55 @@ components:
         sourceUri: {type: string, description: Passage route (/...) or http(s) URL of the source document}
         traceId: {type: string}
         traceUrl: {type: string, description: Trace viewer link when REPORTING_TRACE_URL is set}
+    BalanceVerificationSummary:
+      type: object
+      required: [id, ledgerId, status, hwmBefore, hwmAfter, entriesPending, accountsCompared, diffCount, requestedBy, verifiedAt]
+      properties:
+        id: {type: string, format: uuid}
+        ledgerId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        status:
+          type: string
+          enum: [matched, differs, inconclusive]
+          description: >-
+            matched - every account equal at a steady mark with nothing waiting; differs - at least one account
+            differs at a steady mark with nothing waiting (this can still be an entry the consumer has not received);
+            inconclusive - the read model's mark moved during the check, or entries waited ahead of it
+        hwmBefore: {type: integer, format: int64, description: Read model high-water mark when the read model was read}
+        hwmAfter: {type: integer, format: int64, description: Read model high-water mark after the ledger answered}
+        entriesPending: {type: integer, description: Most entries seen waiting ahead of the mark before or after the ledger call}
+        accountsCompared: {type: integer}
+        diffCount: {type: integer, description: Accounts that differ (diffs holds at most 500)}
+        requestedBy: {type: string}
+        verifiedAt: {type: string, format: date-time}
+    BalanceVerification:
+      allOf:
+        - $ref: '#/components/schemas/BalanceVerificationSummary'
+        - type: object
+          required: [diffs]
+          properties:
+            diffs:
+              type: array
+              description: The first 500 differing accounts by account; empty when diffsWithheld
+              items:
+                type: object
+                required: [account, readModel, ledger, difference]
+                properties:
+                  account: {type: string}
+                  readModel: {type: string, description: 'Net (debit minus credit) in the read model, six places'}
+                  ledger: {type: string, description: 'Net in the ledger trial balance, six places'}
+                  difference: {type: string, description: readModel minus ledger}
+            diffsWithheld: {type: boolean, description: True when the caller lacks ledger.balance.read and the ledger amounts are not served}
     LagRow:
       type: object
       properties:
         ledgerId: {type: string, format: uuid}
         postingSequence: {type: integer, format: int64}
         updatedAt: {type: string, format: date-time}
+        entriesApplied: {type: integer, format: int64, description: Journal entries the ledger consumer has applied for this ledger}
+        entriesPending: {type: integer, format: int64, description: Journal entries that arrived ahead of the high-water mark and wait for an earlier entry; a count that stays above zero means an entry is missing}
+        lagSeconds: {type: integer, format: int64, description: 'Age in seconds of the oldest entry waiting for an earlier one; 0 when none waits. A lower bound: entries the consumer has not received (consumer stopped or behind, an event lost with nothing after it) do not count'}
+        hwmLedger: {type: integer, format: int64, description: Highest posting sequence seen for the ledger, applied or waiting}
     StandardDefinition:
       type: object
       required: [code, name, kind, rows, columns]

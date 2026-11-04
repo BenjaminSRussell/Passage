@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Passage Migration Factory API
-  version: 0.6.0
+  version: 0.7.0
   description: |
     Slices 1 to 7 of wave 49 (PSG-49): the pack catalog, open_items and project_wip pack runs
     with control totals, quarantine release and the legacy cross-reference lookup, the
@@ -141,6 +141,102 @@ paths:
         "409":
           $ref: "#/components/responses/Problem"
         "413":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/migration/tolerances:
+    get:
+      operationId: listTolerances
+      summary: Configured control-total tolerances (FR-49.2, migration.tolerance.<pack>)
+      description: |
+        The tolerances set for the tenant. A control total without a row compares at 0.00.
+      x-passage-duty: MigrationView
+      responses:
+        "200":
+          description: Every configured tolerance, ordered by pack and total.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Tolerance"
+        "403":
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: putTolerance
+      summary: Set the tolerance of a pack's control total (FR-49.2)
+      description: |
+        Sets the allowance for one money total of a pack (`total` such as `open_items.amount`), or
+        for every money total of the pack that has none of its own (`total` is `*`). A money total
+        is an amount in one currency, and the tolerance is the absolute delta allowed on each such
+        total in its own currency; deltas are never added across currencies. Counts, quantities and
+        the project_wip measures always compare at 0.00, so a tolerance for them, or for a pack
+        without money totals, is 422 MIG-0001. A positive amount needs a reason. The amount applies
+        to the pack runs started after the change: a delta inside it is WITHIN_TOLERANCE and does not
+        hold the run back from RECONCILED. A run already started keeps the tolerance it reconciled
+        with, also through quarantine releases. Pass the stored `version` to change an existing
+        tolerance and omit it for a new one (409 MIG-0006 when stale or when another first
+        configuration won). Writes dev.passage.migration.tolerance.configured.v1.
+      x-passage-duty: MigrationReview
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [pack, total, amount]
+              properties:
+                pack:
+                  type: string
+                  enum: [open_items, gl_balances, onhand, open_orders, bank_balances]
+                  description: A pack with money totals; the others are 422 MIG-0001.
+                total:
+                  type: string
+                  enum:
+                    - "*"
+                    - open_items.amount
+                    - open_items.amount_by_account
+                    - gl_balances.balance
+                    - gl_balances.trial_balance
+                    - gl_balances.control_account
+                    - onhand.value
+                    - onhand.value_entity
+                    - onhand.inventory_account
+                    - open_orders.open_value
+                    - bank_balances.balance
+                    - bank_balances.balance_entity
+                  description: A money total of the pack, or `*` for all of them.
+                amount:
+                  type: string
+                  description: Decimal string, at least 0, at most 6 decimals, in the currency of each total it applies to. 0 returns the total to an exact comparison.
+                reason:
+                  type: string
+                  description: Required when the amount is above 0.
+                version:
+                  type: integer
+                  minimum: 1
+      responses:
+        "200":
+          description: The tolerance after the change.
+          headers:
+            Idempotent-Replayed:
+              $ref: "#/components/headers/IdempotentReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tolerance"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
@@ -780,7 +876,8 @@ paths:
       summary: Start a runbook step so the runbook times it against its planned duration (FR-49.6)
       description: |
         Records the start time and the user. A step starts once (MIG-0001 on a second start or a
-        done step) and obeys the go/no-go sequencing of completion (CUT-1601). A rolled-back
+        done step) and obeys the go/no-go sequencing of completion (CUT-1601) and, in a per-entity
+        runbook, the per-entity prerequisites (CUT-1609, see expandByEntity). A rolled-back
         plan's steps cannot be started (MIG-0004). When `version` is given and the plan has moved
         on, the request is rejected with MIG-0006. No event is written; completion writes
         dev.passage.cutover.step.completed.v1.
@@ -833,7 +930,8 @@ paths:
       description: |
         Writes dev.passage.cutover.step.completed.v1. Without `actualDurationMin` the duration
         is measured in whole minutes from the step's start; a step that was never started needs
-        it (MIG-0001). When `version` is given and the plan has moved on, the request is
+        it (MIG-0001). In a per-entity runbook a step waits for its prerequisites (CUT-1609, see
+        expandByEntity). When `version` is given and the plan has moved on, the request is
         rejected with MIG-0006. A rolled-back plan's steps cannot be completed (MIG-0004).
       x-passage-duty: CutoverStepOwner
       parameters:
@@ -1715,6 +1813,28 @@ components:
         releasedAt:
           type: string
           format: date-time
+    Tolerance:
+      type: object
+      required: [pack, total, amount, reason, version, updatedBy, updatedAt]
+      properties:
+        pack:
+          type: string
+        total:
+          type: string
+          description: Control total name, or `*` for the pack default.
+        amount:
+          type: string
+          description: Decimal string.
+        reason:
+          type: string
+        version:
+          type: integer
+          minimum: 1
+        updatedBy:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
     PackRun:
       type: object
       required: [runId, pack, sourceSystem, sourceCompany, cutoffTs, inputHash, status, recordsIn, recordsLoaded, recordsQuarantined, alreadyPresent, version, createdAt]
@@ -2309,6 +2429,19 @@ components:
             recorded duration) become this plan's planned durations (FR-49.6). Entries in
             `rehearsalDurationsMin` override them. 422 when that plan has no measured duration, 404 when it
             does not exist.
+        expandByEntity:
+          type: boolean
+          default: false
+          description: |
+            Generate the per-entity runbook (D5a, the `fx-cutover-plan` shape). The plan-wide pack load
+            steps are replaced by, for each legal entity, a freeze, an extract, a load and a reconcile step
+            per pack, an entity reconciliation, a controller sign-off and a hypercare check: 15 plan-wide
+            steps, plus 2 per entity and pack, plus 5 per entity (3 entities and 9 packs give 84). At most
+            50 entities (MIG-0001 above). None of the per-entity steps is a go/no-go step, but each waits
+            for its own entity's earlier steps (CUT-1609 on start and complete): the extract for the freeze,
+            each pack load for the freeze and the extract, a pack reconcile for that load, the entity
+            reconciliation for every pack reconcile, the sign-off for the entity reconciliation and the
+            hypercare check for the sign-off. The plan-wide go/no-go steps wait for every entity's sign-off.
     Step:
       type: object
       required: [seq, offsetMin, name, owner, plannedDurationMin, actualDurationMin, status, goNoGo]
@@ -2333,6 +2466,9 @@ components:
           type: boolean
         pack:
           type: string
+        entity:
+          type: string
+          description: The legal entity a per-entity step covers (a plan generated with expandByEntity); absent for plan-wide steps.
         completedBy:
           type: string
         completedAt:

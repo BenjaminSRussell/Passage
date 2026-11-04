@@ -43,8 +43,20 @@ type ChangeRequest struct {
 	RequestedShipDate *string      `json:"requestedShipDate,omitempty"`
 	Lines             []LineChange `json:"lines"`
 	// Approver is set by the API when the caller holds SalesOrderApprove: such
-	// a change applies at once even for a customer whose changes need approval.
+	// a change applies at once even for a customer whose changes need approval,
+	// unless the customer names its approvers and the caller is not one.
 	Approver bool `json:"-"`
+
+	// AddLines adds lines to the order and RemoveLines cancels lines by number
+	// (FR-27.9). ListingOverrideReason lets a caller with SalesOrderApprove
+	// accept an added line the product listing denies (FR-27.15). The unexported
+	// fields are what prepareChange computed for AddLines; they are not stored.
+	AddLines              []NewLine `json:"addLines,omitempty"`
+	RemoveLines           []int     `json:"removeLines,omitempty"`
+	ListingOverrideReason string    `json:"listingOverrideReason,omitempty"`
+	added                 []Line
+	addedSupp             []Line
+	overrides             []ListingOverride
 }
 
 // OrderVersion is one entry of an order's change history: the version a change
@@ -165,6 +177,17 @@ func ApplyChange(o *Order, req ChangeRequest) ([]domain.FieldChange, []int, erro
 		l.LineNet = net
 		diff = append(diff, lineDiff...)
 	}
+	removeDiff, err := applyRemovals(o, req, index, seen)
+	if err != nil {
+		return nil, nil, err
+	}
+	diff = append(diff, removeDiff...)
+	addDiff, promised, err := applyAdditions(o, req)
+	if err != nil {
+		return nil, nil, err
+	}
+	diff = append(diff, addDiff...)
+	repromised = append(repromised, promised...)
 	followDiff, followed, err := followParents(o)
 	if err != nil {
 		return nil, nil, err
@@ -173,10 +196,22 @@ func ApplyChange(o *Order, req ChangeRequest) ([]domain.FieldChange, []int, erro
 	if o.Status == domain.OrderConfirmed {
 		repromised = append(repromised, followed...)
 	}
+	if len(req.RemoveLines) > 0 && !hasActiveLine(o.Lines) {
+		return nil, nil, errNoActiveLine
+	}
 	if len(diff) > 0 {
 		o.NetTotal = netOf(o.Lines)
 	}
 	return diff, repromised, nil
+}
+
+func hasActiveLine(lines []Line) bool {
+	for _, l := range lines {
+		if l.LineStatus != domain.LineCancelled {
+			return true
+		}
+	}
+	return false
 }
 
 func netOf(lines []Line) decimal.Decimal {
@@ -261,22 +296,48 @@ func (s *Postgres) ChangeOrder(ctx context.Context, id string, version int, req 
 		if !domain.CanChange(o.Status) {
 			return problem(http.StatusUnprocessableEntity, CodeNotChangeable, fmt.Sprintf("order is %s and cannot be changed", o.Status))
 		}
-		if o.Status == domain.OrderConfirmed && !req.Approver {
-			required, err := changeApprovalRequired(ctx, tx, p.TenantID, o.LegalEntityID, o.CustomerID)
+		// countMoved is the value this change adds to the order's unapproved
+		// change value, when it goes through only because it stays under the
+		// customer's threshold.
+		var countMoved *decimal.Decimal
+		if o.Status == domain.OrderConfirmed {
+			pol, err := loadApprovalPolicy(ctx, tx, p.TenantID, o.LegalEntityID, o.CustomerID)
 			if err != nil {
 				return err
 			}
-			if required {
-				pending, err := submitChangeRequestTx(ctx, tx, p.TenantID, o, req, actor, now)
-				if err != nil {
-					return err
+			// The approve duty skips approval only for a user the customer's
+			// named group (if any) lets decide; anyone else is routed like a
+			// requester, or the group would be bypassed by a direct PATCH.
+			if !(req.Approver && pol.MayDecide(actor)) {
+				required := pol.Required
+				if pol.UsesThreshold(o.Currency) {
+					change, err := changeValue(ctx, tx, p.TenantID, o, req, now)
+					if err != nil {
+						return err
+					}
+					moved, err := unapprovedChangeValue(ctx, tx, p.TenantID, id)
+					if err != nil {
+						return err
+					}
+					required = pol.NeedsApproval(moved, change, o.Currency)
+					countMoved = &change
 				}
-				out = o
-				out.PendingChange = pending
-				return nil
+				if required {
+					pending, err := submitChangeRequestTx(ctx, tx, p.TenantID, o, req, actor, now)
+					if err != nil {
+						return err
+					}
+					out = o
+					out.PendingChange = pending
+					return nil
+				}
 			}
 		}
 		out, err = applyChangeTx(ctx, tx, p.TenantID, o, id, req, actor, now)
+		if err == nil && countMoved != nil && countMoved.IsPositive() {
+			_, err = tx.Exec(ctx, `update sales_order set unapproved_change_value = unapproved_change_value + $3::numeric where tenant_id = $1 and id = $2`,
+				p.TenantID, id, countMoved.String())
+		}
 		return err
 	})
 	return out, err
@@ -301,6 +362,10 @@ func applyChangeTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, id 
 			}
 			o.dates = rule
 		}
+		req, err := prepareChange(ctx, tx, tenantID, o, req, actor, now)
+		if err != nil {
+			return err
+		}
 		diff, repromised, err := ApplyChange(&o, req)
 		if err != nil {
 			return problem(http.StatusUnprocessableEntity, CodeInvalidChange, err.Error())
@@ -309,6 +374,12 @@ func applyChangeTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, id 
 			out = o
 			return nil
 		}
+		if err := insertAddedLinesTx(ctx, tx, tenantID, o); err != nil {
+			return err
+		}
+		if err := appendListingOverridesTx(ctx, tx, tenantID, id, req.overrides); err != nil {
+			return err
+		}
 		if o.isOneTime() && o.NetTotal.GreaterThan(oldTotal) {
 			if err := checkOneTimeLimitTx(ctx, tx, p.TenantID, o.LegalEntityID, o.NetTotal, o.Currency); err != nil {
 				return err
@@ -316,7 +387,11 @@ func applyChangeTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, id 
 		}
 		reallocate := map[int]bool{}
 		for _, l := range o.Lines {
-			b := before[l.LineNo]
+			b, existed := before[l.LineNo]
+			if !existed {
+				reallocate[l.LineNo] = true // an added line draws like a confirmed one
+				continue
+			}
 			if !l.Quantity.Equal(b.Quantity) || l.RequestedShipDate != b.RequestedShipDate || l.LineStatus != b.LineStatus {
 				reallocate[l.LineNo] = true
 			}
@@ -364,6 +439,9 @@ func applyChangeTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, id 
 		}); err != nil {
 			return err
 		}
+		if err := followRemovalsTx(ctx, tx, p.TenantID, o, before, req, actor, next, now); err != nil {
+			return err
+		}
 		checked := false
 		if o.Status == domain.OrderConfirmed && o.OrderType != domain.OrderTypeJournal && o.NetTotal.GreaterThan(oldTotal) {
 			if checked, err = checksAtTx(ctx, tx, p.TenantID, o.LegalEntityID, domain.CheckPointConfirm); err != nil {
@@ -382,7 +460,7 @@ func applyChangeTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, id 
 			}
 		}
 		loaded, err := loadOrder(ctx, tx, p.TenantID, id, false)
-		loaded.Warnings = notices
+		loaded.Warnings = append(notices, addedSupplementaryNotices(o)...)
 		out = loaded
 		return err
 	}()
@@ -419,12 +497,21 @@ func (s *Postgres) CancelOrderAs(ctx context.Context, id string, version int, re
 		if !domain.CanCancel(o.Status) {
 			return problem(http.StatusUnprocessableEntity, CodeNotCancellable, fmt.Sprintf("order is %s and cannot be cancelled", o.Status))
 		}
-		if o.Status == domain.OrderConfirmed && !approver {
-			required, err := changeApprovalRequired(ctx, tx, p.TenantID, o.LegalEntityID, o.CustomerID)
+		if o.Status == domain.OrderConfirmed {
+			pol, err := loadApprovalPolicy(ctx, tx, p.TenantID, o.LegalEntityID, o.CustomerID)
 			if err != nil {
 				return err
 			}
-			if required {
+			moved := decimal.Zero
+			if pol.UsesThreshold(o.Currency) {
+				if moved, err = unapprovedChangeValue(ctx, tx, p.TenantID, id); err != nil {
+					return err
+				}
+			}
+			// A cancellation moves the whole total, on top of what earlier
+			// unapproved changes moved. The approve duty skips approval only for
+			// a user the customer's named group (if any) lets decide.
+			if !(approver && pol.MayDecide(actor)) && pol.NeedsApproval(moved, o.NetTotal, o.Currency) {
 				if _, err := cancelLineIDs(o); err != nil {
 					return err
 				}
@@ -496,6 +583,29 @@ func cancelOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, rea
 		OrderID: id, Version: next, LineIDs: lineIDs, Reason: reason, Actor: actor,
 	}); err != nil {
 		return Order{}, err
+	}
+	// Fulfillment follows order.remaindercancelled, not order.cancelled: a
+	// confirmed order may hold released shipments, so each line cancelled now
+	// goes out with nothing kept (draft and open orders have none).
+	if o.Status == domain.OrderConfirmed {
+		cancelling := make(map[string]bool, len(lineIDs))
+		for _, lid := range lineIDs {
+			cancelling[lid] = true
+		}
+		var lines []salesevents.RemainderLine
+		for _, l := range o.Lines {
+			if cancelling[l.ID] {
+				lines = append(lines, salesevents.RemainderLine{LineID: l.ID, LineNo: l.LineNo, ProductID: l.ProductID,
+					CancelledQty: l.Quantity.String(), KeptQty: "0", LineStatus: domain.LineCancelled})
+			}
+		}
+		if len(lines) > 0 {
+			if err := enqueue(ctx, tx, "order", id, salesevents.OrderRemainderCancelled, tenantID, salesevents.OrderRemainderCancelledData{
+				OrderID: id, LegalEntityID: o.LegalEntityID, Version: next, Status: "CANCELLED", Lines: lines, Reason: reason, Actor: actor,
+			}); err != nil {
+				return Order{}, err
+			}
+		}
 	}
 	return loadOrder(ctx, tx, tenantID, id, false)
 }

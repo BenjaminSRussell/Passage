@@ -49,6 +49,12 @@ func newLogger(w io.Writer) *slog.Logger {
 }
 
 func run(ctx context.Context, getenv func(string) string) error {
+	// PASSAGE_SERVICE_NAME and PASSAGE_SERVICE_PUBLIC_KEYS admit workflow-ts's
+	// signed tender calls (transport.tender.execute); a malformed key list stops
+	// the service here instead of rejecting every service token.
+	if err := tenant.ConfigureServiceVerifier(getenv); err != nil {
+		return err
+	}
 	databaseURL := getenv("DATABASE_URL")
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")

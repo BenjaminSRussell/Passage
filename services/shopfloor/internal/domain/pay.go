@@ -83,7 +83,32 @@ type Calculation struct {
 	Location   *time.Location
 	Rules      Rules
 	Rate       decimal.Decimal
-	Currency   string
+	// RateSteps are the worker's dated cost rates (D2a'): a day is priced at the latest step
+	// effective on or before its date, and at Rate for days before the first step.
+	RateSteps []RateStep
+	Currency  string
+}
+
+// RateStep is a cost rate that takes effect on a date and holds until the next step.
+type RateStep struct {
+	From time.Time
+	Rate decimal.Decimal
+}
+
+// rateOn is the hourly rate of the day d: the latest step whose date is not after d, or the
+// worker's base Rate. Steps are compared by calendar date (year, month, day) and need not be sorted.
+func (c Calculation) rateOn(d time.Time) decimal.Decimal {
+	dy, dm, dd := d.Date()
+	day := time.Date(dy, dm, dd, 0, 0, 0, 0, time.UTC)
+	rate, best := c.Rate, time.Time{}
+	for _, st := range c.RateSteps {
+		y, m, n := st.From.Date()
+		from := time.Date(y, m, n, 0, 0, 0, 0, time.UTC)
+		if !from.After(day) && (best.IsZero() || from.After(best)) {
+			rate, best = st.Rate, from
+		}
+	}
+	return rate
 }
 
 // Run turns worker-days into pay lines. Days may span several pay weeks; the
@@ -124,7 +149,7 @@ func (c Calculation) Run(days []Day) ([]DayPay, error) {
 		switch {
 		case hours.IsZero():
 		case d.Date.Weekday() == time.Sunday:
-			dp.Lines = append(dp.Lines, c.line(TypeOvertime20, hours, c.Rules.SundayMultiplier, sources))
+			dp.Lines = append(dp.Lines, c.line(d.Date, TypeOvertime20, hours, c.Rules.SundayMultiplier, sources))
 		default:
 			base := decimal.Min(hours, c.Rules.DailyThreshold)
 			daily := hours.Sub(base)
@@ -132,10 +157,10 @@ func (c Calculation) Run(days []Day) ([]DayPay, error) {
 			keptBase := decimal.Min(base, room)
 			weekBase = weekBase.Add(keptBase)
 			if keptBase.IsPositive() {
-				dp.Lines = append(dp.Lines, c.line(TypeBase, keptBase, decimal.NewFromInt(1), sources))
+				dp.Lines = append(dp.Lines, c.line(d.Date, TypeBase, keptBase, decimal.NewFromInt(1), sources))
 			}
 			if over := daily.Add(base.Sub(keptBase)); over.IsPositive() {
-				dp.Lines = append(dp.Lines, c.line(TypeOvertime15, over, c.Rules.OvertimeMultiplier, sources))
+				dp.Lines = append(dp.Lines, c.line(d.Date, TypeOvertime15, over, c.Rules.OvertimeMultiplier, sources))
 			}
 		}
 		dp.Lines = append(dp.Lines, c.premiumLines(d, sources)...)
@@ -152,8 +177,8 @@ func (c Calculation) profileAt(t time.Time) Profile {
 	return c.Profile
 }
 
-func (c Calculation) line(typ string, hours, mult decimal.Decimal, sources []string) PayLine {
-	amount := money.Amount{Value: c.Rate, Currency: c.Currency}.Mul(hours.Mul(mult))
+func (c Calculation) line(date time.Time, typ string, hours, mult decimal.Decimal, sources []string) PayLine {
+	amount := money.Amount{Value: c.rateOn(date), Currency: c.Currency}.Mul(hours.Mul(mult))
 	return PayLine{Type: typ, Hours: hours, Multiplier: mult, Amount: amount.Value, Sources: sources}
 }
 
@@ -170,7 +195,7 @@ func (c Calculation) premiumLines(d Day, sources []string) []PayLine {
 		}
 		hours := decimal.NewFromInt(int64(span / time.Second)).Div(decimal.NewFromInt(3600)).Round(2)
 		if hours.IsPositive() {
-			out = append(out, c.line(TypeShiftPremium, hours, w.Premium, sources))
+			out = append(out, c.line(d.Date, TypeShiftPremium, hours, w.Premium, sources))
 		}
 	}
 	return out

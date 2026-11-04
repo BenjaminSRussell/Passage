@@ -31,11 +31,13 @@ var (
 	OperationUpdated = events.Type(Context, "operation", "updated", 1)
 	OperationDeleted = events.Type(Context, "operation", "deleted", 1)
 	OrderUnscheduled = events.Type(Context, "order", "unscheduled", 1)
+
+	ParametersUpdated = events.Type(Context, "parameters", "updated", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CampaignCompleted, CampaignCancelled, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated, CapacityBlockUpdated, NetworkUpdated, OrderImportRecorded, OperationUpdated, OperationDeleted, OrderUnscheduled}
+	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CampaignCompleted, CampaignCancelled, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated, CapacityBlockUpdated, NetworkUpdated, OrderImportRecorded, OperationUpdated, OperationDeleted, OrderUnscheduled, ParametersUpdated}
 }
 
 type RunCompletedData struct {
@@ -45,6 +47,8 @@ type RunCompletedData struct {
 	MakespanMinutes      int     `json:"makespanMinutes"`
 	TotalLatenessMinutes int     `json:"totalLatenessMinutes"`
 	SolverStatus         *string `json:"solverStatus"`
+	// RolledBackToRunID is the run a rollback restored (scope rollback only).
+	RolledBackToRunID string `json:"rolledBackToRunId,omitempty"`
 }
 
 // JobScheduledData is one placed operation. ChangeoverMinutes is the
@@ -245,6 +249,15 @@ type OperationUpdatedData struct {
 	ResourceIDs []string `json:"resourceIds"`
 	Version     int      `json:"version"`
 	JobsRemoved bool     `json:"jobsRemoved"`
+	// QueueBeforeMinutes and QueueAfterMinutes are the elapsed waits around
+	// the operation (FR-23.3).
+	QueueBeforeMinutes int `json:"queueBeforeMinutes"`
+	QueueAfterMinutes  int `json:"queueAfterMinutes"`
+	// Quantity and OverlapQuantity are the decimal strings of the overlap rule
+	// (BR-23.5): the next operation may start once OverlapQuantity of Quantity
+	// is through; null when the operation has none.
+	Quantity        *string `json:"quantity"`
+	OverlapQuantity *string `json:"overlapQuantity"`
 }
 
 // OperationDeletedData announces a removed operation and whether its jobs left
@@ -263,4 +276,16 @@ type OrderUnscheduledData struct {
 	OrderID    string `json:"orderId"`
 	Operations []int  `json:"operations"`
 	KeptFirmed []int  `json:"keptFirmed"`
+}
+
+// ParametersUpdatedData announces changed scheduling parameters: runs and
+// moves after the event take the new defaults and propagation limits.
+type ParametersUpdatedData struct {
+	DefaultMode       string `json:"defaultMode"`
+	DefaultDirection  string `json:"defaultDirection"`
+	DefaultFinite     bool   `json:"defaultFinite"`
+	DragSnapMinutes   int    `json:"dragSnapMinutes"`
+	PropagationOrders int    `json:"propagationOrders"`
+	PropagationLevels int    `json:"propagationLevels"`
+	Version           int    `json:"version"`
 }

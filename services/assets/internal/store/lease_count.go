@@ -133,7 +133,11 @@ func loadLease(ctx context.Context, tx pgx.Tx, tenantID, id string, forUpdate bo
 	if err := mods.Err(); err != nil {
 		return Lease{}, err
 	}
+	mods.Close()
 	markSuperseded(l.Modifications)
+	if l.Termination, err = loadTermination(ctx, tx, tenantID, id); err != nil {
+		return Lease{}, err
+	}
 	return l, nil
 }
 
@@ -184,6 +188,9 @@ func (s *Postgres) ModifyLease(ctx context.Context, leaseID string, in LeaseModi
 			if lease.Version != in.Version {
 				return LeaseModificationResult{}, httpx.NewProblem(http.StatusPreconditionFailed, CodeVersionConflict,
 					fmt.Sprintf("the lease changed since you read it (version %d, current %d); reload and try again", in.Version, lease.Version))
+			}
+			if err := domain.CanMaintainRecognized(lease.Election); err != nil {
+				return LeaseModificationResult{}, err
 			}
 			if err := domain.CanModify(lease.Status); err != nil {
 				return LeaseModificationResult{}, err

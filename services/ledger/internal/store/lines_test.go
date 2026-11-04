@@ -180,3 +180,37 @@ func TestPostgres_ListLines_DocumentIDFindsOnlyThatDocumentsEntry(t *testing.T) 
 		t.Fatalf("unknown document: %+v, %v", page.Items, err)
 	}
 }
+
+// TestPostgres_PlanLineExport_CutsAtTheNthLineUnderTheSameFilterAndScope finds where a capped export
+// ends: the n-th matching line when another follows, nil when the result fits, with the ledger's
+// dimension attributes and the same tenant and legal-entity refusal as ListLines.
+func TestPostgres_PlanLineExport_CutsAtTheNthLineUnderTheSameFilterAndScope(t *testing.T) {
+	e, _ := setup(t)
+	postLinesFixture(t, e)
+
+	plan, err := e.store.PlanLineExport(e.ctx, LineFilter{LedgerID: e.ledger.ID}, 4)
+	if err != nil || plan.Boundary == nil || *plan.Boundary != (LineCursor{PostingSequence: 2, LineNumber: 2}) {
+		t.Fatalf("6 lines capped at 4: %+v, %v", plan.Boundary, err)
+	}
+	if len(plan.DimensionAttributes) != len(e.ledger.DimensionAttributes) {
+		t.Fatalf("attributes %v, want the ledger's %v", plan.DimensionAttributes, e.ledger.DimensionAttributes)
+	}
+	if plan, err := e.store.PlanLineExport(e.ctx, LineFilter{LedgerID: e.ledger.ID}, 6); err != nil || plan.Boundary != nil {
+		t.Fatalf("6 lines capped at 6 fit: %+v, %v", plan.Boundary, err)
+	}
+	// The filter and the cursor apply: two D100 lines, the cut after the first of them.
+	f := LineFilter{LedgerID: e.ledger.ID, Dimensions: map[string]string{"DEPT": "D100"}}
+	if plan, err := e.store.PlanLineExport(e.ctx, f, 1); err != nil || plan.Boundary == nil || *plan.Boundary != (LineCursor{PostingSequence: 1, LineNumber: 1}) {
+		t.Fatalf("filtered: %+v, %v", plan.Boundary, err)
+	}
+	f.After = &LineCursor{PostingSequence: 1, LineNumber: 1}
+	if plan, err := e.store.PlanLineExport(e.ctx, f, 1); err != nil || plan.Boundary != nil {
+		t.Fatalf("filtered after the first: %+v, %v", plan.Boundary, err)
+	}
+	if _, err := e.store.PlanLineExport(principalCtx(testkit.TenantID(2), ""), LineFilter{LedgerID: e.ledger.ID}, 4); problemCode(err) != "LEDGER_NOT_FOUND" {
+		t.Fatalf("another tenant: %v", err)
+	}
+	if _, err := e.store.PlanLineExport(principalCtx(e.tenant, ids.New()), LineFilter{LedgerID: e.ledger.ID}, 4); problemCode(err) != "LEDGER_NOT_FOUND" {
+		t.Fatalf("another legal entity: %v", err)
+	}
+}

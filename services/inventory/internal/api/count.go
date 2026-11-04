@@ -61,26 +61,29 @@ type countPlanRequest struct {
 	SamplePct      string `json:"samplePct"`
 	// MinDaysSinceCount selects only rows not counted for this many days (absent: every row).
 	MinDaysSinceCount *int `json:"minDaysSinceCount"`
+	// IncludeVendorOwned counts vendor-owned stock too (quantity-only variance).
+	IncludeVendorOwned bool `json:"includeVendorOwned"`
 }
 
 type countPlanResponse struct {
-	ID                string    `json:"id"`
-	LegalEntityID     string    `json:"legalEntityId"`
-	Name              string    `json:"name"`
-	Warehouse         string    `json:"warehouse,omitempty"`
-	Currency          string    `json:"currency"`
-	Unit              string    `json:"unit"`
-	TolerancePct      string    `json:"tolerancePct"`
-	ToleranceValue    string    `json:"toleranceValue"`
-	Blind             bool      `json:"blind"`
-	FreezeStock       bool      `json:"freezeStock"`
-	FourEyes          bool      `json:"fourEyes"`
-	LocationFrom      string    `json:"locationFrom,omitempty"`
-	LocationTo        string    `json:"locationTo,omitempty"`
-	ABCClass          string    `json:"abcClass,omitempty"`
-	SamplePct         string    `json:"samplePct,omitempty"`
-	MinDaysSinceCount int       `json:"minDaysSinceCount,omitempty"`
-	CreatedAt         time.Time `json:"createdAt"`
+	ID                 string    `json:"id"`
+	LegalEntityID      string    `json:"legalEntityId"`
+	Name               string    `json:"name"`
+	Warehouse          string    `json:"warehouse,omitempty"`
+	Currency           string    `json:"currency"`
+	Unit               string    `json:"unit"`
+	TolerancePct       string    `json:"tolerancePct"`
+	ToleranceValue     string    `json:"toleranceValue"`
+	Blind              bool      `json:"blind"`
+	FreezeStock        bool      `json:"freezeStock"`
+	FourEyes           bool      `json:"fourEyes"`
+	LocationFrom       string    `json:"locationFrom,omitempty"`
+	LocationTo         string    `json:"locationTo,omitempty"`
+	ABCClass           string    `json:"abcClass,omitempty"`
+	SamplePct          string    `json:"samplePct,omitempty"`
+	MinDaysSinceCount  int       `json:"minDaysSinceCount,omitempty"`
+	IncludeVendorOwned bool      `json:"includeVendorOwned"`
+	CreatedAt          time.Time `json:"createdAt"`
 }
 
 type countLineRequest struct {
@@ -201,7 +204,7 @@ func (a *API) createCountPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	out, inserted, err := a.store.CreateCountPlan(r.Context(), key, domain.CountPlan{LegalEntityID: req.LegalEntityID, Name: req.Name,
 		Warehouse: req.Warehouse, Currency: req.Currency, Unit: req.Unit, TolerancePct: pct, ToleranceValue: val, Blind: req.Blind,
-		FreezeStock: req.FreezeStock, FourEyes: req.FourEyes, LocationFrom: req.LocationFrom, LocationTo: req.LocationTo, ABCClass: req.ABCClass, SamplePct: sample, MinDaysSinceCount: minDays})
+		FreezeStock: req.FreezeStock, FourEyes: req.FourEyes, LocationFrom: req.LocationFrom, LocationTo: req.LocationTo, ABCClass: req.ABCClass, SamplePct: sample, MinDaysSinceCount: minDays, IncludeVendorOwned: req.IncludeVendorOwned})
 	if err != nil {
 		a.failed(w, r, "create count plan", err)
 		return
@@ -444,7 +447,7 @@ func decimalOr(raw string, def decimal.Decimal) (decimal.Decimal, error) {
 func toCountPlanResponse(p domain.CountPlan) countPlanResponse {
 	return countPlanResponse{ID: p.ID, LegalEntityID: p.LegalEntityID, Name: p.Name, Warehouse: p.Warehouse, Currency: p.Currency,
 		Unit: p.Unit, TolerancePct: p.TolerancePct.String(), ToleranceValue: p.ToleranceValue.String(), Blind: p.Blind, FreezeStock: p.FreezeStock, FourEyes: p.FourEyes,
-		LocationFrom: p.LocationFrom, LocationTo: p.LocationTo, ABCClass: p.ABCClass, SamplePct: samplePct(p.SamplePct), MinDaysSinceCount: p.MinDaysSinceCount, CreatedAt: p.CreatedAt}
+		LocationFrom: p.LocationFrom, LocationTo: p.LocationTo, ABCClass: p.ABCClass, SamplePct: samplePct(p.SamplePct), MinDaysSinceCount: p.MinDaysSinceCount, IncludeVendorOwned: p.IncludeVendorOwned, CreatedAt: p.CreatedAt}
 }
 
 func samplePct(d decimal.Decimal) string {

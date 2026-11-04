@@ -215,6 +215,34 @@ export async function listConditionRecords(filter: RecordFilter = {}, signal?: A
   return body.items;
 }
 
+/** The CSV file of the trade agreements export, as the service wrote it. */
+export interface RecordsExport {
+  csv: string;
+  filename: string;
+  /** Rows in the file, without the header. */
+  count: number;
+  /** True when more records matched than the file holds. */
+  truncated: boolean;
+}
+
+/** GET /condition-records:export - the records that match the filter as CSV (up to 50000 rows). */
+export async function exportConditionRecords(filter: RecordFilter = {}, signal?: AbortSignal): Promise<RecordsExport> {
+  const q = new URLSearchParams();
+  for (const [name, value] of Object.entries(filter)) {
+    if (value !== undefined && value !== "" && name !== "limit") q.set(name, String(value));
+  }
+  const text = q.toString();
+  const res = await sendRaw(`/condition-records:export${text ? `?${text}` : ""}`, { headers: { Accept: "text/csv" } }, signal);
+  const csv = await res.text();
+  const disposition = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "");
+  return {
+    csv,
+    filename: disposition?.[1] ?? "trade-agreements.csv",
+    count: Math.max(parseCsv(csv).filter((row) => row.some((cell) => cell !== "")).length - 1, 0),
+    truncated: res.headers.get("X-Passage-Truncated") === "true",
+  };
+}
+
 export function getConditionRecord(id: string, signal?: AbortSignal): Promise<ConditionRecord> {
   return send<ConditionRecord>(`/condition-records/${encodeURIComponent(id)}`, {}, signal);
 }
@@ -253,6 +281,132 @@ async function items<T>(path: string, signal?: AbortSignal): Promise<T[]> {
     throw new PricingApiError(0, "COM-0001", "The response has no items");
   }
   return body.items;
+}
+
+export interface CompareRequest extends ResolveRequest {
+  /** The baseline procedure version. */
+  procedureIdA: string;
+  /** The version compared with the baseline. */
+  procedureIdB: string;
+}
+
+export interface LineComparison {
+  lineNo: number;
+  netUnitPriceA: string;
+  netUnitPriceB: string;
+  netUnitPriceDelta: string;
+  lineNetA: string;
+  lineNetB: string;
+  lineNetDelta: string;
+  errorCodeA?: string;
+  errorCodeB?: string;
+  appliedOnlyA: string[];
+  appliedOnlyB: string[];
+  changed: boolean;
+}
+
+export interface Comparison {
+  identical: boolean;
+  subtotalDelta: string;
+  totalDiscountDelta: string;
+  surchargeDelta: string;
+  orderNetDelta: string;
+  changedLines: number;
+  lines: LineComparison[];
+}
+
+export interface CompareResponse {
+  a: ResolveResponse;
+  b: ResolveResponse;
+  /** Deltas are version B minus version A. */
+  comparison: Comparison;
+}
+
+/** POST /compare - price one request under two procedure versions (FR-26.13); DRAFT versions are allowed. */
+export function comparePrices(body: CompareRequest): Promise<CompareResponse> {
+  return post<CompareResponse>("/compare?explain=false", body);
+}
+
+export type PriceListScope = "CUSTOMER" | "GROUP" | "ALL";
+
+export interface PriceListItem extends ConditionRecord {
+  scope: PriceListScope;
+}
+
+export interface PriceListQuery {
+  legalEntityId: string;
+  customerId: string;
+  customerGroupId?: string;
+  currency: string;
+  asOf: string;
+  type?: ConditionType | "";
+}
+
+export interface NetPriceQuery {
+  legalEntityId: string;
+  customerId: string;
+  customerGroupId?: string;
+  currency: string;
+  asOf: string;
+  productId?: string;
+  productGroupId?: string;
+  /** Prices with the procedure assigned to this channel (the default assignment when absent). */
+  salesChannel?: string;
+}
+
+export interface NetPriceApplied {
+  type: ConditionType;
+  recordId: string;
+  /** A statistical step: reported, but it did not change the net. */
+  statistical?: boolean;
+}
+
+export interface NetPriceBreak {
+  quantity: string;
+  unitPrice: string;
+  netUnitPrice: string;
+  lineNet: string;
+  priceRecordId?: string;
+  applied: NetPriceApplied[];
+  errorCode?: string;
+}
+
+export interface NetPriceRow {
+  productKind: ConditionRecord["productKind"];
+  productKey: string;
+  variant: string;
+  unit: string;
+  breaks: NetPriceBreak[];
+}
+
+export interface NetPriceList {
+  rows: NetPriceRow[];
+  /** True when more rows apply than the service prices (500 rows and 2,000 breaks per response). */
+  truncated: boolean;
+}
+
+export interface PriceList {
+  items: PriceListItem[];
+  /** True when more records apply than the service returns (it caps the list at 1000 entries). */
+  truncated: boolean;
+}
+
+/** GET /price-list - the ACTIVE records that apply to a customer on a date, most specific first. */
+export async function getPriceList(q: PriceListQuery, signal?: AbortSignal): Promise<PriceList> {
+  const body = await send<{ items?: PriceListItem[]; truncated?: boolean }>(`/price-list${query({ ...q })}`, {}, signal);
+  if (!Array.isArray(body.items)) {
+    throw new PricingApiError(0, "COM-0001", "The response has no items");
+  }
+  return { items: body.items, truncated: body.truncated === true };
+}
+
+/** GET /price-list/net-prices - the net price at each quantity break of the customer's price list rows. */
+export async function getNetPriceList(q: NetPriceQuery, signal?: AbortSignal): Promise<NetPriceList> {
+  const body = await send<{ rows?: NetPriceRow[]; truncated?: boolean }>(`/price-list/net-prices${query({ ...q })}`, {}, signal);
+  if (!Array.isArray(body.rows)) {
+    throw new PricingApiError(0, "COM-0001", "The response has no rows");
+  }
+  return { rows: body.rows, truncated: body.truncated === true };
 }
 
 // ---- Price journals (FR-26.9): mass create, update and delete; validate, post atomically, reverse.
@@ -412,6 +566,76 @@ export function getRebateAgreement(id: string, signal?: AbortSignal): Promise<Re
   return send<RebateAgreement>(`/rebates/agreements/${encodeURIComponent(id)}`, {}, signal);
 }
 
+/** One accrual row of a rebate statement (OpenAPI RebateStatementLine). */
+export interface RebateStatementLine {
+  invoiceLineId: string;
+  invoiceDate: string;
+  /** Absent on a RETRO_DELTA row, which has no basis of its own. */
+  basisValue?: string;
+  basisQuantity?: string;
+  amount: string;
+  status: RebateAccrual["status"];
+  retroactive: boolean;
+  source: "INVOICE" | "REPLAYED" | "RETRO_DELTA";
+}
+
+/** GET /rebates/agreements/{id}/statement (PRD §5.26.15): one period's header, lines and footer. */
+export interface RebateStatement {
+  agreementId: string;
+  name: string;
+  partyRole: RebatePartyRole;
+  customerId?: string;
+  customerGroupId?: string;
+  vendorId?: string;
+  basis: "NET_AMOUNT" | "QUANTITY";
+  currency: string;
+  period: string;
+  /** The tier in force at the period's cumulative basis; absent below the first threshold. */
+  tier?: RebateTier;
+  basisValue: string;
+  basisQuantity: string;
+  targetAmount: string;
+  accruedAmount: string;
+  /** The sum of every accrual row of the period, listed or not. */
+  linesAccruedAmount: string;
+  settledAmount: string;
+  openAmount: string;
+  /** The tier's amount on the whole period, the accrued total and the sum of the rows agree, and the rows' basis adds up. */
+  reconciled: boolean;
+  lineCount: number;
+  linesTruncated: boolean;
+  lines: RebateStatementLine[];
+}
+
+export function getRebateStatement(id: string, period: string, signal?: AbortSignal): Promise<RebateStatement> {
+  return send<RebateStatement>(`/rebates/agreements/${encodeURIComponent(id)}/statement${query({ period })}`, {}, signal);
+}
+
+/** A CSV document as the service wrote it, with the file name it suggested. */
+export interface CsvDocument {
+  csv: string;
+  filename: string;
+  /** True when the service cut the document (X-Passage-Truncated). */
+  truncated: boolean;
+}
+
+async function csvDocument(path: string, fallbackName: string, signal?: AbortSignal): Promise<CsvDocument> {
+  const res = await sendRaw(path, { headers: { Accept: "text/csv" } }, signal);
+  const csv = await res.text();
+  const disposition = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "");
+  return { csv, filename: disposition?.[1] ?? fallbackName, truncated: res.headers.get("X-Passage-Truncated") === "true" };
+}
+
+/** GET /rebates/agreements/{id}/statement?format=csv - the statement lines and footer rows. */
+export function exportRebateStatement(id: string, period: string, signal?: AbortSignal): Promise<CsvDocument> {
+  return csvDocument(`/rebates/agreements/${encodeURIComponent(id)}/statement${query({ period, format: "csv" })}`, `rebate-statement-${id}-${period}.csv`, signal);
+}
+
+/** GET /journals/{id}/audit-extract - every line with before and after values; 409 PRC-0064 until the journal is posted. */
+export function exportJournalAudit(id: string, signal?: AbortSignal): Promise<CsvDocument> {
+  return csvDocument(`/journals/${encodeURIComponent(id)}/audit-extract${query({ format: "csv" })}`, `price-journal-${id}-audit.csv`, signal);
+}
+
 export function createRebateAgreement(body: RebateAgreementInput, key: string = newKey()): Promise<RebateAgreement> {
   return post<RebateAgreement>("/rebates/agreements", body, key);
 }
@@ -424,6 +648,11 @@ export function reviseRebateAgreement(id: string, body: { version: number; name?
 /** POST /rebates/agreements/{id}:close - end an ACTIVE agreement on closeDate (the last day invoices accrue). */
 export function closeRebateAgreement(id: string, version: number, closeDate: string, key: string = newKey()): Promise<RebateAgreement> {
   return post<RebateAgreement>(`/rebates/agreements/${encodeURIComponent(id)}:close`, { version, closeDate }, key);
+}
+
+/** POST /rebates/agreements/{id}:reopen - make a CLOSED agreement ACTIVE again with a later last day. */
+export function reopenRebateAgreement(id: string, version: number, validTo: string, key: string = newKey()): Promise<RebateAgreement> {
+  return post<RebateAgreement>(`/rebates/agreements/${encodeURIComponent(id)}:reopen`, { version, validTo }, key);
 }
 
 /** GET /rebates/accruals - accrual rows of an agreement, optionally for one period (2027-03, 2027-Q1, 2027). */
@@ -811,6 +1040,21 @@ export function createCampaign(body: CampaignInput, key: string = newKey()): Pro
 /** POST /campaigns/{id}:kill - the campaign's records drop out of the next resolve. */
 export function killCampaign(id: string, version: number, key: string = newKey()): Promise<Campaign> {
   return post<Campaign>(`/campaigns/${encodeURIComponent(id)}:kill`, { version }, key);
+}
+
+/** The terms POST /campaigns/{id}:revise may change; an omitted field stays as it is. */
+export interface CampaignRevision {
+  name?: string;
+  validFrom?: string;
+  validTo?: string;
+  /** An empty string means every customer. */
+  targetCustomerGroup?: string;
+  budget?: string;
+}
+
+/** POST /campaigns/{id}:revise - change name, validity, target group or budget; the next resolve uses them. */
+export function reviseCampaign(id: string, version: number, change: CampaignRevision, key: string = newKey()): Promise<Campaign> {
+  return post<Campaign>(`/campaigns/${encodeURIComponent(id)}:revise`, { version, ...change }, key);
 }
 
 /** POST /campaigns/{id}:restore - the records rejoin the next resolve inside the campaign validity. */
@@ -1232,18 +1476,65 @@ export interface PricingParameters {
   legalEntityId: string;
   /** When true, the user who created a price journal cannot post it (PRC-0057). */
   journalFourEyes: boolean;
+  /** Document date that prices a resolve sent without a pricingDate (BR-26.2). */
+  pricingDateBasis: PricingDateBasis;
+  /** What TOTAL_DISC applies to: the line nets, or the line amounts at the unit price. */
+  totalDiscountBasis: TotalDiscountBasis;
+  /** Smart rounding table of journal adjustments, lowest band first; the last band has no upTo. */
+  smartRoundingBands: SmartRoundingBand[];
+  /** Default of searchNext on a new condition record that leaves it out (BR-26.1 step 5). */
+  priceSearchMode?: PriceSearchMode;
+  /** SURCHARGE threshold per currency (FR-26.6); a currency not named keeps the reference threshold (250 USD, 200 EUR). */
+  smallOrderThresholds?: Record<string, string>;
   /** 0 when the legal entity has no stored parameters. */
   version: number;
   updatedBy?: string;
   updatedAt?: string;
 }
 
+export type PriceSearchMode = "FIRST_MATCH" | "SEARCH_NEXT";
+export type PricingDateBasis = "SHIP_DATE" | "ORDER_DATE" | "DELIVERY_DATE";
+export type TotalDiscountBasis = "AFTER_LINE_DISC" | "GROSS";
+export interface SmartRoundingBand {
+  upTo?: string;
+  ending: string;
+}
+
 export function getPricingParameters(legalEntityId: string, signal?: AbortSignal): Promise<PricingParameters> {
   return send<PricingParameters>(`/parameters${query({ legalEntityId })}`, {}, signal);
 }
 
-export function setPricingParameters(body: { legalEntityId: string; journalFourEyes: boolean; version: number }, key: string = newKey()): Promise<PricingParameters> {
+export type PricingParametersInput = Omit<PricingParameters, "updatedBy" | "updatedAt" | "priceSearchMode" | "smallOrderThresholds"> & {
+  priceSearchMode: PriceSearchMode;
+  smallOrderThresholds: Record<string, string>;
+};
+
+export function setPricingParameters(body: PricingParametersInput, key: string = newKey()): Promise<PricingParameters> {
   return send<PricingParameters>("/parameters", { method: "PUT", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) });
+}
+
+// ---- Pricing parameters per tenant (PRD 5.26.13, scope tenant).
+
+export type CampaignKillSwitchEffect = "NEXT_RESOLVE" | "IMMEDIATE_CACHE_FLUSH";
+
+export interface PricingTenantParameters {
+  /** Lifetime of the tenant's record snapshots, 10 to 600 seconds; 0 follows the deployment. */
+  cacheTtlSeconds: number;
+  campaignKillSwitchEffect: CampaignKillSwitchEffect;
+  /** 0 when the tenant has no stored parameters. */
+  version: number;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export function getPricingTenantParameters(signal?: AbortSignal): Promise<PricingTenantParameters> {
+  return send<PricingTenantParameters>("/tenant-parameters", {}, signal);
+}
+
+export type PricingTenantParametersInput = Omit<PricingTenantParameters, "updatedBy" | "updatedAt">;
+
+export function setPricingTenantParameters(body: PricingTenantParametersInput, key: string = newKey()): Promise<PricingTenantParameters> {
+  return send<PricingTenantParameters>("/tenant-parameters", { method: "PUT", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) });
 }
 
 // ---- Procedure determination (PRD 5.26.13, reference_procedure): which procedure each sales channel prices with.

@@ -35,6 +35,10 @@ const (
 	AndonScrapRate   = "scrap-rate"
 	AndonQualityFail = "quality-fail"
 
+	// Downtime causes: a downtime the machine reported (DOWN) or idle time the sweep found (BR-25.6).
+	DowntimeCauseDown = "down"
+	DowntimeCauseIdle = "idle"
+
 	// MaxEventAge bounds how old an edge event may be and still be accepted (BR-25.4).
 	MaxEventAge = 7 * 24 * time.Hour
 )
@@ -157,4 +161,31 @@ func ScrapRateExceeded(total, good int64) bool {
 		return false
 	}
 	return (total-good)*100 > total*ScrapRatePercent
+}
+
+// IdleSince returns the start of idle time for a machine whose last state is RUNNING: the last
+// count, or the start of RUNNING when it has counted nothing since (BR-25.6). ok is false while
+// the gap since then is not longer than the threshold, or when idle detection is off (threshold 0).
+func IdleSince(runningSince, lastCount *time.Time, threshold time.Duration, now time.Time) (since time.Time, ok bool) {
+	if runningSince == nil || threshold <= 0 {
+		return time.Time{}, false
+	}
+	ref := *runningSince
+	if lastCount != nil && lastCount.After(ref) {
+		ref = *lastCount
+	}
+	if now.Sub(ref) <= threshold {
+		return time.Time{}, false
+	}
+	return ref, true
+}
+
+// EndsIdle reports whether an accepted event ends an open idle downtime: any count (the machine
+// produces again, BR-25.6) or a state report that leaves RUNNING (DOWN, SETUP, OFF). A repeated
+// RUNNING report does not: the machine is still running without counting, and ending the record
+// there would let the next sweep open a second idle record over the same gap (it starts at the
+// last count). An IDLE report keeps it open too. A DOWN report ends the idle record and then opens
+// a downtime of its own.
+func EndsIdle(e MachineEvent) bool {
+	return e.Kind == EventCount || (e.State != "" && e.State != MachineRunning && e.State != MachineIdle)
 }

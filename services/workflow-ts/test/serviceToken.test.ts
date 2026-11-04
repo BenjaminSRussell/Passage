@@ -9,6 +9,7 @@ import {
   QUALITY_GRANT,
   SERVICE_NAME,
   serviceTokenSignerFromEnv,
+  PARTY_GRANT,
   TRANSPORT_GRANT,
 } from "../src/serviceToken.js";
 
@@ -37,6 +38,7 @@ describe("service token", () => {
       engineering: [...ENGINEERING_GRANT],
       quality: [...QUALITY_GRANT],
       transport: [...TRANSPORT_GRANT],
+      party: [...PARTY_GRANT],
     });
   });
 
@@ -47,6 +49,7 @@ describe("service token", () => {
     expect(claims(signer.mintForEngineering(subject))).toMatchObject({ iss: SERVICE_NAME, aud: "engineering", duties: ["engineering.eco.workflow"] });
     expect(claims(signer.mintForQuality(subject))).toMatchObject({ iss: SERVICE_NAME, aud: "quality", duties: ["quality.capa.execute"] });
     expect(claims(signer.mintForTransport(subject))).toMatchObject({ iss: SERVICE_NAME, aud: "transport", duties: ["transport.tender.execute"] });
+    expect(claims(signer.mintForParty(subject))).toMatchObject({ iss: SERVICE_NAME, aud: "party", duties: ["party.approve"] });
     expect(claims(signer.mintForPayables(subject))).toMatchObject({ aud: "payables", duties: ["payment-run.execute"] });
   });
 
@@ -57,6 +60,7 @@ describe("service token", () => {
       expect(() => signer.mintForEngineering({ ...subject, scope })).toThrow(/scope/);
       expect(() => signer.mintForQuality({ ...subject, scope })).toThrow(/scope/);
       expect(() => signer.mintForTransport({ ...subject, scope })).toThrow(/scope/);
+      expect(() => signer.mintForParty({ ...subject, scope })).toThrow(/scope/);
     }
     expect(() => signer.mintForEngineering({ ...subject, scope: ["le-2", " LE-1 "] })).not.toThrow();
     expect(() => signer.mintForTransport({ ...subject, scope: ["le-2", " LE-1 "] })).not.toThrow();

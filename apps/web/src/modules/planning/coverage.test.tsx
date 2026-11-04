@@ -89,6 +89,21 @@ describe("Coverage groups page", () => {
     expect(screen.getByLabelText("Safety-stock policy")).toHaveValue("today");
   });
 
+  it("tells the planner about the default group REQ until one exists", async () => {
+    stubApi(["/coverage-groups", () => json({ items: [autoFirm] })]);
+    renderAt("/planning/coverage-groups");
+    expect(await screen.findByText("No default coverage group")).toBeInTheDocument();
+    expect(screen.getByText(/Create a group with the code REQ/)).toBeInTheDocument();
+  });
+
+  it("does not show the default group note when REQ exists", async () => {
+    stubApi(["/coverage-groups", () => json({ items: [autoFirm, req] })]);
+    renderAt("/planning/coverage-groups");
+    const table = await findTable({ name: "Coverage groups" });
+    await waitFor(() => expect(within(table).getByText("FIRM5")).toBeInTheDocument());
+    expect(screen.queryByText("No default coverage group")).not.toBeInTheDocument();
+  });
+
   it("shows the empty state", async () => {
     stubApi(["/coverage-groups", () => json({ items: [] })]);
     renderAt("/planning/coverage-groups");

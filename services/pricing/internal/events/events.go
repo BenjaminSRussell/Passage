@@ -17,11 +17,15 @@ const (
 	// Campaigns (FR-26.10): the kill switch set (killed) or cleared (restored).
 	CampaignKilled   = "dev.passage.pricing.campaign.killed.v1"
 	CampaignRestored = "dev.passage.pricing.campaign.restored.v1"
+	// CampaignRevised: name, validity, target customer group or budget changed.
+	CampaignRevised = "dev.passage.pricing.campaign.revised.v1"
 	// Pricing procedures (FR-26.1): a version became ACTIVE.
 	ProcedureActivated = "dev.passage.pricing.procedure.activated.v1"
 	// Rebate agreements (FR-26.11): revised, and closed early.
 	RebateAgreementRevised = "dev.passage.pricing.rebateagreement.revised.v1"
 	RebateAgreementClosed  = "dev.passage.pricing.rebateagreement.closed.v1"
+	// RebateAgreementReopened: a CLOSED agreement became ACTIVE again with a later end date.
+	RebateAgreementReopened = "dev.passage.pricing.rebateagreement.reopened.v1"
 	// Vendor rebate claims (FR-26.15): a period claim was created, and approved for w19 AP.
 	VendorRebateClaimCreated  = "dev.passage.pricing.vendorrebateclaim.created.v1"
 	VendorRebateClaimApproved = "dev.passage.pricing.vendorrebateclaim.approved.v1"
@@ -37,6 +41,8 @@ const (
 	ContractClaimApproved = "dev.passage.pricing.contractclaim.approved.v1"
 	// Pricing parameters (PRD 5.26.13): a legal entity's parameters were changed.
 	ParametersChanged = "dev.passage.pricing.parameters.changed.v1"
+	// A tenant's parameters (cache lifetime, campaign kill switch effect) were changed.
+	TenantParametersChanged = "dev.passage.pricing.tenantparameter.changed.v1"
 	// Procedure determination (PRD 5.26.13): the procedure a legal entity and sales channel
 	// price with was set or cleared.
 	ProcedureAssignmentChanged = "dev.passage.pricing.procedureassignment.changed.v1"
@@ -58,8 +64,32 @@ type ProcedureAssignmentChangedData struct {
 type ParametersChangedData struct {
 	LegalEntityID   string `json:"legal_entity_id"`
 	JournalFourEyes bool   `json:"journal_four_eyes"`
-	Version         int    `json:"version"`
-	UpdatedBy       string `json:"updated_by"`
+	// PricingDateBasis, TotalDiscountBasis and SmartRoundingBands are the values in force
+	// after the change (the audit record of PRD 5.26.13 parameters).
+	PricingDateBasis   string     `json:"pricing_date_basis"`
+	TotalDiscountBasis string     `json:"total_discount_basis"`
+	SmartRoundingBands []BandData `json:"smart_rounding_bands"`
+	// PriceSearchMode and SmallOrderThresholds (currency to decimal string; empty for the
+	// reference table) are the other two values of a legal entity.
+	PriceSearchMode      string            `json:"price_search_mode"`
+	SmallOrderThresholds map[string]string `json:"small_order_thresholds"`
+	Version              int               `json:"version"`
+	UpdatedBy            string            `json:"updated_by"`
+}
+
+// TenantParametersChangedData is the payload of tenantparameter.changed. CacheTTLSeconds is 0
+// when the tenant follows the deployment's PRICING_CACHE_TTL.
+type TenantParametersChangedData struct {
+	CacheTTLSeconds          int    `json:"cache_ttl_seconds"`
+	CampaignKillSwitchEffect string `json:"campaign_kill_switch_effect"`
+	Version                  int    `json:"version"`
+	UpdatedBy                string `json:"updated_by"`
+}
+
+// BandData is one smart rounding band; the last band has no up_to.
+type BandData struct {
+	UpTo   string `json:"up_to,omitempty"`
+	Ending string `json:"ending"`
 }
 
 // VendorRebateClaimData is the payload of vendorrebateclaim.created and .approved. Amount
@@ -90,6 +120,21 @@ type CampaignStatusData struct {
 	LegalEntityID string `json:"legal_entity_id"`
 	Killed        bool   `json:"killed"`
 	Version       int    `json:"version"`
+}
+
+// CampaignRevisedData is the payload of campaign.revised: the campaign's terms after the
+// change. Validity and target group gate resolve, so caches drop their snapshot for the legal entity.
+type CampaignRevisedData struct {
+	CampaignID          string `json:"campaign_id"`
+	LegalEntityID       string `json:"legal_entity_id"`
+	Name                string `json:"name"`
+	ValidFrom           string `json:"valid_from"`
+	ValidTo             string `json:"valid_to"`
+	TargetCustomerGroup string `json:"target_customer_group"`
+	Budget              string `json:"budget"`
+	Currency            string `json:"currency"`
+	Killed              bool   `json:"killed"`
+	Version             int    `json:"version"`
 }
 
 // ProcedureActivatedData is the payload of procedure.activated. SupersededID names the

@@ -123,9 +123,18 @@ func (a *API) createProcessMessage(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	cat, _ := domain.CategoryByCode(in.CategoryCode)
+	cat, err := a.store.ResolveProcessCategory(r.Context(), in.CategoryCode)
+	if err != nil {
+		if !a.replayStoredMessage(w, r, in) {
+			a.fail(w, r, "resolve process category", err)
+		}
+		return
+	}
 	values, err := domain.ApplyLimits(cat, in.Values)
 	if err != nil {
+		if a.replayStoredMessage(w, r, in) {
+			return
+		}
 		var de *domain.Error
 		if errors.As(err, &de) {
 			httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, de.Code, de.Detail))
@@ -149,6 +158,25 @@ func (a *API) createProcessMessage(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, res)
 }
 
+// replayStoredMessage answers a message that failed its category checks with the message already
+// stored under its (source, sourceMessageId), when there is one: the category may have been
+// deactivated or tightened after the first delivery, and an edge or kiosk retry must still get
+// the stored message (200, duplicate) rather than a refusal it would treat as final. It reports
+// whether it wrote the response.
+func (a *API) replayStoredMessage(w http.ResponseWriter, r *http.Request, in domain.NewMessage) bool {
+	stored, ok, err := a.store.StoredProcessMessage(r.Context(), in.Source, in.SourceMessageID)
+	if err != nil {
+		a.fail(w, r, "look up a stored process message", err)
+		return true
+	}
+	if !ok {
+		return false
+	}
+	a.processReplays.Add(1)
+	httpx.JSON(w, http.StatusOK, store.ProcessIngest{Message: stored, Duplicate: true})
+	return true
+}
+
 func (a *API) listProcessMessages(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -159,8 +187,8 @@ func (a *API) listProcessMessages(w http.ResponseWriter, r *http.Request) {
 		fields["status"] = "must be one of received, delivered, partially-delivered, error"
 	}
 	if c := q.Get("category"); c != "" {
-		if _, ok := domain.CategoryByCode(c); !ok {
-			fields["category"] = "is not a known category"
+		if !domain.ValidCategoryCode(c) {
+			fields["category"] = "is not a valid category code"
 		}
 	}
 	if d := q.Get("destination"); d != "" && !domain.KnownDestination(d) {

@@ -36,6 +36,8 @@ const (
 	CodeIdempotencyUse  = "idempotency_key_reuse"
 	eventSource         = "pricing"
 	MaxListLimit        = 100
+	// MaxExportRows bounds one trade agreements CSV export (ExportRecords).
+	MaxExportRows = 50000
 )
 
 // Entry is a stored condition record with its owning legal entity.
@@ -78,6 +80,7 @@ type Store interface {
 	CreateRecord(ctx context.Context, in Entry, idempotencyKey string) (Entry, error)
 	GetRecord(ctx context.Context, id string) (Entry, error)
 	ListRecords(ctx context.Context, f Filter) ([]Entry, error)
+	ExportRecords(ctx context.Context, f Filter, maxRows int, start func(truncated bool) error, row func(Entry) error) error
 	ActiveRecords(ctx context.Context, q ActiveQuery) ([]domain.Record, error)
 	ActivateRecord(ctx context.Context, id string, version int, idempotencyKey string) (Entry, error)
 	WithdrawRecord(ctx context.Context, id string, version int, reason, idempotencyKey string) (Entry, error)
@@ -86,16 +89,20 @@ type Store interface {
 	CreateJournal(ctx context.Context, in JournalInput, idempotencyKey string) (Journal, error)
 	ListJournals(ctx context.Context, f JournalFilter) ([]Journal, error)
 	GetJournal(ctx context.Context, id string) (Journal, error)
+	StreamJournal(ctx context.Context, id string, start func(Journal) error, line func(domain.JournalLine) error) error
 	ValidateJournal(ctx context.Context, id string) (Journal, error)
 	PostJournal(ctx context.Context, id, idempotencyKey string) (Journal, error)
 	ReverseJournal(ctx context.Context, id, idempotencyKey string) (Journal, error)
 	GetParameters(ctx context.Context, legalEntityID string) (Parameters, error)
 	SetParameters(ctx context.Context, in Parameters, version int, idempotencyKey string) (Parameters, error)
+	GetTenantParameters(ctx context.Context) (TenantParameters, error)
+	SetTenantParameters(ctx context.Context, in TenantParameters, version int, idempotencyKey string) (TenantParameters, error)
 	CreateAgreement(ctx context.Context, a domain.RebateAgreement, idempotencyKey string) (domain.RebateAgreement, error)
 	GetAgreement(ctx context.Context, id string) (domain.RebateAgreement, error)
 	ListAgreements(ctx context.Context, f AgreementFilter) ([]domain.RebateAgreement, error)
 	AccrueInvoiceLine(ctx context.Context, in AccrualInput) (Accrual, bool, error)
 	ListAccruals(ctx context.Context, f AccrualFilter) ([]Accrual, error)
+	RebateStatementInput(ctx context.Context, agreementID, periodKey string) (domain.RebateAgreement, domain.StatementInput, error)
 	PreviewVendorClaim(ctx context.Context, agreementID, periodKey string) (VendorClaimPreview, error)
 	CreateVendorClaim(ctx context.Context, in VendorClaimInput, idempotencyKey string) (VendorClaim, error)
 	GetVendorClaim(ctx context.Context, id string) (VendorClaim, error)
@@ -126,6 +133,7 @@ type Store interface {
 	GetCampaign(ctx context.Context, id string) (domain.Campaign, error)
 	ListCampaigns(ctx context.Context, legalEntityID string, limit int) ([]domain.Campaign, error)
 	SetCampaignKilled(ctx context.Context, id string, version int, killed bool, idempotencyKey string) (domain.Campaign, error)
+	ReviseCampaign(ctx context.Context, rev domain.CampaignRevision, idempotencyKey string) (domain.Campaign, error)
 	CreateProcedure(ctx context.Context, p domain.Procedure, idempotencyKey string) (domain.Procedure, error)
 	GetProcedure(ctx context.Context, id string) (domain.Procedure, error)
 	ListProcedures(ctx context.Context, legalEntityID string, limit int) ([]domain.Procedure, error)
@@ -142,6 +150,7 @@ type Store interface {
 	WithdrawFreeGoodsRule(ctx context.Context, id string, version int, idempotencyKey string) (domain.FreeGoodsDef, error)
 	ReviseAgreement(ctx context.Context, rev AgreementRevision, idempotencyKey string) (domain.RebateAgreement, error)
 	CloseAgreement(ctx context.Context, id string, version int, closeDate time.Time, idempotencyKey string) (domain.RebateAgreement, error)
+	ReopenAgreement(ctx context.Context, id string, version int, validTo time.Time, idempotencyKey string) (domain.RebateAgreement, error)
 	CreateBrokerContract(ctx context.Context, c domain.BrokerContract, idempotencyKey string) (domain.BrokerContract, error)
 	GetBrokerContract(ctx context.Context, id string) (domain.BrokerContract, error)
 	ListBrokerContracts(ctx context.Context, f ContractFilter) ([]domain.BrokerContract, error)
@@ -289,12 +298,17 @@ func (s *Postgres) GetRecord(ctx context.Context, id string) (Entry, error) {
 	return e, err
 }
 
-// ListRecords returns records ordered by id (by valid_to, then id, when a valid-to range
-// is given), optionally filtered by status, validity and the last valid day.
-func (s *Postgres) ListRecords(ctx context.Context, f Filter) ([]Entry, error) {
-	if f.Limit <= 0 || f.Limit > MaxListLimit {
-		f.Limit = MaxListLimit
-	}
+// recordQuery is the filtered select shared by ListRecords and ExportRecords: records ordered
+// by id (by valid_to, then id, when a valid-to range is given), $4 being the row limit.
+const recordQuery = ` from condition_record
+	where ($1::text = '' or legal_entity_id::text = $1) and ($2::text = '' or status = $2)
+	and ($3::date is null or (valid_from <= $3::date and valid_to >= $3::date))
+	and ($5::text = '' or condition_type = $5) and ($6::text = '' or customer_key = $6) and ($7::text = '' or product_key = $7)
+	and ($8::text = '' or campaign_id::text = $8)
+	and ($9::date is null or valid_to >= $9::date) and ($10::date is null or valid_to <= $10::date)
+	order by case when $9::date is not null or $10::date is not null then valid_to end, id limit $4`
+
+func recordArgs(f Filter, limit int) []any {
 	optDay := func(t *time.Time) *string {
 		if t == nil {
 			return nil
@@ -302,31 +316,61 @@ func (s *Postgres) ListRecords(ctx context.Context, f Filter) ([]Entry, error) {
 		day := dayStr(*t)
 		return &day
 	}
-	asOf, validToFrom, validToTo := optDay(f.AsOf), optDay(f.ValidToFrom), optDay(f.ValidToTo)
-	out := []Entry{}
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select `+recordColumns+` from condition_record
-			where ($1::text = '' or legal_entity_id::text = $1) and ($2::text = '' or status = $2)
-			and ($3::date is null or (valid_from <= $3::date and valid_to >= $3::date))
-			and ($5::text = '' or condition_type = $5) and ($6::text = '' or customer_key = $6) and ($7::text = '' or product_key = $7)
-			and ($8::text = '' or campaign_id::text = $8)
-			and ($9::date is null or valid_to >= $9::date) and ($10::date is null or valid_to <= $10::date)
-			order by case when $9::date is not null or $10::date is not null then valid_to end, id limit $4`,
-			f.LegalEntityID, f.Status, asOf, f.Limit, f.Type, f.Customer, f.Product, f.CampaignID, validToFrom, validToTo)
+	return []any{f.LegalEntityID, f.Status, optDay(f.AsOf), limit, f.Type, f.Customer, f.Product, f.CampaignID,
+		optDay(f.ValidToFrom), optDay(f.ValidToTo)}
+}
+
+// eachRecord runs the record query in tx and calls fn per row.
+func eachRecord(ctx context.Context, tx pgx.Tx, f Filter, limit int, fn func(Entry) error) error {
+	rows, err := tx.Query(ctx, `select `+recordColumns+recordQuery, recordArgs(f, limit)...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		e, err := scanEntry(rows)
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
-		for rows.Next() {
-			e, err := scanEntry(rows)
-			if err != nil {
-				return err
-			}
-			out = append(out, e)
+		if err := fn(e); err != nil {
+			return err
 		}
-		return rows.Err()
+	}
+	return rows.Err()
+}
+
+// ListRecords returns records ordered by id (by valid_to, then id, when a valid-to range
+// is given), optionally filtered by status, validity and the last valid day.
+func (s *Postgres) ListRecords(ctx context.Context, f Filter) ([]Entry, error) {
+	if f.Limit <= 0 || f.Limit > MaxListLimit {
+		f.Limit = MaxListLimit
+	}
+	out := []Entry{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return eachRecord(ctx, tx, f, f.Limit, func(e Entry) error {
+			out = append(out, e)
+			return nil
+		})
 	})
 	return out, err
+}
+
+// ExportRecords streams the records that match f's filters (f.Limit is ignored) in list
+// order, at most maxRows of them, without holding them in memory (the trade agreements CSV
+// export). start runs once before the first row, with truncated=true when more than maxRows
+// records match, so the caller can set its headers; row runs per record. A start or row
+// error stops the read and is returned.
+func (s *Postgres) ExportRecords(ctx context.Context, f Filter, maxRows int, start func(truncated bool) error, row func(Entry) error) error {
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var matched int
+		if err := tx.QueryRow(ctx, `select count(*) from (select 1`+recordQuery+`) t`, recordArgs(f, maxRows+1)...).Scan(&matched); err != nil {
+			return err
+		}
+		if err := start(matched > maxRows); err != nil {
+			return err
+		}
+		return eachRecord(ctx, tx, f, maxRows, row)
+	})
 }
 
 // ActiveRecords loads the ACTIVE records a resolve needs: one legal entity, one

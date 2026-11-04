@@ -209,8 +209,9 @@ func ValidateLine(l JournalLine, maxScale int32) error {
 // quantity on the same side, a non-negative cost, known dimensions with a site
 // (FR-16.5), ±1 for a serial (BR-16.9), and the owner rule: an
 // OWNERSHIP_CHANGE line names vendor-owned stock and a positive quantity (the
-// quantity moved to the legal entity); any other line is refused on
-// vendor-owned stock, which never carries value (INV-OWN-001, BR-16.14).
+// quantity moved to the legal entity); any other line but a COUNT line (a
+// quantity-only variance) is refused on vendor-owned stock, which never carries
+// value (INV-OWN-001, BR-16.14).
 func ValidateLineFor(t JournalType, l JournalLine, maxScale int32) error {
 	if l.ProductID == "" {
 		return fail(CodeInvalid, "line %d has no product", l.LineNo)
@@ -236,7 +237,7 @@ func ValidateLineFor(t JournalType, l JournalLine, maxScale int32) error {
 		return fail(CodeInvalid, "line %d: an ownership change line names the vendor-owned stock it moves (dimension owner)", l.LineNo)
 	case t == JournalOwnershipChange && l.Qty.Sign() < 0:
 		return fail(CodeInvalid, "line %d: an ownership change quantity is the positive quantity moved to the legal entity", l.LineNo)
-	case t != JournalOwnershipChange && VendorOwned(dims):
+	case t != JournalOwnershipChange && t != JournalCount && VendorOwned(dims):
 		return fail(CodeOwnershipValue, "line %d: vendor-owned stock cannot be valued or financially posted; post an ownership change first", l.LineNo)
 	}
 	if dims[DimLicensePlate] != "" {
@@ -405,6 +406,13 @@ func PlanPosting(j Journal) []PostedLine {
 		st := StatusSold
 		if l.Qty.Sign() > 0 {
 			st = StatusPurchased
+		}
+		if j.Type == JournalCount && VendorOwned(l.Dims) {
+			// A vendor-owned variance moves quantity only: RECEIVED or DEDUCTED, no value.
+			st = StatusDeducted
+			if l.Qty.Sign() > 0 {
+				st = StatusReceived
+			}
 		}
 		out = append(out, PostedLine{Line: l, Status: st})
 	}

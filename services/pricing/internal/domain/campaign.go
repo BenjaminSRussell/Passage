@@ -22,7 +22,8 @@ type Campaign struct {
 	// TargetCustomerGroup is the customer group the campaign is for; empty means every customer.
 	TargetCustomerGroup string
 	// Budget is the planned campaign spend in Currency. It is recorded, not enforced in
-	// resolve: spend is known only from posted invoices (w29/w30).
+	// resolve: spend is known only from posted invoices (w29/w30). A revise may set it to any
+	// amount at least 0.
 	Budget   decimal.Decimal
 	Currency string
 	Killed   bool
@@ -49,6 +50,70 @@ func ValidateCampaign(c Campaign) map[string]string {
 	}
 	if len(c.TargetCustomerGroup) > 64 {
 		fields["targetCustomerGroup"] = "must be at most 64 characters"
+	}
+	return fields
+}
+
+// CampaignRevision is a change to a campaign at an expected version. Nil fields stay as they
+// are; the currency never changes (a budget is in one currency).
+type CampaignRevision struct {
+	ID                  string
+	Version             int
+	Name                *string
+	ValidFrom           *time.Time
+	ValidTo             *time.Time
+	TargetCustomerGroup *string
+	Budget              *decimal.Decimal
+}
+
+// Apply returns c with the revision's fields set.
+func (r CampaignRevision) Apply(c Campaign) Campaign {
+	if r.Name != nil {
+		c.Name = *r.Name
+	}
+	if r.ValidFrom != nil {
+		c.ValidFrom = *r.ValidFrom
+	}
+	if r.ValidTo != nil {
+		c.ValidTo = *r.ValidTo
+	}
+	if r.TargetCustomerGroup != nil {
+		c.TargetCustomerGroup = *r.TargetCustomerGroup
+	}
+	if r.Budget != nil {
+		c.Budget = *r.Budget
+	}
+	return c
+}
+
+// CampaignPastChanges returns field errors where a revision (cur to next) would change how a
+// day before today priced: resolve stays reproducible for a past pricing date, so explain and
+// any document priced on that day keep the campaign's answer (§5.26.4 invariant; BR-26.7 keeps
+// posted invoices un-repriced). Once the campaign has started, its start date and target
+// group are fixed and its end date may move only within today and later (ending it yesterday
+// stops it now); a campaign that has not started may not start in the past. Kill and restore
+// are the explicit exception (FR-26.10). An empty map means the revision keeps the past.
+func CampaignPastChanges(cur, next Campaign, today time.Time) map[string]string {
+	fields := map[string]string{}
+	t, yesterday := dayOf(today), dayOf(today.AddDate(0, 0, -1))
+	if dayOf(cur.ValidFrom) >= t {
+		if dayOf(next.ValidFrom) < t {
+			fields["validFrom"] = "must not be before today (" + t + "): a past day cannot join the campaign"
+		}
+		return fields
+	}
+	if dayOf(next.ValidFrom) != dayOf(cur.ValidFrom) {
+		fields["validFrom"] = "cannot change: the campaign has priced since " + dayOf(cur.ValidFrom)
+	}
+	if min(dayOf(next.ValidTo), yesterday) != min(dayOf(cur.ValidTo), yesterday) {
+		if dayOf(cur.ValidTo) < t {
+			fields["validTo"] = "cannot change: the campaign ended on " + dayOf(cur.ValidTo)
+		} else {
+			fields["validTo"] = "must be " + yesterday + " or later: the days the campaign already priced stay in it"
+		}
+	}
+	if next.TargetCustomerGroup != cur.TargetCustomerGroup {
+		fields["targetCustomerGroup"] = "cannot change after the campaign started on " + dayOf(cur.ValidFrom) + "; create a new campaign"
 	}
 	return fields
 }

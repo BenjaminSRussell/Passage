@@ -313,3 +313,36 @@ func TestElapsedHours(t *testing.T) {
 		}
 	}
 }
+
+// D2a': a day is priced at the latest dated rate effective on or before its date, a day before
+// the first dated rate at the worker's base rate, and the change of rate falls on the date, so
+// the lines of two days of one range carry different amounts. Absence pay follows the same rule.
+func TestCalculate_DatedCostRates(t *testing.T) {
+	c := Calculation{Profile: DefaultProfile(), Location: utc, Rules: DefaultRules(), Rate: dec("10"), Currency: "USD",
+		RateSteps: []RateStep{ // deliberately out of order; the time of day is ignored
+			{From: time.Date(2026, 10, 21, 0, 0, 0, 0, utc), Rate: dec("14")},
+			{From: time.Date(2026, 10, 20, 13, 30, 0, 0, utc), Rate: dec("12")},
+		}}
+	d19, d20, d21 := day(2026, 10, 19, 8), day(2026, 10, 20, 8), day(2026, 10, 21, 8)
+	d21.Absences = []Absence{{ID: "abs-1", Hours: dec("2"), Paid: true, Multiplier: dec("1")}}
+	out, err := c.Run([]Day{d21, d19, d20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[int]string{19: "80", 20: "96", 21: "112"}
+	for _, dp := range out {
+		if got := dp.Lines[0].Amount.String(); got != want[dp.Date.Day()] {
+			t.Errorf("%s base amount = %s, want %s", dp.Date.Format("2006-01-02"), got, want[dp.Date.Day()])
+		}
+	}
+	last := out[2].Lines
+	if abs := last[len(last)-1]; abs.Type != TypeAbsencePaid || abs.Amount.String() != "28" {
+		t.Errorf("paid absence on the 21st = %+v, want 2 h at 14", abs)
+	}
+	// No steps: every day at the base rate, as before.
+	c.RateSteps = nil
+	out, _ = c.Run([]Day{d19})
+	if got := out[0].Lines[0].Amount.String(); got != "80" {
+		t.Errorf("base rate amount = %s, want 80", got)
+	}
+}

@@ -121,6 +121,52 @@ describe("decision routes", () => {
     expect(signals).toEqual([{ workflowId: `capa:${NCR}`, name: "capa-effectiveness", args: [{ result: "EFFECTIVE", note: "no recurrence", actor: "alice", scope: [OTHER_LE, LE] }] }]);
   });
 
+  const CHANGE = "00000000-0000-0000-0000-0000000000b1";
+  const approver = { "X-Passage-Duties": "party.approve" };
+  const pendingChange = { requestId: CHANGE, entityType: "credit_limit", tenantId: TENANT, legalEntityId: LE, requester: "rita", status: "pending", levelId: "finance", approver: "alice", history: [] };
+
+  it("signals a party change decision with the actor and scope of the authenticated approver, never from the body", async () => {
+    readings.set(`approval:${CHANGE}`, pendingChange);
+    expect((await post(`/v1/workflows/party-changes/${CHANGE}:approve`, { actor: "mallory", scope: [OTHER_LE] }, approver)).status).toBe(202);
+    expect((await post(`/v1/workflows/party-changes/${CHANGE}:reject`, {}, approver)).status).toBe(202);
+    expect(signals).toEqual([
+      { workflowId: `approval:${CHANGE}`, name: "approval-decision", args: [{ action: "approve", actor: "alice", scope: [OTHER_LE, LE] }] },
+      { workflowId: `approval:${CHANGE}`, name: "approval-decision", args: [{ action: "reject", actor: "alice", scope: [OTHER_LE, LE] }] },
+    ]);
+  });
+
+  it("delegates a party change level to another user", async () => {
+    readings.set(`approval:${CHANGE}`, pendingChange);
+    const path = `/v1/workflows/party-changes/${CHANGE}:delegate`;
+    expect((await post(path, {}, approver)).status).toBe(400);
+    expect((await post(path, { delegate: "alice" }, approver)).status).toBe(400);
+    expect((await post(path, { delegate: "rita" }, approver)).status).toBe(400);
+    expect(signals).toEqual([]);
+    expect((await post(path, { delegate: " dana " }, approver)).status).toBe(202);
+    expect(signals).toEqual([{ workflowId: `approval:${CHANGE}`, name: "approval-decision", args: [{ action: "delegate", actor: "alice", scope: [OTHER_LE, LE], delegate: "dana" }] }]);
+  });
+
+  it.each([
+    ["no approve duty", {}, { "X-Passage-Duties": "engineering.eco.approve" }, 403],
+    ["a service token", {}, { ...approver, "X-Passage-Service-Token": "x.y" }, 401],
+    ["forged user headers without a tenant", {}, { ...approver, "X-Passage-Tenant": "tenant-1" }, 401],
+    ["the requester", {}, { ...approver, "X-Passage-User": "rita" }, 403],
+    ["someone who is not the current approver", {}, { ...approver, "X-Passage-User": "bob" }, 403],
+    ["another tenant", {}, { ...approver, "X-Passage-Tenant": OTHER_TENANT }, 404],
+    ["a legal entity outside the approver's scope", {}, { ...approver, "X-Passage-Legal-Entity": OTHER_LE }, 403],
+    ["a decided approval", { status: "approved" }, approver, 409],
+    ["an approval that is not a party change", { tenantId: undefined, legalEntityId: undefined }, approver, 404],
+  ])("refuses a party change decision from %s and signals nothing", async (_name, override, headers, status) => {
+    readings.set(`approval:${CHANGE}`, { ...pendingChange, ...override });
+    expect((await post(`/v1/workflows/party-changes/${CHANGE}:approve`, {}, headers)).status).toBe(status);
+    expect(signals).toEqual([]);
+  });
+
+  it("answers 404 when no party change approval runs", async () => {
+    expect((await post(`/v1/workflows/party-changes/${CHANGE}:approve`, {}, approver)).status).toBe(404);
+    expect(signals).toEqual([]);
+  });
+
   it("answers health probes, 404 for unknown routes and 405 for other methods", async () => {
     expect((await fetch(`${base}/healthz`)).status).toBe(200);
     expect((await fetch(`${base}/v1/unknown`)).status).toBe(404);
