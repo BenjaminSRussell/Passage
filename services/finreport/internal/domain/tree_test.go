@@ -130,3 +130,24 @@ func TestLimitToUnit_FiltersByAttributeAndReportsWhatIsLeftOut(t *testing.T) {
 		t.Fatal("unknown unit is refused")
 	}
 }
+
+// A run's viewer sees the unit the run used and the units below it, not the
+// rest of the tree.
+func TestTreeSubtree_KeepsTheUnitAndItsDescendants(t *testing.T) {
+	tr := fixtureTree()
+	codes := func(x Tree) string {
+		var out []string
+		for _, u := range x.Units {
+			out = append(out, u.Code)
+		}
+		return strings.Join(out, ",")
+	}
+	for unit, want := range map[string]string{"EMEA": "EMEA,DE,FR", "DE": "DE", "": codes(tr)} {
+		if got := codes(tr.Subtree(unit)); got != want {
+			t.Errorf("subtree %q = %s, want %s", unit, got, want)
+		}
+	}
+	if sub := tr.Subtree("EMEA"); sub.Code != tr.Code || sub.Attribute != tr.Attribute || len(tr.Units) != 5 {
+		t.Fatalf("subtree changed the tree or lost its header: %+v", sub)
+	}
+}

@@ -163,6 +163,29 @@ describe("ColumnSetEditorPage", () => {
     expect(put && header(put, "If-Match")).toBeNull();
   });
 
+  it("sets a dimension filter on period columns only and saves it", async () => {
+    server.handler = (url, init) => {
+      if (url.pathname === `${BASE}/column-sets/MINE` && init.method === "PUT") return json(200, JSON.parse(String(init.body)), { ETag: '"1"' });
+      return undefined;
+    };
+    renderAt("/finreport/column-sets/new");
+    fireEvent.change(await screen.findByLabelText("Column set code"), { target: { value: "mine" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "By cost center" } });
+    const filters = screen.getAllByLabelText(/^Dimension filter/);
+    expect(filters).toHaveLength(1);
+    fireEvent.change(filters[0], { target: { value: "cost_center=CC100, CC200" } });
+    fireEvent.blur(filters[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Add column" }));
+    fireEvent.change(screen.getAllByLabelText(/^Period/)[1], { target: { value: "calc" } });
+    // A CALC column reads other columns, so it offers no filter of its own.
+    expect(screen.getAllByLabelText(/^Dimension filter/)).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Save column set" }));
+    await waitFor(() => expect(server.calls.some((c) => c.method === "PUT")).toBe(true));
+    const put = server.calls.find((c) => c.method === "PUT");
+    expect(put?.body).toMatchObject({ columns: [{ periodExpr: "P", dimensionFilter: { cost_center: ["CC100", "CC200"] } }, { periodExpr: "CALC" }] });
+    expect((put?.body as { columns: { dimensionFilter?: unknown }[] }).columns[1].dimensionFilter).toBeUndefined();
+  });
+
   it("reports a template that does not exist", async () => {
     server.handler = (url) => (url.pathname === `${BASE}/column-set-templates` ? json(200, { items: [template] }) : undefined);
     renderAt("/finreport/column-sets/new?template=NOPE");

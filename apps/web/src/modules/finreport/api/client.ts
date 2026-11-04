@@ -44,6 +44,8 @@ export interface DefinitionColumn {
   /** Omitted means the run's currency type. */
   currencyType?: CurrencyType;
   calcExpression?: string;
+  /** Only balances whose dimension values match are read into the column ({attribute: [values or "*"]}). Not for CALC columns. */
+  dimensionFilter?: Record<string, string[]>;
 }
 
 export interface Definition {
@@ -697,6 +699,35 @@ export async function saveTree(tree: Tree, etag: string | null): Promise<{ part:
   if (etag) headers["If-Match"] = etag;
   const sent = await send<Tree>(`/trees/${seg(tree.code)}`, { method: "PUT", headers, body: JSON.stringify(tree) });
   return { part: sent.body, etag: sent.etag };
+}
+
+/** One stored revision of a tree, without its body. */
+export interface TreeRevision {
+  revision: number;
+  updatedBy: string;
+  createdAt: string;
+}
+
+/** The tree a run was limited to, as it was when the run was made. */
+export interface RunTreeView {
+  code: string;
+  /** The run's unit; empty for the whole tree. */
+  unit: string;
+  revision: number;
+  currentRevision: number;
+  tree: Tree;
+}
+
+export async function listTreeRevisions(code: string, signal?: AbortSignal): Promise<TreeRevision[]> {
+  return (await get<{ items: TreeRevision[] }>(`/trees/${seg(code)}/revisions`, signal)).items;
+}
+
+export async function getTreeRevision(code: string, revision: number, signal?: AbortSignal): Promise<Tree> {
+  return get<Tree>(`/trees/${seg(code)}/revisions/${revision}`, signal);
+}
+
+export async function getRunTree(runId: string, signal?: AbortSignal): Promise<RunTreeView> {
+  return get<RunTreeView>(`/runs/${seg(runId)}/tree`, signal);
 }
 
 // --- audit trail (FR-15.10) ------------------------------------------------

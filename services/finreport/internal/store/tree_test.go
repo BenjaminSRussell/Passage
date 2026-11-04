@@ -295,3 +295,245 @@ func TestCreateRun_TreeRollUpRecomputesCalculationsAndKeepsWarningsWithAHierarch
 		t.Fatalf("checks = %+v, want REPORT-0041 naming PC99 kept next to the hierarchy's checks", both.Checks)
 	}
 }
+
+// FR-15.4: every save keeps its revision, so a run shows the units it used
+// after the tree changed; another tenant sees no history and a run that was
+// not limited to a tree has none.
+func TestTreeRevisions_KeepEachSaveAndShowTheRunsUnits(t *testing.T) {
+	st, ctx := migrated(t)
+	tr := profitCenterTree()
+	if _, _, err := st.SaveTree(ctx, tr, nil); err != nil {
+		t.Fatal(err)
+	}
+	def := storeFixtureDefinition("PL-REV")
+	if _, _, err := st.SaveDraft(ctx, def, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Publish(ctx, "PL-REV", "tester"); err != nil {
+		t.Fatal(err)
+	}
+	ledger := ids.New()
+	seedDimBalanceRow(t, st, ctx, ledger, "1000", "c", `{"profit_center":"PC10"}`, "5", 1)
+	spec := func(key string, tree *TreeRun) RunSpec {
+		return RunSpec{Code: "PL-REV", LedgerID: ledger, CurrencyType: "acct", PeriodYear: 2026, PeriodNo: 3,
+			Calendar: storeFixtureCalendar(), RequestedBy: "tester", IdempotencyKey: key, RequestHash: key, Tree: tree}
+	}
+	first, err := st.CreateRun(ctx, spec("first", &TreeRun{Code: "PC-TREE", Unit: "DE"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Replace the tree: DE now lists PC10 only and a new unit appears.
+	tr.Name = "Renamed"
+	tr.Units[2].Values = []string{"PC10"}
+	tr.Units = append(tr.Units, domain.TreeUnit{Code: "APAC", Name: "Asia Pacific", Parent: "ALL", Values: []string{"PC40"}})
+	one := 1
+	if _, rev, err := st.SaveTree(ctx, tr, &one); err != nil || rev != 2 {
+		t.Fatalf("replace: rev %d, %v", rev, err)
+	}
+	revs, err := st.ListTreeRevisions(ctx, "PC-TREE")
+	if err != nil || len(revs) != 2 || revs[0].Revision != 2 || revs[1].Revision != 1 || revs[0].UpdatedBy != "u1" {
+		t.Fatalf("revisions = %+v, %v", revs, err)
+	}
+	old, err := st.GetTreeRevision(ctx, "PC-TREE", 1)
+	if err != nil || old.Name != "Profit centers" || len(old.Units) != 5 || len(old.Units[2].Values) != 2 {
+		t.Fatalf("revision 1 = %+v, %v", old, err)
+	}
+	if _, err := st.GetTreeRevision(ctx, "PC-TREE", 9); problemCode(err) != domain.CodePartNotFound {
+		t.Fatalf("missing revision = %v, want %s", err, domain.CodePartNotFound)
+	}
+	if _, err := st.ListTreeRevisions(ctx, "NOPE"); problemCode(err) != domain.CodePartNotFound {
+		t.Fatalf("unknown tree = %v, want %s", err, domain.CodePartNotFound)
+	}
+	v, err := st.RunTree(ctx, first.ID)
+	// The run's viewer sees DE as it was (two values), not the rest of the tree.
+	if err != nil || v.Code != "PC-TREE" || v.Unit != "DE" || v.Revision != 1 || v.CurrentRevision != 2 || v.Tree.Name != "Profit centers" ||
+		len(v.Tree.Units) != 1 || v.Tree.Units[0].Code != "DE" || len(v.Tree.Units[0].Values) != 2 {
+		t.Fatalf("run tree = %+v, %v", v, err)
+	}
+	plain, err := st.CreateRun(ctx, spec("plain", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.RunTree(ctx, plain.ID); problemCode(err) != domain.CodePartNotFound {
+		t.Fatalf("run without a tree = %v, want %s", err, domain.CodePartNotFound)
+	}
+	if n := revisionRows(t, st, ctx); n != 2 {
+		t.Fatalf("stored revision rows = %d, want 2", n)
+	}
+}
+
+func revisionRows(t *testing.T, st *Postgres, ctx context.Context) int {
+	t.Helper()
+	var n int
+	err := dbx.WithTenantTx(ctx, st.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select count(*) from report_tree_revision`).Scan(&n)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// The history is tenant data: another tenant, on the application role under
+// row-level security, sees no revisions of a code it does not have.
+func TestTreeRevisions_TenantIsolation(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	ctx := testkit.Ctx(testkit.TenantID(1))
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	st := New(app)
+	if _, _, err := st.SaveTree(ctx, profitCenterTree(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if revs, err := st.ListTreeRevisions(ctx, "PC-TREE"); err != nil || len(revs) != 1 {
+		t.Fatalf("own revisions = %+v, %v", revs, err)
+	}
+	other := testkit.Ctx(testkit.TenantID(2))
+	if _, err := st.GetTreeRevision(other, "PC-TREE", 1); problemCode(err) != domain.CodePartNotFound {
+		t.Fatalf("other tenant reads revision 1: %v", err)
+	}
+	if _, err := st.ListTreeRevisions(other, "PC-TREE"); problemCode(err) != domain.CodePartNotFound {
+		t.Fatalf("other tenant lists revisions: %v", err)
+	}
+}
+
+// A tree saved before migration 0016 whose backfill was skipped (the migration
+// role did not bypass row-level security) has no stored revision: its current
+// revision is read from the tree, and the next replace stores it before
+// overwriting it, so the runs made on it keep their units.
+func TestTreeRevisions_TreeSavedBeforeTheHistory(t *testing.T) {
+	st, ctx := migrated(t)
+	tr := profitCenterTree()
+	if _, _, err := st.SaveTree(ctx, tr, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := dbx.WithTenantTx(ctx, st.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `delete from report_tree_revision`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	def := storeFixtureDefinition("PL-OLD")
+	if _, _, err := st.SaveDraft(ctx, def, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Publish(ctx, "PL-OLD", "tester"); err != nil {
+		t.Fatal(err)
+	}
+	ledger := ids.New()
+	seedDimBalanceRow(t, st, ctx, ledger, "1000", "c", `{"profit_center":"PC20"}`, "5", 1)
+	run, err := st.CreateRun(ctx, RunSpec{Code: "PL-OLD", LedgerID: ledger, CurrencyType: "acct", PeriodYear: 2026, PeriodNo: 3,
+		Calendar: storeFixtureCalendar(), RequestedBy: "tester", IdempotencyKey: "old", RequestHash: "old", Tree: &TreeRun{Code: "PC-TREE", Unit: "EMEA"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revs, err := st.ListTreeRevisions(ctx, "PC-TREE"); err != nil || len(revs) != 1 || revs[0].Revision != 1 {
+		t.Fatalf("revisions before a save = %+v, %v", revs, err)
+	}
+	if v, err := st.RunTree(ctx, run.ID); err != nil || v.Revision != 1 || len(v.Tree.Units) != 3 {
+		t.Fatalf("run tree before a save = %+v, %v", v, err)
+	}
+	tr.Units = tr.Units[:4] // US goes
+	one := 1
+	if _, rev, err := st.SaveTree(ctx, tr, &one); err != nil || rev != 2 {
+		t.Fatalf("replace: rev %d, %v", rev, err)
+	}
+	if n := revisionRows(t, st, ctx); n != 2 {
+		t.Fatalf("stored revision rows = %d, want 2 (the overwritten one and the new one)", n)
+	}
+	if old, err := st.GetTreeRevision(ctx, "PC-TREE", 1); err != nil || len(old.Units) != 5 {
+		t.Fatalf("revision 1 after the replace = %+v, %v", old, err)
+	}
+	if v, err := st.RunTree(ctx, run.ID); err != nil || v.Revision != 1 || v.CurrentRevision != 2 || len(v.Tree.Units) != 3 {
+		t.Fatalf("run tree after the replace = %+v, %v", v, err)
+	}
+}
+
+// FR-15.3 with FR-15.4 and FR-15.13: the tree unit, the hierarchy's rows and the
+// column's dimension filter all apply to a balance (AND), none twice; each cell
+// drills to exactly its balances and a CALC column reads the filtered column.
+func TestCreateRun_ColumnFilterWithTreeUnitAndHierarchy(t *testing.T) {
+	st, ctx := migrated(t)
+	if _, _, err := st.SaveTree(ctx, profitCenterTree(), nil); err != nil {
+		t.Fatal(err)
+	}
+	def := storeFixtureDefinition("PL-COLF")
+	def.Rows = []domain.Row{{Code: "REV", Kind: domain.RowAccountRange, Label: "Revenue", AccountFrom: "4000", AccountTo: "5999", NormalBalance: "debit"}}
+	def.Columns = []domain.Column{
+		{Code: "ALL", Label: "All", PeriodExpr: "P", CurrencyType: "acct"},
+		{Code: "PC", Label: "PC10 and PC30", PeriodExpr: "P", CurrencyType: "acct", DimensionFilter: map[string][]string{"profit_center": {"PC10", "PC30"}}},
+		{Code: "BLANK", Label: "No profit center", PeriodExpr: "P", CurrencyType: "acct", DimensionFilter: map[string][]string{"profit_center": {""}}},
+		{Code: "SHARE", Label: "Share", PeriodExpr: "CALC", Expression: "PC/ALL*100"},
+	}
+	if _, _, err := st.SaveDraft(ctx, def, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Publish(ctx, "PL-COLF", "tester"); err != nil {
+		t.Fatal(err)
+	}
+	ledger := ids.New()
+	for i, b := range []struct{ pc, account, net string }{
+		{"PC10", "4000", "100"}, {"PC11", "4000", "20"}, {"PC20", "4000", "80"}, {"PC30", "4000", "7"}, {"", "4000", "1000"},
+		{"PC10", "5000", "50"},
+	} {
+		dims := `{}`
+		if b.pc != "" {
+			dims = `{"profit_center":"` + b.pc + `"}`
+		}
+		seedDimBalanceRow(t, st, ctx, ledger, b.account, "c"+b.pc+b.account, dims, b.net, int64(i+1))
+	}
+	h := domain.Hierarchy{Code: "PL-GRP", Name: "P&L groups", Subject: domain.SubjectAccount, Nodes: []domain.HierarchyNode{
+		{Code: "REVENUE", Label: "Revenue", Rules: []domain.Rule{{Values: []string{"4*"}}}},
+		{Code: "COSTS", Label: "Costs", Rules: []domain.Rule{{Values: []string{"5*"}}}},
+	}}
+	if _, _, err := st.SaveHierarchy(ctx, h, nil, "owner"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.PublishHierarchy(ctx, "PL-GRP", "publisher", []domain.Member{{ID: "4000", Key: "4000"}, {ID: "5000", Key: "5000"}}); err != nil {
+		t.Fatal(err)
+	}
+	cells := func(key string, tr *TreeRun, hr *HierarchyRun) map[string]string {
+		t.Helper()
+		r, err := st.CreateRun(ctx, RunSpec{Code: "PL-COLF", LedgerID: ledger, CurrencyType: "acct", PeriodYear: 2026, PeriodNo: 3,
+			Calendar: storeFixtureCalendar(), RequestedBy: "tester", IdempotencyKey: key, RequestHash: key, Tree: tr, Hierarchy: hr})
+		if err != nil {
+			t.Fatalf("%s: %v", key, err)
+		}
+		list, err := st.ListCells(ctx, r.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, c := range list {
+			if err := c.CheckDrill(); err != nil {
+				t.Fatalf("%s %s/%s: %v", key, c.Row, c.Column, err)
+			}
+			out[c.Row+"/"+c.Column] = c.Value.Round(2).String()
+		}
+		return out
+	}
+	// No tree: the column filter alone.
+	if got := cells("plain", nil, nil); got["REV/ALL"] != "1257" || got["REV/PC"] != "157" || got["REV/BLANK"] != "1000" {
+		t.Fatalf("plain = %v", got)
+	}
+	// EMEA covers PC10, PC11 and PC20: PC30 and the blank balance are left out
+	// by the tree, whatever the column asks for.
+	if got := cells("emea", &TreeRun{Code: "PC-TREE", Unit: "EMEA"}, nil); got["REV/ALL"] != "250" || got["REV/PC"] != "150" || got["REV/BLANK"] != "0" || got["REV/SHARE"] != "60" {
+		t.Fatalf("EMEA = %v", got)
+	}
+	// The hierarchy replaces the rows; the tree and the column filter still apply.
+	got := cells("emea-hier", &TreeRun{Code: "PC-TREE", Unit: "EMEA"}, &HierarchyRun{Code: "PL-GRP"})
+	var revenue, costs string
+	for k := range got {
+		if strings.HasSuffix(k, "/PC") && strings.Contains(k, "REVENUE") {
+			revenue = got[k]
+		}
+		if strings.HasSuffix(k, "/PC") && strings.Contains(k, "COSTS") {
+			costs = got[k]
+		}
+	}
+	if revenue != "100" || costs != "50" {
+		t.Fatalf("hierarchy run over EMEA = %v, want REVENUE/PC 100 and COSTS/PC 50", got)
+	}
+}

@@ -87,7 +87,10 @@ func savePart(ctx context.Context, s *Postgres, table partTable, noun, code, upd
 			if isUniqueViolation(err) {
 				return problem(409, CodeRevisionConflict, noun+" "+code+" was created concurrently")
 			}
-			return err
+			if err != nil {
+				return err
+			}
+			return keepRevisionTx(ctx, tx, table, code, rev, body, updatedBy)
 		case err != nil:
 			return err
 		}
@@ -97,10 +100,16 @@ func savePart(ctx context.Context, s *Postgres, table partTable, noun, code, upd
 		if *ifMatch != current {
 			return problem(412, CodeRevisionConflict, fmt.Sprintf("%s revision is %d, not %d", noun, current, *ifMatch))
 		}
+		if err := keepCurrentRevisionTx(ctx, tx, table, code); err != nil {
+			return err
+		}
 		rev = current + 1
 		_, err = tx.Exec(ctx, `update `+string(table)+` set body=$2, revision=$3, updated_by=$4, updated_at=now() where code=$1`,
 			code, body, rev, updatedBy)
-		return err
+		if err != nil {
+			return err
+		}
+		return keepRevisionTx(ctx, tx, table, code, rev, body, updatedBy)
 	})
 	return rev, err
 }

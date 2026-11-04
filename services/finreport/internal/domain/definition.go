@@ -3,6 +3,7 @@ package domain
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
@@ -19,6 +20,8 @@ const (
 	MaxColumns = 60
 	// MaxIndent bounds the row indent level (presentation only).
 	MaxIndent = 10
+	// MaxFilterValues bounds the values one column dimension filter lists.
+	MaxFilterValues = 200
 )
 
 // ShapeCode is the generic validation code for malformed fields.
@@ -87,6 +90,12 @@ type Column struct {
 	PeriodExpr   string `json:"periodExpr"`
 	CurrencyType string `json:"currencyType,omitempty"`
 	Expression   string `json:"calcExpression,omitempty"`
+	// DimensionFilter limits the column to balances whose dimension values
+	// match, the same shape as a row's filter ({attribute: [values or "*"]},
+	// FR-15.3): a row picks up a balance only when the row's filter and the
+	// column's filter both match. Not allowed on CALC columns, which read
+	// other columns.
+	DimensionFilter map[string][]string `json:"dimensionFilter,omitempty"`
 }
 
 // Definition is a statement design: the rows, the columns and the presentation
@@ -204,6 +213,13 @@ func (d Definition) Validate() []Issue {
 		add("rows", CodeExpression, "rows reference each other in a cycle")
 	}
 	out = append(out, validateColumns(d.Columns)...)
+	if d.Kind == KindCashFlow {
+		for i, c := range d.Columns {
+			if len(c.DimensionFilter) > 0 {
+				add("columns["+strconv.Itoa(i)+"].dimensionFilter", ShapeCode, "a cash flow column cannot be filtered by dimension; the cash flow reconciles over the whole ledger")
+			}
+		}
+	}
 	return out
 }
 
@@ -230,6 +246,22 @@ func validateColumns(cols []Column) []Issue {
 		}
 		if c.CurrencyType != "" && c.CurrencyType != "acct" && c.CurrencyType != "rpt" && c.CurrencyType != "txn" {
 			add(field+".currencyType", ShapeCode, "must be acct, rpt or txn, or empty for the run's currency type")
+		}
+		if len(c.DimensionFilter) > 0 {
+			if c.PeriodExpr == "CALC" {
+				add(field+".dimensionFilter", ShapeCode, "a CALC column reads other columns; put the filter on those")
+			}
+			for attr, values := range c.DimensionFilter {
+				if !ValidCode(attr) {
+					add(field+".dimensionFilter", ShapeCode, "dimension attribute "+attr+" must start with a letter and use letters, digits or underscores")
+				}
+				if len(values) == 0 {
+					add(field+".dimensionFilter", ShapeCode, "dimension "+attr+" needs at least one value (or *)")
+				}
+				if len(values) > MaxFilterValues {
+					add(field+".dimensionFilter", CodeTooLarge, fmt.Sprintf("dimension %s may list at most %d values", attr, MaxFilterValues))
+				}
+			}
 		}
 		if c.PeriodExpr != "CALC" {
 			if c.Expression != "" {

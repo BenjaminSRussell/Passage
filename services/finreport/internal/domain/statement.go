@@ -110,6 +110,8 @@ type colPlan struct {
 	found    bool
 	currency string
 	include  map[int]bool
+	// dims is the column's dimension filter; nil keeps every balance.
+	dims map[string][]string
 }
 
 type slot struct {
@@ -260,7 +262,7 @@ func planColumns(in Input) ([]colPlan, error) {
 		if currency == "" {
 			currency = in.CurrencyType
 		}
-		plans[j] = colPlan{found: true, currency: currency, include: include}
+		plans[j] = colPlan{found: true, currency: currency, include: include, dims: c.DimensionFilter}
 	}
 	return plans, nil
 }
@@ -463,6 +465,9 @@ func (e *evaluator) sumBalances(row Row, ci int) cellVal {
 		list := e.index[k]
 		for _, j := range e.matching(row, k, list) {
 			b := list[j]
+			if plan.dims != nil && !dimsMatch(plan.dims, b.Dims) {
+				continue
+			}
 			net := b.Net
 			if excludeClosing {
 				net = net.Sub(b.ClosingNet)

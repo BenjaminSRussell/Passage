@@ -10,6 +10,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/finreport/internal/store"
 )
 
 // partStore keeps row sets and column sets in memory and answers like the
@@ -270,5 +271,68 @@ func TestTrees_RejectBadBodies(t *testing.T) {
 		if w.Code != c.status || problemCode(t, w) != c.code {
 			t.Errorf("%s: %d %s, want %d %s", name, w.Code, w.Body.String(), c.status, c.code)
 		}
+	}
+}
+
+// Tree revisions (FR-15.4): the stored history and the tree a run used.
+func (s *partStore) ListTreeRevisions(_ context.Context, code string) ([]store.TreeRevision, error) {
+	if _, ok := s.trees[code]; !ok {
+		return nil, missing("tree", code)
+	}
+	return []store.TreeRevision{{Revision: 2, UpdatedBy: "u1"}, {Revision: 1, UpdatedBy: "u0"}}, nil
+}
+
+func (s *partStore) GetTreeRevision(_ context.Context, code string, rev int) (domain.Tree, error) {
+	if t, ok := s.trees[code]; ok && rev <= 2 {
+		return t, nil
+	}
+	return domain.Tree{}, httpx.NewProblem(http.StatusNotFound, domain.CodePartNotFound, "tree has no stored revision")
+}
+
+func (s *partStore) RunTree(_ context.Context, id string) (store.RunTreeView, error) {
+	if id != runUUID {
+		return store.RunTreeView{}, httpx.NewProblem(http.StatusNotFound, domain.CodePartNotFound, "run was not limited to a tree")
+	}
+	return store.RunTreeView{Code: "PC-TREE", Unit: "DE", Revision: 1, CurrentRevision: 2, Tree: s.trees["PC-TREE"]}, nil
+}
+
+func TestTreeRevisions_ListGetAndRunTree(t *testing.T) {
+	st := newPartStore()
+	st.trees["PC-TREE"] = domain.Tree{Code: "PC-TREE", Name: "Profit centers", Attribute: "profit_center"}
+	r := scheduleRouter(st)
+	var list struct{ Items []store.TreeRevision }
+	w := call(r, http.MethodGet, "/v1/reporting/trees/PC-TREE/revisions", "", nil, DutyMaintain)
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil || w.Code != http.StatusOK || len(list.Items) != 2 || list.Items[0].Revision != 2 {
+		t.Fatalf("revisions = %d %s", w.Code, w.Body.String())
+	}
+	if w := call(r, http.MethodGet, "/v1/reporting/trees/NOPE/revisions", "", nil, DutyMaintain); w.Code != http.StatusNotFound {
+		t.Fatalf("unknown tree = %d", w.Code)
+	}
+	if w := call(r, http.MethodGet, "/v1/reporting/trees/PC-TREE/revisions/1", "", nil, DutyMaintain); w.Code != http.StatusOK || w.Header().Get("ETag") != `"1"` {
+		t.Fatalf("revision 1 = %d etag %q", w.Code, w.Header().Get("ETag"))
+	}
+	for _, rev := range []string{"0", "x", "9"} {
+		if w := call(r, http.MethodGet, "/v1/reporting/trees/PC-TREE/revisions/"+rev, "", nil, DutyMaintain); w.Code != http.StatusNotFound || problemCode(t, w) != domain.CodePartNotFound {
+			t.Fatalf("revision %s = %d %s", rev, w.Code, w.Body.String())
+		}
+	}
+	for _, p := range []string{"/v1/reporting/trees/PC-TREE/revisions", "/v1/reporting/trees/PC-TREE/revisions/1"} {
+		if w := call(r, http.MethodGet, p, "", nil, DutyView); w.Code != http.StatusForbidden {
+			t.Fatalf("%s with the view duty = %d, want 403", p, w.Code)
+		}
+	}
+	var v store.RunTreeView
+	w = call(r, http.MethodGet, "/v1/reporting/runs/"+runUUID+"/tree", "", nil, DutyView)
+	if err := json.Unmarshal(w.Body.Bytes(), &v); err != nil || w.Code != http.StatusOK || v.Unit != "DE" || v.Revision != 1 || v.CurrentRevision != 2 {
+		t.Fatalf("run tree = %d %s", w.Code, w.Body.String())
+	}
+	if w := call(r, http.MethodGet, "/v1/reporting/runs/"+ledgerUUID+"/tree", "", nil, DutyView); w.Code != http.StatusNotFound {
+		t.Fatalf("run without a tree = %d", w.Code)
+	}
+	if w := call(r, http.MethodGet, "/v1/reporting/runs/not-a-uuid/tree", "", nil, DutyView); w.Code != http.StatusNotFound {
+		t.Fatalf("bad run id = %d", w.Code)
+	}
+	if w := call(r, http.MethodGet, "/v1/reporting/runs/"+runUUID+"/tree", "", nil, DutyRun); w.Code != http.StatusForbidden {
+		t.Fatalf("run duty = %d, want 403", w.Code)
 	}
 }

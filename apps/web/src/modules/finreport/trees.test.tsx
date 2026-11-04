@@ -1,7 +1,7 @@
 import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { Tree } from "./api/client";
+import type { RunSummary, RunTreeView, Tree, TreeRevision } from "./api/client";
 import { toRunRequest, validateRun, type RunValues } from "./NewRunPage";
 import { parseValues } from "./TreeEditor";
 import { header, json, pageViolations, problem, renderAt, server, useFakeServer } from "./testServer";
@@ -186,5 +186,110 @@ describe("tree runs", () => {
   it("parses comma separated values", () => {
     expect(parseValues(" PC10, PC11 ,,PC12 ")).toEqual(["PC10", "PC11", "PC12"]);
     expect(parseValues("")).toEqual([]);
+  });
+});
+
+describe("tree revisions", () => {
+  const revisions: TreeRevision[] = [
+    { revision: 2, updatedBy: "u1", createdAt: "2026-04-03T09:00:00Z" },
+    { revision: 1, updatedBy: "u0", createdAt: "2026-04-01T09:00:00Z" },
+  ];
+  const first: Tree = { ...tree, name: "Profit centers (first)", units: [{ code: "ALL", name: "Group", values: ["PC10"] }] };
+
+  it("lists the stored revisions of a saved tree and shows the units of an older one", async () => {
+    server.handler = (url) => {
+      if (url.pathname === `${BASE}/trees/PC-TREE`) return json(200, tree, { ETag: '"2"' });
+      if (url.pathname === `${BASE}/trees/PC-TREE/revisions`) return json(200, { items: revisions });
+      if (url.pathname === `${BASE}/trees/PC-TREE/revisions/1`) return json(200, first, { ETag: '"1"' });
+      return undefined;
+    };
+    const { container } = renderAt("/finreport/trees/PC-TREE");
+    const table = await findTable({ name: "Tree revisions" });
+    expect(within(table).getAllByRole("row")).toHaveLength(3);
+    fireEvent.click(within(table).getByRole("button", { name: "Show the units of revision 1" }));
+    const units = await findTable({ name: "Units of PC-TREE" });
+    expect(within(units).getByText("PC10")).toBeInTheDocument();
+    expect(within(units).queryByText("Germany")).toBeNull();
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Show the units of revision 1" }));
+    expect(screen.queryByRole("table", { name: "Units of PC-TREE" })).toBeNull();
+  });
+
+  it("is not offered on a new tree, and says so when the history cannot be read", async () => {
+    server.handler = () => undefined;
+    const fresh = renderAt("/finreport/trees/new");
+    await screen.findByLabelText("Tree code");
+    expect(screen.queryByText("Revisions")).toBeNull();
+    fresh.unmount();
+
+    server.handler = (url) => {
+      if (url.pathname === `${BASE}/trees/PC-TREE`) return json(200, tree, { ETag: '"2"' });
+      return problem(500, "COM-0500", "history store down");
+    };
+    renderAt("/finreport/trees/PC-TREE");
+    expect(await screen.findByText(/Revisions are unavailable/)).toBeInTheDocument();
+    expect(screen.getByText(/COM-0500/)).toBeInTheDocument();
+  });
+
+  const RUN = "0190f0a0-0000-7000-8000-000000000101";
+  const run: RunSummary = {
+    id: RUN,
+    definitionCode: "PL-STD",
+    definitionVersion: 2,
+    ledgerId: "0190f0a0-0000-7000-8000-000000000201",
+    currencyType: "acct",
+    periodYear: 2026,
+    periodNo: 3,
+    status: "completed",
+    hwmByLedger: { "0190f0a0-0000-7000-8000-000000000201": 1 },
+    resultHash: "ab".repeat(32),
+    cellCount: 1,
+    requestedBy: "u1",
+    startedAt: "2026-04-02T08:00:00Z",
+    durationMs: 12,
+    tree: { code: "PC-TREE", unit: "ALL", revision: 1 },
+  };
+  const definition = {
+    schemaVersion: "1", code: "PL-STD", name: "Income statement", version: 2, status: "published", kind: "income_statement", includeAdjustmentPeriods: false,
+    rows: [{ code: "REV", kind: "account_range", label: "Revenue", accountFrom: "4000", accountTo: "4999", normalBalance: "credit", format: {} }],
+    columns: [{ code: "C1", label: "March", periodExpr: "P" }],
+  };
+  const runServer = (treeReply: () => ReturnType<typeof json>) => {
+    server.handler = (url) => {
+      const p = url.pathname;
+      if (p === `${BASE}/runs/${RUN}`) return json(200, run);
+      if (p === `${BASE}/runs/${RUN}/cells`) return json(200, { items: [{ row: "REV", column: "C1", value: "1.000000", blank: false, computed: false, keyCount: 1 }] });
+      if (p === `${BASE}/definitions/PL-STD`) return json(200, definition);
+      if (p === `${BASE}/runs/${RUN}/tree`) return treeReply();
+      return undefined;
+    };
+  };
+
+  it("shows the units a tree run used, even after the tree changed", async () => {
+    const view: RunTreeView = { code: "PC-TREE", unit: "ALL", revision: 1, currentRevision: 2, tree };
+    runServer(() => json(200, view));
+    const { container } = renderAt(`/finreport/runs/${RUN}`);
+    const table = await findTable({ name: "Units of PC-TREE" });
+    expect(within(table).getAllByText("Covered")).toHaveLength(3);
+    expect(screen.getByText(/The tree has changed since this run \(now revision 2\)/)).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("marks only the run's unit and the units below it", async () => {
+    runServer(() => json(200, { code: "PC-TREE", unit: "DE", revision: 2, currentRevision: 2, tree } satisfies RunTreeView));
+    renderAt(`/finreport/runs/${RUN}`);
+    const table = await findTable({ name: "Units of PC-TREE" });
+    expect(within(table).getAllByText("Covered")).toHaveLength(1);
+    expect(screen.queryByText(/The tree has changed/)).toBeNull();
+  });
+
+  it("says a revision that was not kept cannot be shown, and reports other failures", async () => {
+    runServer(() => problem(404, "REPORT-0037", "tree PC-TREE has no stored revision 1"));
+    const gone = renderAt(`/finreport/runs/${RUN}`);
+    expect(await screen.findByText(/was not kept, so its units cannot be shown/)).toBeInTheDocument();
+    gone.unmount();
+    runServer(() => problem(500, "COM-0500", "boom"));
+    renderAt(`/finreport/runs/${RUN}`);
+    expect(await screen.findByText("The tree is unavailable")).toBeInTheDocument();
   });
 });
