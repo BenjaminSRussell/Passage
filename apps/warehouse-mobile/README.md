@@ -7,9 +7,11 @@ release.
 
 ## What is here
 
-- `src/App.tsx`: the device shell. Its menu offers the seven bundled core flows
+- `src/App.tsx`: re-exports `DeviceApp` from the web module. Its menu loads published flows
+  (`GET /api/v1/mobile/menus/{id}`) and falls back to the seven bundled core flows
   (`coreFlows.ts`: receive/put-away, pick, cluster pick, pack, move, count, inquiry); Menu
-  leaves the current flow. The shared runner decides every step:
+  leaves the current flow. A publish arrives over SSE (and a 30 s poll) without an app
+  update. The shared runner decides every step:
   one input per screen, Enter or a hardware scan advances, Back returns one step (§6.32.6).
   Scan steps check the expected class and the GS1 label (MOB-0101..0104, BR-32.1, BR-32.2);
   input, select and branch steps take a value or an outcome. A finished flow is queued as a

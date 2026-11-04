@@ -47,6 +47,9 @@ func (s *Store) ReleaseInvoice(ctx context.Context, id, legalEntityID, by string
 		if err := s.markDone(ctx, id, outcome.LedgerEntryID != ""); err != nil {
 			return err
 		}
+		if err := s.putSelfBill(t, inv, outcome.SelfBill); err != nil {
+			return err
+		}
 		now := time.Now().UTC()
 		inv.LedgerEntryID, inv.Status, inv.ReleasedBy, inv.ReleasedAt = outcome.LedgerEntryID, domain.InvoiceStatusPosted, by, &now
 		t.invoiceDocs[id] = inv

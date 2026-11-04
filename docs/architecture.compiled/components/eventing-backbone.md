@@ -31,7 +31,7 @@ internal: platform-kernel, integration (egress relay, webhooks), platform (workf
 - No P3 in events; P2 only where needed; payrollrun.posted aggregates only.
 - Replay: ticket, pause (`passage-ctl consumer pause`), snapshot inbox, offset replay / DLQ replay [P] / snapshot rebuild, resume, verify with I.6; fiscal consumers need controller approval.
 - Per-tenant ACLs on shared topics impossible -> egress topics (needs ADR amendment); GDPR tombstones on snapshot topics [P].
-- Debezium CloudEvents assembly needs `passage-cloudevents-enricher` SMT (spike wave 4).
+- Debezium CloudEvents assembly uses `passage-cloudevents-enricher` (`deploy/kafka-connect/enricher`, chained after EventRouter in `deploy/kafka/connect.yaml`). Live image pull and cluster sync remain #213.
 - `ledger-intercompany` pair match 48 h timeout; S4 timers: mirror PO 5 days.
 
 ## Source Sections

@@ -1,9 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strings"
+
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -13,8 +17,10 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/ledger"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/party"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/partydata"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/periods"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/purchasing"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/tax"
 )
 
 func buildPorts(getenv func(string) string) (api.Ports, error) {
@@ -81,6 +87,23 @@ func buildPorts(getenv func(string) string) (api.Ports, error) {
 	default:
 		slog.Warn("COMPLIANCE_URL is empty: one-time payee erasure answers 503 until it is set")
 	}
+	if url := getenv("TAX_URL"); url != "" {
+		cfg, err := taxConfig(getenv)
+		if err != nil {
+			return api.Ports{}, err
+		}
+		client := tax.New(url, cfg, nil).WithSigner(signer)
+		ports.Tax, ports.TaxRecorder = client, client
+		partyURL, orgURL := getenv("PARTY_URL"), getenv("ORG_URL")
+		if partyURL == "" || orgURL == "" {
+			return api.Ports{}, fmt.Errorf("TAX_URL needs PARTY_URL and ORG_URL: the self-billing document prints the supplier and the legal entity")
+		}
+		ports.SelfBillParties = partydata.New(partyURL, orgURL, nil).WithSigner(signer)
+	} else if allowFakes {
+		slog.Warn("TAX_URL is empty: ERS settlement skips every receipt as TAX_NOT_DETERMINED unless faked", "flag", "PASSAGE_ALLOW_FAKES")
+	} else {
+		slog.Warn("TAX_URL is empty: ERS settlement skips every receipt as TAX_NOT_DETERMINED")
+	}
 	if ports.LegalEntityCountry, err = domain.ParseLegalEntityCountries(getenv("LEGAL_ENTITY_COUNTRIES")); err != nil {
 		return api.Ports{}, err
 	}
@@ -120,6 +143,35 @@ var profileEnv = []struct {
 	{"POSTING_ACCOUNT_GRIR", "2100", func(p *domain.PostingProfile) *string { return &p.GRIR }},
 	{"POSTING_ACCOUNT_PPV", "5200", func(p *domain.PostingProfile) *string { return &p.PPV }},
 	{"POSTING_ACCOUNT_VENDOR_CONTROL", "2000", func(p *domain.PostingProfile) *string { return &p.VendorControl }},
+	{"POSTING_ACCOUNT_EXPENSE", "6000", func(p *domain.PostingProfile) *string { return &p.Expense }},
+	{"POSTING_ACCOUNT_INPUT_TAX", "1570", func(p *domain.PostingProfile) *string { return &p.InputTax }},
+}
+
+type taxRuleEnv struct {
+	Country      string `json:"country"`
+	Code         string `json:"code"`
+	Jurisdiction string `json:"jurisdiction"`
+	RatePct      string `json:"ratePct"`
+}
+
+func taxConfig(getenv func(string) string) (tax.Config, error) {
+	cfg := tax.Config{Group: getenv("TAX_GROUP"), ItemGroup: getenv("TAX_ITEM_GROUP"), Rounding: getenv("TAX_ROUNDING"), Rules: map[string]tax.Rule{}}
+	var rules []taxRuleEnv
+	if err := json.Unmarshal([]byte(getenv("TAX_RULES")), &rules); err != nil || len(rules) == 0 {
+		return tax.Config{}, fmt.Errorf(`TAX_URL needs TAX_RULES, a JSON array of {"country","code","jurisdiction","ratePct"}`)
+	}
+	for _, r := range rules {
+		country := strings.ToUpper(strings.TrimSpace(r.Country))
+		rate, err := decimal.NewFromString(r.RatePct)
+		if len(country) != 2 || r.Code == "" || r.Jurisdiction == "" || err != nil || rate.IsNegative() {
+			return tax.Config{}, fmt.Errorf("TAX_RULES entry %q needs a two-letter country, a code, a jurisdiction and a non-negative ratePct", r.Country)
+		}
+		if _, dup := cfg.Rules[country]; dup {
+			return tax.Config{}, fmt.Errorf("TAX_RULES lists country %s twice", country)
+		}
+		cfg.Rules[country] = tax.Rule{Code: r.Code, Jurisdiction: r.Jurisdiction, RatePct: rate}
+	}
+	return cfg, nil
 }
 
 func buildProfile(getenv func(string) string, allowFakes bool) (domain.PostingProfile, error) {

@@ -2,7 +2,13 @@
 // as exposed to the browser through the BFF at /api/v1/mobile.
 import type { FlowDraft } from "../domain/flowGraph";
 
-const base = "/api/v1/mobile";
+export const base = "/api/v1/mobile";
+
+/** Menu a device loads when none is provisioned (FR-32.2, GET /mobile/v1/menus/{id}). */
+export const DEFAULT_MENU_ID = "default";
+
+/** SSE channel the device watches for publishes (dev.passage.mobile.flow.published.v1). */
+export const PUBLISH_EVENTS_URL = `${base}/events`;
 
 export interface SavedFlow extends FlowDraft {
   flowId: string;
@@ -116,10 +122,96 @@ export async function publishFlow(flowId: string, idempotencyKey: string, ifMatc
   return (await res.json()) as SavedFlow;
 }
 
+/** Published flows a device menu offers (GET /mobile/v1/menus/{id}, FR-32.2). */
+export interface MobileMenu {
+  id: string;
+  flows: SavedFlow[];
+}
+
+function asSavedFlow(value: unknown): SavedFlow | null {
+  if (typeof value !== "object" || value === null) return null;
+  const f = value as Partial<SavedFlow>;
+  if (typeof f.code !== "string" || typeof f.entryStepId !== "string" || !Array.isArray(f.steps)) return null;
+  if (typeof f.flowId !== "string" || typeof f.version !== "number") return null;
+  if (f.status !== "DRAFT" && f.status !== "PUBLISHED" && f.status !== "RETIRED") return null;
+  return f as SavedFlow;
+}
+
+function asMenu(value: unknown): MobileMenu | null {
+  if (typeof value !== "object" || value === null) return null;
+  const body = value as { id?: unknown; flows?: unknown };
+  if (typeof body.id !== "string" || !Array.isArray(body.flows)) return null;
+  const flows: SavedFlow[] = [];
+  for (const item of body.flows) {
+    const flow = asSavedFlow(item);
+    if (!flow) return null;
+    flows.push(flow);
+  }
+  return { id: body.id, flows };
+}
+
+/** Loads a device menu. A 404 without a catalog code means the mobile service is not deployed. */
+export async function fetchMenu(menuId: string = DEFAULT_MENU_ID, signal?: AbortSignal): Promise<MobileMenu> {
+  const res = await fetch(`${base}/menus/${encodeURIComponent(menuId)}`, {
+    headers: { Accept: "application/json" },
+    credentials: "same-origin",
+    signal,
+  });
+  if (!res.ok) throw await failure(res);
+  const menu = asMenu(await res.json());
+  if (!menu) throw new FlowApiError(res.status, "COM-0001", "The response has no menu flows");
+  return menu;
+}
+
+/** A flow.published push (snake_case on the wire, camelCase in the client). */
+export interface FlowPublished {
+  flowId: string;
+  code: string;
+  version: number;
+}
+
+/** Parses one SSE data payload. Unknown or malformed frames are ignored. */
+export function parseFlowPublished(data: string): FlowPublished | null {
+  try {
+    const body = JSON.parse(data) as { flow_id?: unknown; flowId?: unknown; code?: unknown; version?: unknown };
+    const flowId = typeof body.flowId === "string" ? body.flowId : body.flow_id;
+    if (typeof flowId !== "string" || typeof body.code !== "string" || typeof body.version !== "number") return null;
+    return { flowId, code: body.code, version: body.version };
+  } catch {
+    return null;
+  }
+}
+
+export interface SubscribePublishesDeps {
+  EventSource?: typeof EventSource;
+  url?: string;
+}
+
+/**
+ * Listens for published flow versions (AC-32.4). Returns an unsubscribe that closes the
+ * EventSource. The device then reloads the menu; it does not need a new app binary.
+ */
+export function subscribePublishes(onEvent: (event: FlowPublished) => void, deps: SubscribePublishesDeps = {}): () => void {
+  const Ctor = deps.EventSource ?? (typeof EventSource === "undefined" ? undefined : EventSource);
+  if (!Ctor) return () => undefined;
+  let source: EventSource;
+  try {
+    source = new Ctor(deps.url ?? PUBLISH_EVENTS_URL);
+  } catch {
+    return () => undefined;
+  }
+  const listener = (ev: Event) => {
+    const parsed = parseFlowPublished((ev as MessageEvent).data as string);
+    if (parsed) onEvent(parsed);
+  };
+  source.addEventListener("flow.published", listener);
+  return () => source.close();
+}
+
 /** Text for a failed flow call; the mobile service may not be deployed yet (404). */
 export function describeFlowError(error: unknown): string {
   if (error instanceof FlowApiError) {
-    if (error.status === 404 && !error.code) return "The mobile flow service is not available yet. The draft was not saved.";
+    if (error.status === 404 && !error.code) return "The mobile flow service is not available yet.";
     return error.code ? `${error.message} (${error.code})` : error.message;
   }
   return error instanceof Error ? error.message : "Request failed";

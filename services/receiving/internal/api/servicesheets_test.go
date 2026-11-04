@@ -1,40 +1,51 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store/memstore"
 )
 
 const sheetsPath = "/v1/receiving/service-entry-sheets"
 
 type sheetJSON struct {
-	ID           string `json:"id"`
-	Status       string `json:"status"`
-	Total        string `json:"total"`
-	VendorID     string `json:"vendorId"`
-	DecidedBy    string `json:"decidedBy"`
-	RejectReason string `json:"rejectReason"`
-	Lines        []struct {
+	ID            string `json:"id"`
+	Status        string `json:"status"`
+	Total         string `json:"total"`
+	VendorID      string `json:"vendorId"`
+	DecidedBy     string `json:"decidedBy"`
+	RejectReason  string `json:"rejectReason"`
+	ReceiptID     string `json:"receiptId"`
+	LedgerEntryID string `json:"ledgerEntryId"`
+	Lines         []struct {
 		POLineNo int    `json:"poLineNo"`
 		Amount   string `json:"amount"`
 	} `json:"lines"`
 }
 
 func newSheetRig(po domain.PurchaseOrder) *rig {
-	rg := &rig{st: memstore.New(), ledger: &domain.FakeLedger{}}
+	rg := &rig{st: memstore.New(), ledger: &domain.FakeLedger{}, orders: map[string]domain.PurchaseOrder{po.ID: po}}
 	a := api.New(rg.st, api.Ports{
 		Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: rg.ledger,
-		PurchaseOrders: domain.FakePurchaseOrders{Orders: map[string]domain.PurchaseOrder{po.ID: po}},
+		Profile:        domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000", Expense: "6000", InputTax: "1570"},
+		PurchaseOrders: domain.FakePurchaseOrders{Orders: rg.orders},
+		AuditSampler:   testSampler("seed-one-0123456789"),
+		ResolveMinAge:  time.Nanosecond,
+		Tax:            testTax, SelfBillParties: testParties,
 	})
 	router := httpx.NewRouter()
 	a.Register(router)
@@ -98,14 +109,35 @@ func TestServiceSheet_CreateAcceptEmitsOneDecisionEvent(t *testing.T) {
 		t.Fatal("a refused decision emitted an event")
 	}
 	accepted := parseSheet(t, rg.decideSheet(created.ID, "accept", "bob", ""), http.StatusOK)
-	if accepted.Status != "ACCEPTED" || accepted.DecidedBy != "bob" {
+	if accepted.Status != "ACCEPTED" || accepted.DecidedBy != "bob" || accepted.ReceiptID == "" || accepted.LedgerEntryID == "" {
 		t.Fatalf("accepted %+v", accepted)
 	}
+	if len(rg.ledger.Entries) != 1 {
+		t.Fatalf("ledger entries %d, want the service accrual", len(rg.ledger.Entries))
+	}
+	wantLines(t, rg.ledger.Entries[0], "6000=7.52", "2100=-7.52")
+	if rg.ledger.Balance("6000").String() != "7.52" || rg.ledger.Balance("2100").String() != "-7.52" {
+		t.Fatalf("expense %s GR/IR %s", rg.ledger.Balance("6000"), rg.ledger.Balance("2100"))
+	}
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: legalEntityID})
+	page, err := rg.st.ListGrir(ctx, store.GrirFilter{Limit: 10})
+	if err != nil || len(page.Items) != 1 || page.Items[0].ReceiptID != accepted.ReceiptID || page.Items[0].Status != "OPEN" {
+		t.Fatalf("GR/IR %+v err %v", page.Items, err)
+	}
+	rec, err := rg.st.GetReceipt(ctx, accepted.ReceiptID)
+	if err != nil || rec.Source != domain.ReceiptSourceService || rec.PackingSlip != "SES-"+created.ID || rec.State != domain.Posted {
+		t.Fatalf("service receipt %+v err %v", rec, err)
+	}
 	evts := rg.st.Events()
-	if len(evts) != 1 || evts[0].Type != "dev.passage.receiving.serviceentrysheet.decided.v1" {
+	if len(evts) != 2 {
 		t.Fatalf("events %+v", evts)
 	}
+	types := []string{evts[0].Type, evts[1].Type}
+	if types[0] != "dev.passage.receiving.serviceentrysheet.decided.v1" || types[1] != "dev.passage.receiving.receipt.posted.v1" {
+		t.Fatalf("events %v", types)
+	}
 	assertDocumented(t, evts[0])
+	assertDocumented(t, evts[1])
 	byDecider := rg.call(http.MethodGet, sheetsPath+"/"+created.ID, "", duty("ServiceEntryAccept", "", "X-Passage-User", "bob"))
 	if got := decode[sheetJSON](t, byDecider, http.StatusOK); got.ID != created.ID {
 		t.Fatalf("decider read %+v", got)
@@ -188,5 +220,141 @@ func TestServiceSheet_RejectNeedsAReasonAndReadsAreScoped(t *testing.T) {
 	missing := fmt.Sprintf("%s/%s", sheetsPath, "66666666-6666-4666-8666-666666666666")
 	if rec := rg.call(http.MethodGet, missing, "", duty("ServiceEntryMaintain", "", "X-Passage-User", "alice")); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown sheet: %d", rec.Code)
+	}
+}
+
+func TestServiceSheet_AcceptClosedPeriodPostsNothing(t *testing.T) {
+	po := servicePO()
+	rg := &rig{st: memstore.New(), ledger: &domain.FakeLedger{}}
+	a := api.New(rg.st, api.Ports{
+		Periods: domain.FakePeriods{Status: domain.PeriodClosed}, Ledger: rg.ledger,
+		Profile:        domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000", Expense: "6000", InputTax: "1570"},
+		PurchaseOrders: domain.FakePurchaseOrders{Orders: map[string]domain.PurchaseOrder{po.ID: po}},
+		ResolveMinAge:  time.Nanosecond,
+	})
+	router := httpx.NewRouter()
+	a.Register(router)
+	rg.h, rg.api = router, a
+	created := parseSheet(t, rg.sheetAs("alice", sheetBodyFor(sheetLine(1, "1", "2.5"))), http.StatusCreated)
+	if r := rg.decideSheet(created.ID, "accept", "bob", ""); r.code != http.StatusUnprocessableEntity || !strings.Contains(r.body, "PER-AP-001") {
+		t.Fatalf("closed period: %d %s", r.code, r.body)
+	}
+	if len(rg.ledger.Entries) != 0 {
+		t.Fatalf("ledger %+v", rg.ledger.Entries)
+	}
+	read := decode[sheetJSON](t, rg.call(http.MethodGet, sheetsPath+"/"+created.ID, "", duty("ServiceEntryMaintain", "", "X-Passage-User", "alice")), http.StatusOK)
+	if read.Status != "PENDING" {
+		t.Fatalf("sheet moved off PENDING: %+v", read)
+	}
+}
+
+func TestServiceSheet_AcceptedSheetSettlesByERS(t *testing.T) {
+	rg := newSheetRig(servicePO())
+	created := parseSheet(t, rg.sheetAs("alice", sheetBodyFor(sheetLine(1, "3", "2.5"))), http.StatusCreated)
+	accepted := parseSheet(t, rg.decideSheet(created.ID, "accept", "bob", ""), http.StatusOK)
+	rg.enableErs(t, true)
+	run := rg.ersRun(t, http.StatusOK)
+	if len(run.Settled) != 1 || run.Settled[0].InvoiceNumber != "ERS-"+created.ID || run.Settled[0].ReceiptID != accepted.ReceiptID {
+		t.Fatalf("settled %+v", run)
+	}
+	entry := lastEntry(t, rg)
+	wantLines(t, entry, "2100=7.5", "2000=-7.5")
+}
+
+func TestServiceSheet_ERSPriceDifferenceGoesToExpenseNotInventory(t *testing.T) {
+	rg := newSheetRig(servicePO())
+	created := parseSheet(t, rg.sheetAs("alice", sheetBodyFor(sheetLine(1, "4", "2.5"))), http.StatusCreated)
+	accepted := parseSheet(t, rg.decideSheet(created.ID, "accept", "bob", ""), http.StatusOK)
+	repriced := servicePO()
+	repriced.Lines[0].UnitPrice = decimal.RequireFromString("3")
+	rg.orders[poID] = repriced
+	rg.enableErs(t, true)
+	rg.confirmPrice(t, accepted.ReceiptID, 1, "3", http.StatusOK)
+	run := rg.ersRun(t, http.StatusOK)
+	if len(run.Settled) != 1 {
+		t.Fatalf("run %+v", run)
+	}
+	wantLines(t, lastEntry(t, rg), "2100=10", "6000=2", "2000=-12")
+	if rg.ledger.Balance("1400").Sign() != 0 {
+		t.Fatalf("a service price difference reached Inventory: %s", rg.ledger.Balance("1400"))
+	}
+}
+
+func TestServiceSheet_ManualInvoiceDifferenceGoesToExpenseToo(t *testing.T) {
+	rg := newSheetRig(servicePO())
+	created := parseSheet(t, rg.sheetAs("alice", sheetBodyFor(sheetLine(1, "4", "2.5"))), http.StatusCreated)
+	accepted := parseSheet(t, rg.decideSheet(created.ID, "accept", "bob", ""), http.StatusOK)
+	rec := rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-SES-1", accepted.ReceiptID, 4, ""), userDuty("VendorInvoicePost", rg.key(), "ap-clerk"))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("manual invoice %d %s", rec.Code, rec.Body.String())
+	}
+	if rg.ledger.Balance("1400").Sign() != 0 {
+		t.Fatalf("Inventory %s", rg.ledger.Balance("1400"))
+	}
+}
+
+func TestServiceSheet_ReceiptCannotBeCorrectedOrCancelled(t *testing.T) {
+	rg := newSheetRig(servicePO())
+	created := parseSheet(t, rg.sheetAs("alice", sheetBodyFor(sheetLine(1, "4", "2.5"))), http.StatusCreated)
+	accepted := parseSheet(t, rg.decideSheet(created.ID, "accept", "bob", ""), http.StatusOK)
+	entries := len(rg.ledger.Entries)
+	path := receiptsPath + "/" + accepted.ReceiptID
+	problemCode(t, rg.call(http.MethodPost, path+":correct", `{"lines":[{"lineNo":1,"qtyDelta":1}]}`, rg.poster(1)), http.StatusConflict, "RCV-SVC-001")
+	problemCode(t, rg.call(http.MethodPost, path+":cancel", "", rg.poster(1)), http.StatusConflict, "RCV-SVC-001")
+	if len(rg.ledger.Entries) != entries {
+		t.Fatalf("a refused command posted to the ledger: %+v", rg.ledger.Entries[entries:])
+	}
+	read := decode[sheetJSON](t, rg.call(http.MethodGet, sheetsPath+"/"+created.ID, "", duty("ServiceEntryMaintain", "", "X-Passage-User", "alice")), http.StatusOK)
+	if read.Status != "ACCEPTED" {
+		t.Fatalf("sheet %+v", read)
+	}
+}
+
+func TestServiceSheet_AcceptFailsWhenThePurchaseOrderCannotBeRead(t *testing.T) {
+	rg := newSheetRig(servicePO())
+	created := parseSheet(t, rg.sheetAs("alice", sheetBodyFor(sheetLine(1, "4", "2.5"))), http.StatusCreated)
+	delete(rg.orders, poID)
+	if r := rg.decideSheet(created.ID, "accept", "bob", ""); r.code == http.StatusOK {
+		t.Fatalf("accepted without reading the purchase order: %s", r.body)
+	}
+	if len(rg.ledger.Entries) != 0 {
+		t.Fatalf("ledger %+v", rg.ledger.Entries)
+	}
+}
+
+func TestServiceSheet_AuditReleaseOfAnERSInvoicePostsTheDifferenceToExpense(t *testing.T) {
+	rg := newSheetRig(servicePO())
+	created := parseSheet(t, rg.sheetAs("alice", sheetBodyFor(sheetLine(1, "4", "2.5"))), http.StatusCreated)
+	accepted := parseSheet(t, rg.decideSheet(created.ID, "accept", "bob", ""), http.StatusOK)
+	repriced := servicePO()
+	repriced.Lines[0].UnitPrice = decimal.RequireFromString("3")
+	rg.orders[poID] = repriced
+	rg.enableErs(t, true)
+	rg.sampleRate(t, "100")
+	rg.confirmPrice(t, accepted.ReceiptID, 1, "3", http.StatusOK)
+	run := rg.ersRun(t, http.StatusOK)
+	if len(run.Settled) != 1 || run.Settled[0].Status != "AUDIT_BLOCKED" {
+		t.Fatalf("run %+v", run)
+	}
+	if code, body := rg.release(run.Settled[0].InvoiceID, "auditor"); code != http.StatusOK {
+		t.Fatalf("release %d %s", code, body)
+	}
+	wantLines(t, lastEntry(t, rg), "2100=10", "6000=2", "2000=-12")
+	if rg.ledger.Balance("1400").Sign() != 0 {
+		t.Fatalf("Inventory %s", rg.ledger.Balance("1400"))
+	}
+}
+
+func TestServiceSheet_InvoiceAdjustmentOfAServiceLinePostsToExpense(t *testing.T) {
+	rg := newSheetRig(servicePO())
+	created := parseSheet(t, rg.sheetAs("alice", sheetBodyFor(sheetLine(1, "4", "2.5"))), http.StatusCreated)
+	accepted := parseSheet(t, rg.decideSheet(created.ID, "accept", "bob", ""), http.StatusOK)
+	inv := decode[invoiceJSON](t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-SES-ADJ", accepted.ReceiptID, 4, ""), rg.apPosterFor(legalEntityID)), http.StatusCreated)
+	decode[adjustmentJSON](t, rg.call(http.MethodPost, adjustmentsPath, adjustmentBody(inv.ID, "CREDIT", "CN-SES-1", adjLine(1, "1.50")), rg.apPosterFor(legalEntityID)), http.StatusCreated)
+	wantLines(t, lastEntry(t, rg), "6000=-1.5", "2000=1.5")
+	decode[adjustmentJSON](t, rg.call(http.MethodPost, adjustmentsPath, adjustmentBody(inv.ID, "DEBIT", "DN-SES-1", adjLine(1, "0.75")), rg.apPosterFor(legalEntityID)), http.StatusCreated)
+	wantLines(t, lastEntry(t, rg), "6000=0.75", "2000=-0.75")
+	if rg.ledger.Balance("1400").Sign() != 0 {
+		t.Fatalf("a service adjustment reached Inventory: %s", rg.ledger.Balance("1400"))
 	}
 }

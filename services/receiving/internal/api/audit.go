@@ -192,22 +192,33 @@ func (a *API) releaseAuditBlock(w http.ResponseWriter, r *http.Request) {
 	}
 	group := a.vendorGroup(ctx, nil, id, req.LegalEntityID, vendorID)
 	released, err := a.store.ReleaseInvoice(ctx, id, req.LegalEntityID, p.UserID, func(inv store.Invoice) (store.InvoiceOutcome, error) {
+		var parties domain.SelfBillParties
+		if inv.Source == domain.InvoiceSourceERS {
+			var err error
+			if parties, err = a.selfBillParties(ctx, inv); err != nil {
+				return store.InvoiceOutcome{}, err
+			}
+		}
 		lines := make([]domain.HeldLine, len(inv.Lines))
 		subjects := []string{inv.ID}
 		for i, l := range inv.Lines {
-			lines[i] = domain.HeldLine{Qty: l.Qty, UnitPrice: l.UnitPrice, StandardCost: l.StandardCost, Clearing: l.GrirCleared}
+			lines[i] = domain.HeldLine{Qty: l.Qty, UnitPrice: l.UnitPrice, StandardCost: l.StandardCost, Service: l.Service, Clearing: l.GrirCleared}
 			subjects = append(subjects, l.ReceiptID)
 		}
 		entry, err := domain.PostHeldInvoice(ctx, domain.VendorInvoice{
 			ID: inv.ID, LegalEntityID: inv.LegalEntityID, LedgerID: inv.LedgerID, FiscalPeriodID: inv.FiscalPeriodID,
-			PostingDate: inv.PostingDate, InvoiceDate: inv.InvoiceDate, Currency: inv.Currency, VendorGroupCode: group.Code,
+			PostingDate: inv.PostingDate, InvoiceDate: inv.InvoiceDate, Currency: inv.Currency, TaxAmount: inv.TaxAmount, TaxCode: inv.TaxCode, VendorGroupCode: group.Code,
 		}, lines, a.ports.Periods, a.ledgerFor(subjects...), a.ports.Profile)
 		if err != nil {
 			return store.InvoiceOutcome{}, err
 		}
 		total := entry.Lines[len(entry.Lines)-1].Amount.Value.Neg()
 		evt, err := invoicePostedEvent(p.TenantID, inv, group, entry.LedgerEntryID, total, entry.GrirCleared)
-		return store.InvoiceOutcome{LedgerEntryID: entry.LedgerEntryID, Total: total, Event: evt}, err
+		outcome := store.InvoiceOutcome{LedgerEntryID: entry.LedgerEntryID, Total: total, Event: evt}
+		if inv.Source == domain.InvoiceSourceERS {
+			outcome.SelfBill = a.selfBillBuild(p.TenantID, inv, parties)
+		}
+		return outcome, err
 	})
 	if err != nil {
 		writeError(w, r, err)
@@ -354,7 +365,7 @@ func (a *API) ersConfirmablePrice(ctx context.Context, rec store.Receipt, lineNo
 		poLine = po.Lines[at]
 	} else {
 		var reason string
-		if poLine, reason = matchPOLine(po, line.ProductID); reason != "" {
+		if poLine, reason = matchPOLine(po, line.ProductID, 0); reason != "" {
 			return decimal.Zero, poProblem(http.StatusConflict, "AP-ERS-003", "the receipt line has no single purchase order line (%s)", reason)
 		}
 	}

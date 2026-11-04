@@ -17,7 +17,7 @@ func (t *tenantData) invoiceBase(invoiceID string) (store.InvoiceBase, error) {
 	}
 	base := store.InvoiceBase{Invoice: inv}
 	for i, l := range inv.Lines {
-		base.Lines = append(base.Lines, domain.InvoiceLineState{LineNo: i + 1, Amount: l.Amount, StandardCost: l.StandardCost})
+		base.Lines = append(base.Lines, domain.InvoiceLineState{LineNo: i + 1, Amount: l.Amount, StandardCost: l.StandardCost, Service: l.Service})
 	}
 	for _, adj := range t.adjustments {
 		if adj.OriginalInvoiceID != invoiceID {
