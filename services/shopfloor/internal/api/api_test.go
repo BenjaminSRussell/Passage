@@ -55,6 +55,7 @@ type fakeStore struct {
 	absenceIn     *store.AbsenceCodeInput
 	absences      []domain.Absence
 	reasonIn      *store.DowntimeReasonInput
+	categoryIn    *domain.CategoryInput
 }
 
 func (f *fakeStore) Ping(context.Context) error { return nil }

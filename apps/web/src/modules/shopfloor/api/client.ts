@@ -581,16 +581,8 @@ export function getPayExport(id: string, signal?: AbortSignal): Promise<PayExpor
 
 export type ProcessSource = "kiosk" | "edge" | "manual";
 
-export type ProcessCategory =
-  | "phase-start"
-  | "phase-end"
-  | "consumption"
-  | "yield"
-  | "process-data"
-  | "quality-result"
-  | "deviation"
-  | "order-status"
-  | "custom";
+/** A category code: a built-in one (phase-start, quality-result, ...) or one the tenant defined (slice 21). */
+export type ProcessCategory = string;
 
 export type ProcessDestination = "ebr" | "journal" | "quality" | "kafka" | "webhook";
 
@@ -1026,6 +1018,77 @@ export function updateDowntimeReason(reason: DowntimeReason, changes: { name?: s
     method: "PUT",
     headers: { "If-Match": `"${reason.version}"` },
     body: JSON.stringify({ name: reason.name, category: reason.category, active: reason.active, ...changes }),
+  });
+}
+
+/** A characteristic a process category defines: its type, unit and limits (FR-25.17, BR-25.13). */
+export interface CharacteristicDefinition {
+  name: string;
+  type: CharacteristicType;
+  unit?: string | null;
+  /** Decimal string limits, numeric only. */
+  min?: string | null;
+  max?: string | null;
+  /** A message of the category without a value of this name is SF-0115. */
+  required: boolean;
+}
+
+/** One process message category: a row of the tenant's master, or a built-in default (builtIn, no id or version). */
+export interface ProcessCategoryDef {
+  id?: string;
+  code: string;
+  name: string;
+  destinations: ProcessDestination[];
+  rejectOutOfLimit: boolean;
+  characteristics: CharacteristicDefinition[];
+  active: boolean;
+  builtIn: boolean;
+  version?: number;
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface NewProcessCategory {
+  code: string;
+  name: string;
+  destinations: ProcessDestination[];
+  rejectOutOfLimit: boolean;
+  characteristics: CharacteristicDefinition[];
+  active?: boolean;
+}
+
+export type ProcessCategoryChanges = Partial<Omit<NewProcessCategory, "code">>;
+
+export function listProcessCategories(filter: { active?: boolean } = {}, signal?: AbortSignal): Promise<ProcessCategoryDef[]> {
+  return items<ProcessCategoryDef>(`/process-categories${query({ active: filter.active })}`, signal);
+}
+
+export function getProcessCategory(id: string, signal?: AbortSignal): Promise<ProcessCategoryDef> {
+  return send<ProcessCategoryDef>(`/process-categories/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Creates a category; a row for a built-in code replaces that default. A used code is SF-0142. */
+export function createProcessCategory(input: NewProcessCategory, key: string = newKey()): Promise<ProcessCategoryDef> {
+  return post<ProcessCategoryDef>("/process-categories", input, key);
+}
+
+/**
+ * Replaces a category's name, destinations, reject flag, definitions and status (the code never
+ * changes). The version is the If-Match entity tag; another change in between is SF-0143 (412).
+ */
+export function updateProcessCategory(category: ProcessCategoryDef, changes: ProcessCategoryChanges): Promise<ProcessCategoryDef> {
+  return send<ProcessCategoryDef>(`/process-categories/${encodeURIComponent(category.id ?? "")}`, {
+    method: "PUT",
+    headers: { "If-Match": `"${category.version ?? 0}"` },
+    body: JSON.stringify({
+      name: category.name,
+      destinations: category.destinations,
+      rejectOutOfLimit: category.rejectOutOfLimit,
+      characteristics: category.characteristics,
+      active: category.active,
+      ...changes,
+    }),
   });
 }
 

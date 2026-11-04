@@ -68,6 +68,12 @@ channels:
     messages:
       downtimeReasonSaved:
         $ref: "#/components/messages/DowntimeReasonSaved"
+  processCategorySaved:
+    address: passage.shopfloor.processcategory
+    description: A process message category was created or changed (FR-25.17). Not in the PRD event table.
+    messages:
+      processCategorySaved:
+        $ref: "#/components/messages/ProcessCategorySaved"
   productionOperation:
     address: passage.production.operation
     description: |
@@ -163,6 +169,12 @@ operations:
       $ref: "#/channels/downtimeReasonSaved"
     messages:
       - $ref: "#/channels/downtimeReasonSaved/messages/downtimeReasonSaved"
+  publishProcessCategorySaved:
+    action: send
+    channel:
+      $ref: "#/channels/processCategorySaved"
+    messages:
+      - $ref: "#/channels/processCategorySaved/messages/processCategorySaved"
   publishJobReopened:
     action: send
     channel:
@@ -377,6 +389,13 @@ components:
       description: Published in the transaction that creates or replaces a downtime reason code; the Kafka key is the reason id.
       payload:
         $ref: "#/components/schemas/DowntimeReasonSavedData"
+    ProcessCategorySaved:
+      name: dev.passage.shopfloor.processcategory.saved.v1
+      contentType: application/cloudevents+json
+      summary: Process message category created or changed
+      description: Published in the transaction that creates or replaces a process message category; the Kafka key is the category id.
+      payload:
+        $ref: "#/components/schemas/ProcessCategorySavedData"
     OperationStatusChanged:
       x-passage-type: dev.passage.production.operation.statuschanged.v1
       contentType: application/cloudevents+json
@@ -473,7 +492,9 @@ components:
           type: string
         categoryCode:
           type: string
-          enum: [phase-start, phase-end, consumption, yield, process-data, quality-result, deviation, order-status, custom]
+          pattern: "^[a-z0-9][a-z0-9-]*$"
+          maxLength: 32
+          description: A built-in category (phase-start through custom) or a code of the tenant's category master.
         orderId:
           type: string
           format: uuid
@@ -932,6 +953,52 @@ components:
         category:
           type: string
           enum: [planned, unplanned]
+        active:
+          type: boolean
+        version:
+          type: integer
+          minimum: 1
+        savedBy:
+          type: string
+    ProcessCategorySavedData:
+      type: object
+      required: [categoryId, code, name, destinations, rejectOutOfLimit, characteristics, active, version, savedBy]
+      additionalProperties: false
+      properties:
+        categoryId:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        destinations:
+          type: array
+          items:
+            type: string
+            enum: [ebr, journal, quality, kafka, webhook]
+        rejectOutOfLimit:
+          type: boolean
+        characteristics:
+          type: array
+          items:
+            type: object
+            required: [name, type, required]
+            additionalProperties: false
+            properties:
+              name:
+                type: string
+              type:
+                type: string
+                enum: [numeric, text, boolean]
+              unit:
+                type: string
+              min:
+                type: string
+              max:
+                type: string
+              required:
+                type: boolean
         active:
           type: boolean
         version:
