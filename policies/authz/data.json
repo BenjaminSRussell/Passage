@@ -2366,7 +2366,8 @@
       {"resource": "/v1/pricing/condition-records/*:withdraw", "methods": ["POST"]},
       {"resource": "/v1/pricing/condition-records:expire", "methods": ["POST"]},
       {"resource": "/v1/pricing/free-goods-rules", "methods": ["POST"]},
-      {"resource": "/v1/pricing/free-goods-rules/*:withdraw", "methods": ["POST"]}
+      {"resource": "/v1/pricing/free-goods-rules/*:withdraw", "methods": ["POST"]},
+      {"resource": "/v1/pricing/campaigns/*:revise", "methods": ["POST"]}
     ]},
     "pricing.rebate.claim.approve": {"permissions": [
       {"resource": "/v1/pricing/rebates/vendor-claims/*:approve", "methods": ["POST"]},
@@ -2385,7 +2386,8 @@
       {"resource": "/v1/pricing/royalty-agreements", "methods": ["POST"]},
       {"resource": "/v1/pricing/royalty-agreements/*:close", "methods": ["POST"]},
       {"resource": "/v1/pricing/royalty-agreements/*:close-period", "methods": ["POST"]},
-      {"resource": "/v1/pricing/contract-claims", "methods": ["POST"]}
+      {"resource": "/v1/pricing/contract-claims", "methods": ["POST"]},
+      {"resource": "/v1/pricing/rebates/agreements/*:reopen", "methods": ["POST"]}
     ]},
     "pricing.rebate.view": {"permissions": [
       {"resource": "/v1/pricing/rebates/accruals", "methods": ["GET"]},
@@ -2435,7 +2437,8 @@
       {"resource": "/v1/pricing/procedure-assignments", "methods": ["GET"]},
       {"resource": "/v1/pricing/compare", "methods": ["POST"]},
       {"resource": "/v1/pricing/price-list", "methods": ["GET"]},
-      {"resource": "/v1/pricing/price-list/net-prices", "methods": ["GET"]}
+      {"resource": "/v1/pricing/price-list/net-prices", "methods": ["GET"]},
+      {"resource": "/v1/pricing/condition-records:export", "methods": ["GET"]}
     ]},
     "product.configuration.read": {"service_only": true, "permissions": [{"resource": "/v1/product/saved-configurations/*", "methods": ["GET"]}]},
     "product.configure": {"permissions": [{"resource": "/v1/product/configuration-models/*:solve", "methods": ["POST"]}]},
