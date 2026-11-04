@@ -42,7 +42,44 @@ func TestRegistrationPosted_JobStopCarriesOrderAndCostRate(t *testing.T) {
 	lastEventData(t, admin, tenantID, sfevents.RegistrationPosted, &posted)
 	if posted.RegistrationID != stop.ID || posted.Kind != KindJobStop || posted.OrderRef != orderID ||
 		posted.OperationRef != "20" || posted.CostRate == nil || !posted.CostRate.Equal(decimal.RequireFromString("26")) ||
-		posted.Hours == nil || !posted.Hours.Equal(h) {
+		posted.CostRateCurrency != "USD" || posted.Hours == nil || !posted.Hours.Equal(h) {
 		t.Fatalf("registration.posted = %+v, want order %s op 20 rate 26", posted, orderID)
+	}
+}
+
+func TestRegistrationPosted_PunchCarriesNoCostRateAndRateKeepsWorkerCurrency(t *testing.T) {
+	s, _, admin := setup(t)
+	tenantID := testkit.TenantID(86)
+	ctx := testkit.Ctx(tenantID)
+	badge := "B-EUR"
+	w, err := s.CreateWorker(ctx, Worker{PartyID: ids.New(), Name: "Ola Berg", BadgeID: &badge,
+		CostRate: decimal.RequireFromString("26"), Currency: "EUR"}, idem("worker-eur-"+ids.New()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	punch := Registration{ID: ids.New(), WorkerID: w.ID, Kind: domain.KindClockIn, StartedAt: day(8, 0)}
+	if res := register(t, s, ctx, punch); res[0].Status != StatusAccepted {
+		t.Fatalf("punch = %+v", res[0])
+	}
+	var posted sfevents.RegistrationPostedData
+	lastEventData(t, admin, tenantID, sfevents.RegistrationPosted, &posted)
+	if posted.CostRate != nil || posted.CostRateCurrency != "" {
+		t.Fatalf("a punch carries the pay rate: %+v", posted)
+	}
+
+	job, _, err := s.UpsertJob(ctx, Job{ID: ids.New(), OrderRef: ids.New(), OperationRef: "20",
+		ResourceID: ids.New(), PlannedQty: decimal.NewFromInt(10), SequenceStart: day(8, 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopAt := day(10, 0)
+	h := domain.ElapsedHours(day(8, 0), stopAt)
+	stop := Registration{ID: ids.New(), WorkerID: w.ID, Kind: KindJobStop, JobID: &job.ID, StartedAt: day(8, 0), StoppedAt: &stopAt, Hours: &h}
+	if res := register(t, s, ctx, stop); res[0].Status != StatusAccepted {
+		t.Fatalf("stop = %+v", res[0])
+	}
+	lastEventData(t, admin, tenantID, sfevents.RegistrationPosted, &posted)
+	if posted.CostRate == nil || posted.CostRateCurrency != "EUR" {
+		t.Fatalf("job-stop rate = %v %q, want 26 EUR", posted.CostRate, posted.CostRateCurrency)
 	}
 }

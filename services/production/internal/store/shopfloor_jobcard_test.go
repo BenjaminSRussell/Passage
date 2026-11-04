@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -10,6 +11,11 @@ import (
 	"github.com/BenjaminSRussell/passage/services/production/internal/domain"
 )
 
+func sfLaborActual(st *stepper) decimal.Decimal {
+	c := st.costs()
+	return groupSum(c.Actual, domain.GroupLabor)
+}
+
 func ptrDec(s string) *decimal.Decimal {
 	v := d(s)
 	return &v
@@ -17,13 +23,14 @@ func ptrDec(s string) *decimal.Decimal {
 
 func shopfloorCard(reg, orderID string, extra ShopfloorJobCard) ShopfloorJobCard {
 	in := ShopfloorJobCard{
-		RegistrationID: reg,
-		Kind:           "job-stop",
-		OrderRef:       orderID,
-		OperationRef:   "10",
-		Hours:          ptrDec("2.00"),
-		CostRate:       ptrDec("26"),
-		Actor:          "shopfloor",
+		RegistrationID:   reg,
+		Kind:             "job-stop",
+		OrderRef:         orderID,
+		OperationRef:     "10",
+		Hours:            ptrDec("2.00"),
+		CostRate:         ptrDec("26"),
+		CostRateCurrency: "USD",
+		Actor:            "shopfloor",
 	}
 	if extra.Kind != "" {
 		in.Kind = extra.Kind
@@ -39,6 +46,9 @@ func shopfloorCard(reg, orderID string, extra ShopfloorJobCard) ShopfloorJobCard
 	}
 	if extra.CostRate != nil {
 		in.CostRate = extra.CostRate
+	}
+	if extra.CostRateCurrency != "" {
+		in.CostRateCurrency = extra.CostRateCurrency
 	}
 	if extra.RegistrationID != "" {
 		in.RegistrationID = extra.RegistrationID
@@ -107,5 +117,70 @@ func TestPostShopfloorJobCard_SkipsNonJobStops(t *testing.T) {
 	}
 	if c := st.costs(); !groupSum(c.Actual, domain.GroupLabor).IsZero() {
 		t.Fatalf("skipped cards still posted labor %s", groupSum(c.Actual, domain.GroupLabor))
+	}
+}
+
+func TestPostShopfloorJobCard_ForeignCurrencyWorkerRateFallsBackToResourceRate(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(9404))
+	st := startedOrder(t, s, ctx, routedOrder(t, "key-sf-jobcard-eur", ids.New(), 10))
+	j, posted, err := s.PostShopfloorJobCard(ctx, shopfloorCard(ids.New(), st.orderID, ShopfloorJobCard{CostRateCurrency: "EUR"}))
+	if err != nil || !posted {
+		t.Fatalf("post: posted=%v err=%v", posted, err)
+	}
+	if !j.Lines[0].UnitCost.Equal(d("30")) || !j.Lines[0].Amount.Equal(d("60")) {
+		t.Fatalf("hours line %+v, want the resource rate 30 (EUR 26 must not post as USD 26)", j.Lines[0])
+	}
+}
+
+func TestPostShopfloorJobCard_UnknownOperationIsPermanentRefusal(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(9405))
+	st := startedOrder(t, s, ctx, routedOrder(t, "key-sf-jobcard-op", ids.New(), 10))
+	_, posted, err := s.PostShopfloorJobCard(ctx, shopfloorCard(ids.New(), st.orderID, ShopfloorJobCard{OperationRef: "99"}))
+	if posted || !errors.Is(err, ErrJobCardRefused) {
+		t.Fatalf("posted=%v err=%v, want ErrJobCardRefused", posted, err)
+	}
+	if !sfLaborActual(st).IsZero() {
+		t.Fatal("unknown operation posted labor")
+	}
+}
+
+func TestPostShopfloorJobCard_UnknownOrderIsPermanentRefusal(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(9406))
+	_, posted, err := s.PostShopfloorJobCard(ctx, shopfloorCard(ids.New(), ids.New(), ShopfloorJobCard{}))
+	if posted || !errors.Is(err, ErrJobCardRefused) {
+		t.Fatalf("posted=%v err=%v, want ErrJobCardRefused", posted, err)
+	}
+}
+
+func TestPostShopfloorJobCard_PostFailureAfterCreateKeepsWorkerRate(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(9408))
+	st := startedOrder(t, s, ctx, routedOrder(t, "key-sf-jobcard-crash", ids.New(), 10))
+	reg := ids.New()
+	jobs, err := s.ListJobs(ctx, JobFilter{OrderID: st.orderID, JobType: domain.JobProcess})
+	if err != nil || len(jobs.Items) == 0 {
+		t.Fatalf("jobs: %v %v", jobs, err)
+	}
+	key := shopfloorJobCardKey + reg
+	rate := d("26")
+	draft, _, err := s.CreateJournal(ctx, NewJournal{OrderID: st.orderID, Type: domain.JournalJobCard, Proposal: domain.ProposeNone, AutoStart: true,
+		Hours: []HoursInput{{JobID: jobs.Items[0].ID, Hours: d("2.00"), LaborRate: &rate}}, Actor: "shopfloor", IdempotencyKey: key, RequestHash: key})
+	if err != nil || draft.Posted {
+		t.Fatalf("draft: %+v err=%v", draft, err)
+	}
+
+	manual, _, err := s.PostJournal(ctx, PostRequest{JournalID: draft.ID, AutoStart: true, Actor: "planner", IdempotencyKey: "manual-post-1"})
+	if err != nil || !manual.Lines[0].Amount.Equal(d("52")) {
+		t.Fatalf("manual post of the draft: %+v err=%v, want 52 at the stored worker rate", manual.Lines, err)
+	}
+	again, posted, err := s.PostShopfloorJobCard(ctx, shopfloorCard(reg, st.orderID, ShopfloorJobCard{}))
+	if err != nil || posted || again.ID != draft.ID {
+		t.Fatalf("replay after manual post: posted=%v id=%s want %s err=%v", posted, again.ID, draft.ID, err)
+	}
+	if got := sfLaborActual(st); !got.Equal(d("52")) {
+		t.Fatalf("labor %s, want 52 booked once", got)
 	}
 }

@@ -110,6 +110,9 @@ type HoursInput struct {
 	QtyGood    decimal.Decimal
 	QtyError   decimal.Decimal
 	Finished   bool
+	// LaborRate, when positive, is stored on the draft line and values the hours
+	// at post instead of the operation's resource rate (BR-25.9).
+	LaborRate *decimal.Decimal
 }
 
 // NewJournal is a journal to create as a draft. Without explicit lines the
@@ -147,9 +150,6 @@ type PostRequest struct {
 	Actor               string
 	TraceID             string
 	IdempotencyKey      string
-	// LaborRate, when positive, values hours lines instead of the operation's
-	// resource rate (BR-25.9: the shop-floor worker's costRate).
-	LaborRate *decimal.Decimal
 }
 
 // CostSummary is the cost read of an order (FR-21.11): planned rows from the
@@ -417,7 +417,11 @@ func planJobCard(in NewJournal, ops []domain.Operation, jobs []workJob, modes ma
 					return nil, domainProblem(err)
 				}
 			}
-			out = append(out, jobHoursLine(op, job.typ, hi.Hours, hi.QtyGood, hi.QtyError, hi.Finished))
+			line := jobHoursLine(op, job.typ, hi.Hours, hi.QtyGood, hi.QtyError, hi.Finished)
+			if hi.LaborRate != nil && hi.LaborRate.IsPositive() {
+				line.UnitCost = *hi.LaborRate
+			}
+			out = append(out, line)
 		}
 		return out, nil
 	}
@@ -565,7 +569,7 @@ func (s *Postgres) PostJournal(ctx context.Context, r PostRequest) (Journal, boo
 			}
 			h.status = domain.Started
 		}
-		opts := postOptions{overDuty: r.OverConsumptionDuty, overPct: prm.OverConsumptionPct, rafTolerancePct: prm.RAFTolerancePct, actor: r.Actor, key: r.IdempotencyKey, laborRate: r.LaborRate}
+		opts := postOptions{overDuty: r.OverConsumptionDuty, overPct: prm.OverConsumptionPct, rafTolerancePct: prm.RAFTolerancePct, actor: r.Actor, key: r.IdempotencyKey}
 		if err := postJournal(ctx, tx, p.TenantID, &h, &j, opts); err != nil {
 			return err
 		}
@@ -606,7 +610,6 @@ type postOptions struct {
 	rafTolerancePct decimal.Decimal
 	actor           string
 	key             string
-	laborRate       *decimal.Decimal
 }
 
 // postJournal posts j on the locked order h: it checks the posting date
@@ -694,8 +697,8 @@ func postJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, 
 				}
 			}
 			labor := op.LaborRate
-			if o.laborRate != nil && o.laborRate.IsPositive() {
-				labor = *o.laborRate
+			if l.UnitCost.IsPositive() {
+				labor = l.UnitCost
 			}
 			l.UnitCost = labor
 			l.Amount = domain.RoundMoney(l.Qty.Mul(labor), h.currency)

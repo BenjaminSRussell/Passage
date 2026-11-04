@@ -146,16 +146,24 @@ func enqueue(ctx context.Context, tx pgx.Tx, aggregateType, aggregateID, eventTy
 // enqueuePosted writes registration.posted with the job's order and the worker's
 // cost rate when those rows exist, so w21 can post the job-card (FR-25.4, BR-25.9).
 func enqueuePosted(ctx context.Context, tx pgx.Tx, tenantID string, data sfevents.RegistrationPostedData) error {
-	var rate string
-	if err := tx.QueryRow(ctx, `select cost_rate::text from worker where tenant_id = $1 and id = $2`, tenantID, data.WorkerID).Scan(&rate); err == nil {
-		if r, err := decimal.NewFromString(rate); err == nil && r.IsPositive() {
-			data.CostRate = &r
-		}
-	}
 	if data.JobID != nil {
 		var orderRef, opRef string
-		if err := tx.QueryRow(ctx, `select order_ref, operation_ref from shop_job where tenant_id = $1 and id = $2`, tenantID, *data.JobID).Scan(&orderRef, &opRef); err == nil {
+		err := tx.QueryRow(ctx, `select order_ref, operation_ref from shop_job where tenant_id = $1 and id = $2`, tenantID, *data.JobID).Scan(&orderRef, &opRef)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err == nil {
 			data.OrderRef, data.OperationRef = orderRef, opRef
+		}
+		var rate, currency string
+		err = tx.QueryRow(ctx, `select cost_rate::text, currency from worker where tenant_id = $1 and id = $2`, tenantID, data.WorkerID).Scan(&rate, &currency)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err == nil {
+			if r, perr := decimal.NewFromString(rate); perr == nil && r.IsPositive() {
+				data.CostRate, data.CostRateCurrency = &r, currency
+			}
 		}
 	}
 	return enqueue(ctx, tx, "registration", data.RegistrationID, sfevents.RegistrationPosted, tenantID, data)
