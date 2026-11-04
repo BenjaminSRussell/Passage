@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -18,17 +19,17 @@ import (
 // ReconNone is the default reconciliation account type.
 const ReconNone = "none"
 
-const accountColumns = `id, chart_code, account_number, name, account_type, is_postable, suspended_from::text, reconciliation_account_type`
+const accountColumns = `id, chart_code, account_number, name, account_type, is_postable, suspended_from::text, reconciliation_account_type, lock_version`
 
 func scanAccount(row pgx.Row, extra ...any) (Account, error) {
 	var a Account
-	err := row.Scan(append([]any{&a.ID, &a.ChartCode, &a.Number, &a.Name, &a.Type, &a.Postable, &a.SuspendedFrom, &a.ReconType}, extra...)...)
+	err := row.Scan(append([]any{&a.ID, &a.ChartCode, &a.Number, &a.Name, &a.Type, &a.Postable, &a.SuspendedFrom, &a.ReconType, &a.LockVersion}, extra...)...)
 	return a, err
 }
 
 // PutAccount creates or replaces the account number in chart. created is true
 // when the row was inserted.
-func (s *Postgres) PutAccount(ctx context.Context, chartCode, number string, in Account) (Account, bool, error) {
+func (s *Postgres) PutAccount(ctx context.Context, chartCode, number string, ifMatch int, in Account) (Account, bool, error) {
 	p, err := principalOf(ctx)
 	if err != nil {
 		return Account{}, false, err
@@ -39,16 +40,26 @@ func (s *Postgres) PutAccount(ctx context.Context, chartCode, number string, in 
 	var out Account
 	var created bool
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var current int
+		err := tx.QueryRow(ctx, `select lock_version from main_account where tenant_id = $1 and chart_code = $2 and account_number = $3 for update`,
+			p.TenantID, chartCode, number).Scan(&current)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err := checkLock(err == nil, current, ifMatch, "account"); err != nil {
+			return err
+		}
 		row := tx.QueryRow(ctx, `insert into main_account (tenant_id, id, chart_code, account_number, name, account_type, is_postable, suspended_from, reconciliation_account_type)
 			values ($1, $2, $3, $4, $5, $6, $7, nullif($8::text, '')::date, $9)
 			on conflict (tenant_id, chart_code, account_number) do update set name = excluded.name, account_type = excluded.account_type,
 				is_postable = excluded.is_postable, suspended_from = excluded.suspended_from,
-				reconciliation_account_type = excluded.reconciliation_account_type, updated_at = now()
+				reconciliation_account_type = excluded.reconciliation_account_type,
+				`+lockedUpdate("main_account", 10, "name", "account_type", "is_postable", "suspended_from", "reconciliation_account_type")+`
 			returning `+accountColumns+`, (xmax = 0)`,
-			p.TenantID, ids.New(), chartCode, number, in.Name, in.Type, in.Postable, derefString(in.SuspendedFrom), in.ReconType)
+			p.TenantID, ids.New(), chartCode, number, in.Name, in.Type, in.Postable, derefString(in.SuspendedFrom), in.ReconType, ifMatch)
 		var scanErr error
 		out, scanErr = scanAccount(row, &created)
-		return scanErr
+		return lockLost(scanErr, ifMatch, "account")
 	})
 	if err != nil {
 		return Account{}, false, err

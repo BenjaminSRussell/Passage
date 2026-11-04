@@ -33,7 +33,7 @@ const uniqueViolation = "23505"
 
 // Store is the persistence contract the HTTP layer depends on.
 type Store interface {
-	PutAccount(ctx context.Context, chartCode, number string, in Account) (Account, bool, error)
+	PutAccount(ctx context.Context, chartCode, number string, ifMatch int, in Account) (Account, bool, error)
 	ListAccounts(ctx context.Context, chartCode, afterNumber string, limit int) ([]Account, error)
 	CreateLedger(ctx context.Context, in Ledger) (Ledger, error)
 	GetLedger(ctx context.Context, id string) (Ledger, error)
@@ -49,15 +49,15 @@ type Store interface {
 	PutReasonCode(ctx context.Context, code string, in ReasonCode) (ReasonCode, bool, error)
 	ListDescriptionTemplates(ctx context.Context) ([]DescriptionTemplate, error)
 	GetDescriptionTemplate(ctx context.Context, id string) (DescriptionTemplate, error)
-	PutDescriptionTemplate(ctx context.Context, id string, in DescriptionTemplate) (DescriptionTemplate, bool, error)
+	PutDescriptionTemplate(ctx context.Context, id string, ifMatch int, in DescriptionTemplate) (DescriptionTemplate, bool, error)
 	ListStructures(ctx context.Context, ledgerID string) ([]domain.Structure, error)
 	GetStructure(ctx context.Context, ledgerID, id string) (domain.Structure, error)
-	PutStructure(ctx context.Context, ledgerID, id string, in domain.Structure) (domain.Structure, bool, error)
+	PutStructure(ctx context.Context, ledgerID, id string, ifMatch int, in domain.Structure) (domain.Structure, bool, error)
 	ListDimensionValues(ctx context.Context, ledgerID string) ([]domain.DimensionValue, error)
-	PutDimensionValue(ctx context.Context, ledgerID string, in domain.DimensionValue) (domain.DimensionValue, bool, error)
+	PutDimensionValue(ctx context.Context, ledgerID string, ifMatch int, in domain.DimensionValue) (domain.DimensionValue, bool, error)
 	ListJournalNames(ctx context.Context) ([]JournalName, error)
 	GetJournalName(ctx context.Context, code string) (JournalName, error)
-	PutJournalName(ctx context.Context, code string, in JournalName) (JournalName, bool, error)
+	PutJournalName(ctx context.Context, code string, ifMatch int, in JournalName) (JournalName, bool, error)
 	CreateBatch(ctx context.Context, in BatchInput) (Batch, error)
 	GetBatch(ctx context.Context, id string) (Batch, error)
 	ListBatches(ctx context.Context, f BatchFilter) ([]Batch, error)
@@ -67,7 +67,7 @@ type Store interface {
 	CancelBatch(ctx context.Context, id string, version int) (Batch, error)
 	PostBatch(ctx context.Context, in PostBatchInput) (EntryResult, error)
 	ListLines(ctx context.Context, f LineFilter) (LinePage, error)
-	ListRecurring(ctx context.Context, status string) ([]RecurringJournal, error)
+	ListRecurring(ctx context.Context, status string, page Page) ([]RecurringJournal, error)
 	GetRecurring(ctx context.Context, id string) (RecurringJournal, error)
 	PutRecurring(ctx context.Context, id string, version int, in RecurringInput) (RecurringJournal, bool, error)
 	SetRecurringStatus(ctx context.Context, id string, version int, status string, today time.Time) (RecurringJournal, error)
@@ -89,7 +89,7 @@ type Store interface {
 	ListOpenItems(ctx context.Context, f OpenItemFilter) (OpenItemPage, error)
 	SimulateClearing(ctx context.Context, in ClearingInput) (ClearingPreview, error)
 	ClearItems(ctx context.Context, in ClearingInput) (ClearingDocument, bool, error)
-	ListClearings(ctx context.Context, ledgerID, status string) ([]ClearingDocument, error)
+	ListClearings(ctx context.Context, ledgerID, status string, page Page) ([]ClearingDocument, error)
 	GetClearing(ctx context.Context, id string) (ClearingDocument, error)
 	ResetClearing(ctx context.Context, in ResetInput) (ClearingDocument, error)
 	ListAutoClearingRules(ctx context.Context, ledgerID string) ([]AutoClearingRule, error)
@@ -146,6 +146,8 @@ type Account struct {
 	Postable      bool    `json:"isPostable"`
 	SuspendedFrom *string `json:"suspendedFrom,omitempty"`
 	ReconType     string  `json:"reconciliationAccountType"`
+	// LockVersion is the entity tag: PUT of an existing account sends it in If-Match.
+	LockVersion int `json:"lockVersion"`
 }
 
 // Ledger is one accounting ledger of a legal entity.

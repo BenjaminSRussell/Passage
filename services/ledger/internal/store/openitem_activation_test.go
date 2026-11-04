@@ -70,7 +70,7 @@ func activation(e env, key, account string) ActivationInput {
 // carries each non-zero combination balance in as one opening item.
 func TestPostgres_ActivationRunCarriesBalancesIn(t *testing.T) {
 	e, _ := setup(t)
-	if _, _, err := e.store.PutAccount(e.ctx, "STD", "1999", Account{Name: "Clearing", Type: "asset", Postable: true}); err != nil {
+	if _, _, err := e.store.PutAccount(e.ctx, "STD", "1999", 0, Account{Name: "Clearing", Type: "asset", Postable: true}); err != nil {
 		t.Fatal(err)
 	}
 	postHistory(t, e, "h1", domain.SideDebit, "100.00", "D100")
@@ -148,7 +148,7 @@ func TestPostgres_ActivationRunRules(t *testing.T) {
 	for num, a := range map[string]Account{
 		"1999": {Name: "Clearing", Type: "asset", Postable: true},
 	} {
-		if _, _, err := e.store.PutAccount(e.ctx, "STD", num, a); err != nil {
+		if _, _, err := e.store.PutAccount(e.ctx, "STD", num, 0, a); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -186,7 +186,7 @@ func TestPostgres_ActivationRunRules(t *testing.T) {
 // own, and the open items reconcile to the account balance.
 func TestPostgres_ActivationRunSplitsAtTheDateAndReconciles(t *testing.T) {
 	e, _ := setup(t)
-	if _, _, err := e.store.PutAccount(e.ctx, "STD", "1999", Account{Name: "Clearing", Type: "asset", Postable: true}); err != nil {
+	if _, _, err := e.store.PutAccount(e.ctx, "STD", "1999", 0, Account{Name: "Clearing", Type: "asset", Postable: true}); err != nil {
 		t.Fatal(err)
 	}
 	feb := time.Date(2026, 2, 20, 0, 0, 0, 0, time.UTC)
@@ -271,7 +271,7 @@ func TestPostgres_ActivationRunAfterAnEarlierManagedSpell(t *testing.T) {
 // ledger lock and make their own item: none is left as neither.
 func TestPostgres_ActivationRunRacingPostings(t *testing.T) {
 	e, _ := setup(t)
-	if _, _, err := e.store.PutAccount(e.ctx, "STD", "1999", Account{Name: "Clearing", Type: "asset", Postable: true}); err != nil {
+	if _, _, err := e.store.PutAccount(e.ctx, "STD", "1999", 0, Account{Name: "Clearing", Type: "asset", Postable: true}); err != nil {
 		t.Fatal(err)
 	}
 	postHistory(t, e, "r0", domain.SideDebit, "50.00", "D100")

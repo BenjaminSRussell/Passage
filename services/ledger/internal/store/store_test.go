@@ -65,7 +65,7 @@ func setup(t *testing.T) (env, context.Context) {
 		"2100": {Name: "Vendor payable", Type: "liability", Postable: true},
 		"2110": {Name: "Vendor control", Type: "liability", Postable: true, ReconType: "vendor"},
 	} {
-		if _, _, err := s.PutAccount(ctx, "STD", num, a); err != nil {
+		if _, _, err := s.PutAccount(ctx, "STD", num, 0, a); err != nil {
 			t.Fatalf("put account %s: %v", num, err)
 		}
 	}

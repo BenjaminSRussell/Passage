@@ -110,6 +110,9 @@ type BatchFilter struct {
 	LedgerID    string
 	Status      string
 	JournalName string
+	// Page is the keyset page (created_at descending, then id descending); After holds the created_at
+	// (RFC 3339) and the id of the last batch of the previous page. The list returns up to Limit+1 rows.
+	Page Page
 }
 
 // PostBatchInput posts a batch. Version, when > 0, must equal the batch's
@@ -403,8 +406,9 @@ func (s *Postgres) ListBatches(ctx context.Context, f BatchFilter) ([]Batch, err
 		rows, err := tx.Query(ctx, batchSelect+`
 			where b.tenant_id = $1 and ($2 = '' or b.ledger_id::text = $2) and ($3 = '' or b.status = $3)
 				and ($4 = '' or b.journal_name = $4)
-			order by b.created_at desc, b.id
-			limit $5`, p.TenantID, f.LedgerID, f.Status, f.JournalName, batchListLimit)
+				and (cardinality($6::text[]) = 0 or (b.created_at, b.id) < ($6[1]::timestamptz, $6[2]::uuid))
+			order by b.created_at desc, b.id desc
+			limit $5`, p.TenantID, f.LedgerID, f.Status, f.JournalName, f.Page.pageLimit(batchListLimit), f.Page.keys())
 		if err != nil {
 			return err
 		}

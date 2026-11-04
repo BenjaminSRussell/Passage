@@ -289,6 +289,8 @@ export const structureSchema = z.object({
   segments: z.array(z.string()),
   accountFilter: z.array(z.string()),
   constraints: z.array(constraintSchema),
+  /** Entity tag of the row: sent as If-Match to replace it. */
+  lockVersion: z.number().int().optional(),
 });
 export type Structure = z.infer<typeof structureSchema>;
 
@@ -312,6 +314,8 @@ export const dimensionValueSchema = z.object({
   activeFrom: z.string().optional(),
   activeTo: z.string().optional(),
   suspended: z.boolean(),
+  /** Entity tag of the row: sent as If-Match to replace it. */
+  lockVersion: z.number().int().optional(),
 });
 export type DimensionValue = z.infer<typeof dimensionValueSchema>;
 
@@ -345,18 +349,24 @@ export function fetchStructure(ledgerId: string, id: string, fetchImpl: FetchLik
   );
 }
 
-/** PUT /api/v1/ledger/ledgers/{ledger}/account-structures/{id}: creates or replaces a version (status active activates it). */
+/** If-Match for replacing a configuration row at `lockVersion` (a replace without it is 428); none when creating. */
+function tagHeader(lockVersion: number | undefined): Record<string, string> {
+  return lockVersion ? { "If-Match": `"${lockVersion}"` } : {};
+}
+
+/** PUT /api/v1/ledger/ledgers/{ledger}/account-structures/{id}: creates, or replaces a version at `lockVersion` (If-Match; status active activates it). */
 export async function putStructure(
   ledgerId: string,
   id: string,
   input: StructureInput,
+  lockVersion?: number,
   fetchImpl: FetchLike = defaultFetch,
 ): Promise<Structure> {
   const res = await fetchImpl(
     `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/account-structures/${encodeURIComponent(id)}`,
     {
       method: "PUT",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      headers: { Accept: "application/json", "Content-Type": "application/json", ...tagHeader(lockVersion) },
       body: JSON.stringify(input),
     },
   );
@@ -377,18 +387,19 @@ export async function fetchDimensionValues(
   return body.items;
 }
 
-/** PUT /api/v1/ledger/ledgers/{ledger}/dimension-values/{attribute}/{value}. */
+/** PUT /api/v1/ledger/ledgers/{ledger}/dimension-values/{attribute}/{value}: creates, or replaces at `lockVersion` (If-Match). */
 export async function putDimensionValue(
   ledgerId: string,
   attribute: string,
   value: string,
   input: DimensionValueInput,
+  lockVersion?: number,
   fetchImpl: FetchLike = defaultFetch,
 ): Promise<DimensionValue> {
   const path = [attribute, value].map(encodeURIComponent).join("/");
   const res = await fetchImpl(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/dimension-values/${path}`, {
     method: "PUT",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    headers: { Accept: "application/json", "Content-Type": "application/json", ...tagHeader(lockVersion) },
     body: JSON.stringify(input),
   });
   if (!res.ok) throw await readProblem(res);
@@ -438,6 +449,8 @@ export const descriptionTemplateSchema = z.object({
   template: z.string(),
   fieldBindings: z.record(z.string(), z.string()),
   updatedAt: z.string(),
+  /** Entity tag of the row: sent as If-Match to replace it. */
+  lockVersion: z.number().int().optional(),
 });
 export type DescriptionTemplate = z.infer<typeof descriptionTemplateSchema>;
 
@@ -469,6 +482,8 @@ export const journalNameSchema = z.object({
   descriptionLanguage: z.enum(["legal_entity", "user"]).default("legal_entity"),
   active: z.boolean(),
   updatedAt: z.string(),
+  /** Entity tag of the row: sent as If-Match to replace it. */
+  lockVersion: z.number().int().optional(),
 });
 export type JournalName = z.infer<typeof journalNameSchema>;
 
@@ -515,9 +530,9 @@ async function sendJSON<T>(
   return schema.parse(await res.json());
 }
 
-/** PUT /api/v1/ledger/journal-names/{code}: creates or replaces a journal name. */
-export function putJournalName(code: string, input: JournalNameInput, fetchImpl: FetchLike = defaultFetch): Promise<JournalName> {
-  return sendJSON("PUT", `/api/v1/ledger/journal-names/${encodeURIComponent(code)}`, journalNameSchema, fetchImpl, input);
+/** PUT /api/v1/ledger/journal-names/{code}: creates, or replaces a journal name at `lockVersion` (If-Match). */
+export function putJournalName(code: string, input: JournalNameInput, lockVersion?: number, fetchImpl: FetchLike = defaultFetch): Promise<JournalName> {
+  return sendJSON("PUT", `/api/v1/ledger/journal-names/${encodeURIComponent(code)}`, journalNameSchema, fetchImpl, input, tagHeader(lockVersion));
 }
 
 /** One line of a manual journal batch as the service returns it. Amounts are decimal strings. */
@@ -599,7 +614,7 @@ export interface JournalBatchPatch {
   lines?: BatchLineInput[];
 }
 
-const journalBatchListSchema = z.object({ items: z.array(journalBatchSchema) });
+const journalBatchPageSchema = z.object({ items: z.array(journalBatchSchema), nextCursor: z.string().optional() });
 const postBatchResultSchema = z.object({
   entries: z.array(z.object({ id: z.string(), voucher: z.string() })),
   idempotency: z.object({ key: z.string(), replayed: z.boolean() }),
@@ -612,17 +627,28 @@ function ifMatch(version: number): Record<string, string> {
   return { "If-Match": `"${version}"` };
 }
 
-/** GET /api/v1/ledger/journal-batches: the newest 200, optionally by status or journal name. */
-export async function fetchJournalBatches(
+/** One keyset page of a list: `nextCursor` is present when another page follows. */
+export interface Page<T> {
+  items: T[];
+  nextCursor?: string;
+}
+
+function pageQuery(params: URLSearchParams, cursor: string | undefined): string {
+  if (cursor) params.set("cursor", cursor);
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+/** GET /api/v1/ledger/journal-batches: one page (newest first) with the cursor of the next. */
+export function fetchJournalBatchPage(
   filter: { status?: string; journalName?: string } = {},
+  cursor?: string,
   fetchImpl: FetchLike = defaultFetch,
-): Promise<JournalBatch[]> {
+): Promise<Page<JournalBatch>> {
   const params = new URLSearchParams();
   if (filter.status) params.set("status", filter.status);
   if (filter.journalName) params.set("journalName", filter.journalName);
-  const query = params.toString();
-  const body = await getJSON(`/api/v1/ledger/journal-batches${query ? `?${query}` : ""}`, journalBatchListSchema, fetchImpl);
-  return body.items;
+  return getJSON(`/api/v1/ledger/journal-batches${pageQuery(params, cursor)}`, journalBatchPageSchema, fetchImpl);
 }
 
 /** GET /api/v1/ledger/journal-batches/{id}: header, totals and lines. */
@@ -682,15 +708,16 @@ export function fetchDescriptionTemplate(id: string, fetchImpl: FetchLike = defa
   return getJSON(`/api/v1/ledger/description-templates/${encodeURIComponent(id)}`, descriptionTemplateSchema, fetchImpl);
 }
 
-/** PUT /api/v1/ledger/description-templates/{id}: creates or replaces a template. */
+/** PUT /api/v1/ledger/description-templates/{id}: creates, or replaces a template at `lockVersion` (If-Match). */
 export async function putDescriptionTemplate(
   id: string,
   input: DescriptionTemplateInput,
+  lockVersion?: number,
   fetchImpl: FetchLike = defaultFetch,
 ): Promise<DescriptionTemplate> {
   const res = await fetchImpl(`/api/v1/ledger/description-templates/${encodeURIComponent(id)}`, {
     method: "PUT",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    headers: { Accept: "application/json", "Content-Type": "application/json", ...tagHeader(lockVersion) },
     body: JSON.stringify(input),
   });
   if (!res.ok) throw await readProblem(res);
@@ -840,13 +867,14 @@ export interface RecurringJournalInput {
   }[];
 }
 
-const recurringListSchema = z.object({ items: z.array(recurringJournalSchema) });
+const recurringPageSchema = z.object({ items: z.array(recurringJournalSchema), nextCursor: z.string().optional() });
 const recurringRunListSchema = z.object({ items: z.array(recurringRunSchema) });
 
-/** GET /api/v1/ledger/recurring-journals, optionally only active or paused ones. */
-export async function fetchRecurringJournals(status = "", fetchImpl: FetchLike = defaultFetch): Promise<RecurringJournal[]> {
-  const body = await getJSON(`/api/v1/ledger/recurring-journals${status ? `?status=${encodeURIComponent(status)}` : ""}`, recurringListSchema, fetchImpl);
-  return body.items;
+/** GET /api/v1/ledger/recurring-journals: one page (by next run date, then name) with the cursor of the next. */
+export function fetchRecurringJournalPage(status = "", cursor?: string, fetchImpl: FetchLike = defaultFetch): Promise<Page<RecurringJournal>> {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  return getJSON(`/api/v1/ledger/recurring-journals${pageQuery(params, cursor)}`, recurringPageSchema, fetchImpl);
 }
 
 /** GET /api/v1/ledger/recurring-journals/{id} with its lines. */
@@ -991,13 +1019,13 @@ export function createClearing(input: ClearingInput, idempotencyKey: string, fet
   return sendJSON("POST", "/api/v1/ledger/clearings", clearingDocumentSchema, fetchImpl, input, { "Idempotency-Key": idempotencyKey });
 }
 
-const clearingListSchema = z.object({ items: z.array(clearingDocumentSchema) });
+const clearingPageSchema = z.object({ items: z.array(clearingDocumentSchema), nextCursor: z.string().optional() });
 
-/** GET /api/v1/ledger/clearings, newest first, optionally only cleared or reset ones. */
-export async function fetchClearings(ledgerId: string, status = "", fetchImpl: FetchLike = defaultFetch): Promise<ClearingDocument[]> {
+/** GET /api/v1/ledger/clearings: one page, newest first, with the cursor of the next. */
+export function fetchClearingPage(ledgerId: string, status = "", cursor?: string, fetchImpl: FetchLike = defaultFetch): Promise<Page<ClearingDocument>> {
   const params = new URLSearchParams({ ledger: ledgerId });
   if (status) params.set("status", status);
-  return (await getJSON(`/api/v1/ledger/clearings?${params.toString()}`, clearingListSchema, fetchImpl)).items;
+  return getJSON(`/api/v1/ledger/clearings${pageQuery(params, cursor)}`, clearingPageSchema, fetchImpl);
 }
 
 /** GET /api/v1/ledger/clearings/{id} with its items. */

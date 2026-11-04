@@ -43,6 +43,7 @@ type structureView struct {
 	Segments      []string         `json:"segments"`
 	AccountFilter []string         `json:"accountFilter"`
 	Constraints   []constraintBody `json:"constraints"`
+	LockVersion   int              `json:"lockVersion"`
 }
 
 // dimensionValueBody is the PUT body of a registered dimension value.
@@ -55,12 +56,13 @@ type dimensionValueBody struct {
 
 // dimensionValueView is a registered dimension value as returned by the API.
 type dimensionValueView struct {
-	Attribute  string  `json:"attribute"`
-	Value      string  `json:"value"`
-	Name       string  `json:"name"`
-	ActiveFrom *string `json:"activeFrom,omitempty"`
-	ActiveTo   *string `json:"activeTo,omitempty"`
-	Suspended  bool    `json:"suspended"`
+	Attribute   string  `json:"attribute"`
+	Value       string  `json:"value"`
+	Name        string  `json:"name"`
+	ActiveFrom  *string `json:"activeFrom,omitempty"`
+	ActiveTo    *string `json:"activeTo,omitempty"`
+	Suspended   bool    `json:"suspended"`
+	LockVersion int     `json:"lockVersion"`
 }
 
 // ledgerParam reads the {ledger} path segment; a malformed id cannot name a
@@ -112,7 +114,7 @@ func (a *API) getStructure(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, toStructureView(ledgerID, s))
+	writeTagged(w, http.StatusOK, s.LockVersion, toStructureView(ledgerID, s))
 }
 
 // putStructure creates (201) or replaces (200) a structure version; status
@@ -133,6 +135,10 @@ func (a *API) putStructure(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, map[string]string{"id": "must be a UUID"})
 		return
 	}
+	tag, tagOK := replaceTag(w, r)
+	if !tagOK {
+		return
+	}
 	var body structureBody
 	if err := httpx.Decode(r, &body); err != nil {
 		httpx.Fail(w, r, err)
@@ -148,7 +154,7 @@ func (a *API) putStructure(w http.ResponseWriter, r *http.Request) {
 	}
 	in := domain.Structure{Name: body.Name, Version: body.Version, Priority: body.Priority, EffectiveFrom: from,
 		Status: body.Status, Segments: body.Segments, AccountFilter: body.AccountFilter, Constraints: toDomainConstraints(body.Constraints)}
-	saved, created, err := a.store.PutStructure(r.Context(), ledgerID, id, in)
+	saved, created, err := a.store.PutStructure(r.Context(), ledgerID, id, tag, in)
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -157,7 +163,7 @@ func (a *API) putStructure(w http.ResponseWriter, r *http.Request) {
 	if created {
 		status = http.StatusCreated
 	}
-	httpx.JSON(w, status, toStructureView(ledgerID, saved))
+	writeTagged(w, status, saved.LockVersion, toStructureView(ledgerID, saved))
 }
 
 func (a *API) listDimensionValues(w http.ResponseWriter, r *http.Request) {
@@ -189,6 +195,10 @@ func (a *API) putDimensionValue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	tag, tagOK := replaceTag(w, r)
+	if !tagOK {
+		return
+	}
 	var body dimensionValueBody
 	if err := httpx.Decode(r, &body); err != nil {
 		httpx.Fail(w, r, err)
@@ -209,7 +219,7 @@ func (a *API) putDimensionValue(w http.ResponseWriter, r *http.Request) {
 	}
 	in := domain.DimensionValue{Attribute: chi.URLParam(r, "attribute"), Value: chi.URLParam(r, "value"), Name: body.Name,
 		ActiveFrom: from, ActiveTo: to, Suspended: body.Suspended}
-	saved, created, err := a.store.PutDimensionValue(r.Context(), ledgerID, in)
+	saved, created, err := a.store.PutDimensionValue(r.Context(), ledgerID, tag, in)
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -218,7 +228,7 @@ func (a *API) putDimensionValue(w http.ResponseWriter, r *http.Request) {
 	if created {
 		status = http.StatusCreated
 	}
-	httpx.JSON(w, status, toDimensionValueView(saved))
+	writeTagged(w, status, saved.LockVersion, toDimensionValueView(saved))
 }
 
 func parseOptionalDate(s *string) (*time.Time, bool) {
@@ -255,10 +265,10 @@ func toStructureView(ledgerID string, s domain.Structure) structureView {
 	}
 	return structureView{ID: s.ID, LedgerID: ledgerID, Name: s.Name, Version: s.Version, Priority: s.Priority,
 		EffectiveFrom: s.EffectiveFrom.Format(time.DateOnly), Status: s.Status, Segments: s.Segments,
-		AccountFilter: s.AccountFilter, Constraints: cs}
+		AccountFilter: s.AccountFilter, Constraints: cs, LockVersion: s.LockVersion}
 }
 
 func toDimensionValueView(v domain.DimensionValue) dimensionValueView {
 	return dimensionValueView{Attribute: v.Attribute, Value: v.Value, Name: v.Name,
-		ActiveFrom: formatOptionalDate(v.ActiveFrom), ActiveTo: formatOptionalDate(v.ActiveTo), Suspended: v.Suspended}
+		ActiveFrom: formatOptionalDate(v.ActiveFrom), ActiveTo: formatOptionalDate(v.ActiveTo), Suspended: v.Suspended, LockVersion: v.LockVersion}
 }

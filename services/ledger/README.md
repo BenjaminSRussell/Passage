@@ -312,7 +312,7 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
   code (`LEDGER_REASON_REQUIRED` otherwise): items become `reset_open`, the
   difference entry is reversed with the given reason code (the ledger's reversal rules apply) and its
   two items are voided, an open residual item is voided (`LEDGER_CLEARING_RESIDUAL_USED` if it was
-  cleared since). `GET /clearings[/{id}]` reads documents (the list returns the newest 200).
+  cleared since). `GET /clearings[/{id}]` reads documents (the list pages by keyset cursor, newest first).
 - `POST /journal-entries/{id}/reverse` refuses an entry with an item in an active clearing, including a
   clearing's own difference entry (409 `LEDGER_OPEN_ITEM_ALREADY_CLEARED`): reset the clearing first.
 - `PUT/GET /ledgers/{ledger}/tolerance-groups[/{code}]` maintain the groups (`ETag`, optional `If-Match`).
@@ -422,6 +422,7 @@ today:
 | `LEDGER_BATCH_APPROVAL_REQUIRED` | 409: posting a validated batch whose journal name now requires approval; submit it for approval |
 | `LEDGER_SELF_APPROVAL` | 403: the submitter approves a batch of a journal name that does not allow self-approval |
 | `LEDGER_VERSION_CONFLICT` | 412: `If-Match` names an older batch version |
+| `LEDGER_PRECONDITION_REQUIRED` | 428: a PUT changes an existing account, account structure version, dimension value, description template or journal name without `If-Match` (send the row's `lockVersion` as the entity tag); repeating the stored content needs none |
 | `LEDGER_OI_ACCOUNT_INVALID` | 422: account cannot be open-item managed (BR-11.18) |
 | `LEDGER_OI_ACTIVATION_BALANCE` | 422: account has a balance; an activation run is needed (FR-11.19, LEDGER-0023) |
 | `LEDGER_OI_OPEN_ITEMS_EXIST` | 409: switching off an account that still has open items |
@@ -451,3 +452,19 @@ are not raised yet and are tracked in NOT-IMPLEMENTED.md.
 
 Only the platform module and its existing dependencies (chi, pgx/v5,
 shopspring/decimal, google/uuid) are used.
+
+## Concurrency and paging (slice 22)
+
+- Accounts, account structure versions, dimension values, description templates and journal names carry
+  `lockVersion` (migration 0031), returned in the body and as `ETag`. Changing an existing row with `PUT`
+  needs `If-Match: "<lockVersion>"` (428 `LEDGER_PRECONDITION_REQUIRED` without, 412 `LEDGER_VERSION_CONFLICT`
+  when stale or sent for a row that does not exist); creating needs none, and a `PUT` that repeats the stored
+  content is an idempotent 200 without a tag (a retried create, a re-run seed or migration load). The tag
+  increases only when the content changes. Two concurrent creates of one row: one wins, the other gets 428.
+- Keyset cursors are base64url JSON arrays of the sort keys (no secret: a cursor only positions a read the
+  caller may make anyway); each key is type-checked and normalized before it reaches SQL, and an altered
+  cursor is 400. Orders are total: batches and clearings by `created_at` then `id` (both descending),
+  recurring journals by next run date (none last), name, then `id`.
+- `GET /journal-batches`, `/recurring-journals` and `/clearings` page by keyset: `limit` (1 to 200, default 100)
+  and the opaque `cursor` from `nextCursor`, which is absent on the last page.
+- `dev.passage.ledger.journal.posted.v1` carries `legalEntityId` (also the CloudEvent `legalentityid` extension).

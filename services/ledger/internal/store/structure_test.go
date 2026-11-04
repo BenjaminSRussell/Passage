@@ -36,7 +36,7 @@ func bsStructure() domain.Structure {
 func putStructure(t *testing.T, e env, s domain.Structure) (string, domain.Structure) {
 	t.Helper()
 	id := ids.New()
-	out, created, err := e.store.PutStructure(e.ctx, e.ledger.ID, id, s)
+	out, created, err := e.store.PutStructure(e.ctx, e.ledger.ID, id, 0, s)
 	if err != nil || !created {
 		t.Fatalf("put structure %s: created=%v err=%v", s.Name, created, err)
 	}
@@ -53,7 +53,7 @@ func TestPostgres_StructureLifecycle(t *testing.T) {
 	// A draft changes freely; re-sending replaces (not creates).
 	draft := plStructure(domain.StructureDraft)
 	draft.Priority = 4
-	got, created, err := e.store.PutStructure(e.ctx, e.ledger.ID, id, draft)
+	got, created, err := e.store.PutStructure(e.ctx, e.ledger.ID, id, structTag(e, e.ledger.ID, id), draft)
 	if err != nil || created || got.Priority != 4 {
 		t.Fatalf("edit draft: created=%v err=%v %+v", created, err, got)
 	}
@@ -61,28 +61,28 @@ func TestPostgres_StructureLifecycle(t *testing.T) {
 	// Activate, then any change but retirement is locked.
 	active := draft
 	active.Status = domain.StructureActive
-	if _, _, err := e.store.PutStructure(e.ctx, e.ledger.ID, id, active); err != nil {
+	if _, _, err := e.store.PutStructure(e.ctx, e.ledger.ID, id, structTag(e, e.ledger.ID, id), active); err != nil {
 		t.Fatalf("activate: %v", err)
 	}
 	changed := active
 	changed.Segments = []string{"DEPT"}
 	changed.Constraints = changed.Constraints[:1]
-	if _, _, err := e.store.PutStructure(e.ctx, e.ledger.ID, id, changed); problemCode(err) != domain.CodeStructureLocked {
+	if _, _, err := e.store.PutStructure(e.ctx, e.ledger.ID, id, structTag(e, e.ledger.ID, id), changed); problemCode(err) != domain.CodeStructureLocked {
 		t.Fatalf("change active: want %s, got %v", domain.CodeStructureLocked, err)
 	}
-	if _, created, err := e.store.PutStructure(e.ctx, e.ledger.ID, id, active); err != nil || created {
+	if _, created, err := e.store.PutStructure(e.ctx, e.ledger.ID, id, structTag(e, e.ledger.ID, id), active); err != nil || created {
 		t.Fatalf("re-send active unchanged must be an idempotent replace: created=%v err=%v", created, err)
 	}
 
 	// The same name and version under another id is a 409.
-	if _, _, err := e.store.PutStructure(e.ctx, e.ledger.ID, ids.New(), draft); problemCode(err) != domain.CodeStructureVersionExists {
+	if _, _, err := e.store.PutStructure(e.ctx, e.ledger.ID, ids.New(), 0, draft); problemCode(err) != domain.CodeStructureVersionExists {
 		t.Fatalf("duplicate version: got %v", err)
 	}
 
 	// An invalid definition lists every violation.
 	bad := plStructure(domain.StructureDraft)
 	bad.Version, bad.Segments = 2, []string{"PROJECT"}
-	_, _, err = e.store.PutStructure(e.ctx, e.ledger.ID, ids.New(), bad)
+	_, _, err = e.store.PutStructure(e.ctx, e.ledger.ID, ids.New(), 0, bad)
 	if codes := rejectionCodes(err); len(codes) < 2 || codes[0] != domain.CodeStructureInvalid {
 		t.Fatalf("invalid definition: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestPostgres_StructureLifecycle(t *testing.T) {
 	if _, err := e.store.GetStructure(e.ctx, other.ID, id); problemCode(err) != domain.CodeStructureNotFound {
 		t.Fatalf("structure read through another ledger: %v", err)
 	}
-	if _, _, err := e.store.PutStructure(e.ctx, other.ID, id, active); problemCode(err) != domain.CodeStructureNotFound {
+	if _, _, err := e.store.PutStructure(e.ctx, other.ID, id, 0, active); problemCode(err) != domain.CodeStructureNotFound {
 		t.Fatalf("structure written through another ledger: %v", err)
 	}
 }
@@ -176,7 +176,7 @@ func TestPostgres_PostingValidatesAgainstStructures(t *testing.T) {
 	// structure changed since (retire the P&L structure first).
 	retired := plStructure(domain.StructureRetired)
 	retired.Version = 2
-	if _, _, err := e.store.PutStructure(e.ctx, e.ledger.ID, plID, retired); err != nil {
+	if _, _, err := e.store.PutStructure(e.ctx, e.ledger.ID, plID, structTag(e, e.ledger.ID, plID), retired); err != nil {
 		t.Fatalf("retire: %v", err)
 	}
 	if _, err := reverseWith(t, e, posted.Entries[0].ID, "REV-OK-1", ""); err != nil {
@@ -187,7 +187,7 @@ func TestPostgres_PostingValidatesAgainstStructures(t *testing.T) {
 func TestPostgres_DimensionValueRegister(t *testing.T) {
 	e, _ := setup(t)
 	from := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-	v, created, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, domain.DimensionValue{Attribute: "DEPT", Value: "D100", Name: "Sales", ActiveFrom: &from})
+	v, created, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, 0, domain.DimensionValue{Attribute: "DEPT", Value: "D100", Name: "Sales", ActiveFrom: &from})
 	if err != nil || !created || v.ActiveFrom == nil || !v.ActiveFrom.Equal(from) {
 		t.Fatalf("create: created=%v err=%v %+v", created, err, v)
 	}
@@ -200,20 +200,20 @@ func TestPostgres_DimensionValueRegister(t *testing.T) {
 
 	// Moving the start date earlier activates it; suspending refuses it again.
 	early := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	if _, created, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, domain.DimensionValue{Attribute: "DEPT", Value: "D100", Name: "Sales", ActiveFrom: &early}); err != nil || created {
+	if _, created, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, dimTag(e, e.ledger.ID, "DEPT", "D100"), domain.DimensionValue{Attribute: "DEPT", Value: "D100", Name: "Sales", ActiveFrom: &early}); err != nil || created {
 		t.Fatalf("replace: created=%v err=%v", created, err)
 	}
 	if _, err := e.store.PostEntry(e.ctx, vendorInvoice(e.ledger.ID, "ACT-1", "10.00")); err != nil {
 		t.Fatalf("active value: %v", err)
 	}
-	if _, _, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, domain.DimensionValue{Attribute: "DEPT", Value: "D100", Name: "Sales", Suspended: true}); err != nil {
+	if _, _, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, dimTag(e, e.ledger.ID, "DEPT", "D100"), domain.DimensionValue{Attribute: "DEPT", Value: "D100", Name: "Sales", Suspended: true}); err != nil {
 		t.Fatalf("suspend: %v", err)
 	}
 	if _, err := e.store.PostEntry(e.ctx, vendorInvoice(e.ledger.ID, "SUSP-1", "10.00")); rejectionCodes(err) == nil {
 		t.Fatalf("suspended value must be refused, got %v", err)
 	}
 
-	if _, _, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, domain.DimensionValue{Attribute: "PROJECT", Value: "P1"}); rejectionCodes(err) == nil {
+	if _, _, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, 0, domain.DimensionValue{Attribute: "PROJECT", Value: "P1"}); rejectionCodes(err) == nil {
 		t.Fatalf("attribute not on the ledger must be refused, got %v", err)
 	}
 	list, err := e.store.ListDimensionValues(e.ctx, e.ledger.ID)
@@ -225,7 +225,7 @@ func TestPostgres_DimensionValueRegister(t *testing.T) {
 func TestPostgres_StructuresAreTenantAndLegalEntityScoped(t *testing.T) {
 	e, _ := setup(t)
 	id, _ := putStructure(t, e, bsStructure())
-	if _, _, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, domain.DimensionValue{Attribute: "DEPT", Value: "D100"}); err != nil {
+	if _, _, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, 0, domain.DimensionValue{Attribute: "DEPT", Value: "D100"}); err != nil {
 		t.Fatal(err)
 	}
 	otherTenant := principalCtx(testkit.TenantID(2), "")
@@ -251,7 +251,7 @@ func TestPostgres_StructuresAreTenantAndLegalEntityScoped(t *testing.T) {
 		t.Fatalf("other legal entity get structure: %v", err)
 	}
 	var p *httpx.Problem
-	if _, _, err := e.store.PutStructure(otherEntity, e.ledger.ID, ids.New(), bsStructure()); !errors.As(err, &p) || p.Status != http.StatusNotFound {
+	if _, _, err := e.store.PutStructure(otherEntity, e.ledger.ID, ids.New(), 0, bsStructure()); !errors.As(err, &p) || p.Status != http.StatusNotFound {
 		t.Fatalf("other legal entity put structure: %v", err)
 	}
 }

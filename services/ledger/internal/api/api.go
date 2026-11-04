@@ -470,6 +470,10 @@ func (a *API) putAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	chart, number := chi.URLParam(r, "chart"), chi.URLParam(r, "number")
+	tag, tagOK := replaceTag(w, r)
+	if !tagOK {
+		return
+	}
 	var req putAccountRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -511,7 +515,7 @@ func (a *API) putAccount(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	acct, created, err := a.store.PutAccount(r.Context(), chart, number, store.Account{Name: req.Name, Type: req.AccountType,
+	acct, created, err := a.store.PutAccount(r.Context(), chart, number, tag, store.Account{Name: req.Name, Type: req.AccountType,
 		Postable: postable, SuspendedFrom: req.SuspendedFrom, ReconType: reconType})
 	if err != nil {
 		a.fail(w, r, err)
@@ -521,7 +525,7 @@ func (a *API) putAccount(w http.ResponseWriter, r *http.Request) {
 	if created {
 		status = http.StatusCreated
 	}
-	httpx.JSON(w, status, acct)
+	writeTagged(w, status, acct.LockVersion, acct)
 }
 
 func (a *API) listAccounts(w http.ResponseWriter, r *http.Request) {

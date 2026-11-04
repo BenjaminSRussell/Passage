@@ -28,23 +28,29 @@ const (
 // fakeStore records the inputs the handlers pass down and answers with the
 // configured result or error.
 type fakeStore struct {
-	rec      recurringFake
-	oi       openItemFake
-	auto     autoFake
-	deriv    derivationFake
-	vrules   validationFake
-	arules   advancedFake
-	split    splittingFake
-	realign  realignFake
-	attach   attachFake
-	posted   []store.PostInput
-	reversed []store.ReverseInput
-	err      error
-	replay   bool
-	accounts []store.Account
-	validate domain.Result
-	reasons  []store.ReasonCode
-	created  bool
+	rec     recurringFake
+	oi      openItemFake
+	auto    autoFake
+	deriv   derivationFake
+	vrules  validationFake
+	arules  advancedFake
+	split   splittingFake
+	realign realignFake
+	attach  attachFake
+	// putTags are the If-Match tags the configuration PUT handlers passed to the store; listPage the
+	// keyset page of the last paged list; batchPage and clearingPage canned look-ahead pages.
+	putTags      []int
+	listPage     store.Page
+	batchPage    []store.Batch
+	clearingPage []store.ClearingDocument
+	posted       []store.PostInput
+	reversed     []store.ReverseInput
+	err          error
+	replay       bool
+	accounts     []store.Account
+	validate     domain.Result
+	reasons      []store.ReasonCode
+	created      bool
 	// balanceFilter is the last trial balance filter the handler passed down.
 	balanceFilter store.BalanceFilter
 	// putReasons records the reason codes the handlers wrote.
@@ -107,7 +113,9 @@ type putStructureCall struct {
 	in           domain.Structure
 }
 
-func (f *fakeStore) PutAccount(_ context.Context, chart, number string, in store.Account) (store.Account, bool, error) {
+func (f *fakeStore) PutAccount(_ context.Context, chart, number string, tag int, in store.Account) (store.Account, bool, error) {
+	f.putTags = append(f.putTags, tag)
+	in.LockVersion = tag + 1
 	in.ChartCode, in.Number = chart, number
 	return in, true, f.err
 }
@@ -191,7 +199,9 @@ func (f *fakeStore) GetStructure(_ context.Context, _, id string) (domain.Struct
 	return domain.Structure{}, httpx.NewProblem(http.StatusNotFound, domain.CodeStructureNotFound, "account structure not found")
 }
 
-func (f *fakeStore) PutStructure(_ context.Context, ledgerID, id string, in domain.Structure) (domain.Structure, bool, error) {
+func (f *fakeStore) PutStructure(_ context.Context, ledgerID, id string, tag int, in domain.Structure) (domain.Structure, bool, error) {
+	f.putTags = append(f.putTags, tag)
+	in.LockVersion = tag + 1
 	f.putStructures = append(f.putStructures, putStructureCall{ledgerID: ledgerID, id: id, in: in})
 	in.ID = id
 	return in, f.created, f.err
@@ -201,7 +211,9 @@ func (f *fakeStore) ListDimensionValues(context.Context, string) ([]domain.Dimen
 	return f.dimValues, f.err
 }
 
-func (f *fakeStore) PutDimensionValue(_ context.Context, _ string, in domain.DimensionValue) (domain.DimensionValue, bool, error) {
+func (f *fakeStore) PutDimensionValue(_ context.Context, _ string, tag int, in domain.DimensionValue) (domain.DimensionValue, bool, error) {
+	f.putTags = append(f.putTags, tag)
+	in.LockVersion = tag + 1
 	f.putValues = append(f.putValues, in)
 	return in, f.created, f.err
 }
@@ -219,7 +231,9 @@ func (f *fakeStore) GetDescriptionTemplate(_ context.Context, id string) (store.
 	return store.DescriptionTemplate{}, templateNotFound()
 }
 
-func (f *fakeStore) PutDescriptionTemplate(_ context.Context, id string, in store.DescriptionTemplate) (store.DescriptionTemplate, bool, error) {
+func (f *fakeStore) PutDescriptionTemplate(_ context.Context, id string, tag int, in store.DescriptionTemplate) (store.DescriptionTemplate, bool, error) {
+	f.putTags = append(f.putTags, tag)
+	in.LockVersion = tag + 1
 	in.ID = id
 	f.putTemplates = append(f.putTemplates, in)
 	return in, f.created, f.err
@@ -238,7 +252,9 @@ func (f *fakeStore) GetJournalName(_ context.Context, code string) (store.Journa
 	return store.JournalName{}, httpx.NewProblem(http.StatusNotFound, "LEDGER_JOURNAL_NAME_NOT_FOUND", "journal name not found")
 }
 
-func (f *fakeStore) PutJournalName(_ context.Context, code string, in store.JournalName) (store.JournalName, bool, error) {
+func (f *fakeStore) PutJournalName(_ context.Context, code string, tag int, in store.JournalName) (store.JournalName, bool, error) {
+	f.putTags = append(f.putTags, tag)
+	in.LockVersion = tag + 1
 	in.Code = code
 	f.putNames = append(f.putNames, in)
 	return in, f.created, f.err
@@ -259,6 +275,9 @@ func (f *fakeStore) GetBatch(_ context.Context, id string) (store.Batch, error) 
 
 func (f *fakeStore) ListBatches(_ context.Context, filter store.BatchFilter) ([]store.Batch, error) {
 	b, err := f.batchResult(batchCall{op: "list", filter: filter})
+	if f.batchPage != nil {
+		return f.batchPage, err
+	}
 	return []store.Batch{b}, err
 }
 
