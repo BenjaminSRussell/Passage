@@ -145,12 +145,14 @@ components:
           source: { const: /passage/ledger/ledger }
           tenantid: { type: string, format: uuid }
           subject: { type: string, description: Entry id }
+          legalentityid: { type: string, format: uuid, description: The ledger's legal entity (CloudEvents extension, same value as data.legalEntityId) }
           data:
             type: object
-            required: [entryId, ledgerId, documentId, voucher, postingSequence, postingDate, periodKey, lineCount, totals, source, traceId]
+            required: [entryId, ledgerId, legalEntityId, documentId, voucher, postingSequence, postingDate, periodKey, lineCount, totals, source, traceId]
             properties:
               entryId: { type: string, format: uuid }
               ledgerId: { type: string, format: uuid }
+              legalEntityId: { type: string, format: uuid, description: The ledger's legal entity; also the CloudEvent legalentityid extension, which consumers (reporting) require }
               documentId: { type: string, format: uuid }
               voucher: { type: string }
               postingSequence: { type: integer, format: int64, description: Gap-free per ledger }

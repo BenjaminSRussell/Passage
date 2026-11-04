@@ -27,8 +27,10 @@ type ListFilter struct {
 	Customer  string
 	Territory string
 	CaseID    string
-	Before    string
-	Limit     int
+	// Active is "true", "false" or "" (both) for lists of technicians.
+	Active string
+	Before string
+	Limit  int
 }
 
 // ListSLAProfiles returns the tenant's SLA profiles ordered by code.

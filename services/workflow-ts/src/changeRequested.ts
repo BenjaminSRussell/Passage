@@ -1,6 +1,6 @@
 import { WorkflowExecutionAlreadyStartedError, WorkflowIdReusePolicy } from "@temporalio/client";
 import type { Client } from "@temporalio/client";
-import { approvalWorkflow, type ApprovalInput, type ApprovalLevel } from "./workflows.js";
+import { approvalWorkflow, approvalWorkflowId, type ApprovalInput, type ApprovalLevel } from "./workflows.js";
 
 export const changeRequestedType = "dev.passage.party.change.requested.v1";
 
@@ -40,7 +40,7 @@ export async function handleChangeRequested(
   event: ChangeRequestedEvent,
 ): Promise<{ workflowId: string; started: boolean }> {
   const input = toApprovalInput(event, levels);
-  const workflowId = `approval:${input.requestId}`;
+  const workflowId = approvalWorkflowId(input.requestId);
   try {
     await client.workflow.start(approvalWorkflow, {
       workflowId,

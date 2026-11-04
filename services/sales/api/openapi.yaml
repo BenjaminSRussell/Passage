@@ -133,6 +133,30 @@ paths:
         parent's quantity recomputes it, cancels it when the parent drops below
         the rule's base quantity, and a change of the parent's dates moves it
         with the parent. Those follow-on changes are part of the version's diff.
+        addLines adds lines (numbered after the order's highest line number, so a
+        number is never reused) and removeLines cancels lines by number, in the
+        same version as the other edits. An added line is entered like an order
+        line (a configurationId is refused), is checked against the product
+        listings of the customer (SLS-0011; a caller with sales.order.approve
+        and a listingOverrideReason may accept a denied line, and the override is
+        logged on the order), gets the MANDATORY supplementary lines its product
+        calls for (SLS-0012 in warnings) and, on a CONFIRMED order, is promised at
+        once through the delivery date control, allocated, scheduled and counted
+        in the credit re-check. A removed line is cancelled, not deleted; only an
+        OPEN or RESERVED line can go, a supplementary line goes with its parent
+        and cannot be removed alone, a line with a production order planned
+        cannot be removed, and a change cannot leave the order without a line
+        (cancel the order instead); all of these are 422 SLS-0024. The diff names
+        an added line with a lineAdded entry (the product) and its fields with
+        an empty old value, and a removed line with lineStatus OPEN to CANCELLED.
+        On a CONFIRMED order the change also emits order.remaindercancelled
+        for every line whose quantity ceiling moved: kept quantity 0 for the
+        removed lines and the supplementary lines cancelled with them, the new
+        quantity for a lowered, raised or reopened line, so fulfillment cuts
+        what it released above it and lifts the ceiling again on a raise;
+        removing line 1 of an order
+        released from a sales agreement gives the release quantity back to the
+        agreement.
         On a CONFIRMED order, a line whose quantity or requested date changes,
         or that is cancelled or reopened with its parent, returns its allocation
         quota draw and draws again (BR-27.15); a line moved to a later period
@@ -141,7 +165,13 @@ paths:
         When the order is CONFIRMED, its customer has change approval switched
         on (change-policy) and the caller lacks sales.order.approve, the change
         is validated and stored as a PENDING change request instead of applied
-        (202); a caller with sales.order.approve changes the order directly.
+        (202); a caller with sales.order.approve changes the order directly,
+        unless the customer names its approvers (approverIds) and the caller is
+        not one, in which case the change is stored like anyone else's. With a
+        threshold set, the change applies at once only while the value it moves
+        (the sum of each line's absolute net movement), added to what earlier
+        changes of the order applied without approval moved, stays below the
+        threshold.
       operationId: changeOrder
       x-passage-duty: sales.order.write
       parameters:
@@ -162,7 +192,7 @@ paths:
         "202":
           description: >-
             the customer's changes to confirmed orders need approval (see
-            changeOrder description) and the caller lacks sales.order.approve:
+            changeOrder description) and the caller may not skip it:
             nothing was applied, the order is returned unchanged with
             pendingChange holding the stored change request
           headers:
@@ -180,7 +210,7 @@ paths:
               schema: {$ref: "#/components/schemas/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "422":
-          description: SLS-0023 the order cannot be changed; SLS-0024 the change is invalid; SLS-0013 allocation quota cannot cover a changed line in any period
+          description: SLS-0023 the order cannot be changed; SLS-0024 the change is invalid; SLS-0011 an added line's product is not listed for the customer; SLS-0013 allocation quota cannot cover a changed or added line in any period
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
@@ -239,6 +269,45 @@ paths:
         "412": {$ref: "#/components/responses/Problem"}
         "422":
           description: SLS-0022 the hold is not ACTIVE
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/orders/{id}/holds/{holdId}:reject:
+    post:
+      summary: >-
+        Reject an ACTIVE CREDIT hold with a required comment and cancel the order (PRD 5.27.6
+        credit release queue). Only a CREDIT hold of an order awaiting confirmation (DRAFT or OPEN)
+        can be rejected; the user who applied the hold may not reject it. In one transaction the
+        hold becomes REJECTED with who, when and why, the order's other ACTIVE holds are CLEARED,
+        lines, allocation quota and agreement draw are returned as for :cancel, a version with the
+        comment is written, and orderhold.rejected and order.cancelled are emitted. If-Match carries
+        the order ETag, so a retry gets 412 and never rejects twice.
+      operationId: rejectOrderHold
+      x-passage-duty: sales.credit.release
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: holdId, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RejectHoldRequest"}
+      responses:
+        "200":
+          description: the cancelled order at its new version with the hold listed as REJECTED
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Order"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0022 the hold is not ACTIVE; SLS-0062 the hold is not a CREDIT hold, or its order is no longer awaiting confirmation
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
@@ -844,7 +913,7 @@ paths:
                   order: {$ref: "#/components/schemas/Order"}
         "400": {$ref: "#/components/responses/Problem"}
         "403":
-          description: the caller lacks sales.order.approve, or SLS-0045 the caller requested the change
+          description: the caller lacks sales.order.approve, or SLS-0045 the caller requested the change, or SLS-0150 the customer names its approvers and the caller is not one
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
@@ -886,7 +955,11 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/ChangeRequest"}
         "400": {$ref: "#/components/responses/Problem"}
-        "403": {$ref: "#/components/responses/Problem"}
+        "403":
+          description: the caller lacks sales.order.approve, or SLS-0150 the customer names its approvers and the caller is not one
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
         "409":
           description: SLS-0044 the request was already decided
@@ -954,7 +1027,25 @@ paths:
         "400": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
     put:
-      summary: Turn change approval on or off for a customer (If-Match carries the current ETag; first save uses "0")
+      summary: Set a customer's change approval switch, amount threshold and approver group (If-Match carries the current ETag; first save uses "0")
+      description: >-
+        approvalRequired is always replaced. A member the body names replaces
+        the stored value (null or [] clears it); a member it leaves out keeps
+        the stored value, so the plain {"approvalRequired": true} body of older
+        clients does not wipe a threshold or group. approvalThreshold and
+        thresholdCurrency go together: naming either replaces both. With
+        approvalRequired on and a threshold set, a change to a confirmed order
+        applies without approval only while the value it moves (the sum of each
+        line's absolute net movement), added to what earlier unapproved changes
+        of the order moved, stays below the threshold, so a large change cannot
+        be split into small ones; a cancellation moves the whole total. An order
+        in another currency than thresholdCurrency always needs approval, since
+        no rate converts it. A non-empty approverIds (identity user ids) limits
+        who may approve or reject the customer's requests (SLS-0150) and who
+        may change or cancel its confirmed orders without a request; the
+        sales.order.approve duty is still required. An empty group lets anyone
+        holding the duty decide, so a policy never leaves requests without an
+        approver.
       operationId: putChangePolicy
       x-passage-duty: sales.order.approve
       parameters:
@@ -968,9 +1059,12 @@ paths:
               required: [approvalRequired]
               properties:
                 approvalRequired: {type: boolean}
+                approvalThreshold: {type: [string, "null"], description: "decimal string, greater than 0 and below 10^15, at most 4 places; needs thresholdCurrency; null clears it, absent keeps it"}
+                thresholdCurrency: {type: [string, "null"], pattern: "^[A-Z]{3}$", description: "the threshold's currency; null clears it with the threshold, absent keeps it"}
+                approverIds: {type: array, maxItems: 20, items: {type: string, format: uuid}, description: "identity user ids, stored in canonical form, de-duplicated and sorted; [] clears the group, absent keeps it"}
       responses:
         "200":
-          description: the saved switch; changepolicy.changed is written in the same transaction
+          description: the saved policy; changepolicy.changed is written in the same transaction
           headers:
             ETag: {$ref: "#/components/headers/ETag"}
           content:
@@ -1085,12 +1179,59 @@ paths:
         "422": {description: SLS-0049 the order is not CONFIRMED, content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
         "502": {description: SLS-0050 production could not plan a line; the lines planned before it are kept, content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
         "503": {description: SLS-0050 the production service is not configured, content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+  /v1/sales/orders:auto-close:
+    post:
+      summary: Close the INVOICED orders that nothing has changed for a grace period (the nightly auto-close, PRD 5.27.16)
+      description: >-
+        Moves INVOICED orders to CLOSED (BR-27.5), oldest first, up to limit. An order qualifies when it is INVOICED, has
+        been unchanged for graceDays (default 30; the payment signal of wave 30 is not available, so the period stands in
+        for it) and has no ACTIVE hold. Each order closes in its own transaction under its row lock, re-checked against
+        the version the run listed, so an order changed in between is SKIPPED; the close writes an order version with the
+        status diff and order.closed. A closed order takes no progress report, change or cancel. Safe to repeat, which is
+        what the scheduler does; with dryRun=true it lists the candidates and closes nothing. more is true when the limit
+        cut the list. The legal entity is the query parameter, or the caller's; without either, an all-scope caller covers
+        every legal entity.
+      operationId: autoCloseOrders
+      x-passage-duty: sales.order.write
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: graceDays, in: query, description: days an INVOICED order must be unchanged, schema: {type: integer, minimum: 0, maximum: 365, default: 30}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+        - {name: dryRun, in: query, description: list the candidates without closing them, schema: {type: boolean, default: false}}
+      responses:
+        "200":
+          description: what the run closed or, for a dry run, would close
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [closed, skipped, more, items]
+                properties:
+                  closed: {type: integer}
+                  skipped: {type: integer, description: orders that changed between the listing and the close and were left alone}
+                  more: {type: boolean, description: "more candidates are left than the limit allowed. A scheduler repeats the call while more is true and the run closed at least one order; an order that is SKIPPED every time (its lines no longer derive INVOICED) would otherwise hold the head of the list"}
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [orderId, orderNumber, legalEntityId, lastChangedAt, version, result]
+                      properties:
+                        orderId: {type: string, format: uuid}
+                        orderNumber: {type: string}
+                        legalEntityId: {type: string, format: uuid}
+                        lastChangedAt: {type: string, format: date-time, description: "when the order last changed (the invoice that completed it, or a later change such as a hold release); the grace period runs from here"}
+                        version: {type: integer, description: the order version seen, or reached when closed}
+                        result: {type: string, enum: [CLOSED, CANDIDATE, SKIPPED]}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
   /v1/sales/orders/{id}:cancel:
     post:
       summary: >-
         Cancel an order that has not shipped (BR-27.5). Every OPEN or RESERVED line is cancelled,
-        ACTIVE holds are CLEARED, a new version is written and order.cancelled is emitted. An order
-        with a picked, delivered or invoiced line is refused (SLS-0025).
+        ACTIVE holds are CLEARED, a new version is written and order.cancelled is emitted; a
+        CONFIRMED order also emits order.remaindercancelled (status CANCELLED, every cancelled line
+        kept at 0) so fulfillment cuts what it released. An order with a picked, delivered or
+        invoiced line is refused (SLS-0025).
       operationId: cancelOrder
       x-passage-duty: sales.order.confirm
       parameters:
@@ -1114,8 +1255,10 @@ paths:
               schema: {$ref: "#/components/schemas/Order"}
         "202":
           description: >-
-            the customer's changes to confirmed orders need approval and the caller
-            lacks sales.order.approve: nothing was cancelled, the order is returned
+            the customer's changes to confirmed orders need approval (a cancellation
+            moves the whole total, on top of what earlier unapproved changes moved)
+            and the caller lacks sales.order.approve or is outside the customer's
+            named approvers: nothing was cancelled, the order is returned
             unchanged with pendingChange holding the stored request (kind CANCEL)
           headers:
             ETag: {$ref: "#/components/headers/ETag"}
@@ -2261,6 +2404,84 @@ paths:
               schema: {$ref: "#/components/schemas/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/intake-errors/{id}:replay:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      summary: Replay one refused channel order through intake again, once its cause is fixed (PRD 5.27.10)
+      description: >-
+        Sends the request kept with an OPEN intake error through the order intake rules again, as the caller and under
+        the Idempotency-Key it arrived with (a derived key when it had none), so a replay that already stored its order
+        returns that order instead of adding another. The caller's own legal-entity scope and duties apply (a caller
+        holding sales.order.approve may accept a listing override the kept request asked for). When the order is stored (or found), the intake error is
+        RESOLVED with the order's number, the kept request is cleared and orderId is returned. When intake refuses it
+        again the answer is still 200 with replayed false and the new refusal in failure; the error stays OPEN with one
+        more attempt and replayCount.
+      operationId: replayIntakeError
+      x-passage-duty: sales.order.write
+      responses:
+        "200":
+          description: the replay outcome; the ETag header carries the intake error version
+          headers:
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/IntakeReplayResult"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: >-
+            SLS-0116 the intake error is already resolved; SLS-0118 its request was not kept (a row logged before replay
+            existed, or a one-time customer order refused while field encryption was not configured); SLS-0007 a
+            concurrent replay or retry is storing the same order (retry to receive it). None of them counts an attempt.
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "503":
+          description: SLS-0054 the kept request of a one-time customer order is sealed and field encryption is not configured
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+  /v1/sales/intake-errors:replay:
+    post:
+      summary: Replay the open intake errors of a legal entity, oldest first (the scheduled retry, PRD 5.27.10)
+      description: >-
+        Replays up to limit OPEN intake errors whose request was kept, oldest first, each as in the single replay.
+        Errors that already failed 10 times are the dead letters: they are counted in skipped and left for an operator
+        (replay one by id to try it anyway). Each replay runs in its own transactions; a row another replay is storing at
+        the same moment is left out of the counts. A server fault stops the batch with its problem (the replays done
+        before it are kept). Safe to repeat. The legal entity is the query parameter, or the caller's; without either,
+        an all-scope caller replays every legal entity.
+      operationId: replayIntakeErrors
+      x-passage-duty: sales.order.write
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: channel, in: query, description: only this channel, schema: {type: string, maxLength: 40}}
+        - {name: errorCode, in: query, description: only this problem code such as SLS-0011, schema: {type: string, maxLength: 40}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        "200":
+          description: counts and one result per attempted error
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attempted, replayed, failed, skipped, items]
+                properties:
+                  attempted: {type: integer}
+                  replayed: {type: integer, description: orders stored and intake errors closed}
+                  failed: {type: integer, description: refused again}
+                  skipped: {type: integer, description: dead letters (10 or more attempts) left alone}
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/IntakeReplayResult"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "503":
+          description: SLS-0054 a kept one-time customer request is sealed and field encryption is not configured
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
   /v1/sales/orders/{id}:record-progress:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -2730,6 +2951,11 @@ components:
       properties:
         holdType: {type: string, enum: [MANUAL, FRAUD, PRICE_REVIEW]}
         reasonCode: {type: string, minLength: 1, maxLength: 80}
+    RejectHoldRequest:
+      type: object
+      required: [comment]
+      properties:
+        comment: {type: string, minLength: 1, maxLength: 500, description: the credit manager's reason, kept on the hold and as the reason of the order version}
     ListingOverride:
       type: object
       description: A denied line accepted by a user with sales.order.approve (FR-27.15, AC-27.11)
@@ -3024,12 +3250,15 @@ components:
         id: {type: string, format: uuid}
         holdType: {type: string, enum: [CREDIT, FRAUD, MANUAL, PRICE_REVIEW]}
         reasonCode: {type: string}
-        status: {type: string, enum: [ACTIVE, RELEASED, CLEARED]}
+        status: {type: string, enum: [ACTIVE, RELEASED, CLEARED, REJECTED]}
         orderAmount: {$ref: "#/components/schemas/Money"}
         appliedBy: {type: string}
         releasedBy: {type: string}
         releasedUntil: {type: string, format: date-time}
         appliedAt: {type: string, format: date-time}
+        rejectedBy: {type: string, description: set when status is REJECTED}
+        rejectedAt: {type: string, format: date-time}
+        rejectionComment: {type: string}
     AtpPeriod:
       type: object
       required: [date, supply, demand]
@@ -3294,6 +3523,9 @@ components:
         legalEntityId: {type: string, format: uuid}
         customerId: {type: string, format: uuid}
         approvalRequired: {type: boolean}
+        approvalThreshold: {type: string, description: changes applied without approval may together move an order by less than this; absent when every change needs approval}
+        thresholdCurrency: {type: string, pattern: "^[A-Z]{3}$"}
+        approverIds: {type: array, items: {type: string, format: uuid}, description: the only users who may decide the customer's requests or change its confirmed orders directly; empty when anyone holding sales.order.approve may}
         version: {type: integer, minimum: 0}
         updatedBy: {type: string}
         updatedAt: {type: string, format: date-time}
@@ -3330,10 +3562,21 @@ components:
         version: {type: integer}
     ChangeOrderRequest:
       type: object
-      description: At least one of lines or requestedShipDate. Absent line fields keep their value.
+      description: At least one of lines, addLines, removeLines or requestedShipDate. Absent line fields keep their value.
       properties:
         reason: {type: string, maxLength: 500}
         requestedShipDate: {type: string, format: date}
+        addLines:
+          type: array
+          maxItems: 2000
+          description: lines to add, entered like order lines; configurationId is refused (400)
+          items: {$ref: "#/components/schemas/OrderLineRequest"}
+        removeLines:
+          type: array
+          maxItems: 2000
+          description: numbers of the lines to cancel (a removed line keeps its number)
+          items: {type: integer, minimum: 1}
+        listingOverrideReason: {type: string, maxLength: 500, description: "accepts an added line the product listing denies; effective only for a caller with sales.order.approve (FR-27.15)"}
         lines:
           type: array
           maxItems: 2000
@@ -3498,13 +3741,14 @@ components:
         order: {$ref: "#/components/schemas/Order"}
     HoldQueueItem:
       type: object
-      required: [holdId, legalEntityId, orderId, orderNumber, orderVersion, customerId, holdType, reasonCode, amount, currency, appliedBy, appliedAt, slaDueAt]
+      required: [holdId, legalEntityId, orderId, orderNumber, orderVersion, orderStatus, customerId, holdType, reasonCode, amount, currency, appliedBy, appliedAt, slaDueAt]
       properties:
         holdId: {type: string, format: uuid}
         legalEntityId: {type: string, format: uuid}
         orderId: {type: string, format: uuid}
         orderNumber: {type: string}
         orderVersion: {type: integer, description: the order's ETag value for the release call}
+        orderStatus: {type: string, description: the order's status; only a CREDIT hold of a DRAFT or OPEN order can be rejected}
         customerId: {type: string, format: uuid}
         holdType: {type: string, enum: [CREDIT, FRAUD, MANUAL, PRICE_REVIEW]}
         reasonCode: {type: string, description: the failed rule id (CR-1..CR-6) for CREDIT holds}
@@ -3599,13 +3843,13 @@ components:
         validTo: {type: string, format: date, description: last requested date the rule applies to; not before validFrom}
     IntakeError:
       type: object
-      required: [id, legalEntityId, channel, requestHash, errorCode, message, status, attempts, firstSeenAt, lastSeenAt, version]
+      required: [id, legalEntityId, channel, requestHash, errorCode, message, status, attempts, firstSeenAt, lastSeenAt, replayable, replayCount, version]
       properties:
         id: {type: string, format: uuid}
         legalEntityId: {type: string, format: uuid}
         channel: {type: string}
         externalRef: {type: string, description: absent when the request had none}
-        requestHash: {type: string, description: hash of the refused payload; the payload is not kept}
+        requestHash: {type: string, description: "fingerprint of the refused payload, the dedupe key of the log. A request that carries a one-time buyer has a keyed hash (hmac:<key id>:<hex>), or unkeyed when the service has no encryption keys, so a guessed buyer cannot be confirmed against it"}
         errorCode: {type: string, description: problem code of the refusal such as SLS-0007 or COM-0001}
         message: {type: string}
         status: {type: string, enum: [OPEN, RESOLVED]}
@@ -3615,7 +3859,25 @@ components:
         resolvedBy: {type: string}
         resolvedAt: {type: string, format: date-time}
         resolutionNote: {type: string}
+        replayable: {type: boolean, description: true while the refused request is kept so it can be replayed (the request itself is never returned; a one-time customer's is kept only sealed)}
+        replayCount: {type: integer, minimum: 0, description: replays tried}
+        replayedOrderId: {type: string, format: uuid, description: the order a successful replay stored or found}
         version: {type: integer}
+    IntakeReplayResult:
+      type: object
+      required: [intakeError, replayed]
+      properties:
+        intakeError: {$ref: "#/components/schemas/IntakeError"}
+        replayed: {type: boolean, description: the order was stored and the intake error closed}
+        orderId: {type: string, format: uuid}
+        orderNumber: {type: string}
+        failure:
+          type: object
+          description: why intake refused the order again; present when replayed is false
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
     AlternativeRule:
       allOf:
         - $ref: "#/components/schemas/AlternativeRuleRequest"

@@ -32,6 +32,7 @@ import {
   dash,
   Details,
   LoadAlert,
+  messageDelay,
   scopeLabel,
   sentence,
 } from "./pages";
@@ -278,7 +279,7 @@ export function MessageDetailPage() {
               ["Supply", m.supplyRef || dash, true],
               ["Demand", m.demandRef || dash, true],
               ["Suggested date", m.suggestedDate || dash],
-              ["Delay", m.delayDays > 0 ? `${m.delayDays} days` : dash],
+              ["Delay", messageDelay(m) > 0 ? `${messageDelay(m)} days` : dash],
               ["Quantity", m.qty],
             ]}
           />

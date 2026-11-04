@@ -30,6 +30,8 @@ channels:
         $ref: '#/components/messages/ForecastPublishedV1'
       forecastGeneratedV1:
         $ref: '#/components/messages/ForecastGeneratedV1'
+      forecastAllocatedV1:
+        $ref: '#/components/messages/ForecastAllocatedV1'
   scenario:
     address: passage.planning.scenario
     messages:
@@ -90,6 +92,13 @@ operations:
     messages:
       - $ref: '#/channels/forecast/messages/forecastGeneratedV1'
     summary: A statistical forecast generation wrote cells into a model (FR-22.9). Written in the generating transaction; manual and consensus cells are never overwritten and are counted in cells_kept.
+  publishForecastAllocated:
+    action: send
+    channel:
+      $ref: '#/channels/forecast'
+    messages:
+      - $ref: '#/channels/forecast/messages/forecastAllocatedV1'
+    summary: An aggregate forecast was split across items by an allocation key into a model (FR-22.8, BR-22.10). Written in the allocating transaction; quantities are in each item's inventory unit.
   publishScenarioSimulated:
     action: send
     channel:
@@ -155,6 +164,13 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/ForecastGeneratedData'
+    ForecastAllocatedV1:
+      name: dev.passage.planning.forecast.allocated.v1
+      title: A forecast was allocated to items
+      summary: An aggregate forecast was split across items by an allocation key (CloudEvent dev.passage.planning.forecast.allocated.v1).
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ForecastAllocatedData'
     ScenarioSimulatedV1:
       name: dev.passage.planning.scenario.simulated.v1
       title: A scenario simulation finished
@@ -209,15 +225,15 @@ components:
         site_id: {type: string, format: uuid}
         action:
           type: string
-          enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor]
-          description: 'Values are added within v1 only (PRD appendix: additive evolution); a consumer must ignore an action it does not know. no-vendor is PLAN-0008, a planned purchase of the item with no vendor (supply_ref its earliest such order, qty the item''s vendorless quantity)'
-          x-passage-added-in: {red-zone: PSG-2220, sales-on-top: PSG-2223, no-vendor: PSG-2224}
+          enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor, no-quota-source, lot-split, bom-cycle]
+          description: 'Values are added within v1 only (PRD appendix: additive evolution); a consumer must ignore an action it does not know. no-vendor is PLAN-0008, a planned purchase of the item with no vendor (supply_ref its earliest such order, qty the item''s vendorless quantity). lot-split is PLAN-0005, a requirement split over its maximum order quantity (supply_ref its first order, delay_days the number of orders, qty the maximum order quantity). bom-cycle is PLAN-0004, a component line that closes a BOM cycle and was not exploded (item_id the parent, demand_ref the component, qty the line quantity per unit). no-quota-source is PLAN-0009, a planned order no source of the quota arrangement valid on its delivery day could take; the order stays without a source (supply_ref the order, demand_ref the arrangement id, suggested_date its delivery date, qty its quantity)'
+          x-passage-added-in: {red-zone: PSG-2220, sales-on-top: PSG-2223, no-vendor: PSG-2224, lot-split: PSG-2232, bom-cycle: PSG-2233, no-quota-source: PSG-2233}
         item_id: {type: string, format: uuid}
         warehouse_id: {type: [string, 'null'], format: uuid, description: 'The warehouse planning scope the message is about (FR-22.18, added in PSG-2227); null for the site scope. A consumer that ignores it reads a warehouse message as a site one'}
-        supply_ref: {type: string, description: Planned order number or receipt ref; empty for a shortage}
-        demand_ref: {type: string, description: 'Demand the message is about (sales line, forecast, bom line); empty when none'}
+        supply_ref: {type: string, description: 'Planned order number or receipt ref as the run was sent it; for an open purchase order that is the PO number, unchanged, so procurement matches it to the order (a carried-forward firmed order is FP:<planned order id>); empty for a shortage'}
+        demand_ref: {type: string, description: 'Demand the message is about (sales line, forecast, bom line); empty when none. bom-cycle: the component of the skipped line; no-quota-source: the quota arrangement id'}
         suggested_date: {type: string, format: date}
-        delay_days: {type: integer}
+        delay_days: {type: integer, description: Days of delay; for lot-split the number of planned orders the requirement was split into, not a delay}
         qty: {type: string, description: Decimal string in the inventory unit}
     MessageDecidedData:
       type: object
@@ -232,7 +248,7 @@ components:
         legal_entity_id: {type: [string, 'null'], format: uuid, description: Legal entity of the plan; null for a plan with none}
         action:
           type: string
-          enum: [postpone, advance, cancel, decrease, increase, delay, shortage, red-zone, sales-on-top, no-vendor]
+          enum: [postpone, advance, cancel, decrease, increase, delay, shortage, red-zone, sales-on-top, no-vendor, no-quota-source, lot-split, bom-cycle]
           description: 'Only postpone, advance, cancel, decrease and increase can be applied; every action can be dismissed. A consumer must ignore an action it does not know'
         item_id: {type: string, format: uuid}
         warehouse_id: {type: [string, 'null'], format: uuid, description: The warehouse planning scope the message is about; null for the site scope}
@@ -296,6 +312,23 @@ components:
         period_from: {type: string, format: date, description: First period start}
         period_to: {type: string, format: date, description: Last period end}
         generated_by: {type: string, description: User who ran the generation}
+    ForecastAllocatedData:
+      type: object
+      required: [model_id, model_code, version, key_id, key_code, key_version, site_id, items, periods, cells_written, period_from, period_to, allocated_by]
+      properties:
+        model_id: {type: string, format: uuid}
+        model_code: {type: string}
+        version: {type: integer, description: The model's version (ETag) after the allocation}
+        key_id: {type: string, format: uuid}
+        key_code: {type: string}
+        key_version: {type: integer, description: Version of the allocation key the shares were read from}
+        site_id: {type: string, format: uuid}
+        items: {type: integer, description: Items of the key}
+        periods: {type: integer, description: Periods allocated}
+        cells_written: {type: integer, description: Forecast cells written (items x periods), as manual cells in the items' inventory unit}
+        period_from: {type: string, format: date, description: First period start}
+        period_to: {type: string, format: date, description: Last period end}
+        allocated_by: {type: string, description: User who ran the allocation}
     ForecastPublishedData:
       type: object
       required: [model_id, model_code, version, items, horizon_periods, period_from, period_to, submitted_by, approved_by]

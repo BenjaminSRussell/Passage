@@ -2,11 +2,25 @@ import { useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
-import { Alert, Badge, Button, buttonClassName, Card, FormField, PageHeader, Skeleton, StatusPill, Textarea } from "../../shell/ui";
+import { Alert, Badge, Button, buttonClassName, Card, ConfirmDialog, FormField, Input, PageHeader, Skeleton, StatusPill, Textarea } from "../../shell/ui";
 import { describeProblem, type Problem } from "./api/client";
-import { DUTY_HUB_WRITE, getSubscription, resumeSubscription, testSend, type Subscription, type TestSendResult } from "./api/hubClient";
+import {
+  DEFAULT_GRACE_SECONDS,
+  DUTY_HUB_WRITE,
+  getSubscription,
+  MAX_FILTER_LENGTH,
+  MAX_GRACE_SECONDS,
+  resumeSubscription,
+  rotateSubscriptionSecret,
+  testSend,
+  updateSubscriptionFilter,
+  type Subscription,
+  type SubscriptionWithSecret,
+  type TestSendResult,
+} from "./api/hubClient";
 import { dash, formatDateTime } from "./format";
 import styles from "./pages.module.css";
+import { SecretReveal } from "./NewWebhookSubscriptionPage";
 import { ProblemAlert } from "./parts";
 import { useLoad } from "./useLoad";
 
@@ -110,6 +124,136 @@ function TestSendCard({ subscription }: { subscription: Subscription }) {
   );
 }
 
+/** The CESQL condition that narrows the events a subscription takes; saved against the version the page read. */
+function FilterCard({ subscription, onSaved }: { subscription: Subscription; onSaved(): void }) {
+  const canWrite = holdsDuty(usePrincipalDuties(), DUTY_HUB_WRITE);
+  const saved = subscription.filter ?? "";
+  const [text, setText] = useState(saved);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<Problem | null>(null);
+  const [invalid, setInvalid] = useState<string | null>(null);
+
+  async function save(next: string | null) {
+    setError(null);
+    setInvalid(null);
+    if (next !== null && next.length > MAX_FILTER_LENGTH) {
+      setInvalid(`The filter may be at most ${MAX_FILTER_LENGTH} characters.`);
+      return;
+    }
+    setBusy(true);
+    try {
+      await updateSubscriptionFilter(subscription.id, subscription.version, next);
+      if (next === null) setText("");
+      onSaved();
+    } catch (failure) {
+      const problem = describeProblem(failure);
+      if (problem.code === "HUB-0400" && /^filter:/.test(problem.message)) setInvalid(problem.message.replace(/^filter:\s*/, ""));
+      else setError(problem);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Event filter">
+      <div className={styles.stack}>
+        <p className={styles.note}>
+          An event is delivered when its type matches an event type above and this CESQL condition holds. Attributes: id, type, source, subject, time, tenantid, actor, legalentityid; the payload is data.&lt;field&gt;. An event the condition cannot be evaluated for is not delivered.
+        </p>
+        <FormField id="sync-filter" label="Filter" optional error={invalid ?? undefined}>
+          {(control) => <Textarea {...control} rows={3} mono value={text} onChange={(event) => setText(event.target.value)} invalid={Boolean(invalid)} spellCheck={false} disabled={!canWrite} />}
+        </FormField>
+        <div className={styles.formActions}>
+          <Button onClick={() => save(text.trim() === "" ? null : text.trim())} disabled={busy || !canWrite || text.trim() === saved} loading={busy}>
+            Save filter
+          </Button>
+          {saved !== "" ? (
+            <Button variant="secondary" onClick={() => save(null)} disabled={busy || !canWrite}>
+              Remove filter
+            </Button>
+          ) : null}
+          {!canWrite ? <span className={styles.note}>Needs the duty {DUTY_HUB_WRITE}.</span> : null}
+        </div>
+        {error ? <ProblemAlert problem={error} title="Could not save the filter" /> : null}
+      </div>
+    </Card>
+  );
+}
+
+/** Webhook signing secret: rotate it, keeping the old one valid for a grace period so the receiver can switch over. */
+function SecretCard({ subscription, onRotated }: { subscription: Subscription; onRotated(): void }) {
+  const canWrite = holdsDuty(usePrincipalDuties(), DUTY_HUB_WRITE);
+  const [grace, setGrace] = useState(String(DEFAULT_GRACE_SECONDS / 3600));
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<Problem | null>(null);
+  const [invalid, setInvalid] = useState<string | null>(null);
+  const [fresh, setFresh] = useState<SubscriptionWithSecret | null>(null);
+  const hours = Number(grace);
+  const valid = grace.trim() !== "" && Number.isInteger(hours) && hours >= 0 && hours * 3600 <= MAX_GRACE_SECONDS;
+  const previousUntil = subscription.previousSecretExpiresAt ? Date.parse(subscription.previousSecretExpiresAt) : null;
+
+  function ask() {
+    if (!valid) {
+      setInvalid(`Enter whole hours from 0 to ${MAX_GRACE_SECONDS / 3600}; 0 ends the old secret at once.`);
+      return;
+    }
+    setInvalid(null);
+    setConfirming(true);
+  }
+
+  async function rotate() {
+    setConfirming(false);
+    setBusy(true);
+    setError(null);
+    try {
+      setFresh(await rotateSubscriptionSecret(subscription.id, { version: subscription.version, graceSeconds: hours * 3600 }));
+      onRotated();
+    } catch (failure) {
+      setError(describeProblem(failure));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Signing secret">
+      <div className={styles.stack}>
+        <dl className={styles.details}>
+          <Term term="Last rotated">{subscription.secretRotatedAt ? formatDateTime(subscription.secretRotatedAt) : "Never"}</Term>
+          <Term term="Previous secret">
+            {previousUntil !== null && previousUntil > Date.now() ? `Still signs until ${formatDateTime(subscription.previousSecretExpiresAt)}` : dash}
+          </Term>
+        </dl>
+        <p className={styles.note}>
+          Rotating makes a new secret, shown once. During the grace period each delivery carries a signature for the new and the old secret, so the receiver can switch without losing events.
+        </p>
+        {fresh ? <SecretReveal secret={fresh.secret} title="New signing secret" /> : null}
+        <FormField id="sync-grace" label="Keep the old secret for (hours)" hint={`0 to ${MAX_GRACE_SECONDS / 3600}; the default is ${DEFAULT_GRACE_SECONDS / 3600}.`} error={invalid ?? undefined}>
+          {(control) => <Input {...control} inputMode="numeric" value={grace} onChange={(event) => setGrace(event.target.value)} invalid={Boolean(invalid)} disabled={!canWrite} />}
+        </FormField>
+        <div className={styles.formActions}>
+          <Button onClick={ask} disabled={busy || !canWrite} loading={busy}>
+            Rotate secret
+          </Button>
+          {!canWrite ? <span className={styles.note}>Needs the duty {DUTY_HUB_WRITE}.</span> : null}
+        </div>
+        {error ? <ProblemAlert problem={error} title="Could not rotate the secret" /> : null}
+      </div>
+      {confirming ? (
+        <ConfirmDialog
+          title="Rotate the signing secret?"
+          description={`${hours === 0 ? "The old secret stops signing at once, so the receiver must have the new one before the next delivery." : `The old secret keeps signing for ${hours} hour${hours === 1 ? "" : "s"}.`} The new secret is shown once.`}
+          confirmLabel="Rotate secret"
+          cancelLabel="Keep current secret"
+          onConfirm={rotate}
+          onCancel={() => setConfirming(false)}
+        />
+      ) : null}
+    </Card>
+  );
+}
+
 /** One subscription: its settings (credentials are never shown), pause state, and a test send. */
 export function SyncSubscriptionPage() {
   const { id = "" } = useParams();
@@ -187,6 +331,9 @@ export function SyncSubscriptionPage() {
             {sub.url}
           </Term>
           <Term term="Event types">{sub.patterns.join(", ")}</Term>
+          <Term term="Filter" mono={Boolean(sub.filter)}>
+            {sub.filter || dash}
+          </Term>
           {rest ? (
             <>
               <Term term="Method">{rest.method}</Term>
@@ -216,6 +363,9 @@ export function SyncSubscriptionPage() {
           <Term term="Updated">{formatDateTime(sub.updatedAt)}</Term>
         </dl>
       </Card>
+      <FilterCard key={`filter-${sub.version}`} subscription={sub} onSaved={state.reload} />
+      {/* Not keyed by version: the rotation bumps the version, and a remount would drop the new secret before it is copied. */}
+      {sub.kind === "webhook" ? <SecretCard subscription={sub} onRotated={state.reload} /> : null}
       {sub.kind === "rest-push" ? <TestSendCard subscription={sub} /> : null}
     </div>
   );

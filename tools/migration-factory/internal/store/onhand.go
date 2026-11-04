@@ -114,6 +114,9 @@ func runOnhand(ctx context.Context, tx pgx.Tx, in OnhandRun) (domain.PackRun, er
 	for _, o := range toLoad {
 		held[o.LegacyID] = o
 	}
+	if run.Tolerances, err = loadTolerances(ctx, tx); err != nil {
+		return domain.PackRun{}, err
+	}
 	if err := domain.ReconcileOnhand(&run, in.Lines, in.Accepted, len(toLoad), held, in.Account, glTotals); err != nil {
 		return domain.PackRun{}, err
 	}

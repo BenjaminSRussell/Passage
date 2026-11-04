@@ -214,6 +214,12 @@ func (s *Postgres) ReceiveConsignment(ctx context.Context, id string, version in
 		if err != nil {
 			return err
 		}
+		// Before any row lock: a count plan may include vendor-owned stock
+		// (slice 28), so a receipt honours its freeze or flags the counted line
+		// for recount like any other movement (INV-CNT-002, BR-16.8).
+		if err := checkCountFreeze(ctx, tx, tp.TenantID, o.LegalEntityID, "", false, orderedRows(rows, order)); err != nil {
+			return err
+		}
 		serials := receiptSerials(plan)
 		if err := lockSerials(ctx, tx, tp.TenantID, o.LegalEntityID, serials); err != nil {
 			return err
@@ -236,7 +242,7 @@ func (s *Postgres) ReceiveConsignment(ctx context.Context, id string, version in
 					return err
 				}
 			}
-			if err := checkVendorOwned(r); err != nil {
+			if err := checkVendorOwned(r, false); err != nil {
 				return err
 			}
 			if err := saveRow(ctx, tx, tp.TenantID, o.LegalEntityID, r, len(r.lines)); err != nil {

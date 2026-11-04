@@ -22,6 +22,7 @@ export interface CountPlanValues {
   abcClass: "" | "A" | "B" | "C";
   samplePct: string;
   minDaysSinceCount: string;
+  includeVendorOwned?: boolean;
 }
 
 const fields = [
@@ -82,6 +83,7 @@ export function NewCountPlanPage() {
     abcClass: "",
     samplePct: "",
     minDaysSinceCount: "",
+    includeVendorOwned: false,
   });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -114,6 +116,7 @@ export function NewCountPlanPage() {
           abcClass: values.abcClass,
           samplePct: values.samplePct.trim(),
           minDaysSinceCount: age === "" ? undefined : Number(age),
+          includeVendorOwned: values.includeVendorOwned ? true : undefined,
         },
         key.current,
       );
@@ -199,6 +202,13 @@ export function NewCountPlanPage() {
               <label htmlFor="plan-four-eyes">Separate approval</label>
             </span>
             <span className={styles.muted}>A supervisor who did not count must approve the sheet before it posts.</span>
+          </div>
+          <div className={styles.formActions}>
+            <span className={styles.check}>
+              <Input type="checkbox" id="plan-vendor-owned" checked={values.includeVendorOwned} onChange={(event) => change({ ...values, includeVendorOwned: event.target.checked })} />
+              <label htmlFor="plan-vendor-owned">Include vendor-owned stock</label>
+            </span>
+            <span className={styles.muted}>Consignment stock is counted too. A variance changes its quantity only: no value and no ledger entry.</span>
           </div>
           <div className={styles.formActions}>
             <span className={styles.check}>

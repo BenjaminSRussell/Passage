@@ -25,6 +25,9 @@ import (
 // CodeJournalNotFound is raised when a journal id does not exist.
 const CodeJournalNotFound = "PRC-0034"
 
+// CodeJournalNotPosted is raised when the audit extract of a journal that is neither POSTED nor REVERSED is asked for.
+const CodeJournalNotPosted = "PRC-0064"
+
 // JournalFilter narrows a journal list (Price journal log, PRD 5.26.14).
 type JournalFilter struct {
 	LegalEntityID string
@@ -390,7 +393,17 @@ func checkJournal(ctx context.Context, tx pgx.Tx, j *domain.Journal) (bool, erro
 	if err := rows.Err(); err != nil {
 		return false, err
 	}
-	return domain.ValidateJournal(j, stored, domain.DefaultSmartBands()), nil
+	// Smart rounding uses the legal entity's table (FR-26.7, smart_rounding_bands).
+	tp, _ := tenant.FromContext(ctx)
+	params, err := loadParameters(ctx, tx, tp.TenantID, j.LegalEntityID)
+	if err != nil {
+		return false, err
+	}
+	bands, faults := domain.ParseBands(params.SmartRoundingBands)
+	if faults != nil {
+		bands = domain.DefaultSmartBands()
+	}
+	return domain.ValidateJournal(j, stored, bands), nil
 }
 
 // applyJournal writes each validated line to condition_record and enqueues the matching
@@ -585,10 +598,19 @@ func loadJournal(ctx context.Context, tx pgx.Tx, id string, lock, withLines bool
 	if !withLines {
 		return j, nil
 	}
+	err = eachJournalLine(ctx, tx, id, func(l domain.JournalLine) error {
+		j.Lines = append(j.Lines, l)
+		return nil
+	})
+	return j, err
+}
+
+// eachJournalLine reads a journal's lines in line order and hands each to fn as it is read.
+func eachJournalLine(ctx context.Context, tx pgx.Tx, id string, fn func(domain.JournalLine) error) error {
 	rows, err := tx.Query(ctx, `select line_no, op, record_id::text, expected_version, adjust_pct::text, record, before, after, after_version, errors
 		from price_journal_line where journal_id = $1 order by line_no`, id)
 	if err != nil {
-		return Journal{}, err
+		return err
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -596,35 +618,55 @@ func loadJournal(ctx context.Context, tx pgx.Tx, id string, lock, withLines bool
 		var op, adj string
 		var rec, before, after, errs []byte
 		if err := rows.Scan(&l.No, &op, &l.RecordID, &l.ExpectedVersion, &adj, &rec, &before, &after, &l.AfterVersion, &errs); err != nil {
-			return Journal{}, err
+			return err
 		}
 		l.Op = domain.JournalOp(op)
 		l.AdjustPct = decimal.RequireFromString(adj)
 		if err := json.Unmarshal(rec, &l.Record); err != nil {
-			return Journal{}, err
+			return err
 		}
 		if before != nil {
 			var b domain.Record
 			if err := json.Unmarshal(before, &b); err != nil {
-				return Journal{}, err
+				return err
 			}
 			l.Before = &b
 		}
 		if after != nil {
 			var a domain.Record
 			if err := json.Unmarshal(after, &a); err != nil {
-				return Journal{}, err
+				return err
 			}
 			l.After = &a
 		}
 		if errs != nil {
 			if err := json.Unmarshal(errs, &l.Errors); err != nil {
-				return Journal{}, err
+				return err
 			}
 		}
-		j.Lines = append(j.Lines, l)
+		if err := fn(l); err != nil {
+			return err
+		}
 	}
-	return j, rows.Err()
+	return rows.Err()
+}
+
+// StreamJournal reads one journal for the audit extract (PRD §5.26.15) without holding its
+// lines in memory: start receives the header (no lines) and may refuse it before anything is
+// written; line then receives every line in line order, inside the same transaction, so the
+// header and lines agree. The before and after values are the ones stored when the journal
+// posted; nothing is recomputed. A line callback error stops the read and is returned.
+func (s *Postgres) StreamJournal(ctx context.Context, id string, start func(Journal) error, line func(domain.JournalLine) error) error {
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		j, err := loadJournal(ctx, tx, id, false, false)
+		if err != nil {
+			return err
+		}
+		if err := start(j); err != nil {
+			return err
+		}
+		return eachJournalLine(ctx, tx, id, line)
+	})
 }
 
 // sameJournalRequest reports whether a replayed create carries the same request.

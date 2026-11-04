@@ -65,6 +65,27 @@ func secondaryChecker(caps map[string]capacity, busy map[string][]Busy, op Opera
 	}
 }
 
+// secondaryBooked is the SCHED-0005 conflict of the first secondary resource
+// of op that another job already holds during segs, or nil. Unlike
+// secondaryChecker it ignores closed time, so a move over constraints can tell
+// a closed secondary (overridable) from a booked one (never overridden).
+func secondaryBooked(caps map[string]capacity, busy map[string][]Busy, op Operation, segs []Segment) *Conflict {
+	for _, sid := range op.Secondaries {
+		c, ok := caps[sid]
+		if !ok || !c.res.Finite {
+			continue
+		}
+		bs := busy[sid]
+		for _, seg := range segs {
+			if k := sort.Search(len(bs), func(k int) bool { return bs[k].End.After(seg.Start) }); k < len(bs) && bs[k].Start.Before(seg.End) {
+				return &Conflict{Code: CodeSecondaryBusy, JobID: op.ID,
+					Detail: fmt.Sprintf("secondary resource %s is booked by job %s and a booking is never overridden", c.res.Code, bs[k].JobID)}
+			}
+		}
+	}
+	return nil
+}
+
 // firstGap is the first instant of [start, end) that the open intervals iv do
 // not cover, with closed set; adjacent or overlapping intervals count as one.
 func firstGap(iv []Interval, start, end time.Time) (time.Time, bool) {

@@ -604,13 +604,261 @@ The OpenAPI and AsyncAPI specs have no FAIL lines on the doc gates.
 | `policies/authz/data.json`: resource row `/v1/scheduling/orders/*:unschedule` (POST) under `scheduling.schedule.write` | handoff - main session (authz seed) | Existing duty; only the route row is new. Until seeded the "Take the order off the schedule" button gets 403. The duty is Maintain schedule (like `:move`, `:firm` and `:reimport`, which also take jobs off the schedule), not Run scheduling of the per-order `:schedule`: placing an order is a run, removing its placements is schedule maintenance. Product decision open for Ben. |
 | Event `order.unscheduled` / `operation.updated` consumers (production dates cleared when an order is taken off the schedule) | handoff - wave 21 | Production keeps the dates of the last `job.scheduled` / `orderdates.changed` until it reads these events; nothing in this wave clears them. The outbox aggregate types are the new `operation` and `order`; deploy/kafka has no scheduling outbox connector yet, so the topics `passage.scheduling.operation` and `passage.scheduling.order` follow whenever that connector is added (deploy owner). |
 
+Slice 24 builds scheduling parameters (PRD 4.23.13 site parameters, tenant-wide):
+`GET /v1/scheduling/parameters` (duty `scheduling.read`, ETag with the version)
+and `PATCH /v1/scheduling/parameters` (duty `scheduling.setup.write`, Maintain
+scheduling setup, which PRD 4.23.17 gives the parameters; Idempotency-Key,
+If-Match, stale 412 SCHED-0140). The row holds the default run
+mode (jobs or operations), the default direction (forward or backward), the
+default finite flag, the Gantt drag snap (1 to 60 minutes) and the BR-23.10
+propagation limits (1 to 5000 orders, 1 to 20 levels; the PRD 4.23.13 allowed
+values). A tenant that never changed them reads the built-in defaults at
+version 1 (jobs, forward, finite, 5 minutes, 500 orders, 5 levels, so nothing
+behaves differently until a planner saves a change; the PRD defaults of
+backward and infinite are not used, see the decision row below); the first change stores the row and moves the version
+to 2. `POST /runs` and `POST /orders/{orderId}:schedule` take mode, direction
+and finite from the parameters when the request leaves them out (an explicit
+value wins; a failed read of the parameters fails the run instead of using other
+defaults); a propagated `:move` walks the pegs to the stored limits and its
+SCHED-0007 message names them. Event `parameters.updated` through the outbox
+(AsyncAPI documents it). Migration `0018_scheduling_parameters.sql` adds the
+table with tenant RLS and `SELECT, INSERT, UPDATE` for `passage_app`. Web: a
+Parameters page (`/scheduling/parameters`, loading, error with retry, stale
+version message with a reload, field errors, the missing-duty hint), the new run
+form starts from the defaults (a planner's own choices win), and the Gantt drags
+on the stored snap and names the stored propagation limits. Not built: per-site parameters, the resource selection rule,
+safety and queue times, a horizon parameter, and clearing back to the built-in
+defaults (set the values back by hand). The OpenAPI and AsyncAPI specs have no
+FAIL lines on the doc gates.
+
+| Item | Status | Reason |
+|---|---|---|
+| `policies/authz/data.json`: resource row `/v1/scheduling/parameters` (GET) under `scheduling.read` and resource row `/v1/scheduling/parameters` (PATCH) under `scheduling.setup.write` | handoff - main session (authz seed) | Existing duties; only the route rows are new (no new duty, nothing for #313). Until seeded the gateway answers 403 for the read and the save, so the Parameters page shows its error state and the Gantt and the new run form keep the built-in defaults. The nav entry uses `scheduling.read`. |
+| Built-in defaults forward and finite instead of the PRD 4.23.13 defaults backward and infinite | decision for Ben | Runs before this slice defaulted to forward and finite; taking the PRD defaults would change every run that leaves direction or finite out. A tenant can set backward or infinite on the Parameters page. |
+| Drag snap stored per tenant, not per user (PRD 4.23.13 scope `user`) | decision for Ben | There is no per-user preference store in the service; the per-user setting stays in the Gantt deliverable row. |
+
+Slice 25 builds the dispatch list document (PRD 4.23.15 Dispatch list, per
+resource and day or shift): `GET /v1/scheduling/dispatch-list?resourceId&date&days&startMinute&endMinute`
+(duty `scheduling.read`). The window is a local calendar date of the resource
+(1 to 7 days) and a local minute-of-day range, converted with the resource's
+time zone, so a night shift is `startMinute=1320&endMinute=1800`. Both ends are
+wall-clock times, so across a DST change the window holds the hours the clock
+showed (a skipped time maps to the instant of the change, a repeated one to its
+first occurrence; a window wholly inside a skipped hour is a 400). The answer is
+the resource header, the UTC window, the primary and secondary bookings in start
+order numbered from 1 (order, operation, segment, start, end, minutes inside the
+window, setup group, changeover minutes, firmed, finite, late minutes), their
+total minutes and a truncated flag at 1,000 lines. Read only: no migration, no
+event. Web: a Dispatch list page (`/scheduling/dispatch-list`; resource, date and
+shift pickers taken from the resource calendar, loading, empty, error with retry,
+a Print button whose print layout hides the filters; a night shift kept in the
+calendar as two spans across midnight is offered as one shift, and start and
+end print on the resource's clock). The bookings in the window are cut to the
+1,001-row limit before the operation and primary-booking lookups, so those stay
+index probes on a busy resource; the window itself is a one-sided range on the
+resource's start or end index (a range index cannot serve it under row-level
+security because the range overlap operator is not leakproof). Not built: item and
+quantity columns (wave 21 data), a PDF render and the kiosk view (wave 25).
+The OpenAPI spec has no FAIL lines on the doc gate.
+
+| Item | Status | Reason |
+|---|---|---|
+| `policies/authz/data.json`: resource row `/v1/scheduling/dispatch-list` (GET) under `scheduling.read` | handoff - main session (authz seed) | Existing duty; only the route row is needed. |
+| Dispatch list as PDF and the shop-floor kiosk view; item and quantity per line | handoff - wave 25 (kiosk) and wave 21 (order header data) | The page prints through the browser; there is no document template service call and no order header data here. |
+
+Slice 26 builds the override of scheduling constraints (PRD 4.23.14, FR-23.7),
+block breaches on the Gantt, and the DST alignment of the resource calendar.
+`POST /jobs/{id}:move` takes `overrideConstraints` (preview or commit). It needs
+the duty `scheduling.constraints.override` on top of the route's
+`scheduling.schedule.write` (403 `SCHED-0141` without it; the handler checks it,
+so a move that does not ask for the override is unaffected). With it the moved
+job is placed at the asked start although that start is outside open capacity,
+inside a block the job does not match, or a changeover does not fit
+(SCHED-0002), or a secondary resource is closed (SCHED-0005): the job becomes
+one continuous span (changeover included) over the closed time, so the Gantt
+flags it `outsideCapacity` like a job a later downtime overlaps (or
+`blockBreach` when it sits in open time a block keeps from it). A block start
+whose span also runs past the close lists both. The answer lists what
+it went over in `violations` with `overridden: true`, a commit writes each as a
+line in the move run's messages (`SCHED-0002 overridden for job <id>: ...`) and a
+warning log, and an Idempotency-Key replay returns the same answer. Never
+overridden: double booking (SCHED-0001, also the exclusion constraint), a
+secondary resource another job holds (SCHED-0005; the secondary exclusion
+constraint would refuse it too), a slot ending beyond the planning horizon
+(nothing there says the time is open), a firmed job, a resource that is not a
+candidate, and any conflict of the successors or dependents the move pushes. No migration, no new event (`job.scheduled` carries
+the new placement as before). Gantt block breaches: `GET /gantt` bars carry
+`blockBreach`, true when the segment lies in open capacity but in time the
+resource's active blocks do not leave a job with the operation's attributes
+(BR-23.15, the same test as the `affectedJobs` of a block change, finite
+bookings only, so not jobs of an infinite run; never together with
+`outsideCapacity`). DST: `OpenIntervals` now
+resolves shift starts and ends as the dispatch list window does
+(`firstInstantAt`): a wall time skipped by a spring-forward gap is the instant
+of the change, a repeated one its first occurrence, and a shift wholly inside a
+gap is dropped, so the calendar, runs, moves and the dispatch window agree.
+RRULE block windows resolve the same way, so a recurring and a weekly window
+agree. Days without a DST change, and DST days whose shift ends are not in the
+gap, keep exactly the instants they had.
+Web: the move form offers "Preview with override" after a refusal whose
+violations are all SCHED-0002 or SCHED-0005 (not for double booking), shows the
+violations in a warning, and confirms with "Confirm move over constraints"; a
+403 shows the duty message and its code; an overridden preview that is still
+refused says why and does not offer the override again. The Gantt dots a block-breach bar and
+names it in the title; the jobs table badges it. The OpenAPI spec has no FAIL
+lines on the doc gate. Not built: placing campaign jobs on the Gantt (row 7
+below), an override of pushed jobs' conflicts, and a per-bar breach explanation
+naming the block.
+
+| Item | Status | Reason |
+|---|---|---|
+| `policies/authz/data.json`: new flag duty `"scheduling.constraints.override": {"flag": true, "permissions": []}` (after `scheduling.capacity.write`), and `"scheduling.constraints.override"` added to `flag_duties` in `policies/authz/authz_test.rego` `test_flag_duties_grant_no_routes`; the duty for #313 | handoff - main session (authz seed) and #313 | A flag duty, like `production.order.bom-after-release`: the handler checks it with `HasDuty` (`api.DutyOverrideConstraints`) on top of the `:move` route row already seeded under `scheduling.schedule.write`. It must grant no route: a route row would let a holder of only the override duty move jobs. Until it is seeded the override answers 403 `SCHED-0141` and every other move works. PRD 4.23.17 flags it for segregation of duties with *Maintain capacity* (`scheduling.capacity.write`); there is no SoD mechanism in the seed, so that is a role-assignment rule for identity. The web move form does not read duties, so the override button is offered after a capacity refusal; gating it needs the principal's duties in the web shell. |
+
+## Slice 27: queue times between operations (PRD 4.23.3, FR-23.3)
+
+An operation carries `queueBeforeMinutes` and `queueAfterMinutes` (0 to 10,080,
+default 0), set on `POST /operations` and `PATCH /operations/{id}` (a change
+takes the non-firmed jobs off the schedule like a change of minutes). They are
+elapsed minutes of real time in which no resource is booked (across a DST
+change the local clock shows an hour more or less): the next operation of an
+order starts no earlier than the previous one's end plus the previous one's
+queue after plus its own queue before, and the wait runs through closed time.
+Runs (forward and backward: the backward search leaves room for the waits, and
+a latest start inside the hour after the run start, or a queue that makes the
+order miss its due date, falls back to forward as BR-23.2 says), `:schedule`
+and Gantt moves all apply it. The predecessor's queue after holds also when
+that predecessor keeps its slot (firmed, or outside a selection run). A moved
+operation snaps to the wait after its predecessor (an override does not
+override the queue: it is not a capacity rule), pushed successors keep the
+wait between them, and a firmed successor the wait would push refuses the move
+(SCHED-0008). Pegged dependents wait for their parent
+order's end only (no queue before on their first operation). A network step
+counts the queue as part of its wait, so a maximum wait smaller than the queue
+makes the step infeasible at once (SCHED-0009 naming the queue, without
+delaying the predecessor), or the SCHED-0010 warning behind a frozen
+predecessor; the edge's transfer minutes run alongside the queue, not after
+it. Event
+`operation.updated` carries both values (AsyncAPI documents them). Migration
+`0019_operation_queue_times.sql` adds two columns to `scheduling_operation`
+(no new table, so no new grant). Web: both fields on the new-operation form and
+the operation detail page (shown and editable, validated 0 to 10,080). The
+OpenAPI and AsyncAPI specs have no FAIL lines on the doc gates. No authz seed
+needed: existing routes and duties. Not built: the first operation's queue
+before from the run start (it only applies between operations of an order), a
+queue taken from the production route (the order intake from wave 21 leaves it
+0 until the event carries it), overlap quantity (BR-23.5), transit time
+between resources other than the network transfer minutes, and the daily
+bucket mode.
+
+## Slice 28: overlap quantity between operations (PRD 4.23.3, BR-23.5)
+
+Slice 28 builds the overlap of an operation with the next one of its order.
+`POST /operations` and `PATCH /operations/{id}` take `quantity` (the order
+quantity the operation works on) and `overlapQuantity` (the part of it that
+must be through before the next operation may start), decimal strings with at
+most 4 decimals; an overlap needs a quantity and cannot exceed it (400 on
+create, 422 SCHED-0142 on a change, also checked by the database). In a PATCH,
+`overlapQuantity: "0"` clears the overlap; a quantity cannot be cleared. The
+share `ceil(overlap / quantity * 10,000)` basis points of the operation's
+process time (`domain.OverlapShareBP`, `Operation.OverlapBP`) sets the release
+point of its placement (`Placement.Release`): the moment the changeover and
+that share of the process minutes are through, counted over the working
+segments (closed time does not count). The next operation starts no earlier
+than that release plus the queue after and queue before (slice 27, elapsed
+time, immediate predecessor including fixed ones), and never ends before the
+overlapped operation's end plus those queue times (the last units wait them
+too): runs re-place it later by the shortfall, counted from the slot found, and
+after 8 tries start it at that floor; moves and pushed successors floor its
+start at the predecessor's end plus the queue less its own process minutes. Runs (forward and the backward search), `:schedule`, Gantt
+moves, pushes of successors and fixed predecessors (firmed, or outside a
+selection run, read back with their share) all apply it. Changing the overlap
+(or the quantity of an operation that has one) takes the non-firmed jobs off
+the schedule like the other placement fields; `operation.updated` carries both
+quantities. Migration `0020_operation_overlap.sql` adds the two columns and
+their checks to `scheduling_operation` (no new table, so no new grant). Web:
+quantity and overlap quantity on the new-operation form and the operation
+detail page (shown and editable, validated against each other, without a
+float). The OpenAPI and AsyncAPI specs have no FAIL lines on the doc gates. No
+authz seed needed: existing routes and duties. Not built: a network step's
+transfer time and maximum wait are still counted from the predecessor's end (an
+overlap does not shorten them; BR-23.5 writes the start as release plus transit,
+so counting a network transfer from the release is an open product decision); the successor does not also wait for its own share
+of the last transfer batch after the predecessor ends (it ends no earlier than
+that end plus the queue); the overlap is not stored on the job row (`scheduled_job.overlap_qty`
+stays a later column) or shown on the Gantt bar; the quantity is entered on the
+operation, not fed from the production order event yet (wave 21 carries the
+quantity); the pegs between orders use the parent's end, not a transfer batch.
+
+## Slice 29: run comparison and rollback to a previous run (PRD 4.23.14)
+
+Slice 29 keeps what each run placed and builds on it. Every `POST /runs`,
+`:schedule` and rollback run writes a snapshot of the jobs it placed (one row
+per segment in `schedule_run_job`, with the changeover, lateness, secondary
+resources and the operation's version) in the run's own transaction;
+`Run.snapshot` says whether one exists.
+Gantt move runs and runs from before this slice have none (`snapshot: false`).
+`GET /runs/{id}/compare?to=` diffs two snapshots by job: `added` (only the other
+run placed it), `removed` (only the base run did) and `changed` (a different
+resource, start or end) with start and end shifts and the lateness change in
+minutes, plus each side's figures (jobs, orders, late jobs, total and maximum
+lateness, changeover, makespan, and the utilization the PRD's run comparison
+names: booked over open minutes of the resources the run booked, primary and
+secondary, over its own span, calendars as they are now). Counts are exact;
+each list is cut at 500 (`truncated`). Runs of a different scope or horizon are
+compared as they are (a job only one selected is added or removed); the page
+warns when the scopes differ. `POST /runs/{id}:rollback` (duty `scheduling.run`, Idempotency-Key)
+restores the jobs a run placed as the current plan under a new run of scope
+`rollback` (`rollbackOf` names the restored run, and it keeps its own snapshot):
+the current non-firmed jobs of those operations are replaced in one transaction;
+firmed jobs, jobs whose operation or resource no longer exists, and jobs whose
+operation was changed or re-imported since the run (`operation_changed`: its
+version moved, so the old placement has the wrong minutes, candidates, queue
+times, overlap or due date) are skipped and listed in `skipped`; operations the
+run did not place keep their jobs (a later order is not taken off the plan). The
+plan the rest would leave is then checked as it is now, and any break refuses
+the whole rollback with nothing changed: a restored job that overlaps a booking
+made since (409 SCHED-0144, the exclusion constraints on every segment, primary
+and secondary), or 409 SCHED-0146 (`errors` maps up to 50 jobs to the first rule
+each breaks) for a restored segment outside open capacity or in a block the job
+does not match (the Gantt's own outsideCapacity and blockBreach test, so a
+downtime or calendar change since counts), a restored job out of sequence with
+the job of a neighbouring operation of its order (queue times and overlap
+release included; this is what a firmed or changed operation left in place
+between restored ones trips), a peg to or from a restored order whose dependent
+would start before its parent ends or behind an unplaced parent, or a changeover
+on a finite resource with a setup matrix that no longer covers the step into or
+out of a restored job. Only breaks that involve a restored job are listed. No
+restorable job is 422 SCHED-0145; a run without a snapshot is 422 SCHED-0143.
+The rollback locks the operations of every order the run placed in order id and
+operation number order, the order `POST /runs` and `:schedule` lock in, so a
+rollback and a concurrent run serialize rather than deadlock. It publishes `job.scheduled`, `orderdates.changed`
+and `run.completed` (scope `rollback`, `rolledBackToRunId`) through the outbox.
+Migration `0021_run_snapshots.sql`: `schedule_run.snapshot` and `rollback_of`, the
+scope check gains `rollback`, new table `schedule_run_job` (tenant and RLS policy,
+`GRANT SELECT, INSERT` to `passage_app`: the store only inserts and reads it).
+Web: the run detail page has Compare with another run and Roll back to this run
+(confirmation, skipped jobs listed, refusals shown); a new compare page at
+`/scheduling/runs/:id/compare` picks the other run and shows the measures side by
+side with the moved, added and dropped jobs. The OpenAPI and AsyncAPI specs have
+no FAIL lines on the doc gates.
+
+| Item | Status | Reason |
+|---|---|---|
+| `policies/authz/data.json`: resource row `/v1/scheduling/runs/*/compare` (GET) under `scheduling.read` and resource row `/v1/scheduling/runs/*:rollback` (POST) under `scheduling.run` | handoff - main session (authz seed) | Existing duties; only the route rows are new. Until seeded the compare page and the Roll back button answer 403. |
+| Retention of `schedule_run_job` (it grows by the placed segments of every run) | later slice of PSG-23 | Nothing prunes old snapshots; a site run of 5,000 operations adds a few thousand rows. A keep-the-last-N-runs job needs the job runner (FR-23.11). |
+| Snapshots of Gantt moves, and of runs before this slice | later slice of PSG-23 | A move changes one order's jobs; rolling back to one is not defined. Older runs stay as history rows only. |
+| Rollback of operations the run left unplaced, and a rollback that also moves jobs of other operations out of the way | later slice of PSG-23 | Only the jobs the run placed are restored; an overlap with a booking made since, or a SCHED-0146 break, refuses the rollback instead of re-planning around it. |
+| Rollback re-checks not done: resource efficiency changed since the run (job lengths), network transfer time and maximum wait (BR-23.11), a setup matrix version that changed between the run's day and the restored jobs' day, and jobs restored into the past | later slice of PSG-23 | The checks above cover what the Gantt flags and what runs and moves refuse; efficiency and network waits are not flagged on existing jobs either, and runs themselves accept a start in the past. |
+| Network feasibility report (4.23.14) | later slice of PSG-23 | Not part of this slice. |
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
 |---|---|---|---|
 | 1 | Forward operation scheduling, finite and infinite | built | `domain.Schedule`; `finite: false` runs ignore bookings but keep calendar time. |
 | 1 | Backward scheduling and the BR-23.2 fallback to forward with `late_minutes` (FR-23.2) | built (slice 10) | `direction: backward` on `POST /runs`; `domain.placeBackward` searches the latest start of each order's first operation that still ends by the order's earliest due date, using the forward engine so calendars, bookings, blocks, changeovers and networks apply unchanged. A latest start before run start + 1 h, or an order that cannot end on time, is placed forward; late orders carry `late_minutes` and a SCHED-0003 warning. Orders without a due date are placed forward. Operations after the first are placed as early as possible after it (no slack is spread between them), lateness is measured against the due timestamp, not end-of-day of the delivery date, and moves and the CP-SAT campaign path are unchanged. |
-| 1 | Job scheduling (queue-before, setup, process, overlap, transport, queue-after; FR-23.3) and operations mode in daily buckets (FR-23.2) | later slice of PSG-23 | An operation is one block of process minutes. `mode` is accepted and recorded, and both modes place at minute granularity. Setup that must not split (BR-23.3), overlap quantity (BR-23.5) and transit time are not modelled. |
+| 1 | Job scheduling (queue-before, setup, process, overlap, transport, queue-after; FR-23.3) | partial (slices 27 and 28) | Queue before and queue after are built (slice 27); setup that must not split is built (BR-23.3). Overlap quantity (BR-23.5) is built (slice 28); transit time apart from the network edge's transfer minutes is not modelled; queue times from the production route are a handoff to wave 21. |
+| 1 | Operations mode in daily buckets (FR-23.2) | later slice of PSG-23 | `mode` is accepted and recorded, and both modes place at minute granularity. |
 | 1 | Duration from route times and efficiency (BR-23.1) | built (slices 18 and 21) | Minutes come from the planned hours of wave 21's process and setup jobs (already route time times quantity); the scheduling resource's `efficiencyPct` stretches or shrinks them when the job is placed (slice 21). Efficiency from wave 9 resources and per-day overrides remain a handoff (row below). |
 | 1 | Secondary resources booked with the primary (BR-23.4, SCHED-0005) | built (slice 12) | `Operation.Secondaries`, `domain/secondary.go`, `scheduled_job_secondary`. A primary job and a secondary booking on the same resource are kept apart by the scheduler (it sees both as busy time), not by a database constraint, because the two live in different tables. Secondary resources are an explicit list per operation; choosing them by capability or resource group is wave 9. Not yet: secondary bookings as their own bars on the secondary resource's Gantt row (they show on the primary bar, in the jobs table and in the load), in the block-utilization inquiry and in the setup changeover sequencing of the secondary resource; secondaries only for setup or only for process (a secondary is held for the whole job, changeover included); and `ScheduledJob.secondary_resource_ids` on the stored job row (the list lives on the operation and the booking rows). The CP-SAT model does not book secondaries yet. |
 | 1 | Resource selection by resource group and capability with level and expiry (FR-23.2, FR-23.12, SCHED-0004 for capabilities) | handoff — wave 9 (resources, groups, capabilities) | Candidates are explicit resource ids in priority order. Slice 1 keeps its own `scheduling_resource` table with a weekly calendar; wave 9 resources, calendars, efficiency % and capacity-per-day overrides replace it. |
@@ -619,8 +867,8 @@ The OpenAPI and AsyncAPI specs have no FAIL lines on the doc gates.
 | 1 | Changeover cost and the matrix's cleaning operation set on each scheduled changeover | built (slice 7) | `Placement.ChangeoverCost` / `CleaningSetID`, stored on `scheduled_job` (first segment), on the Gantt bar and in `job.scheduled`. A route-setup fallback (SCHED-0012) has no matrix price and carries none. The cleaning set is a reference only: generating the cleaning operations it names is part of the cleanout orders handoff (deliverable 7). |
 | 1 | Reported hours and `finished` jobs frozen with remaining minutes (BR-23.6) | handoff — wave 25 (shop-floor feedback) | Only firmed jobs are frozen; there is no reported-hours input yet. |
 | 2 | Gantt with drag-reschedule, dry-run preview, constraint warnings and firm | built | `apps/web/src/modules/scheduling`. Bars are DOM buttons; a keyboard move form gives the same preview and commit. |
-| 2 | Canvas rendering above 1,000 bars, row virtualization, zoom, Shift+drag of a whole order, undo stack of 20 moves, user drag-snap setting | later slice of PSG-23 | The page fetches a 1-14 day window and snaps to 5 minutes. |
-| 2 | *Override scheduling constraints* duty to commit a move with violations | later slice of PSG-23 | Every violation blocks the commit. |
+| 2 | Canvas rendering above 1,000 bars, row virtualization, zoom, Shift+drag of a whole order, undo stack of 20 moves, per-user drag-snap setting | later slice of PSG-23 | The page fetches a 1-14 day window. The drag snap is a tenant parameter (slice 24, default 5 minutes), not a per-user setting. |
+| 2 | *Override scheduling constraints* duty to commit a move with violations | built (slice 26) for capacity violations of the moved job | `overrideConstraints` on `POST /jobs/{id}:move`, duty `scheduling.constraints.override` (see Slice 26). SCHED-0001, SCHED-0004, SCHED-0008 and conflicts of pushed jobs and dependents still block every commit. |
 | 3 | Capacity load by resource and ISO week with bottleneck flag (FR-23.9) | built | `GET /v1/scheduling/capacity-load`; weeks start Monday 00:00 UTC. |
 | 3 | Load by day and drill-down to jobs | built (slice 16) | `period=day` on `GET /capacity-load` and `GET /capacity-load/jobs`. Days are local days of the resource's calendar time zone. |
 | 3 | Load by resource group; US week numbering; weeks in the resource's time zone | later slice of PSG-23 | Groups come from wave 9; weeks start Monday 00:00 UTC (slice 3). |
@@ -652,7 +900,7 @@ The OpenAPI and AsyncAPI specs have no FAIL lines on the doc gates.
 | 8 | Operation attributes fed from product variant dimensions (w8) and order or batch attributes (w21, w24) | handoff — waves 8, 21 and 24 | Attributes are set on `POST /operations` until those waves publish them. |
 | 8 | RRULE recurrence on capacity blocks | built | `recurrence {rule, startDate, startMinute, endMinute}` on `POST /capacity-blocks`; the subset is FREQ=DAILY or WEEKLY with INTERVAL, BYDAY (plain weekday codes) and COUNT or UNTIL. Other RRULE parts (BYMONTHDAY, BYSETPOS, ordinal weekdays, MONTHLY) are refused rather than guessed. |
 | 8 | Block update and deactivation | built (slice 15) for priority, condition and the active flag | `PATCH /capacity-blocks/{id}` and `GET /capacity-blocks/{id}`, duty `scheduling.capacity.write`, Idempotency-Key and If-Match. The resource, code and window (weekly, dated or recurrence) are fixed at creation: to change them, deactivate the block and create another. Jobs already placed stay where they are until the next run or move; the answer and the event list those the blocks now keep out. |
-| 8 | Showing block breaches on the Gantt (a booked job inside a block it may not use) | later slice of PSG-23 | Listed once, in the block update answer and `capacityblock.updated`; the Gantt does not mark them. |
+| 8 | Showing block breaches on the Gantt (a booked job inside a block it may not use) | built (slice 26) | `blockBreach` on every Gantt bar; the workspace dots the bar and badges the jobs table row. |
 | 6 | Jobs whose transitions break a network after its end date is moved later | later slice of PSG-23 | Ending a network earlier only relaxes the schedule. Moving the end date later re-applies the network to days that runs may have planned without it; those jobs are not listed in `network.updated` and keep their placement until the next run or move. |
 
 ## PRD items (section 4.23) not built yet
@@ -671,13 +919,16 @@ The OpenAPI and AsyncAPI specs have no FAIL lines on the doc gates.
 | Order header data on bars and late orders (item, quantity) | handoff — wave 21 | Bars and late orders carry the order id, operation counts and dates only. |
 | Block utilization inquiry (4.23.14) | built (slice 5) | `GET /resources/{id}/block-utilization` per resource and range, shown on the resource detail screen. A cross-resource report screen with period totals is not built; the inquiry is per resource. |
 | Resource utilization and changeover time of a run (4.23.14) | built (slice 17) | `GET /runs/{id}/kpis` and the Plan measures card on the run detail; they describe the jobs the run still holds. |
-| Run comparison and network feasibility reports (4.23.14) | later slice of PSG-23 | Comparison needs per-run snapshots of the jobs, which a run replaces; not stored. |
-| Dispatch list, Gantt print, campaign sheet, cleanout record documents (4.23.15) | later slice of PSG-23 | No document templates yet. |
+| Run comparison (4.23.14) | built (slice 29) | `GET /runs/{id}/compare`, per-run snapshots in `schedule_run_job`; see the slice 29 section. |
+| Network feasibility report (4.23.14) | later slice of PSG-23 | |
+| Dispatch list (4.23.15) | built (slice 25) as an inquiry and a printable page | See the slice 25 section; a PDF template and the kiosk view are handoffs. |
+| Gantt print, campaign sheet, cleanout record documents (4.23.15) | later slice of PSG-23 | No document templates yet. |
 | Feature flags `scheduling.cp-sat`, `scheduling.propagate-dependents`; config `SCHED_OPT_TIME_LIMIT_S` | later slice of PSG-23 | No flag client; CP-SAT is chosen per campaign with its sequence rule and switched off by leaving `SCHED_OPT_URL` empty, propagation is chosen per move with `propagate`, and the campaign solver limit is fixed at 20 s. |
-| Site parameters (default method and direction, resource selection rule, safety/queue time, drag snap, propagation limit) | later slice of PSG-23 | Defaults are fixed: jobs mode, forward, least finish, propagation 500 orders / 5 levels (`domain.DefaultPropagation*`). |
+| Site parameters (default method and direction, drag snap, propagation limit) | built (slice 24) as tenant-wide parameters | `GET/PATCH /v1/scheduling/parameters`; see the slice 24 section. |
+| Site parameters per site; resource selection rule, safety/queue time, horizon days and the default start | later slice of PSG-23 (per-site parameters are a handoff to wave 9, sites) | The parameters are one row per tenant. Selection stays least finish, no default safety or queue time is added (queue times are per operation, slice 27), and the horizon is `SCHED_HORIZON_DAYS`. |
 | Extension points `scheduling.constraint`, `scheduling.objective` | later slice of PSG-23 | |
-| `ScheduledJob.overlap_qty`; `ScheduleRun.time_limit_s`, `started_at`, `objective_value` | later slice of PSG-23 | Columns arrive with the features that fill them. |
-| Rollback by re-pointing to a previous run | later slice of PSG-23 | A run replaces the jobs it schedules; earlier runs stay as history rows only. |
+| `ScheduledJob.overlap_qty` (the overlap lives on the operation since slice 28); `ScheduleRun.time_limit_s`, `started_at`, `objective_value` | later slice of PSG-23 | Columns arrive with the features that fill them. |
+| Rollback by re-pointing to a previous run | built (slice 29) | `POST /runs/{id}:rollback` restores the run's snapshot under a new run; see the slice 29 section. |
 | Optimistic version check on moves (If-Match) | later slice of PSG-23 | Moves lock the order's operations and the exclusion constraint refuses concurrent bookings, so a stale screen gets a fresh preview rather than a silent overwrite; resources now have an If-Match update (slice 13), moves still do not take If-Match. |
 | scheduler-opt KEDA scale-to-zero and the `scheduling-db` CloudNativePG cluster | handoff — deploy owner | Charts ship the deployment and service only. |
 | Playwright Gantt move + propagate test (4.23.9) | later slice of PSG-23 | Covered by the store move and propagation tests and the page tests. |

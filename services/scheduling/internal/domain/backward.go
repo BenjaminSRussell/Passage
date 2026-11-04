@@ -62,8 +62,16 @@ func (e *engine) placeBackward(chain []Operation, fixed []Placement, start time.
 	ok, first, last := e.probe(chain, fixed, start, time.Time{})
 	if ok && !last.After(due) {
 		total := 0
-		for _, op := range chain {
+		for k, op := range chain {
 			total += e.fastestMinutes(op)
+			if k > 0 {
+				total += int(queueGap(chain[k-1], op) / time.Minute)
+				// An overlapped predecessor lets this operation start before
+				// it ends (BR-23.5): count only the share it still runs.
+				if bp := chain[k-1].OverlapBP; bp > 0 && bp < MaxOverlapBP {
+					total -= e.fastestMinutes(chain[k-1]) * (MaxOverlapBP - bp) / MaxOverlapBP
+				}
+			}
 		}
 		lo, hi := first, due.Add(-minutes(total))
 		for lo.Before(hi) {

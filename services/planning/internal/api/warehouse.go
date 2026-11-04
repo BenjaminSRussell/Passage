@@ -83,7 +83,7 @@ func (req runRequest) warehouseSpecs(stored map[string]store.RunCoverage, asOf t
 	if len(dtos) == 0 {
 		return nil, nil, nil
 	}
-	fields := withStoredCoverageAt(dtos, stored, func(i int) string { return labels[i] }, "warehouse")
+	fields := withStoredCoverageAt(dtos, stored, nil, func(i int) string { return labels[i] }, "warehouse")
 	if len(fields) > 0 {
 		return nil, fields, nil
 	}

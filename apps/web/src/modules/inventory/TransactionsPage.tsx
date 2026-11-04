@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import {
   describeProblem,
@@ -73,18 +73,61 @@ const columns: DataTableColumn<Transaction>[] = [
 
 interface Filters {
   product: string;
+  legalEntity: string;
+  site: string;
+  warehouse: string;
+  location: string;
+  batch: string;
+  serial: string;
+  inventoryStatus: string;
+  owner: string;
+  segment: string;
   status: TransactionStatus | "";
   sourceType: SourceType | "";
   from: string;
   to: string;
 }
 
-const noFilters: Filters = { product: "", status: "", sourceType: "", from: "", to: "" };
+const DIMENSION_FILTERS = [
+  ["site", "Site"],
+  ["warehouse", "Warehouse"],
+  ["location", "Location"],
+  ["batch", "Batch"],
+  ["serial", "Serial number"],
+  ["inventoryStatus", "Inventory status"],
+  ["owner", "Owner (vendor id)"],
+  ["segment", "Segment"],
+] as const satisfies readonly (readonly [keyof Filters, string])[];
+
+const noFilters: Filters = {
+  product: "",
+  legalEntity: "",
+  site: "",
+  warehouse: "",
+  location: "",
+  batch: "",
+  serial: "",
+  inventoryStatus: "",
+  owner: "",
+  segment: "",
+  status: "",
+  sourceType: "",
+  from: "",
+  to: "",
+};
 
 /** Transaction inquiry (FR-16.13): every movement with its status, value and origin, newest first. */
 export function TransactionsPage() {
-  const [draft, setDraft] = useState<Filters>(noFilters);
-  const [filters, setFilters] = useState<Filters>(noFilters);
+  // The on-hand inquiry links here with the dimensions of the row to show its history.
+  const [params] = useSearchParams();
+  const linkedId = (name: string) => {
+    const v = params.get(name)?.trim() ?? "";
+    return UUID.test(v) ? v : "";
+  };
+  const initial: Filters = { ...noFilters, product: linkedId("product"), legalEntity: linkedId("legalEntity") };
+  for (const [name] of DIMENSION_FILTERS) initial[name] = params.get(name)?.trim() ?? "";
+  const [draft, setDraft] = useState<Filters>(initial);
+  const [filters, setFilters] = useState<Filters>(initial);
   const [errors, setErrors] = useState<Partial<Record<keyof Filters, string>>>({});
   const key = JSON.stringify(filters);
   const state = useLoad((signal) => listTransactions(filters as TransactionQuery, signal), key);
@@ -100,9 +143,10 @@ export function TransactionsPage() {
     event.preventDefault();
     const found: Partial<Record<keyof Filters, string>> = {};
     if (draft.product.trim() !== "" && !UUID.test(draft.product.trim())) found.product = "Enter the product id (a UUID).";
+    if (draft.legalEntity.trim() !== "" && !UUID.test(draft.legalEntity.trim())) found.legalEntity = "Enter the legal entity id (a UUID).";
     if (draft.from && draft.to && draft.to < draft.from) found.to = "The end date is before the start date.";
     setErrors(found);
-    if (Object.keys(found).length === 0) setFilters({ ...draft, product: draft.product.trim() });
+    if (Object.keys(found).length === 0) setFilters({ ...draft, product: draft.product.trim(), legalEntity: draft.legalEntity.trim() });
   }
 
   async function loadMore() {
@@ -129,6 +173,14 @@ export function TransactionsPage() {
           <FormField id="txn-product" label="Product" optional error={errors.product}>
             {(control) => <Input {...control} value={draft.product} onChange={set("product")} placeholder="Product id" invalid={Boolean(errors.product)} />}
           </FormField>
+          <FormField id="txn-legal-entity" label="Legal entity" optional error={errors.legalEntity}>
+            {(control) => <Input {...control} value={draft.legalEntity} onChange={set("legalEntity")} placeholder="Legal entity id" invalid={Boolean(errors.legalEntity)} />}
+          </FormField>
+          {DIMENSION_FILTERS.map(([name, label]) => (
+            <FormField key={name} id={`txn-${name}`} label={label} optional>
+              {(control) => <Input {...control} value={draft[name]} onChange={set(name)} maxLength={100} />}
+            </FormField>
+          ))}
           <FormField id="txn-status" label="Status" optional>
             {(control) => (
               <Select {...control} value={draft.status} onChange={set("status")}>

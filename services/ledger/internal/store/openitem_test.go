@@ -24,7 +24,7 @@ func oiSetup(t *testing.T) env {
 		"1999": {Name: "Clearing", Type: "asset", Postable: true},
 		"6990": {Name: "Clearing differences", Type: "expense", Postable: true},
 	} {
-		if _, _, err := e.store.PutAccount(e.ctx, "STD", num, a); err != nil {
+		if _, _, err := e.store.PutAccount(e.ctx, "STD", num, 0, a); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -320,7 +320,7 @@ func TestPostgres_ClearingRules(t *testing.T) {
 
 func listClearings(t *testing.T, e env, status string) []ClearingDocument {
 	t.Helper()
-	got, err := e.store.ListClearings(e.ctx, e.ledger.ID, status)
+	got, err := e.store.ListClearings(e.ctx, e.ledger.ID, status, Page{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +339,7 @@ func TestPostgres_OpenItemAccountRules(t *testing.T) {
 		t.Fatalf("unknown account: %v", err)
 	}
 	// An account with a balance needs an activation run.
-	if _, _, err := e.store.PutAccount(e.ctx, "STD", "1100", Account{Name: "Bank", Type: "asset", Postable: true}); err != nil {
+	if _, _, err := e.store.PutAccount(e.ctx, "STD", "1100", 0, Account{Name: "Bank", Type: "asset", Postable: true}); err != nil {
 		t.Fatal(err)
 	}
 	hash, _ := domain.HashPayload("bank")
@@ -404,7 +404,7 @@ func TestPostgres_OpenItemsAreTenantScopedAndPaged(t *testing.T) {
 // another legal entity cannot see the clearing.
 func TestPostgres_ClearingIntegrity(t *testing.T) {
 	e := oiSetup(t)
-	if _, _, err := e.store.PutAccount(e.ctx, "STD", "1998", Account{Name: "Suspense", Type: "asset", Postable: true}); err != nil {
+	if _, _, err := e.store.PutAccount(e.ctx, "STD", "1998", 0, Account{Name: "Suspense", Type: "asset", Postable: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := e.store.PutOpenItemAccount(e.ctx, e.ledger.ID, "1998", true); err != nil {

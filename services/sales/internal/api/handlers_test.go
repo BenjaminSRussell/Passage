@@ -29,6 +29,8 @@ type fakeStore struct {
 	profile      store.CreditProfile
 	listedLE     *string
 	releaseCalls int
+	rejectCalls  int
+	rejectBody   string
 }
 
 func (f *fakeStore) GetOrder(context.Context, string) (store.Order, error) { return f.order, nil }
@@ -36,6 +38,15 @@ func (f *fakeStore) GetOrder(context.Context, string) (store.Order, error) { ret
 func (f *fakeStore) ReleaseHold(_ context.Context, _, _ string, _ int, _ string, _ time.Time) (store.ConfirmResult, error) {
 	f.releaseCalls++
 	return store.ConfirmResult{Order: f.order, Confirmed: true}, nil
+}
+
+func (f *fakeStore) RejectHold(_ context.Context, _, _ string, _ int, comment, _ string, _ time.Time) (store.Order, error) {
+	f.rejectCalls++
+	f.rejectBody = comment
+	o := f.order
+	o.Status = "CANCELLED"
+	o.Version++
+	return o, nil
 }
 
 func (f *fakeStore) ListOrders(_ context.Context, filter store.OrderFilter) (store.OrderPage, error) {
@@ -128,6 +139,45 @@ func TestReleaseHold_RequiresIfMatch(t *testing.T) {
 	rec := serve(t, f, http.MethodPost, orders+"/"+ids.New()+"/holds/"+ids.New()+":release", principal(dutyCreditRelease), nil)
 	if rec.Code != http.StatusPreconditionRequired || f.releaseCalls != 0 {
 		t.Fatalf("status %d calls %d", rec.Code, f.releaseCalls)
+	}
+}
+
+// TestRejectHold covers the route's duty (CreditRelease only), the required
+// comment, If-Match and the cancelled order in the response.
+func TestRejectHold(t *testing.T) {
+	orderID, holdID := ids.New(), ids.New()
+	path := orders + "/" + orderID + "/holds/" + holdID + ":reject"
+	match := map[string]string{"If-Match": `"2"`}
+	post := func(f *fakeStore, duty, body string, headers map[string]string) *httptest.ResponseRecorder {
+		return serveBody(t, f, http.MethodPost, path, body, principal(duty), headers)
+	}
+
+	f := &fakeStore{order: store.Order{ID: orderID, Version: 2}}
+	rec := post(f, dutyCreditRelease, `{"comment":"  over the limit "}`, match)
+	if rec.Code != http.StatusOK || f.rejectCalls != 1 || f.rejectBody != "over the limit" {
+		t.Fatalf("status %d calls %d comment %q: %s", rec.Code, f.rejectCalls, f.rejectBody, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"status":"CANCELLED"`) || rec.Header().Get("ETag") != `"3"` {
+		t.Fatalf("response %s etag %s", rec.Body.String(), rec.Header().Get("ETag"))
+	}
+
+	f = &fakeStore{}
+	if rec := post(f, dutyHold, `{"comment":"x"}`, match); rec.Code != http.StatusForbidden || f.rejectCalls != 0 {
+		t.Fatalf("sales.order.hold must not reject: %d", rec.Code)
+	}
+	for name, body := range map[string]string{"missing": `{}`, "blank": `{"comment":"   "}`, "long": `{"comment":"` + strings.Repeat("x", 501) + `"}`} {
+		f = &fakeStore{}
+		if rec := post(f, dutyCreditRelease, body, match); rec.Code != http.StatusBadRequest || f.rejectCalls != 0 {
+			t.Fatalf("%s comment: status %d", name, rec.Code)
+		}
+	}
+	f = &fakeStore{}
+	if rec := post(f, dutyCreditRelease, `{"comment":"x"}`, nil); rec.Code != http.StatusPreconditionRequired || f.rejectCalls != 0 {
+		t.Fatalf("no If-Match: %d", rec.Code)
+	}
+	bad := orders + "/" + orderID + "/holds/not-a-uuid:reject"
+	if rec := serveBody(t, &fakeStore{}, http.MethodPost, bad, `{"comment":"x"}`, principal(dutyCreditRelease), match); rec.Code != http.StatusNotFound {
+		t.Fatalf("bad hold id: %d", rec.Code)
 	}
 }
 

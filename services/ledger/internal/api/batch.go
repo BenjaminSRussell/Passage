@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -96,7 +97,7 @@ func (a *API) getJournalName(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, n)
+	writeTagged(w, http.StatusOK, n.LockVersion, n)
 }
 
 // putJournalName creates or replaces a journal name: 201 when created, 200 when replaced.
@@ -105,6 +106,10 @@ func (a *API) putJournalName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	code := chi.URLParam(r, "code")
+	tag, tagOK := replaceTag(w, r)
+	if !tagOK {
+		return
+	}
 	var req putJournalNameRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -149,7 +154,7 @@ func (a *API) putJournalName(w http.ResponseWriter, r *http.Request) {
 	if req.Active != nil {
 		active = *req.Active
 	}
-	n, created, err := a.store.PutJournalName(r.Context(), code, store.JournalName{Name: name, RequiresApproval: req.RequiresApproval,
+	n, created, err := a.store.PutJournalName(r.Context(), code, tag, store.JournalName{Name: name, RequiresApproval: req.RequiresApproval,
 		SelfApprovalAllowed: req.SelfApprovalAllowed, ReversalReasonRequired: req.ReversalReasonRequired,
 		AllowReconAccounts: req.AllowReconAccounts, LinesLimit: limit, Active: active,
 		PostingRestriction: restriction, DescriptionLanguage: language})
@@ -161,7 +166,7 @@ func (a *API) putJournalName(w http.ResponseWriter, r *http.Request) {
 	if created {
 		status = http.StatusCreated
 	}
-	httpx.JSON(w, status, n)
+	writeTagged(w, status, n.LockVersion, n)
 }
 
 // --- journal batches ---------------------------------------------------------
@@ -270,13 +275,20 @@ func (a *API) listBatches(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
+	page, ok := pageParams(w, r, cursorTimestamp, cursorUUID)
+	if !ok {
+		return
+	}
 	batches, err := a.store.ListBatches(r.Context(), store.BatchFilter{LedgerID: q.Get("ledger"), Status: q.Get("status"),
-		JournalName: q.Get("journalName")})
+		JournalName: q.Get("journalName"), Page: page})
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": batches})
+	batches, next := trimPage(batches, page.Limit, func(b store.Batch) []string {
+		return []string{b.CreatedAt.UTC().Format(time.RFC3339Nano), b.ID}
+	})
+	httpx.JSON(w, http.StatusOK, pageBody(batches, next))
 }
 
 func (a *API) createBatch(w http.ResponseWriter, r *http.Request) {
@@ -360,6 +372,22 @@ func parseIfMatch(raw string) (int, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// replaceTag reads If-Match on a PUT that may replace a configuration row. An absent header is 0 (fine
+// for a create; the store answers 428 for a replace). A malformed one is a 400 problem.
+func replaceTag(w http.ResponseWriter, r *http.Request) (int, bool) {
+	tag, ok := parseIfMatch(r.Header.Get("If-Match"))
+	if !ok {
+		validationFailed(w, r, map[string]string{"If-Match": `must be the entity tag (lockVersion) of the row as read, for example "3"`})
+	}
+	return tag, ok
+}
+
+// writeTagged renders a configuration row with its lockVersion as the ETag.
+func writeTagged(w http.ResponseWriter, status int, lockVersion int, body any) {
+	w.Header().Set("ETag", strconv.Quote(strconv.Itoa(lockVersion)))
+	httpx.JSON(w, status, body)
 }
 
 func (a *API) getBatch(w http.ResponseWriter, r *http.Request) {

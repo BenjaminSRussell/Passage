@@ -1,19 +1,24 @@
 import { useState, type FormEvent } from "react";
-import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, StatusPill, Textarea, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, type Problem } from "./api/client";
 import {
   createFiscalCalendar,
   fiscalPatterns,
   generateFiscalYear,
+  getFiscalCalendar,
+  renameFiscalCalendar,
+  setFiscalCalendarStatus,
+  withFreshRowOnConflict,
   listFiscalCalendars,
   listFiscalPeriods,
   type FiscalCalendar,
   type FiscalPattern,
   type FiscalPeriod,
 } from "./api/structure";
+import { dayNumber } from "./hierarchyTree";
 import { useLegalEntity } from "./legalEntityContext";
 import styles from "./pages.module.css";
-import { useRows } from "./referenceParts";
+import { StatusAction, useRows } from "./referenceParts";
 
 const codePattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,9}$/;
 type Errors = Partial<Record<"code" | "name", string>>;
@@ -32,6 +37,21 @@ export function validateCalendar(code: string, name: string): Errors {
 export function validateYear(value: string): string | undefined {
   const year = Number(value);
   return /^\d{4}$/.test(value) && year >= 1900 && year <= 2999 ? undefined : "Enter a year from 1900 to 2999.";
+}
+
+// parsePeriods reads one period per line as "YYYY-MM-DD YYYY-MM-DD" (a comma also separates the dates).
+export function parsePeriods(text: string): { periods: { start: string; end: string }[]; error?: string } {
+  const periods: { start: string; end: string }[] = [];
+  const lines = text.split("\n").map((line) => line.trim()).filter((line) => line !== "");
+  for (const [index, line] of lines.entries()) {
+    const [start, end, ...rest] = line.split(/[\s,]+/);
+    const valid = (value?: string) => value !== undefined && dayNumber(value) !== null;
+    if (rest.length > 0 || !valid(start) || !valid(end) || (start as string) > (end as string)) {
+      return { periods: [], error: `Line ${index + 1}: enter a start and an end date as YYYY-MM-DD, start first.` };
+    }
+    periods.push({ start: start as string, end: end as string });
+  }
+  return { periods };
 }
 
 const codeProblems: Record<string, string> = { "ORG-CAL-CODE-DUPLICATE": "A fiscal calendar with this code already exists." };
@@ -126,11 +146,18 @@ const periodColumns: DataTableColumn<FiscalPeriod>[] = [
   { key: "week53", header: "53rd week", render: (row) => (row.week53 ? <Badge tone="info">Yes</Badge> : "") },
 ];
 
-function CalendarDetail({ calendar, canWrite, onGenerated }: { calendar: FiscalCalendar; canWrite: boolean; onGenerated(year: number): void }) {
+function CalendarDetail({ calendar, canWrite, onGenerated, onChanged }: { calendar: FiscalCalendar; canWrite: boolean; onGenerated(year: number): void; onChanged(fresh: FiscalCalendar): void }) {
+  const custom = calendar.pattern === "custom";
   const [year, setYear] = useState(String(calendar.generatedYears.at(-1) ?? new Date().getFullYear()));
   const [yearError, setYearError] = useState<string | undefined>();
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
+  const [periodText, setPeriodText] = useState("");
+  const [force, setForce] = useState(false);
+  const [name, setName] = useState(calendar.name);
+  const [nameError, setNameError] = useState<string | undefined>();
+  const [renameFailure, setRenameFailure] = useState<Problem | null>(null);
+  const [renaming, setRenaming] = useState(false);
   const [shownYear, setShownYear] = useState<number | null>(calendar.generatedYears.at(-1) ?? null);
   const periods = useRows(
     (signal) => (shownYear === null ? Promise.resolve([]) : listFiscalPeriods(calendar.id, shownYear, { signal })),
@@ -145,9 +172,14 @@ function CalendarDetail({ calendar, canWrite, onGenerated }: { calendar: FiscalC
     if (problem) {
       return;
     }
+    const parsed = custom ? parsePeriods(periodText) : { periods: [] };
+    if (parsed.error || (custom && parsed.periods.length === 0)) {
+      setFailure({ code: "ORG-WEB-PERIODS", message: parsed.error ?? "A custom calendar needs its periods: enter one per line." });
+      return;
+    }
     setBusy(true);
     try {
-      const generated = await generateFiscalYear(calendar.id, Number(year));
+      const generated = await generateFiscalYear(calendar.id, Number(year), { periods: parsed.periods, force: force && calendar.generatedYears.includes(Number(year)) });
       setShownYear(generated.fiscalYear);
       onGenerated(generated.fiscalYear);
     } catch (error) {
@@ -157,9 +189,48 @@ function CalendarDetail({ calendar, canWrite, onGenerated }: { calendar: FiscalC
     }
   };
 
+  const rename = async (event: FormEvent) => {
+    event.preventDefault();
+    const problem = validateCalendar(calendar.code, name).name;
+    setNameError(problem);
+    setRenameFailure(null);
+    if (problem || name.trim() === calendar.name) {
+      return;
+    }
+    setRenaming(true);
+    try {
+      await withFreshRowOnConflict(
+        () => renameFiscalCalendar(calendar.id, calendar.version, name.trim()),
+        () => getFiscalCalendar(calendar.id),
+        (fresh) => onChanged(fresh),
+      );
+    } catch (error) {
+      setRenameFailure(describeProblem(error));
+    } finally {
+      setRenaming(false);
+    }
+  };
+
   return (
     <Card title={`${calendar.code} - ${calendar.name}`}>
       <div className={styles.panel}>
+        {canWrite ? (
+          <form onSubmit={rename} noValidate className={styles.form} aria-label={`Rename ${calendar.code}`}>
+            <FormField id="rename-calendar" label="Calendar name" error={nameError}>
+              {(control) => <Input {...control} value={name} maxLength={120} onChange={(event) => setName(event.target.value)} />}
+            </FormField>
+            {renameFailure ? (
+              <Alert tone="danger" title="Could not rename the fiscal calendar" live="alert">
+                {renameFailure.message} ({renameFailure.code})
+              </Alert>
+            ) : null}
+            <div>
+              <Button type="submit" loading={renaming}>
+                Save name
+              </Button>
+            </div>
+          </form>
+        ) : null}
         <div className={styles.filters}>
           <div className={styles.filter}>
             <label htmlFor="period-year" className={styles.filterLabel}>
@@ -180,9 +251,20 @@ function CalendarDetail({ calendar, canWrite, onGenerated }: { calendar: FiscalC
             <FormField id="generate-year" label="Generate fiscal year" hint="Generating an existing year changes nothing." error={yearError}>
               {(control) => <Input {...control} value={year} inputMode="numeric" maxLength={4} onChange={(event) => setYear(event.target.value)} />}
             </FormField>
+            {custom ? (
+              <FormField id="generate-periods" label="Periods" hint="One period per line: start date, then end date (YYYY-MM-DD). Periods must be contiguous.">
+                {(control) => <Textarea {...control} value={periodText} rows={6} onChange={(event) => setPeriodText(event.target.value)} />}
+              </FormField>
+            ) : null}
+            {calendar.generatedYears.includes(Number(year)) ? (
+              <label className={styles.checkRow}>
+                <input type="checkbox" checked={force} onChange={(event) => setForce(event.target.checked)} />
+                Regenerate this year (replaces its periods; refused once the ledger has postings)
+              </label>
+            ) : null}
             <div>
               <Button type="submit" loading={busy}>
-                Generate year
+                {force && calendar.generatedYears.includes(Number(year)) ? "Regenerate year" : "Generate year"}
               </Button>
             </div>
           </form>
@@ -227,9 +309,24 @@ export function FiscalCalendarsPage() {
       key: "actions",
       header: "Actions",
       render: (row) => (
-        <Button size="sm" aria-label={`Open periods of ${row.code}`} onClick={() => setSelectedId(row.id)}>
-          Periods
-        </Button>
+        <div className={styles.rowActions}>
+          <Button size="sm" aria-label={`Open periods of ${row.code}`} onClick={() => setSelectedId(row.id)}>
+            Periods
+          </Button>
+          {canWrite ? (
+            <StatusAction
+              subject={`fiscal calendar ${row.code}`}
+              status={row.status}
+              apply={(next) =>
+                withFreshRowOnConflict(
+                  () => setFiscalCalendarStatus(row.id, row.version, next),
+                  () => getFiscalCalendar(row.id),
+                  (fresh) => state.update((rows) => rows.map((item) => (item.id === row.id ? fresh : item))),
+                )
+              }
+            />
+          ) : null}
+        </div>
       ),
     },
   ];
@@ -248,6 +345,7 @@ export function FiscalCalendarsPage() {
           key={selected.id}
           calendar={selected}
           canWrite={canWrite}
+          onChanged={(fresh) => state.update((rows) => rows.map((item) => (item.id === fresh.id ? fresh : item)))}
           onGenerated={(fiscalYear) =>
             state.update((rows) =>
               rows.map((row) =>

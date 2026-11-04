@@ -164,6 +164,7 @@ describe("Coding a downtime with the reason master", () => {
     endedAt: null,
     reasonCode: null,
     category: "unplanned",
+    cause: "down",
     andonRaised: false,
   };
 

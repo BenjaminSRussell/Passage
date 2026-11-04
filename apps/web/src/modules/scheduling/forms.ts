@@ -30,6 +30,22 @@ export function decimalText(value: string, scale: number, integers = 12): string
   return pattern.test(v) ? v : null;
 }
 
+/** Drops trailing zeros and a bare point: "100.0000" becomes "100". */
+export function trimDecimal(value: string): string {
+  const v = value.trim();
+  return v.includes(".") ? v.replace(/0+$/, "").replace(/\.$/, "") : v;
+}
+
+/** Compares two non-negative decimal strings as text, without a float: -1, 0 or 1. */
+export function compareDecimal(a: string, b: string): number {
+  const [ai = "0", af = ""] = trimDecimal(a).split(".");
+  const [bi = "0", bf = ""] = trimDecimal(b).split(".");
+  const scale = Math.max(af.length, bf.length);
+  const x = (ai.replace(/^0+(?=\d)/, "") + af.padEnd(scale, "0")).padStart(40, "0");
+  const y = (bi.replace(/^0+(?=\d)/, "") + bf.padEnd(scale, "0")).padStart(40, "0");
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
 /** True when a decimal string is greater than zero. */
 export function positive(value: string): boolean {
   return /[1-9]/.test(value);

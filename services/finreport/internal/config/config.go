@@ -16,6 +16,7 @@ import (
 // (NOT-IMPLEMENTED.md).
 type Reporting struct {
 	MaxLagSeconds        int // run blocked above this lag unless allow_stale
+	LagAlertSeconds      int // lag above max for this long raises lag.exceeded (PRD §2.15.5)
 	PageSize             int // drill level 2 page size (BR-15.4)
 	CellKeyLimit         int // keys stored before a cell becomes a query spec (BR-15.11)
 	RetentionClosedYears int // library retention for closed-period runs (FR-15.8)
@@ -50,6 +51,7 @@ type setting struct {
 func (cfg *Reporting) settings() []setting {
 	return []setting{
 		{"REPORTING_MAX_LAG_S", 30, 0, 600, &cfg.MaxLagSeconds},
+		{"REPORTING_LAG_ALERT_S", 60, 0, 3600, &cfg.LagAlertSeconds},
 		{"REPORTING_PAGE_SIZE", 500, 100, 1000, &cfg.PageSize},
 		{"REPORTING_CELL_KEY_LIMIT", 50000, 1000, 200000, &cfg.CellKeyLimit},
 		{"REPORTING_RETENTION_CLOSED_YEARS", 7, 1, 30, &cfg.RetentionClosedYears},

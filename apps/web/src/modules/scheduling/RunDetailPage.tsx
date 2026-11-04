@@ -1,11 +1,108 @@
-import type { ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useRef, useState, type ReactNode } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, PageHeader, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
-import { getRun, getRunKpis, RUN_WARNING_LABELS, type RunResourceKpi } from "./api/client";
+import { describeProblem, getRun, getRunKpis, newKey, rollbackRun, RUN_WARNING_LABELS, type Problem, type RunResourceKpi, type RunRollback } from "./api/client";
 import { dash, formatDateTime, formatMinutes, sentence, shortId } from "./format";
 import styles from "./pages.module.css";
 import { scopeLabels } from "./RunsPage";
 import { useLoad } from "./useLoad";
+
+const skipLabels: Record<string, string> = {
+  firmed: "firmed, so it stays where it is",
+  operation_missing: "its operation no longer exists",
+  operation_changed: "its operation was changed since the run, so the old placement is out of date",
+  resource_missing: "a resource it used no longer exists",
+};
+
+const rollbackFailures: Record<string, string> = {
+  "SCHED-0143": "This run kept no job snapshot",
+  "SCHED-0144": "The plan changed since this run",
+  "SCHED-0145": "Nothing can be restored",
+  "SCHED-0146": "The restored plan would break scheduling rules",
+};
+
+/** Restores the jobs this run placed as the current plan (PRD 4.23.14 rollback). */
+function RollbackCard({ runId }: { runId: string }) {
+  const navigate = useNavigate();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<Problem | null>(null);
+  const [done, setDone] = useState<RunRollback | null>(null);
+  const key = useRef(newKey());
+
+  async function rollBack() {
+    setBusy(true);
+    setFailure(null);
+    try {
+      const result = await rollbackRun(runId, key.current);
+      key.current = newKey();
+      setDone(result);
+      setConfirming(false);
+      if (result.skipped.length === 0) navigate(`/scheduling/runs/${result.run.id}`);
+    } catch (error) {
+      const problem = describeProblem(error);
+      if (problem.code === "idempotency_key_reuse") key.current = newKey();
+      setConfirming(false);
+      setFailure(problem);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Roll back to this run">
+      <div className={styles.stack}>
+        <p className={styles.note}>
+          Puts the jobs this run placed back as the current plan, under a new run. Firmed jobs, and operations changed since the run, stay as they are. If a restored job
+          now overlaps a booking made since, or would break the calendar, a block, its order&apos;s sequence, a peg or a changeover, nothing changes.
+        </p>
+        {failure ? (
+          <Alert tone="danger" title={rollbackFailures[failure.code] ?? "The rollback failed"} live="alert">
+            {failure.message} ({failure.code})
+            {Object.keys(failure.fields).length > 0 ? (
+              <ul className={styles.messages} aria-label="Jobs that block the rollback">
+                {Object.entries(failure.fields).map(([job, why]) => (
+                  <li key={job}>{`${shortId(job)}: ${why}`}</li>
+                ))}
+              </ul>
+            ) : null}
+          </Alert>
+        ) : null}
+        {done ? (
+          <Alert tone="success" live="status" title={`${done.restored} job(s) restored`}>
+            {done.skipped.length > 0 ? (
+              <>
+                <span>Left alone:</span>
+                <ul className={styles.messages}>
+                  {done.skipped.map((sk) => (
+                    <li key={sk.jobId}>{`${shortId(sk.jobId)}: ${skipLabels[sk.reason] ?? sk.reason}`}</li>
+                  ))}
+                </ul>
+                <Link to={`/scheduling/runs/${done.run.id}`}>Open the rollback run</Link>
+              </>
+            ) : null}
+          </Alert>
+        ) : null}
+        {confirming ? (
+          <div className={styles.formActions}>
+            <Button variant="primary" loading={busy} onClick={rollBack}>
+              Roll back the plan
+            </Button>
+            <Button variant="ghost" disabled={busy} onClick={() => setConfirming(false)}>
+              Keep the current plan
+            </Button>
+          </div>
+        ) : (
+          <div className={styles.formActions}>
+            <Button variant="secondary" onClick={() => setConfirming(true)}>
+              Roll back to this run
+            </Button>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
 
 /**
  * One schedule run with its metrics, the operations it could not place (with
@@ -53,6 +150,9 @@ export function RunDetailPage() {
     ["Solver status", run.solverStatus ?? dash],
     ["Started", formatDateTime(run.createdAt)],
   ];
+  if (run.rollbackOf) {
+    facts.push(["Restored run", <Link key="rb" to={`/scheduling/runs/${run.rollbackOf}`}>{shortId(run.rollbackOf)}</Link>]);
+  }
 
   const k = kpis.data;
   const kpiFacts: [string, string][] = k
@@ -80,9 +180,16 @@ export function RunDetailPage() {
         title="Schedule run"
         meta={<StatusPill status={run.status} />}
         actions={
-          <Link className={buttonClassName("secondary")} to="/scheduling">
-            Open the Gantt
-          </Link>
+          <>
+            {run.snapshot ? (
+              <Link className={buttonClassName("secondary")} to={`/scheduling/runs/${run.id}/compare`}>
+                Compare with another run
+              </Link>
+            ) : null}
+            <Link className={buttonClassName("secondary")} to="/scheduling">
+              Open the Gantt
+            </Link>
+          </>
         }
       />
       <Card>
@@ -126,6 +233,13 @@ export function RunDetailPage() {
           </div>
         )}
       </Card>
+      {run.snapshot ? (
+        <RollbackCard key={run.id} runId={run.id} />
+      ) : (
+        <Card title="Roll back to this run">
+          <EmptyState compact headingLevel={3} title="No job snapshot" description="Gantt moves and runs from before snapshots kept no jobs, so they can be neither compared nor rolled back to." />
+        </Card>
+      )}
       <Card title="Warnings">
         {(run.warnings ?? []).length === 0 ? (
           <EmptyState

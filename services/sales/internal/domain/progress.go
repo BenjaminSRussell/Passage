@@ -20,6 +20,7 @@ const (
 	OrderPartiallyShipped = "PARTIALLY_SHIPPED"
 	OrderShipped          = "SHIPPED"
 	OrderInvoiced         = "INVOICED"
+	OrderClosed           = "CLOSED"
 
 	OrderTypeSubscription = "SUBSCRIPTION"
 	OrderTypeReturned     = "RETURNED"

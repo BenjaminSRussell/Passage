@@ -164,6 +164,9 @@ func ReconcileBankBalances(r *PackRun, source, accepted []BankBalanceLine, loade
 		return err
 	}
 	r.Totals = totals
+	if err := r.applyTolerances(); err != nil {
+		return err
+	}
 	if !r.HasMismatch() {
 		return r.Advance(StatusReconciled)
 	}

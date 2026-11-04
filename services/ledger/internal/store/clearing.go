@@ -522,8 +522,9 @@ func (s *Postgres) GetClearing(ctx context.Context, id string) (ClearingDocument
 	return out, err
 }
 
-// ListClearings returns the clearing documents of a ledger, newest first, up to 200.
-func (s *Postgres) ListClearings(ctx context.Context, ledgerID, status string) ([]ClearingDocument, error) {
+// ListClearings returns the clearing documents of a ledger, newest first, one keyset page (200 rows when
+// no limit is asked; Limit+1 rows are returned so the caller can see another page exists).
+func (s *Postgres) ListClearings(ctx context.Context, ledgerID, status string, page Page) ([]ClearingDocument, error) {
 	p, err := principalOf(ctx)
 	if err != nil {
 		return nil, err
@@ -534,7 +535,8 @@ func (s *Postgres) ListClearings(ctx context.Context, ledgerID, status string) (
 			return err
 		}
 		rows, err := tx.Query(ctx, clearingSelect+` where d.tenant_id = $1 and d.ledger_id = $2 and ($3 = '' or d.status = $3)
-			order by d.created_at desc, d.id desc limit 200`, p.TenantID, ledgerID, status)
+			and (cardinality($5::text[]) = 0 or (d.created_at, d.id) < ($5[1]::timestamptz, $5[2]::uuid))
+			order by d.created_at desc, d.id desc limit $4`, p.TenantID, ledgerID, status, page.pageLimit(200), page.keys())
 		if err != nil {
 			return err
 		}

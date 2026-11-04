@@ -9,6 +9,7 @@ import {
   autoPack,
   describeProblem,
   getLegalEntitySetting,
+  listDeliveryTolerances,
   packContainer,
   postPackingSlip,
   type AutoPackResult,
@@ -18,7 +19,7 @@ import {
   type ShipmentLine,
   type ShortPickReason,
 } from "./api/client";
-import { compareDecimal, COUNTRY, CURRENCY, DECIMAL, multiplyDecimal, shortId, SHORT_PICK_REASONS, subtractDecimal, sumDecimals, today } from "./format";
+import { compareDecimal, COUNTRY, CURRENCY, DECIMAL, multiplyDecimal, pickCeiling, resolveTolerance, shortId, SHORT_PICK_REASONS, subtractDecimal, sumDecimals, today } from "./format";
 import { explain, ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 
@@ -48,11 +49,30 @@ export function PickForm({ shipment, onDone }: { shipment: Shipment; onDone(next
   async function submit(event: FormEvent) {
     event.preventDefault();
     const found: Record<string, string> = {};
+    // A quantity above plan is allowed up to the over-delivery tolerance (BR-28.7); the
+    // tolerances are read only when one is entered.
+    const over = open.filter((l) => DECIMAL.test((values[l.id] ?? "").trim()) && compareDecimal(values[l.id].trim(), l.qtyPlanned) > 0);
+    // null: the list could not be read (for example without WarehouseView); the service then decides alone.
+    let tolerances: Awaited<ReturnType<typeof listDeliveryTolerances>> | null = [];
+    if (over.length > 0) {
+      setBusy(true);
+      try {
+        tolerances = await listDeliveryTolerances();
+      } catch {
+        tolerances = null;
+      }
+      setBusy(false);
+    }
     for (const l of open) {
       const v = (values[l.id] ?? "").trim();
       if (!DECIMAL.test(v)) found[l.id] = "Enter the picked quantity, 0 or more, with at most 6 decimals.";
-      else if (compareDecimal(v, l.qtyPlanned) > 0) found[l.id] = `Over-pick: at most ${l.qtyPlanned} is planned (FUL-0004).`;
-      else if (compareDecimal(v, l.qtyPacked) < 0) found[l.id] = `${l.qtyPacked} is already packed or shipped; enter the line's total picked, at least that (FUL-0031).`;
+      else if (compareDecimal(v, l.qtyPlanned) > 0) {
+        if (tolerances === null) continue;
+        const pct = resolveTolerance(tolerances, l.productId, shipment.customerId);
+        const ceiling = pickCeiling(l.qtyPlanned, pct);
+        if (compareDecimal(pct, "0") === 0) found[l.id] = `Over-pick: at most ${l.qtyPlanned} is planned and no over-delivery tolerance applies (FUL-0004).`;
+        else if (compareDecimal(v, ceiling) > 0) found[l.id] = `Over-ship: at most ${ceiling} is allowed, ${l.qtyPlanned} planned plus a ${pct}% tolerance (FUL-0005).`;
+      } else if (compareDecimal(v, l.qtyPacked) < 0) found[l.id] = `${l.qtyPacked} is already packed or shipped; enter the line's total picked, at least that (FUL-0031).`;
     }
     setErrors(found);
     setFailure(null);

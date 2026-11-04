@@ -30,6 +30,12 @@ type changeOrderRequest struct {
 	Reason            string              `json:"reason"`
 	RequestedShipDate *string             `json:"requestedShipDate"`
 	Lines             []lineChangeRequest `json:"lines"`
+	// AddLines adds lines and RemoveLines cancels lines by number;
+	// listingOverrideReason accepts an added line the product listing denies
+	// (a caller with sales.order.approve only).
+	AddLines              []orderLineRequest `json:"addLines"`
+	RemoveLines           []int              `json:"removeLines"`
+	ListingOverrideReason string             `json:"listingOverrideReason"`
 }
 
 // cancelOrderRequest is the optional body of :cancel.
@@ -48,13 +54,41 @@ func buildChange(req changeOrderRequest) (store.ChangeRequest, map[string]string
 			f["requestedShipDate"] = "must be a date such as 2027-03-04"
 		}
 	}
-	if len(req.Lines) == 0 && req.RequestedShipDate == nil {
-		f["lines"] = "nothing to change: send lines or requestedShipDate"
+	if len(req.Lines) == 0 && req.RequestedShipDate == nil && len(req.AddLines) == 0 && len(req.RemoveLines) == 0 {
+		f["lines"] = "nothing to change: send lines, addLines, removeLines or requestedShipDate"
 	}
 	if len(req.Lines) > maxLines {
 		f["lines"] = fmt.Sprintf("must have at most %d lines", maxLines)
 	}
-	out := store.ChangeRequest{Reason: req.Reason, RequestedShipDate: req.RequestedShipDate}
+	if len(req.AddLines) > maxLines {
+		f["addLines"] = fmt.Sprintf("must have at most %d lines", maxLines)
+	}
+	if len(req.RemoveLines) > maxLines {
+		f["removeLines"] = fmt.Sprintf("must have at most %d line numbers", maxLines)
+	}
+	if len(req.ListingOverrideReason) > maxOverrideReason {
+		f["listingOverrideReason"] = fmt.Sprintf("must be at most %d characters", maxOverrideReason)
+	}
+	out := store.ChangeRequest{Reason: req.Reason, RequestedShipDate: req.RequestedShipDate, ListingOverrideReason: req.ListingOverrideReason,
+		RemoveLines: req.RemoveLines}
+	for i, no := range req.RemoveLines {
+		if no < 1 {
+			f[fmt.Sprintf("removeLines[%d]", i)] = "must be 1 or more"
+		}
+	}
+	for i, l := range req.AddLines {
+		path := func(name string) string { return fmt.Sprintf("addLines[%d].%s", i, name) }
+		line, ok := buildLine(i, l, f, path)
+		if l.ConfigurationID != nil {
+			f[path("configurationId")] = "a line added by a change cannot carry a configuration yet"
+			ok = false
+		}
+		if ok {
+			out.AddLines = append(out.AddLines, store.NewLine{ProductID: line.ProductID, Quantity: line.Quantity, Unit: line.Unit,
+				SiteID: line.SiteID, WarehouseID: line.WarehouseID, UnitPrice: line.UnitPrice, DiscPct: line.DiscPct,
+				RequestedShipDate: line.RequestedShipDate, DeliveryDateControl: line.DeliveryDateControl})
+		}
+	}
 	for i, l := range req.Lines {
 		path := func(name string) string { return fmt.Sprintf("lines[%d].%s", i, name) }
 		if l.LineNo < 1 {

@@ -41,6 +41,8 @@ type packingCalls struct {
 	weights       map[string]decimal.Decimal
 	ret           store.ReturnInput
 	balancesOf    string
+	adjust        store.AdjustInput
+	movements     store.MovementFilter
 }
 
 func (f *fakeStore) ListContainerTypes(_ context.Context, limit int) ([]store.ContainerType, error) {
@@ -115,6 +117,22 @@ func (f *fakeStore) ReturnPackaging(_ context.Context, in store.ReturnInput, ide
 		return store.ReturnableBalance{}, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeRTPNegative, "returnable packaging balance would become negative")
 	}
 	return store.ReturnableBalance{CustomerID: in.CustomerID, ContainerType: in.ContainerType, Balance: decimal.NewFromInt(6).Sub(in.Qty)}, nil
+}
+
+func (f *fakeStore) AdjustReturnable(_ context.Context, in store.AdjustInput, idem store.Idem) (store.ReturnableMovement, error) {
+	f.lastIdem = idem
+	f.packing.adjust = in
+	if in.Delta.IsNegative() && in.Delta.Neg().GreaterThan(decimal.NewFromInt(6)) {
+		return store.ReturnableMovement{}, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeRTPNegative, "returnable packaging balance would become negative")
+	}
+	reason := in.Reason
+	return store.ReturnableMovement{ID: ids.New(), CustomerID: in.CustomerID, ContainerType: in.ContainerType, Kind: store.MovementAdjusted, Qty: in.Delta,
+		BalanceAfter: decimal.NewFromInt(6).Add(in.Delta), Reason: &reason}, nil
+}
+
+func (f *fakeStore) ListReturnableMovements(_ context.Context, filter store.MovementFilter) ([]store.ReturnableMovement, error) {
+	f.packing.movements = filter
+	return []store.ReturnableMovement{{ID: ids.New(), CustomerID: filter.CustomerID, ContainerType: "PALLET", Kind: store.MovementReturned, Qty: decimal.NewFromInt(-4), BalanceAfter: decimal.NewFromInt(6)}}, nil
 }
 
 func expectField(t *testing.T, rec interface {
@@ -353,5 +371,76 @@ func TestPostPackingSlip_CountryCode(t *testing.T) {
 	rec = do(t, h, http.MethodPost, path, body, withKey("pps-2", map[string]string{"If-Match": `"3"`}))
 	if rec.Code != http.StatusCreated || fs.lastPost.CountryCode != "DE" {
 		t.Fatalf("status = %d country = %q body = %s, want 201 with DE", rec.Code, fs.lastPost.CountryCode, rec.Body.String())
+	}
+}
+
+func TestAdjustReturnable_ValidatesAndNeedsTheMaintainDuty(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(t, fs)
+	cust := ids.New()
+	path := "/v1/fulfillment/returnable-packaging:adjust"
+	maintain := withKey("adj-1", map[string]string{"X-Passage-Duties": "ReturnablePackagingMaintain"})
+	body := func(delta, reason string) string {
+		return `{"customerId":"` + cust + `","containerType":"PALLET","delta":"` + delta + `","reason":"` + reason + `","reference":" count sheet 7 "}`
+	}
+	// Receiving returns does not let a caller correct a balance: WarehouseReceive is the
+	// duty section 5.28.17 lists as the conflict of ReturnablePackagingMaintain.
+	if rec := do(t, h, http.MethodPost, path, body("3", "Opening balance"), withKey("adj-r", nil)); rec.Code != http.StatusForbidden {
+		t.Fatalf("with WarehouseReceive but not ReturnablePackagingMaintain: status = %d, want 403", rec.Code)
+	}
+	// ReturnablePackagingMaintain alone is enough.
+	if rec := do(t, h, http.MethodPost, path, body("3", "Opening balance"), withKey("adj-0", map[string]string{"X-Passage-Duties": "ReturnablePackagingMaintain"})); rec.Code != http.StatusCreated {
+		t.Fatalf("with only ReturnablePackagingMaintain: status = %d body = %s, want 201", rec.Code, rec.Body.String())
+	}
+	for _, delta := range []string{"0", "1.5", "+2", "abc", "", "1000000000"} {
+		rec := do(t, h, http.MethodPost, path, body(delta, "Opening balance"), maintain)
+		expectField(t, rec, rec.Body.String(), "delta")
+	}
+	for _, reason := range []string{"", "  ab ", strings.Repeat("x", 201)} {
+		rec := do(t, h, http.MethodPost, path, body("2", reason), maintain)
+		expectField(t, rec, rec.Body.String(), "reason")
+	}
+	rec := do(t, h, http.MethodPost, path, `{"customerId":"c1","containerType":"PALLET","delta":"2","reason":"Opening balance"}`, maintain)
+	expectField(t, rec, rec.Body.String(), "customerId")
+	rec = do(t, h, http.MethodPost, path, body("-9", "Lost in transit"), maintain)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), store.CodeRTPNegative) {
+		t.Fatalf("status = %d body = %s, want 422 FUL-0015", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodPost, path, body("-2", " Lost in transit "), maintain)
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"balanceAfter":"4"`) || !strings.Contains(rec.Body.String(), `"kind":"ADJUSTED"`) {
+		t.Fatalf("status = %d body = %s, want 201 ADJUSTED balance 4", rec.Code, rec.Body.String())
+	}
+	got := fs.packing.adjust
+	if got.CustomerID != cust || got.ContainerType != "PALLET" || !got.Delta.Equal(decimal.NewFromInt(-2)) || got.Reason != "Lost in transit" || got.Reference != "count sheet 7" {
+		t.Fatalf("store input = %+v, want trimmed reason and reference with delta -2", got)
+	}
+	if fs.lastIdem.Key != "adj-1" {
+		t.Fatalf("idempotency key = %q, want adj-1", fs.lastIdem.Key)
+	}
+	// No Idempotency-Key is a 400.
+	noKey := map[string]string{"X-Passage-Duties": "ReturnablePackagingMaintain"}
+	if rec := do(t, h, http.MethodPost, path, body("2", "Opening balance"), noKey); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), CodeIdemMissing) {
+		t.Fatalf("status = %d body = %s, want 400 %s", rec.Code, rec.Body.String(), CodeIdemMissing)
+	}
+}
+
+func TestListReturnableMovements_FiltersAndRejectsBadParameters(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(t, fs)
+	cust := ids.New()
+	rec := do(t, h, http.MethodGet, "/v1/fulfillment/returnable-packaging/movements?customerId="+cust+"&containerType=PALLET&kind=RETURNED&limit=5", "", packingHeaders)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"kind":"RETURNED"`) || !strings.Contains(rec.Body.String(), `"qty":"-4"`) {
+		t.Fatalf("status = %d body = %s, want 200 with the movement", rec.Code, rec.Body.String())
+	}
+	if fs.packing.movements != (store.MovementFilter{CustomerID: cust, ContainerType: "PALLET", Kind: "RETURNED", Limit: 5}) {
+		t.Fatalf("filter = %+v", fs.packing.movements)
+	}
+	for q, field := range map[string]string{"customerId=nope": "customerId", "containerType=a%20b": "containerType", "kind=SOLD": "kind", "limit=0": "limit"} {
+		rec := do(t, h, http.MethodGet, "/v1/fulfillment/returnable-packaging/movements?"+q, "", packingHeaders)
+		expectField(t, rec, rec.Body.String(), field)
+	}
+	// Reading needs only WarehouseView.
+	if rec := do(t, h, http.MethodGet, "/v1/fulfillment/returnable-packaging/movements", "", map[string]string{"X-Passage-Duties": "WarehousePick"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 without WarehouseView", rec.Code)
 	}
 }

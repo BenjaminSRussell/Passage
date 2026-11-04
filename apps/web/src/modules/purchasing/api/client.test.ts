@@ -10,6 +10,8 @@ import {
   listModelServiceSpecs,
   putServiceSpec,
   changeRFQ,
+  createRFQFromRequisitions,
+  splitRequisitionLine,
   compareRFQ,
   confirmDeliveryDate,
   deleteDeliverySchedule,
@@ -188,6 +190,32 @@ describe("purchasing API client", () => {
       "/api/v1/procurement/rfqs/q1/compare",
       "/api/v1/procurement/rfqs/q1/compare?rule=LEAD_TIME",
     ]);
+  });
+
+  it("starts an RFQ from requisition lines with an Idempotency-Key", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ id: "q1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await createRFQFromRequisitions({ requisitionLineIds: ["l1"], replyDeadline: "2099-01-15T17:00:00.000Z" }, "key-r");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/v1/procurement/rfqs:from-requisitions");
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBe("key-r");
+    expect(JSON.parse(String(init.body))).toEqual({
+      requisitionLineIds: ["l1"],
+      replyDeadline: "2099-01-15T17:00:00.000Z",
+    });
+  });
+
+  it("splits a requisition line with the requisition version and an Idempotency-Key", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ id: "r1", lines: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await splitRequisitionLine("l1", 4, ["40", "35"], "key-s");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/v1/procurement/requisition-lines/l1:split");
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBe("key-s");
+    expect((init.headers as Record<string, string>)["If-Match"]).toBe('"4"');
+    expect(JSON.parse(String(init.body))).toEqual({ quantities: ["40", "35"] });
   });
 
   it("awards and closes RFQs with If-Match and an Idempotency-Key", async () => {

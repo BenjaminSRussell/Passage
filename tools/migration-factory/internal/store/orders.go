@@ -97,6 +97,9 @@ func runOpenOrders(ctx context.Context, tx pgx.Tx, in OpenOrdersRun) (domain.Pac
 	for _, o := range toLoad {
 		held[o.HeldKey()] = o
 	}
+	if run.Tolerances, err = loadTolerances(ctx, tx); err != nil {
+		return domain.PackRun{}, err
+	}
 	if err := domain.ReconcileOpenOrders(&run, in.Lines, in.Accepted, len(toLoad), held); err != nil {
 		return domain.PackRun{}, err
 	}

@@ -56,6 +56,8 @@ type Store interface {
 	Ping(ctx context.Context) error
 	RunOpenItems(ctx context.Context, idem store.Idem, in store.OpenItemsRun) (domain.PackRun, bool, error)
 	GetRun(ctx context.Context, id string) (domain.PackRun, error)
+	ListTolerances(ctx context.Context) ([]domain.ToleranceRule, error)
+	PutTolerance(ctx context.Context, idem store.Idem, c store.ToleranceChange) (domain.ToleranceRule, bool, error)
 	ListRuns(ctx context.Context, f store.RunFilter) ([]domain.PackRun, error)
 	CreatePlan(ctx context.Context, idem store.Idem, plan domain.Plan, createdBy string) (domain.Plan, bool, error)
 	GetPlan(ctx context.Context, id string) (domain.Plan, error)
@@ -111,6 +113,8 @@ func (s *Server) Register(r chi.Router) {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/packs", s.packCatalog)
 		r.With(authz.RequireDuty(DutyMigrationRun)).Post("/migration/packs/{pack}/runs", s.startPackRun)
+		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/tolerances", s.listTolerances)
+		r.With(authz.RequireDuty(DutyMigrationReview)).Put("/migration/tolerances", s.putTolerance)
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs", s.listRuns)
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}", s.getRun)
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}/control-totals", s.controlTotals)

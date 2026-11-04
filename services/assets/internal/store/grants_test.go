@@ -70,3 +70,16 @@ func TestGrants_LeaseBookingAndProfileWorkAsAppRole(t *testing.T) {
 		t.Fatalf("modify checks the pending bookings and posted lines: %v", err)
 	}
 }
+
+func TestGrants_LeaseTerminationWorksAsAppRole(t *testing.T) {
+	s, ctx := store.New(appPool(t)), scoped(1, "")
+	le, ledgerID, fake := ids.New(), ids.New(), ledgerclient.NewFake()
+	lease := workedLease(t, s, ctx, le, "L-GRANT-T")
+	if _, err := s.TerminateLease(ctx, lease.ID, store.LeaseTerminationInput{Version: lease.Version, AfterPeriod: 1}, "grant-term"); err != nil {
+		t.Fatalf("termination deletes the later schedule lines and inserts the row: %v", err)
+	}
+	res, err := s.PostLeasesToGL(ctx, fake, store.LeaseGLPostRequest{LegalEntityID: le, LedgerID: ledgerID, PostThrough: day("2026-12-31")})
+	if err != nil || len(res.Booked) != 3 || len(res.Failed) != 0 {
+		t.Fatalf("booking links the termination journal (UPDATE on lease_termination): %+v %v", res, err)
+	}
+}

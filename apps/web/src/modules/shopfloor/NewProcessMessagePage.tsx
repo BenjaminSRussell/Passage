@@ -13,7 +13,7 @@ import {
 } from "./api/client";
 import { UUID } from "./format";
 import styles from "./pages.module.css";
-import { CATEGORIES, CATEGORY_LABELS } from "./processLabels";
+import { useCategoryOptions } from "./processLabels";
 
 export interface ValueRow {
   name: string;
@@ -101,6 +101,7 @@ export function validateProcessMessage(values: Values, sourceMessageId: string):
 /** Manual entry of a process message (duty Create process messages). */
 export function NewProcessMessagePage() {
   const navigate = useNavigate();
+  const categories = useCategoryOptions();
   const [values, setValues] = useState<Values>({ categoryCode: "process-data", orderId: "", phasePath: "", occurredAt: nowLocal(), values: [emptyRow()] });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -147,10 +148,10 @@ export function NewProcessMessagePage() {
         <form className={styles.form} onSubmit={submit} noValidate>
           <FormField id="pm-category" label="Category">
             {(control) => (
-              <Select {...control} value={values.categoryCode} onChange={(event) => update({ categoryCode: event.target.value as ProcessCategory })}>
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {CATEGORY_LABELS[c]}
+              <Select {...control} value={values.categoryCode} onChange={(event) => update({ categoryCode: event.target.value })}>
+                {categories.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.label}
                   </option>
                 ))}
               </Select>

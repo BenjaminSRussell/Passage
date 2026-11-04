@@ -17,6 +17,8 @@ import { PackRunsPage } from "./PackRunsPage";
 import { ParallelRunDetailPage } from "./ParallelRunDetailPage";
 import { ParallelRunsPage } from "./ParallelRunsPage";
 import { ProjectOpeningPage } from "./ProjectOpeningPage";
+import { SetTolerancePage } from "./SetTolerancePage";
+import { TolerancesPage } from "./TolerancesPage";
 import { XrefLookupPage } from "./XrefLookupPage";
 
 const migrationFactory: PassageModule = {
@@ -38,6 +40,8 @@ const migrationFactory: PassageModule = {
     { path: "/migration-factory/parallel-runs", element: createElement(ParallelRunsPage), handle: { title: "Parallel runs" } },
     { path: "/migration-factory/parallel-runs/new", element: createElement(NewParallelRunPage), handle: { title: "Start parallel run" } },
     { path: "/migration-factory/parallel-runs/:id", element: createElement(ParallelRunDetailPage), handle: { title: "Parallel run" } },
+    { path: "/migration-factory/tolerances", element: createElement(TolerancesPage), handle: { title: "Control-total tolerances" } },
+    { path: "/migration-factory/tolerances/set", element: createElement(SetTolerancePage), handle: { title: "Set control-total tolerance" } },
     { path: "/migration-factory/xref", element: createElement(XrefLookupPage), handle: { title: "Legacy reference" } },
     { path: "/migration-factory/cutover", element: createElement(CutoverPlansPage), handle: { title: "Cutover runbooks" } },
     { path: "/migration-factory/cutover/new", element: createElement(NewCutoverPlanPage), handle: { title: "Generate cutover plan" } },
@@ -48,6 +52,7 @@ const migrationFactory: PassageModule = {
     { label: "Pack runs", to: "/migration-factory", duty: "MigrationView" },
     { label: "Pack catalog", to: "/migration-factory/packs", duty: "MigrationView" },
     { label: "Parallel runs", to: "/migration-factory/parallel-runs", duty: "MigrationView" },
+    { label: "Tolerances", to: "/migration-factory/tolerances", duty: "MigrationView" },
     // Any signed-in user may resolve a legacy id (9.49.5).
     { label: "Legacy reference", to: "/migration-factory/xref" },
     { label: "Cutover runbooks", to: "/migration-factory/cutover", duty: "CutoverManager" },

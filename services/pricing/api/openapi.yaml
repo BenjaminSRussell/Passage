@@ -132,6 +132,121 @@ paths:
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/compare:
+    post:
+      operationId: comparePrices
+      summary: Price one request under two procedure versions and report what differs (FR-26.13).
+      description: >
+        Both versions are stored procedure versions of the request's legal entity, DRAFT included, so a
+        draft can be tried against the active version before it is activated. The request is priced against
+        the inline `records` when they are present and against the legal entity's ACTIVE records as of the
+        pricing date otherwise. Nothing is stored. Explains by default; pass ?explain=false to omit the traces.
+        The deltas are version B minus version A. A version outside the caller's legal entities is 404 PRC-0042;
+        one of another legal entity the caller may read is 422.
+      parameters:
+        - name: explain
+          in: query
+          required: false
+          schema: {type: string, enum: ["true", "false"]}
+      x-passage-duty: pricing.view
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CompareRequest"}
+      responses:
+        "200":
+          description: Both priced documents and their line-by-line comparison.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CompareResponse"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/price-list:
+    get:
+      operationId: getCustomerPriceList
+      summary: Price list by customer, the ACTIVE condition records that apply to a customer on a date (PRD 5.26.14).
+      description: >
+        Returns the records keyed to the customer, to the customer's group (when customerGroupId is
+        given) or to all customers, ordered by product, variant, unit, condition type, scope (CUSTOMER,
+        GROUP, ALL) and from-quantity. Records of a killed, expired or non-targeted campaign are left out,
+        as in resolve. It is an inquiry: POST /resolve decides which condition wins a given line.
+        At most 1000 items are returned, in that order; `truncated` is true when more apply (narrow with type).
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: customerId, in: query, required: true, schema: {type: string}}
+        - {name: customerGroupId, in: query, required: false, schema: {type: string}}
+        - {name: currency, in: query, required: true, schema: {type: string, pattern: "^[A-Z]{3}$"}}
+        - {name: asOf, in: query, required: true, description: "Pricing date, YYYY-MM-DD.", schema: {type: string, format: date}}
+        - {name: type, in: query, required: false, description: "Comma-separated condition types; all types when omitted.", schema: {type: string}}
+      responses:
+        "200":
+          description: The applicable records, most specific agreement first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, truncated]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 1000
+                    items: {$ref: "#/components/schemas/PriceListItem"}
+                  truncated: {type: boolean, description: "True when more than 1000 records apply and the list was cut."}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/price-list/net-prices:
+    get:
+      operationId: getCustomerNetPriceList
+      summary: Price list by customer with the net price at each quantity break (PRD 5.26.14).
+      description: >
+        Batch resolve over the customer's price list. Each product row of the applicable PRICE records
+        (see getCustomerPriceList) is priced as a one-line sale at its quantity breaks: the from-quantities
+        of the price, line discount and multiline discount records that can price a line of the row (its own,
+        its product's for a variant row, and the all-products ones, with the row's unit or none), from its
+        lowest price break up, at most 20 per row. Each break is priced exactly as the line of a
+        POST /v1/pricing/resolve of that one line, under the procedure the sales channel is assigned or the
+        named one; `priceRecordId` is the winning PRICE record and `applied` every condition the line
+        applied, so a client can mark the winning records. Rows are product, variant, unit combinations in
+        the order of the price list. A record keyed to a product group is priced as a line of that group,
+        a product row as a line with no product group. Order-level conditions (total discount, small-order
+        surcharge) and free goods are not part of a break: `lineNet` is the quantity times the net unit
+        price, and an INCLUSIVE free goods rule lowers the charged quantity only on an order.
+        One response resolves at most 500 rows and 2,000 breaks in all; rows are taken whole in order and
+        `truncated` is true when more apply (narrow with productId or productGroupId).
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: customerId, in: query, required: true, schema: {type: string}}
+        - {name: customerGroupId, in: query, required: false, schema: {type: string}}
+        - {name: currency, in: query, required: true, schema: {type: string, pattern: "^[A-Z]{3}$"}}
+        - {name: asOf, in: query, required: true, description: "Pricing date, YYYY-MM-DD.", schema: {type: string, format: date}}
+        - {name: productId, in: query, required: false, description: "Only rows keyed to this product or one of its variants (with productGroupId, rows matching either).", schema: {type: string}}
+        - {name: productGroupId, in: query, required: false, description: "Only rows keyed to this product group (with productId, rows matching either).", schema: {type: string}}
+        - {name: salesChannel, in: query, required: false, description: "Channel whose procedure assignment prices the breaks.", schema: {type: string}}
+        - {name: procedure, in: query, required: false, description: "Procedure name to price with instead of the assigned one.", schema: {type: string}}
+      responses:
+        "200":
+          description: The net price rows.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rows, truncated]
+                properties:
+                  rows:
+                    type: array
+                    maxItems: 500
+                    items: {$ref: "#/components/schemas/NetPriceRow"}
+                  truncated: {type: boolean, description: "True when more rows apply than the 500 rows or 2,000 breaks one response resolves."}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {description: "A query field is invalid, or PRC-0063 when the named or assigned procedure has no ACTIVE version.", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
   /v1/pricing/condition-records:
     get:
       operationId: listConditionRecords
@@ -186,6 +301,43 @@ paths:
         "403": {$ref: "#/components/responses/Problem"}
         "404": {description: "campaignId names no campaign the caller can see (PRC-0041).", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
         "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/condition-records:export:
+    get:
+      operationId: exportConditionRecords
+      summary: Export the trade agreements that match the filters as CSV (§5.26.14).
+      description: >
+        Takes the filters of the list (not its limit): up to 50000 rows ordered like the list, and the
+        header X-Passage-Truncated: true when more matched. Rows are streamed as they are read; a failure
+        after the first bytes aborts the connection, so a short file is never presented as complete.
+        Columns: recordId, type, customerKind, customerKey, productKind, productKey, variant, currency,
+        unit, fromQuantity, amount, discPct1, discPct2, validFrom, validTo, searchNext, exclusive,
+        campaignId, status, version; the names that also exist in the price journal CSV import have the
+        same format. A text cell that starts with =, +, -, @, a tab or a carriage return gets a leading
+        apostrophe (spreadsheet formula injection); numbers, negative ones included, are written as they are.
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: legalEntityId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: status, in: query, required: false, schema: {type: string, enum: [DRAFT, ACTIVE, EXPIRED, WITHDRAWN]}}
+        - {name: type, in: query, required: false, schema: {type: string, enum: [PRICE, LINE_DISC, MULTILINE_DISC, TOTAL_DISC, SURCHARGE]}}
+        - {name: customer, in: query, required: false, description: "Exact customer or customer-group key.", schema: {type: string}}
+        - {name: product, in: query, required: false, description: "Exact product or product-group key.", schema: {type: string}}
+        - {name: campaignId, in: query, required: false, description: "Records of one campaign (FR-26.10).", schema: {type: string, format: uuid}}
+        - {name: asOf, in: query, required: false, description: "Records valid on this date (YYYY-MM-DD).", schema: {type: string, format: date}}
+        - {name: validToFrom, in: query, required: false, description: "Records whose last valid day is on or after this date.", schema: {type: string, format: date}}
+        - {name: validToTo, in: query, required: false, description: "Records whose last valid day is on or before this date.", schema: {type: string, format: date}}
+      responses:
+        "200":
+          description: The CSV file, with a header row.
+          headers:
+            Content-Disposition: {description: "attachment; filename=trade-agreements-YYYY-MM-DD.csv", schema: {type: string}}
+            X-Passage-Truncated: {description: "true when more than 50000 records matched and the file holds the first 50000.", schema: {type: string}}
+          content:
+            text/csv:
+              schema: {type: string}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "500": {$ref: "#/components/responses/Problem"}
   /v1/pricing/condition-records/{id}:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -403,6 +555,46 @@ paths:
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/journals/{id}/audit-extract:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getPriceJournalAuditExtract
+      summary: Audit extract of a posted or reversed price journal, header and every line with before and after values (§5.26.15).
+      description: >
+        The audit document of a journal, taken after it was posted or reversed: the journal header
+        (status, who created and posted it, when, the journal it reverses or was reversed by) and
+        every line with its operation and the key, price, discounts and validity of the condition
+        record before and after the change. An OPEN or VALIDATED journal has no extract (409
+        PRC-0064). The before and after values are the ones stored on the line when the journal
+        posted, not recomputed, so a later change to the record does not change the extract.
+        format=csv (default) streams every line, one row per line with the header repeated, and
+        text cells that could run as a spreadsheet formula are prefixed with an apostrophe
+        (numbers, negative ones too, are written as they are); if the read fails after the
+        download started the connection is aborted, so a client never keeps a short file that
+        looks complete. format=json returns the Journal with at most 5,000 lines and
+        linesTruncated=true when there are more. Read only: nothing is written and no event is raised.
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: format, in: query, required: false, schema: {type: string, enum: [csv, json], default: csv}}
+      responses:
+        "200":
+          description: >
+            The extract. The CSV header is journalId, journalName, journalStatus, legalEntityId,
+            createdBy, postedBy, postedAt, reversesJournalId, reversedByJournalId, lineNo, op,
+            recordId, expectedVersion, adjustPct, type, customerKind, customerKey, productKind,
+            productKey, variant, currency, unit, then before and after fromQuantity, amount,
+            discPct1, discPct2, validFrom, validTo, status, version.
+          content:
+            text/csv:
+              schema: {type: string}
+            application/json:
+              schema: {$ref: "#/components/schemas/Journal"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {description: "PRC-0064: the journal is not posted or reversed.", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+        "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/journals/{id}:validate:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -509,9 +701,16 @@ paths:
       summary: Read the pricing parameters of a legal entity.
       description: >
         Returns the stored parameters, or the defaults at version 0 when none are stored
-        (PRD 5.26.13). Today the parameter is journalFourEyes (default false): when true, the
-        user who created a price journal cannot post it (403 PRC-0057). A legal entity outside
-        the caller's scope is 403 AUTH-0003.
+        (PRD 5.26.13): journalFourEyes (default false; when true the user who created a price
+        journal cannot post it, 403 PRC-0057), pricingDateBasis (SHIP_DATE, ORDER_DATE or
+        DELIVERY_DATE; the document date that prices a resolve that sends no pricingDate),
+        totalDiscountBasis (AFTER_LINE_DISC, or GROSS to apply TOTAL_DISC to the line amounts at
+        the unit price before line discounts) and smartRoundingBands (the table of price journal
+        smart rounding; the PRD default 0-10 .99, 10-100 .95, 100 and up whole when none is
+        stored), priceSearchMode (FIRST_MATCH, or SEARCH_NEXT to make searchNext true on a new
+        condition record that leaves it out) and smallOrderThresholds (the SURCHARGE threshold per
+        currency; a currency it does not name keeps the reference threshold, 250 USD and 200 EUR,
+        and 0 switches the surcharge off for that currency). A legal entity outside the caller's scope is 403 AUTH-0003.
       x-passage-duty: pricing.view
       parameters:
         - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
@@ -531,7 +730,9 @@ paths:
         version is the version read (0 when none was stored); a different stored version is
         412 conflict_version. The change writes dev.passage.pricing.parameters.changed.v1 to the
         outbox in the same transaction (the audit record: value, version and the user). Every
-        value is required, since the PUT replaces them all. A legal entity outside the caller's
+        value is required, since the PUT replaces them all (a body with only journalFourEyes, as
+        before slice 18, or without priceSearchMode and smallOrderThresholds before slice 19, is 422 naming the missing fields). A change applies from the next resolve
+        whatever its pricing date: the parameters are not effective-dated. A legal entity outside the caller's
         scope is 403 AUTH-0003. A retry with the same Idempotency-Key replays the first response.
       x-passage-duty: pricing.admin
       parameters:
@@ -542,10 +743,15 @@ paths:
           application/json:
             schema:
               type: object
-              required: [legalEntityId, journalFourEyes, version]
+              required: [legalEntityId, journalFourEyes, pricingDateBasis, totalDiscountBasis, smartRoundingBands, priceSearchMode, smallOrderThresholds, version]
               properties:
                 legalEntityId: {type: string, format: uuid}
                 journalFourEyes: {type: boolean}
+                pricingDateBasis: {type: string, enum: [SHIP_DATE, ORDER_DATE, DELIVERY_DATE]}
+                totalDiscountBasis: {type: string, enum: [AFTER_LINE_DISC, GROSS]}
+                smartRoundingBands: {$ref: "#/components/schemas/SmartRoundingBands"}
+                priceSearchMode: {type: string, enum: [FIRST_MATCH, SEARCH_NEXT]}
+                smallOrderThresholds: {$ref: "#/components/schemas/SmallOrderThresholds"}
                 version: {type: integer, minimum: 0}
       responses:
         "200":
@@ -553,6 +759,60 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/PricingParameters"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/tenant-parameters:
+    get:
+      operationId: getPricingTenantParameters
+      summary: Read the pricing parameters of the tenant.
+      description: >
+        Returns the stored tenant parameters, or the defaults at version 0 when none are stored
+        (PRD 5.26.13, scope tenant): cacheTtlSeconds (10 to 600, the lifetime of this tenant's
+        record snapshots; 0 follows the deployment's PRICING_CACHE_TTL) and
+        campaignKillSwitchEffect (NEXT_RESOLVE by default; IMMEDIATE_CACHE_FLUSH has every
+        replica empty its snapshots when it reads campaign.killed or campaign.restored, FR-26.10).
+        The replica that takes a kill or restore always empties its own snapshots.
+      x-passage-duty: pricing.view
+      responses:
+        "200":
+          description: The tenant parameters.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PricingTenantParameters"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    put:
+      operationId: setPricingTenantParameters
+      summary: Set the pricing parameters of the tenant at the expected version.
+      description: >
+        version is the version read (0 when none was stored); a different stored version is
+        412 conflict_version. The change writes dev.passage.pricing.tenantparameter.changed.v1 to
+        the outbox in the same transaction (the audit record) and empties this replica's
+        snapshots at once; other replicas drop theirs when they read the event, or within the
+        snapshot lifetime. Every value is required, since the PUT replaces them all. A retry
+        with the same Idempotency-Key replays the first response.
+      x-passage-duty: pricing.admin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cacheTtlSeconds, campaignKillSwitchEffect, version]
+              properties:
+                cacheTtlSeconds: {type: integer, description: "0, or 10 to 600."}
+                campaignKillSwitchEffect: {type: string, enum: [NEXT_RESOLVE, IMMEDIATE_CACHE_FLUSH]}
+                version: {type: integer, minimum: 0}
+      responses:
+        "200":
+          description: The stored tenant parameters.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PricingTenantParameters"}
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
@@ -674,6 +934,44 @@ paths:
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/rebates/agreements/{id}/statement:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getRebateStatement
+      summary: Rebate agreement statement for one accrual period, with accrued, settled and open totals (§5.26.15).
+      description: >
+        The statement document of one period of a customer or vendor rebate agreement: the
+        header (agreement, party, period), one line per accrual row of the period (posted
+        invoice lines, replayed lines and retroactive deltas, in invoice order) and the footer.
+        The footer is exact whatever the line count: accruedAmount is the period's accrued total,
+        settledAmount the sum of the SETTLED rows (settlement is posted by w30; it is zero until
+        then), openAmount the difference. tier is the tier in force at the period's cumulative
+        basis and targetAmount what that tier owes on the whole period (BR-26.8: one rate on the
+        whole cumulative basis). reconciled says the accrual rows agree with it: targetAmount
+        equals accruedAmount, the rows (credits as negative rows, retroactive deltas included)
+        sum to it (linesAccruedAmount, over every row whatever the list limit), and the rows'
+        own basis sums to the period's cumulative basis. A period without accruals is a
+        statement with zero totals and no lines. At most 5,000 lines are listed
+        (linesTruncated=true when there are more). format=csv downloads the lines and the three
+        footer rows (rowType LINE, TOTAL_ACCRUED, TOTAL_SETTLED, OPEN; source INVOICE, REPLAYED
+        or RETRO_DELTA). Read only: nothing is written and no event is raised.
+      x-passage-duty: pricing.rebate.view
+      parameters:
+        - {name: period, in: query, required: true, description: "The accrual period key in the form the agreement accrues by: 2027-03 (MONTH), 2027-Q1 (QUARTER) or 2027 (YEAR).", schema: {type: string}}
+        - {name: format, in: query, required: false, schema: {type: string, enum: [json, csv], default: json}}
+      responses:
+        "200":
+          description: The statement.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RebateStatement"}
+            text/csv:
+              schema: {type: string}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/rebates/agreements/{id}:revise:
     post:
       operationId: reviseRebateAgreement
@@ -727,6 +1025,36 @@ paths:
       responses:
         "200":
           description: The closed agreement; version incremented.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RebateAgreement"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/rebates/agreements/{id}:reopen:
+    post:
+      operationId: reopenRebateAgreement
+      summary: Make a CLOSED rebate agreement ACTIVE again with a later last day (FR-26.11).
+      description: >
+        validTo must be later than the close date the agreement carries; invoices dated after the old
+        close date accrue again up to it, and the accruals already booked stay. 409 PRC-0031 when the
+        agreement is not CLOSED; 412 on a stale version. Writes dev.passage.pricing.rebateagreement.reopened.v1
+        in the same transaction; a repeated Idempotency-Key replays the first response.
+      x-passage-duty: pricing.rebate.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RebateAgreementReopen"}
+      responses:
+        "200":
+          description: The reopened agreement; version incremented.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/RebateAgreement"}
@@ -2330,6 +2658,39 @@ paths:
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/campaigns/{id}:revise:
+    post:
+      operationId: reviseCampaign
+      summary: Change a campaign's name, validity, target customer group or budget (FR-26.10).
+      description: >
+        An omitted field stays as it is; an empty targetCustomerGroup means every customer. The merged
+        campaign is validated as on create (422), the currency never changes, and a killed campaign may
+        be revised. A revise never changes how a day before today priced (422 COM-0001 naming the field):
+        once the campaign has started its validFrom and targetCustomerGroup are fixed and validTo may not
+        fall before yesterday (or change at all once the campaign has ended); a campaign that has not
+        started may not get a validFrom in the past. The new validity and target group gate the next resolve. 404 PRC-0041 when unknown;
+        412 on a stale version. Writes dev.passage.pricing.campaign.revised.v1 in the same transaction; a
+        repeated Idempotency-Key replays the first response.
+      x-passage-duty: pricing.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CampaignRevise"}
+      responses:
+        "200":
+          description: The revised campaign; version incremented.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Campaign"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/campaigns/{id}:kill:
     post:
       operationId: killCampaign
@@ -2514,6 +2875,17 @@ components:
             id: {type: string, format: uuid}
             killed: {type: boolean, description: "Kill switch; a killed campaign's records take no part in resolve."}
             version: {type: integer, minimum: 1}
+    CampaignRevise:
+      type: object
+      required: [version]
+      description: Change at least one of name, validFrom, validTo, targetCustomerGroup or budget.
+      properties:
+        version: {type: integer, minimum: 1}
+        name: {type: string, minLength: 1, maxLength: 120}
+        validFrom: {type: string, format: date}
+        validTo: {type: string, format: date, description: "Inclusive; not before validFrom."}
+        targetCustomerGroup: {type: string, maxLength: 64, description: "Empty means every customer."}
+        budget: {type: string, description: "Planned spend, decimal at least 0, in the campaign currency."}
     CampaignInput:
       type: object
       required: [legalEntityId, name, validFrom, validTo, budget, currency]
@@ -2695,13 +3067,16 @@ components:
         quantity: {type: string, description: "Decimal string greater than 0."}
     ResolveRequest:
       type: object
-      required: [legalEntityId, customerId, currency, pricingDate, lines]
+      required: [legalEntityId, customerId, currency, lines]
       properties:
         legalEntityId: {type: string, format: uuid}
         customerId: {type: string, description: "Customer id (w7); matched exactly against record customer keys."}
         customerGroupId: {type: string, description: "Customer pricing group of the document, if any."}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
-        pricingDate: {type: string, format: date}
+        pricingDate: {type: string, format: date, description: "The pricing date. When omitted, the pricing date is the document date the legal entity's pricingDateBasis names (BR-26.2): shipDate, orderDate or deliveryDate; 422 when that date is missing too. A pricingDate that is sent always wins."}
+        orderDate: {type: string, format: date, description: "Order date, the pricing date under basis ORDER_DATE when pricingDate is omitted."}
+        shipDate: {type: string, format: date, description: "Requested ship date, the pricing date under basis SHIP_DATE (the default) when pricingDate is omitted."}
+        deliveryDate: {type: string, format: date, description: "Delivery date, the pricing date under basis DELIVERY_DATE when pricingDate is omitted."}
         salesChannel: {type: string, pattern: "^([A-Z0-9][A-Z0-9_-]{0,31})?$", description: "Selects the channel's procedure assignment; empty uses the legal entity's default (PRD 5.26.13)."}
         procedure: {type: string, description: "Name of a procedure to price with; its ACTIVE version is used instead of the assigned one (422 PRC-0063 when it has none)."}
         lines:
@@ -2732,7 +3107,7 @@ components:
         discPct2: {type: string, description: "0-100; must be 0 for SURCHARGE."}
         validFrom: {type: string, format: date}
         validTo: {type: string, format: date}
-        searchNext: {type: boolean}
+        searchNext: {type: boolean, description: "Left out, a new condition record or journal CREATE line takes the legal entity's priceSearchMode (SEARCH_NEXT is true); an inline simulate or compare record takes false."}
         exclusive: {type: boolean}
         campaignId: {type: string, format: uuid, description: "Optional campaign (FR-26.2, FR-26.10). On create the campaign must exist in the record's legal entity (404 PRC-0041, 422). In resolve the record applies only while the campaign is live and targets the customer's group; at one access a campaign record outranks a plain one (BR-26.1 step 4)."}
     SimulateRequest:
@@ -2742,7 +3117,92 @@ components:
           properties:
             records:
               type: array
+              maxItems: 1000
+              description: "Inline condition records, at most 1000 (422 with a records field error beyond that)."
               items: {$ref: "#/components/schemas/RecordInput"}
+    CompareRequest:
+      allOf:
+        - $ref: "#/components/schemas/SimulateRequest"
+        - type: object
+          required: [procedureIdA, procedureIdB]
+          properties:
+            procedureIdA: {type: string, format: uuid, description: "The baseline procedure version."}
+            procedureIdB: {type: string, format: uuid, description: "The version compared with the baseline; must differ from A and belong to the same legal entity."}
+          description: "procedure and salesChannel choose a procedure for resolve and are rejected here (422): the versions are named by procedureIdA and procedureIdB."
+    LineComparison:
+      type: object
+      required: [lineNo, netUnitPriceA, netUnitPriceB, netUnitPriceDelta, lineNetA, lineNetB, lineNetDelta, appliedOnlyA, appliedOnlyB, changed]
+      properties:
+        lineNo: {type: integer}
+        netUnitPriceA: {type: string}
+        netUnitPriceB: {type: string}
+        netUnitPriceDelta: {type: string, description: "B minus A."}
+        lineNetA: {type: string}
+        lineNetB: {type: string}
+        lineNetDelta: {type: string, description: "B minus A."}
+        errorCodeA: {type: string, description: "Set when version A found no price for the line."}
+        errorCodeB: {type: string, description: "Set when version B found no price for the line."}
+        appliedOnlyA:
+          type: array
+          description: "Conditions (TYPE:record) that version A applied and B did not."
+          items: {type: string}
+        appliedOnlyB:
+          type: array
+          description: "Conditions (TYPE:record) that version B applied and A did not."
+          items: {type: string}
+        changed: {type: boolean}
+    Comparison:
+      type: object
+      required: [identical, subtotalDelta, totalDiscountDelta, surchargeDelta, orderNetDelta, changedLines, lines]
+      properties:
+        identical: {type: boolean}
+        subtotalDelta: {type: string}
+        totalDiscountDelta: {type: string}
+        surchargeDelta: {type: string}
+        orderNetDelta: {type: string}
+        changedLines: {type: integer}
+        lines:
+          type: array
+          items: {$ref: "#/components/schemas/LineComparison"}
+    CompareResponse:
+      type: object
+      required: [a, b, comparison]
+      properties:
+        a: {$ref: "#/components/schemas/ResolveResponse"}
+        b: {$ref: "#/components/schemas/ResolveResponse"}
+        comparison: {$ref: "#/components/schemas/Comparison"}
+    NetPriceRow:
+      type: object
+      required: [productKind, productKey, variant, unit, breaks]
+      properties:
+        productKind: {type: string, enum: [product, product_group, variant, all]}
+        productKey: {type: string}
+        variant: {type: string}
+        unit: {type: string, description: "Empty when the records apply to any unit."}
+        breaks:
+          type: array
+          maxItems: 20
+          items: {$ref: "#/components/schemas/NetPriceBreak"}
+    NetPriceBreak:
+      type: object
+      required: [quantity, unitPrice, netUnitPrice, lineNet, applied]
+      properties:
+        quantity: {type: string, description: "Decimal quantity of the one-line sale."}
+        unitPrice: {type: string, description: "PRICE before discounts; zero when errorCode is set."}
+        netUnitPrice: {type: string}
+        lineNet: {type: string, description: "Quantity times the net unit price, rounded to the currency's minor units."}
+        priceRecordId: {type: string, format: uuid, description: "The PRICE record that won this break; absent when errorCode is set."}
+        applied:
+          type: array
+          items: {$ref: "#/components/schemas/Applied"}
+        errorCode: {type: string, description: "PRC-0001 when no price applies at this quantity."}
+    PriceListItem:
+      allOf:
+        - $ref: "#/components/schemas/ConditionRecord"
+        - type: object
+          required: [scope]
+          properties:
+            scope: {type: string, enum: [CUSTOMER, GROUP, ALL], description: "Why the record applies to the customer."}
     ConditionRecordInput:
       allOf:
         - $ref: "#/components/schemas/RecordInput"
@@ -2925,9 +3385,10 @@ components:
         warning: {type: string, enum: [PRC-0014], description: "PRC-0014 when the line is already priced at nothing, so free goods would give the goods twice."}
     ResolveResponse:
       type: object
-      required: [currency, lines, subtotal, totalDiscount, surcharge, orderNet, applied, explainRef, freeGoods]
+      required: [currency, pricingDate, lines, subtotal, totalDiscount, surcharge, orderNet, applied, explainRef, freeGoods]
       properties:
         currency: {type: string}
+        pricingDate: {type: string, format: date, description: "The date the document was priced on: the pricingDate sent, else the document date the legal entity's pricingDateBasis chose (BR-26.2). Send it back as pricingDate to re-resolve the same document on the same date after the basis changes."}
         lines:
           type: array
           items:
@@ -2992,6 +3453,7 @@ components:
         selected: {type: string}
         stepNo: {type: integer, description: "Procedure step of the condition; absent under the reference order."}
         reason: {type: string, description: "Why a condition that found a record did not apply: an exclusion group (FR-26.8) kept another member."}
+        basis: {type: string, enum: [GROSS], description: "On the TOTAL_DISC step when the legal entity's totalDiscountBasis is GROSS (the discount applied to the line amounts at the unit price); absent under AFTER_LINE_DISC."}
         accesses:
           type: array
           items:
@@ -3043,13 +3505,49 @@ components:
         version: {type: integer, minimum: 1}
         updatedBy: {type: string}
         updatedAt: {type: string, format: date-time}
+    SmartRoundingBands:
+      type: array
+      minItems: 1
+      maxItems: 10
+      description: >
+        Ordered smart rounding bands (FR-26.7). upTo strictly increases; amounts below upTo round
+        up to the next value ending in `ending`. The last band has no upTo (422 otherwise). ending is
+        a decimal string from 0 up to 1 with at most four places. The table is stored and returned in
+        canonical form (trailing zeros dropped, "0.50" becomes "0.5").
+      items:
+        type: object
+        required: [ending]
+        properties:
+          upTo: {type: string, description: "Decimal string greater than 0; absent on the last band."}
+          ending: {type: string, description: "Decimal string, 0 to 0.9999."}
     PricingParameters:
       type: object
-      required: [legalEntityId, journalFourEyes, version]
+      required: [legalEntityId, journalFourEyes, pricingDateBasis, totalDiscountBasis, smartRoundingBands, priceSearchMode, smallOrderThresholds, version]
       properties:
         legalEntityId: {type: string, format: uuid}
         journalFourEyes: {type: boolean}
+        pricingDateBasis: {type: string, enum: [SHIP_DATE, ORDER_DATE, DELIVERY_DATE], description: "Default SHIP_DATE."}
+        totalDiscountBasis: {type: string, enum: [AFTER_LINE_DISC, GROSS], description: "Default AFTER_LINE_DISC."}
+        smartRoundingBands: {$ref: "#/components/schemas/SmartRoundingBands"}
+        priceSearchMode: {type: string, enum: [FIRST_MATCH, SEARCH_NEXT], description: "Default FIRST_MATCH. The default of searchNext on a new condition record that leaves it out."}
+        smallOrderThresholds: {$ref: "#/components/schemas/SmallOrderThresholds"}
         version: {type: integer, minimum: 0, description: "0 when the legal entity has no stored parameters."}
+        updatedBy: {type: string}
+        updatedAt: {type: string, format: date-time}
+    SmallOrderThresholds:
+      type: object
+      description: >
+        The SURCHARGE threshold per currency (FR-26.6): a currency code to a decimal string of at
+        least 0 with at most six places, at most 30 currencies. An empty object is the reference
+        table (250 USD, 200 EUR); 0 switches the surcharge off for that currency.
+      additionalProperties: {type: string}
+    PricingTenantParameters:
+      type: object
+      required: [cacheTtlSeconds, campaignKillSwitchEffect, version]
+      properties:
+        cacheTtlSeconds: {type: integer, description: "10 to 600; 0 follows the deployment's PRICING_CACHE_TTL."}
+        campaignKillSwitchEffect: {type: string, enum: [NEXT_RESOLVE, IMMEDIATE_CACHE_FLUSH], description: "Default NEXT_RESOLVE."}
+        version: {type: integer, minimum: 0, description: "0 when the tenant has no stored parameters."}
         updatedBy: {type: string}
         updatedAt: {type: string, format: date-time}
     Journal:
@@ -3074,7 +3572,7 @@ components:
           items: {$ref: "#/components/schemas/JournalLineError"}
         lines:
           type: array
-          description: Set on GET /journals/{id} only.
+          description: Set on GET /journals/{id} (at most 1,000) and on the JSON audit extract (at most 5,000).
           items: {$ref: "#/components/schemas/JournalLine"}
         linesTruncated: {type: boolean}
     JournalLine:
@@ -3098,6 +3596,48 @@ components:
         from: {type: string, description: "Threshold: cumulative basis value or quantity."}
         ratePct: {type: string, description: "NET_AMOUNT tiers: percent of net value."}
         amountPerUnit: {type: string, description: "QUANTITY tiers: amount per unit."}
+    RebateStatementLine:
+      type: object
+      required: [invoiceLineId, invoiceDate, amount, status, retroactive, source]
+      properties:
+        invoiceLineId: {type: string, description: "The invoice line; retro:<run>:<period> on a RETRO_DELTA row."}
+        invoiceDate: {type: string, format: date, description: "The invoice date; the recompute day on a RETRO_DELTA row."}
+        basisValue: {type: string, description: "The line's net value. Absent on a RETRO_DELTA row, which has no basis of its own."}
+        basisQuantity: {type: string, description: "The line's quantity. Absent on a RETRO_DELTA row."}
+        amount: {type: string, description: "Accrued on this row, with the currency's minor units; negative for a credit."}
+        status: {type: string, enum: [ACCRUED, ADJUSTED, SETTLED, REVERSED]}
+        retroactive: {type: boolean}
+        source:
+          type: string
+          enum: [INVOICE, REPLAYED, RETRO_DELTA]
+          description: "INVOICE: accrued from the invoice feed. REPLAYED: an invoice line a retroactive recompute added to the period basis (accrues nothing itself). RETRO_DELTA: the period delta the recompute posted."
+    RebateStatement:
+      type: object
+      required: [agreementId, name, partyRole, basis, currency, period, basisValue, basisQuantity, targetAmount, accruedAmount, linesAccruedAmount, settledAmount, openAmount, reconciled, lineCount, linesTruncated, lines]
+      properties:
+        agreementId: {type: string, format: uuid}
+        name: {type: string}
+        partyRole: {type: string, enum: [CUSTOMER, VENDOR]}
+        customerId: {type: string, format: uuid}
+        customerGroupId: {type: string, format: uuid}
+        vendorId: {type: string, format: uuid}
+        basis: {type: string, enum: [NET_AMOUNT, QUANTITY]}
+        currency: {type: string}
+        period: {type: string, description: "The period key asked for."}
+        tier: {$ref: "#/components/schemas/Tier"}
+        basisValue: {type: string, description: "Cumulative net value of the period."}
+        basisQuantity: {type: string, description: "Cumulative quantity of the period."}
+        targetAmount: {type: string, description: "What the tier in force owes on the whole period."}
+        accruedAmount: {type: string, description: "The period's accrued total."}
+        linesAccruedAmount: {type: string, description: "The sum of every accrual row of the period (not only the listed ones)."}
+        settledAmount: {type: string}
+        openAmount: {type: string, description: "accruedAmount less settledAmount."}
+        reconciled: {type: boolean, description: "targetAmount, accruedAmount and linesAccruedAmount are equal and the rows' own basis sums to basisValue and basisQuantity."}
+        lineCount: {type: integer, description: "Accrual rows of the period."}
+        linesTruncated: {type: boolean}
+        lines:
+          type: array
+          items: {$ref: "#/components/schemas/RebateStatementLine"}
     RebateAgreementInput:
       type: object
       required: [legalEntityId, name, basis, period, tiers, currency, validFrom, validTo]
@@ -3144,6 +3684,12 @@ components:
           type: array
           minItems: 1
           items: {$ref: "#/components/schemas/Tier"}
+    RebateAgreementReopen:
+      type: object
+      required: [version, validTo]
+      properties:
+        version: {type: integer, minimum: 1}
+        validTo: {type: string, format: date, description: "The new last day; later than the close date."}
     RebateAgreementClose:
       type: object
       required: [version, closeDate]

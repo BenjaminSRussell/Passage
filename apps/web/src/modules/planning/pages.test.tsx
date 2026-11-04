@@ -231,6 +231,42 @@ describe("DDMRP buffer orders (FR-22.16, AC-22.12)", () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url.includes("action=sales-on-top"))).toBe(true));
   });
 
+  it("shows a PLAN-0005 lot-split message with its catalog text and filters by it", async () => {
+    const split: Message = { id: "00000000-0000-0000-0000-00000000f004", status: "open", version: 1, action: "lot-split", code: "PLAN-0005", text: "Requirement for item-9 splits into 3 orders (max 100).", itemId: buffered.itemId, supplyRef: "PLN-000001", demandRef: "", suggestedDate: "2026-11-20", delayDays: 3, qty: "100", planningPriority: null, bufferZone: null };
+    const fetchMock = stubApi(["/messages", () => json({ items: [split] })]);
+    renderAt("/planning/messages");
+    const table = await findTable({ name: "Messages" });
+    await waitFor(() => expect(within(table).getByText("Lot split")).toBeInTheDocument());
+    expect(within(table).getByText("PLAN-0005 Requirement for item-9 splits into 3 orders (max 100).")).toBeInTheDocument();
+    // delayDays carries the number of orders, which is not a delay: the Delay column stays empty.
+    const [, row] = within(table).getAllByRole("row");
+    expect(within(row).queryByRole("cell", { name: "3" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Action"), { target: { value: "lot-split" } });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url.includes("action=lot-split"))).toBe(true));
+  });
+
+  it("shows a PLAN-0004 bom-cycle message with its catalog text and filters by it", async () => {
+    const cycle: Message = { id: "00000000-0000-0000-0000-00000000f005", status: "open", version: 1, action: "bom-cycle", code: "PLAN-0004", text: "BOM cycle detected for item-9; low-level codes not updated.", itemId: buffered.itemId, supplyRef: "", demandRef: "item-8", suggestedDate: "2026-11-02", delayDays: 0, qty: "1", planningPriority: null, bufferZone: null };
+    const fetchMock = stubApi(["/messages", () => json({ items: [cycle] })]);
+    renderAt("/planning/messages");
+    const table = await findTable({ name: "Messages" });
+    await waitFor(() => expect(within(table).getByText("BOM cycle")).toBeInTheDocument());
+    expect(within(table).getByText("PLAN-0004 BOM cycle detected for item-9; low-level codes not updated.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Action"), { target: { value: "bom-cycle" } });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url.includes("action=bom-cycle"))).toBe(true));
+  });
+
+  it("shows a PLAN-0009 no-quota-source message with its catalog text and filters by it", async () => {
+    const none: Message = { id: "00000000-0000-0000-0000-00000000f006", status: "open", version: 1, action: "no-quota-source", code: "PLAN-0009", text: "Quota arrangement arr-1 has no usable source in 2026-11-11.", itemId: buffered.itemId, supplyRef: "PLN-000004", demandRef: "arr-1", suggestedDate: "2026-11-11", delayDays: 0, qty: "40", planningPriority: null, bufferZone: null };
+    const fetchMock = stubApi(["/messages", () => json({ items: [none] })]);
+    renderAt("/planning/messages");
+    const table = await findTable({ name: "Messages" });
+    await waitFor(() => expect(within(table).getByText("No quota source")).toBeInTheDocument());
+    expect(within(table).getByText("PLAN-0009 Quota arrangement arr-1 has no usable source in 2026-11-11.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Action"), { target: { value: "no-quota-source" } });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url.includes("action=no-quota-source"))).toBe(true));
+  });
+
   it("shows a PLAN-0008 no-vendor message with its catalog text and filters by it", async () => {
     const none: Message = { id: "00000000-0000-0000-0000-00000000f003", status: "open", version: 1, action: "no-vendor", code: "PLAN-0008", text: "No vendor for planned purchase of item-9; using none.", itemId: buffered.itemId, supplyRef: "PLN-000003", demandRef: "", suggestedDate: "2026-11-04", delayDays: 0, qty: "17", planningPriority: null, bufferZone: null };
     const fetchMock = stubApi(["/messages", () => json({ items: [none] })]);

@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Passage integration hub events
-  version: 0.1.0
+  version: 0.3.0
   description: |
     The hub's own CloudEvents 1.0 (platform/go/events envelope), written to the outbox
     in the same transaction as the change (src/events.ts) and relayed by Debezium. The
@@ -10,7 +10,7 @@ info:
     credentials never appear in an event. The outbox `aggregate_type` is the type's entity
     segment, so the EventRouter publishes each event to `passage.hub.<entity>`, the topic
     platform/go/events.Topic gives for its type (the channels below); the Kafka key is the
-    subscription or API client id. When the hub consumes `passage.hub.webhook` and a
+    subscription, API client or catalog entry id. When the hub consumes `passage.hub.webhook` and a
     subscription matches `dev.passage.hub.webhook.*`, that subscription receives the
     outcome events, but delivering an outcome event writes no outcome event of its own
     (no feedback loop).
@@ -29,6 +29,8 @@ channels:
         $ref: '#/components/messages/subscriptionPaused'
       subscriptionResumed:
         $ref: '#/components/messages/subscriptionResumed'
+      subscriptionSecretRotated:
+        $ref: '#/components/messages/subscriptionSecretRotated'
   passage.hub.webhook:
     address: passage.hub.webhook
     messages:
@@ -45,6 +47,17 @@ channels:
         $ref: '#/components/messages/apiClientUpdated'
       apiClientRevoked:
         $ref: '#/components/messages/apiClientRevoked'
+  passage.hub.catalogentry:
+    address: passage.hub.catalogentry
+    messages:
+      catalogEntryPublished:
+        $ref: '#/components/messages/catalogEntryPublished'
+      catalogEntryUpdated:
+        $ref: '#/components/messages/catalogEntryUpdated'
+      catalogEntryDeprecated:
+        $ref: '#/components/messages/catalogEntryDeprecated'
+      catalogEntryRetired:
+        $ref: '#/components/messages/catalogEntryRetired'
 operations:
   publishSubscriptionCreated:
     action: send
@@ -81,6 +94,13 @@ operations:
     summary: "A paused subscription was resumed."
     messages:
       - $ref: '#/channels/passage.hub.subscription/messages/subscriptionResumed'
+  publishSubscriptionSecretRotated:
+    action: send
+    channel:
+      $ref: '#/channels/passage.hub.subscription'
+    summary: "A webhook subscription's signing secret was rotated; the data never carries a secret."
+    messages:
+      - $ref: '#/channels/passage.hub.subscription/messages/subscriptionSecretRotated'
   publishWebhookDelivered:
     action: send
     channel:
@@ -116,6 +136,34 @@ operations:
     summary: "An API client was revoked."
     messages:
       - $ref: '#/channels/passage.hub.apiclient/messages/apiClientRevoked'
+  publishCatalogEntryPublished:
+    action: send
+    channel:
+      $ref: '#/channels/passage.hub.catalogentry'
+    summary: "A version of an API or event contract was published to the catalog."
+    messages:
+      - $ref: '#/channels/passage.hub.catalogentry/messages/catalogEntryPublished'
+  publishCatalogEntryUpdated:
+    action: send
+    channel:
+      $ref: '#/channels/passage.hub.catalogentry'
+    summary: "A catalog entry's title, summary or owner service changed."
+    messages:
+      - $ref: '#/channels/passage.hub.catalogentry/messages/catalogEntryUpdated'
+  publishCatalogEntryDeprecated:
+    action: send
+    channel:
+      $ref: '#/channels/passage.hub.catalogentry'
+    summary: "A catalog entry was deprecated with a sunset date."
+    messages:
+      - $ref: '#/channels/passage.hub.catalogentry/messages/catalogEntryDeprecated'
+  publishCatalogEntryRetired:
+    action: send
+    channel:
+      $ref: '#/channels/passage.hub.catalogentry'
+    summary: "A deprecated catalog entry was retired after its sunset date."
+    messages:
+      - $ref: '#/channels/passage.hub.catalogentry/messages/catalogEntryRetired'
 components:
   messages:
     subscriptionCreated:
@@ -148,6 +196,12 @@ components:
       summary: "A paused subscription was resumed."
       payload:
         $ref: '#/components/schemas/SubscriptionData'
+    subscriptionSecretRotated:
+      name: dev.passage.hub.subscription.secretrotated.v1
+      title: subscription.secretrotated
+      summary: "A webhook subscription's signing secret was rotated; the data never carries a secret."
+      payload:
+        $ref: '#/components/schemas/SubscriptionSecretRotatedData'
     webhookDelivered:
       name: dev.passage.hub.webhook.delivered.v1
       title: webhook.delivered
@@ -178,19 +232,59 @@ components:
       summary: "An API client was revoked."
       payload:
         $ref: '#/components/schemas/ClientData'
+    catalogEntryPublished:
+      name: dev.passage.hub.catalogentry.published.v1
+      title: catalogentry.published
+      summary: "A version of an API or event contract was published to the catalog."
+      payload:
+        $ref: '#/components/schemas/CatalogEntryData'
+    catalogEntryUpdated:
+      name: dev.passage.hub.catalogentry.updated.v1
+      title: catalogentry.updated
+      summary: "A catalog entry's title, summary or owner service changed."
+      payload:
+        $ref: '#/components/schemas/CatalogEntryData'
+    catalogEntryDeprecated:
+      name: dev.passage.hub.catalogentry.deprecated.v1
+      title: catalogentry.deprecated
+      summary: "A catalog entry was deprecated with a sunset date."
+      payload:
+        $ref: '#/components/schemas/CatalogEntryData'
+    catalogEntryRetired:
+      name: dev.passage.hub.catalogentry.retired.v1
+      title: catalogentry.retired
+      summary: "A deprecated catalog entry was retired after its sunset date."
+      payload:
+        $ref: '#/components/schemas/CatalogEntryData'
   schemas:
     SubscriptionData:
       type: object
-      required: [subscription_id, kind, name, patterns, status, paused_reason, version]
+      required: [subscription_id, kind, name, patterns, filter, status, paused_reason, version]
       additionalProperties: false
       properties:
         subscription_id: {type: string, format: uuid}
         kind: {type: string, enum: [webhook, rest-push]}
         name: {type: string}
         patterns: {type: array, items: {type: string}}
+        filter: {type: [string, "null"], description: "The CESQL filter expression, or null."}
         status: {type: string, enum: [active, paused]}
         paused_reason: {type: [string, "null"], description: "HUB-0114 after a 410 Gone."}
         version: {type: integer, minimum: 1}
+    SubscriptionSecretRotatedData:
+      type: object
+      required: [subscription_id, kind, name, patterns, filter, status, paused_reason, version, secret_rotated_at, previous_secret_expires_at]
+      additionalProperties: false
+      properties:
+        subscription_id: {type: string, format: uuid}
+        kind: {type: string, enum: [webhook]}
+        name: {type: string}
+        patterns: {type: array, items: {type: string}}
+        filter: {type: [string, "null"], description: "The CESQL filter expression, or null."}
+        status: {type: string, enum: [active, paused]}
+        paused_reason: {type: [string, "null"], description: "HUB-0114 after a 410 Gone."}
+        version: {type: integer, minimum: 1}
+        secret_rotated_at: {type: string, format: date-time}
+        previous_secret_expires_at: {type: [string, "null"], format: date-time, description: "When the previous secret stops signing; null when it was ended at once."}
     DeliveredData:
       type: object
       required: [subscription_id, event_id, attempts]
@@ -222,4 +316,19 @@ components:
         burst: {type: integer}
         sandbox_tenant_id: {type: [string, "null"], format: uuid}
         status: {type: string, enum: [active, revoked]}
+        version: {type: integer, minimum: 1}
+    CatalogEntryData:
+      type: object
+      required: [catalog_entry_id, kind, name, spec_version, title, owner_service, lifecycle, sunset_at, replaced_by, version]
+      additionalProperties: false
+      properties:
+        catalog_entry_id: {type: string, format: uuid}
+        kind: {type: string, enum: [api, event]}
+        name: {type: string}
+        spec_version: {type: string, description: "MAJOR.MINOR.PATCH of the published contract."}
+        title: {type: string}
+        owner_service: {type: string}
+        lifecycle: {type: string, enum: [active, deprecated, retired], description: "A version published into a deprecated major line is published deprecated."}
+        sunset_at: {type: [string, "null"], format: date-time, description: "Set once deprecated."}
+        replaced_by: {type: [string, "null"], format: uuid}
         version: {type: integer, minimum: 1}

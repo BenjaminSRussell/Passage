@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -24,6 +26,9 @@ const (
 	CodeChangeStale        = "SLS-0046"
 	CodeChangeNotFound     = "SLS-0112"
 	CodeChangeNotRequester = "SLS-0114"
+	// CodeNotChangeApprover: the customer names its approvers and the caller is
+	// not one of them (slice 27).
+	CodeNotChangeApprover = "SLS-0150"
 
 	ChangePending  = "PENDING"
 	ChangeApproved = "APPROVED"
@@ -42,12 +47,31 @@ const (
 // entity (FR-27.9, PRD 5.27.13 change_approval_required). Version is 0 for a
 // customer that never set it: no approval is needed.
 type ChangePolicy struct {
-	LegalEntityID    string     `json:"legalEntityId"`
-	CustomerID       string     `json:"customerId"`
-	ApprovalRequired bool       `json:"approvalRequired"`
-	Version          int        `json:"version"`
-	UpdatedBy        string     `json:"updatedBy,omitempty"`
-	UpdatedAt        *time.Time `json:"updatedAt,omitempty"`
+	LegalEntityID    string `json:"legalEntityId"`
+	CustomerID       string `json:"customerId"`
+	ApprovalRequired bool   `json:"approvalRequired"`
+	// ApprovalThreshold, when set, limits approval to changes that move the
+	// order total by at least this amount in ThresholdCurrency (a cancellation
+	// moves it by the whole total); absent means every change needs approval.
+	ApprovalThreshold *decimal.Decimal `json:"approvalThreshold,omitempty"`
+	ThresholdCurrency string           `json:"thresholdCurrency,omitempty"`
+	// ApproverIDs, when not empty, are the only users (canonical identity user
+	// ids) who may approve or reject a request for this customer.
+	ApproverIDs []string   `json:"approverIds"`
+	Version     int        `json:"version"`
+	UpdatedBy   string     `json:"updatedBy,omitempty"`
+	UpdatedAt   *time.Time `json:"updatedAt,omitempty"`
+	// KeepThreshold and KeepApprovers make PutChangePolicy leave the stored
+	// threshold (with its currency) or group as they are: a body that does not
+	// name them, such as the slice 13 {"approvalRequired": ...}, must not
+	// clear what a newer client set.
+	KeepThreshold bool `json:"-"`
+	KeepApprovers bool `json:"-"`
+}
+
+// Approval returns the policy as the domain rules take it.
+func (p ChangePolicy) Approval() domain.ApprovalPolicy {
+	return domain.ApprovalPolicy{Required: p.ApprovalRequired, Threshold: p.ApprovalThreshold, ThresholdCurrency: p.ThresholdCurrency, Approvers: p.ApproverIDs}
 }
 
 // OrderChangeRequest is a change of a CONFIRMED order that waits for a
@@ -96,16 +120,73 @@ func changeRequestNotFound() error {
 	return problem(http.StatusNotFound, CodeChangeNotFound, "change request not found")
 }
 
-// changeApprovalRequired reports whether the customer's changes to confirmed
-// orders need approval.
-func changeApprovalRequired(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, customerID string) (bool, error) {
-	var required bool
-	err := tx.QueryRow(ctx, `select approval_required from customer_change_policy
-		where tenant_id = $1 and legal_entity_id = $2 and customer_id = $3`, tenantID, legalEntityID, customerID).Scan(&required)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
+// loadApprovalPolicy returns the customer's approval policy; a customer that
+// never saved one needs no approval.
+func loadApprovalPolicy(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, customerID string) (domain.ApprovalPolicy, error) {
+	pol := ChangePolicy{LegalEntityID: legalEntityID, CustomerID: customerID}
+	if err := loadChangePolicy(ctx, tx, tenantID, &pol); err != nil {
+		return domain.ApprovalPolicy{}, err
 	}
-	return required, err
+	return pol.Approval(), nil
+}
+
+// requireChangeApprover refuses a decision by a user outside the customer's
+// named approver group (SLS-0150). The order's customer decides the group.
+func requireChangeApprover(ctx context.Context, tx pgx.Tx, tenantID string, r OrderChangeRequest, actor string) error {
+	pol, err := loadApprovalPolicy(ctx, tx, tenantID, r.LegalEntityID, r.CustomerID)
+	if err != nil {
+		return err
+	}
+	if !pol.MayDecide(actor) {
+		return problem(http.StatusForbidden, CodeNotChangeApprover, "this customer's changes can be decided only by its named approvers")
+	}
+	return nil
+}
+
+// changeValue is the value req would move on the locked order o: the sum of
+// each line's absolute net movement (a cancelled line counts as 0), computed
+// on a copy of o the way the change would be applied. Summing per line means a
+// rise on one line and an equal cut on another count twice, not zero.
+func changeValue(ctx context.Context, tx pgx.Tx, tenantID string, o Order, req ChangeRequest, now time.Time) (decimal.Decimal, error) {
+	trial := o
+	trial.Lines = append([]Line(nil), o.Lines...)
+	rule, err := loadDateRule(ctx, tx, tenantID, o.LegalEntityID, now)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	trial.dates = rule
+	req, err = prepareChange(ctx, tx, tenantID, o, req, "", now)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	if _, _, err := ApplyChange(&trial, req); err != nil {
+		return decimal.Zero, problem(http.StatusUnprocessableEntity, CodeInvalidChange, err.Error())
+	}
+	moved := decimal.Zero
+	for i, l := range trial.Lines {
+		// A line the change added moves its whole net.
+		was := decimal.Zero
+		if i < len(o.Lines) {
+			was = effectiveNet(o.Lines[i])
+		}
+		moved = moved.Add(effectiveNet(l).Sub(was).Abs())
+	}
+	return moved, nil
+}
+
+func effectiveNet(l Line) decimal.Decimal {
+	if l.LineStatus == domain.LineCancelled {
+		return decimal.Zero
+	}
+	return l.LineNet
+}
+
+// unapprovedChangeValue is what the changes applied to the locked order
+// without approval have moved so far.
+func unapprovedChangeValue(ctx context.Context, tx pgx.Tx, tenantID, orderID string) (decimal.Decimal, error) {
+	var moved decimal.Decimal
+	err := tx.QueryRow(ctx, `select unapproved_change_value from sales_order where tenant_id = $1 and id = $2`, tenantID, orderID).Scan(&moved)
+	return moved, err
 }
 
 // submitChangeRequestTx checks that req would change the locked order o, then
@@ -122,7 +203,11 @@ func submitChangeRequestTx(ctx context.Context, tx pgx.Tx, tenantID string, o Or
 		return nil, err
 	}
 	trial.dates = rule
-	diff, _, err := ApplyChange(&trial, req)
+	prepared, err := prepareChange(ctx, tx, tenantID, o, req, actor, now)
+	if err != nil {
+		return nil, err
+	}
+	diff, _, err := ApplyChange(&trial, prepared)
 	if err != nil {
 		return nil, problem(http.StatusUnprocessableEntity, CodeInvalidChange, err.Error())
 	}
@@ -266,6 +351,9 @@ func (s *Postgres) ApproveChangeRequest(ctx context.Context, id string, version 
 		if r.RequestedBy == actor {
 			return problem(http.StatusForbidden, CodeChangeSelfApproval, "a change cannot be approved by the user who requested it")
 		}
+		if err := requireChangeApprover(ctx, tx, p.TenantID, r, actor); err != nil {
+			return err
+		}
 		o, err := loadOrder(ctx, tx, p.TenantID, r.OrderID, true)
 		if err != nil {
 			return err
@@ -277,7 +365,12 @@ func (s *Postgres) ApproveChangeRequest(ctx context.Context, id string, version 
 		if r.Kind == KindCancel {
 			applied, err = cancelOrderTx(ctx, tx, p.TenantID, o, r.Reason, r.RequestedBy, now)
 		} else {
-			applied, err = applyChangeTx(ctx, tx, p.TenantID, o, r.OrderID, r.Change, r.RequestedBy, now)
+			// The approver holds sales.order.approve (the route) and is one the
+			// customer lets decide, so a listing override the request carries
+			// (listingOverrideReason) is accepted on their approval.
+			change := r.Change
+			change.Approver = true
+			applied, err = applyChangeTx(ctx, tx, p.TenantID, o, r.OrderID, change, r.RequestedBy, now)
 		}
 		if err != nil {
 			return err
@@ -385,6 +478,9 @@ func (s *Postgres) RejectChangeRequest(ctx context.Context, id string, version i
 		if r.Status != ChangePending {
 			return problem(http.StatusConflict, CodeChangeDecided, "the change request was already "+r.Status)
 		}
+		if err := requireChangeApprover(ctx, tx, p.TenantID, r, actor); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `update order_change_request set status = 'REJECTED', decided_by = $3, decided_at = $4, decision_comment = $5,
 				version = version + 1 where tenant_id = $1 and id = $2`, p.TenantID, id, actor, now, comment); err != nil {
 			return err
@@ -413,9 +509,10 @@ func (s *Postgres) GetChangePolicy(ctx context.Context, legalEntityID, customerI
 
 func loadChangePolicy(ctx context.Context, tx pgx.Tx, tenantID string, out *ChangePolicy) error {
 	var updatedAt time.Time
-	err := tx.QueryRow(ctx, `select approval_required, version, updated_by, updated_at from customer_change_policy
-		where tenant_id = $1 and legal_entity_id = $2 and customer_id = $3`, tenantID, out.LegalEntityID, out.CustomerID).
-		Scan(&out.ApprovalRequired, &out.Version, &out.UpdatedBy, &updatedAt)
+	out.ApproverIDs = []string{}
+	err := tx.QueryRow(ctx, `select approval_required, approval_threshold, coalesce(threshold_currency, ''), approver_user_ids::text[], version, updated_by, updated_at
+		from customer_change_policy where tenant_id = $1 and legal_entity_id = $2 and customer_id = $3`, tenantID, out.LegalEntityID, out.CustomerID).
+		Scan(&out.ApprovalRequired, &out.ApprovalThreshold, &out.ThresholdCurrency, &out.ApproverIDs, &out.Version, &out.UpdatedBy, &updatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -426,23 +523,40 @@ func loadChangePolicy(ctx context.Context, tx pgx.Tx, tenantID string, out *Chan
 	return nil
 }
 
-// PutChangePolicy creates the switch when version is 0 and otherwise replaces
+// PutChangePolicy creates the policy when version is 0 and otherwise replaces
 // it when version matches the stored one; any other version is a version
-// conflict. changepolicy.changed is written in the same transaction.
+// conflict. The threshold (with its currency) and the group are kept as stored
+// when in says so (KeepThreshold, KeepApprovers). changepolicy.changed is
+// written in the same transaction.
 func (s *Postgres) PutChangePolicy(ctx context.Context, in ChangePolicy, version int, actor string) (ChangePolicy, error) {
 	p, _ := tenant.FromContext(ctx)
 	out := ChangePolicy{LegalEntityID: in.LegalEntityID, CustomerID: in.CustomerID}
+	approvers, invalid := domain.NormalizeApprovers(in.ApproverIDs)
+	if len(invalid) > 0 {
+		return out, problem(http.StatusUnprocessableEntity, CodeInvalidChange, "invalid approval policy: approverIds must be user ids (UUIDs)")
+	}
+	if in.KeepThreshold {
+		in.ApprovalThreshold, in.ThresholdCurrency = nil, ""
+	}
+	if f := domain.ValidateApprovalPolicy(domain.ApprovalPolicy{Threshold: in.ApprovalThreshold, ThresholdCurrency: in.ThresholdCurrency, Approvers: approvers}); len(f) > 0 {
+		return out, problem(http.StatusUnprocessableEntity, CodeInvalidChange, "invalid approval policy: "+firstField(f))
+	}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var stored int
 		var err error
 		if version == 0 {
-			err = tx.QueryRow(ctx, `insert into customer_change_policy (tenant_id, legal_entity_id, customer_id, approval_required, updated_by)
-				values ($1, $2, $3, $4, $5) on conflict do nothing returning version`,
-				p.TenantID, in.LegalEntityID, in.CustomerID, in.ApprovalRequired, actor).Scan(&stored)
+			err = tx.QueryRow(ctx, `insert into customer_change_policy (tenant_id, legal_entity_id, customer_id, approval_required, approval_threshold, threshold_currency, approver_user_ids, updated_by)
+				values ($1, $2, $3, $4, $5, nullif($6, ''), $7::text[]::uuid[], $8) on conflict do nothing returning version`,
+				p.TenantID, in.LegalEntityID, in.CustomerID, in.ApprovalRequired, in.ApprovalThreshold, in.ThresholdCurrency, approvers, actor).Scan(&stored)
 		} else {
-			err = tx.QueryRow(ctx, `update customer_change_policy set approval_required = $4, updated_by = $5, version = version + 1, updated_at = now()
-				where tenant_id = $1 and legal_entity_id = $2 and customer_id = $3 and version = $6 returning version`,
-				p.TenantID, in.LegalEntityID, in.CustomerID, in.ApprovalRequired, actor, version).Scan(&stored)
+			err = tx.QueryRow(ctx, `update customer_change_policy set approval_required = $4,
+					approval_threshold = case when $10 then approval_threshold else $5 end,
+					threshold_currency = case when $10 then threshold_currency else nullif($6, '') end,
+					approver_user_ids = case when $11 then approver_user_ids else $7::text[]::uuid[] end,
+					updated_by = $8, version = version + 1, updated_at = now()
+				where tenant_id = $1 and legal_entity_id = $2 and customer_id = $3 and version = $9 returning version`,
+				p.TenantID, in.LegalEntityID, in.CustomerID, in.ApprovalRequired, in.ApprovalThreshold, in.ThresholdCurrency, approvers, actor, version,
+				in.KeepThreshold, in.KeepApprovers).Scan(&stored)
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			return versionConflict()
@@ -454,7 +568,25 @@ func (s *Postgres) PutChangePolicy(ctx context.Context, in ChangePolicy, version
 			return err
 		}
 		return enqueue(ctx, tx, "changepolicy", in.CustomerID, salesevents.ChangePolicyChanged, p.TenantID, salesevents.ChangePolicyChangedData{
-			LegalEntityID: in.LegalEntityID, CustomerID: in.CustomerID, ApprovalRequired: out.ApprovalRequired, Actor: actor, Version: out.Version})
+			LegalEntityID: in.LegalEntityID, CustomerID: in.CustomerID, ApprovalRequired: out.ApprovalRequired, ApprovalThreshold: thresholdString(out.ApprovalThreshold),
+			ThresholdCurrency: out.ThresholdCurrency, ApproverIDs: out.ApproverIDs, Actor: actor, Version: out.Version})
 	})
 	return out, err
+}
+
+func thresholdString(d *decimal.Decimal) string {
+	if d == nil {
+		return ""
+	}
+	return d.StringFixed(4)
+}
+
+// firstField names the first (alphabetical) invalid field of a validation map.
+func firstField(f map[string]string) string {
+	keys := make([]string, 0, len(f))
+	for k := range f {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys[0] + " " + f[keys[0]]
 }

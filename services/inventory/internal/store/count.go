@@ -40,13 +40,13 @@ func (s *Postgres) CreateCountPlan(ctx context.Context, key string, in domain.Co
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var id string
 		if err := tx.QueryRow(ctx, `insert into count_plan (tenant_id, legal_entity_id, id, name, warehouse, currency, unit, tolerance_pct,
-			tolerance_value, blind, freeze_stock, four_eyes, location_from, location_to, abc_class, sample_pct, min_days_since_count, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+			tolerance_value, blind, freeze_stock, four_eyes, location_from, location_to, abc_class, sample_pct, min_days_since_count, include_vendor_owned, idempotency_key)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 			on conflict (tenant_id, idempotency_key) do update set name = count_plan.name
 			returning id::text, (xmax = 0)`,
 			tp.TenantID, in.LegalEntityID, ids.New(), strings.TrimSpace(in.Name), optionalText(in.Warehouse), in.Currency, in.Unit,
 			in.TolerancePct.String(), in.ToleranceValue.String(), in.Blind, in.FreezeStock, in.FourEyes, optionalText(in.LocationFrom),
-			optionalText(in.LocationTo), optionalText(in.ABCClass), optionalDecimal(in.SamplePct), optionalInt(in.MinDaysSinceCount), key).Scan(&id, &inserted); err != nil {
+			optionalText(in.LocationTo), optionalText(in.ABCClass), optionalDecimal(in.SamplePct), optionalInt(in.MinDaysSinceCount), in.IncludeVendorOwned, key).Scan(&id, &inserted); err != nil {
 			return scopeProblem(err)
 		}
 		var err error
@@ -59,7 +59,7 @@ func (s *Postgres) CreateCountPlan(ctx context.Context, key string, in domain.Co
 	if !inserted && (out.LegalEntityID != in.LegalEntityID || out.Name != strings.TrimSpace(in.Name) || out.Warehouse != in.Warehouse ||
 		out.Currency != in.Currency || out.Unit != in.Unit || !out.TolerancePct.Equal(in.TolerancePct) ||
 		!out.ToleranceValue.Equal(in.ToleranceValue) || out.Blind != in.Blind || out.FreezeStock != in.FreezeStock || out.FourEyes != in.FourEyes ||
-		out.LocationFrom != in.LocationFrom || out.LocationTo != in.LocationTo || out.ABCClass != in.ABCClass || !out.SamplePct.Equal(in.SamplePct) || out.MinDaysSinceCount != in.MinDaysSinceCount) {
+		out.LocationFrom != in.LocationFrom || out.LocationTo != in.LocationTo || out.ABCClass != in.ABCClass || !out.SamplePct.Equal(in.SamplePct) || out.MinDaysSinceCount != in.MinDaysSinceCount || out.IncludeVendorOwned != in.IncludeVendorOwned) {
 		return domain.CountPlan{}, false, problem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request body")
 	}
 	return out, inserted, nil
@@ -135,14 +135,14 @@ func (s *Postgres) GenerateCountSheet(ctx context.Context, planID, key string) (
 
 // snapshotLines writes one sheet line per on-hand row of the plan holding
 // physical stock, in (product, dimension set) order. Vendor-owned rows are
-// left out: a count variance posts a valued COUNT journal, which vendor-owned
-// stock never carries (BR-16.14). A plan with MinDaysSinceCount keeps only rows
+// left out unless the plan includes them (their variance posts quantity only,
+// BR-16.14). A plan with MinDaysSinceCount keeps only rows
 // whose last posted count is older than that many days, or never counted.
 func snapshotLines(ctx context.Context, tx pgx.Tx, tenantID string, plan domain.CountPlan, sheetID string) error {
 	rows, err := tx.Query(ctx, `select o.product_id::text, o.dimension_set_hash, (o.posted_qty + o.received + o.registered - o.deducted - o.picked)::text
 		from on_hand o join dimension_set d on d.tenant_id = o.tenant_id and d.hash = o.dimension_set_hash
 		where o.tenant_id = $1 and o.legal_entity_id = $2 and ($3 = '' or d.dims->>'warehouse' = $3)
-		  and o.posted_qty + o.received + o.registered - o.deducted - o.picked <> 0 and d.dims->>'owner' is null
+		  and o.posted_qty + o.received + o.registered - o.deducted - o.picked <> 0 and ($8 or d.dims->>'owner' is null)
 		  and ($4 = '' or d.dims->>'location' collate "C" >= $4 collate "C")
 		  and ($5 = '' or d.dims->>'location' collate "C" <= $5 collate "C")
 		  and ($6 = '' or exists (select 1 from abc_classification c where c.tenant_id = o.tenant_id and c.product_id = o.product_id
@@ -152,7 +152,7 @@ func snapshotLines(ctx context.Context, tx pgx.Tx, tenantID string, plan domain.
 		  and ($7 = 0 or not exists (select 1 from count_sheet_line cl join count_sheet cs on cs.tenant_id = cl.tenant_id and cs.id = cl.sheet_id
 		       where cl.tenant_id = o.tenant_id and cl.product_id = o.product_id and cl.dimension_set_hash = o.dimension_set_hash
 		         and cs.legal_entity_id = o.legal_entity_id and cs.status = 'POSTED' and cl.counted_qty is not null and cl.counted_at > now() - make_interval(days => $7)))
-		order by o.product_id, o.dimension_set_hash`, tenantID, plan.LegalEntityID, plan.Warehouse, plan.LocationFrom, plan.LocationTo, plan.ABCClass, plan.MinDaysSinceCount)
+		order by o.product_id, o.dimension_set_hash`, tenantID, plan.LegalEntityID, plan.Warehouse, plan.LocationFrom, plan.LocationTo, plan.ABCClass, plan.MinDaysSinceCount, plan.IncludeVendorOwned)
 	if err != nil {
 		return err
 	}
@@ -377,7 +377,11 @@ func countVariances(ctx context.Context, tx pgx.Tx, tenantID string, sheet domai
 	variances := map[string]decimal.Decimal{}
 	approval := ""
 	for _, it := range items {
-		if err := lockRow(ctx, tx, tenantID, sheet.LegalEntityID, plan.Currency, it.row); err != nil {
+		currency := plan.Currency
+		if domain.VendorOwned(it.row.dims) {
+			currency = "" // vendor-owned rows are never valued, in any currency
+		}
+		if err := lockRow(ctx, tx, tenantID, sheet.LegalEntityID, currency, it.row); err != nil {
 			return nil, nil, "", err
 		}
 		book := it.row.oh.PhysicalInvent()
@@ -436,13 +440,13 @@ func (s *Postgres) postCountJournal(ctx context.Context, tx pgx.Tx, tenantID str
 
 const countPlanColumns = `id::text, legal_entity_id::text, name, coalesce(warehouse, ''), currency::text, unit, tolerance_pct::text,
 	tolerance_value::text, blind, freeze_stock, four_eyes, coalesce(location_from, ''), coalesce(location_to, ''), coalesce(abc_class, ''),
-	coalesce(sample_pct, 0)::text, coalesce(min_days_since_count, 0), created_at`
+	coalesce(sample_pct, 0)::text, coalesce(min_days_since_count, 0), include_vendor_owned, created_at`
 
 func scanCountPlan(row pgx.Row) (domain.CountPlan, error) {
 	var p domain.CountPlan
 	var pct, val, sample string
 	if err := row.Scan(&p.ID, &p.LegalEntityID, &p.Name, &p.Warehouse, &p.Currency, &p.Unit, &pct, &val, &p.Blind, &p.FreezeStock, &p.FourEyes,
-		&p.LocationFrom, &p.LocationTo, &p.ABCClass, &sample, &p.MinDaysSinceCount, &p.CreatedAt); err != nil {
+		&p.LocationFrom, &p.LocationTo, &p.ABCClass, &sample, &p.MinDaysSinceCount, &p.IncludeVendorOwned, &p.CreatedAt); err != nil {
 		return p, err
 	}
 	p.TolerancePct, p.ToleranceValue = decimal.RequireFromString(pct), decimal.RequireFromString(val)

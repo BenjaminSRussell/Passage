@@ -63,6 +63,10 @@ type TraceStep struct {
 	// that found a record did not apply: an exclusion group chose another member (FR-26.8).
 	StepNo int    `json:"stepNo,omitempty"`
 	Reason string `json:"reason,omitempty"`
+	// Basis is set on the TOTAL_DISC step when it applied to the GROSS line amounts
+	// (total_discount_basis); absent under AFTER_LINE_DISC, so the explain content address of a
+	// document priced after line discounts is the one it had before the basis existed.
+	Basis string `json:"basis,omitempty"`
 }
 
 // LineResult is the priced line. Error is set (and the amounts are zero) when no price exists.
@@ -95,6 +99,8 @@ type Result struct {
 	Trace     []TraceStep     `json:"trace"`
 	// Procedure is the procedure version that drove the resolution; nil under the reference order.
 	Procedure *ProcedureRef `json:"procedure,omitempty"`
+	// PricingDate is the day the document was priced on (BR-26.2), YYYY-MM-DD.
+	PricingDate string `json:"pricingDate"`
 }
 
 // Resolve prices every line and then the order. It is a pure function of its input.
@@ -109,11 +115,12 @@ func Resolve(in Input) Result {
 		recs = bucket(in.Records)
 	}
 	groups := groupQuantities(in.Lines)
-	res := Result{Currency: in.Header.Currency, Lines: make([]LineResult, 0, len(in.Lines)), Applied: []Applied{}, Trace: []TraceStep{}}
+	res := Result{Currency: in.Header.Currency, Lines: make([]LineResult, 0, len(in.Lines)), Applied: []Applied{}, Trace: []TraceStep{},
+		PricingDate: dayOf(in.Header.PricingDate)}
 	if in.Procedure != nil && len(in.Procedure.Steps) > 0 {
 		res.Procedure = &ProcedureRef{ID: in.Procedure.ID, Name: in.Procedure.Name, Version: in.Procedure.Version}
 	}
-	sum, base, qty, allQty := decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero
+	sum, base, gross, qty, allQty := decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero
 	for _, line := range in.Lines {
 		lr := resolveLine(in.Header, line, recs, plan, groups[groupKey(line)])
 		res.Lines = append(res.Lines, lr)
@@ -124,6 +131,7 @@ func Resolve(in Input) Result {
 		allQty = allQty.Add(line.Quantity)
 		if !lr.Exclusive {
 			base = base.Add(lr.LineNet)
+			gross = gross.Add(roundMinor(lr.Quantity.Mul(lr.UnitPrice), in.Header.Currency))
 			qty = qty.Add(line.Quantity)
 		}
 	}
@@ -144,19 +152,31 @@ func Resolve(in Input) Result {
 			if !base.IsPositive() {
 				continue
 			}
-			rec, value, access, step := evaluate(t, in.Header, Line{Quantity: qty}, recs, base)
+			// total_discount_basis GROSS applies the discount to the line amounts at the PRICE step's
+			// unit price; the discount is then capped at the nets it can come off.
+			discBase := base
+			if in.TotalDiscountBasis == TotalBasisGross {
+				discBase = gross
+			}
+			rec, value, access, step := evaluate(t, in.Header, Line{Quantity: qty}, recs, discBase)
 			step.StepNo = st.StepNo
+			if in.TotalDiscountBasis == TotalBasisGross {
+				step.Basis = TotalBasisGross
+			}
 			res.Trace = append(res.Trace, step)
 			if rec == nil {
 				continue
 			}
 			discounted := roundMinor(value, in.Header.Currency)
+			if cut := discBase.Sub(discounted); cut.GreaterThan(base) {
+				discounted = discBase.Sub(base)
+			}
 			ap := Applied{Type: t, RecordID: rec.ID, Access: access, StepNo: st.StepNo, AccountKey: st.AccountKey}
 			if st.Statistical {
-				change := discounted.Sub(base)
+				change := discounted.Sub(discBase)
 				ap.Statistical, ap.Amount = true, &change
 			} else {
-				res.TotalDiscount = base.Sub(discounted)
+				res.TotalDiscount = discBase.Sub(discounted)
 				res.OrderNet = res.OrderNet.Sub(res.TotalDiscount)
 			}
 			res.Applied = append(res.Applied, ap)

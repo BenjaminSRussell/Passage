@@ -70,7 +70,7 @@ export const defaultRoutes: Record<string, Reply> = {
   "GET /hierarchy-versions/v3": () => json({ ...versionList[0], version: 7, nodes: draftNodes }),
 };
 
-export const allDuties = ["org.read", "org.hierarchy.write", "org.hierarchy.publish", "org.hierarchy.backdate"];
+export const allDuties = ["org.read", "org.hierarchy.write", "org.hierarchy.publish", "org.hierarchy.backdate", "tenant.administer"];
 
 export function renderPage(overrides: Record<string, Reply> = {}, duties: string[] = allDuties) {
   const fetchMock = serve({ ...defaultRoutes, ...overrides });

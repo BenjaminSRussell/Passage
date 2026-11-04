@@ -32,9 +32,9 @@ func (s *Postgres) CreatePlan(ctx context.Context, idem Idem, plan domain.Plan, 
 			}
 			for _, st := range plan.Steps {
 				if _, err := tx.Exec(ctx, `insert into cutover_step (tenant_id, plan_id, seq, offset_minutes, name, owner, planned_duration_min,
-					actual_duration_min, status, go_nogo, pack)
-					values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-					plan.PlanID, st.Seq, st.OffsetMin, st.Name, st.Owner, st.PlannedDurationMin, st.ActualDurationMin, st.Status, st.GoNoGo, st.Pack); err != nil {
+					actual_duration_min, status, go_nogo, pack, entity)
+					values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+					plan.PlanID, st.Seq, st.OffsetMin, st.Name, st.Owner, st.PlannedDurationMin, st.ActualDurationMin, st.Status, st.GoNoGo, st.Pack, st.Entity); err != nil {
 					return domain.Plan{}, fmt.Errorf("insert cutover_step: %w", err)
 				}
 			}
@@ -73,7 +73,7 @@ func loadSteps(ctx context.Context, tx pgx.Tx, plans []*domain.Plan) error {
 		planIDs = append(planIDs, p.PlanID)
 	}
 	rows, err := tx.Query(ctx, `select plan_id::text, seq, offset_minutes, name, owner, planned_duration_min, actual_duration_min, status,
-		go_nogo, pack, completed_by, completed_at, started_at, started_by
+		go_nogo, pack, entity, completed_by, completed_at, started_at, started_by
 		from cutover_step where tenant_id = current_setting('passage.tenant_id', true)::uuid and plan_id = any($1::uuid[]) order by plan_id, seq`, planIDs)
 	if err != nil {
 		return err
@@ -83,7 +83,7 @@ func loadSteps(ctx context.Context, tx pgx.Tx, plans []*domain.Plan) error {
 		var planID string
 		var st domain.Step
 		if err := rows.Scan(&planID, &st.Seq, &st.OffsetMin, &st.Name, &st.Owner, &st.PlannedDurationMin, &st.ActualDurationMin, &st.Status,
-			&st.GoNoGo, &st.Pack, &st.CompletedBy, &st.CompletedAt, &st.StartedAt, &st.StartedBy); err != nil {
+			&st.GoNoGo, &st.Pack, &st.Entity, &st.CompletedBy, &st.CompletedAt, &st.StartedAt, &st.StartedBy); err != nil {
 			return err
 		}
 		byID[planID].Steps = append(byID[planID].Steps, st)

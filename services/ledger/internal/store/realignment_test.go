@@ -229,10 +229,10 @@ func TestPostgres_RealignmentRefusesBadRequestsAndClosedPeriods(t *testing.T) {
 // that is not registered or is suspended is refused like any posting.
 func TestPostgres_RealignmentValidatesTheNewValue(t *testing.T) {
 	e := realignSetup(t)
-	if _, _, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, domain.DimensionValue{Attribute: "DEPT", Value: "D150", Name: "Merged"}); err != nil {
+	if _, _, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, 0, domain.DimensionValue{Attribute: "DEPT", Value: "D150", Name: "Merged"}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if _, _, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, domain.DimensionValue{Attribute: "DEPT", Value: "D100", Name: "Old", Suspended: true}); err != nil {
+	if _, _, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, 0, domain.DimensionValue{Attribute: "DEPT", Value: "D100", Name: "Old", Suspended: true}); err != nil {
 		t.Fatalf("suspend old: %v", err)
 	}
 	run, _, err := e.store.CreateRealignment(e.ctx, realignRequest(e, "VAL-1"))
@@ -244,7 +244,7 @@ func TestPostgres_RealignmentValidatesTheNewValue(t *testing.T) {
 	}
 
 	e2 := realignSetup(t)
-	if _, _, err := e2.store.PutDimensionValue(e2.ctx, e2.ledger.ID, domain.DimensionValue{Attribute: "DEPT", Value: "D150", Name: "Merged", Suspended: true}); err != nil {
+	if _, _, err := e2.store.PutDimensionValue(e2.ctx, e2.ledger.ID, 0, domain.DimensionValue{Attribute: "DEPT", Value: "D150", Name: "Merged", Suspended: true}); err != nil {
 		t.Fatalf("register inactive: %v", err)
 	}
 	run2, _, err := e2.store.CreateRealignment(e2.ctx, realignRequest(e2, "VAL-2"))
