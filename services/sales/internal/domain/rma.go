@@ -23,12 +23,15 @@ const (
 	RMAReceive     = "receive"
 	RMAInspect     = "inspect"
 	RMADisposition = "disposition"
+	RMACreditStart = "credit-start"
 	RMACredit      = "credit"
 
 	DispositionCreditOnly    = "CREDIT_ONLY"
 	DispositionReturnToStock = "RETURN_TO_STOCK"
 
 	CostOriginal = "ORIGINAL_COST"
+	CostCurrent  = "CURRENT_COST"
+	CostZero     = "ZERO"
 
 	AccountSalesReturns = "4000"
 	AccountRestocking   = "4200"
@@ -145,7 +148,8 @@ func AdvanceRMA(status, action string, now time.Time) (string, *time.Time, error
 		RMAReceive:     RMAAuthorized,
 		RMAInspect:     RMAReceived,
 		RMADisposition: RMAInspected,
-		RMACredit:      RMADispositioned,
+		RMACreditStart: RMADispositioned,
+		RMACredit:      RMACredited,
 	}
 	from, ok := want[action]
 	if !ok {
@@ -159,6 +163,7 @@ func AdvanceRMA(status, action string, now time.Time) (string, *time.Time, error
 		RMAReceive:     RMAReceived,
 		RMAInspect:     RMAInspected,
 		RMADisposition: RMADispositioned,
+		RMACreditStart: RMACredited,
 		RMACredit:      RMAClosed,
 	}[action]
 	var expires *time.Time
@@ -167,6 +172,20 @@ func AdvanceRMA(status, action string, now time.Time) (string, *time.Time, error
 		expires = &day
 	}
 	return next, expires, nil
+}
+
+// ValidCostMethod reports whether m is a return cost method; the empty method means ORIGINAL_COST.
+func ValidCostMethod(m string) bool {
+	return m == "" || m == CostOriginal || m == CostCurrent || m == CostZero
+}
+
+// CreditQuantity is the quantity credited for a line: the accepted quantity, or the whole expected
+// quantity of a line created CREDIT_ONLY that no goods came back for.
+func CreditQuantity(creditOnly bool, expected, received, accepted decimal.Decimal) decimal.Decimal {
+	if creditOnly && received.IsZero() {
+		return expected
+	}
+	return accepted
 }
 
 // PhysicalReturn reports whether a disposition receives goods into stock.

@@ -74,7 +74,7 @@ func (a *API) Routes(r chi.Router) {
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/shipments", a.listShipments)
 	r.With(authz.RequireAnyDuty("WarehouseView", "fulfillment.shipment.read")).Get("/v1/fulfillment/shipments/{id}", a.getShipment)
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/packing-slips", a.listPackingSlips)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/packing-slips/{id}", a.getPackingSlip)
+	r.With(authz.RequireAnyDuty("WarehouseView", "fulfillment.packing-slip.read")).Get("/v1/fulfillment/packing-slips/{id}", a.getPackingSlip)
 	r.With(authz.RequireDuty("WarehousePick")).Post("/v1/fulfillment/shipments/{id}:confirm-pick", a.confirmPick)
 	r.With(authz.RequireDuty("WarehousePack")).Post("/v1/fulfillment/shipments/{id}/containers", a.packContainer)
 	r.With(authz.RequireDuty("PackingSlipPost")).Post("/v1/fulfillment/shipments/{id}:post-packing-slip", a.postPackingSlip)

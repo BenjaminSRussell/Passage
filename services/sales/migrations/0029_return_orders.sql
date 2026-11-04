@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS return_order (
   legal_entity_id uuid NOT NULL,
   rma_number text NOT NULL,
   customer_id uuid NOT NULL,
-  original_invoice_id uuid,
+  original_invoice_id uuid NOT NULL,
+  original_invoice_number text NOT NULL,
   return_reason_code text NOT NULL CHECK (char_length(return_reason_code) BETWEEN 1 AND 40),
   status text NOT NULL CHECK (status IN (
     'REQUESTED', 'AUTHORIZED', 'RECEIVED', 'INSPECTED', 'DISPOSITIONED', 'CREDITED', 'CLOSED', 'REJECTED', 'EXPIRED')),
@@ -23,6 +24,9 @@ CREATE TABLE IF NOT EXISTS return_order (
   journal_posting_id text,
   created_by text NOT NULL,
   updated_by text NOT NULL,
+  authorized_by text,
+  disposition_date date,
+  credit_posting_date date,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, id),
@@ -33,6 +37,7 @@ CREATE TABLE IF NOT EXISTS return_order (
 CREATE TABLE IF NOT EXISTS return_order_line (
   tenant_id uuid NOT NULL,
   id uuid NOT NULL,
+  legal_entity_id uuid NOT NULL,
   return_order_id uuid NOT NULL,
   line_no int NOT NULL CHECK (line_no >= 1),
   product_id uuid NOT NULL,
@@ -40,6 +45,10 @@ CREATE TABLE IF NOT EXISTS return_order_line (
   warehouse_id uuid,
   quantity_expected numeric(20,6) NOT NULL CHECK (quantity_expected > 0),
   quantity_received numeric(20,6) NOT NULL DEFAULT 0 CHECK (quantity_received >= 0 AND quantity_received <= quantity_expected),
+  quantity_accepted numeric(20,6) NOT NULL DEFAULT 0 CHECK (quantity_accepted >= 0 AND quantity_accepted <= quantity_received),
+  credit_only boolean NOT NULL DEFAULT false,
+  order_line_id uuid,
+  unit_cost numeric(20,6) CHECK (unit_cost IS NULL OR unit_cost >= 0),
   unit text NOT NULL DEFAULT 'EA',
   unit_price numeric(20,6) NOT NULL CHECK (unit_price >= 0),
   disposition_code text CHECK (disposition_code IS NULL OR disposition_code IN ('CREDIT_ONLY', 'RETURN_TO_STOCK')),
@@ -68,6 +77,10 @@ ALTER TABLE return_order_line FORCE ROW LEVEL SECURITY;
 CREATE POLICY return_order_line_tenant_access ON return_order_line AS PERMISSIVE
   USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
+CREATE POLICY return_order_line_legal_entity_scope ON return_order_line AS RESTRICTIVE
+  USING (current_setting('passage.legal_entity_scopes', true) = '*'
+         OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
+CREATE INDEX IF NOT EXISTS return_order_invoice ON return_order (tenant_id, original_invoice_id);
 
 DO $$
 BEGIN

@@ -343,7 +343,7 @@ type Store interface {
 	ListReturnOrders(ctx context.Context, f ReturnOrderFilter) ([]ReturnOrder, error)
 	AuthorizeReturnOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ReturnOrder, error)
 	ReceiveReturnOrder(ctx context.Context, id string, version int, lines []ReceiveLine, actor string, now time.Time) (ReturnOrder, error)
-	InspectReturnOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ReturnOrder, error)
+	InspectReturnOrder(ctx context.Context, id string, version int, lines []InspectLine, actor string, now time.Time) (ReturnOrder, error)
 	DispositionReturnOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ReturnOrder, error)
 	CreditReturnOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ReturnOrder, error)
 	Ping(ctx context.Context) error
@@ -355,6 +355,8 @@ type Postgres struct {
 	crypt     *fieldcrypt.Keys
 	inventory InventoryReceiver
 	ar        ARCreditor
+	invoices  InvoiceReader
+	costs     CostReader
 }
 
 // New returns a Postgres store.

@@ -342,6 +342,8 @@
       {"resource": "/v1/inventory/holds:release-source", "methods": ["POST"]}
     ]},
     "fulfillment.shipment.read": {"service_only": true, "permissions": [{"resource": "/v1/fulfillment/shipments/*", "methods": ["GET"]}]},
+    "ar.rmacredit.post": {"service_only": true, "permissions": [{"resource": "/v1/receivables/rma-credits", "methods": ["POST"]}]},
+    "fulfillment.packing-slip.read": {"service_only": true, "permissions": [{"resource": "/v1/fulfillment/packing-slips/*", "methods": ["GET"]}]},
     "billing.invoice.read": {"service_only": true, "permissions": [{"resource": "/v1/billing/invoices/*", "methods": ["GET"]}]},
     "sales.order.lookup": {"service_only": true, "permissions": [{"resource": "/v1/sales/orders/*", "methods": ["GET"]}]},
     "inventory.hold.apply": {"service_only": true, "permissions": [
@@ -3042,7 +3044,11 @@
     },
     "sales": {
       "product": ["product.configuration.read"],
-      "production": ["production.order.create-from-sales"]
+      "production": ["production.order.create-from-sales"],
+      "billing": ["billing.invoice.read"],
+      "fulfillment": ["fulfillment.packing-slip.read"],
+      "inventory": ["inventory.read", "inventory.journal.write", "inventory.journal.post"],
+      "receivables": ["ar.rmacredit.post"]
     },
     "ledger": {
       "close": ["period.check"],

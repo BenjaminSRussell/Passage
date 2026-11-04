@@ -27,7 +27,6 @@ type returnLineRequest struct {
 	WarehouseID      string  `json:"warehouseId"`
 	Quantity         string  `json:"quantity"`
 	Unit             string  `json:"unit"`
-	UnitPrice        string  `json:"unitPrice"`
 	Disposition      string  `json:"disposition"`
 	ReturnCostMethod string  `json:"returnCostMethod"`
 	RestockingPct    *string `json:"restockingPct"`
@@ -36,9 +35,8 @@ type returnLineRequest struct {
 type createReturnRequest struct {
 	LegalEntityID     string              `json:"legalEntityId"`
 	CustomerID        string              `json:"customerId"`
-	OriginalInvoiceID *string             `json:"originalInvoiceId"`
+	OriginalInvoiceID string              `json:"originalInvoiceId"`
 	ReturnReasonCode  string              `json:"returnReasonCode"`
-	Currency          string              `json:"currency"`
 	Lines             []returnLineRequest `json:"lines"`
 }
 
@@ -49,6 +47,21 @@ type receiveLineRequest struct {
 
 type receiveReturnRequest struct {
 	Lines []receiveLineRequest `json:"lines"`
+}
+
+type inspectLineRequest struct {
+	LineNo      int    `json:"lineNo"`
+	Accepted    string `json:"quantityAccepted"`
+	Disposition string `json:"disposition"`
+}
+
+type inspectReturnRequest struct {
+	Lines []inspectLineRequest `json:"lines"`
+}
+
+var returnStatuses = map[string]bool{
+	domain.RMARequested: true, domain.RMAAuthorized: true, domain.RMAReceived: true, domain.RMAInspected: true, domain.RMADispositioned: true,
+	domain.RMACredited: true, domain.RMAClosed: true, domain.RMARejected: true, domain.RMAExpired: true,
 }
 
 func (a *API) registerReturnOrders(r chi.Router) {
@@ -108,24 +121,21 @@ func buildReturnOrder(req createReturnRequest, key string) (store.NewReturnOrder
 	if !ids.Valid(req.LegalEntityID) {
 		fields["legalEntityId"] = "must be a UUID"
 	}
-	if !ids.Valid(req.CustomerID) {
-		fields["customerId"] = "must be a UUID"
+	if !ids.Valid(req.OriginalInvoiceID) {
+		fields["originalInvoiceId"] = "is required and must be a UUID"
 	}
-	if req.OriginalInvoiceID != nil && !ids.Valid(*req.OriginalInvoiceID) {
-		fields["originalInvoiceId"] = "must be a UUID"
+	if req.CustomerID != "" && !ids.Valid(req.CustomerID) {
+		fields["customerId"] = "must be a UUID"
 	}
 	req.ReturnReasonCode = strings.TrimSpace(req.ReturnReasonCode)
 	if n := len([]rune(req.ReturnReasonCode)); n < 1 || n > 40 {
 		fields["returnReasonCode"] = "must be 1 to 40 characters"
 	}
-	if !currencyCode.MatchString(req.Currency) {
-		fields["currency"] = "must be a 3-letter ISO code"
-	}
 	if n := len(req.Lines); n < 1 || n > maxLines {
 		fields["lines"] = fmt.Sprintf("must have 1 to %d lines", maxLines)
 	}
 	in := store.NewReturnOrder{LegalEntityID: req.LegalEntityID, CustomerID: req.CustomerID, OriginalInvoiceID: req.OriginalInvoiceID,
-		ReturnReasonCode: req.ReturnReasonCode, Currency: req.Currency, IdempotencyKey: key}
+		ReturnReasonCode: req.ReturnReasonCode, IdempotencyKey: key}
 	seen := map[int]bool{}
 	for i, l := range req.Lines {
 		name := fmt.Sprintf("lines[%d]", i)
@@ -146,16 +156,15 @@ func buildReturnOrder(req createReturnRequest, key string) (store.NewReturnOrder
 		if err != nil || !qty.IsPositive() {
 			fields[name+".quantity"] = "must be a positive decimal"
 		}
-		price, err := decimal.NewFromString(l.UnitPrice)
-		if err != nil || price.IsNegative() {
-			fields[name+".unitPrice"] = "must be a non-negative decimal"
+		if !domain.ValidCostMethod(l.ReturnCostMethod) {
+			fields[name+".returnCostMethod"] = "must be ORIGINAL_COST, CURRENT_COST or ZERO"
 		}
 		nl := store.NewReturnLine{LineNo: l.LineNo, ProductID: l.ProductID, SiteID: l.SiteID, WarehouseID: l.WarehouseID,
-			Quantity: qty, Unit: l.Unit, UnitPrice: price, Disposition: l.Disposition, ReturnCostMethod: l.ReturnCostMethod}
+			Quantity: qty, Unit: l.Unit, Disposition: l.Disposition, ReturnCostMethod: l.ReturnCostMethod}
 		if l.RestockingPct != nil {
 			pct, err := decimal.NewFromString(*l.RestockingPct)
-			if err != nil || pct.IsNegative() {
-				fields[name+".restockingPct"] = "must be a non-negative decimal"
+			if err != nil || pct.IsNegative() || pct.GreaterThan(decimal.NewFromInt(100)) {
+				fields[name+".restockingPct"] = "must be a decimal from 0 to 100"
 			} else {
 				nl.RestockingPct = &pct
 			}
@@ -176,6 +185,9 @@ func (a *API) listReturnOrders(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := store.ReturnOrderFilter{LegalEntityID: legalEntity, CustomerID: q.Get("customerId"), Status: q.Get("status")}
 	fields := map[string]string{}
+	if f.Status != "" && !returnStatuses[f.Status] {
+		fields["status"] = "must be a return order status"
+	}
 	if f.CustomerID != "" && !ids.Valid(f.CustomerID) {
 		fields["customerId"] = "must be a UUID"
 	}
@@ -227,7 +239,50 @@ func (a *API) authorizeReturnOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) inspectReturnOrder(w http.ResponseWriter, r *http.Request) {
-	a.rmaCommand(w, r, "inspect return order", a.store.InspectReturnOrder)
+	returnRoute(func(w http.ResponseWriter, r *http.Request, id string) {
+		version, ok := ifMatch(w, r)
+		if !ok {
+			return
+		}
+		var req inspectReturnRequest
+		if err := httpx.Decode(r, &req); err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		fields := map[string]string{}
+		var lines []store.InspectLine
+		seen := map[int]bool{}
+		for i, l := range req.Lines {
+			name := fmt.Sprintf("lines[%d]", i)
+			if l.LineNo < 1 || seen[l.LineNo] {
+				fields[name+".lineNo"] = "must be a line number, once per call"
+			}
+			seen[l.LineNo] = true
+			accepted, err := decimal.NewFromString(l.Accepted)
+			if err != nil || accepted.IsNegative() {
+				fields[name+".quantityAccepted"] = "must be a decimal of 0 or more"
+			}
+			if l.Disposition != domain.DispositionReturnToStock && l.Disposition != domain.DispositionCreditOnly {
+				fields[name+".disposition"] = "must be RETURN_TO_STOCK or CREDIT_ONLY"
+			}
+			lines = append(lines, store.InspectLine{LineNo: l.LineNo, Accepted: accepted, Disposition: l.Disposition})
+		}
+		if len(lines) == 0 {
+			fields["lines"] = "must name every received line"
+		}
+		if len(fields) > 0 {
+			validationFailed(w, r, fields)
+			return
+		}
+		p, _ := tenant.FromContext(r.Context())
+		saved, err := a.store.InspectReturnOrder(r.Context(), id, version, lines, p.UserID, a.now().UTC())
+		if err != nil {
+			a.fail(w, r, "inspect return order", err)
+			return
+		}
+		setETag(w, saved.Version)
+		httpx.JSON(w, http.StatusOK, saved)
+	})(w, r)
 }
 
 func (a *API) dispositionReturnOrder(w http.ResponseWriter, r *http.Request) {
@@ -260,8 +315,8 @@ func (a *API) receiveReturnOrder(w http.ResponseWriter, r *http.Request) {
 				}
 				seen[l.LineNo] = true
 				qty, err := decimal.NewFromString(l.Quantity)
-				if err != nil || !qty.IsPositive() {
-					fields[name+".quantity"] = "must be a positive decimal"
+				if err != nil || qty.IsNegative() {
+					fields[name+".quantity"] = "must be a decimal of 0 or more"
 				}
 				lines = append(lines, store.ReceiveLine{LineNo: l.LineNo, Quantity: qty})
 			}

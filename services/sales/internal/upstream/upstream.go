@@ -118,7 +118,7 @@ func (c *Client) CreateForLine(ctx context.Context, in ProductionRequest) (order
 	return "", false, fmt.Errorf("production responded with status %d", status)
 }
 
-func (c *Client) do(ctx context.Context, method, target, audience, duty, legalEntityID, idempotencyKey string, payload []byte) (int, []byte, error) {
+func (c *Client) do(ctx context.Context, method, target, audience, duty, legalEntityID, idempotencyKey string, payload []byte, headers ...[2]string) (int, []byte, error) {
 	p, ok := tenant.FromContext(ctx)
 	if !ok {
 		return 0, nil, errors.New("no principal in context")
@@ -132,6 +132,9 @@ func (c *Client) do(ctx context.Context, method, target, audience, duty, legalEn
 	}
 	if idempotencyKey != "" {
 		req.Header.Set("Idempotency-Key", idempotencyKey)
+	}
+	for _, h := range headers {
+		req.Header.Set(h[0], h[1])
 	}
 	signed, err := c.signer.ApplyDuties(req, p, audience, legalEntityID, []string{duty})
 	if err == nil && !signed {

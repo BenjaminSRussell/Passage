@@ -512,17 +512,30 @@ stale `If-Match` `412 SLS-0006`; duty `sales.order.write`. The order page's
 The OpenAPI and AsyncAPI documents pass the doc gates with no FAIL lines.
 
 Wave 30 AC3 adds return orders (`return_order` / `return_order_line`, migration
-0029): create in REQUESTED, then `:authorize` (30-day validity), `:receive`
-(RETURN_TO_STOCK restocks through an `InventoryReceiver` at original cost),
-`:inspect`, `:disposition` and `:credit`. Credit computes restocking (BR-30.3:
-15% with a 25.00 USD / 20.00 EUR floor on RETURN_TO_STOCK, 0% on CREDIT_ONLY),
-asks receivables to post the credit note, and closes the RMA (CREDITED is
-transient). Events: `returnorder.{authorized,received,inspected,dispositioned,credited}.v1`.
-AC-30.5 is covered by `internal/store/rma_e2e_test.go`. Not built: SCRAP /
-REPAIR / REPLACE / REJECT_RETURN_TO_CUSTOMER, tax lines, a live inventory HTTP
-client (tests inject a receiver; without one a receipt id is still stored), and
-a sales HTTP client for receivables (without `ARCreditor`, `:credit` is 503
-`SLS-0121`). Duties stay `sales.order.read` / `sales.order.write`.
+0029): create in REQUESTED from a billing invoice (customer, currency, net unit
+price and the returnable quantity, invoiced less other open RMAs per product,
+come from the invoice; 422 `SLS-0123` above it), `:authorize` by a user other
+than the creator (30-day validity), `:receive` into quarantine (lines left out
+receive 0), `:inspect` (accepted quantity and disposition per received line),
+`:disposition` (restocks the accepted RETURN_TO_STOCK quantity through inventory
+after the state commit, key `rma-receive:<lineId>`, at the ORIGINAL_COST packing
+slip cost, the CURRENT_COST on-hand average or ZERO) and `:credit` (credit from
+accepted quantities, or the whole expected quantity of a line created
+CREDIT_ONLY that nothing came back for; stored as CREDITED, receivables posts the
+note, then CLOSED). A failed restock or credit post leaves the stored state and
+is retried by repeating the command. Credit computes restocking (BR-30.3: 15%
+with a 25.00 USD / 20.00 EUR floor on RETURN_TO_STOCK, 0% on CREDIT_ONLY).
+Events: `returnorder.{authorized,received,inspected,dispositioned,credited}.v1`.
+AC-30.5 is covered by `internal/store/rma_e2e_test.go`. Peers are wired from
+`BILLING_URL`, `FULFILLMENT_URL`, `INVENTORY_URL` (with
+`SALES_RETURN_OFFSET_ACCOUNT`, the MOVEMENT journal's offset account) and
+`RECEIVABLES_URL`; a missing peer answers 503. Not built: SCRAP / REPAIR /
+REPLACE / REJECT_RETURN_TO_CUSTOMER, tax lines, a physical quarantine stock
+status (receive records the quantity only), per-slip cost when one product
+shipped on several packing slips at different costs (the first slip's cost is
+used), and a different return price per invoice line of the same product (the
+weighted average net unit price is used). Duties stay `sales.order.read` /
+`sales.order.write`.
 
 ## Ticket deliverables
 

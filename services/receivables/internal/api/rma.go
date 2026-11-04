@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/shopspring/decimal"
 
@@ -13,11 +14,9 @@ import (
 type rmaCreditRequest struct {
 	RMAID         string          `json:"rmaId"`
 	RMANumber     string          `json:"rmaNumber"`
-	CustomerID    string          `json:"customerId"`
 	LegalEntityID string          `json:"legalEntityId"`
-	Currency      string          `json:"currency"`
+	InvoiceNumber string          `json:"invoiceNumber"`
 	PostingDate   string          `json:"postingDate"`
-	LedgerID      string          `json:"ledgerId"`
 	Gross         decimal.Decimal `json:"gross"`
 	Restocking    decimal.Decimal `json:"restocking"`
 	Net           decimal.Decimal `json:"net"`
@@ -25,11 +24,6 @@ type rmaCreditRequest struct {
 
 func (a *API) postRMACredit(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
-		return
-	}
-	key := r.Header.Get(idempotencyKey)
-	if key == "" {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "Idempotency-Key header is required"))
 		return
 	}
 	var req rmaCreditRequest
@@ -41,20 +35,14 @@ func (a *API) postRMACredit(w http.ResponseWriter, r *http.Request) {
 	if !ids.Valid(req.RMAID) {
 		fields["rmaId"] = "must be a UUID"
 	}
-	if req.RMANumber == "" {
-		fields["rmaNumber"] = "is required"
-	}
-	if !ids.Valid(req.CustomerID) {
-		fields["customerId"] = "must be a UUID"
+	if n := len(req.RMANumber); n < 1 || n > 40 || strings.TrimSpace(req.RMANumber) != req.RMANumber {
+		fields["rmaNumber"] = "must be 1 to 40 characters without surrounding spaces"
 	}
 	if !ids.Valid(req.LegalEntityID) {
 		fields["legalEntityId"] = "must be a UUID"
 	}
-	if req.LedgerID != "" && !ids.Valid(req.LedgerID) {
-		fields["ledgerId"] = "must be a UUID"
-	}
-	if !currencyCode.MatchString(req.Currency) {
-		fields["currency"] = "must be a 3-letter ISO code"
+	if req.InvoiceNumber == "" {
+		fields["invoiceNumber"] = "is required"
 	}
 	if _, err := store.ParseDay(req.PostingDate); err != nil {
 		fields["postingDate"] = "must be YYYY-MM-DD"
@@ -65,13 +53,18 @@ func (a *API) postRMACredit(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, p)
 		return
 	}
+	if err := store.ValidateRMAAmounts(req.Gross, req.Restocking, req.Net); err != nil {
+		p := httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeRMACreditInvalid, "the credit amounts are inconsistent")
+		p.Errors = map[string]string{"amounts": err.Error()}
+		httpx.Fail(w, r, p)
+		return
+	}
 	if !scopeAllows(w, r, req.LegalEntityID) {
 		return
 	}
 	out, err := a.store.PostRMACredit(r.Context(), store.RMACredit{
-		RMAID: req.RMAID, RMANumber: req.RMANumber, CustomerID: req.CustomerID, LegalEntityID: req.LegalEntityID,
-		Currency: req.Currency, PostingDate: req.PostingDate, IdempotencyKey: key, LedgerID: req.LedgerID,
-		Gross: req.Gross, Restocking: req.Restocking, Net: req.Net,
+		RMAID: req.RMAID, RMANumber: req.RMANumber, LegalEntityID: req.LegalEntityID, InvoiceNumber: req.InvoiceNumber,
+		PostingDate: req.PostingDate, Gross: req.Gross, Restocking: req.Restocking, Net: req.Net,
 	})
 	if err != nil {
 		a.fail("post rma credit", w, r, err)

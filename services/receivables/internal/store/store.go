@@ -206,8 +206,9 @@ type Store interface {
 
 // Postgres implements Store on pgx.
 type Postgres struct {
-	pool   *pgxpool.Pool
-	ledger ledgerclient.Ledger
+	pool       *pgxpool.Pool
+	ledger     ledgerclient.Ledger
+	rmaLedgers map[string]string
 }
 
 // New returns a Postgres store over pool.

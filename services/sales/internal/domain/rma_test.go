@@ -64,7 +64,8 @@ func TestRMAAdvance_AuthorizeReceiveInspectDispositionCredit(t *testing.T) {
 		{RMAAuthorized, RMAReceive, RMAReceived},
 		{RMAReceived, RMAInspect, RMAInspected},
 		{RMAInspected, RMADisposition, RMADispositioned},
-		{RMADispositioned, RMACredit, RMAClosed},
+		{RMADispositioned, RMACreditStart, RMACredited},
+		{RMACredited, RMACredit, RMAClosed},
 	} {
 		got, _, err := AdvanceRMA(step.from, step.action, now)
 		if err != nil || got != step.want {

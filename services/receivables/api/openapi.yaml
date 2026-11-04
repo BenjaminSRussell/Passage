@@ -1356,13 +1356,16 @@ paths:
       operationId: postRMACredit
       summary: Post an RMA credit note (AC-30.5)
       description: |
-        Sales calls this after a return order is dispositioned. Creates a CREDIT_NOTE open item
-        (negative amount) keyed by `CN-{rmaNumber}` and posts Dr 4000 gross / Cr 4200 restocking /
-        Cr 1200 net when a ledger id is supplied. A repeat of the same RMA number in the legal
-        entity returns the stored open item.
-      x-passage-duty: ARPaymentPost
-      parameters:
-        - { $ref: "#/components/parameters/IdempotencyKey" }
+        Sales calls this, with a service token, after a return order is dispositioned. The customer
+        and currency come from the original invoice's open item and the ledger from the legal
+        entity's configured ledger (`RECEIVABLES_RMA_LEDGERS`); none is taken from the body. The
+        credit is refused (422 AR-RMA-INVOICE) above what is open on the invoice, counting earlier
+        RMA credits. It creates a CREDIT_NOTE open item (negative net) keyed by `CN-{rmaNumber}`,
+        records the credit PENDING, then posts Dr 4000 gross / Cr 4200 restocking / Cr 1200 net under
+        the journal key `rma-credit:{legalEntityId}:{document}`. A ledger outage backs off (503
+        AR-RMA-GL); a ledger refusal parks the credit (409 AR-RMA-PARKED). A repeat of the same RMA
+        returns the stored values; a repeat with other amounts is 422 idempotency_key_reuse.
+      x-passage-duty: ar.rmacredit.post
       requestBody:
         required: true
         content:
@@ -1376,6 +1379,9 @@ paths:
               schema: { $ref: "#/components/schemas/RMACreditNote" }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
 components:
   securitySchemes:
     bearerAuth:
@@ -2170,25 +2176,26 @@ components:
           items: { $ref: "#/components/schemas/Deduction" }
     RMACreditRequest:
       type: object
-      required: [rmaId, rmaNumber, customerId, legalEntityId, currency, postingDate, gross, restocking, net]
+      additionalProperties: false
+      required: [rmaId, rmaNumber, legalEntityId, invoiceNumber, postingDate, gross, restocking, net]
       properties:
         rmaId: { type: string, format: uuid }
-        rmaNumber: { type: string, minLength: 1 }
-        customerId: { type: string, format: uuid }
+        rmaNumber: { type: string, minLength: 1, maxLength: 40 }
         legalEntityId: { type: string, format: uuid }
-        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        invoiceNumber: { type: string, minLength: 1, description: The original invoice; its open item decides the customer and currency }
         postingDate: { type: string, format: date }
-        ledgerId: { type: string, format: uuid, description: When set, the credit posts Dr 4000 / Cr 4200 / Cr 1200 through the ledger }
         gross: { $ref: "#/components/schemas/Money" }
         restocking: { $ref: "#/components/schemas/Money" }
         net: { $ref: "#/components/schemas/Money" }
     RMACreditNote:
       type: object
-      required: [openItemId, documentNumber, gross, restocking, net]
+      required: [openItemId, documentNumber, journalPostingId, customerId, currency, gross, restocking, net]
       properties:
         openItemId: { type: string, format: uuid }
         documentNumber: { type: string }
         journalPostingId: { type: string }
+        customerId: { type: string, format: uuid }
+        currency: { type: string }
         gross: { $ref: "#/components/schemas/Money" }
         restocking: { $ref: "#/components/schemas/Money" }
         net: { $ref: "#/components/schemas/Money" }

@@ -51,6 +51,11 @@ serviceIdentity:
 upstream:
   productUrl: "http://product:8080"
   productionUrl: "http://production:8080"
+  billingUrl: "http://billing:8080"
+  fulfillmentUrl: "http://fulfillment:8080"
+  inventoryUrl: "http://inventory:8080"
+  receivablesUrl: "http://receivables:8080"
+  returnOffsetAccount: ""
 
 # Field encryption (platform fieldcrypt) for the buyer of a one-time customer
 # order: keysSecret is a Secret with a "keys" entry of id=base64(32 bytes)
