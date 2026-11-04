@@ -1112,6 +1112,8 @@ components:
         ledgerId: {type: string, format: uuid}
         postingSequence: {type: integer, format: int64}
         updatedAt: {type: string, format: date-time}
+        entriesApplied: {type: integer, format: int64, description: Journal entries the ledger consumer has applied for this ledger}
+        entriesPending: {type: integer, format: int64, description: Journal entries that arrived ahead of the high-water mark and wait for an earlier entry; a count that stays above zero means an entry is missing}
     StandardDefinition:
       type: object
       required: [code, name, kind, rows, columns]

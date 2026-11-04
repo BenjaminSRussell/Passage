@@ -179,6 +179,10 @@ export interface LagRow {
   ledgerId: string;
   postingSequence: number;
   updatedAt: string;
+  /** Journal entries the ledger consumer has applied; absent from older services. */
+  entriesApplied?: number;
+  /** Entries that arrived ahead of the mark and wait for an earlier one; absent from older services. */
+  entriesPending?: number;
 }
 
 export interface CalendarPeriod {

@@ -86,6 +86,10 @@ type LagRow struct {
 	LedgerID        string    `json:"ledgerId"`
 	PostingSequence int64     `json:"postingSequence"`
 	UpdatedAt       time.Time `json:"updatedAt"`
+	EntriesApplied  int64     `json:"entriesApplied"`
+	// EntriesPending counts entries that arrived ahead of the mark and wait for
+	// an earlier one; a count that stays above zero means an entry is missing.
+	EntriesPending int64 `json:"entriesPending"`
 }
 
 // CreateRun evaluates a published definition over the reporting read model and
@@ -320,14 +324,17 @@ func (s *Postgres) GetCell(ctx context.Context, runID, row, column string) (doma
 func (s *Postgres) Lag(ctx context.Context) ([]LagRow, error) {
 	var out []LagRow
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select ledger_id::text, posting_sequence, updated_at from reporting_hwm order by ledger_id`)
+		rows, err := tx.Query(ctx, `select h.ledger_id::text, h.posting_sequence, h.updated_at,
+			(select count(*) from reporting_entry_applied a where a.ledger_id = h.ledger_id),
+			(select count(*) from reporting_entry_pending w where w.ledger_id = h.ledger_id)
+			from reporting_hwm h order by h.ledger_id`)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var l LagRow
-			if err := rows.Scan(&l.LedgerID, &l.PostingSequence, &l.UpdatedAt); err != nil {
+			if err := rows.Scan(&l.LedgerID, &l.PostingSequence, &l.UpdatedAt, &l.EntriesApplied, &l.EntriesPending); err != nil {
 				return err
 			}
 			out = append(out, l)

@@ -1,4 +1,4 @@
-# NOT-IMPLEMENTED: PSG-15 (wave 15), after slice 7
+# NOT-IMPLEMENTED: PSG-15 (wave 15), after slice 8
 
 Every deliverable bullet of PSG-15, and every acceptance criterion that slices 1
 to 7 do not fully meet, is listed here. Status is either **later slice of PSG-15**
@@ -21,8 +21,8 @@ platform change outside the wave's owned paths).
 
 | FR | Status | Reason |
 | --- | --- | --- |
-| FR-15.1 read model fed by `journal.posted/reversed/balance.rebuilt/year-end.closed` | **later slice of PSG-15** for the consumer (balances and, from slice 5, journal lines through `PutJournalLines`), HWM upkeep and backfill; **handoff** to wave 11 for the events and to the kernel for consumer inbox helpers. Slice 1 reads `reporting_balance` and `reporting_hwm` as they are, and tests seed them directly. | No consumer exists yet. |
-| FR-15.1 lag SLO and nightly zero-diff verify against `ledger.Balance` | **later slice of PSG-15** | Needs the consumer above and the ledger balance API. |
+| FR-15.1 read model fed by `journal.posted/reversed/balance.rebuilt/year-end.closed` | Slice 8 (consumer core): `consumer.HandleJournalPosted` applies a `dev.passage.ledger.journal.posted.v1` event (source `/passage/ledger/ledger`) through `store.ApplyEntry`. It runs as the service principal `service:finreport-ledger` that the platform eventing consumer puts in the context, narrowed to the entry's legal entity (never all-scope); it fetches the entry's lines through `LineSource` (lines whose count differs from `lineCount` are retried), and the store, in one transaction, writes them to `reporting_journal_line`, upserts their accounting-currency amounts into `reporting_balance` (`currency_type` `acct`) and advances `reporting_hwm`. The read model holds exactly the entries up to the mark (BR-15.6): the ledger keys `journal.posted` by entry id, so one ledger's entries arrive through several partitions and out of order; an entry ahead of the mark waits in `reporting_entry_pending` (migration 0010, lines included) and is applied, with every waiting successor, as soon as the gap closes. A replay changes nothing. Nothing is dead-lettered for arriving early, so a slow partition cannot stop a ledger; an entry that never arrives shows as `entriesPending` on `GET /lag` and in the lag panel. Reversals arrive as `journal.posted` (lines carry `reversalOfEntryId`) and need no handler; negative postings (storno, BR-11.16) are stored as a negative amount on the side they reduce. A ledger `passage://` source link is stored as its Passage route, any other unsafe link is dropped (a link never refuses an entry). `reporting_entry_applied` records each entry and whether it was a closing entry. Malformed events and read-model refusals are `eventing.Permanent`. **Blocking handoff** to wave 11: `journal.posted` must carry `legalEntityId` (`JournalPostedData` in `services/ledger/internal/events`; `events.New` copies it to the `legalentityid` extension). Without it the consumer refuses every event: a service principal holds no all-scope duty, so with no entity it can neither mint the ledger token nor pass row-level security. **Later slice of PSG-15**: the `LineSource` HTTP client (`GET /v1/ledger/journal-lines?ledger=&documentId=`, keep the lines of `entryId` only, follow `nextCursor`, map `debitCredit`, `amountAcct`, `negativePosting`, `reversalOfEntryId`, `dimensions`, `sourceUri`, `traceId`), the Kafka wiring in `cmd/finreport` (`eventing.NewConsumer` named `finreport-ledger`, topic `passage.ledger.journal`, dead-letter `passage.ledger.journal.dlq`, `Idempotent: true` with an inbox table, or none, since `ApplyEntry` is idempotent), backfill of a ledger whose entries predate the consumer (until then its first entry waits for entry 1), and the `balance.rebuilt` and `year-end.closed` handlers. **Handoff** to wave 11 for a reporting-currency (`rpt`) and transaction-currency amount on `LedgerLine` (only `amount` and `amountAcct` exist, so `rpt` and `txn` balances are not written) and for the posting service on the event: a year-end closing counts as closing only with source system `close` and type `year_end_closing`, both caller-supplied, while the ledger itself trusts `posted_by_service`. The fiscal period is the ledger's `periodKey` year and month until wave 14's calendar API (no opening period 0 is written). | Consumer core is built; transport and source are not. |
+| FR-15.1 lag SLO and nightly zero-diff verify against `ledger.Balance` | **later slice of PSG-15** | The consumer core exists (slice 8); the verify job needs the ledger balance API client and the platform job runner. |
 | FR-15.2 max 2,000 rows, expression validation on save | Done (`Validate`: limits, references, cycles, syntax; division by zero renders blank and is tested). Row formats bold, indent, print zero and page break are stored; underline is not modelled, and page break has no effect until PDF rendering exists (**later slice of PSG-15**). | Rendering outputs are not built. |
 | BR-15.3 sign presentation and `raw:` calculations | Done (credit rows show `-net`; `raw:` uses stored net). | n/a |
 | FR-15.3 columns: currency type, ledger override, variance/percent, comparative templates | Period expressions, CALC (variance and percent as expressions such as `C2-C1` or `(C2-C1)/C1*100`) and per-column currency type (empty = the run's) done. Currency filter within a currency type, column dimension filter, column format, `ledger_code_override` (BR-15.10, REPORT-0005), comparative templates and variance presets are **later slice of PSG-15**. | Multi-ledger columns need the chart-of-accounts compatibility check; the read model has no transaction currency code yet. |
@@ -51,7 +51,7 @@ platform change outside the wave's owned paths).
 | Events: `statement.failed`, `distribution.sent`, `lag.exceeded` | **later slice of PSG-15**. A cash flow run refused with REPORT-0008 / REPORT-0009 answers 422 and writes no `statement.failed`: runs are synchronous and nothing is stored. | Their producers (async runs, distribution, lag monitor) are not built yet. |
 | `statement.generated.v1`, `definition.published.v1`, `hierarchy.unassigned.v1` | Done: written to the outbox in the same transaction. `hierarchy.unassigned.v1` is raised at publish of a non-strict hierarchy; raising it when a new account or dimension value arrives needs the master-data events (see deliverable 6). | n/a |
 | Retire event | Retire writes no event; PRD §2.15.5 names none. From slice 6 a retire writes a `definition_retired` audit entry in the same transaction. | n/a |
-| Jobs: `reporting-balance-consumer`, `reporting-balance-verify`, `statement-schedules`, `library-retention-sweep`, `audit-completeness-check`, `hierarchy-membership-refresh` | **later slice of PSG-15**. The schedule model exists (slice 3) and `domain.Schedule.NextRun` gives the next firing in the schedule's zone; the job that fires them does not. | Depend on the consumer and the platform job runner. |
+| Jobs: `reporting-balance-consumer` (handler built in slice 8; wiring later), `reporting-balance-verify`, `statement-schedules`, `library-retention-sweep`, `audit-completeness-check`, `hierarchy-membership-refresh` | **later slice of PSG-15**. The schedule model exists (slice 3) and `domain.Schedule.NextRun` gives the next firing in the schedule's zone; the job that fires them does not. | Depend on the consumer and the platform job runner. |
 | Schedules: delete, owner and "last run" | No delete (PRD §2.15.5 lists GET and PUT only; `enabled: false` pauses). `updatedBy` records the last editor; "last run" on the Schedules screen needs the firing job (**later slice of PSG-15**). | n/a |
 | `POST` publish, validate, retire, install and hierarchy publish: `Idempotency-Key` | Not taken. Validate is stateless. Publish (definitions and hierarchies) is safe to repeat: a second call finds no draft and answers 404, so it never creates a second version. Retire succeeds again on a retired code. Install skips codes already in use. Import and run creation persist the key (`idempotency_keys` table and `statement_run.idempotency_key`). | PRD §2.15.5 asks for a key on import and runs only. |
 | Row-set / column-set / tree endpoints | **later slice of PSG-15** (slice 7 adds `accounts`, an explicit account list on `account_range` rows, used by hierarchy runs) | Not needed by the first evaluation path. The definition list (`GET /definitions`), retire (slice 2) and run list (`GET /runs`, newest first, no cursor) are built. |
@@ -70,7 +70,7 @@ platform change outside the wave's owned paths).
 | OTel, structured logs with `correlationId` | **handoff** to the platform kernel | Not wired in slice 1. The service uses the default JSON `slog` handler. |
 | Helm: ServiceMonitor | Template built (slice 4) behind `serviceMonitor.enabled`, scraping `/metrics` on the admin port. It has nothing to scrape until the kernel serves `/metrics` (kernel endpoints row above, **handoff**). | n/a |
 | `REPORTING_*` configuration | Slice 4: every variable is read and validated at startup (`internal/config`, PRD §2.15.13 defaults and ranges) and set from the chart values; the effective values are logged. Slice 5: drill level 2 uses `REPORTING_PAGE_SIZE` as its default page, and `REPORTING_TRACE_URL` (new, not in §2.15.13: the trace viewer link) builds `traceUrl`. The lag gate, large cells, retention, attachment limit, share links, the PDF queue and the dimension-security cache are **later slice of PSG-15** (see their rows). | Their consumers are not built. |
-| `reporting-db` CloudNativePG cluster, read replica, Kafka consumer group `reporting-balances` | **handoff** to deploy/ (deployment-cicd) | Cluster manifests are not in this wave's paths. |
+| `reporting-db` CloudNativePG cluster, read replica, Kafka consumer group `finreport-ledger` (the PRD job `reporting-balance-consumer`; the platform consumer names the group after its service principal) | **handoff** to deploy/ (deployment-cicd) | Cluster manifests are not in this wave's paths. |
 | Renderer sidecar (Chromium) | **handoff** to deploy/ and **later slice of PSG-15** | See FR-15.6. |
 
 ## Acceptance criteria
@@ -136,12 +136,12 @@ platform change outside the wave's owned paths).
 
 ## Legal-entity scope follow-ups (#241)
 
-- **later slice**: the ledger consumer that fills `reporting_balance` and
-  `reporting_hwm` must write `legal_entity_id` from the ledger's legal entity;
-  rows written without it are visible only to all-entity callers.
-- **later slice**: the consumer must write a ledger's `reporting_hwm` row (with
-  its entity) before the journal lines; lines for a ledger without visible
-  reporting rows are refused with 404 REPORT-0031.
+- Slice 8: the consumer writes `legal_entity_id` from the event's
+  `legalEntityId` (payload, or the `legalentityid` extension copied from it):
+  the first entry of a ledger records it on `reporting_hwm`, later entries must
+  match (422 `REPORT-0032`, permanent). An event without one is refused; the
+  consumer never writes a NULL entity and never runs all-scope. It writes the
+  `reporting_hwm` row before the lines.
 - **handoff**: existing rows keep a NULL `legal_entity_id`; assigning them is a
   data migration owned by the tenant administrator.
 
@@ -157,3 +157,17 @@ No new duty. Two route rows the main session must seed in `policies/authz/data.j
 
 Until the second row is seeded, a statement runner without `reporting.definition.maintain`
 sees the picker disabled with a note and runs the definition's own rows.
+
+## Handoffs from slice 8 (authz seed)
+
+No new duty and no new route. The consumer is an internal handler, so nothing is
+seeded for this slice; the seed below is needed when the Kafka wiring and the
+ledger client land (later slice), together with the wave 11 change.
+
+| Item | Owner | Seed |
+| --- | --- | --- |
+| Service principal `finreport-ledger` | Main session (`platform/go/tenant/serviceprincipal.go`, `policies/authz/data.json`) | `servicePrincipals["finreport-ledger"] = {"ledger.entry.lookup"}`; `servicePrincipalIssuers["finreport-ledger"] = {"finreport"}`; `data.json` `service_principals["finreport-ledger"] = ["ledger.entry.lookup"]` |
+| Service grant finreport to ledger | Main session (`policies/authz/data.json`) | `service_grants["finreport"] = {"ledger": ["ledger.entry.lookup"]}` (service-only `GET /v1/ledger/journal-lines`) |
+| Rego pin | Main session (`policies/authz/authz_test.rego`) | `data.service_principals["finreport-ledger"] == ["ledger.entry.lookup"]`, `data.service_grants.finreport == {"ledger": ["ledger.entry.lookup"]}`, `allowed("ledger.entry.lookup", "GET", "/v1/ledger/journal-lines")`, `not allowed("ledger.entry.lookup", "GET", "/v1/ledger/journal-entries/e1")` |
+| `legalEntityId` on `dev.passage.ledger.journal.posted.v1` (and AsyncAPI) | Wave 11 (`services/ledger`) | Blocking: the consumer refuses events without it. |
+| Kafka consumer group `finreport-ledger` on `passage.ledger.journal`, dead-letter topic, ledger accepting finreport's service key, finreport's signing key | deploy/ | Deployment is not in this wave's paths. |
