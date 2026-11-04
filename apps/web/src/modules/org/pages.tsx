@@ -5,11 +5,9 @@ import { Alert, Badge, DataTable, PageHeader, StatusPill, type DataTableColumn }
 import {
   ALL,
   describeProblem,
-  listLegalEntities,
   listOperatingUnits,
   listSites,
   listWarehouses,
-  type LegalEntity,
   type ListOptions,
   type OperatingUnit,
   type Page,
@@ -115,32 +113,6 @@ export function ScopedListPage<T>({ title, label, emptyTitle, columns, getRowKey
       ) : null}
       <DataTable label={label} columns={columns} rows={state.rows} getRowKey={getRowKey} loading={state.loading} empty={{ title: emptyTitle }} />
     </>
-  );
-}
-
-const loadAllEntities = (_scope: Scope, options: ListOptions) => listLegalEntities(ALL, options);
-
-const legalEntityColumns: DataTableColumn<LegalEntity>[] = [
-  { key: "code", header: "Code", mono: true },
-  { key: "name", header: "Name" },
-  { key: "country", header: "Country" },
-  { key: "currency", header: "Accounting currency" },
-  { key: "timeZone", header: "Time zone" },
-  { key: "status", header: "Status", render: (row) => <StatusPill status={row.status} /> },
-  { key: "version", header: "Version", align: "end" },
-];
-
-export function LegalEntitiesPage() {
-  return (
-    <ScopedListPage
-      scoped={false}
-      title="Legal entities"
-      label="Legal entities"
-      emptyTitle="No legal entities"
-      columns={legalEntityColumns}
-      getRowKey={(row) => row.id}
-      load={loadAllEntities}
-    />
   );
 }
 
