@@ -244,3 +244,50 @@ func (f *fakeStore) RecomputeRetro(_ context.Context, in store.RetroInput) (stor
 	}
 	return out, nil
 }
+
+// StreamCommissionStatement mirrors the store: the rep's lines of the month in invoice order and the totals per currency.
+func (f *fakeStore) StreamCommissionStatement(_ context.Context, flt store.CommissionStatementFilter, start func([]store.CommissionStatementTotal) error, line func(store.CommissionTxn) error) error {
+	f.mu.Lock()
+	var rows []store.CommissionTxn
+	for _, t := range f.commission().txns {
+		if t.LegalEntityID == flt.LegalEntityID && t.RepID == flt.RepID && t.PeriodKey == flt.PeriodKey {
+			rows = append(rows, t)
+		}
+	}
+	f.mu.Unlock()
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].InvoiceDate.Before(rows[j].InvoiceDate) })
+	byCur := map[string]*store.CommissionStatementTotal{}
+	var order []string
+	for _, t := range rows {
+		c, ok := byCur[t.Currency]
+		if !ok {
+			c = &store.CommissionStatementTotal{Currency: t.Currency}
+			byCur[t.Currency] = c
+			order = append(order, t.Currency)
+		}
+		c.Lines++
+		if t.Amount.Sign() < 0 {
+			c.Credited = c.Credited.Add(t.Amount)
+		} else {
+			c.Earned = c.Earned.Add(t.Amount)
+		}
+		c.Net = c.Net.Add(t.Amount)
+	}
+	sort.Strings(order)
+	totals := []store.CommissionStatementTotal{}
+	for _, cur := range order {
+		totals = append(totals, *byCur[cur])
+	}
+	if err := start(totals); err != nil {
+		return err
+	}
+	for i, t := range rows {
+		if i == 1 && f.streamErr != nil {
+			return f.streamErr
+		}
+		if err := line(t); err != nil {
+			return err
+		}
+	}
+	return nil
+}

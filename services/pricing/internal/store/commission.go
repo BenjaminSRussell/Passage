@@ -83,18 +83,22 @@ type CommissionFilter struct {
 	Limit     int
 }
 
-const commissionColumns = `select id::text, legal_entity_id::text, invoice_line_id, coalesce(reverses_invoice_line_id, ''), invoice_date,
+// commissionSelect is the select list scanTxn reads; extra columns may follow it.
+const commissionSelect = `select id::text, legal_entity_id::text, invoice_line_id, coalesce(reverses_invoice_line_id, ''), invoice_date,
 	period_key, customer_id, customer_group, item_group, sales_group_id::text, rep_id, share_pct::text, basis, line_net::text,
-	cost_snapshot::text, basis_amount::text, rate_pct::text, amount::text, currency::text, debit_account, credit_account, status
-	from commission_transaction`
+	cost_snapshot::text, basis_amount::text, rate_pct::text, amount::text, currency::text, debit_account, credit_account, status`
 
-func scanTxn(row pgx.Row) (CommissionTxn, error) {
+const commissionColumns = commissionSelect + ` from commission_transaction`
+
+// scanTxn reads a commissionSelect row; extra receives any columns selected after it.
+func scanTxn(row pgx.Row, extra ...any) (CommissionTxn, error) {
 	var t CommissionTxn
 	var share, net, ba, rp, amt string
 	var cost *string
-	if err := row.Scan(&t.ID, &t.LegalEntityID, &t.InvoiceLineID, &t.ReversesInvoiceLineID, &t.InvoiceDate, &t.PeriodKey, &t.CustomerID,
+	dest := append([]any{&t.ID, &t.LegalEntityID, &t.InvoiceLineID, &t.ReversesInvoiceLineID, &t.InvoiceDate, &t.PeriodKey, &t.CustomerID,
 		&t.CustomerGroup, &t.ItemGroup, &t.SalesGroupID, &t.RepID, &share, &t.Basis, &net, &cost, &ba, &rp, &amt, &t.Currency,
-		&t.DebitAccount, &t.CreditAccount, &t.Status); err != nil {
+		&t.DebitAccount, &t.CreditAccount, &t.Status}, extra...)
+	if err := row.Scan(dest...); err != nil {
 		return CommissionTxn{}, err
 	}
 	t.SharePct, t.LineNet = decimal.RequireFromString(share), decimal.RequireFromString(net)

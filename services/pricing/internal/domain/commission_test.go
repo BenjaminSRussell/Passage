@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -174,6 +175,12 @@ func TestValidateShares(t *testing.T) {
 		{"zero share", []Share{{"R1", dec("0")}, {"R2", dec("100")}}, "reps[0].sharePct"},
 		{"duplicate rep", []Share{{"R1", dec("50")}, {"R1", dec("50")}}, "reps[1].repId"},
 		{"blank rep", []Share{{" ", dec("100")}}, "reps[0].repId"},
+		// The rep id is a statement path segment: / and : stop the gateway glob, . and .. are normalised away.
+		{"rep id with a slash", []Share{{"R1", dec("50")}, {"EU/R2", dec("50")}}, "reps[1].repId"},
+		{"rep id with a colon", []Share{{"worker:7", dec("100")}}, "reps[0].repId"},
+		{"rep id dot dot", []Share{{"..", dec("100")}}, "reps[0].repId"},
+		{"rep id of 65 characters", []Share{{strings.Repeat("r", 65), dec("100")}}, "reps[0].repId"},
+		{"rep id of 64 characters with dots and dashes", []Share{{"w-1." + strings.Repeat("r", 60), dec("100")}}, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -111,6 +111,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerProcedureRoutes(r)
 	a.registerOpsRoutes(r)
 	a.registerStatementRoutes(r)
+	a.registerCommissionStatementRoutes(r)
 }
 
 // Metrics serves the Prometheus text exposition of the service counters.

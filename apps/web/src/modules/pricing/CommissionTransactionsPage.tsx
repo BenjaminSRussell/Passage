@@ -78,6 +78,9 @@ export function CommissionTransactionsPage() {
             <Link className={buttonClassName("secondary")} to="/pricing/commission/settlement">
               Settlement export
             </Link>
+            <Link className={buttonClassName("secondary")} to="/pricing/commission/statement">
+              Rep statement
+            </Link>
             <Link className={buttonClassName("ghost")} to="/pricing/commission/sales-groups">
               Sales groups
             </Link>

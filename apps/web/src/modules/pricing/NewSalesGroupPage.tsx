@@ -31,6 +31,7 @@ export function validateSalesGroup(v: SalesGroupDraft): Errors {
   v.reps.forEach((r, i) => {
     const id = r.repId.trim();
     if (id === "" || id.length > 64) errors[`reps[${i}].repId`] = "Enter the rep's worker id (up to 64 characters).";
+    else if (/[/:]/.test(id) || id === "." || id === "..") errors[`reps[${i}].repId`] = "A rep id has no / or : and is not . or .. (it addresses the rep's statement).";
     else if (seen.has(id)) errors[`reps[${i}].repId`] = "Each rep appears once.";
     seen.add(id);
     if (!DECIMAL.test(r.sharePct) || Number(r.sharePct) <= 0 || Number(r.sharePct) > 100) errors[`reps[${i}].sharePct`] = "Enter a share above 0 and up to 100.";

@@ -862,6 +862,37 @@ export function listCommissionTransactions(filter: CommissionFilter = {}, signal
   return items<CommissionTransaction>(`/commission/transactions${query({ ...filter })}`, signal);
 }
 
+/** One currency of a commission statement footer (OpenAPI CommissionStatement.totals). */
+export interface CommissionStatementTotal {
+  currency: string;
+  lineCount: number;
+  earnedAmount: string;
+  creditedAmount: string;
+  netAmount: string;
+}
+
+/** GET /commission/reps/{repId}/statement (PRD §5.26.15): one rep's month, the footer summed over every transaction. */
+export interface CommissionStatement {
+  legalEntityId: string;
+  repId: string;
+  period: string;
+  lineCount: number;
+  linesTruncated: boolean;
+  totals: CommissionStatementTotal[];
+  lines: CommissionTransaction[];
+}
+
+export function getCommissionStatement(filter: { legalEntityId: string; repId: string; period: string }, signal?: AbortSignal): Promise<CommissionStatement> {
+  const { repId, ...rest } = filter;
+  return send<CommissionStatement>(`/commission/reps/${encodeURIComponent(repId)}/statement${query({ ...rest })}`, {}, signal);
+}
+
+/** GET /commission/reps/{repId}/statement?format=csv - every transaction of the month, then the footer rows. */
+export function exportCommissionStatement(filter: { legalEntityId: string; repId: string; period: string }, signal?: AbortSignal): Promise<CsvDocument> {
+  const { repId, ...rest } = filter;
+  return csvDocument(`/commission/reps/${encodeURIComponent(repId)}/statement${query({ ...rest, format: "csv" })}`, `commission-statement-${filter.period}.csv`, signal);
+}
+
 // ---- Trade promotion funds (FR-26.19, BR-26.15) and promotion planning (FR-26.20).
 
 export const FUND_SOURCES = ["CAMPAIGN_ACCRUAL", "REBATE_ACCRUAL", "CLAIM", "DEDUCTION"] as const;
