@@ -1288,3 +1288,11 @@ test_hub_client_routes_split_write_consume_and_read if {
 	not allowed("hub.delivery.read", "POST", "/v1/hub/clients:consume")
 	not allowed("hub.delivery.read", "PATCH", "/v1/hub/clients/c1")
 }
+
+test_finreport_ledger_consumer_reads_only_journal_lines if {
+	data.service_principals["finreport-ledger"] == ["ledger.entry.lookup"]
+	data.service_grants.finreport == {"ledger": ["ledger.entry.lookup"]}
+	data.duties["ledger.entry.lookup"].service_only
+	allowed("ledger.entry.lookup", "GET", "/v1/ledger/journal-lines")
+	not allowed("ledger.entry.lookup", "GET", "/v1/ledger/journal-entries/e1")
+}

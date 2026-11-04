@@ -3041,6 +3041,7 @@
     "PlatformAdmin": {"permissions": [{"resource": "/api/v1/agents/kill-switch", "methods": ["GET", "POST"]}]}
   },
   "service_grants": {
+    "finreport": {"ledger": ["ledger.entry.lookup"]},
     "billing": {
       "ledger": ["ledger.entry.post", "ledger.ledger.lookup"],
       "revrec": ["revrec.allocation.read"],
@@ -3150,6 +3151,7 @@
     }
   },
   "service_principals": {
+    "finreport-ledger": ["ledger.entry.lookup"],
     "purchasing-inbound": ["purchasing.inbound.apply"],
     "fulfillment-order": ["fulfillment.order.sync"],
     "integration-hub": ["migration.outbound.render", "migration.xref.record"],
