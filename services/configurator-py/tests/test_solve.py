@@ -46,12 +46,11 @@ def test_fifty_constraint_fixture():
 
 
 def _solve_bound() -> float:
-    # AC-8.2 holds CP-SAT to < 200 ms. GitHub-hosted CP-SAT on this fixture
-    # has been observed at 229 ms, so the required-ortools lane allows 400 ms
-    # (still fails a 10x). The fallback backtracker uses 2 s.
-    if os.environ.get("CONFIGURATOR_REQUIRE_ORTOOLS") == "1":
+    # AC-8.2 is 200 ms. GitHub-hosted CP-SAT on this fixture hit 229 ms, so the
+    # CP-SAT lane allows 400 ms (still fails a 10x). Fallback is 500 ms.
+    if os.environ.get("CONFIGURATOR_REQUIRE_ORTOOLS") == "1" or solve_module.cp_model is not None:
         return 0.4
-    return 2.0
+    return 0.5
 
 
 def test_fixture_file_exists():

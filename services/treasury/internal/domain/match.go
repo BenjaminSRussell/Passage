@@ -583,14 +583,11 @@ func (ix *matchIndex) decide(line *prepared, cands []*prepared, r Rule, t Thresh
 	}
 	// Cold items can score at most amount+date. Skip them once the top three
 	// cannot change, so equal-amount misses are not lines×items×rules.
-	// A strict rule scores 0 on every cold item (strictEligible requires an
-	// exact reference, which is hot), so Ranked is only the hot hits — it no
-	// longer fills score-0 runners-up. Reconcile reads Status/Best, not Ranked.
 	maxCold := 0
 	if !r.Strict {
 		maxCold = w.Amount + w.Date
 	}
-	if r.Strict || len(ranked) == 3 && ranked[2].Score > maxCold {
+	if len(ranked) == 3 && ranked[2].Score > maxCold {
 		return decisionFromRanked(ranked, t)
 	}
 	for _, c := range cands {
