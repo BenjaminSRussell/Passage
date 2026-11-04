@@ -2849,7 +2849,9 @@
       {"resource": "/v1/shopfloor/workers/*:assign-setup", "methods": ["POST"]},
       {"resource": "/v1/shopfloor/workers/*:assign-resource", "methods": ["POST"]},
       {"resource": "/v1/shopfloor/downtime-reasons", "methods": ["POST"]},
-      {"resource": "/v1/shopfloor/downtime-reasons/*", "methods": ["PUT"]}
+      {"resource": "/v1/shopfloor/downtime-reasons/*", "methods": ["PUT"]},
+      {"resource": "/v1/shopfloor/process-categories", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/process-categories/*", "methods": ["PUT"]}
     ]},
     "shopfloor.time.autoclockout": {"service_only": true, "permissions": [{"resource": "/v1/shopfloor/registrations:auto-clock-out", "methods": ["POST"]}]},
     "shopfloor.time.correct": {"permissions": [{"resource": "/v1/shopfloor/registrations/*:correct", "methods": ["POST"]}]},
@@ -2885,7 +2887,9 @@
       {"resource": "/v1/shopfloor/workers/*", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/jobs/*/reopenings", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/downtime-reasons", "methods": ["GET"]},
-      {"resource": "/v1/shopfloor/downtime-reasons/*", "methods": ["GET"]}
+      {"resource": "/v1/shopfloor/downtime-reasons/*", "methods": ["GET"]},
+      {"resource": "/v1/shopfloor/process-categories", "methods": ["GET"]},
+      {"resource": "/v1/shopfloor/process-categories/*", "methods": ["GET"]}
     ]},
     "treasury.bank-account.approve": {"permissions": [
       {"resource": "/v1/treasury/bank-accounts/*:activate", "methods": ["POST"]},
