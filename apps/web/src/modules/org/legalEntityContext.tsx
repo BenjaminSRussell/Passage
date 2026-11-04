@@ -7,6 +7,7 @@ const REFERENCE_WRITE_DUTY = "org.reference.write";
 const LEGAL_ENTITY_WRITE_DUTY = "org.legal-entity.write";
 const FISCAL_CALENDAR_WRITE_DUTY = "org.fiscal-calendar.write";
 const OPERATING_UNIT_WRITE_DUTY = "org.operating-unit.write";
+const SITE_WRITE_DUTY = "org.site.write";
 // The org service refuses tenant-level writes (new legal entities, fiscal calendars and years, teams) unless the
 // caller also holds tenant.administer and carries no legal-entity claim (rejectScopedCaller in services/org).
 const TENANT_ADMIN_DUTY = "tenant.administer";
@@ -23,6 +24,7 @@ export interface LegalEntityContextValue {
   canWriteLegalEntity: boolean;
   canWriteFiscalCalendar: boolean;
   canWriteOperatingUnit: boolean;
+  canWriteSite: boolean;
   canAdministerTenant: boolean;
   canWriteHierarchy: boolean;
   canPublishHierarchy: boolean;
@@ -55,13 +57,17 @@ function writeStored(value: string | null): void {
 
 export function LegalEntityProvider({ duties, children }: { duties?: readonly string[]; children: ReactNode }) {
   const canAll = Array.isArray(duties) && duties.includes(ALL_SCOPE_DUTY);
-  const canWriteReference = Array.isArray(duties) && duties.includes(REFERENCE_WRITE_DUTY);
+  const held = (duty: string) => Array.isArray(duties) && duties.includes(duty);
+  const canAdministerTenant = held(TENANT_ADMIN_DUTY);
+  // Reference status and unit writes, and every hierarchy write, are tenant-level in the service
+  // (rejectScopedCaller): the route duty alone is refused with 403 AUTH-0003, so the actions need both.
+  const canWriteReference = held(REFERENCE_WRITE_DUTY) && canAdministerTenant;
   const canWriteLegalEntity = Array.isArray(duties) && duties.includes(LEGAL_ENTITY_WRITE_DUTY);
   const canWriteFiscalCalendar = Array.isArray(duties) && duties.includes(FISCAL_CALENDAR_WRITE_DUTY);
   const canWriteOperatingUnit = Array.isArray(duties) && duties.includes(OPERATING_UNIT_WRITE_DUTY);
-  const canAdministerTenant = Array.isArray(duties) && duties.includes(TENANT_ADMIN_DUTY);
-  const canWriteHierarchy = Array.isArray(duties) && duties.includes(HIERARCHY_WRITE_DUTY);
-  const canPublishHierarchy = Array.isArray(duties) && duties.includes(HIERARCHY_PUBLISH_DUTY);
+  const canWriteSite = held(SITE_WRITE_DUTY);
+  const canWriteHierarchy = held(HIERARCHY_WRITE_DUTY) && canAdministerTenant;
+  const canPublishHierarchy = held(HIERARCHY_PUBLISH_DUTY) && canAdministerTenant;
   const canBackdateHierarchy = Array.isArray(duties) && duties.includes(HIERARCHY_BACKDATE_DUTY);
   const [entities, setEntities] = useState<LegalEntity[]>([]);
   const [scope, setScopeState] = useState<Scope>("");
@@ -107,8 +113,8 @@ export function LegalEntityProvider({ duties, children }: { duties?: readonly st
   );
 
   const value = useMemo(
-    () => ({ entities, scope, setScope, canAll, canWriteReference, canWriteLegalEntity, canWriteFiscalCalendar, canWriteOperatingUnit, canAdministerTenant, canWriteHierarchy, canPublishHierarchy, canBackdateHierarchy, loading, error }),
-    [entities, scope, setScope, canAll, canWriteReference, canWriteLegalEntity, canWriteFiscalCalendar, canWriteOperatingUnit, canAdministerTenant, canWriteHierarchy, canPublishHierarchy, canBackdateHierarchy, loading, error],
+    () => ({ entities, scope, setScope, canAll, canWriteReference, canWriteLegalEntity, canWriteFiscalCalendar, canWriteOperatingUnit, canWriteSite, canAdministerTenant, canWriteHierarchy, canPublishHierarchy, canBackdateHierarchy, loading, error }),
+    [entities, scope, setScope, canAll, canWriteReference, canWriteLegalEntity, canWriteFiscalCalendar, canWriteOperatingUnit, canWriteSite, canAdministerTenant, canWriteHierarchy, canPublishHierarchy, canBackdateHierarchy, loading, error],
   );
   return <LegalEntityContext.Provider value={value}>{children}</LegalEntityContext.Provider>;
 }

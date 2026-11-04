@@ -4,7 +4,8 @@ import { HierarchyDesignerPage } from "./HierarchyDesignerPage";
 import { ReferenceDataPage } from "./ReferenceDataPage";
 import { FiscalCalendarsPage } from "./FiscalCalendarsPage";
 import { LegalEntitiesPage } from "./LegalEntityAdmin";
-import { OperatingUnitsPage, OrgHome, OrgLayout, SitesPage, WarehousesPage } from "./pages";
+import { OrgHome, OrgLayout } from "./pages";
+import { OperatingUnitsPage, SitesPage, WarehousesPage } from "./StructurePages";
 import { TeamsPage } from "./TeamsPage";
 
 const org: PassageModule = {

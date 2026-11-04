@@ -575,7 +575,7 @@ describe("permissions", () => {
   });
 
   it("shows the draft read-only, with the reason, when write is missing", async () => {
-    const { user } = renderPage(units, ["org.read", "org.hierarchy.publish"]);
+    const { user } = renderPage(units, ["org.read", "org.hierarchy.publish", "tenant.administer"]);
     await openType(user);
     await screen.findByRole("tree");
     await user.click(screen.getByRole("checkbox", { name: "Show draft" }));
@@ -593,13 +593,21 @@ describe("permissions", () => {
     expect(screen.queryByRole("button", { name: "Create draft" })).toBeNull();
     expect(screen.getByText(/needs the hierarchy write duty/)).toBeInTheDocument();
     unmount();
-    const writer = renderPage(withoutDraft, ["org.read", "org.hierarchy.write"]);
+    const writer = renderPage(withoutDraft, ["org.read", "org.hierarchy.write", "tenant.administer"]);
     await openType(writer.user);
     expect(await screen.findByRole("button", { name: "Create draft" })).toBeInTheDocument();
   });
 
+  it("offers no draft actions with the hierarchy duties but without tenant.administer", async () => {
+    const view = renderPage(withoutDraft, ["org.read", "org.hierarchy.write", "org.hierarchy.publish"]);
+    await openType(view.user);
+    await screen.findByRole("tree");
+    expect(screen.queryByRole("button", { name: "Create draft" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Publish…" })).toBeNull();
+  });
+
   it("hides Publish without the publish duty but keeps editing", async () => {
-    const { user } = renderPage(units, ["org.read", "org.hierarchy.write"]);
+    const { user } = renderPage(units, ["org.read", "org.hierarchy.write", "tenant.administer"]);
     await openType(user);
     await screen.findByRole("tree");
     await user.click(screen.getByRole("checkbox", { name: "Show draft" }));
@@ -609,7 +617,7 @@ describe("permissions", () => {
   });
 
   it("refuses a past date without the backdate duty before sending", async () => {
-    const { fetchMock, user } = renderPage({ ...units, ...saved }, ["org.read", "org.hierarchy.write", "org.hierarchy.publish"]);
+    const { fetchMock, user } = renderPage({ ...units, ...saved }, ["org.read", "org.hierarchy.write", "org.hierarchy.publish", "tenant.administer"]);
     await openType(user);
     await screen.findByRole("tree");
     await user.click(screen.getByRole("checkbox", { name: "Show draft" }));

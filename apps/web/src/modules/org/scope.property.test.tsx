@@ -2,7 +2,8 @@ import { findTable } from "../../test-utils";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OperatingUnitsPage, OrgLayout, SitesPage, WarehousesPage } from "./pages";
+import { OrgLayout } from "./pages";
+import { OperatingUnitsPage, SitesPage, WarehousesPage } from "./StructurePages";
 import { stubLocalStorage } from "./testStorage";
 
 const SEED = 20261026;

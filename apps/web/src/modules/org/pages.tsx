@@ -1,20 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Outlet } from "react-router-dom";
 import { usePrincipalDuties } from "../../shell/principal";
-import { Alert, Badge, DataTable, PageHeader, StatusPill, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, DataTable, PageHeader, type DataTableColumn } from "../../shell/ui";
 import {
   ALL,
   describeProblem,
-  listOperatingUnits,
-  listSites,
-  listWarehouses,
   type ListOptions,
-  type OperatingUnit,
   type Page,
   type Problem,
   type Scope,
-  type Site,
-  type Warehouse,
 } from "./api/client";
 import { LegalEntitySwitcher } from "./LegalEntitySwitcher";
 import { LegalEntityProvider, useLegalEntity } from "./legalEntityContext";
@@ -58,21 +52,29 @@ interface ListState<T> {
   error: Problem | null;
 }
 
+export interface ListControls<T> {
+  reload(): void;
+  update(change: (rows: T[]) => T[]): void;
+}
+
 interface ScopedListPageProps<T> {
   title: string;
   label: string;
   emptyTitle: string;
-  columns: DataTableColumn<T>[];
+  columns: DataTableColumn<T>[] | ((rows: ListControls<T>) => DataTableColumn<T>[]);
   getRowKey(row: T): string;
+  // Rendered between the header and the table, for create forms; receives the same controls as `columns`.
+  toolbar?: (rows: ListControls<T>) => ReactNode;
   load(scope: Scope, options: ListOptions): Promise<Page<T>>;
   scoped?: boolean;
 }
 
-export function ScopedListPage<T>({ title, label, emptyTitle, columns, getRowKey, load, scoped = true }: ScopedListPageProps<T>) {
+export function ScopedListPage<T>({ title, label, emptyTitle, columns, getRowKey, load, toolbar, scoped = true }: ScopedListPageProps<T>) {
   const { scope: selected, entities, loading: entitiesLoading } = useLegalEntity();
   const scope = scoped ? selected : ALL;
   const waiting = scoped && entitiesLoading;
   const [state, setState] = useState<ListState<T>>({ rows: [], loading: true, error: null });
+  const [reloads, setReloads] = useState(0);
   const latest = useRef(0);
 
   useEffect(() => {
@@ -96,7 +98,12 @@ export function ScopedListPage<T>({ title, label, emptyTitle, columns, getRowKey
       },
     );
     return () => controller.abort();
-  }, [scope, waiting]);
+  }, [scope, waiting, reloads]);
+
+  const controls: ListControls<T> = {
+    reload: () => setReloads((value) => value + 1),
+    update: (change) => setState((current) => ({ ...current, rows: change(current.rows) })),
+  };
 
   const scopeName = scope === ALL ? "All entities" : (entities.find((entity) => entity.id === scope)?.code ?? dash);
   return (
@@ -106,71 +113,13 @@ export function ScopedListPage<T>({ title, label, emptyTitle, columns, getRowKey
         description={scoped ? `Scope: ${scopeName}` : undefined}
         meta={scoped ? <span role="status">{scope === ALL ? <Badge tone="info">Read-only, all entities</Badge> : null}</span> : undefined}
       />
+      {toolbar ? toolbar(controls) : null}
       {state.error ? (
         <Alert tone="danger" title={`Could not load ${label.toLowerCase()}`} live="alert">
           {state.error.message} ({state.error.code})
         </Alert>
       ) : null}
-      <DataTable label={label} columns={columns} rows={state.rows} getRowKey={getRowKey} loading={state.loading} empty={{ title: emptyTitle }} />
+      <DataTable label={label} columns={typeof columns === "function" ? columns(controls) : columns} rows={state.rows} getRowKey={getRowKey} loading={state.loading} empty={{ title: emptyTitle }} />
     </>
-  );
-}
-
-function useEntityCode(): (id?: string) => string {
-  const { entities } = useLegalEntity();
-  return (id) => (id ? (entities.find((entity) => entity.id === id)?.code ?? id) : dash);
-}
-
-export function OperatingUnitsPage() {
-  const entityCode = useEntityCode();
-  const columns: DataTableColumn<OperatingUnit>[] = [
-    { key: "code", header: "Code", mono: true },
-    { key: "name", header: "Name" },
-    { key: "type", header: "Type" },
-    { key: "defaultLegalEntityId", header: "Default legal entity", render: (row) => entityCode(row.defaultLegalEntityId) },
-  ];
-  return (
-    <ScopedListPage
-      title="Operating units"
-      label="Operating units"
-      emptyTitle="No operating units"
-      columns={columns}
-      getRowKey={(row) => row.id}
-      load={listOperatingUnits}
-    />
-  );
-}
-
-export function SitesPage() {
-  const entityCode = useEntityCode();
-  const columns: DataTableColumn<Site>[] = [
-    { key: "code", header: "Code", mono: true },
-    { key: "name", header: "Name" },
-    { key: "legalEntityId", header: "Legal entity", render: (row) => entityCode(row.legalEntityId) },
-    { key: "timeZone", header: "Time zone" },
-    { key: "defaultWarehouseId", header: "Default warehouse", render: (row) => row.defaultWarehouseId ?? dash },
-  ];
-  return (
-    <ScopedListPage title="Sites" label="Sites" emptyTitle="No sites" columns={columns} getRowKey={(row) => row.id} load={listSites} />
-  );
-}
-
-export function WarehousesPage() {
-  const columns: DataTableColumn<Warehouse>[] = [
-    { key: "code", header: "Code", mono: true },
-    { key: "name", header: "Name" },
-    { key: "siteId", header: "Site" },
-    { key: "type", header: "Type" },
-    { key: "status", header: "Status", render: (row) => <StatusPill status={row.status} /> },
-  ];
-  return (
-    <ScopedListPage
-      title="Warehouses"
-      label="Warehouses"
-      emptyTitle="No warehouses"
-      columns={columns}
-      getRowKey={(row) => row.id}
-      load={listWarehouses}
-    />
   );
 }
