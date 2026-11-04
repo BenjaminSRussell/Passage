@@ -49,16 +49,19 @@ var (
 	// DowntimeReasonSaved is not in the PRD event table: OEE reporting and the andon consumers
 	// need the planned or unplanned category behind a coded downtime.
 	DowntimeReasonSaved = events.Type(Context, "downtimereason", "saved", 1)
-	EdgeNodeSaved       = events.Type(Context, "edgenode", "saved", 1)
-	EdgeConfigPublished = events.Type(Context, "edgeconfig", "published", 1)
-	EdgeConfigApplied   = events.Type(Context, "edgeconfig", "applied", 1)
+	// ProcessCategorySaved is not in the PRD event table: the consuming contexts (w21, w24, w33, w35)
+	// need the destinations and limits a category routes with.
+	ProcessCategorySaved = events.Type(Context, "processcategory", "saved", 1)
+	EdgeNodeSaved        = events.Type(Context, "edgenode", "saved", 1)
+	EdgeConfigPublished  = events.Type(Context, "edgeconfig", "published", 1)
+	EdgeConfigApplied    = events.Type(Context, "edgeconfig", "applied", 1)
 )
 
 // All lists every event type the service publishes (used by the startup registry check).
 func All() []string {
 	return []string{RegistrationPosted, PaydayApproved, PaydayExported, AndonRaised, ProcessMessageReceived, ProcessMessageDelivered, ProcessMessageDeleted,
 		OEEBucketUpdated, OEEBucketRemoved, JobReported, JobReopened, RegistrationCorrected, PaydayRevised, TimeProfileSaved, PayAgreementSaved, WorkerAssigned, AbsenceCodeSaved,
-		EdgeNodeSaved, EdgeConfigPublished, EdgeConfigApplied, DowntimeReasonSaved}
+		EdgeNodeSaved, EdgeConfigPublished, EdgeConfigApplied, DowntimeReasonSaved, ProcessCategorySaved}
 }
 
 // ProcessMessageReceivedData is the payload of dev.passage.shopfloor.processmessage.received.v1,
@@ -340,6 +343,30 @@ type DowntimeReasonSavedData struct {
 	Active   bool   `json:"active"`
 	Version  int    `json:"version"`
 	SavedBy  string `json:"savedBy"`
+}
+
+// ProcessCategorySavedData is the payload of dev.passage.shopfloor.processcategory.saved.v1,
+// published when a process message category is created or changed.
+type ProcessCategorySavedData struct {
+	CategoryID       string                     `json:"categoryId"`
+	Code             string                     `json:"code"`
+	Name             string                     `json:"name"`
+	Destinations     []string                   `json:"destinations"`
+	RejectOutOfLimit bool                       `json:"rejectOutOfLimit"`
+	Characteristics  []ProcessCategoryCharacter `json:"characteristics"`
+	Active           bool                       `json:"active"`
+	Version          int                        `json:"version"`
+	SavedBy          string                     `json:"savedBy"`
+}
+
+// ProcessCategoryCharacter is one characteristic definition of a saved category.
+type ProcessCategoryCharacter struct {
+	Name     string  `json:"name"`
+	Type     string  `json:"type"`
+	Unit     *string `json:"unit,omitempty"`
+	Min      *string `json:"min,omitempty"`
+	Max      *string `json:"max,omitempty"`
+	Required bool    `json:"required"`
 }
 
 // EdgeNodeSavedData is the payload of dev.passage.shopfloor.edgenode.saved.v1, published when

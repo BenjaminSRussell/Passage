@@ -56,6 +56,22 @@ the finish (an offline replay) is not SF-0113: it is stored and the server's bun
 (`registration.corrected`), so the bundle's hours count once. A start that began after the finish but was stored
 before the event arrived is closed at 0.00 h and its stop also carries `job-finished-conflict` for supervisor review.
 
+## Slice 21: process message categories (FR-25.17, BR-25.13)
+
+`process_category` (migration `0020`) is the tenant's category master. A row overrides the built-in default of the same
+code (`phase-start` through `custom`) or adds a code of its own (lowercase letters, digits, hyphens, up to 32), and carries
+the destinations (`ebr`, `journal`, `quality`, `kafka`, `webhook`), `rejectOutOfLimit` and characteristic definitions (name,
+type, unit, limits, required). `POST`/`GET process-categories` and `GET`/`PUT process-categories/{id}` (create with an
+`Idempotency-Key`, update with `If-Match`; the code never changes; duties `shopfloor.setup.maintain` and `shopfloor.view`)
+publish `dev.passage.shopfloor.processcategory.saved.v1`. The list returns the tenant's rows and the built-in defaults no row
+overrides (`builtIn: true`). `POST process-messages` resolves the category first: a master row wins, else the default,
+else SF-0164; an inactive row is SF-0165. The definitions then govern the values they name (unit and limits come from the
+definition, a different type or a missing required value is SF-0115), and a category that rejects out-of-limit values
+refuses a value outside the limits with SF-0114. Messages already stored keep the routing they were received with, and
+a replay of a stored (source, sourceMessageId) still answers 200 with the stored message after its category was deactivated
+or tightened. The database checks `process_message.category_code` against the code format (it no longer lists the built-in
+codes), so the API's resolve step is what keeps an unknown code out.
+
 ## Slice 20: andon sweep, scrap rate and quality fail alerts (FR-25.11)
 
 `POST /v1/shopfloor/andon:sweep` (duty `shopfloor.oee.rollup`, the scheduler identity that runs the OEE rollup; no
@@ -578,6 +594,8 @@ OpenAPI and AsyncAPI files in step with the router and the published event types
 | GET `/v1/shopfloor/jobs`, `/jobs/{id}`; POST `/jobs/{id}:feedback` | `shopfloor.time.register`; an `override` also needs `shopfloor.check.override` (shop floor supervisor; not in the PRD duty table) |
 | POST `/v1/shopfloor/process-messages`, `/process-messages/{id}:reprocess`, `/process-messages/{id}:delete` | `shopfloor.process.create` (Create process messages: manual, reprocess/delete with reason) |
 | GET `/v1/shopfloor/process-messages`, `/process-messages/{id}` | `shopfloor.view` |
+| POST `/v1/shopfloor/process-categories`, PUT `/process-categories/{id}` | `shopfloor.setup.maintain` |
+| GET `/v1/shopfloor/process-categories`, `/process-categories/{id}` | `shopfloor.view` |
 | POST `/v1/shopfloor/process-messages/{id}/deliveries/{destination}:report`, `/process-messages:retry-due` | `shopfloor.process.deliver` (consuming context and scheduler service identities) |
 
 Duties are checked by the platform `authz` middleware. The OPA decision point replaces the
@@ -648,6 +666,8 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0161` | 422 | Quantity feedback on a job whose operation production finished; reopen the operation in production |
 | `SF-0162` | 404 | No open andon alert has that id (unknown, or already cleared) |
 | `SF-0163` | 422 | Only a quality-fail alert is cleared by hand; a downtime or scrap-rate alert clears itself after 5 minutes |
+| `SF-0164` | 404 or 422 | The process category does not exist (404 on a read or change; 422 when a message names a code that is neither a built-in default nor a master row) |
+| `SF-0165` | 422 | The process category is inactive; its messages are refused |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Warnings on an accepted registration (`items[].warnings`, the request succeeds):

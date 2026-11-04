@@ -52,15 +52,16 @@ const (
 )
 
 // Category is a process message category with its destinations (FR-25.17).
-// The categories and their destinations are fixed defaults until category
-// master data (O05C/O06C/O07C equivalents) is configurable per tenant.
+// A tenant's category master (process_category) overrides these built-in
+// defaults by code and may add codes of its own; CategoryByCode returns the defaults.
 type Category struct {
 	Code             string
 	Destinations     []string
 	RejectOutOfLimit bool
+	Characteristics  []CharacteristicDef
 }
 
-// CategoryByCode returns the category definition for code.
+// CategoryByCode returns the built-in default definition for code.
 func CategoryByCode(code string) (Category, bool) {
 	switch code {
 	case "phase-start", "phase-end":
@@ -123,8 +124,8 @@ func (m NewMessage) FieldErrors() map[string]string {
 	if n := utf8.RuneCountInString(m.SourceMessageID); n < 1 || n > maxSourceIDLen {
 		f["sourceMessageId"] = fmt.Sprintf("must be 1 to %d characters", maxSourceIDLen)
 	}
-	if _, ok := CategoryByCode(m.CategoryCode); !ok {
-		f["categoryCode"] = "is not a known category"
+	if !ValidCategoryCode(m.CategoryCode) {
+		f["categoryCode"] = "is not a valid category code"
 	}
 	if !ids.Valid(m.OrderID) {
 		f["orderId"] = "must be a UUID"
@@ -173,8 +174,13 @@ func parseBound(name string, s *string) (*decimal.Decimal, error) {
 
 // ApplyLimits checks each characteristic against its type and limits (BR-25.13).
 // An out-of-limit numeric is flagged and accepted, unless the category rejects
-// out-of-limit values, in which case the message fails with SF-0014.
+// out-of-limit values, in which case the message fails with SF-0114. The category's
+// characteristic definitions govern the unit and limits of the values they name.
 func ApplyLimits(cat Category, in []Characteristic) ([]Characteristic, error) {
+	in, err := applyDefinitions(cat, in)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]Characteristic, 0, len(in))
 	for _, c := range in {
 		c.OutOfLimit = false
