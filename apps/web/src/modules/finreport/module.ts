@@ -5,6 +5,8 @@ import { DefinitionEditorPage } from "./DefinitionEditorPage";
 import { DefinitionsPage } from "./DefinitionsPage";
 import { HierarchiesPage } from "./HierarchiesPage";
 import { HierarchyEditorPage } from "./HierarchyEditorPage";
+import { ColumnSetEditorPage, RowSetEditorPage } from "./PartEditorPages";
+import { ColumnSetsPage, RowSetsPage } from "./PartsPages";
 import { NewRunPage } from "./NewRunPage";
 import { RunPage } from "./RunPage";
 import { RunsPage } from "./RunsPage";
@@ -16,7 +18,7 @@ import { VerificationsPage } from "./VerificationsPage";
 const finreport: PassageModule = {
   id: "finreport",
   title: "Financial statements",
-  description: "Report definitions, statement runs over the journal with drill-down to the balances and journal lines behind every amount, downloads, distribution schedules, the audit trail and the check of the read model against the ledger.",
+  description: "Report definitions, statement runs over the journal with drill-down to the balances and journal lines behind every amount, downloads, row sets and column sets with comparative templates, distribution schedules, the audit trail and the check of the read model against the ledger.",
   routes: [
     { path: "/finreport", element: createElement(RunsPage), handle: { title: "Financial statements" } },
     { path: "/finreport/runs/new", element: createElement(NewRunPage), handle: { title: "Run a statement" } },
@@ -24,6 +26,12 @@ const finreport: PassageModule = {
     { path: "/finreport/definitions", element: createElement(DefinitionsPage), handle: { title: "Report definitions" } },
     { path: "/finreport/definitions/new", element: createElement(DefinitionEditorPage), handle: { title: "New report definition" } },
     { path: "/finreport/definitions/:code", element: createElement(DefinitionEditorPage), handle: { title: "Report definition" } },
+    { path: "/finreport/row-sets", element: createElement(RowSetsPage), handle: { title: "Row sets" } },
+    { path: "/finreport/row-sets/new", element: createElement(RowSetEditorPage), handle: { title: "New row set" } },
+    { path: "/finreport/row-sets/:code", element: createElement(RowSetEditorPage), handle: { title: "Row set" } },
+    { path: "/finreport/column-sets", element: createElement(ColumnSetsPage), handle: { title: "Column sets" } },
+    { path: "/finreport/column-sets/new", element: createElement(ColumnSetEditorPage), handle: { title: "New column set" } },
+    { path: "/finreport/column-sets/:code", element: createElement(ColumnSetEditorPage), handle: { title: "Column set" } },
     { path: "/finreport/hierarchies", element: createElement(HierarchiesPage), handle: { title: "Derived hierarchies" } },
     { path: "/finreport/hierarchies/new", element: createElement(HierarchyEditorPage), handle: { title: "New derived hierarchy" } },
     { path: "/finreport/hierarchies/:code", element: createElement(HierarchyEditorPage), handle: { title: "Derived hierarchy" } },
@@ -37,6 +45,8 @@ const finreport: PassageModule = {
   nav: [
     { label: "Statements", to: "/finreport", duty: "reporting.statement.view" },
     { label: "Report definitions", to: "/finreport/definitions", duty: "reporting.statement.view" },
+    { label: "Row sets", to: "/finreport/row-sets", duty: "reporting.definition.maintain" },
+    { label: "Column sets", to: "/finreport/column-sets", duty: "reporting.definition.maintain" },
     { label: "Derived hierarchies", to: "/finreport/hierarchies", duty: "reporting.definition.maintain" },
     { label: "Distribution schedules", to: "/finreport/schedules", duty: "reporting.statement.schedule" },
     { label: "Audit trail", to: "/finreport/audit-trail", duty: "reporting.audit.view" },

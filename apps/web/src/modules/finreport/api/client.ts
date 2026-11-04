@@ -595,6 +595,64 @@ export async function saveSchedule(schedule: ScheduleInput, etag: string | null)
   return { schedule: sent.body, etag: sent.etag };
 }
 
+// --- designer parts (FR-15.2, FR-15.3) -------------------------------------
+
+/** A reusable list of report rows. */
+export interface RowSet {
+  code: string;
+  name: string;
+  rows: DefinitionRow[];
+  /** Read-only: the user who saved the set last. */
+  updatedBy?: string;
+}
+
+/** A reusable list of report columns; templates are column sets the service ships. */
+export interface ColumnSet {
+  code: string;
+  name: string;
+  description?: string;
+  columns: DefinitionColumn[];
+  updatedBy?: string;
+}
+
+export async function listRowSets(signal?: AbortSignal): Promise<RowSet[]> {
+  return (await get<{ items: RowSet[] }>("/row-sets", signal)).items;
+}
+
+export async function getRowSet(code: string, signal?: AbortSignal): Promise<{ part: RowSet; etag: string | null }> {
+  const sent = await send<RowSet>(`/row-sets/${seg(code)}`, {}, signal);
+  return { part: sent.body, etag: sent.etag };
+}
+
+/** Creates (etag null) or replaces a row set. A stale etag answers 412 conflict_version. */
+export async function saveRowSet(set: RowSet, etag: string | null): Promise<{ part: RowSet; etag: string | null }> {
+  const headers: Record<string, string> = {};
+  if (etag) headers["If-Match"] = etag;
+  const sent = await send<RowSet>(`/row-sets/${seg(set.code)}`, { method: "PUT", headers, body: JSON.stringify(set) });
+  return { part: sent.body, etag: sent.etag };
+}
+
+export async function listColumnSets(signal?: AbortSignal): Promise<ColumnSet[]> {
+  return (await get<{ items: ColumnSet[] }>("/column-sets", signal)).items;
+}
+
+export async function getColumnSet(code: string, signal?: AbortSignal): Promise<{ part: ColumnSet; etag: string | null }> {
+  const sent = await send<ColumnSet>(`/column-sets/${seg(code)}`, {}, signal);
+  return { part: sent.body, etag: sent.etag };
+}
+
+export async function saveColumnSet(set: ColumnSet, etag: string | null): Promise<{ part: ColumnSet; etag: string | null }> {
+  const headers: Record<string, string> = {};
+  if (etag) headers["If-Match"] = etag;
+  const sent = await send<ColumnSet>(`/column-sets/${seg(set.code)}`, { method: "PUT", headers, body: JSON.stringify(set) });
+  return { part: sent.body, etag: sent.etag };
+}
+
+/** The comparative column sets the service ships (actual against prior year, and so on). */
+export async function listColumnTemplates(signal?: AbortSignal): Promise<ColumnSet[]> {
+  return (await get<{ items: ColumnSet[] }>("/column-set-templates", signal)).items;
+}
+
 // --- audit trail (FR-15.10) ------------------------------------------------
 
 /** Ledger kinds (posted, approvals, reversals, period changes, ...) then the reporting service's own kinds. */

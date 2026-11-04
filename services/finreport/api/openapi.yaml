@@ -850,6 +850,202 @@ paths:
         '412': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
         '428': {$ref: '#/components/responses/Problem'}
+  /v1/reporting/row-sets:
+    get:
+      operationId: listRowSets
+      summary: RowSets ordered by code (FR-15.2)
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: RowSets
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/RowSet'}
+  /v1/reporting/row-sets/{code}:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    get:
+      operationId: getRowSet
+      summary: Read a row set
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: The row set
+          headers:
+            ETag:
+              description: RowSet revision, echoed in If-Match to replace it
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RowSet'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: putRowSet
+      summary: Create or replace a row set (idempotent)
+      description: >-
+        The rows follow the row rules of a definition: at most 2,000, unique codes, totals over known rows, no cycles. Field errors answer 422 REPORT-0038 for the code and name and
+        REPORT-0002 for expressions and references. updatedBy is read-only and
+        ignored when sent.
+      x-passage-duty: reporting.definition.maintain
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: Required when the row set exists; the ETag last read. Missing gives 428, stale gives 412 conflict_version. Without If-Match the PUT only creates; when two requests create the same code at once, one succeeds and the other answers 409 conflict_version.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RowSet'}
+      responses:
+        '200':
+          description: Saved row set
+          headers:
+            ETag:
+              description: New revision
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RowSet'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
+  /v1/reporting/column-sets:
+    get:
+      operationId: listColumnSets
+      summary: ColumnSets ordered by code (FR-15.3)
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: ColumnSets
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ColumnSet'}
+  /v1/reporting/column-sets/{code}:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    get:
+      operationId: getColumnSet
+      summary: Read a column set
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: The column set
+          headers:
+            ETag:
+              description: ColumnSet revision, echoed in If-Match to replace it
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ColumnSet'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: putColumnSet
+      summary: Create or replace a column set (idempotent)
+      description: >-
+        The columns follow the column rules of a definition: at most 60, supported period expressions, CALC columns over known columns, no cycles. Field errors answer 422 REPORT-0038 for the code and name and
+        REPORT-0002 for expressions and references. updatedBy is read-only and
+        ignored when sent.
+      x-passage-duty: reporting.definition.maintain
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: Required when the column set exists; the ETag last read. Missing gives 428, stale gives 412 conflict_version. Without If-Match the PUT only creates; when two requests create the same code at once, one succeeds and the other answers 409 conflict_version.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ColumnSet'}
+      responses:
+        '200':
+          description: Saved column set
+          headers:
+            ETag:
+              description: New revision
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ColumnSet'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
+  /v1/reporting/column-set-templates:
+    get:
+      operationId: listColumnSetTemplates
+      summary: Comparative column sets the service ships (FR-15.3)
+      description: >-
+        Period against prior year, year to date against prior year to date,
+        period against prior period, and all of them, each with variance and
+        variance percent CALC columns (current minus comparative, and that over
+        the comparative times 100, on displayed values: blank when the
+        comparative is zero, sign reversed when it is below zero). Save one under a tenant code with
+        PUT /column-sets/{code} to edit it, or name it as the columnSet of
+        a compose request.
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: Templates ordered by code
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ColumnSet'}
+  /v1/reporting/definitions:compose:
+    post:
+      operationId: composeDefinition
+      summary: Build a definition draft body from a row set and a column set
+      description: >-
+        Copies the rows of the row set and the columns of the column set (a
+        stored one, else a shipped template of that code) into a draft body and
+        validates it. Nothing is stored: save the body with PUT /definitions/{code}.
+        An unknown set answers 404 REPORT-0037, an invalid result 422.
+      x-passage-duty: reporting.definition.maintain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name, rowSet, columnSet]
+              properties:
+                code: {type: string}
+                name: {type: string}
+                kind: {type: string, enum: [trial_balance, balance_sheet, income_statement, cash_flow, custom], description: Defaults to custom}
+                includeAdjustmentPeriods: {type: boolean}
+                rowSet: {type: string, description: Code of a stored row set}
+                columnSet: {type: string, description: Code of a stored column set or of a shipped template}
+      responses:
+        '200':
+          description: The draft body, version 0
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Definition'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
   /v1/reporting/audit-trail:
     get:
       operationId: listAuditTrail
@@ -1095,6 +1291,29 @@ components:
         periodExpr: {type: string, pattern: '^(P|P-[0-9]+|YTD|PY|PYTD|Q|FY|CALC)$'}
         currencyType: {type: string, enum: [acct, rpt, txn], description: Omitted means the run's currency type}
         calcExpression: {type: string}
+    RowSet:
+      type: object
+      required: [code, name, rows]
+      properties:
+        code: {type: string, pattern: '^[A-Z][A-Z0-9-]{1,29}$'}
+        name: {type: string, minLength: 1, maxLength: 120}
+        rows:
+          type: array
+          maxItems: 2000
+          items: {$ref: '#/components/schemas/Row'}
+        updatedBy: {type: string, readOnly: true}
+    ColumnSet:
+      type: object
+      required: [code, name, columns]
+      properties:
+        code: {type: string, pattern: '^[A-Z][A-Z0-9-]{1,29}$'}
+        name: {type: string, minLength: 1, maxLength: 120}
+        description: {type: string, maxLength: 500}
+        columns:
+          type: array
+          maxItems: 60
+          items: {$ref: '#/components/schemas/Column'}
+        updatedBy: {type: string, readOnly: true}
     RunRequest:
       type: object
       required: [definition, ledgerId, currencyType, period, calendar]
