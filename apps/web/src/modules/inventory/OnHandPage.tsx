@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { fetchOnHand, ON_HAND_GROUPS, type OnHandGroup, type OnHandRow } from "./api/client";
+import { onHandCsv, downloadText } from "./csvExport";
 import { dash, isIsoDate, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -94,18 +96,42 @@ export function OnHandPage() {
       mono: group === "product" || group === "legal_entity",
       render: (row: OnHandRow) => row.group[group] || dash,
     })),
+    ...(shown.includes("product")
+      ? [
+          {
+            key: "drill",
+            header: "History",
+            render: (row: OnHandRow) =>
+              row.group.product ? <Link to={`/inventory/transactions?product=${encodeURIComponent(row.group.product)}`}>Transactions</Link> : dash,
+          } satisfies DataTableColumn<OnHandRow>,
+        ]
+      : []),
     physicalColumn,
     ...(filters.asOf ? [] : availabilityColumns),
     ...amountColumns,
   ];
   const rows = state.data?.items ?? [];
+  const [exportNote, setExportNote] = useState("");
+  function exportCsv() {
+    const csv = onHandCsv(rows, groupBy, Boolean(filters.asOf), GROUP_LABELS);
+    const done = downloadText(`on-hand-${filters.asOf || new Date().toISOString().slice(0, 10)}.csv`, csv);
+    setExportNote(done ? `Exported ${rows.length} ${rows.length === 1 ? "row" : "rows"}.` : "This browser cannot save the file.");
+  }
 
   return (
     <div className={styles.stack}>
       <PageHeader
         title="On-hand inquiry"
         description="Physical and available stock by any combination of dimensions, now or on a past date, straight from the posting ledger."
+        actions={
+          <Button onClick={exportCsv} disabled={state.loading || rows.length === 0}>
+            Export CSV
+          </Button>
+        }
       />
+      <Alert tone="info" live="status">
+        {exportNote}
+      </Alert>
       <Card title="Filter and group">
         <form onSubmit={apply} noValidate className={styles.form}>
           <FormField id="onhand-asof" label="As of date" optional error={dateError} hint="Stock and value at the end of that day. Leave empty for now.">

@@ -1890,6 +1890,57 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/journals/{id}:copy:
+    post:
+      operationId: copyInventoryJournal
+      summary: Copy a journal into a new DRAFT journal (AX copy journal)
+      description: |
+        Creates a DRAFT journal with the legal entity, type, offset account, journal name and
+        currency of the source and one line per source line (quantities, unit, cost price and
+        dimensions; no client keys, no reversal links). The source can have any status and is never
+        changed, so a posted journal is a template for the next one. The body is a JSON object
+        (send {}); postingDate defaults to the source's posting date. The copy passes the same checks as a new journal: an active journal
+        name that still allows the type (INV-JNL-007) and the line rules and limit. A COUNT journal
+        belongs to its sheet and a reversal to the journal it reverses: both answer 409 INV-JNL-003.
+        Copying an OWNERSHIP_CHANGE journal also needs inventory.consignment.write, as creating one
+        does (403 AUTH-0003 otherwise).
+        Idempotency-Key is required: repeating the request returns the first copy (200,
+        Idempotent-Replayed); the same key with another posting date is 422 idempotency_key_reuse.
+      x-passage-duty: inventory.journal.write
+      parameters:
+        - $ref: '#/components/parameters/JournalId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                postingDate: { type: string, format: date, description: Posting date of the copy; the source's date when absent }
+      responses:
+        '201':
+          description: Copy created (DRAFT)
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '200':
+          description: The copy made by the first request with this key
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/inventory/count-plans/{id}:generate-tags:
     post:
       operationId: generateInventoryCountTags

@@ -1,5 +1,6 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { ApprovalsPage } from "./ApprovalsPage";
 import { AbcRunPage } from "./AbcRunPage";
 import { AbcRunsPage } from "./AbcRunsPage";
 import { BlockingsPage } from "./BlockingsPage";
@@ -51,6 +52,7 @@ const inventory: PassageModule = {
     { path: "/inventory/workspace", element: createElement(WorkspacePage), handle: { title: "Inventory workspace" } },
     { path: "/inventory/onhand", element: createElement(OnHandPage) },
     { path: "/inventory/journals", element: createElement(JournalsPage) },
+    { path: "/inventory/approvals", element: createElement(ApprovalsPage), handle: { title: "Journal approvals" } },
     { path: "/inventory/journals/new", element: createElement(NewJournalPage) },
     { path: "/inventory/journals/:id", element: createElement(JournalDetailPage), handle: { title: "Journal details" } },
     { path: "/inventory/journal-names", element: createElement(JournalNamesPage) },
@@ -93,6 +95,7 @@ const inventory: PassageModule = {
     { label: "Workspace", to: "/inventory/workspace", duty: "inventory.read" },
     { label: "On-hand", to: "/inventory/onhand", duty: "inventory.read" },
     { label: "Journals", to: "/inventory/journals", duty: "inventory.read" },
+    { label: "Approvals", to: "/inventory/approvals", duty: "inventory.read" },
     { label: "New journal", to: "/inventory/journals/new", duty: "inventory.journal.write" },
     { label: "Journal names", to: "/inventory/journal-names", duty: "inventory.read" },
     { label: "Transactions", to: "/inventory/transactions", duty: "inventory.read" },
