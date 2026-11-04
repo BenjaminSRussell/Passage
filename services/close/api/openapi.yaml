@@ -443,6 +443,19 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
+  /v1/close/accrual-runs/{runId}:cancel:
+    post:
+      operationId: cancelAccrualRun
+      x-passage-duty: close.accrual.run
+      description: Cancels a scheduled or parked accrual run so no further occurrence or reversal posts. Entries already posted stay in the ledger. A run copies the scheme's amount, accounts and autoReverse when it is applied, so later scheme edits do not change it; cancel and apply again to pick them up. The user who last changed a scheme cannot apply it.
+      parameters:
+        - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Cancelled run. }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
   /v1/close/regrouping-rules/{code}:
     put:
       operationId: putRegroupingRule

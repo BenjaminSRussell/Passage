@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -354,7 +355,7 @@ func (a *API) putAccrual(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	scheme.Code, scheme.LegalEntityID = chi.URLParam(r, "code"), p.LegalEntityID
+	scheme.Code, scheme.LegalEntityID, scheme.UpdatedBy = chi.URLParam(r, "code"), p.LegalEntityID, p.UserID
 	if scheme.Frequency == "" {
 		scheme.Frequency = "monthly"
 	}
@@ -379,6 +380,18 @@ func (a *API) putAccrual(w http.ResponseWriter, r *http.Request) {
 	if !a.ledgerBelongsToCaller(w, r, p.LegalEntityID, scheme.LedgerID) {
 		return
 	}
+	if a.yearLedger != nil {
+		info, err := a.yearLedger.Ledger(r.Context(), p.LegalEntityID, scheme.LedgerID)
+		if err != nil {
+			a.yearEndFailed(w, r, "accrual ledger lookup failed", err)
+			return
+		}
+		amount, _ := decimal.NewFromString(scheme.Amount)
+		if !amount.Equal(amount.Round(money.MinorUnits(info.Currency))) {
+			fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "amount has more decimals than the ledger currency "+info.Currency+" allows"))
+			return
+		}
+	}
 	out, err := a.accruals.PutAccrualScheme(r.Context(), scheme)
 	if err != nil {
 		fail(w, r, err)
@@ -391,8 +404,8 @@ func validateAccrualScheme(scheme domain.AccrualDefinition) error {
 	switch {
 	case scheme.Occurrences < 1 || scheme.Occurrences > 120:
 		return &domain.Error{Code: domain.CodeValidation, Detail: "occurrences must be between 1 and 120"}
-	case scheme.Frequency != "monthly" && scheme.Frequency != "quarterly" && scheme.Frequency != "custom":
-		return &domain.Error{Code: domain.CodeValidation, Detail: "frequency must be monthly, quarterly or custom"}
+	case scheme.Frequency != "monthly" && scheme.Frequency != "quarterly":
+		return &domain.Error{Code: domain.CodeValidation, Detail: "frequency must be monthly or quarterly"}
 	case scheme.Spread != domain.SpreadEqual && scheme.Spread != domain.SpreadByDays && scheme.Spread != domain.SpreadCustom:
 		return &domain.Error{Code: domain.CodeValidation, Detail: "spread must be equal, by_days or custom"}
 	}
@@ -466,16 +479,24 @@ func (a *API) applyAccrual(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, unprocessable("currency must be the ledger currency "+info.Currency))
 		return
 	}
+	if scheme.UpdatedBy != "" && scheme.UpdatedBy == p.UserID {
+		fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the user who last changed the accrual scheme cannot apply it"))
+		return
+	}
 	amount, err := decimal.NewFromString(scheme.Amount)
 	if err != nil {
 		fail(w, r, unprocessable("the accrual scheme holds no valid amount"))
 		return
 	}
+	stepMonths := 1
+	if scheme.Frequency == "quarterly" {
+		stepMonths = 3
+	}
 	custom := make([]decimal.Decimal, len(scheme.Custom))
 	for i, c := range scheme.Custom {
 		custom[i], _ = decimal.NewFromString(c)
 	}
-	occ, err := domain.SpreadAccrual(amount, start, domain.AccrualScheme{Occurrences: scheme.Occurrences, Spread: scheme.Spread, Custom: custom, AutoReverse: scheme.AutoReverse}, money.MinorUnits(info.Currency))
+	occ, err := domain.SpreadAccrual(amount, start, domain.AccrualScheme{Occurrences: scheme.Occurrences, StepMonths: stepMonths, Spread: scheme.Spread, Custom: custom, AutoReverse: scheme.AutoReverse}, money.MinorUnits(info.Currency))
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -485,6 +506,16 @@ func (a *API) applyAccrual(w http.ResponseWriter, r *http.Request) {
 		LegalEntityID: p.LegalEntityID, LedgerID: req.LedgerID, SchemeCode: scheme.Code, Amount: amount.String(), Currency: info.Currency,
 		DebitAccount: scheme.DebitAccount, CreditAccount: scheme.CreditAccount, AutoReverse: scheme.AutoReverse,
 		StartDate: req.StartDate, Status: "scheduled", Occurrences: occ, EntryIDs: map[string]string{}, CreatedBy: p.UserID, NextDue: &today,
+	}
+	for _, o := range occ {
+		if o.Date.After(today) {
+			break
+		}
+		if err := a.requireOpenPeriod(r.Context(), p.LegalEntityID, req.LedgerID, o.Date.Format(dateLayout)); err != nil {
+			a.yearEndFailed(w, r, "accrual period check failed", err)
+			return
+		}
+		break
 	}
 	hash := store.HashRequest(http.MethodPost, r.URL.Path, hashKey(req.LedgerID, info.Currency, req.StartDate))
 	saved, err := a.accruals.SaveAccrualRun(r.Context(), run, r.Header.Get(idempotencyHeader), hash)
@@ -580,6 +611,32 @@ func (a *API) advanceAccrual(ctx context.Context, run domain.AccrualRun, today t
 	return run, persist()
 }
 
+func permanentPeriodRefusal(err error) bool {
+	var de *domain.Error
+	return errors.As(err, &de) && (de.Code == domain.CodePeriodClosed || de.Code == domain.CodeNoPeriod)
+}
+
+func (a *API) cancelAccrual(w http.ResponseWriter, r *http.Request) {
+	if _, ok := a.principal(w, r); !ok {
+		return
+	}
+	if a.accruals == nil {
+		fail(w, r, missingSlice("accruals"))
+		return
+	}
+	id := chi.URLParam(r, "runId")
+	if !ids.Valid(id) {
+		fail(w, r, notFound("accrual run not found"))
+		return
+	}
+	out, err := a.accruals.CancelAccrualRun(r.Context(), id)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
 func (a *API) PostDueAccruals(ctx context.Context) (int, error) {
 	if a.accruals == nil || a.yearLedger == nil {
 		return 0, nil
@@ -590,7 +647,7 @@ func (a *API) PostDueAccruals(ctx context.Context) (int, error) {
 		runCtx := tenant.With(ctx, tenant.Principal{TenantID: run.TenantID, LegalEntityID: run.LegalEntityID, UserID: run.CreatedBy})
 		updated, err := a.advanceAccrual(runCtx, run, a.today())
 		if err != nil {
-			park := ledgerclient.Rejected(err)
+			park := ledgerclient.Rejected(err) || permanentPeriodRefusal(err)
 			slog.Error("accrual run could not post", "runId", run.ID, "tenantId", run.TenantID, "parked", park, "err", err)
 			if recordErr := a.accruals.RecordAccrualFailure(runCtx, run.ID, err.Error(), park); recordErr != nil {
 				slog.Error("accrual failure could not be recorded", "runId", run.ID, "err", recordErr)

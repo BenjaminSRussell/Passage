@@ -173,6 +173,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyAccrualWrite)).Put("/v1/close/accrual-schemes/{code}", a.putAccrual)
 	r.With(authz.RequireDuty(dutyAccrualWrite)).Get("/v1/close/accrual-schemes/{code}", a.getAccrual)
 	r.With(authz.RequireDuty(dutyAccrualRun)).Post("/v1/close/accrual-schemes/{code}:apply", a.applyAccrual)
+	r.With(authz.RequireDuty(dutyAccrualRun)).Post("/v1/close/accrual-runs/{runId}:cancel", a.cancelAccrual)
 	r.With(authz.RequireDuty(dutyRegroupWrite)).Put("/v1/close/regrouping-rules/{code}", a.putRegroup)
 	r.With(authz.RequireDuty(dutyRegroupWrite)).Get("/v1/close/regrouping-rules/{code}", a.getRegroup)
 	r.With(authz.RequireDuty(dutyRegroupRun)).Post("/v1/close/regroupings", a.runRegroup)

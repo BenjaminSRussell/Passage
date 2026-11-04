@@ -265,6 +265,18 @@ func (m *memAccruals) DueAccrualRuns(context.Context) ([]domain.AccrualRun, erro
 	}
 	return out, nil
 }
+func (m *memAccruals) CancelAccrualRun(_ context.Context, id string) (domain.AccrualRun, error) {
+	run, ok := m.runs[id]
+	if !ok {
+		return run, &domain.Error{Code: domain.CodeNoRun, Detail: "accrual run not found"}
+	}
+	if run.Status == "posted" {
+		return run, &domain.Error{Code: domain.CodeInvalidTransition, Detail: "only a scheduled or parked accrual run can be cancelled"}
+	}
+	run.Status = "cancelled"
+	m.runs[id] = run
+	return run, nil
+}
 func (m *memAccruals) RecordAccrualFailure(_ context.Context, id, message string, park bool) error {
 	if park {
 		run := m.runs[id]
@@ -520,7 +532,7 @@ func TestAccrualSpreadsAndPostsWithoutPostClosed(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("scheme: %d %s", rec.Code, rec.Body)
 	}
-	rec = f.send(http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-01"}`, "close.accrual.run", "accrual-1")
+	rec = f.sendAs("bob", http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-01"}`, "close.accrual.run", "accrual-1")
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("apply: %d %s", rec.Code, rec.Body)
 	}
@@ -697,7 +709,7 @@ func TestAccrualMonthEndPostsOnlyDueOccurrencesAndTheSweeperPostsTheRest(t *test
 		t.Fatalf("scheme: %d %s", rec.Code, rec.Body)
 	}
 	*f.clock = time.Date(2026, 2, 15, 9, 0, 0, 0, time.UTC)
-	rec := f.send(http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-31"}`, "close.accrual.run", "accrual-eom")
+	rec := f.sendAs("bob", http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-31"}`, "close.accrual.run", "accrual-eom")
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("apply: %d %s", rec.Code, rec.Body)
 	}
@@ -708,7 +720,7 @@ func TestAccrualMonthEndPostsOnlyDueOccurrencesAndTheSweeperPostsTheRest(t *test
 	if got := postingDates(f); !slices.Equal(got, []string{"2026-01-31"}) {
 		t.Fatalf("only the January occurrence is due on 15 February, posted %v", got)
 	}
-	replay := f.send(http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-31"}`, "close.accrual.run", "accrual-eom")
+	replay := f.sendAs("bob", http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-31"}`, "close.accrual.run", "accrual-eom")
 	if replay.Code != http.StatusCreated || len(f.ledger.Entries()) != 1 {
 		t.Fatalf("replay must not post again: %d, %d entries", replay.Code, len(f.ledger.Entries()))
 	}
@@ -749,18 +761,18 @@ func TestAccrualApplyIgnoresCallerAmountAndRefusesForeignCurrency(t *testing.T) 
 	f := newSliceB()
 	ledger := testkit.TenantID(7)
 	putAccrualScheme(f, "rent", `{"ledgerId":"`+ledger+`","debitAccount":"6100","creditAccount":"2100","amount":"120.00","occurrences":2,"spread":"equal","autoReverse":false}`)
-	rec := f.send(http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","amount":"999999.00","startDate":"2026-01-01"}`, "close.accrual.run", "accrual-amount")
+	rec := f.sendAs("bob", http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","amount":"999999.00","startDate":"2026-01-01"}`, "close.accrual.run", "accrual-amount")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("a request amount is not accepted: %d %s", rec.Code, rec.Body)
 	}
-	rec = f.send(http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","currency":"EUR","startDate":"2026-01-01"}`, "close.accrual.run", "accrual-eur")
+	rec = f.sendAs("bob", http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","currency":"EUR","startDate":"2026-01-01"}`, "close.accrual.run", "accrual-eur")
 	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "CLOSE-0011") {
 		t.Fatalf("a foreign currency is refused: %d %s", rec.Code, rec.Body)
 	}
 	if n := len(f.ledger.Entries()); n != 0 {
 		t.Fatalf("nothing may post, got %d", n)
 	}
-	rec = f.send(http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-01"}`, "close.accrual.run", "accrual-ok")
+	rec = f.sendAs("bob", http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-01"}`, "close.accrual.run", "accrual-ok")
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("apply: %d %s", rec.Code, rec.Body)
 	}
@@ -784,7 +796,7 @@ func TestAccrualPermanentLedgerRefusalParksTheRun(t *testing.T) {
 	ledger := testkit.TenantID(7)
 	putAccrualScheme(f, "rent", `{"ledgerId":"`+ledger+`","debitAccount":"6100","creditAccount":"2100","amount":"120.00","occurrences":2,"spread":"equal","autoReverse":false}`)
 	*f.clock = time.Date(2026, 1, 15, 9, 0, 0, 0, time.UTC)
-	f.send(http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-01"}`, "close.accrual.run", "accrual-park")
+	f.sendAs("bob", http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-01"}`, "close.accrual.run", "accrual-park")
 	f.ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: "LEDGER-0001"})
 	*f.clock = time.Date(2026, 2, 15, 9, 0, 0, 0, time.UTC)
 	if _, err := f.api.PostDueAccruals(context.Background()); err != nil {
@@ -855,5 +867,83 @@ func TestChecklistRunRefusesLegalEntitiesOutsideTheCallerScope(t *testing.T) {
 	rec := f.send(http.MethodPost, "/v1/close/runs", `{"templateId":"`+tmpl+`","fiscalPeriodId":"`+testkit.TenantID(8)+`","legalEntityIds":["`+testkit.TenantID(10)+`"]}`, "close.checklist.write", "run-scope")
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAccrualApplyRefusesTheUserWhoLastChangedTheScheme(t *testing.T) {
+	f := newSliceB()
+	ledger := testkit.TenantID(7)
+	putAccrualScheme(f, "rent", `{"ledgerId":"`+ledger+`","debitAccount":"6100","creditAccount":"2100","amount":"120.00","occurrences":2}`)
+	rec := f.send(http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-01"}`, "close.accrual.run", "accrual-self")
+	if rec.Code != http.StatusForbidden || len(f.ledger.Entries()) != 0 {
+		t.Fatalf("got %d %s with %d entries", rec.Code, rec.Body, len(f.ledger.Entries()))
+	}
+}
+
+func TestAccrualQuarterlyStepsThreeMonthsAndCustomFrequencyIsRefused(t *testing.T) {
+	f := newSliceB()
+	ledger := testkit.TenantID(7)
+	if rec := putAccrualScheme(f, "q", `{"ledgerId":"`+ledger+`","debitAccount":"6100","creditAccount":"2100","amount":"400.00","frequency":"quarterly","occurrences":4,"autoReverse":false}`); rec.Code != http.StatusOK {
+		t.Fatalf("quarterly scheme: %d %s", rec.Code, rec.Body)
+	}
+	*f.clock = time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)
+	if rec := f.sendAs("bob", http.MethodPost, "/v1/close/accrual-schemes/q:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-01"}`, "close.accrual.run", "q-1"); rec.Code != http.StatusCreated {
+		t.Fatalf("apply: %d %s", rec.Code, rec.Body)
+	}
+	if got := postingDates(f); !slices.Equal(got, []string{"2026-01-01", "2026-04-01", "2026-07-01", "2026-10-01"}) {
+		t.Fatalf("quarterly dates %v", got)
+	}
+	if rec := putAccrualScheme(f, "c", `{"ledgerId":"`+ledger+`","debitAccount":"6100","creditAccount":"2100","amount":"400.00","frequency":"custom","occurrences":4}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("custom frequency: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAccrualSchemeAmountScaleFollowsTheLedgerCurrency(t *testing.T) {
+	f := newSliceB()
+	rec := putAccrualScheme(f, "rent", `{"ledgerId":"`+testkit.TenantID(7)+`","debitAccount":"6100","creditAccount":"2100","amount":"100.005","occurrences":2}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAccrualApplyRefusesBeforeSavingWhenTheFirstDueMonthIsNotOpen(t *testing.T) {
+	f := newSliceB()
+	ledger := testkit.TenantID(7)
+	putAccrualScheme(f, "rent", `{"ledgerId":"`+ledger+`","debitAccount":"6100","creditAccount":"2100","amount":"120.00","occurrences":2}`)
+	closed := fakeStore{spans: []domain.Span{span(testkit.TenantID(8), domain.Row{Module: domain.ModuleAll, Status: domain.StatusClosed})}}
+	a := api.New(closed).WithLedgers(fakeLedger{owner: testkit.TenantID(9)}).WithYearEnd(&memoryRuns{}, f.ledger).
+		WithSliceB(f.periods, f.checks, f.allocs, f.accrual, f.regroup, nil).WithClock(func() time.Time { return *f.clock })
+	r := httpx.NewRouter()
+	a.Register(r)
+	f.router = r
+	rec := f.sendAs("bob", http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-01"}`, "close.accrual.run", "accrual-closed")
+	if rec.Code != http.StatusUnprocessableEntity || len(f.accrual.runs) != 0 {
+		t.Fatalf("got %d %s with %d saved runs", rec.Code, rec.Body, len(f.accrual.runs))
+	}
+}
+
+func TestAccrualSweepParksAClosedPeriodAndCancelStopsARun(t *testing.T) {
+	f := newSliceB()
+	ledger := testkit.TenantID(7)
+	putAccrualScheme(f, "rent", `{"ledgerId":"`+ledger+`","debitAccount":"6100","creditAccount":"2100","amount":"120.00","occurrences":2}`)
+	*f.clock = time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
+	rec := f.sendAs("bob", http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-01"}`, "close.accrual.run", "accrual-p")
+	var run domain.AccrualRun
+	_ = json.Unmarshal(rec.Body.Bytes(), &run)
+	closed := fakeStore{spans: []domain.Span{span(testkit.TenantID(8), domain.Row{Module: domain.ModuleAll, Status: domain.StatusClosed})}}
+	a := api.New(closed).WithYearEnd(&memoryRuns{}, f.ledger).WithSliceB(f.periods, f.checks, f.allocs, f.accrual, f.regroup, nil).WithClock(func() time.Time { return *f.clock })
+	*f.clock = time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC)
+	if _, err := a.PostDueAccruals(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.accrual.parked) != 1 {
+		t.Fatalf("a closed period parks the run, parked %v", f.accrual.parked)
+	}
+	rec = f.sendAs("bob", http.MethodPost, "/v1/close/accrual-runs/"+run.ID+":cancel", "", "close.accrual.run", "")
+	if rec.Code != http.StatusOK || f.accrual.runs[run.ID].Status != "cancelled" {
+		t.Fatalf("cancel: %d %s", rec.Code, rec.Body)
+	}
+	if rec := f.sendAs("bob", http.MethodPost, "/v1/close/accrual-runs/not-a-uuid:cancel", "", "close.accrual.run", ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("bad id: %d", rec.Code)
 	}
 }

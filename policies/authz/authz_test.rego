@@ -597,6 +597,10 @@ test_service_grants_allow_only_their_declared_routes if {
 	allowed("close.allocation.run", "POST", "/v1/close/allocation-runs/r-1:post")
 	not allowed("close.allocation.write", "POST", "/v1/close/allocation-runs")
 	allowed("close.accrual.run", "POST", "/v1/close/accrual-schemes/rent:apply")
+	allowed("close.accrual.run", "POST", "/v1/close/accrual-runs/r-1:cancel")
+	not allowed("close.accrual.write", "POST", "/v1/close/accrual-schemes/rent:apply")
+	not allowed("close.accrual.write", "POST", "/v1/close/accrual-runs/r-1:cancel")
+	not allowed("close.accrual.run", "PUT", "/v1/close/accrual-schemes/rent")
 	allowed("close.regrouping.run", "POST", "/v1/close/regroupings")
 	data.service_grants.ledger.fx == ["fx.rate.lookup"]
 	allowed("fx.rate.lookup", "GET", "/v1/fx/rates")

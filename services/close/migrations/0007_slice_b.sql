@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS accrual_run (
   credit_account text NOT NULL,
   auto_reverse boolean NOT NULL,
   start_date date NOT NULL,
-  status text NOT NULL CHECK (status IN ('scheduled', 'posted', 'reversed', 'parked')),
+  status text NOT NULL CHECK (status IN ('scheduled', 'posted', 'reversed', 'parked', 'cancelled')),
   occurrences jsonb NOT NULL,
   entry_ids jsonb NOT NULL DEFAULT '{}',
   attempts int NOT NULL DEFAULT 0,
@@ -167,7 +167,7 @@ ALTER TABLE close_task ADD COLUMN IF NOT EXISTS reassigned_by text;
 ALTER TABLE period_reopen_request ADD COLUMN IF NOT EXISTS rejected_by text;
 ALTER TABLE period_reopen_request ADD COLUMN IF NOT EXISTS idempotency_key text NOT NULL DEFAULT '';
 ALTER TABLE period_reopen_request ADD COLUMN IF NOT EXISTS request_hash text NOT NULL DEFAULT '';
-CREATE UNIQUE INDEX IF NOT EXISTS period_reopen_request_idempotency ON period_reopen_request (tenant_id, idempotency_key) WHERE idempotency_key <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS period_reopen_request_idempotency ON period_reopen_request (tenant_id, requested_by, idempotency_key) WHERE idempotency_key <> '';
 ALTER TABLE close_run ADD COLUMN IF NOT EXISTS idempotency_key text NOT NULL DEFAULT '';
 ALTER TABLE close_run ADD COLUMN IF NOT EXISTS request_hash text NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX IF NOT EXISTS close_run_idempotency ON close_run (tenant_id, idempotency_key) WHERE idempotency_key <> '';

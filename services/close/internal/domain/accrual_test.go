@@ -121,3 +121,20 @@ func TestSpreadAccrual_RejectsExtraDecimalsAndNegativeResidual(t *testing.T) {
 		}
 	}
 }
+
+func TestSpreadAccrual_QuarterlyStepsThreeMonths(t *testing.T) {
+	start := time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC)
+	got, err := domain.SpreadAccrual(decimal.RequireFromString("400.00"), start, domain.AccrualScheme{Occurrences: 4, StepMonths: 3, Spread: domain.SpreadEqual}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"2026-01-31", "2026-04-30", "2026-07-31", "2026-10-31"}
+	for i, o := range got {
+		if o.Date.Format("2006-01-02") != want[i] {
+			t.Errorf("occurrence %d on %s, want %s", i, o.Date.Format("2006-01-02"), want[i])
+		}
+	}
+	if _, err := domain.SpreadAccrual(decimal.NewFromInt(4), start, domain.AccrualScheme{Occurrences: 2, StepMonths: 2, Spread: domain.SpreadEqual}, 2); code(err) != domain.CodeValidation {
+		t.Fatalf("unsupported step: %v", err)
+	}
+}

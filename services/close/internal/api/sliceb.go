@@ -56,6 +56,7 @@ type AccrualStore interface {
 	SaveAccrualRun(ctx context.Context, in domain.AccrualRun, key, requestHash string) (domain.AccrualRun, error)
 	AccrualRun(ctx context.Context, id string) (domain.AccrualRun, error)
 	DueAccrualRuns(ctx context.Context) ([]domain.AccrualRun, error)
+	CancelAccrualRun(ctx context.Context, id string) (domain.AccrualRun, error)
 	RecordAccrualFailure(ctx context.Context, id, message string, park bool) error
 }
 

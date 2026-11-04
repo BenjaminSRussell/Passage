@@ -51,8 +51,8 @@ func (s *Postgres) AccrualScheme(ctx context.Context, ledgerID, code string) (do
 	var custom []byte
 	var amount decimal.Decimal
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `select legal_entity_id::text, ledger_id::text, code, debit_account, credit_account, amount, frequency, occurrences, spread, custom, auto_reverse from accrual_scheme where ledger_id = $1 and code = $2`, ledgerID, code).
-			Scan(&in.LegalEntityID, &in.LedgerID, &in.Code, &in.DebitAccount, &in.CreditAccount, &amount, &in.Frequency, &in.Occurrences, &in.Spread, &custom, &in.AutoReverse)
+		return tx.QueryRow(ctx, `select legal_entity_id::text, ledger_id::text, code, debit_account, credit_account, amount, frequency, occurrences, spread, custom, auto_reverse, updated_by from accrual_scheme where ledger_id = $1 and code = $2`, ledgerID, code).
+			Scan(&in.LegalEntityID, &in.LedgerID, &in.Code, &in.DebitAccount, &in.CreditAccount, &amount, &in.Frequency, &in.Occurrences, &in.Spread, &custom, &in.AutoReverse, &in.UpdatedBy)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return in, &domain.Error{Code: domain.CodeNoRun, Detail: "accrual scheme not found"}
@@ -91,8 +91,12 @@ func (s *Postgres) SaveAccrualRun(ctx context.Context, in domain.AccrualRun, key
 		scanErr := tx.QueryRow(ctx, `select id::text from accrual_run where id = $1`, in.ID).Scan(&existingID)
 		switch {
 		case scanErr == nil:
-			if _, err := tx.Exec(ctx, `update accrual_run set status = $2, entry_ids = $3::jsonb, attempts = 0, last_error = '', next_attempt_at = coalesce($4, next_attempt_at) where id = $1`, in.ID, in.Status, idsRaw, in.NextDue); err != nil {
+			tag, err := tx.Exec(ctx, `update accrual_run set status = $2, entry_ids = $3::jsonb, attempts = 0, last_error = '', next_attempt_at = coalesce($4, next_attempt_at) where id = $1 and status <> 'cancelled'`, in.ID, in.Status, idsRaw, in.NextDue)
+			if err != nil {
 				return err
+			}
+			if tag.RowsAffected() == 0 {
+				return &domain.Error{Code: domain.CodeInvalidTransition, Detail: "the accrual run was cancelled"}
 			}
 			saved = in
 			return nil
@@ -180,7 +184,10 @@ func (s *Postgres) AccrualRun(ctx context.Context, id string) (domain.AccrualRun
 	return in, nil
 }
 
-const dueAccrualBatch = 100
+const (
+	dueAccrualBatch     = 100
+	accrualLeaseSeconds = 300.0
+)
 
 func (s *Postgres) DueAccrualRuns(ctx context.Context) ([]domain.AccrualRun, error) {
 	conn, err := s.pool.Acquire(ctx)
@@ -219,7 +226,9 @@ func (s *Postgres) dueAccrualForTenant(ctx context.Context, tenantID string) ([]
 	ctx = tenant.With(ctx, tenant.Principal{TenantID: tenantID, Duties: map[string]struct{}{tenant.DutyAllScope: {}}})
 	var out []domain.AccrualRun
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select `+accrualRunColumns+` from accrual_run where status = 'scheduled' and next_attempt_at <= now() order by next_attempt_at limit $1`, dueAccrualBatch)
+		rows, err := tx.Query(ctx, `with claimed as (
+				select id as claimed_id from accrual_run where status = 'scheduled' and next_attempt_at <= now() order by next_attempt_at limit $1 for update skip locked
+			) update accrual_run set next_attempt_at = now() + make_interval(secs => $2) from claimed where accrual_run.id = claimed.claimed_id returning `+accrualRunColumns, dueAccrualBatch, accrualLeaseSeconds)
 		if err != nil {
 			return err
 		}
@@ -242,4 +251,29 @@ func (s *Postgres) RecordAccrualFailure(ctx context.Context, id, message string,
 			next_attempt_at = now() + make_interval(secs => least(60 * power(2, attempts), 3600)) where id = $1`, id, message, park)
 		return err
 	})
+}
+
+func (s *Postgres) CancelAccrualRun(ctx context.Context, id string) (domain.AccrualRun, error) {
+	var out domain.AccrualRun
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		run, err := scanAccrual(tx.QueryRow(ctx, `select `+accrualRunColumns+` from accrual_run where id = $1 for update`, id))
+		if err != nil {
+			return err
+		}
+		out = run
+		switch run.Status {
+		case "cancelled":
+			return nil
+		case "scheduled", "parked":
+		default:
+			return &domain.Error{Code: domain.CodeInvalidTransition, Detail: "only a scheduled or parked accrual run can be cancelled"}
+		}
+		out.Status = "cancelled"
+		_, err = tx.Exec(ctx, `update accrual_run set status = 'cancelled' where id = $1`, id)
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return out, &domain.Error{Code: domain.CodeNoRun, Detail: "accrual run not found"}
+	}
+	return out, err
 }

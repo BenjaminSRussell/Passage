@@ -143,6 +143,7 @@ type AccrualDefinition struct {
 	Spread        SpreadMethod `json:"spread"`
 	Custom        []string     `json:"custom,omitempty"`
 	AutoReverse   bool         `json:"autoReverse"`
+	UpdatedBy     string       `json:"updatedBy,omitempty"`
 }
 
 type AccrualRun struct {

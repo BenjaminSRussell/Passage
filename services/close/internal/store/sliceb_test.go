@@ -12,8 +12,10 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
+	"github.com/BenjaminSRussell/passage/services/close/internal/api"
 	"github.com/BenjaminSRussell/passage/services/close/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/close/internal/store"
 )
@@ -352,7 +354,7 @@ func TestExpireReopened_ContinuesPastAFailingTenant(t *testing.T) {
 }
 
 func TestDueAccrualRunsBackOffAndParkWithoutBlockingOthers(t *testing.T) {
-	_, app := migrated(t)
+	admin, app := migrated(t)
 	s := store.New(app)
 	ctx := principal(1)
 	past := time.Now().Add(-time.Hour)
@@ -374,6 +376,9 @@ func TestDueAccrualRunsBackOffAndParkWithoutBlockingOthers(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.RecordAccrualFailure(ctx, refused.ID, "ledger refused", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(context.Background(), `update accrual_run set next_attempt_at = now() - interval '1 minute' where id = $1`, healthy.ID); err != nil {
 		t.Fatal(err)
 	}
 	due, err = s.DueAccrualRuns(context.Background())
@@ -429,5 +434,111 @@ func TestChecklistEvidenceStartAndReassign(t *testing.T) {
 	done, err := s.CompleteTask(ctx, task.ID, "alice", "s3://evidence/prep.pdf")
 	if err != nil || done.Status != "completed" || done.EvidenceURI == "" {
 		t.Fatalf("complete with evidence: %+v %v", done, err)
+	}
+}
+
+type pgLedger struct{ *ledgerclient.Fake }
+
+func (pgLedger) Ledger(context.Context, string, string) (ledgerclient.Info, error) {
+	return ledgerclient.Info{Currency: "USD"}, nil
+}
+func (pgLedger) Accounts(context.Context, string, string) (map[string]ledgerclient.ChartAccount, error) {
+	return nil, nil
+}
+func (pgLedger) TrialBalance(context.Context, ledgerclient.TrialBalanceQuery) (ledgerclient.TrialBalance, error) {
+	return ledgerclient.TrialBalance{}, nil
+}
+
+func dueAccrualFixture(t *testing.T) (*store.Postgres, *api.API, *ledgerclient.Fake, domain.AccrualRun) {
+	t.Helper()
+	_, app := migrated(t)
+	s := store.New(app)
+	ctx := principal(1)
+	registerJan(t, s, ctx)
+	past := time.Now().Add(-time.Hour)
+	run, err := s.SaveAccrualRun(ctx, domain.AccrualRun{LegalEntityID: entityID, LedgerID: ledgerID, SchemeCode: "RENT", Amount: "10.00", Currency: "USD", DebitAccount: "6100", CreditAccount: "2100",
+		StartDate: "2026-01-31", Status: "scheduled", EntryIDs: map[string]string{}, CreatedBy: "bob", NextDue: &past,
+		Occurrences: []domain.AccrualOccurrence{{Date: time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC), Amount: decimal.NewFromInt(10), ReverseOn: time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC)}}}, "acc-1", "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := ledgerclient.NewFake()
+	a := api.New(s).WithYearEnd(s, pgLedger{fake}).WithSliceB(s, s, s, s, s, nil).WithClock(func() time.Time { return time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC) })
+	return s, a, fake, run
+}
+
+func TestPostDueAccruals_PostsThroughTheRLSPrincipalAndRecordsEntries(t *testing.T) {
+	s, a, fake, run := dueAccrualFixture(t)
+	done, err := a.PostDueAccruals(context.Background())
+	if err != nil || done != 1 {
+		t.Fatalf("sweep: %d %v", done, err)
+	}
+	got, err := s.AccrualRun(principal(1), run.ID)
+	if err != nil || got.Status != "posted" || got.EntryIDs["occ-2026-01-31"] == "" || len(fake.Entries()) != 1 {
+		t.Fatalf("run %+v entries %d %v", got, len(fake.Entries()), err)
+	}
+	if again, err := a.PostDueAccruals(context.Background()); err != nil || again != 0 || len(fake.Entries()) != 1 {
+		t.Fatalf("a posted run is not swept again: %d %v", again, err)
+	}
+}
+
+func TestPostDueAccruals_ParksARunWhoseMonthIsClosed(t *testing.T) {
+	s, a, fake, run := dueAccrualFixture(t)
+	if _, err := s.TransitionPeriod(principal(1), domain.PeriodTransition{LegalEntityID: entityID, LedgerID: ledgerID, FiscalPeriodID: periodID, Module: domain.ModuleAll, To: domain.StatusClosed, Actor: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if done, err := a.PostDueAccruals(context.Background()); err != nil || done != 0 {
+		t.Fatalf("sweep: %d %v", done, err)
+	}
+	got, err := s.AccrualRun(principal(1), run.ID)
+	if err != nil || got.Status != "parked" || got.LastError == "" || len(fake.Entries()) != 0 {
+		t.Fatalf("run %+v %v", got, err)
+	}
+}
+
+func TestCancelAccrualRun_StopsTheSweepAndBlocksLateProgress(t *testing.T) {
+	s, a, fake, run := dueAccrualFixture(t)
+	cancelled, err := s.CancelAccrualRun(principal(1), run.ID)
+	if err != nil || cancelled.Status != "cancelled" {
+		t.Fatalf("cancel: %+v %v", cancelled, err)
+	}
+	if done, err := a.PostDueAccruals(context.Background()); err != nil || done != 0 || len(fake.Entries()) != 0 {
+		t.Fatalf("a cancelled run is not swept: %d %v", done, err)
+	}
+	run.Status = "posted"
+	if _, err := s.SaveAccrualRun(principal(1), run, "", ""); code(err) != domain.CodeInvalidTransition {
+		t.Fatalf("progress on a cancelled run must be refused: %v", err)
+	}
+}
+
+func TestDueAccrualRuns_AreLeasedSoASecondSweeperSkipsThem(t *testing.T) {
+	s, _, _, _ := dueAccrualFixture(t)
+	first, err := s.DueAccrualRuns(context.Background())
+	if err != nil || len(first) != 1 {
+		t.Fatalf("first sweeper: %+v %v", first, err)
+	}
+	second, err := s.DueAccrualRuns(context.Background())
+	if err != nil || len(second) != 0 {
+		t.Fatalf("second sweeper must skip the leased run: %+v %v", second, err)
+	}
+}
+
+func TestReopenIdempotencyKeyIsScopedToTheRequester(t *testing.T) {
+	_, app := migrated(t)
+	s := store.New(app)
+	ctx := principal(1)
+	registerJan(t, s, ctx)
+	if _, err := s.TransitionPeriod(ctx, domain.PeriodTransition{LegalEntityID: entityID, LedgerID: ledgerID, FiscalPeriodID: periodID, Module: domain.ModuleAll, To: domain.StatusClosed, Actor: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	in := domain.StoredReopen{LegalEntityID: entityID, LedgerID: ledgerID, FiscalPeriodID: periodID, Module: domain.ModuleAll, Reason: "audit adjustment after close", RequestedBy: "alice", Required: 2, ExpiresDays: 3, IdempotencyKey: "same", RequestHash: "h"}
+	first, err := s.RequestReopen(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.RequestedBy = "bob"
+	other, err := s.RequestReopen(ctx, in)
+	if err == nil && other.ID == first.ID {
+		t.Fatal("another user's replay must not return alice's request")
 	}
 }

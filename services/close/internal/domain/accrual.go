@@ -16,6 +16,7 @@ const (
 
 type AccrualScheme struct {
 	Occurrences int
+	StepMonths  int
 	Spread      SpreadMethod
 	Custom      []decimal.Decimal
 	AutoReverse bool
@@ -45,12 +46,19 @@ func SpreadAccrual(total decimal.Decimal, start time.Time, scheme AccrualScheme,
 	if !total.IsPositive() || !total.Equal(total.Round(scale)) {
 		return nil, fail(CodeValidation, "amount must be positive with no more decimals than the currency allows")
 	}
+	step := scheme.StepMonths
+	if step == 0 {
+		step = 1
+	}
+	if step != 1 && step != 3 {
+		return nil, fail(CodeValidation, "accruals step one or three months")
+	}
 	dates := make([]time.Time, n)
 	days := make([]int, n)
 	totalDays := 0
 	for i := 0; i < n; i++ {
-		dates[i] = addMonths(start, i)
-		next := addMonths(start, i+1)
+		dates[i] = addMonths(start, i*step)
+		next := addMonths(start, (i+1)*step)
 		days[i] = int(next.Sub(dates[i]).Hours() / 24)
 		totalDays += days[i]
 	}
@@ -95,7 +103,7 @@ func SpreadAccrual(total decimal.Decimal, start time.Time, scheme AccrualScheme,
 		if !amounts[i].IsPositive() {
 			return nil, fail(CodeValidation, "amount is too small to spread over every occurrence")
 		}
-		out[i] = AccrualOccurrence{Date: dates[i], Amount: amounts[i], ReverseOn: addMonths(start, i+1)}
+		out[i] = AccrualOccurrence{Date: dates[i], Amount: amounts[i], ReverseOn: addMonths(start, (i+1)*step)}
 	}
 	return out, nil
 }

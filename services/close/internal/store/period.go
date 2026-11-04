@@ -177,7 +177,7 @@ func (s *Postgres) RequestReopen(ctx context.Context, in domain.StoredReopen) (d
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if in.IdempotencyKey != "" {
 			var priorID, priorHash string
-			err := tx.QueryRow(ctx, `select id::text, request_hash from period_reopen_request where idempotency_key = $1`, in.IdempotencyKey).Scan(&priorID, &priorHash)
+			err := tx.QueryRow(ctx, `select id::text, request_hash from period_reopen_request where idempotency_key = $1 and requested_by = $2`, in.IdempotencyKey, in.RequestedBy).Scan(&priorID, &priorHash)
 			switch {
 			case err == nil:
 				if priorHash != in.RequestHash {

@@ -238,7 +238,8 @@
       {"resource": "/v1/close/accrual-schemes/*", "methods": ["GET", "PUT"]}
     ]},
     "close.accrual.run": {"permissions": [
-      {"resource": "/v1/close/accrual-schemes/*:apply", "methods": ["POST"]}
+      {"resource": "/v1/close/accrual-schemes/*:apply", "methods": ["POST"]},
+      {"resource": "/v1/close/accrual-runs/*:cancel", "methods": ["POST"]}
     ]},
     "close.regrouping.write": {"permissions": [
       {"resource": "/v1/close/regrouping-rules/*", "methods": ["GET", "PUT"]}

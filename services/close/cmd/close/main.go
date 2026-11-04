@@ -58,6 +58,7 @@ type config struct {
 	reopenApprovers   int
 	lockWaitMS        int
 	reopenSweepEvery  time.Duration
+	accrualSweepEvery time.Duration
 }
 
 func intSetting(getenv func(string) string, key string, fallback, min, max int) (int, error) {
@@ -92,6 +93,14 @@ func loadConfig(getenv func(string) string) (config, error) {
 		}
 		cfg.reopenSweepEvery = d
 	}
+	cfg.accrualSweepEvery = cfg.reopenSweepEvery
+	if raw := getenv("CLOSE_ACCRUAL_SWEEP_INTERVAL"); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil || d <= 0 {
+			return config{}, fmt.Errorf("CLOSE_ACCRUAL_SWEEP_INTERVAL must be a positive duration such as 1m, got %q", raw)
+		}
+		cfg.accrualSweepEvery = d
+	}
 	return cfg, nil
 }
 
@@ -103,7 +112,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
-	slog.Info("close configuration", "reopenDefaultDays", cfg.reopenDefaultDays, "reopenApprovers", cfg.reopenApprovers, "lockWaitMs", cfg.lockWaitMS, "reopenSweepInterval", cfg.reopenSweepEvery.String())
+	slog.Info("close configuration", "reopenDefaultDays", cfg.reopenDefaultDays, "reopenApprovers", cfg.reopenApprovers, "lockWaitMs", cfg.lockWaitMS, "reopenSweepInterval", cfg.reopenSweepEvery.String(), "accrualSweepInterval", cfg.accrualSweepEvery.String())
 	databaseURL := getenv("DATABASE_URL")
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")
@@ -147,11 +156,12 @@ func run(ctx context.Context, getenv func(string) string) error {
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
-	go sweepReopened(ctx, a, cfg.reopenSweepEvery)
+	go sweepEvery(ctx, cfg.reopenSweepEvery, "reopen expiry", a.ExpireReopened)
+	go sweepEvery(ctx, cfg.accrualSweepEvery, "accrual posting", a.PostDueAccruals)
 	return <-errs
 }
 
-func sweepReopened(ctx context.Context, a *api.API, every time.Duration) {
+func sweepEvery(ctx context.Context, every time.Duration, name string, work func(context.Context) (int, error)) {
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
 	for {
@@ -159,13 +169,12 @@ func sweepReopened(ctx context.Context, a *api.API, every time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			n, err := a.ExpireReopened(ctx)
+			n, err := work(ctx)
 			if err != nil {
-				slog.Error("reopen expiry sweep failed", "err", err)
-				continue
+				slog.Error(name+" sweep failed", "err", err)
 			}
 			if n > 0 {
-				slog.Info("reopen expiry sweep closed periods", "count", n)
+				slog.Info(name+" sweep finished", "count", n)
 			}
 		}
 	}
