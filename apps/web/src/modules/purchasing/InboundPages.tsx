@@ -1,16 +1,40 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Alert, Button, DataTable, FormField, PageHeader, Select, buttonClassName, type DataTableColumn } from "../../shell/ui";
-import { getInboundChange, listInboundChanges, type InboundChange, type InboundSource, type InboundStatus } from "./api/client";
-import { Details, LoadError, ShortId, StatusBadge, dash, statusLabel, useResource, uuidPattern } from "./parts";
+import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, buttonClassName, type DataTableColumn } from "../../shell/ui";
+import {
+  describeProblem,
+  getInboundChange,
+  listInboundChanges,
+  settleInboundChange,
+  type InboundChange,
+  type InboundResolution,
+  type InboundSource,
+  type InboundStatus,
+} from "./api/client";
+import { Details, LoadError, ShortId, StatusBadge, dash, statusLabel, useResource, uuidPattern, type Failure } from "./parts";
 import styles from "./pages.module.css";
 
-const SOURCES: InboundSource[] = ["PLANNING_MESSAGE", "DROPSHIP_CLOSED"];
+const SOURCES: InboundSource[] = ["PLANNING_MESSAGE", "DROPSHIP_CLOSED", "DROPSHIP_CANCELLED"];
 const STATUSES: InboundStatus[] = ["APPLIED", "REFUSED", "IGNORED"];
+type ResolutionFilter = InboundResolution | "NONE" | "";
 
 /** What asked for the change, in words. */
 export function sourceLabel(source: InboundSource): string {
-  return source === "PLANNING_MESSAGE" ? "Planning message" : "Drop-ship closed";
+  switch (source) {
+    case "PLANNING_MESSAGE":
+      return "Planning message";
+    case "DROPSHIP_CLOSED":
+      return "Drop-ship closed";
+    default:
+      return "Drop-ship cancelled";
+  }
+}
+
+/** Where a change stands for the buyer: a refused one waits until it is acknowledged or retried. */
+export function settledLabel(c: InboundChange): string {
+  if (c.resolution === "ACKNOWLEDGED") return "Acknowledged";
+  if (c.resolution === "RETRIED") return "Retried";
+  return c.status === "REFUSED" ? "Waiting for a buyer" : dash;
 }
 
 /** The action of the request, in words: close-remainder reads "Close remainder". */
@@ -50,12 +74,13 @@ const columns: DataTableColumn<InboundChange>[] = [
   { key: "effect", header: "Effect", render: (c) => effectOf(c) || dash },
   { key: "status", header: "Status", render: (c) => <StatusBadge status={c.status} /> },
   { key: "reason", header: "Reason", render: (c) => (c.reason ? `${c.reasonCode}: ${c.reason}` : dash) },
+  { key: "settled", header: "Settled", render: (c) => settledLabel(c) },
 ];
 
 /**
- * Changes from other services: the planning messages a planner applied to a purchase order and the closed
- * drop-ship remainders, as the purchasing consumer handled them. A refused change is the buyer's to settle
- * by hand on the order; it is listed here with the rule that stopped it.
+ * Changes from other services: the planning messages a planner applied to a purchase order and the closed or
+ * cancelled drop-ships, as the purchasing consumer handled them. A refused change is the buyer's to settle: it
+ * is listed here with the rule that stopped it, and its page retries or acknowledges it.
  */
 export function InboundChangesPage() {
   const navigate = useNavigate();
@@ -63,23 +88,24 @@ export function InboundChangesPage() {
   const purchaseOrderId = params.get("purchaseOrderId") ?? "";
   const [source, setSource] = useState<InboundSource | "">("");
   const [status, setStatus] = useState<InboundStatus | "">(params.get("status") === "REFUSED" ? "REFUSED" : "");
+  const [resolution, setResolution] = useState<ResolutionFilter>(params.get("resolution") === "NONE" ? "NONE" : "");
   const [cursor, setCursor] = useState<string | undefined>();
   const [rows, setRows] = useState<InboundChange[]>([]);
   const validOrder = purchaseOrderId === "" || uuidPattern.test(purchaseOrderId);
   const page = useResource(
     async (signal) => {
       if (!validOrder) return { items: [] as InboundChange[] };
-      const result = await listInboundChanges({ source, status, purchaseOrderId }, { cursor, signal });
+      const result = await listInboundChanges({ source, status, resolution, purchaseOrderId }, { cursor, signal });
       setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
       return result;
     },
-    [source, status, purchaseOrderId, cursor, validOrder],
+    [source, status, resolution, purchaseOrderId, cursor, validOrder],
   );
   return (
     <div className={styles.stack}>
       <PageHeader
         title="Changes from other services"
-        description="Planning messages a planner applied to a purchase order, and drop-ship remainders that fulfillment closed. Each moves the order through its change versions; a refused change is left for you to settle on the order."
+        description="Planning messages a planner applied to a purchase order, and drop-ships that fulfillment closed or cancelled. Each moves the order through its change versions; a refused change waits for you to retry or acknowledge it."
       />
       <div className={styles.toolbar}>
         <div className={styles.filter}>
@@ -124,6 +150,25 @@ export function InboundChangesPage() {
             )}
           </FormField>
         </div>
+        <div className={styles.filter}>
+          <FormField id="inb-resolution" label="Settled">
+            {(control) => (
+              <Select
+                {...control}
+                value={resolution}
+                onChange={(e) => {
+                  setCursor(undefined);
+                  setResolution(e.target.value as ResolutionFilter);
+                }}
+              >
+                <option value="">Any</option>
+                <option value="NONE">Waiting for a buyer</option>
+                <option value="ACKNOWLEDGED">Acknowledged</option>
+                <option value="RETRIED">Retried</option>
+              </Select>
+            )}
+          </FormField>
+        </div>
         {purchaseOrderId !== "" ? (
           <div className={styles.filter}>
             <Button
@@ -147,7 +192,7 @@ export function InboundChangesPage() {
         loading={page.loading && rows.length === 0}
         empty={{
           title: "No changes from other services",
-          description: "When planning applies a message to a purchase order or fulfillment closes a drop-ship, the change is listed here.",
+          description: "When planning applies a message to a purchase order or fulfillment closes or cancels a drop-ship, the change is listed here.",
         }}
         onRowOpen={(c) => navigate(`/purchasing/inbound-changes/${c.id}`)}
       />
@@ -166,7 +211,33 @@ export function InboundChangesPage() {
 export function InboundChangeDetailPage() {
   const { id = "" } = useParams();
   const resource = useResource(async (signal) => (await getInboundChange(id, signal)).body, [id]);
-  const c = resource.data;
+  const [settled, setSettled] = useState<InboundChange | null>(null);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState<"acknowledge" | "retry" | null>(null);
+  const [failure, setFailure] = useState<Failure | null>(null);
+  // Set when a retry ran but a purchasing rule refused the change again: the page would otherwise look unchanged.
+  const [refusedAgain, setRefusedAgain] = useState(false);
+  const c = settled && settled.id === id ? settled : resource.data;
+
+  async function settle(action: "acknowledge" | "retry") {
+    if (!c) return;
+    setBusy(action);
+    setFailure(null);
+    setRefusedAgain(false);
+    try {
+      const { body } = await settleInboundChange(c.id, action, note.trim());
+      setSettled(body);
+      setRefusedAgain(action === "retry" && body.status === "REFUSED" && !body.resolution);
+      setNote("");
+    } catch (error) {
+      setFailure(describeProblem(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const waiting = c?.status === "REFUSED" && !c.resolution;
+  const stale = failure?.code === "PRC-INB-008";
   return (
     <div className={styles.stack}>
       <PageHeader
@@ -186,11 +257,24 @@ export function InboundChangeDetailPage() {
       />
       {resource.error ? <LoadError what="the change" error={resource.error} onRetry={resource.reload} /> : null}
       {resource.loading && !c ? <p role="status">Loading the change…</p> : null}
+      <Alert tone="warning" live="status">
+        {refusedAgain && c ? `The retry ran (${c.attempts ?? 0} runs in all) and was refused again; the reason below is the new one.` : null}
+      </Alert>
       {c ? (
         <>
-          {c.status === "REFUSED" ? (
+          {waiting ? (
             <Alert tone="danger" title={`Not applied (${c.reasonCode})`}>
-              {c.reason} Change the line by hand on the purchase order if it still has to move.
+              {c.reason} Fix the cause on the purchase order and retry, or change the line by hand and acknowledge.
+            </Alert>
+          ) : null}
+          {c.status === "REFUSED" && c.resolution === "ACKNOWLEDGED" ? (
+            <Alert tone="info" title="Acknowledged">
+              Not applied ({c.reasonCode}); {c.resolvedBy || "a buyer"} dealt with it by hand. {c.reason}
+            </Alert>
+          ) : null}
+          {c.resolution === "RETRIED" ? (
+            <Alert tone="success" title="Retried">
+              The request ran again ({c.attempts} runs in all) and is now {statusLabel(c.status).toLowerCase()}.
             </Alert>
           ) : null}
           {c.status === "IGNORED" ? (
@@ -216,11 +300,52 @@ export function InboundChangeDetailPage() {
               { label: "Order version", value: c.versionNo ? String(c.versionNo) : "", mono: true },
               { label: "Applied by", value: c.requestedBy ?? "" },
               { label: "Note", value: c.note ?? "" },
+              { label: "Settled", value: settledLabel(c) },
+              { label: "Runs of the request", value: c.attempts ? String(c.attempts) : "", mono: true },
+              { label: "Settled by", value: c.resolvedBy ?? "" },
+              { label: "Settled at", value: c.resolvedAt ?? "", mono: true },
+              { label: "Settlement note", value: c.resolutionNote ?? "" },
               { label: "Source id", value: c.sourceKey, mono: true },
               { label: "Event id", value: c.eventId, mono: true },
               { label: "Received", value: c.createdAt, mono: true },
             ]}
           />
+          <Alert
+            tone="danger"
+            live="alert"
+            action={
+              stale ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setSettled(null);
+                    setFailure(null);
+                    resource.reload();
+                  }}
+                >
+                  Reload change
+                </Button>
+              ) : undefined
+            }
+          >
+            {failure ? `${failure.message} (${failure.code})` : null}
+          </Alert>
+          {waiting ? (
+            <Card title="Settle this change">
+              <FormField id="inb-note" label="Note" optional>
+                {(control) => <Input {...control} value={note} maxLength={1000} onChange={(e) => setNote(e.target.value)} />}
+              </FormField>
+              <div className={styles.actions}>
+                <Button variant="primary" loading={busy === "retry"} disabled={busy !== null} onClick={() => settle("retry")}>
+                  Retry the change
+                </Button>
+                <Button variant="secondary" loading={busy === "acknowledge"} disabled={busy !== null} onClick={() => settle("acknowledge")}>
+                  Acknowledge
+                </Button>
+              </div>
+            </Card>
+          ) : null}
         </>
       ) : null}
     </div>

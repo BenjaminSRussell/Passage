@@ -37,8 +37,8 @@ serviceMonitor:
   enabled: false
   interval: 30s
 
-# The inbound consumer (slice 18): follows fulfillment's dropship.closed.v1 and planning's
-# message.applied.v1 and changes the purchase orders they name. It exits at start until
+# The inbound consumer (slice 18): follows fulfillment's dropship.closed.v1 and
+# dropship.cancelled.v1 (slice 19) and planning's message.applied.v1 and changes the purchase orders they name. It exits at start until
 # service:purchasing-inbound is seeded in the service principal table.
 consumer:
   enabled: false

@@ -13,6 +13,17 @@ const (
 	// SourceDropShipClosed is the closing of a drop-ship remainder in fulfillment (wave 28,
 	// dropship.closed.v1); the key is the drop-ship id.
 	SourceDropShipClosed = "DROPSHIP_CLOSED"
+	// SourceDropShipCancelled is a drop-ship cancelled while open in fulfillment (dropship.cancelled.v1,
+	// slice 19); the key is the drop-ship id.
+	SourceDropShipCancelled = "DROPSHIP_CANCELLED"
+)
+
+// How a refused change was settled (slice 19). A change waits with an empty resolution.
+const (
+	// ResolutionAcknowledged: a buyer dealt with the refused request by hand.
+	ResolutionAcknowledged = "ACKNOWLEDGED"
+	// ResolutionRetried: a retry ran the request again and it left REFUSED.
+	ResolutionRetried = "RETRIED"
 )
 
 // Inbound change outcomes.
@@ -32,6 +43,8 @@ const (
 	ActionIncrease = "increase"
 	// ActionCloseRemainder is the action recorded for a closed drop-ship.
 	ActionCloseRemainder = "close-remainder"
+	// ActionCancelDropShip is the action recorded for a cancelled drop-ship.
+	ActionCancelDropShip = "cancel-dropship"
 )
 
 // Inbound problem codes. They are recorded on the change row and never returned over HTTP.
@@ -43,6 +56,9 @@ const (
 	CodeInboundDate          = "PRC-INB-005"
 	CodeInboundOrderState    = "PRC-INB-006"
 	CodeInboundNoChange      = "PRC-INB-007"
+	// CodeInboundNotOpen is the 409 of acknowledging or retrying a change that is not a REFUSED one
+	// waiting for a buyer (slice 19).
+	CodeInboundNotOpen = "PRC-INB-008"
 )
 
 // InboundLine is the view of an open PO line the inbound rules need.
@@ -162,6 +178,16 @@ func PlanPlanningMessage(req InboundRequest, lines []InboundLine) InboundPlan {
 func PlanDropShipClose(req InboundRequest, l InboundLine) InboundPlan {
 	if !req.Qty.IsPositive() {
 		return ignore(CodeInboundQuantity, "nothing was closed")
+	}
+	return lowerLine(l, l.Qty.Sub(req.Qty))
+}
+
+// PlanDropShipCancel decides what a cancelled drop-ship does to the PO line it bought against: the
+// quantity the vendor will never ship (the ordered quantity less what was confirmed or closed before)
+// comes off the line, and a line left with nothing ordered and nothing received is cancelled.
+func PlanDropShipCancel(req InboundRequest, l InboundLine) InboundPlan {
+	if !req.Qty.IsPositive() {
+		return ignore(CodeInboundQuantity, "nothing was left to cancel")
 	}
 	return lowerLine(l, l.Qty.Sub(req.Qty))
 }

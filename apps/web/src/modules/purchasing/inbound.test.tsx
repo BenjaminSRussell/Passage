@@ -2,7 +2,7 @@ import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InboundChange } from "./api/client";
-import { actionLabel, effectOf, sourceLabel } from "./InboundPages";
+import { actionLabel, effectOf, settledLabel, sourceLabel } from "./InboundPages";
 import { json, pageViolations, problem, renderAt, stubFetch } from "./testHarness";
 
 const PO_ID = "55555555-5555-4555-8555-555555555555";
@@ -123,7 +123,7 @@ describe("changes from other services", () => {
     stubFetch(() => json(refused));
     const { unmount } = renderAt(`/purchasing/inbound-changes/${refused.id}`);
     expect(await screen.findByText("Not applied (PRC-PO-007)")).toBeInTheDocument();
-    expect(screen.getByText(/Change the line by hand/)).toBeInTheDocument();
+    expect(screen.getByText(/Fix the cause on the purchase order and retry/)).toBeInTheDocument();
     unmount();
     vi.unstubAllGlobals();
 
@@ -150,9 +150,94 @@ describe("changes from other services", () => {
 
   it("words sources, actions and effects", () => {
     expect(sourceLabel("DROPSHIP_CLOSED")).toBe("Drop-ship closed");
+    expect(sourceLabel("DROPSHIP_CANCELLED")).toBe("Drop-ship cancelled");
+    expect(settledLabel(change(1))).toBe("—");
+    expect(settledLabel(change(1, { status: "REFUSED" }))).toBe("Waiting for a buyer");
+    expect(settledLabel(change(1, { status: "REFUSED", resolution: "ACKNOWLEDGED" }))).toBe("Acknowledged");
+    expect(settledLabel(change(1, { resolution: "RETRIED" }))).toBe("Retried");
     expect(actionLabel("close-remainder")).toBe("Close remainder");
     expect(effectOf(change(1, { dateBefore: undefined, dateAfter: undefined }))).toBe("");
     expect(effectOf(change(1, { qtyBefore: "100", qtyAfter: "0", dateBefore: undefined, dateAfter: undefined }))).toBe("Line cancelled (was 100)");
     expect(effectOf(change(1, { qtyBefore: "100", qtyAfter: "90" }))).toBe("Quantity 100 → 90, Due 2027-03-10 → 2027-03-17");
+  });
+  it("filters by whether a buyer has settled the change and shows the settled column", async () => {
+    const waiting = change(6, { status: "REFUSED", reasonCode: "PRC-PO-007", reason: "below received", source: "DROPSHIP_CANCELLED", action: "cancel-dropship" });
+    const acknowledged = change(7, { status: "REFUSED", resolution: "ACKNOWLEDGED", reasonCode: "PRC-PO-007", reason: "below received" });
+    const fetchMock = stubFetch(() => json({ items: [waiting, acknowledged] }));
+    renderAt("/purchasing/inbound-changes");
+    const table = await findTable({ name: "Changes from other services" });
+    await waitFor(() => expect(within(table).getByText("Waiting for a buyer")).toBeInTheDocument());
+    expect(within(table).getByText("Acknowledged")).toBeInTheDocument();
+    expect(within(table).getByText("Drop-ship cancelled")).toBeInTheDocument();
+    expect(within(table).getByText("Cancel dropship")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Settled"), { target: { value: "NONE" } });
+    await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toBe("/api/v1/procurement/inbound-changes?resolution=NONE"));
+  });
+
+  it("retries a refused change and shows its new outcome", async () => {
+    const refused = change(8, { status: "REFUSED", reasonCode: "PRC-PO-007", reason: "line 1 quantity 80 cannot be below received 90", attempts: 1, qtyAfter: undefined });
+    const done = { ...refused, status: "APPLIED" as const, reasonCode: undefined, reason: undefined, resolution: "RETRIED" as const, attempts: 2, resolvedBy: "buyer@example.com", qtyBefore: "100", qtyAfter: "80" };
+    const mock = stubFetch((_url, init) => (init.method === "POST" ? json(done) : json(refused)));
+    const { container } = renderAt(`/purchasing/inbound-changes/${refused.id}`);
+    expect(await screen.findByText("Not applied (PRC-PO-007)")).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.change(screen.getByLabelText(/^Note/), { target: { value: "receipt corrected" } });
+    fireEvent.click(screen.getByRole("button", { name: "Retry the change" }));
+    expect(await screen.findByText(/2 runs in all/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry the change" })).toBeNull();
+    const post = mock.mock.calls.find(([, i]) => (i as RequestInit).method === "POST")!;
+    expect(post[0]).toBe(`/api/v1/procurement/inbound-changes/${refused.id}:retry`);
+    expect((post[1] as RequestInit).headers).toHaveProperty("Idempotency-Key");
+    expect(JSON.parse((post[1] as RequestInit).body as string)).toEqual({ note: "receipt corrected" });
+  });
+
+  it("says so when a retry is refused again and keeps the change open", async () => {
+    const refused = change(10, { status: "REFUSED", reasonCode: "PRC-PO-007", reason: "line 1 quantity 80 cannot be below received 90", attempts: 1 });
+    const again = { ...refused, reasonCode: "PRC-PO-007", reason: "line 1 quantity 80 cannot be below received 85", attempts: 2 };
+    stubFetch((_url, init) => (init.method === "POST" ? json(again) : json(refused)));
+    renderAt(`/purchasing/inbound-changes/${refused.id}`);
+    await screen.findByText(/below received 90/);
+    fireEvent.click(screen.getByRole("button", { name: "Retry the change" }));
+    expect(await screen.findByText(/refused again/)).toBeInTheDocument();
+    expect(screen.getByText(/below received 85/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry the change" })).toBeEnabled();
+  });
+
+  it("acknowledges a refused change", async () => {
+    const refused = change(9, { status: "REFUSED", reasonCode: "PRC-INB-006", reason: "purchase order is IN_REVIEW", attempts: 1 });
+    const mock = stubFetch((_url, init) => (init.method === "POST" ? json({ ...refused, resolution: "ACKNOWLEDGED", resolvedBy: "buyer@example.com" }) : json(refused)));
+    renderAt(`/purchasing/inbound-changes/${refused.id}`);
+    await screen.findByText("Not applied (PRC-INB-006)");
+    fireEvent.click(screen.getByRole("button", { name: "Acknowledge" }));
+    expect(await screen.findByText(/buyer@example.com dealt with it by hand/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Acknowledge" })).toBeNull();
+    const post = mock.mock.calls.find(([, i]) => (i as RequestInit).method === "POST")!;
+    expect(post[0]).toBe(`/api/v1/procurement/inbound-changes/${refused.id}:acknowledge`);
+    expect((post[1] as RequestInit).body).toBeUndefined();
+  });
+
+  it("shows why a settlement failed and offers a reload when the change was settled meanwhile", async () => {
+    const refused = change(1, { status: "REFUSED", reasonCode: "PRC-PO-007", reason: "below received", attempts: 1 });
+    stubFetch((_url, init) => (init.method === "POST" ? problem(409, "PRC-INB-008", "this one is REFUSED and acknowledged") : json(refused)));
+    renderAt(`/purchasing/inbound-changes/${refused.id}`);
+    await screen.findByText("Not applied (PRC-PO-007)");
+    fireEvent.click(screen.getByRole("button", { name: "Retry the change" }));
+    expect(await screen.findByText(/acknowledged.*PRC-INB-008/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reload change" })).toBeInTheDocument();
+  });
+
+  it("offers no settlement on an applied or acknowledged change", async () => {
+    const applied = change(2);
+    stubFetch(() => json(applied));
+    const { unmount } = renderAt(`/purchasing/inbound-changes/${applied.id}`);
+    await screen.findByRole("heading", { name: "Planning message: postpone" });
+    expect(screen.queryByRole("button", { name: "Retry the change" })).toBeNull();
+    unmount();
+    vi.unstubAllGlobals();
+    const acked = change(3, { status: "REFUSED", resolution: "ACKNOWLEDGED", reasonCode: "PRC-PO-007", reason: "below received", resolvedBy: "buyer@example.com" });
+    stubFetch(() => json(acked));
+    renderAt(`/purchasing/inbound-changes/${acked.id}`);
+    expect(await screen.findByText(/buyer@example.com dealt with it by hand/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Acknowledge" })).toBeNull();
   });
 });

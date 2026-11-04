@@ -172,3 +172,34 @@ func TestPlanQuantity_Properties(t *testing.T) {
 		}
 	})
 }
+
+func TestPlanDropShipCancel(t *testing.T) {
+	line := InboundLine{LineNo: 2, Qty: decimal.RequireFromString("10"), ReceivedQty: decimal.Zero}
+	cases := map[string]struct {
+		qty     string
+		outcome string
+		cancel  bool
+		newQty  string
+	}{
+		"part of the line":   {"4", InboundApplied, false, "6"},
+		"all of the line":    {"10", InboundApplied, true, ""},
+		"more than the line": {"11", InboundRefused, false, ""},
+		"nothing left":       {"0", InboundIgnored, false, ""},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			p := PlanDropShipCancel(InboundRequest{Action: ActionCancelDropShip, Qty: decimal.RequireFromString(c.qty)}, line)
+			if p.Outcome != c.outcome || p.CancelLine != c.cancel {
+				t.Fatalf("plan = %+v", p)
+			}
+			if c.newQty != "" && (!p.SetQty || !p.NewQty.Equal(decimal.RequireFromString(c.newQty))) {
+				t.Fatalf("new qty = %s, want %s", p.NewQty, c.newQty)
+			}
+		})
+	}
+	received := line
+	received.ReceivedQty = decimal.RequireFromString("3")
+	if p := PlanDropShipCancel(InboundRequest{Qty: decimal.RequireFromString("10")}, received); p.Outcome != InboundRefused || p.Code != CodeInboundQuantity {
+		t.Fatalf("a line with receipts cannot go to zero: %+v", p)
+	}
+}

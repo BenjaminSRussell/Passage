@@ -264,17 +264,17 @@ components:
       type: object
       description: >-
         One change another service asked of a purchase order (slice 18): a planning message a planner applied, or the closed
-        remainder of a drop-ship. APPLIED means the line moved (as version versionNo, waiting for re-approval when
-        reapprovalRequired); REFUSED means a purchasing rule stopped it and reason says which, for a buyer to settle by hand;
-        IGNORED means there was nothing to change.
+        remainder or cancellation of a drop-ship. APPLIED means the line moved (as version versionNo, waiting for re-approval when
+        reapprovalRequired); REFUSED means a purchasing rule stopped it and reason says which, for a buyer to settle (slice 19:
+        acknowledge it, or retry it once the cause is fixed); IGNORED means there was nothing to change.
       required: [id, legalEntityId, source, sourceKey, eventId, action, status, reapprovalRequired, createdAt]
       properties:
         id: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
-        source: { type: string, enum: [PLANNING_MESSAGE, DROPSHIP_CLOSED] }
-        sourceKey: { type: string, description: 'The planning message id, or the drop-ship id and its running closed total (<drop-ship id>:<qty_closed>); the idempotency key.' }
+        source: { type: string, enum: [PLANNING_MESSAGE, DROPSHIP_CLOSED, DROPSHIP_CANCELLED] }
+        sourceKey: { type: string, description: 'The planning message id; the drop-ship id and its running closed total (<drop-ship id>:<qty_closed>) for a closing; the drop-ship id for a cancellation. The idempotency key.' }
         eventId: { type: string, description: Id of the event that carried the request. }
-        action: { type: string, description: 'postpone, advance, cancel, decrease or increase for a planning message; close-remainder for a drop-ship.' }
+        action: { type: string, description: 'postpone, advance, cancel, decrease or increase for a planning message; close-remainder for a closed drop-ship; cancel-dropship for a cancelled one.' }
         purchaseOrderId: { type: string, format: uuid }
         poNumber: { type: string, example: PO-00000001 }
         lineNo: { type: integer, minimum: 1 }
@@ -283,7 +283,7 @@ components:
         status: { type: string, enum: [APPLIED, REFUSED, IGNORED] }
         reasonCode: { type: string, description: 'Why the change was refused or ignored: a PRC-PO-* or PRC-AGR-* code of the PO edit, or PRC-INB-001 to PRC-INB-007 (not applicable, no line, ambiguous line, quantity, date, order state, no change).' }
         reason: { type: string }
-        requestedQty: { $ref: '#/components/schemas/Money', description: 'The message quantity of a planning message; for a drop-ship, the quantity this closing adds to the closings of the drop-ship already recorded.' }
+        requestedQty: { $ref: '#/components/schemas/Money', description: 'The message quantity of a planning message; for a closed drop-ship, the quantity this closing adds to the closings already recorded; for a cancelled one, the ordered quantity less what was confirmed or closed before.' }
         requestedDate: { type: string, format: date }
         qtyBefore: { $ref: '#/components/schemas/Money' }
         qtyAfter: { $ref: '#/components/schemas/Money' }
@@ -294,6 +294,17 @@ components:
         requestedBy: { type: string, description: The planner who applied the message. }
         note: { type: string, description: The planner's reason, or the drop-ship number. }
         createdAt: { type: string, format: date-time }
+        warehouseId: { type: string, format: uuid, description: The planning scope of a planning message; kept so a retry plans the same lines. }
+        attempts: { type: integer, minimum: 1, description: The runs of the request so far, the consumer's first run and every retry. }
+        resolution: { type: string, enum: [ACKNOWLEDGED, RETRIED], description: 'How a refused change was settled; absent while it waits. A retried change shows the retry''s outcome in status.' }
+        resolvedBy: { type: string, description: The user who acknowledged or retried the change. }
+        resolvedAt: { type: string, format: date-time }
+        resolutionNote: { type: string, description: The buyer's note, at most 1000 characters. }
+    InboundChangeDecision:
+      type: object
+      additionalProperties: false
+      properties:
+        note: { type: string, maxLength: 1000, description: Why the buyer acknowledged the change, or what was fixed before the retry. }
     InboundChangePage:
       type: object
       required: [items]
@@ -3607,11 +3618,12 @@ paths:
       summary: List the changes other services asked of purchase orders, newest first (slice 18)
       description: >-
         One row per planning message a planner applied to a purchase order (message.applied.v1) and per closed drop-ship remainder
-        (dropship.closed.v1) the purchasing consumer handled, applied or not. Filter by source, status (REFUSED lists what a buyer
-        has to settle by hand), purchase order and legal entity.
+        (dropship.closed.v1) or cancelled drop-ship (dropship.cancelled.v1) the purchasing consumer handled, applied or not.
+        Filter by source, status, resolution (status REFUSED with resolution NONE is the buyer's queue), purchase order and legal entity.
       parameters:
-        - { name: source, in: query, required: false, schema: { type: string, enum: [PLANNING_MESSAGE, DROPSHIP_CLOSED] } }
+        - { name: source, in: query, required: false, schema: { type: string, enum: [PLANNING_MESSAGE, DROPSHIP_CLOSED, DROPSHIP_CANCELLED] } }
         - { name: status, in: query, required: false, schema: { type: string, enum: [APPLIED, REFUSED, IGNORED] } }
+        - { name: resolution, in: query, required: false, description: 'NONE lists changes nobody has settled.', schema: { type: string, enum: [NONE, ACKNOWLEDGED, RETRIED] } }
         - { name: purchaseOrderId, in: query, required: false, schema: { type: string, format: uuid } }
         - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
         - { $ref: '#/components/parameters/Limit' }
@@ -3641,6 +3653,60 @@ paths:
         '403': { description: Missing duty PurchaseOrderInquire (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Change not found (PRC-INB-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: id is not a UUID (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/inbound-changes/{id}:acknowledge:
+    post:
+      operationId: acknowledgeInboundChange
+      x-passage-duty: PurchaseOrderMaintain
+      summary: Acknowledge a refused inbound change the buyer dealt with by hand (slice 19)
+      description: >-
+        Settles a REFUSED change nobody has settled as ACKNOWLEDGED, with an optional note, so it leaves the buyer's queue. The purchase order is not touched and the status stays REFUSED. Writes inboundchange.resolved.v1. 409 PRC-INB-008 for a change that is not REFUSED or already settled. A replayed Idempotency-Key returns the change as it is now.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InboundChangeDecision' }
+      responses:
+        '200':
+          description: The change as it is now
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InboundChange' }
+        '400': { description: Idempotency-Key missing (PRC-IDEM-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty PurchaseOrderMaintain or the change's legal entity is outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Change not found (PRC-INB-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: The change is not a refused one waiting for a buyer (PRC-INB-008), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: id is not a UUID, the note is too long or idempotency_key_reuse (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/inbound-changes/{id}:retry:
+    post:
+      operationId: retryInboundChange
+      x-passage-duty: PurchaseOrderMaintain
+      summary: Run a refused inbound change again against the purchase order as it is now (slice 19)
+      description: >-
+        Plans the original request again (the message, or the drop-ship quantity) against the current order and applies it through the PO change management path as the caller, who needs PurchaseOrderMaintain. The change keeps its row and idempotency key: it becomes APPLIED or IGNORED and RETRIED (inboundchange.resolved.v1, with the order's own po.confirmed.v1 and poversion.created.v1 when a line moved), or stays REFUSED with the new reason and one more attempt. 409 PRC-INB-008 for a change that is not REFUSED or already settled. A replayed Idempotency-Key returns the change as it is now.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InboundChangeDecision' }
+      responses:
+        '200':
+          description: The change as it is now
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InboundChange' }
+        '400': { description: Idempotency-Key missing (PRC-IDEM-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty PurchaseOrderMaintain or the change's legal entity is outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Change not found (PRC-INB-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: The change is not a refused one waiting for a buyer (PRC-INB-008), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: id is not a UUID, the note is too long or idempotency_key_reuse (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/charge-codes:
     post:
       operationId: createChargeCode

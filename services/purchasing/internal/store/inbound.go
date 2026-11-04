@@ -53,6 +53,16 @@ type InboundChange struct {
 	RequestedBy        string           `json:"requestedBy,omitempty"`
 	Note               string           `json:"note,omitempty"`
 	CreatedAt          time.Time        `json:"createdAt"`
+	// WarehouseID is the planning scope of a planning message (kept so a retry plans the same lines).
+	WarehouseID string `json:"warehouseId,omitempty"`
+	// Attempts counts the runs of the request: the consumer's first run and every retry.
+	Attempts int `json:"attempts"`
+	// Resolution says how a REFUSED change was settled: empty while it waits, ACKNOWLEDGED by a buyer, or
+	// RETRIED once a retry took it out of REFUSED (the row then shows the retry's outcome).
+	Resolution     string     `json:"resolution,omitempty"`
+	ResolvedBy     string     `json:"resolvedBy,omitempty"`
+	ResolvedAt     *time.Time `json:"resolvedAt,omitempty"`
+	ResolutionNote string     `json:"resolutionNote,omitempty"`
 }
 
 // InboundFilter narrows ListInboundChanges; empty fields do not filter.
@@ -61,6 +71,8 @@ type InboundFilter struct {
 	Status          string
 	PurchaseOrderID string
 	LegalEntityID   string
+	// Resolution is NONE (not settled yet), ACKNOWLEDGED or RETRIED; empty does not filter.
+	Resolution string
 }
 
 // DropShipClosedIn is the part of fulfillment's dropship.closed.v1 the consumer uses.
@@ -75,6 +87,20 @@ type DropShipClosedIn struct {
 	// drop-ship can be closed more than once (sales cutting the order back closes part of it, the buyer
 	// closes the rest), so the line goes down by what this total adds to the closings already handled.
 	QtyClosed decimal.Decimal
+}
+
+// DropShipCancelledIn is the part of fulfillment's dropship.cancelled.v1 the consumer uses.
+type DropShipCancelledIn struct {
+	EventID             string
+	LegalEntityID       string
+	DropShipID          string
+	DropShipNumber      string
+	PurchaseOrderID     string
+	PurchaseOrderLineID string
+	// Qty is the ordered quantity of the drop-ship, QtyConfirmed what the vendor shipped before the
+	// cancellation (nothing, for a drop-ship cancelled while OPEN).
+	Qty          decimal.Decimal
+	QtyConfirmed decimal.Decimal
 }
 
 // PlanningMessageIn is the part of planning's message.applied.v1 the consumer uses. SupplyRef is the
@@ -114,39 +140,93 @@ func (s *Postgres) ApplyDropShipClosed(ctx context.Context, tx pgx.Tx, in DropSh
 			out = seen
 			return err
 		}
-		var poID string
-		var lineNo int
-		p, _ := tenant.FromContext(ctx)
-		err := tx.QueryRow(ctx, `select purchase_order_id::text, line_no from purchase_order_line where tenant_id = $1 and id = $2`,
-			p.TenantID, in.PurchaseOrderLineID).Scan(&poID, &lineNo)
-		if errors.Is(err, pgx.ErrNoRows) || (err == nil && poID != strings.ToLower(in.PurchaseOrderID)) {
+		poID, found, err := dropShipLine(ctx, tx, in.PurchaseOrderID, in.PurchaseOrderLineID)
+		if err != nil || !found {
 			// The drop-ship names a line this service does not hold (or one on another order): nothing to change.
-			return nil
-		}
-		if err != nil {
 			return err
 		}
-		var handled decimal.Decimal
-		if err := tx.QueryRow(ctx, `select coalesce(sum(requested_qty), 0) from purchase_inbound_change
-			where tenant_id = $1 and source = $2 and split_part(source_key, ':', 1) = $3`,
-			p.TenantID, domain.SourceDropShipClosed, in.DropShipID).Scan(&handled); err != nil {
+		handled, err := closedSoFar(ctx, tx, in.DropShipID)
+		if err != nil {
 			return err
 		}
 		qty := decimal.Max(decimal.Zero, in.QtyClosed.Sub(handled))
 		base.RequestedQty = &qty
 		recorded = true
-		out, err = applyInbound(ctx, tx, base, poID, func(cur PurchaseOrder) domain.InboundPlan {
-			for _, l := range cur.Lines {
-				if l.LineNo != lineNo {
-					continue
-				}
-				if l.Status == domain.POLineCancelled {
-					return domain.InboundPlan{Outcome: domain.InboundIgnored, Code: domain.CodeInboundNoLine, Reason: "the line is already cancelled"}
-				}
-				return domain.PlanDropShipClose(domain.InboundRequest{Action: base.Action, Qty: qty}, inboundLine(l))
+		out, err = applyInbound(ctx, tx, base, poID, dropShipPlanner(domain.PlanDropShipClose, base.Action, in.PurchaseOrderLineID, qty))
+		return err
+	})
+	return out, recorded, err
+}
+
+// dropShipLine finds the order a drop-ship's PO line is on; found is false when this service holds no
+// such line, or the line is on another order than the drop-ship names.
+func dropShipLine(ctx context.Context, tx pgx.Tx, poID, lineID string) (string, bool, error) {
+	p, _ := tenant.FromContext(ctx)
+	var found string
+	err := tx.QueryRow(ctx, `select purchase_order_id::text from purchase_order_line where tenant_id = $1 and id = $2`,
+		p.TenantID, lineID).Scan(&found)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && found != strings.ToLower(poID)) {
+		return "", false, nil
+	}
+	return found, err == nil, err
+}
+
+// closedSoFar is the quantity already taken off by the closings of a drop-ship, whatever their outcome.
+func closedSoFar(ctx context.Context, tx pgx.Tx, dropShipID string) (decimal.Decimal, error) {
+	p, _ := tenant.FromContext(ctx)
+	var handled decimal.Decimal
+	err := tx.QueryRow(ctx, `select coalesce(sum(requested_qty), 0) from purchase_inbound_change
+		where tenant_id = $1 and source = $2 and split_part(source_key, ':', 1) = $3`,
+		p.TenantID, domain.SourceDropShipClosed, dropShipID).Scan(&handled)
+	return handled, err
+}
+
+// dropShipPlanner plans a quantity cut of the PO line a drop-ship bought against.
+func dropShipPlanner(plan func(domain.InboundRequest, domain.InboundLine) domain.InboundPlan, action, lineID string, qty decimal.Decimal) func(PurchaseOrder) domain.InboundPlan {
+	return func(cur PurchaseOrder) domain.InboundPlan {
+		for _, l := range cur.Lines {
+			if !strings.EqualFold(l.ID, lineID) {
+				continue
 			}
-			return domain.InboundPlan{Outcome: domain.InboundIgnored, Code: domain.CodeInboundNoLine, Reason: "the line is not on the purchase order"}
-		})
+			if l.Status == domain.POLineCancelled {
+				return domain.InboundPlan{Outcome: domain.InboundIgnored, Code: domain.CodeInboundNoLine, Reason: "the line is already cancelled"}
+			}
+			return plan(domain.InboundRequest{Action: action, Qty: qty}, inboundLine(l))
+		}
+		return domain.InboundPlan{Outcome: domain.InboundIgnored, Code: domain.CodeInboundNoLine, Reason: "the line is not on the purchase order"}
+	}
+}
+
+// ApplyDropShipCancelled takes a drop-ship cancelled while open (dropship.cancelled.v1) off the PO line it
+// bought against, the way a closed remainder does: the line goes down by the quantity the vendor will not
+// ship (the ordered quantity less what was confirmed and what earlier closings took), through the change
+// management path (FR-17.8), and a line left with nothing is cancelled with the order when it was the last.
+// A change a purchasing rule stops is recorded as REFUSED for a buyer to settle. The drop-ship id is the
+// idempotency key, so a cancellation delivered twice changes nothing twice. It reports whether anything
+// was recorded (false for a cancellation already handled and for a line this service does not hold).
+func (s *Postgres) ApplyDropShipCancelled(ctx context.Context, tx pgx.Tx, in DropShipCancelledIn) (InboundChange, bool, error) {
+	var out InboundChange
+	var recorded bool
+	err := withEventScope(ctx, tx, in.LegalEntityID, func() error {
+		base := InboundChange{LegalEntityID: in.LegalEntityID, Source: domain.SourceDropShipCancelled, SourceKey: in.DropShipID,
+			EventID: in.EventID, Action: domain.ActionCancelDropShip, PurchaseOrderID: in.PurchaseOrderID, LineID: in.PurchaseOrderLineID,
+			Note: in.DropShipNumber}
+		if seen, ok, err := existingInbound(ctx, tx, base.Source, base.SourceKey); err != nil || ok {
+			out = seen
+			return err
+		}
+		poID, found, err := dropShipLine(ctx, tx, in.PurchaseOrderID, in.PurchaseOrderLineID)
+		if err != nil || !found {
+			return err
+		}
+		closed, err := closedSoFar(ctx, tx, in.DropShipID)
+		if err != nil {
+			return err
+		}
+		qty := decimal.Max(decimal.Zero, in.Qty.Sub(in.QtyConfirmed).Sub(closed))
+		base.RequestedQty = &qty
+		recorded = true
+		out, err = applyInbound(ctx, tx, base, poID, dropShipPlanner(domain.PlanDropShipCancel, base.Action, in.PurchaseOrderLineID, qty))
 		return err
 	})
 	return out, recorded, err
@@ -163,7 +243,7 @@ func (s *Postgres) ApplyPlanningMessage(ctx context.Context, tx pgx.Tx, in Plann
 	var recorded bool
 	err := withEventScope(ctx, tx, in.LegalEntityID, func() error {
 		base := InboundChange{LegalEntityID: in.LegalEntityID, Source: domain.SourcePlanningMessage, SourceKey: in.MessageID,
-			EventID: in.EventID, Action: in.Action, PONumber: in.SupplyRef, ProductID: in.ItemID, RequestedBy: in.DecidedBy, Note: in.Note}
+			EventID: in.EventID, Action: in.Action, PONumber: in.SupplyRef, ProductID: in.ItemID, RequestedBy: in.DecidedBy, Note: in.Note, WarehouseID: in.WarehouseID}
 		if in.Qty.Sign() != 0 {
 			base.RequestedQty = &in.Qty
 		}
@@ -184,19 +264,24 @@ func (s *Postgres) ApplyPlanningMessage(ctx context.Context, tx pgx.Tx, in Plann
 			return err
 		}
 		recorded = true
-		out, err = applyInbound(ctx, tx, base, poID, func(cur PurchaseOrder) domain.InboundPlan {
-			var open []domain.InboundLine
-			for _, l := range cur.Lines {
-				if l.Status == domain.POLineOpen && l.ProductID == strings.ToLower(in.ItemID) {
-					open = append(open, inboundLine(l))
-				}
-			}
-			return domain.PlanPlanningMessage(domain.InboundRequest{Action: in.Action, Qty: in.Qty, Date: in.SuggestedDate,
-				WarehouseID: strings.ToLower(in.WarehouseID)}, open)
-		})
+		out, err = applyInbound(ctx, tx, base, poID, planningPlanner(in))
 		return err
 	})
 	return out, recorded, err
+}
+
+// planningPlanner plans an applied planning message against the open lines of its item.
+func planningPlanner(in PlanningMessageIn) func(PurchaseOrder) domain.InboundPlan {
+	return func(cur PurchaseOrder) domain.InboundPlan {
+		var open []domain.InboundLine
+		for _, l := range cur.Lines {
+			if l.Status == domain.POLineOpen && l.ProductID == strings.ToLower(in.ItemID) {
+				open = append(open, inboundLine(l))
+			}
+		}
+		return domain.PlanPlanningMessage(domain.InboundRequest{Action: in.Action, Qty: in.Qty, Date: in.SuggestedDate,
+			WarehouseID: strings.ToLower(in.WarehouseID)}, open)
+	}
 }
 
 func inboundLine(l PurchaseOrderLine) domain.InboundLine {
@@ -414,7 +499,7 @@ func scaledTax(l PurchaseOrderLine, newQty decimal.Decimal, minor int32) decimal
 const inboundColumns = `id, legal_entity_id, source, source_key, event_id, action, coalesce(purchase_order_id::text, ''), po_number,
 	coalesce(line_no, 0), coalesce(line_id::text, ''), coalesce(product_id::text, ''), status, reason_code, reason,
 	requested_qty, requested_date, qty_before, qty_after, date_before, date_after, coalesce(version_no, 0), reapproval_required,
-	requested_by, note, created_at`
+	requested_by, note, created_at, coalesce(warehouse_id::text, ''), attempts, resolution, resolved_by, resolved_at, resolution_note`
 
 const inboundSelect = `select ` + inboundColumns + ` from purchase_inbound_change`
 
@@ -423,34 +508,230 @@ func scanInbound(row pgx.CollectableRow) (InboundChange, error) {
 	var reqDate, dateBefore, dateAfter *time.Time
 	err := row.Scan(&c.ID, &c.LegalEntityID, &c.Source, &c.SourceKey, &c.EventID, &c.Action, &c.PurchaseOrderID, &c.PONumber,
 		&c.LineNo, &c.LineID, &c.ProductID, &c.Status, &c.ReasonCode, &c.Reason, &c.RequestedQty, &reqDate, &c.QtyBefore, &c.QtyAfter,
-		&dateBefore, &dateAfter, &c.VersionNo, &c.ReapprovalRequired, &c.RequestedBy, &c.Note, &c.CreatedAt)
+		&dateBefore, &dateAfter, &c.VersionNo, &c.ReapprovalRequired, &c.RequestedBy, &c.Note, &c.CreatedAt,
+		&c.WarehouseID, &c.Attempts, &c.Resolution, &c.ResolvedBy, &c.ResolvedAt, &c.ResolutionNote)
 	c.RequestedDate, c.DateBefore, c.DateAfter = dayOrNil(reqDate), dayOrNil(dateBefore), dayOrNil(dateAfter)
 	return c, err
 }
 
-// recordInbound writes the change row and its event; the row's id and time are set here.
+// recordInbound writes the change row and its events; the row's id and time are set here. A base that
+// already has an id is a retry of that change (slice 19): its outcome is rewritten in place, so the
+// request keeps one row and one idempotency key however many times it runs.
 func recordInbound(ctx context.Context, tx pgx.Tx, c InboundChange, r inboundResult) (InboundChange, error) {
 	p, _ := tenant.FromContext(ctx)
-	c.ID, c.Status, c.ReasonCode, c.Reason = ids.New(), r.status, r.code, r.reason
+	if c.ID != "" {
+		return recordRetry(ctx, tx, c, r)
+	}
+	c.ID, c.Status, c.ReasonCode, c.Reason, c.Attempts = ids.New(), r.status, r.code, r.reason, 1
 	err := tx.QueryRow(ctx, `insert into purchase_inbound_change (tenant_id, id, legal_entity_id, source, source_key, event_id, action,
 		purchase_order_id, po_number, line_no, line_id, product_id, status, reason_code, reason, requested_qty, requested_date,
-		qty_before, qty_after, date_before, date_after, version_no, reapproval_required, requested_by, note)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+		qty_before, qty_after, date_before, date_after, version_no, reapproval_required, requested_by, note, warehouse_id)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
 		returning created_at`,
 		p.TenantID, c.ID, c.LegalEntityID, c.Source, c.SourceKey, c.EventID, c.Action, nullable(c.PurchaseOrderID), c.PONumber,
 		nullableInt(c.LineNo), nullable(c.LineID), nullable(c.ProductID), c.Status, c.ReasonCode, c.Reason, c.RequestedQty, dayPtr(c.RequestedDate),
-		c.QtyBefore, c.QtyAfter, dayPtr(c.DateBefore), dayPtr(c.DateAfter), nullableInt(c.VersionNo), c.ReapprovalRequired, c.RequestedBy, c.Note).
+		c.QtyBefore, c.QtyAfter, dayPtr(c.DateBefore), dayPtr(c.DateAfter), nullableInt(c.VersionNo), c.ReapprovalRequired, c.RequestedBy, c.Note,
+		nullable(c.WarehouseID)).
 		Scan(&c.CreatedAt)
 	if err != nil {
 		return InboundChange{}, fmt.Errorf("record inbound change: %w", err)
 	}
-	return c, enqueue(ctx, tx, "inboundchange", c.ID, purchasingevents.InboundChangeRecorded, inboundData(c))
+	d := inboundData(c)
+	if d.BuyerID, err = buyerOf(ctx, tx, c.PurchaseOrderID); err != nil {
+		return InboundChange{}, err
+	}
+	if err := enqueue(ctx, tx, "inboundchange", c.ID, purchasingevents.InboundChangeRecorded, d); err != nil {
+		return InboundChange{}, err
+	}
+	if c.Status == domain.InboundRefused {
+		// The buyer's notification: addressed to the user who made the order, for the notification service
+		// (wave 4) to route; the change waits in the refused queue until a buyer settles it.
+		if err := enqueue(ctx, tx, "inboundchange", c.ID, purchasingevents.InboundChangeRefused, d); err != nil {
+			return InboundChange{}, err
+		}
+	}
+	return c, nil
+}
+
+// recordRetry rewrites the outcome of change c (its id is set) after a retry. A retry that leaves
+// REFUSED settles the change as RETRIED and writes inboundchange.resolved.v1; one that is refused again
+// only counts the attempt, and the change stays in the buyer's queue with the new reason.
+func recordRetry(ctx context.Context, tx pgx.Tx, c InboundChange, r inboundResult) (InboundChange, error) {
+	p, _ := tenant.FromContext(ctx)
+	settled := r.status != domain.InboundRefused
+	resolution, by := "", ""
+	if settled {
+		resolution, by = domain.ResolutionRetried, p.UserID
+	}
+	note := ""
+	if settled {
+		note = c.ResolutionNote
+	}
+	_, err := tx.Exec(ctx, `update purchase_inbound_change set status = $3, reason_code = $4, reason = $5, purchase_order_id = $6, po_number = $7,
+		line_no = $8, line_id = coalesce($9::uuid, line_id), product_id = coalesce($10::uuid, product_id), qty_before = $11, qty_after = $12,
+		date_before = $13, date_after = $14, version_no = $15, reapproval_required = $16, attempts = attempts + 1, resolution = $17,
+		resolved_by = $18, resolved_at = case when $17 = '' then null else now() end, resolution_note = $19, updated_at = now()
+		where tenant_id = $1 and id = $2`,
+		p.TenantID, c.ID, r.status, r.code, r.reason, nullable(c.PurchaseOrderID), c.PONumber, nullableInt(c.LineNo), nullable(c.LineID),
+		nullable(c.ProductID), c.QtyBefore, c.QtyAfter, dayPtr(c.DateBefore), dayPtr(c.DateAfter), nullableInt(c.VersionNo), c.ReapprovalRequired,
+		resolution, by, note)
+	if err != nil {
+		return InboundChange{}, fmt.Errorf("record inbound retry: %w", err)
+	}
+	out, err := loadInbound(ctx, tx, c.ID, false)
+	if err != nil {
+		return InboundChange{}, err
+	}
+	if settled {
+		return out, enqueue(ctx, tx, "inboundchange", out.ID, purchasingevents.InboundChangeResolved, resolvedData(out, p.UserID))
+	}
+	return out, nil
+}
+
+// buyerOf is the user who made the order, the one a refused change is for; empty when unknown. A failed
+// read is returned, not swallowed: it aborts the transaction, so nothing after it could be written anyway.
+func buyerOf(ctx context.Context, tx pgx.Tx, poID string) (string, error) {
+	if poID == "" {
+		return "", nil
+	}
+	p, _ := tenant.FromContext(ctx)
+	var buyer string
+	err := tx.QueryRow(ctx, `select coalesce(created_by::text, '') from purchase_order where tenant_id = $1 and id = $2`, p.TenantID, poID).Scan(&buyer)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return buyer, err
+}
+
+func resolvedData(c InboundChange, by string) purchasingevents.InboundChangeResolvedData {
+	d := purchasingevents.InboundChangeResolvedData{ChangeID: c.ID, LegalEntityID: c.LegalEntityID, Source: c.Source, SourceKey: c.SourceKey,
+		Action: c.Action, Resolution: c.Resolution, Status: c.Status, POID: c.PurchaseOrderID, Number: c.PONumber, LineNo: c.LineNo,
+		ReasonCode: c.ReasonCode, Attempts: c.Attempts, ResolvedBy: by, Note: c.ResolutionNote, VersionNo: c.VersionNo,
+		ReapprovalRequired: c.ReapprovalRequired}
+	if c.ResolvedAt != nil {
+		d.ResolvedAt = c.ResolvedAt.UTC().Format(time.RFC3339)
+	}
+	return d
+}
+
+// loadInbound reads one change, locking it for update when asked; 404 when it is not visible.
+func loadInbound(ctx context.Context, tx pgx.Tx, id string, lock bool) (InboundChange, error) {
+	p, _ := tenant.FromContext(ctx)
+	q := inboundSelect + ` where tenant_id = $1 and id = $2`
+	if lock {
+		q += ` for update`
+	}
+	rows, err := tx.Query(ctx, q, p.TenantID, id)
+	if err != nil {
+		return InboundChange{}, err
+	}
+	items, err := pgx.CollectRows(rows, scanInbound)
+	if err != nil {
+		return InboundChange{}, err
+	}
+	if len(items) == 0 {
+		return InboundChange{}, httpx.NewProblem(http.StatusNotFound, CodeInboundChangeNotFound, "inbound change not found")
+	}
+	return items[0], nil
+}
+
+// openRefused loads a change under lock and checks it is a REFUSED one nobody settled.
+func openRefused(ctx context.Context, tx pgx.Tx, id string, idem Idem) (cur InboundChange, replay bool, err error) {
+	cur, err = loadInbound(ctx, tx, id, true)
+	if err != nil {
+		return cur, false, err
+	}
+	if _, replay, err = claimKey(ctx, tx, idem, id); err != nil || replay {
+		return cur, replay, err
+	}
+	if cur.Status != domain.InboundRefused || cur.Resolution != "" {
+		return cur, false, httpx.NewProblem(http.StatusConflict, domain.CodeInboundNotOpen,
+			"only a refused change nobody has settled can be acknowledged or retried; this one is "+cur.Status+settledSuffix(cur))
+	}
+	return cur, false, nil
+}
+
+func settledSuffix(c InboundChange) string {
+	if c.Resolution == "" {
+		return ""
+	}
+	return " and " + strings.ToLower(c.Resolution)
+}
+
+// AcknowledgeInboundChange settles a REFUSED change as ACKNOWLEDGED: the buyer dealt with the request by
+// hand (or decided to leave the order as it is), so it leaves the queue. The change is not applied. 409
+// PRC-INB-008 when it is not a refused change waiting for a buyer. A replayed Idempotency-Key returns the
+// change as it is now. Writes inboundchange.resolved.v1.
+func (s *Postgres) AcknowledgeInboundChange(ctx context.Context, id, note string, idem Idem) (InboundChange, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out InboundChange
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		cur, replay, err := openRefused(ctx, tx, id, idem)
+		if err != nil || replay {
+			out = cur
+			return err
+		}
+		if _, err := tx.Exec(ctx, `update purchase_inbound_change set resolution = $3, resolved_by = $4, resolved_at = now(), resolution_note = $5,
+			updated_at = now() where tenant_id = $1 and id = $2`, p.TenantID, id, domain.ResolutionAcknowledged, p.UserID, note); err != nil {
+			return err
+		}
+		out, err = loadInbound(ctx, tx, id, false)
+		if err != nil {
+			return err
+		}
+		return enqueue(ctx, tx, "inboundchange", out.ID, purchasingevents.InboundChangeResolved, resolvedData(out, p.UserID))
+	})
+	return out, err
+}
+
+// RetryInboundChange runs a REFUSED change's request again against the purchase order as it is now (the
+// buyer has fixed what stopped it: confirmed the order, freed the agreement draw, raised nothing past the
+// received floor), through the same planning and change management path as the consumer. The change keeps
+// its row: it becomes APPLIED or IGNORED and RETRIED, or stays REFUSED with the new reason and one more
+// attempt. 409 PRC-INB-008 when it is not a refused change waiting for a buyer. A replayed Idempotency-Key
+// returns the change as it is now.
+func (s *Postgres) RetryInboundChange(ctx context.Context, id, note string, idem Idem) (InboundChange, error) {
+	var out InboundChange
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		cur, replay, err := openRefused(ctx, tx, id, idem)
+		if err != nil || replay {
+			out = cur
+			return err
+		}
+		var decide func(PurchaseOrder) domain.InboundPlan
+		switch {
+		case cur.PurchaseOrderID == "":
+			return httpx.NewProblem(http.StatusConflict, domain.CodeInboundNotOpen, "the change names no purchase order to retry against")
+		case cur.Source == domain.SourcePlanningMessage:
+			in := PlanningMessageIn{Action: cur.Action, ItemID: cur.ProductID, WarehouseID: cur.WarehouseID}
+			if cur.RequestedQty != nil {
+				in.Qty = *cur.RequestedQty
+			}
+			if cur.RequestedDate != nil {
+				in.SuggestedDate = *cur.RequestedDate
+			}
+			decide = planningPlanner(in)
+		case cur.Source == domain.SourceDropShipClosed && cur.RequestedQty != nil:
+			decide = dropShipPlanner(domain.PlanDropShipClose, cur.Action, cur.LineID, *cur.RequestedQty)
+		case cur.Source == domain.SourceDropShipCancelled && cur.RequestedQty != nil:
+			decide = dropShipPlanner(domain.PlanDropShipCancel, cur.Action, cur.LineID, *cur.RequestedQty)
+		default:
+			return httpx.NewProblem(http.StatusConflict, domain.CodeInboundNotOpen, "the change does not hold the request to run again")
+		}
+		// The run starts from the request alone: what the last attempt measured or moved is not carried over.
+		base := cur
+		base.QtyBefore, base.QtyAfter, base.DateBefore, base.DateAfter = nil, nil, nil, nil
+		base.VersionNo, base.ReapprovalRequired, base.ResolutionNote = 0, false, note
+		out, err = applyInbound(ctx, tx, base, cur.PurchaseOrderID, decide)
+		return err
+	})
+	return out, err
 }
 
 func inboundData(c InboundChange) purchasingevents.InboundChangeData {
 	d := purchasingevents.InboundChangeData{ChangeID: c.ID, LegalEntityID: c.LegalEntityID, Source: c.Source, SourceKey: c.SourceKey,
 		Action: c.Action, Status: c.Status, POID: c.PurchaseOrderID, Number: c.PONumber, LineNo: c.LineNo, ReasonCode: c.ReasonCode,
-		Reason: c.Reason, VersionNo: c.VersionNo, ReapprovalRequired: c.ReapprovalRequired}
+		Reason: c.Reason, VersionNo: c.VersionNo, ReapprovalRequired: c.ReapprovalRequired, Attempts: c.Attempts}
 	if c.QtyBefore != nil {
 		d.QtyBefore = c.QtyBefore.String()
 	}
@@ -468,22 +749,11 @@ func inboundData(c InboundChange) purchasingevents.InboundChangeData {
 
 // GetInboundChange returns one change; 404 when it is not visible to the caller.
 func (s *Postgres) GetInboundChange(ctx context.Context, id string) (InboundChange, error) {
-	p, _ := tenant.FromContext(ctx)
 	var out InboundChange
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, inboundSelect+` where tenant_id = $1 and id = $2`, p.TenantID, id)
-		if err != nil {
-			return err
-		}
-		items, err := pgx.CollectRows(rows, scanInbound)
-		if err != nil {
-			return err
-		}
-		if len(items) == 0 {
-			return httpx.NewProblem(http.StatusNotFound, CodeInboundChangeNotFound, "inbound change not found")
-		}
-		out = items[0]
-		return nil
+		var err error
+		out, err = loadInbound(ctx, tx, id, false)
+		return err
 	})
 	return out, err
 }
@@ -496,8 +766,9 @@ func (s *Postgres) ListInboundChanges(ctx context.Context, f InboundFilter, afte
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, inboundSelect+` where tenant_id = $1 and ($2 = '' or source = $2) and ($3 = '' or status = $3)
 			and ($4::uuid is null or purchase_order_id = $4::uuid) and ($5 = '' or legal_entity_id::text = $5)
-			and ($6::uuid is null or id < $6::uuid) order by id desc limit $7`,
-			p.TenantID, f.Source, f.Status, nullable(f.PurchaseOrderID), f.LegalEntityID, nullable(after), limit+1)
+			and ($6::uuid is null or id < $6::uuid)
+			and ($8 = '' or ($8 = 'NONE' and resolution = '') or resolution = $8) order by id desc limit $7`,
+			p.TenantID, f.Source, f.Status, nullable(f.PurchaseOrderID), f.LegalEntityID, nullable(after), limit+1, f.Resolution)
 		if err != nil {
 			return err
 		}

@@ -481,6 +481,7 @@ start until that principal is seeded in `platform/go/tenant` and `policies/authz
 | Event | Effect on the purchase order |
 |---|---|
 | fulfillment `dropship.closed.v1` (topic `passage.fulfillment.dropship`) | The PO line named by `purchase_order_line_id` (the `id` of a line of `GET /purchase-orders/{id}`) is lowered by what the closing adds: `qty_closed` is the drop-ship's running closed total (a drop-ship can be closed more than once, for example when sales cuts the order back and the buyer later closes the rest), so the line goes down by `qty_closed` less the closings of that drop-ship already recorded. A line left with nothing and no receipts is cancelled, and the PO with it when it was the last open line. The drop-ship id with the total is the idempotency key. |
+| fulfillment `dropship.cancelled.v1` (same topic, slice 19) | The same line is lowered by the quantity the vendor will never ship: `qty` (the drop-ship's ordered quantity) less `qty_confirmed` and less what earlier closings of that drop-ship took off. A line left with nothing and no receipts is cancelled, the PO with it when it was the last open line. The drop-ship id is the idempotency key. |
 | planning `message.applied.v1` (topic `passage.planning.plan`, planning's plan channel, beside its other plan and message events, which are skipped) | `supply_ref` names the PO (by number) and `item_id` the line. `postpone` and `advance` move the delivery date to `suggested_date` (a postpone must be later, an advance earlier); `decrease` and `increase` take or add `qty` (the message quantity is the delta); `cancel` cancels the line. With several open lines of the item a date move is narrowed to the line whose open quantity equals `qty`; otherwise the message is refused as ambiguous. A `warehouse_id` narrows the lines to that warehouse. The message id is the idempotency key. Any other action, a `supply_ref` that is no PO of the legal entity (a planned order, production or transfer) and a plan with no legal entity record nothing. |
 
 Every change goes through the PO change management path (FR-17.8): the next version, confirmed at once or waiting for
@@ -488,15 +489,21 @@ re-approval when a rule fires (a quantity increase over 5 %); totals, percentage
 quantity. Only a CONFIRMED order takes a change; one in review or cancelled is recorded as refused. A purchasing rule
 that stops a change (the received/invoiced floor PRC-PO-007, a line drawn on an agreement PRC-PO-010, a service
 specification above the line, an ambiguous line) never retries and never dead-letters: it is recorded as `REFUSED`
-with its code for a buyer to settle by hand. The consumer runs with the legal-entity scope of the event, because its
+with its code for a buyer to settle: `POST /inbound-changes/{id}:retry` runs the stored request again against the order as
+it is now (the same planning and change path, as the caller, who needs `PurchaseOrderMaintain`; the row becomes APPLIED or
+IGNORED and `RETRIED`, or stays REFUSED with the new reason and one more `attempts`), and `:acknowledge` marks it dealt
+with by hand (`ACKNOWLEDGED`, order untouched). Either needs the change to be REFUSED and unsettled (409 PRC-INB-008
+otherwise), writes `inboundchange.resolved.v1` and takes an `Idempotency-Key`; `GET /inbound-changes?status=REFUSED&resolution=NONE`
+is the buyer's queue. A refused change also writes `inboundchange.refused.v1` with `buyer_id`, the user who made the order,
+for the notification service (wave 4) to route; purchasing sends no notification itself. The consumer runs with the legal-entity scope of the event, because its
 principal carries none.
 
 `purchase_inbound_change` keeps one row per request (`status` APPLIED, REFUSED or IGNORED; the quantity and date before
 and after; the PO version it went into and whether it waits for re-approval; who applied the message) and
-`inboundchange.recorded.v1` is written with it. Codes recorded on a row besides those of the PO edit: PRC-INB-001
+`inboundchange.recorded.v1` is written with it (a retry rewrites the row in place, so one request keeps one row and one key). Codes recorded on a row besides those of the PO edit: PRC-INB-001
 action is not for a PO, -002 no open line (of the item in that warehouse), -003 more than one open line, -004 quantity
 (nothing to take off or add, more than the line holds, a line with receipts to zero), -005 date (none, the same, the wrong
-direction), -006 the order is not CONFIRMED, -007 no change (the line already had that quantity and date).
+direction), -006 the order is not CONFIRMED, -007 no change (the line already had that quantity and date), -008 (the 409 of settling a change that is not an unsettled REFUSED one).
 
 ## Error codes
 

@@ -1968,8 +1968,10 @@ export function checkServiceLimit(poId: string, lineNo: number, unplanned: strin
 
 // --- Changes other services asked of purchase orders (slice 18) ---
 
-export type InboundSource = "PLANNING_MESSAGE" | "DROPSHIP_CLOSED";
+export type InboundSource = "PLANNING_MESSAGE" | "DROPSHIP_CLOSED" | "DROPSHIP_CANCELLED";
 export type InboundStatus = "APPLIED" | "REFUSED" | "IGNORED";
+/** How a refused change was settled (slice 19); "NONE" in a filter lists the changes nobody has settled. */
+export type InboundResolution = "ACKNOWLEDGED" | "RETRIED";
 
 /**
  * One planning message a planner applied to a purchase order, or one closed drop-ship remainder, as the
@@ -2001,22 +2003,46 @@ export interface InboundChange {
   requestedBy?: string;
   note?: string;
   createdAt: string;
+  warehouseId?: string;
+  /** Runs of the request: the consumer's first and every retry. */
+  attempts?: number;
+  resolution?: InboundResolution;
+  resolvedBy?: string;
+  resolvedAt?: string;
+  resolutionNote?: string;
 }
 
 export interface InboundFilters {
   source?: InboundSource | "";
   status?: InboundStatus | "";
+  resolution?: InboundResolution | "NONE" | "";
   purchaseOrderId?: string;
 }
 
 export function listInboundChanges(filters: InboundFilters = {}, options: ListOptions = {}) {
   return list<InboundChange>(
     "/inbound-changes",
-    { source: filters.source || undefined, status: filters.status || undefined, purchaseOrderId: filters.purchaseOrderId || undefined },
+    {
+      source: filters.source || undefined,
+      status: filters.status || undefined,
+      resolution: filters.resolution || undefined,
+      purchaseOrderId: filters.purchaseOrderId || undefined,
+    },
     options,
   );
 }
 
 export function getInboundChange(id: string, signal?: AbortSignal) {
   return send<InboundChange>("GET", `/inbound-changes/${encodeURIComponent(id)}`, { signal });
+}
+
+/**
+ * Settles a refused change (slice 19; needs PurchaseOrderMaintain): "acknowledge" says the buyer dealt with it by
+ * hand, "retry" runs the request again against the order as it is now.
+ */
+export function settleInboundChange(id: string, action: "acknowledge" | "retry", note: string, idempotencyKey = newIdempotencyKey()) {
+  return send<InboundChange>("POST", `/inbound-changes/${encodeURIComponent(id)}:${action}`, {
+    body: note ? { note } : undefined,
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
 }

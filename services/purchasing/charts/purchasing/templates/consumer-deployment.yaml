@@ -1,5 +1,5 @@
 {{- if .Values.consumer.enabled }}
-# Follows fulfillment dropship.closed.v1 and planning message.applied.v1 (slice 18). It starts only once
+# Follows fulfillment dropship.closed.v1 and dropship.cancelled.v1 and planning message.applied.v1 (slices 18, 19). It starts only once
 # service:purchasing-inbound is seeded in the service principal table.
 apiVersion: apps/v1
 kind: Deployment

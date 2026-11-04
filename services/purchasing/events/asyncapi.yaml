@@ -113,16 +113,22 @@ channels:
         $ref: '#/components/messages/DeliveryScheduleConfirmed'
   inboundchange:
     address: passage.procurement.inboundchange
-    description: Changes other services asked of purchase orders (slice 18); the Kafka key is the change id.
+    description: Changes other services asked of purchase orders (slice 18) and how a buyer settled the refused ones (slice 19); the Kafka key is the change id.
     messages:
       inboundChangeRecorded:
         $ref: '#/components/messages/InboundChangeRecorded'
+      inboundChangeRefused:
+        $ref: '#/components/messages/InboundChangeRefused'
+      inboundChangeResolved:
+        $ref: '#/components/messages/InboundChangeResolved'
   fulfillmentDropShip:
     address: passage.fulfillment.dropship
-    description: Drop-ship events of fulfillment (wave 28); purchasing follows dropship.closed.v1. Other events on the topic are skipped.
+    description: Drop-ship events of fulfillment (wave 28); purchasing follows dropship.closed.v1 and dropship.cancelled.v1 (slice 19). Other events on the topic are skipped.
     messages:
       dropShipClosed:
         $ref: '#/components/messages/DropShipClosedConsumed'
+      dropShipCancelled:
+        $ref: '#/components/messages/DropShipCancelledConsumed'
   planningMessage:
     address: passage.planning.plan
     description: The plan channel of master planning (wave 22), where planning writes its plan and action message events keyed by the plan; purchasing follows message.applied.v1. Other events on the topic are skipped.
@@ -156,6 +162,24 @@ operations:
       $ref: '#/channels/inboundchange'
     messages:
       - $ref: '#/channels/inboundchange/messages/inboundChangeRecorded'
+  publishInboundChangeRefused:
+    action: send
+    channel:
+      $ref: '#/channels/inboundchange'
+    messages:
+      - $ref: '#/channels/inboundchange/messages/inboundChangeRefused'
+  publishInboundChangeResolved:
+    action: send
+    channel:
+      $ref: '#/channels/inboundchange'
+    messages:
+      - $ref: '#/channels/inboundchange/messages/inboundChangeResolved'
+  receiveDropShipCancelled:
+    action: receive
+    channel:
+      $ref: '#/channels/fulfillmentDropShip'
+    messages:
+      - $ref: '#/channels/fulfillmentDropShip/messages/dropShipCancelled'
   receiveDropShipClosed:
     action: receive
     channel:
@@ -346,6 +370,44 @@ components:
               type: { type: string, const: dev.passage.procurement.inboundchange.recorded.v1 }
               subject: { type: string, format: uuid, description: change id }
               data: { $ref: '#/components/schemas/InboundChangeData' }
+    InboundChangeRefused:
+      name: InboundChangeRefused
+      title: inboundchange.refused.v1
+      x-passage-type: dev.passage.procurement.inboundchange.refused.v1
+      summary: A purchasing rule refused a change another service asked of a purchase order; this is the buyer's notification (slice 19).
+      description: Written beside inboundchange.recorded.v1 for a REFUSED change, with the same data and buyer_id, the user who made the order. The notification service (wave 4) routes it to that buyer, who acknowledges or retries the change at /inbound-changes/{id}.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.inboundchange.refused.v1 }
+              subject: { type: string, format: uuid, description: change id }
+              data: { $ref: '#/components/schemas/InboundChangeData' }
+    InboundChangeResolved:
+      name: InboundChangeResolved
+      title: inboundchange.resolved.v1
+      x-passage-type: dev.passage.procurement.inboundchange.resolved.v1
+      summary: A buyer settled a refused change by acknowledging it or by a retry that left REFUSED (slice 19).
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.inboundchange.resolved.v1 }
+              subject: { type: string, format: uuid, description: change id }
+              data: { $ref: '#/components/schemas/InboundChangeResolvedData' }
+    DropShipCancelledConsumed:
+      name: DropShipCancelledConsumed
+      title: dropship.cancelled.v1 (consumed)
+      x-passage-type: dev.passage.fulfillment.dropship.cancelled.v1
+      summary: Fulfillment cancelled an open drop-ship; purchasing takes its quantity off the PO line it bought against (consumed).
+      description: Published by fulfillment (wave 28), source `fulfillment`. Only the members below are read; the drop-ship id is the idempotency key. The line goes down by qty less qty_confirmed and less what earlier closings of the drop-ship took off.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/DropShipCancelledIn'
     DropShipClosedConsumed:
       name: DropShipClosedConsumed
       title: dropship.closed.v1 (consumed)
@@ -750,9 +812,9 @@ components:
       properties:
         change_id: { type: string, format: uuid }
         legal_entity_id: { type: string, format: uuid }
-        source: { type: string, enum: [PLANNING_MESSAGE, DROPSHIP_CLOSED] }
-        source_key: { type: string, description: 'The planning message id, or the drop-ship id and its running closed total (<drop-ship id>:<qty_closed>); the idempotency key.' }
-        action: { type: string, description: 'The planning action (postpone, advance, cancel, decrease, increase) or close-remainder for a drop-ship.' }
+        source: { type: string, enum: [PLANNING_MESSAGE, DROPSHIP_CLOSED, DROPSHIP_CANCELLED] }
+        source_key: { type: string, description: 'The planning message id, the drop-ship id and its running closed total (<drop-ship id>:<qty_closed>) for a closing, or the drop-ship id for a cancellation; the idempotency key.' }
+        action: { type: string, description: 'The planning action (postpone, advance, cancel, decrease, increase), close-remainder for a closed drop-ship or cancel-dropship for a cancelled one.' }
         status: { type: string, enum: [APPLIED, REFUSED, IGNORED] }
         po_id: { type: string, format: uuid }
         number: { type: string, example: PO-00000001 }
@@ -765,6 +827,41 @@ components:
         date_after: { type: string, format: date }
         version_no: { type: integer, minimum: 1, description: The PO version the change went into. }
         reapproval_required: { type: boolean, description: True when the change waits for re-approval as the next version. }
+        attempts: { type: integer, minimum: 1, description: The runs of the request so far (the consumer's first run and every retry). }
+        buyer_id: { type: string, format: uuid, description: The user who made the order; the one a refused change is for. Empty when unknown. }
+    InboundChangeResolvedData:
+      type: object
+      required: [change_id, legal_entity_id, source, source_key, action, resolution, status, attempts, reapproval_required]
+      additionalProperties: false
+      properties:
+        change_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        source: { type: string, enum: [PLANNING_MESSAGE, DROPSHIP_CLOSED, DROPSHIP_CANCELLED] }
+        source_key: { type: string, description: The idempotency key of the request. }
+        action: { type: string }
+        resolution: { type: string, enum: [ACKNOWLEDGED, RETRIED], description: 'ACKNOWLEDGED leaves the status REFUSED and the order as it is; RETRIED means the request ran again and left REFUSED.' }
+        status: { type: string, enum: [APPLIED, REFUSED, IGNORED], description: The outcome of the request now. }
+        po_id: { type: string, format: uuid }
+        number: { type: string, example: PO-00000001 }
+        line_no: { type: integer, minimum: 1 }
+        reason_code: { type: string }
+        attempts: { type: integer, minimum: 1 }
+        resolved_by: { type: string, description: The user who settled the change. }
+        resolved_at: { type: string, format: date-time }
+        note: { type: string, description: The buyer's note. }
+        version_no: { type: integer, minimum: 1, description: The PO version a successful retry went into. }
+        reapproval_required: { type: boolean }
+    DropShipCancelledIn:
+      type: object
+      required: [drop_ship_id, legal_entity_id, purchase_order_id, purchase_order_line_id, qty, qty_confirmed]
+      properties:
+        drop_ship_id: { type: string, format: uuid }
+        drop_ship_number: { type: string, example: DS-0000001 }
+        legal_entity_id: { type: string, format: uuid }
+        purchase_order_id: { type: string, format: uuid }
+        purchase_order_line_id: { type: string, format: uuid, description: 'The id of the PO line (the id member of a line of GET /purchase-orders/{id}).' }
+        qty: { type: string, description: Decimal string. The ordered quantity of the drop-ship. }
+        qty_confirmed: { type: string, description: Decimal string. What the vendor confirmed before the cancellation; it does not come off the line. }
     DropShipClosedIn:
       type: object
       required: [drop_ship_id, legal_entity_id, purchase_order_id, purchase_order_line_id, qty_closed]

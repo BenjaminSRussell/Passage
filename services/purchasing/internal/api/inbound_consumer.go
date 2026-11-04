@@ -23,7 +23,9 @@ const (
 	// DropShipClosedType is fulfillment's dropship.closed.v1 (wave 28), on DropShipTopic (the drop-ship
 	// channel of fulfillment's AsyncAPI, keyed by the drop-ship, so the closings of one drop-ship arrive in order).
 	DropShipClosedType = "dev.passage.fulfillment.dropship.closed.v1"
-	DropShipTopic      = "passage.fulfillment.dropship"
+	// DropShipCancelledType is fulfillment's dropship.cancelled.v1 on the same topic (slice 19).
+	DropShipCancelledType = "dev.passage.fulfillment.dropship.cancelled.v1"
+	DropShipTopic         = "passage.fulfillment.dropship"
 	// DropShipSource is the CloudEvents source fulfillment writes. Who may write to the topic at all is
 	// the broker's ACL (only fulfillment's outbox relay); the check keeps an event another service
 	// mislabels or misroutes from changing a purchase order.
@@ -54,6 +56,17 @@ type dropShipClosedData struct {
 	QtyClosed           string `json:"qty_closed"`
 }
 
+// dropShipCancelledData is the part of dropship.cancelled.v1 the consumer reads.
+type dropShipCancelledData struct {
+	DropShipID          string `json:"drop_ship_id"`
+	DropShipNumber      string `json:"drop_ship_number"`
+	LegalEntityID       string `json:"legal_entity_id"`
+	PurchaseOrderID     string `json:"purchase_order_id"`
+	PurchaseOrderLineID string `json:"purchase_order_line_id"`
+	Qty                 string `json:"qty"`
+	QtyConfirmed        string `json:"qty_confirmed"`
+}
+
 // messageAppliedData is the part of message.applied.v1 the consumer reads. legal_entity_id is null for a
 // plan with none, and warehouse_id for the site scope.
 type messageAppliedData struct {
@@ -72,10 +85,13 @@ type messageAppliedData struct {
 // InboundConsumerStore is the persistence the inbound consumer needs.
 type InboundConsumerStore interface {
 	ApplyDropShipClosed(ctx context.Context, tx pgx.Tx, in store.DropShipClosedIn) (store.InboundChange, bool, error)
+	ApplyDropShipCancelled(ctx context.Context, tx pgx.Tx, in store.DropShipCancelledIn) (store.InboundChange, bool, error)
 	ApplyPlanningMessage(ctx context.Context, tx pgx.Tx, in store.PlanningMessageIn) (store.InboundChange, bool, error)
 }
 
-// InboundConsumerHandlers handles fulfillment's dropship.closed.v1 and planning's message.applied.v1.
+// InboundConsumerHandlers handles fulfillment's dropship.closed.v1 and dropship.cancelled.v1 and planning's
+// message.applied.v1. A cancelled drop-ship takes its quantity (less what was confirmed or closed) off its
+// PO line the way a closing does.
 // Register it with a consumer named InboundConsumerName, which runs with the DutyInboundApply duty.
 //
 // A closed drop-ship lowers the PO line it bought against by what the closing adds to qty_closed (the
@@ -106,6 +122,33 @@ func InboundConsumerHandlers(s InboundConsumerStore) map[string]eventing.Handler
 				return err
 			}
 			slog.InfoContext(ctx, "drop-ship closing followed", "dropShipId", d.DropShipID, "recorded", recorded, "status", change.Status,
+				"reasonCode", change.ReasonCode, "tenantId", evt.TenantID, "eventId", evt.ID)
+			return nil
+		}),
+		DropShipCancelledType: eventing.HandlerFunc(func(ctx context.Context, tx pgx.Tx, evt events.Event) error {
+			if err := checkInboundEvent(ctx, evt, DropShipSource); err != nil {
+				return err
+			}
+			var d dropShipCancelledData
+			if err := json.Unmarshal(evt.Data, &d); err != nil {
+				return eventing.Permanent(fmt.Errorf("%s data: %w", evt.Type, err))
+			}
+			qty, err := decimal.NewFromString(d.Qty)
+			confirmed := decimal.Zero
+			if err == nil && d.QtyConfirmed != "" {
+				confirmed, err = decimal.NewFromString(d.QtyConfirmed)
+			}
+			if !ids.Valid(d.DropShipID) || !ids.Valid(d.LegalEntityID) || !ids.Valid(d.PurchaseOrderID) || !ids.Valid(d.PurchaseOrderLineID) ||
+				err != nil || qty.IsNegative() || confirmed.IsNegative() {
+				return eventing.Permanent(errors.New("dropship.cancelled needs drop_ship_id, legal_entity_id, purchase_order_id, purchase_order_line_id and a qty and qty_confirmed of 0 or more"))
+			}
+			change, recorded, err := s.ApplyDropShipCancelled(ctx, tx, store.DropShipCancelledIn{EventID: evt.ID, LegalEntityID: strings.ToLower(d.LegalEntityID),
+				DropShipID: strings.ToLower(d.DropShipID), DropShipNumber: d.DropShipNumber, PurchaseOrderID: strings.ToLower(d.PurchaseOrderID),
+				PurchaseOrderLineID: strings.ToLower(d.PurchaseOrderLineID), Qty: qty, QtyConfirmed: confirmed})
+			if err != nil {
+				return err
+			}
+			slog.InfoContext(ctx, "drop-ship cancellation followed", "dropShipId", d.DropShipID, "recorded", recorded, "status", change.Status,
 				"reasonCode", change.ReasonCode, "tenantId", evt.TenantID, "eventId", evt.ID)
 			return nil
 		}),

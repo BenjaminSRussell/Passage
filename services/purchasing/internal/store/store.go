@@ -148,6 +148,8 @@ type Store interface {
 	RecertifySigningLimit(ctx context.Context, id string, ifMatch int, today domain.Day, idem Idem) (domain.SigningLimit, error)
 	GetInboundChange(ctx context.Context, id string) (InboundChange, error)
 	ListInboundChanges(ctx context.Context, f InboundFilter, after string, limit int) (Page[InboundChange], error)
+	AcknowledgeInboundChange(ctx context.Context, id, note string, idem Idem) (InboundChange, error)
+	RetryInboundChange(ctx context.Context, id, note string, idem Idem) (InboundChange, error)
 	Ping(ctx context.Context) error
 }
 
