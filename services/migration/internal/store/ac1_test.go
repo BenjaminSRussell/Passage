@@ -15,7 +15,7 @@ import (
 
 func ac1Target(t *testing.T) (*store.Postgres, *ac1load.PGTarget, func(string) error) {
 	t.Helper()
-	pool := testkit.DB(t)
+	pool, app := testkit.DBWithApp(t)
 	ctx := context.Background()
 	testdb.Fresh(t, pool)
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
@@ -26,7 +26,7 @@ func ac1Target(t *testing.T) (*store.Postgres, *ac1load.PGTarget, func(string) e
 	}
 	t.Cleanup(func() { _ = ac1load.DropTarget(context.Background(), pool) })
 	exec := func(sql string) error { _, err := pool.Exec(ctx, sql); return err }
-	return store.New(pool), ac1load.NewPGTarget(pool), exec
+	return store.New(app), ac1load.NewPGTarget(app), exec
 }
 
 func TestPostgres_AC1FullSizeLoadMeetsTimeBudgetAndReconciles(t *testing.T) {

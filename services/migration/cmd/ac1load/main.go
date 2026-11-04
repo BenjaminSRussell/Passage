@@ -31,16 +31,59 @@ func main() {
 	}
 }
 
-func refuseUnlessThrowaway(ctx context.Context, owner *pgxpool.Pool) error {
-	var name string
+type server struct {
+	database string
+	addr     string
+	port     int
+}
+
+func whereAmI(ctx context.Context, pool *pgxpool.Pool) (server, error) {
+	var s server
+	err := pool.QueryRow(ctx, `select current_database(), coalesce(inet_server_addr()::text, ''), coalesce(inet_server_port(), 0)`).Scan(&s.database, &s.addr, &s.port)
+	return s, err
+}
+
+func guard(ctx context.Context, owner, app *pgxpool.Pool) (ac1load.Env, func(), error) {
+	release, err := testdb.Acquire(ctx, owner)
+	if err != nil {
+		return ac1load.Env{}, nil, err
+	}
+	env, err := checkThrowaway(ctx, owner, app)
+	if err != nil {
+		release()
+		return ac1load.Env{}, nil, err
+	}
+	return env, release, nil
+}
+
+func checkThrowaway(ctx context.Context, owner, app *pgxpool.Pool) (ac1load.Env, error) {
+	var env ac1load.Env
 	var objects int
-	if err := owner.QueryRow(ctx, `select current_database(), (select count(*) from pg_tables where schemaname not in ('pg_catalog', 'information_schema'))`).Scan(&name, &objects); err != nil {
-		return err
+	var privileged bool
+	if err := app.QueryRow(ctx, `select current_user, r.rolsuper or r.rolbypassrls, version() from pg_roles r where r.rolname = current_user`).Scan(&env.DBRole, &privileged, &env.DBVersion); err != nil {
+		return env, err
 	}
-	if name != throwawayDatabase && objects != 0 {
-		return fmt.Errorf("refusing to drop schemas in database %q: it is not %q and not empty", name, throwawayDatabase)
+	if privileged {
+		return env, fmt.Errorf("role %s bypasses row-level security; the measured load must run as the app role", env.DBRole)
 	}
-	return nil
+	if err := owner.QueryRow(ctx, `select count(*) from pg_tables where schemaname not in ('pg_catalog', 'information_schema')`).Scan(&objects); err != nil {
+		return env, err
+	}
+	ownerAt, err := whereAmI(ctx, owner)
+	if err != nil {
+		return env, err
+	}
+	appAt, err := whereAmI(ctx, app)
+	if err != nil {
+		return env, err
+	}
+	if ownerAt != appAt {
+		return env, fmt.Errorf("owner connection reaches %+v but app connection reaches %+v", ownerAt, appAt)
+	}
+	if ownerAt.database != throwawayDatabase && objects != 0 {
+		return env, fmt.Errorf("refusing to drop schemas in database %q: it is not %q and not empty", ownerAt.database, throwawayDatabase)
+	}
+	return env, nil
 }
 
 func run(ctx context.Context, reportPath, markdownPath, commit string) error {
@@ -55,28 +98,18 @@ func run(ctx context.Context, reportPath, markdownPath, commit string) error {
 		return err
 	}
 	defer owner.Close()
-	if err := refuseUnlessThrowaway(ctx, owner); err != nil {
-		return err
-	}
-	release, err := testdb.Acquire(ctx, owner)
-	if err != nil {
-		return err
-	}
-	defer release()
 	app, err := dbx.Connect(ctx, appURL)
 	if err != nil {
 		return err
 	}
 	defer app.Close()
-	env := ac1load.Env{Commit: commit}
-	env.Host, _ = os.Hostname()
-	var privileged bool
-	if err := app.QueryRow(ctx, `select current_user, r.rolsuper or r.rolbypassrls, version() from pg_roles r where r.rolname = current_user`).Scan(&env.DBRole, &privileged, &env.DBVersion); err != nil {
+	env, release, err := guard(ctx, owner, app)
+	if err != nil {
 		return err
 	}
-	if privileged {
-		return fmt.Errorf("role %s bypasses row-level security; the measured load must run as the app role", env.DBRole)
-	}
+	defer release()
+	env.Commit = commit
+	env.Host, _ = os.Hostname()
 	for _, stmt := range []string{`drop schema if exists migration cascade`, `drop table if exists schema_migrations`} {
 		if _, err := owner.Exec(ctx, stmt); err != nil {
 			return err

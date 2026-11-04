@@ -43,8 +43,13 @@ if [[ -z "${PASSAGE_TEST_DATABASE_URL:-}" || -z "${PASSAGE_TEST_APP_DATABASE_URL
     sleep 1
   done
   docker exec "$NAME" pg_isready -U postgres -d passage_ac1 >/dev/null
-  docker exec -e PGPASSWORD="$PASSWORD" "$NAME" psql -U postgres -d passage_ac1 -v ON_ERROR_STOP=1 -q -c \
-    "do \$\$ begin if not exists (select 1 from pg_roles where rolname = 'passage_app') then create role passage_app login nosuperuser nobypassrls; end if; end \$\$; alter role passage_app password '${PASSWORD}';"
+  docker exec -i -e PGPASSWORD="$PASSWORD" "$NAME" psql -U postgres -d passage_ac1 -v ON_ERROR_STOP=1 -v pw="$PASSWORD" -q <<'SQL'
+select not exists (select 1 from pg_roles where rolname = 'passage_app') as missing \gset
+\if :missing
+create role passage_app login nosuperuser nobypassrls;
+\endif
+alter role passage_app password :'pw';
+SQL
   export PASSAGE_TEST_DATABASE_URL="postgres://postgres:${PASSWORD}@127.0.0.1:${PORT}/passage_ac1?sslmode=disable"
   export PASSAGE_TEST_APP_DATABASE_URL="postgres://passage_app:${PASSWORD}@127.0.0.1:${PORT}/passage_ac1?sslmode=disable"
 fi
