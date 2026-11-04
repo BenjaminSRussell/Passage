@@ -826,6 +826,7 @@ export interface CountPlan {
   abcClass?: CountAbcClass;
   samplePct?: string;
   minDaysSinceCount?: number;
+  includeVendorOwned?: boolean;
   createdAt: string;
 }
 
@@ -846,6 +847,8 @@ export interface CountPlanInput {
   samplePct?: string;
   /** Select only rows not counted for this many days (whole days, 1 to 3650). */
   minDaysSinceCount?: number;
+  /** Count vendor-owned (consignment) stock too; its variance posts quantity only. */
+  includeVendorOwned?: boolean;
 }
 
 export interface CountSheetSummary {

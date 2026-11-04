@@ -9,6 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
 )
@@ -71,6 +72,9 @@ func (s *Postgres) ListTransactions(ctx context.Context, f TransactionFilter) ([
 	if limit <= 0 || limit > maxListLimit {
 		limit = 100
 	}
+	if f.ID != "" && !ids.Valid(f.ID) {
+		return []TransactionRow{}, nil // no transaction has this id; comparing as uuid would fail
+	}
 	var cursor *string
 	if f.Cursor != "" {
 		cursor = &f.Cursor
@@ -98,7 +102,7 @@ func (s *Postgres) ListTransactions(ctx context.Context, f TransactionFilter) ([
 			  and ($5::date is null or t.physical_date >= $5::date)
 			  and ($6::date is null or t.physical_date <= $6::date)
 			  and ($7::uuid is null or t.id < $7::uuid)
-			  and ($9 = '' or t.id::text = $9)
+			  and ($9 = '' or t.id = nullif($9, '')::uuid)
 			  and ($10 = '' or t.legal_entity_id = nullif($10, '')::uuid)
 			  and ($11 = '{}' or d.dims @> $11::jsonb)
 			order by t.id desc
