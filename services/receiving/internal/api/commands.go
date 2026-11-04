@@ -430,6 +430,8 @@ func (a *API) correctReceipt(w http.ResponseWriter, r *http.Request) {
 		if v, ok := decimalField(fields, prefix+"qtyDelta", l.QtyDelta, true); ok {
 			if v.IsZero() {
 				fields[prefix+"qtyDelta"] = "must not be zero"
+			} else if !domain.FitsColumn(v) {
+				fields[prefix+"qtyDelta"] = qtyScale
 			}
 			deltas[l.LineNo] = v
 		}

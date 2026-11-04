@@ -100,6 +100,9 @@ func TestCorrect_CatchWeightCaseCount(t *testing.T) {
 	if rec := rg.call(http.MethodPost, path, body("-10", "0"), rg.poster(posted.Version)); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "lines[0].cwQtyDelta") {
 		t.Fatalf("zero case delta: %d %s", rec.Code, rec.Body)
 	}
+	if rec := rg.call(http.MethodPost, path, body(`"-10.0000001"`, "-1"), rg.poster(posted.Version)); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "lines[0].qtyDelta") {
+		t.Fatalf("seven-decimal weight delta: %d %s", rec.Code, rec.Body)
+	}
 	got := rg.call(http.MethodPost, path, body("-10", "-1"), rg.poster(posted.Version))
 	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"qty":"92"`) || !strings.Contains(got.Body.String(), `"cwQty":9`) {
 		t.Fatalf("9 cases at 92 kg is inside 88.2-99 and must correct: %d %s", got.Code, got.Body)
