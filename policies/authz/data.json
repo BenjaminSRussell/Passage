@@ -2904,7 +2904,8 @@
       {"resource": "/v1/shopfloor/process-categories/*", "methods": ["PUT"]},
       {"resource": "/v1/shopfloor/workers/*", "methods": ["PUT"]},
       {"resource": "/v1/shopfloor/workers/*:deactivate", "methods": ["POST"]},
-      {"resource": "/v1/shopfloor/workers/*:reactivate", "methods": ["POST"]}
+      {"resource": "/v1/shopfloor/workers/*:reactivate", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/workers/*/cost-rates", "methods": ["POST"]}
     ]},
     "shopfloor.time.autoclockout": {"service_only": true, "permissions": [{"resource": "/v1/shopfloor/registrations:auto-clock-out", "methods": ["POST"]}]},
     "shopfloor.time.correct": {"permissions": [{"resource": "/v1/shopfloor/registrations/*:correct", "methods": ["POST"]}]},
@@ -2942,7 +2943,8 @@
       {"resource": "/v1/shopfloor/downtime-reasons", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/downtime-reasons/*", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/process-categories", "methods": ["GET"]},
-      {"resource": "/v1/shopfloor/process-categories/*", "methods": ["GET"]}
+      {"resource": "/v1/shopfloor/process-categories/*", "methods": ["GET"]},
+      {"resource": "/v1/shopfloor/workers/*/cost-rates", "methods": ["GET"]}
     ]},
     "treasury.bank-account.approve": {"permissions": [
       {"resource": "/v1/treasury/bank-accounts/*:activate", "methods": ["POST"]},
