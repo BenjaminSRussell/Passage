@@ -41,6 +41,8 @@ type fakeStore struct {
 	versionLE       string
 	versionStatus   string
 	roll            *store.RollInput
+	rollReplay      *store.RollResult
+	rollReplayKey   string
 	attempts        []store.Attempt
 	resolve         *store.ResolveInput
 }
@@ -128,6 +130,14 @@ func (f *fakeStore) StoreRoll(_ context.Context, in store.RollInput) (store.Roll
 	f.calls++
 	f.roll = &in
 	return store.RollResult{VersionID: in.VersionID, SiteID: in.SiteID, ItemCount: len(in.Roots), StoredCount: len(in.Roots)}, f.replayed, f.err
+}
+
+func (f *fakeStore) RollReplay(_ context.Context, key string, _ any) (store.RollResult, bool, error) {
+	f.rollReplayKey = key
+	if f.rollReplay == nil {
+		return store.RollResult{}, false, nil
+	}
+	return *f.rollReplay, true, nil
 }
 
 func (f *fakeStore) GetPostingAccounts(context.Context, string) (store.PostingAccounts, error) {

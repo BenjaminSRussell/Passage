@@ -47,6 +47,7 @@ type Store interface {
 	ActivateVersion(ctx context.Context, in store.ActivationInput) (store.ActivationResult, bool, error)
 	ActivationPositions(ctx context.Context, versionID string) ([]inventory.Position, error)
 	StoreRoll(ctx context.Context, in store.RollInput) (store.RollResult, bool, error)
+	RollReplay(ctx context.Context, key string, fingerprint any) (store.RollResult, bool, error)
 	GetPostingAccounts(ctx context.Context, legalEntityID string) (store.PostingAccounts, error)
 	SetPostingAccounts(ctx context.Context, in store.PostingAccounts) (store.PostingAccounts, error)
 	ListActivationAttempts(ctx context.Context) ([]store.Attempt, error)

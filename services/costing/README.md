@@ -278,6 +278,7 @@ PASSAGE_TEST_DATABASE_URL=postgres://admin@... PASSAGE_TEST_APP_DATABASE_URL=pos
 | `CST-TXN-001` | 422 | Invalid settlement input (a non-positive quantity, or `STANDARD` without a positive standard unit cost) |
 | `CST-TXN-002` | 422 | Duplicate transaction id in one preview |
 | `CST-PPV-001` | 422 | PPV inputs invalid (quantity not positive or a negative unit price) |
+| `CST-GRIR-001` | 422 | A recorded invoice cannot clear GR/IR from the receipt it names (receipt not recorded or for another entity, product, site or currency; another PO price; invoiced beyond the received quantity) |
 | `CST-VAL-001` | 422 | An untyped issue must name a valuation type because several types hold stock |
 | `CST-VAL-002` | 422 | A valuation category cannot change while the product holds stock (domain guard; no endpoint changes a category yet) |
 | `CST-VLG-001` | 422 | Valuation ledger set invalid (no or two primaries, duplicate id, non-positive rate, primary rate not 1) |

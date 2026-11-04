@@ -9,6 +9,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/costing/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/costing/internal/store"
@@ -35,9 +36,15 @@ func (f *slice5) RecordCostTransactions(_ context.Context, in []store.CostTransa
 	f.recorded = append(f.recorded, in)
 	n := 0
 	for _, c := range in {
-		if _, ok := f.costTxns[c.SourceKey]; !ok {
+		s, ok := f.costTxns[c.SourceKey]
+		if !ok {
 			f.costTxns[c.SourceKey] = c
 			n++
+			continue
+		}
+		// Like the store: a replayed key with other content is refused (CST-CTX-001).
+		if !mustDec(s.Amount).Equal(mustDec(c.Amount)) || !mustDec(s.Qty).Equal(mustDec(c.Qty)) || s.GrirAmount != c.GrirAmount {
+			return 0, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeCostTxnConflict, "a source key was already recorded with other content")
 		}
 	}
 	return n, nil
@@ -46,6 +53,33 @@ func (f *slice5) RecordCostTransactions(_ context.Context, in []store.CostTransa
 func (f *slice5) CostTransactionRecorded(_ context.Context, sourceKey string) (bool, error) {
 	_, ok := f.costTxns[sourceKey]
 	return ok, nil
+}
+
+// RecordInvoicePPV allocates by remainder over the fake's rows with the domain
+// rule; the locking, replay and refusals are the store's, tested in store/grir_test.go.
+func (f *slice5) RecordInvoicePPV(_ context.Context, in store.InvoicePPV) (store.CostTransaction, bool, error) {
+	if c, ok := f.costTxns[in.Row.SourceKey]; ok {
+		return c, false, nil
+	}
+	receipt, ok := f.costTxns[in.ReceiptKey]
+	if !ok {
+		return store.CostTransaction{}, false, &domain.Error{Code: domain.CodeGRIRAllocation, Detail: "no receipt"}
+	}
+	priorQty, priorGRIR := decimal.Zero, decimal.Zero
+	for _, c := range f.costTxns {
+		if c.GrirReceiptKey == in.ReceiptKey {
+			priorQty, priorGRIR = priorQty.Add(mustDec(c.GrirQty)), priorGRIR.Add(mustDec(c.GrirAmount))
+		}
+	}
+	grir, err := domain.InvoiceGRIR(mustDec(receipt.Qty), mustDec(receipt.GrirAmount), priorQty, priorGRIR, in.Qty, in.POUnit, in.Scale)
+	if err != nil {
+		return store.CostTransaction{}, false, err
+	}
+	r := in.Row
+	r.Amount, r.GrirAmount = in.Qty.Mul(in.InvoiceUnit).RoundBank(in.Scale).Sub(grir).String(), grir.String()
+	r.GrirReceiptKey, r.GrirQty = in.ReceiptKey, in.Qty.String()
+	f.costTxns[r.SourceKey] = r
+	return r, true, nil
 }
 
 func (f *slice5) ValueBalances(_ context.Context, q store.BalanceQuery) ([]domain.Balance, error) {

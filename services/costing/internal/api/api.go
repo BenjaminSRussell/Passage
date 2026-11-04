@@ -540,12 +540,18 @@ type ppvRequest struct {
 	ProductID     string `json:"productId"`
 	SiteID        string `json:"siteId"`
 	FinancialDate string `json:"financialDate"`
+	// A recorded INVOICE names the receipt line it clears (both required): its
+	// GR/IR is allocated from that receipt's stored GR/IR by remainder, so split
+	// invoices clear the receipt exactly, and its PPV is the payable less that.
+	ReceiptDocumentID string `json:"receiptDocumentId"`
+	ReceiptLineID     string `json:"receiptLineId"`
 }
 
 type ppvResponse struct {
 	Kind             string `json:"kind"`
 	Currency         string `json:"currency"`
 	Amount           string `json:"amount"`
+	GrirAmount       string `json:"grirAmount,omitempty"`
 	Direction        string `json:"direction"`
 	SourceDocumentID string `json:"sourceDocumentId"`
 	Recorded         bool   `json:"recorded"`
@@ -594,7 +600,7 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 	}
 	qty := parseDecimal(fields, "qty", req.Qty, false)
 	po := parseDecimal(fields, "poUnitPrice", req.PoUnitPrice, true)
-	var amount, std decimal.Decimal
+	var amount, std, invoiceUnit decimal.Decimal
 	scale := money.MinorUnits(req.Currency)
 	if req.Kind == "RECEIPT" {
 		std = parseDecimal(fields, "standardUnitCost", req.StandardUnitCost, true)
@@ -606,14 +612,14 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 		}
 		amount = domain.ReceiptPPV(qty, po, std, scale)
 	} else {
-		inv := parseDecimal(fields, "invoiceUnitPrice", req.InvoiceUnitPrice, true)
+		invoiceUnit = parseDecimal(fields, "invoiceUnitPrice", req.InvoiceUnitPrice, true)
 		if len(fields) == 0 {
-			if err := domain.CheckPPVInputs(qty, po, inv); err != nil {
+			if err := domain.CheckPPVInputs(qty, po, invoiceUnit); err != nil {
 				a.fail(w, r, "ppv", err)
 				return
 			}
 		}
-		amount = domain.InvoicePPV(qty, inv, po, scale)
+		amount = domain.InvoicePPV(qty, invoiceUnit, po, scale)
 	}
 	grir := qty.Mul(po).RoundBank(scale)
 	persist := req.SourceLineID != "" || req.LegalEntityID != "" || req.ProductID != "" || req.SiteID != "" || req.FinancialDate != ""
@@ -629,7 +635,17 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 		if len(req.SourceDocumentID) > maxPPVDocumentID {
 			fields["sourceDocumentId"] = fmt.Sprintf("must be at most %d characters", maxPPVDocumentID)
 		}
-		for name, v := range map[string]string{"sourceDocumentId": req.SourceDocumentID, "sourceLineId": req.SourceLineID} {
+		refs := map[string]string{"sourceDocumentId": req.SourceDocumentID, "sourceLineId": req.SourceLineID}
+		if req.Kind == "INVOICE" {
+			refs["receiptDocumentId"], refs["receiptLineId"] = req.ReceiptDocumentID, req.ReceiptLineID
+			if n := len(req.ReceiptDocumentID); n < 1 || n > maxPPVDocumentID {
+				fields["receiptDocumentId"] = fmt.Sprintf("is required on a recorded invoice, at most %d characters", maxPPVDocumentID)
+			}
+			if n := len(req.ReceiptLineID); n < 1 || n > maxPPVLineID {
+				fields["receiptLineId"] = fmt.Sprintf("is required on a recorded invoice, 1 to %d characters", maxPPVLineID)
+			}
+		}
+		for name, v := range refs {
 			if strings.Contains(v, ":") {
 				fields[name] = "must not contain a colon"
 			}
@@ -639,6 +655,9 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 			LegalEntityID: req.LegalEntityID, ProductID: req.ProductID, SiteID: req.SiteID, Kind: domain.KindPPV, Qty: ppvQty,
 			Amount: amount.StringFixed(scale), Currency: req.Currency, FinancialDate: req.FinancialDate})
 		row.GrirAmount = grir.StringFixed(scale)
+	}
+	if (req.ReceiptDocumentID != "" || req.ReceiptLineID != "") && (!persist || req.Kind != "INVOICE") {
+		fields["receiptDocumentId"] = "names the receipt of a recorded invoice only"
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
@@ -659,12 +678,29 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		inserted, err := a.store.RecordCostTransactions(r.Context(), []store.CostTransaction{row})
-		if err != nil {
-			a.fail(w, r, "record ppv cost transaction", err)
-			return
+		if req.Kind == "INVOICE" {
+			stored, fresh, err := a.store.RecordInvoicePPV(r.Context(), store.InvoicePPV{Row: row, Qty: qty, InvoiceUnit: invoiceUnit, POUnit: po, Scale: scale,
+				ReceiptKey: strings.Join([]string{"ppv", "RECEIPT", strings.ToLower(req.LegalEntityID), req.ReceiptDocumentID, req.ReceiptLineID}, ":")})
+			if err != nil {
+				a.fail(w, r, "record invoice ppv", err)
+				return
+			}
+			if fresh {
+				a.costTxnsRecorded.Add(1)
+			}
+			amount, grir = decimal.RequireFromString(stored.Amount), decimal.RequireFromString(stored.GrirAmount)
+		} else {
+			inserted, err := a.store.RecordCostTransactions(r.Context(), []store.CostTransaction{row})
+			if err != nil {
+				a.fail(w, r, "record ppv cost transaction", err)
+				return
+			}
+			a.costTxnsRecorded.Add(int64(inserted))
 		}
-		a.costTxnsRecorded.Add(int64(inserted))
+	}
+	grirOut := ""
+	if persist {
+		grirOut = grir.StringFixed(scale)
 	}
 	direction := "NONE"
 	switch {
@@ -675,5 +711,5 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 	}
 	a.ppvCalculated.Add(1)
 	httpx.JSON(w, http.StatusOK, ppvResponse{Kind: req.Kind, Currency: req.Currency, Amount: amount.StringFixed(scale),
-		Direction: direction, SourceDocumentID: req.SourceDocumentID, Recorded: persist})
+		GrirAmount: grirOut, Direction: direction, SourceDocumentID: req.SourceDocumentID, Recorded: persist})
 }
