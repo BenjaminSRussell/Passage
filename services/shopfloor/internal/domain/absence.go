@@ -112,7 +112,7 @@ func (c Calculation) absenceLines(d Day) []PayLine {
 		}
 		l := PayLine{Type: TypeAbsenceUnpaid, Hours: hours, Multiplier: decimal.Zero, Amount: decimal.Zero, Sources: []string{a.ID}}
 		if a.Paid {
-			amount := money.Amount{Value: c.Rate, Currency: c.Currency}.Mul(hours.Mul(a.Multiplier))
+			amount := money.Amount{Value: c.rateOn(d.Date), Currency: c.Currency}.Mul(hours.Mul(a.Multiplier))
 			l = PayLine{Type: TypeAbsencePaid, Hours: hours, Multiplier: a.Multiplier, Amount: amount.Value, Sources: []string{a.ID}}
 		}
 		out = append(out, l)

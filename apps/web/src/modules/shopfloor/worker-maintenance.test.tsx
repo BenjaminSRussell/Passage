@@ -43,7 +43,7 @@ function serve(w: Worker, extra?: Handler) {
     const custom = extra?.(url, init);
     if (custom) return custom;
     if (url.pathname.endsWith(`/workers/${ANA}`) && (init.method ?? "GET") === "GET") return json(200, w);
-    if (["/time-profiles", "/pay-agreements", "/registrations", "/worker-days", "/machines", "/jobs"].some((p) => url.pathname.endsWith(p))) return json(200, { items: [] });
+    if (["/time-profiles", "/pay-agreements", "/registrations", "/worker-days", "/machines", "/jobs", "/cost-rates"].some((p) => url.pathname.endsWith(p))) return json(200, { items: [] });
     return undefined;
   };
 }

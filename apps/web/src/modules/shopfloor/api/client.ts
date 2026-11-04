@@ -475,6 +475,8 @@ export interface Downtime {
   endedAt: string | null;
   reasonCode: string | null;
   category: DowntimeCategory;
+  /** "down" for a reported downtime, "idle" for idle time the andon sweep found (BR-25.6). */
+  cause: "down" | "idle";
   andonRaised: boolean;
 }
 
@@ -1191,6 +1193,32 @@ export function reactivateWorker(workerId: string, version: number, key: string 
     method: "POST",
     headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
   });
+}
+
+/** One dated cost rate of a worker: per hour, in the worker's currency, from effectiveFrom until the next one. */
+export interface CostRate {
+  id: string;
+  workerId: string;
+  /** Calendar date, YYYY-MM-DD. */
+  effectiveFrom: string;
+  /** Decimal string. */
+  costRate: string;
+  note: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** The worker's dated cost rates, newest effective date first; empty when the worker has none. */
+export function listWorkerCostRates(workerId: string, signal?: AbortSignal): Promise<CostRate[]> {
+  return items<CostRate>(`/workers/${encodeURIComponent(workerId)}/cost-rates`, signal);
+}
+
+/**
+ * Sets the worker's cost rate from a date. One rate per date (SF-0170, 409): a change takes effect
+ * on a later date. The worker's own user cannot set it (SF-0106, 403).
+ */
+export function addWorkerCostRate(workerId: string, input: { effectiveFrom: string; costRate: string; note: string | null }, key: string = newKey()): Promise<CostRate> {
+  return post<CostRate>(`/workers/${encodeURIComponent(workerId)}/cost-rates`, input, key);
 }
 
 /** Registers and changes edge nodes and publishes their configuration (with the write allowlist). */

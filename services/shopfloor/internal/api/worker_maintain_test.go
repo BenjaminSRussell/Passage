@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -136,5 +137,74 @@ func TestWorkerMaintenance_StoreProblemsPassThrough(t *testing.T) {
 		if rec.Code != c.status {
 			t.Errorf("%s: %d %s", c.path, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+type costRateFake struct {
+	fakeStore
+	added  *store.CostRateInput
+	failed error
+}
+
+func (f *costRateFake) AddCostRate(_ context.Context, id string, in store.CostRateInput, by string, _ store.Idem) (store.CostRate, error) {
+	if f.failed != nil {
+		return store.CostRate{}, f.failed
+	}
+	f.added = &in
+	return store.CostRate{ID: "r-1", WorkerID: id, EffectiveFrom: in.EffectiveFrom, CostRate: in.CostRate, Note: in.Note, CreatedBy: by}, nil
+}
+
+func (f *costRateFake) ListCostRates(context.Context, string) ([]store.CostRate, error) {
+	return []store.CostRate{{ID: "r-1", EffectiveFrom: "2026-07-01"}}, nil
+}
+
+var _ Store = (*costRateFake)(nil)
+
+func TestCostRates_RoutesValidationAndDuties(t *testing.T) {
+	f := &costRateFake{}
+	h := newRouter(f)
+	path := "/v1/shopfloor/workers/" + workerID + "/cost-rates"
+	hdr := map[string]string{"Idempotency-Key": "cr-1"}
+
+	rec := callWith(t, h, http.MethodPost, path, `{"effectiveFrom":"2026-07-01","costRate":"24.50","note":" raise "}`, allDuty, hdr)
+	if rec.Code != http.StatusCreated || f.added == nil || f.added.EffectiveFrom != "2026-07-01" || f.added.CostRate.String() != "24.5" || *f.added.Note != "raise" {
+		t.Fatalf("add: %d %s %+v", rec.Code, rec.Body.String(), f.added)
+	}
+	for _, c := range []struct{ body, field string }{
+		{`{"effectiveFrom":"07/01/2026","costRate":"1"}`, "effectiveFrom"},
+		{`{"effectiveFrom":"1999-12-31","costRate":"1"}`, "effectiveFrom"},
+		{`{"effectiveFrom":"2100-01-01","costRate":"1"}`, "effectiveFrom"},
+		{`{"effectiveFrom":"2026-07-01","costRate":"-1"}`, "costRate"},
+		{`{"effectiveFrom":"2026-07-01","costRate":"1.1234567"}`, "costRate"},
+		{`{"effectiveFrom":"2026-07-01","costRate":"abc"}`, "costRate"},
+		{`{"effectiveFrom":"2026-07-01","costRate":"1","note":"  "}`, "note"},
+	} {
+		rec := callWith(t, h, http.MethodPost, path, c.body, allDuty, hdr)
+		var p struct {
+			Errors map[string]string `json:"errors"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &p)
+		if rec.Code != http.StatusBadRequest || p.Errors[c.field] == "" {
+			t.Errorf("%s: %d errors=%v", c.body, rec.Code, p.Errors)
+		}
+	}
+	if rec := callWith(t, h, http.MethodPost, path, `{"effectiveFrom":"2026-07-01","costRate":"1"}`, allDuty, nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing Idempotency-Key: %d", rec.Code)
+	}
+	if rec := callWith(t, h, http.MethodPost, "/v1/shopfloor/workers/nope/cost-rates", `{"effectiveFrom":"2026-07-01","costRate":"1"}`, allDuty, hdr); rec.Code != http.StatusNotFound {
+		t.Fatalf("bad id: %d", rec.Code)
+	}
+	if rec := callWith(t, h, http.MethodPost, path, `{"effectiveFrom":"2026-07-01","costRate":"1"}`, DutyView, hdr); rec.Code != http.StatusForbidden {
+		t.Fatalf("write with only the view duty: %d", rec.Code)
+	}
+	if rec := callWith(t, h, http.MethodGet, path, ``, DutyView, nil); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"effectiveFrom":"2026-07-01"`) {
+		t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := callWith(t, h, http.MethodGet, path, ``, DutyRegister, nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("list without the view duty: %d", rec.Code)
+	}
+	f.failed = httpx.NewProblem(http.StatusConflict, store.CodeCostRateExists, "exists")
+	if rec := callWith(t, h, http.MethodPost, path, `{"effectiveFrom":"2026-07-01","costRate":"1"}`, allDuty, hdr); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "SF-0170") {
+		t.Fatalf("duplicate date: %d %s", rec.Code, rec.Body.String())
 	}
 }

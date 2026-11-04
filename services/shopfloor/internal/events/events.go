@@ -44,6 +44,9 @@ var (
 	// worker's name, cost rate or active state changes, as the pay lines of earlier days keep the
 	// rate they were calculated with.
 	WorkerSaved = events.Type(Context, "worker", "saved", 1)
+	// WorkerCostRateSet is not in the PRD event table: payroll (w43) and costing (w21, w39) learn
+	// the dated hourly rate a worker's days are priced at.
+	WorkerCostRateSet = events.Type(Context, "workercostrate", "set", 1)
 	// AbsenceCodeSaved is not in the PRD event table: payroll (w43) needs the pay terms
 	// behind the absence lines of a worker-day.
 	AbsenceCodeSaved = events.Type(Context, "absencecode", "saved", 1)
@@ -64,7 +67,7 @@ var (
 // All lists every event type the service publishes (used by the startup registry check).
 func All() []string {
 	return []string{RegistrationPosted, PaydayApproved, PaydayExported, AndonRaised, ProcessMessageReceived, ProcessMessageDelivered, ProcessMessageDeleted,
-		OEEBucketUpdated, OEEBucketRemoved, JobReported, JobReopened, RegistrationCorrected, PaydayRevised, TimeProfileSaved, PayAgreementSaved, WorkerAssigned, WorkerSaved, AbsenceCodeSaved,
+		OEEBucketUpdated, OEEBucketRemoved, JobReported, JobReopened, RegistrationCorrected, PaydayRevised, TimeProfileSaved, PayAgreementSaved, WorkerAssigned, WorkerSaved, WorkerCostRateSet, AbsenceCodeSaved,
 		EdgeNodeSaved, EdgeConfigPublished, EdgeConfigApplied, DowntimeReasonSaved, ProcessCategorySaved}
 }
 
@@ -340,6 +343,19 @@ type WorkerSavedData struct {
 	Change   string  `json:"change"`
 	Reason   *string `json:"reason"`
 	SavedBy  string  `json:"savedBy"`
+}
+
+// WorkerCostRateSetData is the payload of dev.passage.shopfloor.workercostrate.set.v1, published when
+// a dated cost rate is added to a worker. CostRate is a decimal string per hour in Currency, and holds
+// for days from EffectiveFrom (YYYY-MM-DD) until the next dated rate. Days already calculated keep
+// the rate they were calculated with until a supervisor recalculates or revises them.
+type WorkerCostRateSetData struct {
+	WorkerID      string `json:"workerId"`
+	CostRateID    string `json:"costRateId"`
+	EffectiveFrom string `json:"effectiveFrom"`
+	CostRate      string `json:"costRate"`
+	Currency      string `json:"currency"`
+	SetBy         string `json:"setBy"`
 }
 
 // AbsenceCodeSavedData is the payload of dev.passage.shopfloor.absencecode.saved.v1,

@@ -142,7 +142,7 @@ export function WorkerMaintenance({ worker, onSaved }: { worker: Worker; onSaved
           {field("name", "Name", undefined, false, { maxLength: 120 })}
           {field("badgeId", "Badge", "Scanned at the kiosk; unique in your tenant. Clear it to remove the badge.", true, { maxLength: 64 })}
           {field("userId", "Sign-in user", "This user can't approve their own time.", true, { maxLength: 200 })}
-          {field("costRate", "Cost rate per hour", "Applies to days calculated from now on. Approved days keep their pay; days already calculated keep their lines until recalculated.", false, { inputMode: "decimal" })}
+          {field("costRate", "Cost rate per hour", "The base rate, for days before the first dated rate in the cost rate history (all days when there is none). Approved days keep their pay; days already calculated keep their lines until recalculated.", false, { inputMode: "decimal" })}
           {field("currency", "Currency", undefined, false, { maxLength: 3 })}
           {failure ? (
             <div className={styles.formActions}>

@@ -81,6 +81,9 @@ type Store interface {
 	DeactivateWorker(ctx context.Context, workerID string, version int, reason, savedBy string, idem store.Idem) (store.Worker, error)
 	ReactivateWorker(ctx context.Context, workerID string, version int, savedBy string, idem store.Idem) (store.Worker, error)
 	ListWorkers(ctx context.Context, activeOnly bool, limit int) ([]store.Worker, error)
+	AddCostRate(ctx context.Context, workerID string, in store.CostRateInput, savedBy string, idem store.Idem) (store.CostRate, error)
+	ListCostRates(ctx context.Context, workerID string) ([]store.CostRate, error)
+	LoadRateSteps(ctx context.Context, workerID string) ([]domain.RateStep, error)
 	CreateRegistrations(ctx context.Context, items []store.Registration) ([]store.RegistrationResult, error)
 	ListRegistrations(ctx context.Context, workerID string, start, end time.Time, limit int) ([]store.RegistrationView, error)
 	ListBundleRegistrations(ctx context.Context, bundleID string, limit int) ([]store.RegistrationView, error)
@@ -282,6 +285,7 @@ func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	a.registerAbsence(r)
 	a.registerWorkerMaintenance(r)
+	a.registerCostRates(r)
 	a.registerDowntimeReasons(r)
 	a.registerProcessCategories(r)
 	a.registerEdge(r)
@@ -925,8 +929,12 @@ func (a *API) recalculate(ctx context.Context, win rangeWindow) ([]domain.DayPay
 	if err != nil {
 		return nil, "", err
 	}
+	steps, err := a.store.LoadRateSteps(ctx, win.workerID)
+	if err != nil {
+		return nil, "", err
+	}
 	profileFor := func(t time.Time) domain.Profile { return setup.Profiles.For(t, win.loc) }
-	calc := domain.Calculation{ProfileFor: profileFor, Location: win.loc, Rules: rules, Rate: in.Rate, Currency: in.Currency}
+	calc := domain.Calculation{ProfileFor: profileFor, Location: win.loc, Rules: rules, Rate: in.Rate, RateSteps: steps, Currency: in.Currency}
 	all, err := calc.Run(domain.AddAbsences(domain.BuildDaysFor(in.Punches, win.loc, profileFor), in.Absences, win.loc))
 	if err != nil {
 		var de *domain.Error

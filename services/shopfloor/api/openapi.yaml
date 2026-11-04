@@ -352,7 +352,8 @@ paths:
       description: |
         Approves every calculated day in the range. Days already approved are
         returned unchanged. Any open flag fails the request (SF-0006); a day whose
-        registrations changed after calculation fails with SF-0104; approving
+        registrations changed after calculation, or that is priced by a dated cost
+        rate added after its calculation, fails with SF-0104; approving
         your own day fails with SF-0106. Newly approved days emit
         dev.passage.shopfloor.payday.approved.v1.
       parameters:
@@ -869,7 +870,10 @@ paths:
         which no person role holds).
         Raising and clearing a downtime alert otherwise happen only when the machine sends events,
         so a machine that went DOWN and then fell silent would never raise one. The sweep, in one
-        transaction, raises a downtime alert for every downtime open for more than 10 minutes,
+        transaction, opens an idle downtime (`cause` idle, BR-25.6) for every machine whose latest
+        state is RUNNING and that has sent no count for its idle threshold, starting at its last count
+        and unless the machine has a downtime open (the next count or a state that leaves RUNNING ends it),
+        raises a downtime alert for every downtime open for more than 10 minutes (an idle one too),
         clears the downtime alerts whose downtime ended at least 5 minutes ago, and reads the
         latest completed stored OEE bucket of each resource: more than 5 % scrap in a bucket of at
         least 10 pieces raises a `scrap-rate` alert, and the alert clears once the latest completed
@@ -2816,6 +2820,78 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
+  /v1/shopfloor/workers/{id}/cost-rates:
+    get:
+      operationId: listWorkerCostRates
+      summary: List a worker's dated cost rates
+      description: |
+        The worker's dated hourly cost rates (D2a'), newest effective date first. A day is priced at the
+        latest rate effective on or before its date; days before the first dated rate are priced at the
+        worker's own `costRate`. The list is empty for a worker who has never had a dated rate.
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The worker's dated cost rates.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CostRateList"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: addWorkerCostRate
+      summary: Set a worker's cost rate from a date
+      description: |
+        Records that the worker costs `costRate` an hour (in the worker's currency) from `effectiveFrom`
+        until the next dated rate. Rates are append-only: a second rate for the same date is SF-0170 (409),
+        so a change takes effect on a later date. A past date is allowed and rewrites no pay line: a
+        calculated day that the new rate prices is stale for approval (SF-0104) until it is recalculated,
+        and an approved day keeps its lines and stays approved until a supervisor revises it
+        (`pay:revise` prices each day at the rate effective on its own date). The worker's own sign-in user
+        cannot set the rate (SF-0106, 403). Publishes `dev.passage.shopfloor.workercostrate.set.v1`.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CostRateInput"
+      responses:
+        "201":
+          description: The stored rate (or the stored outcome of a repeated key).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CostRate"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
   /v1/shopfloor/workers/{id}:deactivate:
     post:
       operationId: deactivateWorker
@@ -4450,7 +4526,7 @@ components:
           type: integer
     Downtime:
       type: object
-      required: [id, machineId, resourceId, startedAt, endedAt, reasonCode, category, andonRaised]
+      required: [id, machineId, resourceId, startedAt, endedAt, reasonCode, category, cause, andonRaised]
       properties:
         id:
           type: string
@@ -4472,8 +4548,62 @@ components:
         category:
           type: string
           enum: [planned, unplanned]
+        cause:
+          type: string
+          enum: [down, idle]
+          description: >-
+            down for a downtime the machine reported (state DOWN); idle for idle time the andon sweep
+            found on a RUNNING machine with no count for its idle threshold (BR-25.6). A count or a
+            state that leaves RUNNING (DOWN, SETUP, OFF) ends an idle record.
         andonRaised:
           type: boolean
+    CostRate:
+      type: object
+      required: [id, workerId, effectiveFrom, costRate, note, createdBy, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workerId:
+          type: string
+          format: uuid
+        effectiveFrom:
+          type: string
+          format: date
+          description: The first day priced at this rate.
+        costRate:
+          type: string
+          description: Decimal string, per hour, in the worker's currency.
+        note:
+          type: [string, "null"]
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    CostRateList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CostRate"
+    CostRateInput:
+      type: object
+      required: [effectiveFrom, costRate]
+      properties:
+        effectiveFrom:
+          type: string
+          format: date
+          description: Between 2000-01-01 and 2099-12-31.
+        costRate:
+          type: string
+          description: Non-negative decimal string with at most 6 decimals, per hour.
+        note:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 500
     DowntimeCode:
       type: object
       required: [reasonCode]
@@ -4530,8 +4660,11 @@ components:
           maxLength: 500
     AndonSweepResult:
       type: object
-      required: [downtimeRaised, scrapRateRaised, cleared]
+      required: [idleOpened, downtimeRaised, scrapRateRaised, cleared]
       properties:
+        idleOpened:
+          type: integer
+          description: Idle downtime records opened for RUNNING machines with no count for their idle threshold.
         downtimeRaised:
           type: integer
           description: Downtime alerts raised for downtimes open over 10 minutes.
