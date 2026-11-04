@@ -1515,7 +1515,19 @@
       {"resource": "/v1/service/work-orders", "methods": ["GET"]},
       {"resource": "/v1/service/work-orders/*", "methods": ["GET"]},
       {"resource": "/v1/service/agreements/*/visits", "methods": ["GET"]},
-      {"resource": "/v1/service/agreements/*/history", "methods": ["GET"]}
+      {"resource": "/v1/service/agreements/*/history", "methods": ["GET"]},
+      {"resource": "/v1/service/technicians", "methods": ["GET"]},
+      {"resource": "/v1/service/technicians/*", "methods": ["GET"]},
+      {"resource": "/v1/service/dispatch/board", "methods": ["GET"]},
+      {"resource": "/v1/service/dispatch/runs", "methods": ["GET"]},
+      {"resource": "/v1/service/dispatch/runs/*", "methods": ["GET"]}
+    ]},
+    "SvcDispatch": {"permissions": [
+      {"resource": "/v1/service/technicians", "methods": ["POST"]},
+      {"resource": "/v1/service/technicians/*", "methods": ["PUT"]},
+      {"resource": "/v1/service/work-orders/*:assign", "methods": ["POST"]},
+      {"resource": "/v1/service/work-orders/*:unassign", "methods": ["POST"]},
+      {"resource": "/v1/service/dispatch/publish", "methods": ["POST"]}
     ]},
     "SvcObjectMaintain": {"permissions": [
       {"resource": "/v1/service/service-objects", "methods": ["POST"]},
@@ -1525,7 +1537,8 @@
     "SvcWoMaintain": {"permissions": [
       {"resource": "/v1/service/work-orders", "methods": ["POST"]},
       {"resource": "/v1/service/work-orders/*:follow-up", "methods": ["POST"]},
-      {"resource": "/v1/service/work-orders/*:transition", "methods": ["POST"]}
+      {"resource": "/v1/service/work-orders/*:transition", "methods": ["POST"]},
+      {"resource": "/v1/service/work-orders/*/scheduling", "methods": ["PUT"]}
     ]},
     "TMS_CARRIER_RESPOND": {"permissions": [{"resource": "/v1/transport/tenders/*:respond", "methods": ["POST"]}]},
     "TMS_GATE": {"permissions": [
