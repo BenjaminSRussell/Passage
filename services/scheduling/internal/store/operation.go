@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -21,6 +22,8 @@ const (
 	CodeOperationVersion   = "SCHED-0137"
 	CodeOperationFirmed    = "SCHED-0138"
 	CodeCandidateSecondary = "SCHED-0139"
+	// CodeOverlapQuantity: the overlap quantity needs a quantity and cannot exceed it (BR-23.5).
+	CodeOverlapQuantity = "SCHED-0142"
 )
 
 // OperationPatch changes an operation; nil and empty fields stay as they are.
@@ -36,6 +39,10 @@ type OperationPatch struct {
 	// operation (FR-23.3).
 	QueueBeforeMinutes *int
 	QueueAfterMinutes  *int
+	// Quantity and OverlapQuantity change the quantities of the overlap rule
+	// (BR-23.5). An OverlapQuantity of zero clears the overlap.
+	Quantity        *decimal.Decimal
+	OverlapQuantity *decimal.Decimal
 	// ResourceIDs replaces the candidate resources, in priority order.
 	ResourceIDs []string
 }
@@ -43,7 +50,7 @@ type OperationPatch struct {
 // reschedules reports whether the change makes the operation's placement stale:
 // everything but the priority, which only orders the next run.
 func (p OperationPatch) reschedules() bool {
-	return p.Minutes != nil || p.DueAt != nil || p.ReadyAt != nil || p.SetupMinutes != nil || p.QueueBeforeMinutes != nil || p.QueueAfterMinutes != nil || p.ResourceIDs != nil
+	return p.Minutes != nil || p.DueAt != nil || p.ReadyAt != nil || p.SetupMinutes != nil || p.QueueBeforeMinutes != nil || p.QueueAfterMinutes != nil || p.OverlapQuantity != nil || p.ResourceIDs != nil
 }
 
 // OperationUpdate is the changed operation. JobsRemoved is true when its
@@ -187,6 +194,21 @@ func (s *Postgres) UpdateOperation(ctx context.Context, id string, version int, 
 		if patch.QueueAfterMinutes != nil {
 			cur.QueueAfterMinutes = *patch.QueueAfterMinutes
 		}
+		if patch.Quantity != nil {
+			q := patch.Quantity.StringFixed(4)
+			cur.Quantity = &q
+		}
+		if patch.OverlapQuantity != nil {
+			if patch.OverlapQuantity.IsZero() {
+				cur.OverlapQuantity = nil
+			} else {
+				o := patch.OverlapQuantity.StringFixed(4)
+				cur.OverlapQuantity = &o
+			}
+		}
+		if cur.OverlapQuantity != nil && (cur.Quantity == nil || dec(*cur.OverlapQuantity).GreaterThan(dec(*cur.Quantity))) {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeOverlapQuantity, "the overlap quantity needs a quantity and cannot exceed it")
+		}
 		if patch.ResourceIDs != nil {
 			var known int
 			if err := tx.QueryRow(ctx, `select count(*) from scheduling_resource where id = any($1::uuid[])`, patch.ResourceIDs).Scan(&known); err != nil {
@@ -203,21 +225,22 @@ func (s *Postgres) UpdateOperation(ctx context.Context, id string, version int, 
 			cur.ResourceIDs = patch.ResourceIDs
 		}
 		removed := false
-		if patch.reschedules() {
+		if patch.reschedules() || (patch.Quantity != nil && cur.OverlapQuantity != nil) {
 			if removed, err = dropJobs(ctx, tx, id); err != nil {
 				return err
 			}
 		}
 		upd, err := scanOperation(tx.QueryRow(ctx, `update scheduling_operation set minutes = $2, due_at = $3, ready_at = $4, priority = $5, setup_minutes = $6,
-				queue_before_minutes = $8, queue_after_minutes = $9, candidate_resource_ids = $7::uuid[], version = version + 1, updated_at = now() where id = $1::uuid returning `+opCols,
-			id, cur.Minutes, cur.DueAt, cur.ReadyAt, cur.Priority, cur.SetupMinutes, cur.ResourceIDs, cur.QueueBeforeMinutes, cur.QueueAfterMinutes), nil)
+				queue_before_minutes = $8, queue_after_minutes = $9, quantity = $10::text::numeric, overlap_quantity = $11::text::numeric, candidate_resource_ids = $7::uuid[], version = version + 1, updated_at = now() where id = $1::uuid returning `+opCols,
+			id, cur.Minutes, cur.DueAt, cur.ReadyAt, cur.Priority, cur.SetupMinutes, cur.ResourceIDs, cur.QueueBeforeMinutes, cur.QueueAfterMinutes, cur.Quantity, cur.OverlapQuantity), nil)
 		if err != nil {
 			return err
 		}
 		out = OperationUpdate{Operation: upd, JobsRemoved: removed}
 		data := schedevents.OperationUpdatedData{OperationID: upd.ID, OrderID: upd.OrderID, OperNumber: upd.OperNumber, Minutes: upd.Minutes,
 			Priority: upd.Priority, ResourceIDs: upd.ResourceIDs, Version: upd.Version, JobsRemoved: removed,
-			QueueBeforeMinutes: upd.QueueBeforeMinutes, QueueAfterMinutes: upd.QueueAfterMinutes}
+			QueueBeforeMinutes: upd.QueueBeforeMinutes, QueueAfterMinutes: upd.QueueAfterMinutes,
+			Quantity: upd.Quantity, OverlapQuantity: upd.OverlapQuantity}
 		if upd.DueAt != nil {
 			d := rfc(*upd.DueAt)
 			data.DueAt = &d

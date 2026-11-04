@@ -514,7 +514,7 @@ components:
         version: { type: integer }
     OperationUpdatedData:
       type: object
-      required: [operationId, orderId, operNumber, minutes, dueAt, readyAt, priority, resourceIds, version, jobsRemoved, queueBeforeMinutes, queueAfterMinutes]
+      required: [operationId, orderId, operNumber, minutes, dueAt, readyAt, priority, resourceIds, version, jobsRemoved, queueBeforeMinutes, queueAfterMinutes, quantity, overlapQuantity]
       properties:
         operationId: { type: string, format: uuid }
         orderId: { type: string, format: uuid }
@@ -531,6 +531,8 @@ components:
         jobsRemoved: { type: boolean }
         queueBeforeMinutes: { type: integer, minimum: 0, maximum: 10080, description: Elapsed wait in front of the operation in minutes (FR-23.3); no resource is booked. }
         queueAfterMinutes: { type: integer, minimum: 0, maximum: 10080, description: Elapsed wait behind the operation in minutes (FR-23.3); no resource is booked. }
+        quantity: { type: [string, 'null'], description: Order quantity the operation works on as a decimal string; null when not set. }
+        overlapQuantity: { type: [string, 'null'], description: Part of the quantity that must be through before the next operation may start (BR-23.5); null when there is no overlap. }
     OperationDeletedData:
       type: object
       required: [operationId, orderId, operNumber, jobsRemoved]

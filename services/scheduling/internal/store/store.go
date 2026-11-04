@@ -103,12 +103,17 @@ type Operation struct {
 	SetupMinutes         int      `json:"setupMinutes"`
 	// QueueBeforeMinutes and QueueAfterMinutes are the elapsed waits in front
 	// of and behind the operation (FR-23.3); no resource is booked for them.
-	QueueBeforeMinutes int               `json:"queueBeforeMinutes"`
-	QueueAfterMinutes  int               `json:"queueAfterMinutes"`
-	Attributes         map[string]string `json:"attributes"`
-	NetworkID          *string           `json:"networkId"`
-	Status             string            `json:"status"`
-	CreatedAt          time.Time         `json:"createdAt"`
+	QueueBeforeMinutes int `json:"queueBeforeMinutes"`
+	QueueAfterMinutes  int `json:"queueAfterMinutes"`
+	// Quantity is the order quantity the operation works on and
+	// OverlapQuantity the part of it that must be through before the next
+	// operation may start (BR-23.5); decimal strings, both optional.
+	Quantity        *string           `json:"quantity"`
+	OverlapQuantity *string           `json:"overlapQuantity"`
+	Attributes      map[string]string `json:"attributes"`
+	NetworkID       *string           `json:"networkId"`
+	Status          string            `json:"status"`
+	CreatedAt       time.Time         `json:"createdAt"`
 	// Version starts at 1 and rises with every change; PATCH and DELETE need it
 	// in If-Match.
 	Version   int        `json:"version"`

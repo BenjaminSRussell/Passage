@@ -373,6 +373,7 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0125` | 422 | Complete needs a started campaign |
 | `SCHED-0140` | 412 | If-Match is stale: the scheduling parameters changed since they were read |
 | `SCHED-0141` | 403 | A move asked for `overrideConstraints` without the `scheduling.constraints.override` duty |
+| `SCHED-0142` | 422 | Operation change: an overlap quantity needs a quantity and cannot exceed it (BR-23.5) |
 | `precondition_required` | 428 | A campaign command was sent without If-Match |
 
 A dry-run move never fails for a constraint: it returns `feasible: false` and

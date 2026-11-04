@@ -23,6 +23,8 @@ type operationPatchRequest struct {
 	SetupMinutes       *int       `json:"setupMinutes"`
 	QueueBeforeMinutes *int       `json:"queueBeforeMinutes"`
 	QueueAfterMinutes  *int       `json:"queueAfterMinutes"`
+	Quantity           *string    `json:"quantity"`
+	OverlapQuantity    *string    `json:"overlapQuantity"`
 	ResourceIDs        []string   `json:"resourceIds"`
 }
 
@@ -81,8 +83,8 @@ func (a *API) updateOperation(w http.ResponseWriter, r *http.Request) {
 	fields := map[string]string{}
 	patch := store.OperationPatch{DueAt: req.DueAt, ReadyAt: req.ReadyAt}
 	if req.Minutes == nil && req.DueAt == nil && req.ReadyAt == nil && req.Priority == nil && req.SetupMinutes == nil &&
-		req.QueueBeforeMinutes == nil && req.QueueAfterMinutes == nil && req.ResourceIDs == nil {
-		fields["body"] = "send at least one of minutes, dueAt, readyAt, priority, setupMinutes, queueBeforeMinutes, queueAfterMinutes or resourceIds"
+		req.QueueBeforeMinutes == nil && req.QueueAfterMinutes == nil && req.Quantity == nil && req.OverlapQuantity == nil && req.ResourceIDs == nil {
+		fields["body"] = "send at least one of minutes, dueAt, readyAt, priority, setupMinutes, queueBeforeMinutes, queueAfterMinutes, quantity, overlapQuantity or resourceIds"
 	}
 	if req.Minutes != nil {
 		if *req.Minutes < 1 || *req.Minutes > 100000 {
@@ -113,6 +115,21 @@ func (a *API) updateOperation(w http.ResponseWriter, r *http.Request) {
 			fields["queueAfterMinutes"] = "must be 0 to 10080"
 		}
 		patch.QueueAfterMinutes = req.QueueAfterMinutes
+	}
+	if req.Quantity != nil {
+		if q, msg := parseQuantity(*req.Quantity, false); msg != "" {
+			fields["quantity"] = msg
+		} else {
+			patch.Quantity = &q
+		}
+	}
+	if req.OverlapQuantity != nil {
+		// Zero clears the overlap.
+		if o, msg := parseQuantity(*req.OverlapQuantity, true); msg != "" {
+			fields["overlapQuantity"] = msg
+		} else {
+			patch.OverlapQuantity = &o
+		}
 	}
 	if req.ResourceIDs != nil {
 		if len(req.ResourceIDs) < 1 || len(req.ResourceIDs) > 50 {

@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, EmptyState, FormField, Input, PageHeader, Select, Skeleton, Textarea } from "../../shell/ui";
 import { createOperation, describeProblem, listNetworks, listResources, newKey, type NewOperation, type Problem } from "./api/client";
 import { fromUtcInput, UUID } from "./format";
-import { CODE, optionalWhole, wholeNumber, WEEK_MINUTES } from "./forms";
+import { CODE, compareDecimal, decimalText, optionalWhole, positive, wholeNumber, WEEK_MINUTES } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -23,6 +23,8 @@ export interface Values {
   setupMinutes: string;
   queueBeforeMinutes: string;
   queueAfterMinutes: string;
+  quantity: string;
+  overlapQuantity: string;
   attributes: string;
   networkId: string;
 }
@@ -42,6 +44,8 @@ export const emptyOperation: Values = {
   setupMinutes: "",
   queueBeforeMinutes: "",
   queueAfterMinutes: "",
+  quantity: "",
+  overlapQuantity: "",
   attributes: "",
   networkId: "",
 };
@@ -96,6 +100,14 @@ export function validateOperation(values: Values): { errors: Errors; input?: New
   if (queueBefore === null) errors.queueBeforeMinutes = `Enter 0 to ${WEEK_MINUTES.toLocaleString("en-US")} minutes.`;
   const queueAfter = optionalWhole(values.queueAfterMinutes, 0, WEEK_MINUTES);
   if (queueAfter === null) errors.queueAfterMinutes = `Enter 0 to ${WEEK_MINUTES.toLocaleString("en-US")} minutes.`;
+  const quantity = values.quantity.trim();
+  if (quantity !== "" && (decimalText(quantity, 4, 14) === null || !positive(quantity))) errors.quantity = "Enter a quantity above zero with at most 4 decimals.";
+  const overlap = values.overlapQuantity.trim();
+  if (overlap !== "") {
+    if (decimalText(overlap, 4, 14) === null || !positive(overlap)) errors.overlapQuantity = "Enter a quantity above zero with at most 4 decimals.";
+    else if (quantity === "") errors.overlapQuantity = "An overlap needs the quantity above.";
+    else if (!errors.quantity && compareDecimal(overlap, quantity) > 0) errors.overlapQuantity = "The overlap cannot exceed the quantity.";
+  }
   const { attributes, error: attributesError } = parseAttributes(values.attributes);
   if (attributesError) errors.attributes = attributesError;
   if (Object.keys(errors).length > 0 || operNumber === null || minutes === null) return { errors };
@@ -108,6 +120,8 @@ export function validateOperation(values: Values): { errors: Errors; input?: New
   if (setupMinutes !== undefined && setupMinutes !== null) input.setupMinutes = setupMinutes;
   if (queueBefore !== undefined && queueBefore !== null) input.queueBeforeMinutes = queueBefore;
   if (queueAfter !== undefined && queueAfter !== null) input.queueAfterMinutes = queueAfter;
+  if (quantity !== "") input.quantity = quantity;
+  if (overlap !== "") input.overlapQuantity = overlap;
   if (Object.keys(attributes).length > 0) input.attributes = attributes;
   if (values.networkId !== "") input.networkId = values.networkId;
   return { errors, input };
@@ -124,6 +138,8 @@ const fieldNames: Record<string, keyof Values> = {
   setupMinutes: "setupMinutes",
   queueBeforeMinutes: "queueBeforeMinutes",
   queueAfterMinutes: "queueAfterMinutes",
+  quantity: "quantity",
+  overlapQuantity: "overlapQuantity",
   attributes: "attributes",
   networkId: "networkId",
 };
@@ -194,7 +210,7 @@ export function NewOperationPage() {
     }
   }
 
-  const field = (name: "orderId" | "operNumber" | "minutes" | "priority" | "setupGroup" | "setupMinutes" | "queueBeforeMinutes" | "queueAfterMinutes", props: { inputMode?: "numeric" } = {}) =>
+  const field = (name: "orderId" | "operNumber" | "minutes" | "priority" | "setupGroup" | "setupMinutes" | "queueBeforeMinutes" | "queueAfterMinutes" | "quantity" | "overlapQuantity", props: { inputMode?: "numeric" | "decimal" } = {}) =>
     function Control(control: { id: string }) {
       return <Input {...control} {...props} value={values[name]} onChange={(event) => update({ [name]: event.target.value })} invalid={Boolean(errors[name])} />;
     };
@@ -308,6 +324,18 @@ export function NewOperationPage() {
             </FormField>
             <FormField id="operation-queue-after" label="Queue after (minutes)" optional hint="Elapsed wait behind the operation, before the next one may start." error={errors.queueAfterMinutes}>
               {field("queueAfterMinutes", { inputMode: "numeric" })}
+            </FormField>
+            <FormField id="operation-quantity" label="Quantity" optional hint="The order quantity this operation works on; needed for an overlap." error={errors.quantity}>
+              {field("quantity", { inputMode: "decimal" })}
+            </FormField>
+            <FormField
+              id="operation-overlap"
+              label="Overlap quantity"
+              optional
+              hint="The next operation may start once this part of the quantity is through, instead of at the end."
+              error={errors.overlapQuantity}
+            >
+              {field("overlapQuantity", { inputMode: "decimal" })}
             </FormField>
             <FormField
               id="operation-network"

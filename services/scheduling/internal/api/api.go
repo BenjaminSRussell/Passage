@@ -21,6 +21,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -107,6 +108,8 @@ type operationRequest struct {
 	SetupMinutes         *int              `json:"setupMinutes"`
 	QueueBeforeMinutes   *int              `json:"queueBeforeMinutes"`
 	QueueAfterMinutes    *int              `json:"queueAfterMinutes"`
+	Quantity             *string           `json:"quantity"`
+	OverlapQuantity      *string           `json:"overlapQuantity"`
 	Attributes           map[string]string `json:"attributes"`
 	NetworkID            *string           `json:"networkId"`
 }
@@ -491,6 +494,30 @@ func (a *API) createOperation(w http.ResponseWriter, r *http.Request) {
 			fields["queueAfterMinutes"] = fmt.Sprintf("must be 0 to %d", maxWeekMinutes)
 		}
 	}
+	var quantity, overlap *string
+	if req.Quantity != nil {
+		q, msg := parseQuantity(*req.Quantity, false)
+		if msg != "" {
+			fields["quantity"] = msg
+		} else {
+			s := q.StringFixed(4)
+			quantity = &s
+		}
+	}
+	if req.OverlapQuantity != nil {
+		o, msg := parseQuantity(*req.OverlapQuantity, false)
+		switch {
+		case msg != "":
+			fields["overlapQuantity"] = msg
+		case quantity == nil && fields["quantity"] == "":
+			fields["overlapQuantity"] = "needs a quantity"
+		case quantity != nil && o.GreaterThan(decimal.RequireFromString(*quantity)):
+			fields["overlapQuantity"] = "must not exceed the quantity"
+		case quantity != nil:
+			s := o.StringFixed(4)
+			overlap = &s
+		}
+	}
 	if msg := validAttributes(req.Attributes); msg != "" {
 		fields["attributes"] = msg
 	}
@@ -507,7 +534,7 @@ func (a *API) createOperation(w http.ResponseWriter, r *http.Request) {
 	}
 	op, created, err := a.store.CreateOperation(r.Context(), store.Operation{OrderID: req.OrderID, OperNumber: req.OperNumber,
 		Minutes: req.Minutes, DueAt: req.DueAt, ReadyAt: req.ReadyAt, Priority: priority, ResourceIDs: req.ResourceIDs,
-		SecondaryResourceIDs: req.SecondaryResourceIDs, SetupGroup: group, SetupMinutes: setupMinutes, QueueBeforeMinutes: queueBefore, QueueAfterMinutes: queueAfter, Attributes: req.Attributes, NetworkID: req.NetworkID}, idem)
+		SecondaryResourceIDs: req.SecondaryResourceIDs, SetupGroup: group, SetupMinutes: setupMinutes, QueueBeforeMinutes: queueBefore, QueueAfterMinutes: queueAfter, Quantity: quantity, OverlapQuantity: overlap, Attributes: req.Attributes, NetworkID: req.NetworkID}, idem)
 	if err != nil {
 		slog.Error("create operation failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -1143,4 +1170,28 @@ func (a *API) listRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// quantityText is the plain decimal form the OpenAPI pattern allows: digits
+// with an optional fraction, no sign, exponent or bare point.
+var quantityText = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?$`)
+
+// parseQuantity reads a decimal quantity string: at most 4 decimals and 14
+// integer digits, positive (or zero when allowZero). The message is empty when
+// it is valid.
+func parseQuantity(s string, allowZero bool) (decimal.Decimal, string) {
+	s = strings.TrimSpace(s)
+	if !quantityText.MatchString(s) {
+		return decimal.Zero, "must be a decimal number"
+	}
+	q, err := decimal.NewFromString(s)
+	switch {
+	case err != nil:
+		return q, "must be a decimal number"
+	case q.IsNegative() || (q.IsZero() && !allowZero):
+		return q, "must be greater than zero"
+	case q.Exponent() < -4 || q.GreaterThanOrEqual(decimal.New(1, 14)):
+		return q, "must have at most 4 decimals and 14 integer digits"
+	}
+	return q, ""
 }

@@ -251,6 +251,11 @@ type OperationUpdatedData struct {
 	// the operation (FR-23.3).
 	QueueBeforeMinutes int `json:"queueBeforeMinutes"`
 	QueueAfterMinutes  int `json:"queueAfterMinutes"`
+	// Quantity and OverlapQuantity are the decimal strings of the overlap rule
+	// (BR-23.5): the next operation may start once OverlapQuantity of Quantity
+	// is through; null when the operation has none.
+	Quantity        *string `json:"quantity"`
+	OverlapQuantity *string `json:"overlapQuantity"`
 }
 
 // OperationDeletedData announces a removed operation and whether its jobs left

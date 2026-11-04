@@ -56,6 +56,10 @@ export interface Operation {
   /** Elapsed wait in front of and behind the operation; no resource is booked (FR-23.3). */
   queueBeforeMinutes: number;
   queueAfterMinutes: number;
+  /** Order quantity the operation works on, a decimal string (4 decimals); null when not set. */
+  quantity?: string | null;
+  /** Part of the quantity that must be through before the next operation may start (BR-23.5); null when none. */
+  overlapQuantity?: string | null;
   /** Product or order attributes that capacity block conditions match on (FR-23.17). */
   attributes: Record<string, string>;
   /** Network governing the step from the order's previous operation into this one (FR-23.13). */
@@ -76,6 +80,9 @@ export interface OperationPatch {
   setupMinutes?: number;
   queueBeforeMinutes?: number;
   queueAfterMinutes?: number;
+  /** Decimal strings; an overlapQuantity of "0" clears the overlap (BR-23.5). */
+  quantity?: string;
+  overlapQuantity?: string;
   /** Replaces the candidate resources, in priority order. */
   resourceIds?: string[];
 }
@@ -114,6 +121,9 @@ export interface NewOperation {
   setupMinutes?: number;
   queueBeforeMinutes?: number;
   queueAfterMinutes?: number;
+  /** Decimal strings; an overlap needs a quantity and cannot exceed it (BR-23.5). */
+  quantity?: string;
+  overlapQuantity?: string;
   attributes?: Record<string, string>;
   networkId?: string;
 }

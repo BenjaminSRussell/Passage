@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/money"
+	"github.com/shopspring/decimal"
 )
 
 // Conflict codes (message catalog SCHED-0001, -0002, -0004, -0008).
@@ -75,6 +76,29 @@ type Operation struct {
 	// end plus its QueueAfter plus the next one's QueueBefore.
 	QueueBefore int
 	QueueAfter  int
+	// OverlapBP is the share of this operation's process time, in basis
+	// points of 10,000, after which the next operation of the order may start
+	// (BR-23.5): the overlap quantity over the operation's quantity, rounded
+	// up. 0 means no overlap, and a value of 10,000 or more is the same as
+	// none (the next one waits for the end).
+	OverlapBP int
+}
+
+// MaxOverlapBP is a full process: an overlap of that much is no overlap.
+const MaxOverlapBP = 10000
+
+// OverlapShareBP converts an overlap quantity over an operation quantity into
+// basis points of its process time, rounded up so the next operation never
+// starts before the overlap quantity is through. Zero or negative inputs give
+// 0 (no overlap).
+func OverlapShareBP(overlap, quantity decimal.Decimal) int {
+	if !overlap.IsPositive() || !quantity.IsPositive() {
+		return 0
+	}
+	if overlap.GreaterThanOrEqual(quantity) {
+		return MaxOverlapBP
+	}
+	return int(overlap.Mul(decimal.NewFromInt(MaxOverlapBP)).Div(quantity).Ceil().IntPart())
 }
 
 // queueGap is the wait between the end of prev and the start of next in the
@@ -138,6 +162,40 @@ type Placement struct {
 	// (FR-23.3), carried so the next operation of the order keeps it also
 	// when this job is fixed (firmed or outside the run's selection).
 	QueueAfter int
+	// OverlapBP carries the operation's overlap share (BR-23.5) for the same
+	// reason as QueueAfter.
+	OverlapBP int
+}
+
+// Release is the earliest instant the next operation of the order may start
+// before its queue (BR-23.5): the end of the job, or with an overlap share the
+// moment the changeover and that share of the process minutes are through,
+// counted over the job's working segments (closed time between them does not
+// count).
+func (p Placement) Release() time.Time {
+	if p.OverlapBP <= 0 || p.OverlapBP >= MaxOverlapBP || len(p.Segments) == 0 {
+		return p.End
+	}
+	total := 0
+	for _, s := range p.Segments {
+		total += int(s.End.Sub(s.Start) / time.Minute)
+	}
+	proc := total - p.ChangeoverMinutes
+	if proc <= 0 {
+		return p.End
+	}
+	need := p.ChangeoverMinutes + (proc*p.OverlapBP+MaxOverlapBP-1)/MaxOverlapBP
+	if need >= total {
+		return p.End
+	}
+	for _, s := range p.Segments {
+		d := int(s.End.Sub(s.Start) / time.Minute)
+		if need <= d {
+			return s.Start.Add(minutes(need))
+		}
+		need -= d
+	}
+	return p.End
 }
 
 // withSlot copies the changeover a slot was priced with onto the placement.
@@ -350,7 +408,7 @@ func startCandidates(busy []Busy, ready time.Time) []time.Time {
 
 func newPlacement(op Operation, resourceID string, segs []Segment) Placement {
 	pl := Placement{OperationID: op.ID, OrderID: op.OrderID, OperNumber: op.OperNumber, ResourceID: resourceID,
-		Segments: segs, Start: segs[0].Start, End: segs[len(segs)-1].End, Secondaries: op.Secondaries, QueueAfter: op.QueueAfter}
+		Segments: segs, Start: segs[0].Start, End: segs[len(segs)-1].End, Secondaries: op.Secondaries, QueueAfter: op.QueueAfter, OverlapBP: op.OverlapBP}
 	if !op.DueAt.IsZero() && pl.End.After(op.DueAt) {
 		pl.LateMinutes = minutesBetween(op.DueAt, pl.End)
 	}
@@ -598,15 +656,21 @@ func PlanMove(in MoveInput) MovePlan {
 			if before == nil || op.OperNumber > before.OperNumber {
 				before = &in.Order[i]
 			}
-			if pl, ok := in.Current[op.ID]; ok && pl.End.After(at) {
-				at = pl.End
+			if pl, ok := in.Current[op.ID]; ok && pl.Release().After(at) {
+				at = pl.Release()
 			}
 		}
 	}
 	if before != nil {
 		// The wait between the operation before and the moved one (FR-23.3).
 		if pl, ok := in.Current[before.ID]; ok {
-			if t := pl.End.Add(queueGap(*before, *mv)); t.After(at) {
+			if t := pl.Release().Add(queueGap(*before, *mv)); t.After(at) {
+				at = t
+			}
+			// An overlapped successor still cannot end before the operation
+			// before it does plus the queue its last units wait (BR-23.5,
+			// FR-23.3): it needs at least its process minutes after that.
+			if t := pl.End.Add(queueGap(*before, *mv) - minutes(BookedMinutes(mv.Minutes, c.res.EfficiencyPct))); pl.OverlapBP > 0 && t.After(at) {
 				at = t
 			}
 		}
@@ -690,7 +754,7 @@ func PlanMove(in MoveInput) MovePlan {
 	// number) on their resources so the first starts no earlier than pred and
 	// each later one no earlier than the one before it ends. Operations that
 	// already start late enough and keep their changeover stay as they are.
-	push := func(chain []Operation, pred time.Time, predOp *Operation, firmedDetail string) ([]Placement, *Conflict) {
+	push := func(chain []Operation, pred time.Time, predEnd time.Time, predOp *Operation, firmedDetail string) ([]Placement, *Conflict) {
 		var out []Placement
 		for i := range chain {
 			op := chain[i]
@@ -699,7 +763,15 @@ func PlanMove(in MoveInput) MovePlan {
 				continue
 			}
 			if predOp != nil {
-				pred = pred.Add(queueGap(*predOp, op))
+				gap := queueGap(*predOp, op)
+				pred = pred.Add(gap)
+				if predOp.OverlapBP > 0 {
+					// Overlapped: not before the predecessor's end plus the
+					// queue, less its own process minutes (BR-23.5).
+					if t := predEnd.Add(gap - minutes(BookedMinutes(op.Minutes, caps[cur.ResourceID].res.EfficiencyPct))); t.After(pred) {
+						pred = t
+					}
+				}
 			}
 			predOp = &chain[i]
 			ready := cur.Start
@@ -710,7 +782,7 @@ func PlanMove(in MoveInput) MovePlan {
 				if ready.After(cur.Start) {
 					return nil, &Conflict{Code: CodeFirmed, Detail: firmedDetail, JobID: op.ID}
 				}
-				pred = cur.End
+				pred, predEnd = cur.Release(), cur.End
 				continue
 			}
 			cc := caps[cur.ResourceID]
@@ -732,13 +804,13 @@ func PlanMove(in MoveInput) MovePlan {
 				out = append(out, next)
 				touch(cur.ResourceID, cur.Start)
 			}
-			pred = next.End
+			pred, predEnd = next.Release(), next.End
 		}
 		return out, nil
 	}
 
 	successors := byOperNumber(slices.DeleteFunc(slices.Clone(in.Order), func(op Operation) bool { return op.OperNumber <= mv.OperNumber }))
-	pushed, conf := push(successors, moved.End, mv, "move would push a firmed successor; unfirm it first")
+	pushed, conf := push(successors, moved.Release(), moved.End, mv, "move would push a firmed successor; unfirm it first")
 	if conf != nil {
 		return MovePlan{Conflict: conf}
 	}
@@ -769,7 +841,7 @@ func PlanMove(in MoveInput) MovePlan {
 					ready = e
 				}
 			}
-			dep, conf := push(chain, ready, nil, "a firmed job would have to move; unfirm it first")
+			dep, conf := push(chain, ready, ready, nil, "a firmed job would have to move; unfirm it first")
 			if conf != nil {
 				conf.Detail = fmt.Sprintf("pegged order %s: %s", oid, conf.Detail)
 				return MovePlan{Conflict: conf}

@@ -17,7 +17,7 @@ import {
   type Problem,
 } from "./api/client";
 import { fromUtcInput, toUtcInput, dash, formatDateTime, formatMinutes, sentence, shortId } from "./format";
-import { optionalWhole, wholeNumber, WEEK_MINUTES } from "./forms";
+import { compareDecimal, decimalText, optionalWhole, positive, trimDecimal, wholeNumber, WEEK_MINUTES } from "./forms";
 import { describeAttributes } from "./OperationsPage";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -33,11 +33,14 @@ export interface OperationEditValues {
   setupMinutes: string;
   queueBeforeMinutes: string;
   queueAfterMinutes: string;
+  /** Decimal text; blank means none. A quantity cannot be removed once set. */
+  quantity: string;
+  overlapQuantity: string;
   /** Candidate resource codes in priority order, separated by commas. */
   candidates: string;
 }
 
-type Field = "minutes" | "dueAt" | "readyAt" | "priority" | "setupMinutes" | "queueBeforeMinutes" | "queueAfterMinutes" | "candidates" | "form";
+type Field = "minutes" | "dueAt" | "readyAt" | "priority" | "setupMinutes" | "queueBeforeMinutes" | "queueAfterMinutes" | "quantity" | "overlapQuantity" | "candidates" | "form";
 type Errors = Partial<Record<Field, string>>;
 
 export function initialValues(op: Operation, codes: Record<string, string>): OperationEditValues {
@@ -49,6 +52,8 @@ export function initialValues(op: Operation, codes: Record<string, string>): Ope
     setupMinutes: String(op.setupMinutes),
     queueBeforeMinutes: String(op.queueBeforeMinutes ?? 0),
     queueAfterMinutes: String(op.queueAfterMinutes ?? 0),
+    quantity: op.quantity ? trimDecimal(op.quantity) : "",
+    overlapQuantity: op.overlapQuantity ? trimDecimal(op.overlapQuantity) : "",
     candidates: op.resourceIds.map((id) => codes[id] ?? id).join(", "),
   };
 }
@@ -66,6 +71,15 @@ export function validateOperationEdit(values: OperationEditValues, current: Oper
   if (queueBefore === null || queueBefore === undefined) errors.queueBeforeMinutes = `Enter whole minutes from 0 to ${WEEK_MINUTES}.`;
   const queueAfter = optionalWhole(values.queueAfterMinutes, 0, WEEK_MINUTES);
   if (queueAfter === null || queueAfter === undefined) errors.queueAfterMinutes = `Enter whole minutes from 0 to ${WEEK_MINUTES}.`;
+  const quantity = values.quantity.trim();
+  if (quantity !== "" && (decimalText(quantity, 4, 14) === null || !positive(quantity))) errors.quantity = "Enter a quantity above zero with at most 4 decimals.";
+  else if (quantity === "" && current.quantity) errors.quantity = "A quantity cannot be removed; change it instead.";
+  const overlap = values.overlapQuantity.trim();
+  if (overlap !== "") {
+    if (decimalText(overlap, 4, 14) === null || !positive(overlap)) errors.overlapQuantity = "Enter a quantity above zero with at most 4 decimals, or leave it blank.";
+    else if (quantity === "") errors.overlapQuantity = "An overlap needs a quantity.";
+    else if (!errors.quantity && compareDecimal(overlap, quantity) > 0) errors.overlapQuantity = "The overlap cannot exceed the quantity.";
+  }
   const dueAt = values.dueAt === "" ? undefined : fromUtcInput(values.dueAt);
   if (dueAt === null) errors.dueAt = "Enter a valid date and time (UTC).";
   const readyAt = values.readyAt === "" ? undefined : fromUtcInput(values.readyAt);
@@ -97,6 +111,10 @@ export function validateOperationEdit(values: OperationEditValues, current: Oper
   if (setupMinutes !== current.setupMinutes) patch.setupMinutes = setupMinutes as number;
   if (queueBefore !== (current.queueBeforeMinutes ?? 0)) patch.queueBeforeMinutes = queueBefore as number;
   if (queueAfter !== (current.queueAfterMinutes ?? 0)) patch.queueAfterMinutes = queueAfter as number;
+  const wasQuantity = current.quantity ? trimDecimal(current.quantity) : "";
+  const wasOverlap = current.overlapQuantity ? trimDecimal(current.overlapQuantity) : "";
+  if (quantity !== "" && trimDecimal(quantity) !== wasQuantity) patch.quantity = quantity;
+  if (overlap !== wasOverlap) patch.overlapQuantity = overlap === "" ? "0" : overlap;
   if (dueAt && (!current.dueAt || toUtcInput(current.dueAt) !== values.dueAt)) patch.dueAt = dueAt;
   if (readyAt && (!current.readyAt || toUtcInput(current.readyAt) !== values.readyAt)) patch.readyAt = readyAt;
   if (JSON.stringify(resourceIds) !== JSON.stringify(current.resourceIds)) patch.resourceIds = resourceIds;
@@ -144,7 +162,7 @@ function Panel({ op: initial, codes, onReload }: PanelProps) {
   function fail(error: unknown) {
     const problem = describeProblem(error);
     const found: Errors = {};
-    for (const name of ["minutes", "dueAt", "readyAt", "priority", "setupMinutes", "queueBeforeMinutes", "queueAfterMinutes"] as const) {
+    for (const name of ["minutes", "dueAt", "readyAt", "priority", "setupMinutes", "queueBeforeMinutes", "queueAfterMinutes", "quantity", "overlapQuantity"] as const) {
       if (problem.fields[name]) found[name] = problem.fields[name];
     }
     if (problem.fields.resourceIds) found.candidates = problem.fields.resourceIds;
@@ -228,6 +246,8 @@ function Panel({ op: initial, codes, onReload }: PanelProps) {
               ["Route setup", formatMinutes(op.setupMinutes)],
               ["Queue before", formatMinutes(op.queueBeforeMinutes ?? 0)],
               ["Queue after", formatMinutes(op.queueAfterMinutes ?? 0)],
+              ["Quantity", op.quantity ? trimDecimal(op.quantity) : dash],
+              ["Overlap quantity", op.overlapQuantity ? trimDecimal(op.overlapQuantity) : dash],
               ["Attributes", describeAttributes(op.attributes)],
               ["Version", op.version],
             ] as [string, ReactNode][]
@@ -287,6 +307,12 @@ function Panel({ op: initial, codes, onReload }: PanelProps) {
           </FormField>
           <FormField id="op-queue-after" label="Queue after (minutes)" hint="Elapsed wait behind the operation, before the next one may start." error={errors.queueAfterMinutes}>
             {(control) => <Input {...control} inputMode="numeric" value={values.queueAfterMinutes} onChange={(e) => change({ queueAfterMinutes: e.target.value })} invalid={Boolean(errors.queueAfterMinutes)} />}
+          </FormField>
+          <FormField id="op-quantity" label="Quantity" hint="The order quantity this operation works on; it cannot be removed once set." error={errors.quantity}>
+            {(control) => <Input {...control} inputMode="decimal" value={values.quantity} onChange={(e) => change({ quantity: e.target.value })} invalid={Boolean(errors.quantity)} />}
+          </FormField>
+          <FormField id="op-overlap" label="Overlap quantity" hint="The next operation may start once this part of the quantity is through. Blank removes the overlap." error={errors.overlapQuantity}>
+            {(control) => <Input {...control} inputMode="decimal" value={values.overlapQuantity} onChange={(e) => change({ overlapQuantity: e.target.value })} invalid={Boolean(errors.overlapQuantity)} />}
           </FormField>
           <FormField id="op-candidates" label="Candidate resources" hint="Resource codes in priority order, separated by commas." error={errors.candidates}>
             {(control) => <Input {...control} value={values.candidates} onChange={(e) => change({ candidates: e.target.value })} invalid={Boolean(errors.candidates)} />}

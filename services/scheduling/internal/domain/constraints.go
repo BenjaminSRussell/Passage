@@ -345,6 +345,11 @@ func (e *engine) placeChain(chain []Operation, fixed []Placement, start, seed ti
 	}
 }
 
+// maxOverlapRetries bounds the re-placements that keep an overlapped
+// operation from ending before its predecessor; past it the operation starts
+// at the predecessor's end plus the queue.
+const maxOverlapRetries = 8
+
 // attempt places a chain in operation order, booking each placement as it
 // goes so the caller can unbook a failed attempt. Each operation starts after
 // every fixed predecessor and the previous placed one, at or after its ready
@@ -364,14 +369,14 @@ func (e *engine) attempt(chain []Operation, fixed []Placement, start time.Time, 
 			if f.OperNumber >= op.OperNumber {
 				continue
 			}
-			ready = latest(ready, f.End)
+			ready = latest(ready, f.Release())
 			if prev == nil || f.OperNumber > prev.OperNumber {
 				prev, frozen = &fixed[i], true
 			}
 		}
 		if k > 0 {
 			p := &pls[k-1]
-			ready = latest(ready, p.End)
+			ready = latest(ready, p.Release())
 			if prev == nil || p.OperNumber > prev.OperNumber {
 				prev, frozen = p, false
 			}
@@ -379,7 +384,7 @@ func (e *engine) attempt(chain []Operation, fixed []Placement, start time.Time, 
 		if prev != nil {
 			// The wait between the operation right before (placed now or
 			// fixed) and this one (FR-23.3).
-			ready = latest(ready, prev.End.Add(queueWait(prev, op)))
+			ready = latest(ready, prev.Release().Add(queueWait(prev, op)))
 		}
 		var net *ResourceNetwork
 		if op.Network != "" && prev != nil {
@@ -391,6 +396,23 @@ func (e *engine) attempt(chain []Operation, fixed []Placement, start time.Time, 
 			net = &n
 		}
 		pl, w, st := e.placeOp(op, ready, prev, frozen, net)
+		if prev != nil && prev.OverlapBP > 0 {
+			// An overlapped operation may start inside its predecessor but
+			// never ends before the predecessor's last units are through it
+			// and their queue (BR-23.5, FR-23.3). Start later by the shortfall,
+			// counted from the slot found (a ready time inside closed time
+			// would keep the same slot), and if that does not settle, start
+			// at the floor itself, which cannot end before it.
+			floor := prev.End.Add(queueWait(prev, op))
+			for try := 0; st == nil && pl.End.Before(floor) && try < maxOverlapRetries; try++ {
+				ready = latest(ready, pl.Start.Add(floor.Sub(pl.End)))
+				pl, w, st = e.placeOp(op, ready, prev, frozen, net)
+			}
+			if st == nil && pl.End.Before(floor) {
+				ready = latest(ready, floor)
+				pl, w, st = e.placeOp(op, ready, prev, frozen, net)
+			}
+		}
 		if st != nil {
 			st.idx = k
 			return pls, ws, st

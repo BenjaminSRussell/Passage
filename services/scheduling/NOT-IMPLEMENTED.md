@@ -750,13 +750,52 @@ queue taken from the production route (the order intake from wave 21 leaves it
 between resources other than the network transfer minutes, and the daily
 bucket mode.
 
+## Slice 28: overlap quantity between operations (PRD 4.23.3, BR-23.5)
+
+Slice 28 builds the overlap of an operation with the next one of its order.
+`POST /operations` and `PATCH /operations/{id}` take `quantity` (the order
+quantity the operation works on) and `overlapQuantity` (the part of it that
+must be through before the next operation may start), decimal strings with at
+most 4 decimals; an overlap needs a quantity and cannot exceed it (400 on
+create, 422 SCHED-0142 on a change, also checked by the database). In a PATCH,
+`overlapQuantity: "0"` clears the overlap; a quantity cannot be cleared. The
+share `ceil(overlap / quantity * 10,000)` basis points of the operation's
+process time (`domain.OverlapShareBP`, `Operation.OverlapBP`) sets the release
+point of its placement (`Placement.Release`): the moment the changeover and
+that share of the process minutes are through, counted over the working
+segments (closed time does not count). The next operation starts no earlier
+than that release plus the queue after and queue before (slice 27, elapsed
+time, immediate predecessor including fixed ones), and never ends before the
+overlapped operation's end plus those queue times (the last units wait them
+too): runs re-place it later by the shortfall, counted from the slot found, and
+after 8 tries start it at that floor; moves and pushed successors floor its
+start at the predecessor's end plus the queue less its own process minutes. Runs (forward and the backward search), `:schedule`, Gantt
+moves, pushes of successors and fixed predecessors (firmed, or outside a
+selection run, read back with their share) all apply it. Changing the overlap
+(or the quantity of an operation that has one) takes the non-firmed jobs off
+the schedule like the other placement fields; `operation.updated` carries both
+quantities. Migration `0020_operation_overlap.sql` adds the two columns and
+their checks to `scheduling_operation` (no new table, so no new grant). Web:
+quantity and overlap quantity on the new-operation form and the operation
+detail page (shown and editable, validated against each other, without a
+float). The OpenAPI and AsyncAPI specs have no FAIL lines on the doc gates. No
+authz seed needed: existing routes and duties. Not built: a network step's
+transfer time and maximum wait are still counted from the predecessor's end (an
+overlap does not shorten them; BR-23.5 writes the start as release plus transit,
+so counting a network transfer from the release is an open product decision); the successor does not also wait for its own share
+of the last transfer batch after the predecessor ends (it ends no earlier than
+that end plus the queue); the overlap is not stored on the job row (`scheduled_job.overlap_qty`
+stays a later column) or shown on the Gantt bar; the quantity is entered on the
+operation, not fed from the production order event yet (wave 21 carries the
+quantity); the pegs between orders use the parent's end, not a transfer batch.
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
 |---|---|---|---|
 | 1 | Forward operation scheduling, finite and infinite | built | `domain.Schedule`; `finite: false` runs ignore bookings but keep calendar time. |
 | 1 | Backward scheduling and the BR-23.2 fallback to forward with `late_minutes` (FR-23.2) | built (slice 10) | `direction: backward` on `POST /runs`; `domain.placeBackward` searches the latest start of each order's first operation that still ends by the order's earliest due date, using the forward engine so calendars, bookings, blocks, changeovers and networks apply unchanged. A latest start before run start + 1 h, or an order that cannot end on time, is placed forward; late orders carry `late_minutes` and a SCHED-0003 warning. Orders without a due date are placed forward. Operations after the first are placed as early as possible after it (no slack is spread between them), lateness is measured against the due timestamp, not end-of-day of the delivery date, and moves and the CP-SAT campaign path are unchanged. |
-| 1 | Job scheduling (queue-before, setup, process, overlap, transport, queue-after; FR-23.3) | partial (slice 27) | Queue before and queue after are built (slice 27); setup that must not split is built (BR-23.3). Overlap quantity (BR-23.5) and transit time apart from the network edge's transfer minutes are not modelled; queue times from the production route are a handoff to wave 21. |
+| 1 | Job scheduling (queue-before, setup, process, overlap, transport, queue-after; FR-23.3) | partial (slices 27 and 28) | Queue before and queue after are built (slice 27); setup that must not split is built (BR-23.3). Overlap quantity (BR-23.5) is built (slice 28); transit time apart from the network edge's transfer minutes is not modelled; queue times from the production route are a handoff to wave 21. |
 | 1 | Operations mode in daily buckets (FR-23.2) | later slice of PSG-23 | `mode` is accepted and recorded, and both modes place at minute granularity. |
 | 1 | Duration from route times and efficiency (BR-23.1) | built (slices 18 and 21) | Minutes come from the planned hours of wave 21's process and setup jobs (already route time times quantity); the scheduling resource's `efficiencyPct` stretches or shrinks them when the job is placed (slice 21). Efficiency from wave 9 resources and per-day overrides remain a handoff (row below). |
 | 1 | Secondary resources booked with the primary (BR-23.4, SCHED-0005) | built (slice 12) | `Operation.Secondaries`, `domain/secondary.go`, `scheduled_job_secondary`. A primary job and a secondary booking on the same resource are kept apart by the scheduler (it sees both as busy time), not by a database constraint, because the two live in different tables. Secondary resources are an explicit list per operation; choosing them by capability or resource group is wave 9. Not yet: secondary bookings as their own bars on the secondary resource's Gantt row (they show on the primary bar, in the jobs table and in the load), in the block-utilization inquiry and in the setup changeover sequencing of the secondary resource; secondaries only for setup or only for process (a secondary is held for the whole job, changeover included); and `ScheduledJob.secondary_resource_ids` on the stored job row (the list lives on the operation and the booking rows). The CP-SAT model does not book secondaries yet. |
@@ -825,7 +864,7 @@ bucket mode.
 | Site parameters (default method and direction, drag snap, propagation limit) | built (slice 24) as tenant-wide parameters | `GET/PATCH /v1/scheduling/parameters`; see the slice 24 section. |
 | Site parameters per site; resource selection rule, safety/queue time, horizon days and the default start | later slice of PSG-23 (per-site parameters are a handoff to wave 9, sites) | The parameters are one row per tenant. Selection stays least finish, no default safety or queue time is added (queue times are per operation, slice 27), and the horizon is `SCHED_HORIZON_DAYS`. |
 | Extension points `scheduling.constraint`, `scheduling.objective` | later slice of PSG-23 | |
-| `ScheduledJob.overlap_qty`; `ScheduleRun.time_limit_s`, `started_at`, `objective_value` | later slice of PSG-23 | Columns arrive with the features that fill them. |
+| `ScheduledJob.overlap_qty` (the overlap lives on the operation since slice 28); `ScheduleRun.time_limit_s`, `started_at`, `objective_value` | later slice of PSG-23 | Columns arrive with the features that fill them. |
 | Rollback by re-pointing to a previous run | later slice of PSG-23 | A run replaces the jobs it schedules; earlier runs stay as history rows only. |
 | Optimistic version check on moves (If-Match) | later slice of PSG-23 | Moves lock the order's operations and the exclusion constraint refuses concurrent bookings, so a stale screen gets a fresh preview rather than a silent overwrite; resources now have an If-Match update (slice 13), moves still do not take If-Match. |
 | scheduler-opt KEDA scale-to-zero and the `scheduling-db` CloudNativePG cluster | handoff — deploy owner | Charts ship the deployment and service only. |
