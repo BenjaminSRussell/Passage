@@ -474,7 +474,8 @@
       {"resource": "/v1/procurement/model-service-specs", "methods": ["GET"]},
       {"resource": "/v1/procurement/model-service-specs/*", "methods": ["GET"]},
       {"resource": "/v1/procurement/inbound-changes", "methods": ["GET"]},
-      {"resource": "/v1/procurement/inbound-changes/*", "methods": ["GET"]}
+      {"resource": "/v1/procurement/inbound-changes/*", "methods": ["GET"]},
+      {"resource": "/v1/procurement/inquiries/*", "methods": ["GET"]}
     ]},
     "purchasing.inbound.apply": {"flag": true, "permissions": []},
     "PurchaseOrderConfirm": {"permissions": [
