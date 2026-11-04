@@ -218,9 +218,10 @@ func TestPostgres_ResolveP95Under20ms(t *testing.T) {
 	// The budget is a property of the service, but a shared machine running other suites
 	// at the same time inflates the tail. The steady state is measured up to three times
 	// and the best run counts; if every run misses the budget, the run must still be within
-	// ten times the budget (GitHub-hosted runners land around 5x; a broken cache costs
-	// about 1.5 s per resolve, so 10x still catches a regression), unless
-	// PASSAGE_LATENCY_STRICT=1 asks for the budget itself.
+	// ten times the budget (GitHub-hosted runners land around 5–8x even on the
+	// dedicated pricing-store shard; a broken cache costs about 1.5 s per
+	// resolve, so 10x still catches a regression). PASSAGE_LATENCY_STRICT=1
+	// asserts the 20/60 ms budget itself and is not set in CI.
 	within := func(p95, p99 time.Duration, factor time.Duration) bool {
 		return p95 < factor*20*time.Millisecond && p99 < factor*60*time.Millisecond
 	}
