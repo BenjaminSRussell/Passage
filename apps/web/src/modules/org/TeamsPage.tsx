@@ -16,6 +16,7 @@ import {
 import { useLegalEntity } from "./legalEntityContext";
 import styles from "./pages.module.css";
 import { StatusAction, useRows } from "./referenceParts";
+import { AddMemberForm, CreateTeamTypeForm, EditTeamForm, MemberActions } from "./TeamWrites";
 
 const codePattern = /^[A-Za-z0-9][A-Za-z0-9_-]{1,19}$/;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -148,8 +149,11 @@ const memberColumns: DataTableColumn<TeamMember>[] = [
   { key: "validTo", header: "To", mono: true },
 ];
 
-function TeamMembers({ team }: { team: Team }) {
+function TeamMembers({ team, canWrite }: { team: Team; canWrite: boolean }) {
   const members = useRows((signal) => listTeamMembers(team.id, { signal }), team.id);
+  const columns: DataTableColumn<TeamMember>[] = canWrite
+    ? [...memberColumns, { key: "actions", header: "Actions", render: (row) => <MemberActions team={team} member={row} onChanged={members.reload} /> }]
+    : memberColumns;
   return (
     <Card title={`Members of ${team.code}`}>
       {members.error ? (
@@ -159,12 +163,13 @@ function TeamMembers({ team }: { team: Team }) {
       ) : null}
       <DataTable
         label={`Members of ${team.code}`}
-        columns={memberColumns}
+        columns={columns}
         rows={members.rows}
         getRowKey={(row) => row.id}
         loading={members.loading}
         empty={{ title: "No members" }}
       />
+      {canWrite ? <AddMemberForm team={team} onAdded={members.reload} /> : null}
     </Card>
   );
 }
@@ -213,6 +218,7 @@ export function TeamsPage() {
   return (
     <>
       <PageHeader title="Teams" description="Groups of users and parties with effective-dated membership." />
+      {canWrite ? <CreateTeamTypeForm onCreated={types.reload} /> : null}
       {canWrite ? <CreateTeamForm types={types.rows} onCreated={state.reload} /> : null}
       {types.error ? (
         <Alert tone="danger" title="Could not load team types" live="alert">
@@ -225,7 +231,14 @@ export function TeamsPage() {
         </Alert>
       ) : null}
       <DataTable label="Teams" columns={columns} rows={state.rows} getRowKey={(row) => row.id} loading={state.loading} empty={{ title: "No teams" }} />
-      {selected ? <TeamMembers team={selected} /> : null}
+      {selected && canWrite ? (
+        <EditTeamForm
+          key={selected.id}
+          team={selected}
+          onSaved={(next) => state.update((rows) => rows.map((item) => (item.id === selected.id ? { ...item, ...next } : item)))}
+        />
+      ) : null}
+      {selected ? <TeamMembers team={selected} canWrite={canWrite} /> : null}
     </>
   );
 }

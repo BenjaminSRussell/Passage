@@ -2,26 +2,33 @@ import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, FormField, Input, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
 import {
   describeProblem,
+  listLocations,
   listOperatingUnits,
   listSites,
   listWarehouses,
+  type Location,
   type OperatingUnit,
   type Problem,
   type Site,
   type Warehouse,
 } from "./api/client";
 import {
+  createLocation,
   createOperatingUnit,
   createSite,
   createWarehouse,
+  getLocation,
   getOperatingUnit,
   getSite,
   getWarehouse,
+  locationTypes,
   operatingUnitTypes,
+  setLocationStatus,
   setOperatingUnitStatus,
   setSiteStatus,
   setWarehouseStatus,
   warehouseTypes,
+  type LocationType,
   type OperatingUnitType,
   type WarehouseType,
 } from "./api/write";
@@ -87,6 +94,23 @@ export function validateWarehouse({ siteId, code, name }: WarehouseValues): Erro
   return compact({
     siteId: siteId === "" ? "Select a site." : undefined,
     code: shortCode.test(code) ? undefined : "Use 1 to 10 letters, digits, - or _.",
+    name: checkName(name),
+  });
+}
+
+export interface LocationValues {
+  warehouseId: string;
+  code: string;
+  name: string;
+  type: LocationType;
+}
+
+const locationCode = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,19}$/;
+
+export function validateLocation({ warehouseId, code, name }: LocationValues): Errors<"warehouseId" | "code" | "name"> {
+  return compact({
+    warehouseId: warehouseId === "" ? "Select a warehouse." : undefined,
+    code: locationCode.test(code) ? undefined : "Use 1 to 20 letters, digits, - _ or .",
     name: checkName(name),
   });
 }
@@ -432,6 +456,97 @@ export function WarehousesPage() {
                   </FormField>
                   <FormField id="wh-time-zone" label="Time zone" optional hint="IANA name; defaults to the site's.">
                     {(control) => <Input {...control} {...text("timeZone")} />}
+                  </FormField>
+                </>
+              )}
+            />
+          </>
+        ) : null
+      }
+    />
+  );
+}
+
+export function LocationsPage() {
+  const { canWriteSite, scope } = useLegalEntity();
+  // Warehouses in the selected scope, for the warehouse column and the form (ALL needs the all-scope duty).
+  const warehouses = useRows(
+    (signal) => (scope === "" ? Promise.resolve([]) : listWarehouses(scope, { signal }).then((page) => page.items)),
+    `warehouses:${scope}`,
+  );
+  const warehouseOf = (id: string) => warehouses.rows.find((row) => row.id === id);
+  return (
+    <ScopedListPage<Location>
+      title="Locations"
+      label="Locations"
+      emptyTitle="No locations"
+      getRowKey={(row) => row.id}
+      load={listLocations}
+      columns={(controls) => [
+        { key: "code", header: "Code", mono: true },
+        { key: "name", header: "Name" },
+        { key: "warehouseId", header: "Warehouse", render: (row) => warehouseOf(row.warehouseId)?.code ?? row.warehouseId },
+        { key: "type", header: "Type" },
+        ...statusColumns(canWriteSite, controls, "location", {
+          set: (row, status) => setLocationStatus(row.legalEntityId, row.id, row.version, status),
+          get: (row) => getLocation(row.legalEntityId, row.id),
+        }),
+      ]}
+      toolbar={({ reload }) =>
+        canWriteSite ? (
+          <>
+            {warehouses.error ? (
+              <Alert tone="danger" title="Could not load the warehouses" live="alert">
+                {warehouses.error.message} ({warehouses.error.code})
+              </Alert>
+            ) : null}
+            <CreateForm<LocationValues, "warehouseId" | "code" | "name">
+              title="Add location"
+              subject="location"
+              initial={{ warehouseId: "", code: "", name: "", type: "storage" }}
+              validate={validateLocation}
+              send={(values) =>
+                createLocation(warehouseOf(values.warehouseId)?.legalEntityId ?? "", {
+                  warehouseId: values.warehouseId,
+                  code: values.code.toUpperCase(),
+                  name: values.name.trim(),
+                  type: values.type,
+                })
+              }
+              duplicate={duplicateOf("ORG-LOC-CODE-DUPLICATE", "A location with this code already exists in the warehouse.")}
+              onCreated={reload}
+              fields={({ errors, text }) => (
+                <>
+                  <FormField id="loc-warehouse" label="Warehouse" error={errors.warehouseId}>
+                    {(control) => (
+                      <Select {...control} {...text("warehouseId")}>
+                        <option value="">Select a warehouse</option>
+                        {warehouses.rows
+                          .filter((row) => row.status === "active")
+                          .map((row) => (
+                            <option key={row.id} value={row.id}>
+                              {row.code} - {row.name}
+                            </option>
+                          ))}
+                      </Select>
+                    )}
+                  </FormField>
+                  <FormField id="loc-code" label="Code" error={errors.code}>
+                    {(control) => <Input {...control} {...text("code")} maxLength={20} />}
+                  </FormField>
+                  <FormField id="loc-name" label="Name" error={errors.name}>
+                    {(control) => <Input {...control} {...text("name")} maxLength={120} />}
+                  </FormField>
+                  <FormField id="loc-type" label="Type">
+                    {(control) => (
+                      <Select {...control} {...text("type")}>
+                        {locationTypes.map((type) => (
+                          <option key={type} value={type}>
+                            {label(type)}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
                   </FormField>
                 </>
               )}

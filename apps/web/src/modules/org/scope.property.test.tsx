@@ -120,7 +120,7 @@ describe(`legal-entity re-scoping (seed ${SEED})`, () => {
       const expected = page.rows.filter((r) => target === "ALL" || page.owner(r as never) === target).map((r) => r.code);
       expect(codes.sort()).toEqual(expected.sort());
       expect(codes.filter((code) => target !== "ALL" && ownerOf.get(code) !== target)).toEqual([]);
-      expect(screen.queryByText("Read-only, all entities") !== null).toBe(target === "ALL");
+      expect(screen.queryByText("Viewing all entities") !== null).toBe(target === "ALL");
     }
   }, 120_000);
 

@@ -19,7 +19,7 @@ export function LegalEntitySwitcher() {
             {entity.code} - {entity.name}
           </option>
         ))}
-        {canAll ? <option value={ALL}>All entities (read-only)</option> : null}
+        {canAll ? <option value={ALL}>All entities</option> : null}
       </Select>
     </div>
   );

@@ -111,7 +111,7 @@ export function ScopedListPage<T>({ title, label, emptyTitle, columns, getRowKey
       <PageHeader
         title={title}
         description={scoped ? `Scope: ${scopeName}` : undefined}
-        meta={scoped ? <span role="status">{scope === ALL ? <Badge tone="info">Read-only, all entities</Badge> : null}</span> : undefined}
+        meta={scoped ? <span role="status">{scope === ALL ? <Badge tone="info">Viewing all entities</Badge> : null}</span> : undefined}
       />
       {toolbar ? toolbar(controls) : null}
       {state.error ? (

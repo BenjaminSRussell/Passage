@@ -71,6 +71,18 @@ export interface Warehouse {
   version: number;
 }
 
+export interface Location {
+  id: string;
+  legalEntityId: string;
+  warehouseId: string;
+  code: string;
+  name: string;
+  type: "storage" | "receiving" | "shipping" | "quarantine";
+  status: string;
+  addressId?: string;
+  version: number;
+}
+
 export interface Page<T> {
   items: T[];
   nextCursor?: string;
@@ -162,3 +174,6 @@ export const listSites = (scope: Scope, options?: ListOptions) =>
 
 export const listWarehouses = (scope: Scope, options?: ListOptions) =>
   listAll<Warehouse>("/warehouses", scope, entityFilter(scope), options);
+
+export const listLocations = (scope: Scope, options?: ListOptions) =>
+  listAll<Location>("/locations", scope, entityFilter(scope), options);

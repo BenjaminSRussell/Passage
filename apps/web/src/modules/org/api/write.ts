@@ -1,4 +1,4 @@
-import { orgFetch, type OperatingUnit, type Site, type Warehouse } from "./client";
+import { orgFetch, type Location, type OperatingUnit, type Site, type Warehouse } from "./client";
 import { referenceFetch } from "./reference";
 
 // Writes for operating units, sites and warehouses. Operating units are tenant-level (no legal-entity policy), so
@@ -62,3 +62,21 @@ export const createWarehouse = (legalEntityId: string, input: CreateWarehouseInp
 export const getWarehouse = (legalEntityId: string, id: string) => scopedGet<Warehouse>(legalEntityId, "/warehouses", id);
 export const setWarehouseStatus = (legalEntityId: string, id: string, version: number, status: RowStatus) =>
   scopedPatch<Warehouse>(legalEntityId, "/warehouses", id, { version, status });
+
+export type LocationType = Location["type"];
+export const locationTypes: readonly LocationType[] = ["storage", "receiving", "shipping", "quarantine"];
+
+export interface CreateLocationInput {
+  warehouseId: string;
+  code: string;
+  name: string;
+  type: LocationType;
+}
+
+// legalEntityId is the chosen warehouse's legal entity; the service derives the location's own from the warehouse.
+export const createLocation = (legalEntityId: string, input: CreateLocationInput) => scopedPost<Location>(legalEntityId, "/locations", input);
+export const getLocation = (legalEntityId: string, id: string) => scopedGet<Location>(legalEntityId, "/locations", id);
+export const updateLocation = (legalEntityId: string, id: string, version: number, patch: { name?: string; type?: LocationType; status?: RowStatus }) =>
+  scopedPatch<Location>(legalEntityId, "/locations", id, { version, ...patch });
+export const setLocationStatus = (legalEntityId: string, id: string, version: number, status: RowStatus) =>
+  updateLocation(legalEntityId, id, version, { status });

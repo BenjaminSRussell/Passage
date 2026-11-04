@@ -139,7 +139,7 @@ function CreateLegalEntityForm({ onCreated }: { onCreated(): void }) {
 }
 
 export function LegalEntitiesPage() {
-  const { canWriteLegalEntity, canAdministerTenant } = useLegalEntity();
+  const { canWriteLegalEntity, canAdministerTenant, reload: reloadSwitcher } = useLegalEntity();
   const state = useRows((signal) => listLegalEntities(ALL, { signal }).then((page) => page.items), "legal-entities");
   const columns: DataTableColumn<LegalEntity>[] = [
     { key: "code", header: "Code", mono: true },
@@ -158,21 +158,27 @@ export function LegalEntitiesPage() {
         <StatusAction
           subject={`legal entity ${row.code}`}
           status={row.status}
-          apply={(next) =>
-            withFreshRowOnConflict(
+          apply={async (next) => {
+            await withFreshRowOnConflict(
               () => setLegalEntityStatus(row.id, row.version, next),
               () => getLegalEntity(row.id),
               (fresh) => state.update((rows) => rows.map((item) => (item.id === row.id ? { ...item, ...fresh } : item))),
-            )
-          }
+            );
+            reloadSwitcher();
+          }}
         />
       ),
     });
   }
   return (
     <>
-      <PageHeader title="Legal entities" description="Companies of the tenant. New entities appear in the switcher after the page is reloaded." />
-      {canWriteLegalEntity && canAdministerTenant ? <CreateLegalEntityForm onCreated={state.reload} /> : null}
+      <PageHeader title="Legal entities" description="Companies of the tenant. The switcher refreshes after a new entity is added or one is deactivated." />
+      {canWriteLegalEntity && canAdministerTenant ? <CreateLegalEntityForm
+          onCreated={() => {
+            state.reload();
+            reloadSwitcher();
+          }}
+        /> : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load legal entities" live="alert">
           {state.error.message} ({state.error.code})
