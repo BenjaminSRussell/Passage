@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -219,6 +220,8 @@ func (m *memAllocs) MarkAllocationReversed(_ context.Context, runID, entryID str
 type memAccruals struct {
 	schemes map[string]domain.AccrualDefinition
 	runs    map[string]domain.AccrualRun
+	byKey   map[string]string
+	parked  map[string]string
 }
 
 func (m *memAccruals) PutAccrualScheme(_ context.Context, in domain.AccrualDefinition) (domain.AccrualDefinition, error) {
@@ -235,23 +238,50 @@ func (m *memAccruals) AccrualScheme(_ context.Context, ledgerID, code string) (d
 	}
 	return s, nil
 }
-func (m *memAccruals) SaveAccrualRun(_ context.Context, in domain.AccrualRun, _, _ string) (domain.AccrualRun, error) {
-	if in.ID == "" {
-		in.ID = ids.New()
-	}
+func (m *memAccruals) SaveAccrualRun(_ context.Context, in domain.AccrualRun, key, _ string) (domain.AccrualRun, error) {
 	if m.runs == nil {
-		m.runs = map[string]domain.AccrualRun{}
+		m.runs, m.byKey = map[string]domain.AccrualRun{}, map[string]string{}
 	}
-	m.runs[in.ID] = in
+	if _, known := m.runs[in.ID]; known && in.ID != "" {
+		m.runs[in.ID] = in
+		return in, nil
+	}
+	if id, replay := m.byKey[key]; replay && key != "" {
+		return m.runs[id], nil
+	}
+	in.ID, in.TenantID = ids.New(), testkit.TenantID(1)
+	m.runs[in.ID], m.byKey[key] = in, in.ID
 	return in, nil
 }
 func (m *memAccruals) AccrualRun(_ context.Context, id string) (domain.AccrualRun, error) {
 	return m.runs[id], nil
 }
+func (m *memAccruals) DueAccrualRuns(context.Context) ([]domain.AccrualRun, error) {
+	var out []domain.AccrualRun
+	for _, run := range m.runs {
+		if run.Status == "scheduled" {
+			out = append(out, run)
+		}
+	}
+	return out, nil
+}
+func (m *memAccruals) RecordAccrualFailure(_ context.Context, id, message string, park bool) error {
+	if park {
+		run := m.runs[id]
+		run.Status = "parked"
+		m.runs[id] = run
+		if m.parked == nil {
+			m.parked = map[string]string{}
+		}
+		m.parked[id] = message
+	}
+	return nil
+}
 
 type memRegroup struct {
-	rules map[string]domain.StoredRegroupingRule
-	runs  map[string]domain.RegroupingRun
+	rules   map[string]domain.StoredRegroupingRule
+	runs    map[string]domain.RegroupingRun
+	claimed map[string]bool
 }
 
 func (m *memRegroup) PutRegroupingRule(_ context.Context, in domain.StoredRegroupingRule) (domain.StoredRegroupingRule, error) {
@@ -286,13 +316,30 @@ func (m *memRegroup) SaveRegroupingRun(_ context.Context, in domain.RegroupingRu
 	if m.runs == nil {
 		m.runs = map[string]domain.RegroupingRun{}
 	}
-	for _, existing := range m.runs {
-		if existing.Status == "posted" && existing.LedgerID == in.LedgerID && existing.KeyDate == in.KeyDate {
-			return domain.RegroupingRun{}, &domain.Error{Code: domain.CodeRegroupingExists, Detail: "already posted"}
-		}
-	}
 	m.runs[in.ID] = in
 	return in, nil
+}
+func (m *memRegroup) ClaimRegroupingRules(_ context.Context, runID string) error {
+	run := m.runs[runID]
+	for otherID, other := range m.runs {
+		if otherID == runID || !m.claimed[otherID] || other.LedgerID != run.LedgerID || other.KeyDate != run.KeyDate {
+			continue
+		}
+		for _, code := range run.RuleCodes {
+			if slices.Contains(other.RuleCodes, code) {
+				return &domain.Error{Code: domain.CodeRegroupingExists, Detail: "already claimed"}
+			}
+		}
+	}
+	if m.claimed == nil {
+		m.claimed = map[string]bool{}
+	}
+	m.claimed[runID] = true
+	return nil
+}
+func (m *memRegroup) ReleaseRegroupingRules(_ context.Context, runID string) error {
+	delete(m.claimed, runID)
+	return nil
 }
 func (m *memRegroup) RegroupingRun(_ context.Context, id string) (domain.RegroupingRun, error) {
 	r, ok := m.runs[id]
@@ -321,6 +368,8 @@ func (m memItems) List(context.Context, string, string, string) ([]domain.OpenIt
 }
 
 type sliceB struct {
+	clock   *time.Time
+	api     *api.API
 	periods *memPeriods
 	checks  *memChecklists
 	allocs  *memAllocs
@@ -330,9 +379,13 @@ type sliceB struct {
 	router  http.Handler
 }
 
-func newSliceB() sliceB {
+func newSliceB() sliceB { return newSliceBWith(memItems{}) }
+
+func newSliceBWith(items api.OpenItemSource) sliceB {
 	period := testkit.TenantID(8)
+	clock := time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)
 	f := sliceB{
+		clock: &clock,
 		periods: &memPeriods{rows: map[string][]domain.Row{period: {
 			{Module: domain.ModuleAll, Status: domain.StatusOpen},
 			{Module: domain.ModuleGL, Status: domain.StatusOpen},
@@ -352,19 +405,23 @@ func newSliceB() sliceB {
 	}
 	store := fakeStore{spans: []domain.Span{span(period, domain.Row{Module: domain.ModuleAll, Status: domain.StatusOpen}, domain.Row{Module: domain.ModuleGL, Status: domain.StatusOpen})}}
 	a := api.New(store).WithLedgers(fakeLedger{owner: testkit.TenantID(9)}).WithYearEnd(&memoryRuns{periods: closedYear()}, f.ledger).
-		WithSliceB(f.periods, f.checks, f.allocs, f.accrual, f.regroup, memItems{})
+		WithSliceB(f.periods, f.checks, f.allocs, f.accrual, f.regroup, items).WithClock(func() time.Time { return clock })
 	r := httpx.NewRouter()
 	a.Register(r)
-	f.router = r
+	f.router, f.api = r, a
 	return f
 }
 
 func (f sliceB) send(method, target, payload, duties, key string) *httptest.ResponseRecorder {
+	return f.sendAs("alice", method, target, payload, duties, key)
+}
+
+func (f sliceB) sendAs(user, method, target, payload, duties, key string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, target, strings.NewReader(payload))
 	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
 	req.Header.Set("X-Passage-Duties", duties)
 	req.Header.Set("X-Passage-Legal-Entity", testkit.TenantID(9))
-	req.Header.Set("X-Passage-User", "alice")
+	req.Header.Set("X-Passage-User", user)
 	if key != "" {
 		req.Header.Set("Idempotency-Key", key)
 	}
@@ -459,11 +516,11 @@ func TestAllocationClosedPeriodIsRejectedBeforeTheLedger(t *testing.T) {
 func TestAccrualSpreadsAndPostsWithoutPostClosed(t *testing.T) {
 	f := newSliceB()
 	ledger := testkit.TenantID(7)
-	rec := f.send(http.MethodPut, "/v1/close/accrual-schemes/rent", `{"ledgerId":"`+ledger+`","debitAccount":"6100","creditAccount":"2100","occurrences":2,"spread":"equal","autoReverse":false}`, "close.accrual.write", "")
+	rec := f.send(http.MethodPut, "/v1/close/accrual-schemes/rent", `{"ledgerId":"`+ledger+`","debitAccount":"6100","creditAccount":"2100","amount":"120.00","occurrences":2,"spread":"equal","autoReverse":false}`, "close.accrual.write", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("scheme: %d %s", rec.Code, rec.Body)
 	}
-	rec = f.send(http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","amount":"120.00","startDate":"2026-01-01"}`, "close.accrual.run", "accrual-1")
+	rec = f.send(http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-01"}`, "close.accrual.run", "accrual-1")
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("apply: %d %s", rec.Code, rec.Body)
 	}
@@ -494,6 +551,75 @@ func TestRegroupingAccountSignPostsWithoutPostClosed(t *testing.T) {
 	if len(posted) != 1 || posted[0].PostClosed || posted[0].SourceType != "regrouping" {
 		t.Fatalf("posted %+v", posted)
 	}
+	assertSides(t, posted[0].Lines, "1100", "2500", "500")
+}
+
+func assertSides(t *testing.T, lines []ledgerclient.Line, debit, credit, amount string) {
+	t.Helper()
+	if len(lines) != 2 || lines[0].Credit || !lines[1].Credit || lines[0].Account != debit || lines[1].Account != credit ||
+		!lines[0].Amount.Equal(decimal.RequireFromString(amount)) || !lines[1].Amount.Equal(decimal.RequireFromString(amount)) {
+		t.Fatalf("want Dr %s / Cr %s for %s, got %+v", debit, credit, amount, lines)
+	}
+}
+
+func postRegroupRule(f sliceB, rule, balanceAccount string, balance int64, normal string) *httptest.ResponseRecorder {
+	f.ledger.cumulative = []ledgerclient.BalanceRow{net(balanceAccount, balance, nil)}
+	ledger := testkit.TenantID(7)
+	f.send(http.MethodPut, "/v1/close/regrouping-rules/"+rule, `{"ledgerId":"`+ledger+`","sortMethod":"account_balance_sign","sourceAccount":"`+balanceAccount+`","adjustmentAccount":"2500","targetAccount":"`+balanceAccount+`","normalBalance":"`+normal+`","sequence":1}`, "close.regrouping.write", "")
+	return f.send(http.MethodPost, "/v1/close/regroupings", `{"ledgerId":"`+ledger+`","keyDate":"2026-01-31","ruleCodes":["`+rule+`"],"mode":"post"}`, "close.regrouping.run", "rg-"+rule)
+}
+
+func TestRegroupingDebitBalanceOnCreditAccountDebitsTheAdjustment(t *testing.T) {
+	f := newSliceB()
+	if rec := postRegroupRule(f, "VEND", "2000", 300, "credit"); rec.Code != http.StatusCreated {
+		t.Fatalf("run: %d %s", rec.Code, rec.Body)
+	}
+	assertSides(t, f.ledger.Entries()[0].Lines, "2500", "2000", "300")
+}
+
+func TestRegroupingRuleRunsClaimTheirRulesPerKeyDate(t *testing.T) {
+	f := newSliceB()
+	if rec := postRegroupRule(f, "BANK", "1100", -500, "debit"); rec.Code != http.StatusCreated {
+		t.Fatalf("first: %d %s", rec.Code, rec.Body)
+	}
+	rec := f.send(http.MethodPost, "/v1/close/regroupings", `{"ledgerId":"`+testkit.TenantID(7)+`","keyDate":"2026-01-31","ruleCodes":["BANK"],"mode":"post"}`, "close.regrouping.run", "rg-again")
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "CLOSE-0010") {
+		t.Fatalf("second run on the same key date: %d %s", rec.Code, rec.Body)
+	}
+	if n := len(f.ledger.Entries()); n != 1 {
+		t.Fatalf("the ledger must receive one regrouping, got %d", n)
+	}
+}
+
+func TestRegroupingItemMethodsRefuseWithoutAnOpenItemSource(t *testing.T) {
+	f := newSliceBWith(nil)
+	ledger := testkit.TenantID(7)
+	f.send(http.MethodPut, "/v1/close/regrouping-rules/LT", `{"ledgerId":"`+ledger+`","sortMethod":"remaining_term","sourceAccount":"2100","buckets":[{"fromDays":366,"toDays":0,"adjustmentAccount":"1600","targetAccount":"2100"}],"sequence":1}`, "close.regrouping.write", "")
+	rec := f.send(http.MethodPost, "/v1/close/regroupings", `{"ledgerId":"`+ledger+`","keyDate":"2026-01-31","ruleCodes":["LT"],"mode":"post"}`, "close.regrouping.run", "rg-lt")
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	if len(f.regroup.runs) != 0 || len(f.ledger.Entries()) != 0 {
+		t.Fatalf("nothing may be recorded or posted: %d runs, %d entries", len(f.regroup.runs), len(f.ledger.Entries()))
+	}
+}
+
+func TestRegroupingWithNothingToReclassifyIsNotPosted(t *testing.T) {
+	f := newSliceB()
+	if rec := postRegroupRule(f, "BANK", "1100", 500, "debit"); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "CLOSE-0011") {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	if len(f.regroup.runs) != 0 {
+		t.Fatal("an empty post run must not be recorded")
+	}
+}
+
+func TestRegroupingRejectsDuplicateRuleCodes(t *testing.T) {
+	f := newSliceB()
+	rec := f.send(http.MethodPost, "/v1/close/regroupings", `{"ledgerId":"`+testkit.TenantID(7)+`","keyDate":"2026-01-31","ruleCodes":["A","A"]}`, "close.regrouping.run", "rg-dup")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
 }
 
 func TestWriteEndpointsRequireIdempotencyKey(t *testing.T) {
@@ -520,5 +646,214 @@ func TestProposeAllocationMatchesFixtureWeights(t *testing.T) {
 	}, "6100", "", 2)
 	if err != nil || !got.Destinations[0].Amount.Equal(decimal.NewFromInt(3000)) || !got.Destinations[1].Amount.Equal(decimal.NewFromInt(5000)) {
 		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+func TestTwoApproverReopenOverHTTP(t *testing.T) {
+	f := newSliceB()
+	period, ledger := testkit.TenantID(8), testkit.TenantID(7)
+	target := "/v1/close/periods/" + period + "/modules/ap:request-reopen"
+	rec := f.send(http.MethodPost, target, `{"ledgerId":"`+ledger+`","reason":"audit adjustment after close"}`, "period.reopen", "reopen-http")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("request: %d %s", rec.Code, rec.Body)
+	}
+	var req domain.StoredReopen
+	if err := json.Unmarshal(rec.Body.Bytes(), &req); err != nil || req.Required != 2 {
+		t.Fatalf("request body %+v %v", req, err)
+	}
+	approve := func(user string) (*httptest.ResponseRecorder, domain.StoredReopen) {
+		rec := f.sendAs(user, http.MethodPost, "/v1/close/reopen-requests/"+req.ID+":approve", `{}`, "period.reopen", "")
+		var out domain.StoredReopen
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec, out
+	}
+	if rec, _ := approve("alice"); rec.Code != http.StatusConflict {
+		t.Fatalf("the requester cannot approve: %d %s", rec.Code, rec.Body)
+	}
+	if rec, out := approve("bob"); rec.Code != http.StatusOK || out.Status != "pending" {
+		t.Fatalf("first approval keeps the request pending: %d %s", rec.Code, rec.Body)
+	}
+	if rec, out := approve("cara"); rec.Code != http.StatusOK || out.Status != "approved" {
+		t.Fatalf("second approver completes it: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestReopenNeedsAnEndUser(t *testing.T) {
+	f := newSliceB()
+	rec := f.sendAs("", http.MethodPost, "/v1/close/periods/"+testkit.TenantID(8)+"/modules/ap:request-reopen", `{"ledgerId":"`+testkit.TenantID(7)+`","reason":"audit adjustment after close"}`, "period.reopen", "reopen-nouser")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+}
+
+func putAccrualScheme(f sliceB, code, body string) *httptest.ResponseRecorder {
+	return f.send(http.MethodPut, "/v1/close/accrual-schemes/"+code, body, "close.accrual.write", "")
+}
+
+func TestAccrualMonthEndPostsOnlyDueOccurrencesAndTheSweeperPostsTheRest(t *testing.T) {
+	f := newSliceB()
+	ledger := testkit.TenantID(7)
+	if rec := putAccrualScheme(f, "rent", `{"ledgerId":"`+ledger+`","debitAccount":"6100","creditAccount":"2100","amount":"300.00","occurrences":3,"spread":"equal","autoReverse":true}`); rec.Code != http.StatusOK {
+		t.Fatalf("scheme: %d %s", rec.Code, rec.Body)
+	}
+	*f.clock = time.Date(2026, 2, 15, 9, 0, 0, 0, time.UTC)
+	rec := f.send(http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-31"}`, "close.accrual.run", "accrual-eom")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("apply: %d %s", rec.Code, rec.Body)
+	}
+	var run domain.AccrualRun
+	if err := json.Unmarshal(rec.Body.Bytes(), &run); err != nil || run.Status != "scheduled" || run.Currency != "USD" {
+		t.Fatalf("run %+v %v", run, err)
+	}
+	if got := postingDates(f); !slices.Equal(got, []string{"2026-01-31"}) {
+		t.Fatalf("only the January occurrence is due on 15 February, posted %v", got)
+	}
+	replay := f.send(http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-31"}`, "close.accrual.run", "accrual-eom")
+	if replay.Code != http.StatusCreated || len(f.ledger.Entries()) != 1 {
+		t.Fatalf("replay must not post again: %d, %d entries", replay.Code, len(f.ledger.Entries()))
+	}
+
+	*f.clock = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
+	if done, err := f.api.PostDueAccruals(context.Background()); err != nil || done != 0 {
+		t.Fatalf("sweep: %d %v", done, err)
+	}
+	if got := postingDates(f); !slices.Equal(got, []string{"2026-01-31", "2026-02-28", "2026-02-28"}) {
+		t.Fatalf("the sweeper posts February's occurrence and January's reversal on 28 February, got %v", got)
+	}
+
+	*f.clock = time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
+	if done, err := f.api.PostDueAccruals(context.Background()); err != nil || done != 1 {
+		t.Fatalf("final sweep: %d %v", done, err)
+	}
+	stored := f.accrual.runs[run.ID]
+	if stored.Status != "posted" || len(stored.EntryIDs) != 6 {
+		t.Fatalf("run %s with %d entries", stored.Status, len(stored.EntryIDs))
+	}
+	for _, e := range f.ledger.Entries() {
+		if e.SourceType == "accrual" && !e.Lines[0].Amount.Equal(decimal.NewFromInt(100)) {
+			t.Fatalf("each occurrence is 100.00, got %+v", e.Lines)
+		}
+	}
+}
+
+func postingDates(f sliceB) []string {
+	var dates []string
+	for _, e := range f.ledger.Entries() {
+		dates = append(dates, e.PostingDate)
+	}
+	slices.Sort(dates)
+	return dates
+}
+
+func TestAccrualApplyIgnoresCallerAmountAndRefusesForeignCurrency(t *testing.T) {
+	f := newSliceB()
+	ledger := testkit.TenantID(7)
+	putAccrualScheme(f, "rent", `{"ledgerId":"`+ledger+`","debitAccount":"6100","creditAccount":"2100","amount":"120.00","occurrences":2,"spread":"equal","autoReverse":false}`)
+	rec := f.send(http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","amount":"999999.00","startDate":"2026-01-01"}`, "close.accrual.run", "accrual-amount")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("a request amount is not accepted: %d %s", rec.Code, rec.Body)
+	}
+	rec = f.send(http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","currency":"EUR","startDate":"2026-01-01"}`, "close.accrual.run", "accrual-eur")
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "CLOSE-0011") {
+		t.Fatalf("a foreign currency is refused: %d %s", rec.Code, rec.Body)
+	}
+	if n := len(f.ledger.Entries()); n != 0 {
+		t.Fatalf("nothing may post, got %d", n)
+	}
+	rec = f.send(http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-01"}`, "close.accrual.run", "accrual-ok")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("apply: %d %s", rec.Code, rec.Body)
+	}
+	for _, e := range f.ledger.Entries() {
+		if !e.Lines[0].Amount.Equal(decimal.NewFromInt(60)) || e.Currency != "USD" {
+			t.Fatalf("the stored amount spreads in the ledger currency: %+v", e)
+		}
+	}
+}
+
+func TestAccrualSchemeRequiresAPositiveAmount(t *testing.T) {
+	f := newSliceB()
+	rec := putAccrualScheme(f, "rent", `{"ledgerId":"`+testkit.TenantID(7)+`","debitAccount":"6100","creditAccount":"2100","occurrences":2}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAccrualPermanentLedgerRefusalParksTheRun(t *testing.T) {
+	f := newSliceB()
+	ledger := testkit.TenantID(7)
+	putAccrualScheme(f, "rent", `{"ledgerId":"`+ledger+`","debitAccount":"6100","creditAccount":"2100","amount":"120.00","occurrences":2,"spread":"equal","autoReverse":false}`)
+	*f.clock = time.Date(2026, 1, 15, 9, 0, 0, 0, time.UTC)
+	f.send(http.MethodPost, "/v1/close/accrual-schemes/rent:apply", `{"ledgerId":"`+ledger+`","startDate":"2026-01-01"}`, "close.accrual.run", "accrual-park")
+	f.ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: "LEDGER-0001"})
+	*f.clock = time.Date(2026, 2, 15, 9, 0, 0, 0, time.UTC)
+	if _, err := f.api.PostDueAccruals(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.accrual.parked) != 1 {
+		t.Fatalf("a permanent refusal parks the run, parked %v", f.accrual.parked)
+	}
+}
+
+func TestAllocationRefusesALedgerOrPeriodThatDoesNotMatchTheRule(t *testing.T) {
+	f := newSliceB()
+	ruleID, ledger, period := testkit.TenantID(31), testkit.TenantID(7), testkit.TenantID(8)
+	rule := `{"ledgerId":"` + ledger + `","name":"rent","method":"fixed_weight","sourceAccounts":["6100"],"destinations":[{"key":"A","account":"6100","weight":"1"}],"offsetAccount":"6100"}`
+	if rec := f.send(http.MethodPut, "/v1/close/allocation-rules/"+ruleID, rule, "close.allocation.write", ""); rec.Code != http.StatusOK {
+		t.Fatalf("rule: %d %s", rec.Code, rec.Body)
+	}
+	other := testkit.TenantID(12)
+	rec := f.send(http.MethodPost, "/v1/close/allocation-runs", `{"ledgerId":"`+other+`","ruleId":"`+ruleID+`","fiscalPeriodId":"`+period+`","postingDate":"2026-01-31","mode":"post"}`, "close.allocation.run", "alloc-ledger")
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "CLOSE-0011") {
+		t.Fatalf("ledger mismatch: %d %s", rec.Code, rec.Body)
+	}
+	rec = f.send(http.MethodPost, "/v1/close/allocation-runs", `{"ledgerId":"`+ledger+`","ruleId":"`+ruleID+`","fiscalPeriodId":"`+testkit.TenantID(13)+`","postingDate":"2026-01-31","mode":"post"}`, "close.allocation.run", "alloc-period")
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("period mismatch: %d %s", rec.Code, rec.Body)
+	}
+	if n := len(f.ledger.Entries()); n != 0 {
+		t.Fatalf("nothing may post, got %d", n)
+	}
+}
+
+func TestAllocationRuleValidation(t *testing.T) {
+	f := newSliceB()
+	ledger := testkit.TenantID(7)
+	base := `"ledgerId":"` + ledger + `","name":"rent","method":"fixed_weight","offsetAccount":"6100"`
+	tests := map[string]string{
+		"no source accounts":    `{` + base + `,"destinations":[{"key":"A","account":"6100","weight":"1"}]}`,
+		"no destinations":       `{` + base + `,"sourceAccounts":["6100"],"destinations":[]}`,
+		"duplicate destination": `{` + base + `,"sourceAccounts":["6100"],"destinations":[{"key":"A","account":"6100","weight":"1"},{"key":"A","account":"6100","weight":"2"}]}`,
+	}
+	for name, body := range tests {
+		if rec := f.send(http.MethodPut, "/v1/close/allocation-rules/"+testkit.TenantID(31), body, "close.allocation.write", ""); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: got %d %s", name, rec.Code, rec.Body)
+		}
+	}
+}
+
+func TestMalformedIdentifiersAreClientErrors(t *testing.T) {
+	f := newSliceB()
+	if rec := f.send(http.MethodGet, "/v1/close/allocation-rules/not-a-uuid", "", "close.allocation.write", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("allocation rule: %d", rec.Code)
+	}
+	if rec := f.send(http.MethodGet, "/v1/close/accrual-schemes/rent?ledgerId=bad", "", "close.accrual.write", ""); rec.Code != http.StatusBadRequest {
+		t.Errorf("accrual scheme: %d", rec.Code)
+	}
+	if rec := f.send(http.MethodGet, "/v1/close/regrouping-rules/BANK?ledgerId=bad", "", "close.regrouping.write", ""); rec.Code != http.StatusBadRequest {
+		t.Errorf("regrouping rule: %d", rec.Code)
+	}
+	if rec := f.send(http.MethodPost, "/v1/close/regroupings/not-a-uuid:post", "", "close.regrouping.run", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("regrouping run: %d", rec.Code)
+	}
+}
+
+func TestChecklistRunRefusesLegalEntitiesOutsideTheCallerScope(t *testing.T) {
+	f := newSliceB()
+	tmpl := testkit.TenantID(21)
+	f.send(http.MethodPut, "/v1/close/templates/"+tmpl, `{"name":"month-end","tasks":[{"key":"prep","name":"Prep","module":"gl","assigneeRole":"controller","dependsOn":[]}]}`, "close.checklist.write", "")
+	rec := f.send(http.MethodPost, "/v1/close/runs", `{"templateId":"`+tmpl+`","fiscalPeriodId":"`+testkit.TenantID(8)+`","legalEntityIds":["`+testkit.TenantID(10)+`"]}`, "close.checklist.write", "run-scope")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
 	}
 }

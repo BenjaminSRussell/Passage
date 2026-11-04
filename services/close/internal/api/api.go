@@ -61,6 +61,7 @@ type API struct {
 	accruals    AccrualStore
 	regroups    RegroupingStore
 	openItems   OpenItemSource
+	clock       func() time.Time
 }
 
 type checkRequest struct {
@@ -107,6 +108,7 @@ var problemSlugs = map[string]string{
 	domain.CodeLedgerRejected:    "ledger_rejected",
 	domain.CodeIdempotencyReuse:  "idempotency_key_reuse",
 	domain.CodeRegroupingExists:  "regrouping_exists",
+	domain.CodeUnprocessable:     "unprocessable",
 	"COM-0001":                   "validation_failed",
 	"AUTH-0001":                  "forbidden_tenant",
 }
@@ -124,6 +126,7 @@ var problemStatuses = map[string]int{
 	domain.CodeLedgerRejected:      http.StatusUnprocessableEntity,
 	domain.CodeIdempotencyReuse:    http.StatusConflict,
 	domain.CodeRegroupingExists:    http.StatusConflict,
+	domain.CodeUnprocessable:       http.StatusUnprocessableEntity,
 	domain.CodeZeroBasis:           http.StatusUnprocessableEntity,
 	domain.CodeNoConvergence:       http.StatusUnprocessableEntity,
 }
@@ -136,6 +139,8 @@ func (a *API) WithLedgers(l LedgerLookup) *API {
 }
 
 func (a *API) WithConfig(cfg Config) *API { a.cfg = cfg; return a }
+
+func (a *API) WithClock(now func() time.Time) *API { a.clock = now; return a }
 
 func (a *API) WithSliceB(p PeriodStore, c ChecklistStore, al AllocationStore, ac AccrualStore, rg RegroupingStore, items OpenItemSource) *API {
 	a.periods, a.checklists, a.allocs, a.accruals, a.regroups, a.openItems = p, c, al, ac, rg, items

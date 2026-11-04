@@ -1,7 +1,11 @@
 package api
 
 import (
+	"context"
+	"log/slog"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -12,6 +16,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/money"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/close/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/close/internal/store"
 )
@@ -39,8 +44,12 @@ func (a *API) putAllocRule(w http.ResponseWriter, r *http.Request) {
 	if rule.Method == "" {
 		rule.Method = "fixed_weight"
 	}
-	if !ids.Valid(p.LegalEntityID) || !ids.Valid(rule.LedgerID) || rule.Name == "" || rule.OffsetAccount == "" {
-		fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "ledgerId, name and offsetAccount are required"))
+	if !ids.Valid(p.LegalEntityID) || !ids.Valid(rule.LedgerID) || rule.Name == "" || len(rule.Name) > 60 || rule.OffsetAccount == "" {
+		fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "ledgerId, name (up to 60 characters) and offsetAccount are required"))
+		return
+	}
+	if err := validateAllocationRule(rule); err != nil {
+		fail(w, r, err)
 		return
 	}
 	if !a.ledgerBelongsToCaller(w, r, p.LegalEntityID, rule.LedgerID) {
@@ -54,6 +63,28 @@ func (a *API) putAllocRule(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, out)
 }
 
+func validateAllocationRule(rule domain.AllocationRule) error {
+	if len(rule.SourceAccounts) == 0 || len(rule.Destinations) == 0 {
+		return &domain.Error{Code: domain.CodeValidation, Detail: "sourceAccounts and at least one destination are required"}
+	}
+	seen := map[string]bool{}
+	for _, d := range rule.Destinations {
+		if d.Key == "" || d.Account == "" || seen[d.Key] {
+			return &domain.Error{Code: domain.CodeValidation, Detail: "destinations need a unique key and an account"}
+		}
+		seen[d.Key] = true
+	}
+	return nil
+}
+
+func notFound(detail string) error { return &domain.Error{Code: domain.CodeNoRun, Detail: detail} }
+
+func unprocessable(detail string) error {
+	return &domain.Error{Code: domain.CodeUnprocessable, Detail: detail}
+}
+
+func hashKey(parts ...string) []byte { return []byte(strings.Join(parts, "|")) }
+
 func (a *API) getAllocRule(w http.ResponseWriter, r *http.Request) {
 	if _, ok := a.principal(w, r); !ok {
 		return
@@ -62,7 +93,12 @@ func (a *API) getAllocRule(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, missingSlice("allocations"))
 		return
 	}
-	out, err := a.allocs.AllocationRule(r.Context(), chi.URLParam(r, "ruleId"))
+	id := chi.URLParam(r, "ruleId")
+	if !ids.Valid(id) {
+		fail(w, r, notFound("allocation rule not found"))
+		return
+	}
+	out, err := a.allocs.AllocationRule(r.Context(), id)
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -119,14 +155,28 @@ func (a *API) runAllocation(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
+	if rule.LedgerID != req.LedgerID {
+		fail(w, r, unprocessable("the allocation rule belongs to a different ledger"))
+		return
+	}
+	span, err := a.periodSpan(r.Context(), p.LegalEntityID, req.LedgerID, req.PostingDate)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	want, _ := ids.Canonical(req.FiscalPeriodID)
+	if got, _ := ids.Canonical(span.FiscalPeriodID); got != want {
+		fail(w, r, unprocessable("fiscalPeriodId does not cover postingDate"))
+		return
+	}
 	info, err := a.yearLedger.Ledger(r.Context(), p.LegalEntityID, req.LedgerID)
 	if err != nil {
 		a.yearEndFailed(w, r, "allocation ledger lookup failed", err)
 		return
 	}
-	amount, err := a.sourceAmount(r, info, rule, req.PostingDate)
+	amount, err := a.sourceAmount(r.Context(), info, rule, req.PostingDate)
 	if err != nil {
-		fail(w, r, err)
+		a.yearEndFailed(w, r, "allocation source read failed", err)
 		return
 	}
 	dests := append([]domain.AllocationDest(nil), rule.Destinations...)
@@ -138,10 +188,6 @@ func (a *API) runAllocation(w http.ResponseWriter, r *http.Request) {
 	scale := money.MinorUnits(info.Currency)
 	proposal, err := domain.ProposeAllocation(amount, dests, rule.OffsetAccount, rule.OffsetDimensions, scale)
 	if err != nil {
-		if rule.AllocateFromZero && amount.IsZero() {
-			fail(w, r, err)
-			return
-		}
 		fail(w, r, err)
 		return
 	}
@@ -150,7 +196,7 @@ func (a *API) runAllocation(w http.ResponseWriter, r *http.Request) {
 		PostingDate: req.PostingDate, Currency: info.Currency, SourceAmount: amount.String(), Mode: req.Mode, Status: "proposed",
 		Proposal: proposal, CreatedBy: p.UserID,
 	}
-	hash := store.HashRequest(http.MethodPost, "/v1/close/allocation-runs", []byte(req.RuleID+req.FiscalPeriodID+req.PostingDate+req.Mode))
+	hash := store.HashRequest(http.MethodPost, "/v1/close/allocation-runs", hashKey(req.LedgerID, info.Currency, req.RuleID, req.FiscalPeriodID, req.PostingDate, req.Mode))
 	saved, err := a.allocs.SaveAllocationRun(r.Context(), run, r.Header.Get(idempotencyHeader), hash)
 	if err != nil {
 		fail(w, r, err)
@@ -166,13 +212,19 @@ func (a *API) runAllocation(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, saved)
 }
 
-func (a *API) sourceAmount(r *http.Request, info ledgerclient.Info, rule domain.AllocationRule, postingDate string) (decimal.Decimal, error) {
+func (a *API) sourceAmount(ctx context.Context, info ledgerclient.Info, rule domain.AllocationRule, postingDate string) (decimal.Decimal, error) {
 	period := postingDate[:len("2006-01")]
-	tb, err := a.yearLedger.TrialBalance(r.Context(), ledgerclient.TrialBalanceQuery{
+	tb, err := a.yearLedger.TrialBalance(ctx, ledgerclient.TrialBalanceQuery{
 		LegalEntityID: rule.LegalEntityID, LedgerID: rule.LedgerID, PeriodTo: period, GroupBy: info.DimensionAttributes,
 	})
 	if err != nil {
 		return decimal.Zero, err
+	}
+	if tb.Currency != "" && tb.Currency != info.Currency {
+		return decimal.Zero, unprocessable("the trial balance currency differs from the ledger currency")
+	}
+	if len(rule.SourceAccounts) == 0 {
+		return decimal.Zero, unprocessable("the allocation rule names no source accounts")
 	}
 	want := map[string]bool{}
 	for _, acct := range rule.SourceAccounts {
@@ -180,16 +232,15 @@ func (a *API) sourceAmount(r *http.Request, info ledgerclient.Info, rule domain.
 	}
 	total := decimal.Zero
 	for _, row := range tb.Rows {
-		if len(want) > 0 && !want[row.Account] {
-			continue
+		if want[row.Account] {
+			total = total.Add(row.Net)
 		}
-		total = total.Add(row.Net)
 	}
 	return total, nil
 }
 
 func (a *API) dispatchAllocation(r *http.Request, run domain.AllocationRun) (domain.AllocationRun, error) {
-	if err := a.requireOpenPeriod(r, run.LegalEntityID, run.LedgerID, run.PostingDate); err != nil {
+	if err := a.requireOpenPeriod(r.Context(), run.LegalEntityID, run.LedgerID, run.PostingDate); err != nil {
 		return run, err
 	}
 	id, err := a.yearLedger.Post(r.Context(), allocationEntry(run))
@@ -224,7 +275,12 @@ func (a *API) postAllocation(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, missingSlice("allocations"))
 		return
 	}
-	run, err := a.allocs.AllocationRun(r.Context(), chi.URLParam(r, "runId"))
+	runID := chi.URLParam(r, "runId")
+	if !ids.Valid(runID) {
+		fail(w, r, notFound("allocation run not found"))
+		return
+	}
+	run, err := a.allocs.AllocationRun(r.Context(), runID)
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -249,7 +305,12 @@ func (a *API) reverseAllocation(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, missingSlice("allocations"))
 		return
 	}
-	run, err := a.allocs.AllocationRun(r.Context(), chi.URLParam(r, "runId"))
+	runID := chi.URLParam(r, "runId")
+	if !ids.Valid(runID) {
+		fail(w, r, notFound("allocation run not found"))
+		return
+	}
+	run, err := a.allocs.AllocationRun(r.Context(), runID)
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -303,8 +364,16 @@ func (a *API) putAccrual(w http.ResponseWriter, r *http.Request) {
 	if scheme.Occurrences == 0 {
 		scheme.Occurrences = 12
 	}
-	if scheme.Code == "" || !ids.Valid(scheme.LedgerID) || scheme.DebitAccount == "" || scheme.CreditAccount == "" {
-		fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "code, ledgerId, debitAccount and creditAccount are required"))
+	if scheme.Code == "" || len(scheme.Code) > 20 || !ids.Valid(scheme.LedgerID) || scheme.DebitAccount == "" || scheme.CreditAccount == "" {
+		fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "code (up to 20 characters), ledgerId, debitAccount and creditAccount are required"))
+		return
+	}
+	if amount, err := decimal.NewFromString(scheme.Amount); err != nil || !amount.IsPositive() {
+		fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "amount must be a positive decimal"))
+		return
+	}
+	if err := validateAccrualScheme(scheme); err != nil {
+		fail(w, r, err)
 		return
 	}
 	if !a.ledgerBelongsToCaller(w, r, p.LegalEntityID, scheme.LedgerID) {
@@ -318,6 +387,18 @@ func (a *API) putAccrual(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, out)
 }
 
+func validateAccrualScheme(scheme domain.AccrualDefinition) error {
+	switch {
+	case scheme.Occurrences < 1 || scheme.Occurrences > 120:
+		return &domain.Error{Code: domain.CodeValidation, Detail: "occurrences must be between 1 and 120"}
+	case scheme.Frequency != "monthly" && scheme.Frequency != "quarterly" && scheme.Frequency != "custom":
+		return &domain.Error{Code: domain.CodeValidation, Detail: "frequency must be monthly, quarterly or custom"}
+	case scheme.Spread != domain.SpreadEqual && scheme.Spread != domain.SpreadByDays && scheme.Spread != domain.SpreadCustom:
+		return &domain.Error{Code: domain.CodeValidation, Detail: "spread must be equal, by_days or custom"}
+	}
+	return nil
+}
+
 func (a *API) getAccrual(w http.ResponseWriter, r *http.Request) {
 	if _, ok := a.principal(w, r); !ok {
 		return
@@ -327,6 +408,10 @@ func (a *API) getAccrual(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ledgerID := r.URL.Query().Get("ledgerId")
+	if !ids.Valid(ledgerID) {
+		fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "ledgerId must be a UUID"))
+		return
+	}
 	out, err := a.accruals.AccrualScheme(r.Context(), ledgerID, chi.URLParam(r, "code"))
 	if err != nil {
 		fail(w, r, err)
@@ -337,7 +422,6 @@ func (a *API) getAccrual(w http.ResponseWriter, r *http.Request) {
 
 type applyAccrualRequest struct {
 	LedgerID  string `json:"ledgerId"`
-	Amount    string `json:"amount"`
 	Currency  string `json:"currency"`
 	StartDate string `json:"startDate"`
 }
@@ -365,11 +449,6 @@ func (a *API) applyAccrual(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "ledgerId and startDate are required"))
 		return
 	}
-	amount, err := decimal.NewFromString(req.Amount)
-	if err != nil || !amount.IsPositive() {
-		fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "amount must be a positive decimal"))
-		return
-	}
 	if !a.ledgerBelongsToCaller(w, r, p.LegalEntityID, req.LedgerID) {
 		return
 	}
@@ -383,26 +462,32 @@ func (a *API) applyAccrual(w http.ResponseWriter, r *http.Request) {
 		a.yearEndFailed(w, r, "accrual ledger lookup failed", err)
 		return
 	}
-	currency := req.Currency
-	if currency == "" {
-		currency = info.Currency
+	if req.Currency != "" && req.Currency != info.Currency {
+		fail(w, r, unprocessable("currency must be the ledger currency "+info.Currency))
+		return
+	}
+	amount, err := decimal.NewFromString(scheme.Amount)
+	if err != nil {
+		fail(w, r, unprocessable("the accrual scheme holds no valid amount"))
+		return
 	}
 	custom := make([]decimal.Decimal, len(scheme.Custom))
 	for i, c := range scheme.Custom {
 		custom[i], _ = decimal.NewFromString(c)
 	}
-	occ, err := domain.SpreadAccrual(amount, start, domain.AccrualScheme{Occurrences: scheme.Occurrences, Spread: scheme.Spread, Custom: custom, AutoReverse: scheme.AutoReverse}, money.MinorUnits(currency))
+	occ, err := domain.SpreadAccrual(amount, start, domain.AccrualScheme{Occurrences: scheme.Occurrences, Spread: scheme.Spread, Custom: custom, AutoReverse: scheme.AutoReverse}, money.MinorUnits(info.Currency))
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
-	hash := store.HashRequest(http.MethodPost, r.URL.Path, []byte(req.Amount+req.StartDate))
-	key := r.Header.Get(idempotencyHeader)
+	today := a.today()
 	run := domain.AccrualRun{
-		LegalEntityID: p.LegalEntityID, LedgerID: req.LedgerID, SchemeCode: scheme.Code, Amount: amount.String(), Currency: currency,
-		StartDate: req.StartDate, Status: "scheduled", Occurrences: occ, EntryIDs: map[string]string{}, CreatedBy: p.UserID,
+		LegalEntityID: p.LegalEntityID, LedgerID: req.LedgerID, SchemeCode: scheme.Code, Amount: amount.String(), Currency: info.Currency,
+		DebitAccount: scheme.DebitAccount, CreditAccount: scheme.CreditAccount, AutoReverse: scheme.AutoReverse,
+		StartDate: req.StartDate, Status: "scheduled", Occurrences: occ, EntryIDs: map[string]string{}, CreatedBy: p.UserID, NextDue: &today,
 	}
-	saved, err := a.accruals.SaveAccrualRun(r.Context(), run, key, hash)
+	hash := store.HashRequest(http.MethodPost, r.URL.Path, hashKey(req.LedgerID, info.Currency, req.StartDate))
+	saved, err := a.accruals.SaveAccrualRun(r.Context(), run, r.Header.Get(idempotencyHeader), hash)
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -411,52 +496,112 @@ func (a *API) applyAccrual(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusOK, saved)
 		return
 	}
-	if saved.EntryIDs == nil {
-		saved.EntryIDs = map[string]string{}
-	}
-	for _, o := range saved.Occurrences {
-		occKey := "occ-" + o.Date.Format(dateLayout)
-		if saved.EntryIDs[occKey] != "" {
-			continue
-		}
-		if err := a.requireOpenPeriod(r, p.LegalEntityID, req.LedgerID, o.Date.Format(dateLayout)); err != nil {
-			fail(w, r, err)
-			return
-		}
-		doc := uuid.NewSHA1(uuid.MustParse(saved.ID), []byte("accrual-"+o.Date.Format(dateLayout))).String()
-		entry := ledgerclient.Entry{
-			LegalEntityID: p.LegalEntityID, LedgerID: req.LedgerID, PostingDate: o.Date.Format(dateLayout), Currency: saved.Currency,
-			DocumentID: doc, IdempotencyKey: doc, SourceType: "accrual", PostClosed: false, Lines: []ledgerclient.Line{
-				{Account: scheme.DebitAccount, Amount: o.Amount},
-				{Account: scheme.CreditAccount, Credit: true, Amount: o.Amount},
-			},
-		}
-		id, err := a.yearLedger.Post(r.Context(), entry)
-		if err != nil {
-			a.yearEndFailed(w, r, "accrual post failed", err)
-			return
-		}
-		saved.EntryIDs[occKey] = id
-		if scheme.AutoReverse {
-			rev, err := a.yearLedger.Reverse(r.Context(), ledgerclient.Reversal{
-				LegalEntityID: p.LegalEntityID, EntryID: id, PostingDate: o.ReverseOn.Format(dateLayout),
-				IdempotencyKey: uuid.NewSHA1(uuid.MustParse(saved.ID), []byte("accrual-rev-"+o.Date.Format(dateLayout))).String(),
-				Description:    "Accrual reversal", PostClosed: false,
-			})
-			if err != nil {
-				a.yearEndFailed(w, r, "accrual reversal failed", err)
-				return
-			}
-			saved.EntryIDs["rev-"+o.ReverseOn.Format(dateLayout)] = rev
-		}
-	}
-	saved.Status = "posted"
-	saved, err = a.accruals.SaveAccrualRun(r.Context(), saved, key, hash)
+	saved, err = a.advanceAccrual(r.Context(), saved, today)
 	if err != nil {
-		fail(w, r, err)
+		a.yearEndFailed(w, r, "accrual post failed", err)
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, saved)
+}
+
+func (a *API) advanceAccrual(ctx context.Context, run domain.AccrualRun, today time.Time) (domain.AccrualRun, error) {
+	if run.EntryIDs == nil {
+		run.EntryIDs = map[string]string{}
+	}
+	persist := func() error {
+		saved, err := a.accruals.SaveAccrualRun(ctx, run, "", "")
+		if err != nil {
+			return err
+		}
+		run = saved
+		return nil
+	}
+	for _, o := range run.Occurrences {
+		date, reverseOn := o.Date.Format(dateLayout), o.ReverseOn.Format(dateLayout)
+		occKey, revKey := "occ-"+date, "rev-"+reverseOn
+		if run.EntryIDs[occKey] == "" && !o.Date.After(today) {
+			if err := a.requireOpenPeriod(ctx, run.LegalEntityID, run.LedgerID, date); err != nil {
+				return run, err
+			}
+			doc := uuid.NewSHA1(uuid.MustParse(run.ID), []byte("accrual-"+date)).String()
+			id, err := a.yearLedger.Post(ctx, ledgerclient.Entry{
+				LegalEntityID: run.LegalEntityID, LedgerID: run.LedgerID, PostingDate: date, Currency: run.Currency,
+				DocumentID: doc, IdempotencyKey: doc, SourceType: "accrual", PostClosed: false, Lines: []ledgerclient.Line{
+					{Account: run.DebitAccount, Amount: o.Amount},
+					{Account: run.CreditAccount, Credit: true, Amount: o.Amount},
+				},
+			})
+			if err != nil {
+				return run, err
+			}
+			run.EntryIDs[occKey] = id
+			if err := persist(); err != nil {
+				return run, err
+			}
+		}
+		if !run.AutoReverse || run.EntryIDs[occKey] == "" || run.EntryIDs[revKey] != "" || o.ReverseOn.After(today) {
+			continue
+		}
+		if err := a.requireOpenPeriod(ctx, run.LegalEntityID, run.LedgerID, reverseOn); err != nil {
+			return run, err
+		}
+		rev, err := a.yearLedger.Reverse(ctx, ledgerclient.Reversal{
+			LegalEntityID: run.LegalEntityID, EntryID: run.EntryIDs[occKey], PostingDate: reverseOn,
+			IdempotencyKey: uuid.NewSHA1(uuid.MustParse(run.ID), []byte("accrual-rev-"+date)).String(),
+			Description:    "Accrual reversal", PostClosed: false,
+		})
+		if err != nil {
+			return run, err
+		}
+		run.EntryIDs[revKey] = rev
+		if err := persist(); err != nil {
+			return run, err
+		}
+	}
+	var next *time.Time
+	consider := func(day time.Time) {
+		if next == nil || day.Before(*next) {
+			d := day
+			next = &d
+		}
+	}
+	for _, o := range run.Occurrences {
+		if run.EntryIDs["occ-"+o.Date.Format(dateLayout)] == "" {
+			consider(o.Date)
+		}
+		if run.AutoReverse && run.EntryIDs["rev-"+o.ReverseOn.Format(dateLayout)] == "" {
+			consider(o.ReverseOn)
+		}
+	}
+	run.Status, run.NextDue = "scheduled", next
+	if next == nil {
+		run.Status = "posted"
+	}
+	return run, persist()
+}
+
+func (a *API) PostDueAccruals(ctx context.Context) (int, error) {
+	if a.accruals == nil || a.yearLedger == nil {
+		return 0, nil
+	}
+	runs, listErr := a.accruals.DueAccrualRuns(ctx)
+	completed := 0
+	for _, run := range runs {
+		runCtx := tenant.With(ctx, tenant.Principal{TenantID: run.TenantID, LegalEntityID: run.LegalEntityID, UserID: run.CreatedBy})
+		updated, err := a.advanceAccrual(runCtx, run, a.today())
+		if err != nil {
+			park := ledgerclient.Rejected(err)
+			slog.Error("accrual run could not post", "runId", run.ID, "tenantId", run.TenantID, "parked", park, "err", err)
+			if recordErr := a.accruals.RecordAccrualFailure(runCtx, run.ID, err.Error(), park); recordErr != nil {
+				slog.Error("accrual failure could not be recorded", "runId", run.ID, "err", recordErr)
+			}
+			continue
+		}
+		if updated.Status == "posted" {
+			completed++
+		}
+	}
+	return completed, listErr
 }
 
 func (a *API) putRegroup(w http.ResponseWriter, r *http.Request) {
@@ -474,8 +619,14 @@ func (a *API) putRegroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rule.Code, rule.LegalEntityID = chi.URLParam(r, "code"), p.LegalEntityID
-	if rule.Code == "" || !ids.Valid(rule.LedgerID) {
-		fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "code and ledgerId are required"))
+	if rule.Code == "" || len(rule.Code) > 20 || !ids.Valid(rule.LedgerID) {
+		fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "code (up to 20 characters) and ledgerId are required"))
+		return
+	}
+	switch rule.SortMethod {
+	case domain.SortRemainingTerm, domain.SortDebitCredit, domain.SortAccountSign:
+	default:
+		fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "sortMethod must be remaining_term, debit_credit_balance or account_balance_sign"))
 		return
 	}
 	if !a.ledgerBelongsToCaller(w, r, p.LegalEntityID, rule.LedgerID) {
@@ -497,7 +648,12 @@ func (a *API) getRegroup(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, missingSlice("regrouping"))
 		return
 	}
-	out, err := a.regroups.RegroupingRule(r.Context(), r.URL.Query().Get("ledgerId"), chi.URLParam(r, "code"))
+	ledgerID := r.URL.Query().Get("ledgerId")
+	if !ids.Valid(ledgerID) {
+		fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "ledgerId must be a UUID"))
+		return
+	}
+	out, err := a.regroups.RegroupingRule(r.Context(), ledgerID, chi.URLParam(r, "code"))
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -512,12 +668,23 @@ type regroupRunRequest struct {
 	Mode      string   `json:"mode"`
 }
 
+func uniqueSorted(codes []string) ([]string, bool) {
+	out := append([]string(nil), codes...)
+	sort.Strings(out)
+	for i := 1; i < len(out); i++ {
+		if out[i] == out[i-1] {
+			return nil, false
+		}
+	}
+	return out, len(out) > 0
+}
+
 func (a *API) runRegroup(w http.ResponseWriter, r *http.Request) {
 	p, ok := a.principal(w, r)
 	if !ok {
 		return
 	}
-	if a.regroups == nil {
+	if a.regroups == nil || a.yearLedger == nil {
 		fail(w, r, missingSlice("regrouping"))
 		return
 	}
@@ -533,73 +700,92 @@ func (a *API) runRegroup(w http.ResponseWriter, r *http.Request) {
 	if req.Mode == "" {
 		req.Mode = "simulate"
 	}
+	if req.Mode != "simulate" && req.Mode != "post" {
+		fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "mode must be simulate or post"))
+		return
+	}
 	keyDate, err := time.Parse(dateLayout, req.KeyDate)
 	if err != nil || !ids.Valid(req.LedgerID) {
 		fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "ledgerId and keyDate are required"))
 		return
 	}
+	codes, ok := uniqueSorted(req.RuleCodes)
+	if !ok {
+		fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "ruleCodes must list each rule once and at least one rule"))
+		return
+	}
 	if !a.ledgerBelongsToCaller(w, r, p.LegalEntityID, req.LedgerID) {
 		return
 	}
-	stored, err := a.regroups.ListRegroupingRules(r.Context(), req.LedgerID, req.RuleCodes)
+	stored, err := a.regroups.ListRegroupingRules(r.Context(), req.LedgerID, codes)
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
 	rules := make([]domain.RegroupingRule, len(stored))
+	needsItems := false
 	for i, s := range stored {
 		rules[i] = domain.RegroupingRule{Code: s.Code, SortMethod: s.SortMethod, Sequence: s.Sequence, SourceAccount: s.SourceAccount,
 			AdjustmentAccount: s.AdjustmentAccount, TargetAccount: s.TargetAccount, NormalBalance: s.NormalBalance, Buckets: s.Buckets}
+		needsItems = needsItems || s.SortMethod != domain.SortAccountSign
+	}
+	if needsItems && a.openItems == nil {
+		fail(w, r, missingSlice("open items"))
+		return
 	}
 	var items []domain.OpenItem
-	if a.openItems != nil {
-		for _, rule := range rules {
-			if rule.SortMethod == domain.SortAccountSign {
-				continue
-			}
-			found, err := a.openItems.List(r.Context(), p.LegalEntityID, req.LedgerID, rule.SourceAccount)
-			if err != nil {
-				fail(w, r, err)
-				return
-			}
-			items = append(items, found...)
+	for _, rule := range rules {
+		if rule.SortMethod == domain.SortAccountSign {
+			continue
 		}
+		found, err := a.openItems.List(r.Context(), p.LegalEntityID, req.LedgerID, rule.SourceAccount)
+		if err != nil {
+			a.yearEndFailed(w, r, "regrouping open items read failed", err)
+			return
+		}
+		items = append(items, found...)
 	}
-	var balances []domain.Balance
-	if a.yearLedger != nil {
-		info, err := a.yearLedger.Ledger(r.Context(), p.LegalEntityID, req.LedgerID)
-		if err != nil {
-			a.yearEndFailed(w, r, "regrouping ledger lookup failed", err)
-			return
-		}
-		tb, err := a.yearLedger.TrialBalance(r.Context(), ledgerclient.TrialBalanceQuery{
-			LegalEntityID: p.LegalEntityID, LedgerID: req.LedgerID, PeriodTo: req.KeyDate[:len("2006-01")], GroupBy: info.DimensionAttributes,
-		})
-		if err != nil {
-			fail(w, r, err)
-			return
-		}
-		for _, row := range tb.Rows {
-			balances = append(balances, domain.Balance{Account: row.Account, Amount: row.Net, Dimensions: domain.DimensionKey(row.Dimensions)})
-		}
+	info, err := a.yearLedger.Ledger(r.Context(), p.LegalEntityID, req.LedgerID)
+	if err != nil {
+		a.yearEndFailed(w, r, "regrouping ledger lookup failed", err)
+		return
+	}
+	tb, err := a.yearLedger.TrialBalance(r.Context(), ledgerclient.TrialBalanceQuery{
+		LegalEntityID: p.LegalEntityID, LedgerID: req.LedgerID, PeriodTo: req.KeyDate[:len("2006-01")], GroupBy: info.DimensionAttributes,
+	})
+	if err != nil {
+		a.yearEndFailed(w, r, "regrouping trial balance read failed", err)
+		return
+	}
+	if tb.Currency != "" && tb.Currency != info.Currency {
+		fail(w, r, unprocessable("the trial balance currency differs from the ledger currency"))
+		return
+	}
+	balances := make([]domain.Balance, 0, len(tb.Rows))
+	for _, row := range tb.Rows {
+		balances = append(balances, domain.Balance{Account: row.Account, Amount: row.Net, Dimensions: domain.DimensionKey(row.Dimensions)})
 	}
 	proposal, err := domain.Regroup(items, balances, rules, keyDate)
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
+	if req.Mode == "post" && len(proposal) == 0 {
+		fail(w, r, unprocessable("nothing to reclassify for these rules on this key date"))
+		return
+	}
 	run := domain.RegroupingRun{
-		LegalEntityID: p.LegalEntityID, LedgerID: req.LedgerID, KeyDate: req.KeyDate, RuleCodes: req.RuleCodes,
+		LegalEntityID: p.LegalEntityID, LedgerID: req.LedgerID, KeyDate: req.KeyDate, RuleCodes: codes,
 		Mode: req.Mode, Status: "proposed", Proposal: proposal, CreatedBy: p.UserID,
 	}
-	hash := store.HashRequest(http.MethodPost, "/v1/close/regroupings", []byte(req.LedgerID+req.KeyDate+req.Mode))
+	hash := store.HashRequest(http.MethodPost, "/v1/close/regroupings", hashKey(req.LedgerID, info.Currency, req.KeyDate, req.Mode, strings.Join(codes, ",")))
 	saved, err := a.regroups.SaveRegroupingRun(r.Context(), run, r.Header.Get(idempotencyHeader), hash)
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
 	if req.Mode == "post" && saved.Status != "posted" {
-		saved, err = a.dispatchRegroup(r, saved)
+		saved, err = a.dispatchRegroup(r.Context(), saved)
 		if err != nil {
 			a.yearEndFailed(w, r, "regrouping post failed", err)
 			return
@@ -608,25 +794,38 @@ func (a *API) runRegroup(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, saved)
 }
 
-func (a *API) dispatchRegroup(r *http.Request, run domain.RegroupingRun) (domain.RegroupingRun, error) {
+func (a *API) dispatchRegroup(ctx context.Context, run domain.RegroupingRun) (domain.RegroupingRun, error) {
 	if a.yearLedger == nil {
 		return run, missingSlice("regrouping")
 	}
-	if err := a.requireOpenPeriod(r, run.LegalEntityID, run.LedgerID, run.KeyDate); err != nil {
-		return run, err
-	}
 	if len(run.Proposal) == 0 {
-		return a.regroups.MarkRegroupingPosted(r.Context(), run.ID, "")
+		return run, unprocessable("a regrouping with nothing to reclassify cannot be posted")
 	}
-	info, err := a.yearLedger.Ledger(r.Context(), run.LegalEntityID, run.LedgerID)
+	if err := a.requireOpenPeriod(ctx, run.LegalEntityID, run.LedgerID, run.KeyDate); err != nil {
+		return run, err
+	}
+	info, err := a.yearLedger.Ledger(ctx, run.LegalEntityID, run.LedgerID)
 	if err != nil {
 		return run, err
 	}
-	id, err := a.yearLedger.Post(r.Context(), regroupEntry(run, info.Currency))
-	if err != nil {
+	for _, line := range run.Proposal {
+		if line.Currency != "" && line.Currency != info.Currency {
+			return run, unprocessable("an open item is in " + line.Currency + " but the ledger currency is " + info.Currency)
+		}
+	}
+	if err := a.regroups.ClaimRegroupingRules(ctx, run.ID); err != nil {
 		return run, err
 	}
-	return a.regroups.MarkRegroupingPosted(r.Context(), run.ID, id)
+	id, err := a.yearLedger.Post(ctx, regroupEntry(run, info.Currency))
+	if err != nil {
+		if ledgerclient.Rejected(err) {
+			if releaseErr := a.regroups.ReleaseRegroupingRules(ctx, run.ID); releaseErr != nil {
+				slog.Error("regrouping claim could not be released", "runId", run.ID, "err", releaseErr)
+			}
+		}
+		return run, err
+	}
+	return a.regroups.MarkRegroupingPosted(ctx, run.ID, id)
 }
 
 func regroupEntry(run domain.RegroupingRun, currency string) ledgerclient.Entry {
@@ -635,9 +834,14 @@ func regroupEntry(run domain.RegroupingRun, currency string) ledgerclient.Entry 
 		if p.Amount.IsZero() {
 			continue
 		}
+		debit, credit := p.AdjustmentAccount, p.TargetAccount
+		if p.SourceCredit {
+			debit, credit = credit, debit
+		}
+		dims := domain.ParseDimensions(p.Dimensions)
 		lines = append(lines,
-			ledgerclient.Line{Account: p.AdjustmentAccount, Amount: p.Amount, Dimensions: domain.ParseDimensions(p.Dimensions)},
-			ledgerclient.Line{Account: p.TargetAccount, Credit: true, Amount: p.Amount, Dimensions: domain.ParseDimensions(p.Dimensions)},
+			ledgerclient.Line{Account: debit, Amount: p.Amount, Dimensions: dims},
+			ledgerclient.Line{Account: credit, Credit: true, Amount: p.Amount, Dimensions: dims},
 		)
 	}
 	doc := uuid.NewSHA1(uuid.MustParse(run.ID), []byte("regrouping")).String()
@@ -655,7 +859,12 @@ func (a *API) postRegroup(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, missingSlice("regrouping"))
 		return
 	}
-	run, err := a.regroups.RegroupingRun(r.Context(), chi.URLParam(r, "runId"))
+	runID := chi.URLParam(r, "runId")
+	if !ids.Valid(runID) {
+		fail(w, r, notFound("regrouping run not found"))
+		return
+	}
+	run, err := a.regroups.RegroupingRun(r.Context(), runID)
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -664,7 +873,7 @@ func (a *API) postRegroup(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusOK, run)
 		return
 	}
-	saved, err := a.dispatchRegroup(r, run)
+	saved, err := a.dispatchRegroup(r.Context(), run)
 	if err != nil {
 		a.yearEndFailed(w, r, "regrouping post failed", err)
 		return
@@ -680,7 +889,12 @@ func (a *API) reverseRegroup(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, missingSlice("regrouping"))
 		return
 	}
-	run, err := a.regroups.RegroupingRun(r.Context(), chi.URLParam(r, "runId"))
+	runID := chi.URLParam(r, "runId")
+	if !ids.Valid(runID) {
+		fail(w, r, notFound("regrouping run not found"))
+		return
+	}
+	run, err := a.regroups.RegroupingRun(r.Context(), runID)
 	if err != nil {
 		fail(w, r, err)
 		return

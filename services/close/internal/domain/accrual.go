@@ -27,17 +27,30 @@ type AccrualOccurrence struct {
 	ReverseOn time.Time       `json:"reverseOn"`
 }
 
+func addMonths(start time.Time, months int) time.Time {
+	year, month, day := start.Date()
+	first := time.Date(year, month+time.Month(months), 1, 0, 0, 0, 0, start.Location())
+	last := first.AddDate(0, 1, -1).Day()
+	if day > last || start.AddDate(0, 0, 1).Month() != month {
+		day = last
+	}
+	return first.AddDate(0, 0, day-1)
+}
+
 func SpreadAccrual(total decimal.Decimal, start time.Time, scheme AccrualScheme, scale int32) ([]AccrualOccurrence, error) {
 	n := scheme.Occurrences
 	if n < 1 || n > 120 {
 		return nil, fail(CodeValidation, "occurrences must be between 1 and 120")
 	}
+	if !total.IsPositive() || !total.Equal(total.Round(scale)) {
+		return nil, fail(CodeValidation, "amount must be positive with no more decimals than the currency allows")
+	}
 	dates := make([]time.Time, n)
 	days := make([]int, n)
 	totalDays := 0
 	for i := 0; i < n; i++ {
-		dates[i] = start.AddDate(0, i, 0)
-		next := start.AddDate(0, i+1, 0)
+		dates[i] = addMonths(start, i)
+		next := addMonths(start, i+1)
 		days[i] = int(next.Sub(dates[i]).Hours() / 24)
 		totalDays += days[i]
 	}
@@ -79,7 +92,10 @@ func SpreadAccrual(total decimal.Decimal, start time.Time, scheme AccrualScheme,
 	}
 	out := make([]AccrualOccurrence, n)
 	for i := 0; i < n; i++ {
-		out[i] = AccrualOccurrence{Date: dates[i], Amount: amounts[i], ReverseOn: start.AddDate(0, i+1, 0)}
+		if !amounts[i].IsPositive() {
+			return nil, fail(CodeValidation, "amount is too small to spread over every occurrence")
+		}
+		out[i] = AccrualOccurrence{Date: dates[i], Amount: amounts[i], ReverseOn: addMonths(start, i+1)}
 	}
 	return out, nil
 }

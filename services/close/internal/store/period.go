@@ -102,7 +102,7 @@ func (s *Postgres) TransitionPeriod(ctx context.Context, in domain.PeriodTransit
 				return &domain.Error{Code: domain.CodeNoPeriod, Detail: "period is not registered"}
 			}
 		} else {
-			if _, err := tx.Exec(ctx, `update period_status set status = $4, allowed_group_id = nullif($5,''), reopen_expires_at = null, changed_by = $6, changed_at = now()
+			if _, err := tx.Exec(ctx, `update period_status set status = $4, allowed_group_id = nullif($5,''), reopen_expires_at = case when $4 in ('closed', 'permanently_closed') then null else reopen_expires_at end, changed_by = $6, changed_at = now()
 				where legal_entity_id = $1 and ledger_id = $2 and fiscal_period_id = $3 and module = $7`,
 				in.LegalEntityID, in.LedgerID, in.FiscalPeriodID, in.To, group, in.Actor, in.Module); err != nil {
 				return err
@@ -166,10 +166,29 @@ func (s *Postgres) RequestReopen(ctx context.Context, in domain.StoredReopen) (d
 	if err := domain.ValidateReopenReason(in.Reason); err != nil {
 		return domain.StoredReopen{}, err
 	}
+	p, ok := tenant.FromContext(ctx)
+	if !ok {
+		return domain.StoredReopen{}, errors.New("request reopen: no principal")
+	}
 	if in.Required < 2 {
 		in.Required = 2
 	}
+	var out domain.StoredReopen
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if in.IdempotencyKey != "" {
+			var priorID, priorHash string
+			err := tx.QueryRow(ctx, `select id::text, request_hash from period_reopen_request where idempotency_key = $1`, in.IdempotencyKey).Scan(&priorID, &priorHash)
+			switch {
+			case err == nil:
+				if priorHash != in.RequestHash {
+					return reuse("Idempotency-Key was already used with a different request")
+				}
+				out, err = scanReopen(tx.QueryRow(ctx, reopenSelect+` where id = $1`, priorID))
+				return err
+			case !errors.Is(err, pgx.ErrNoRows):
+				return err
+			}
+		}
 		var status domain.Status
 		err := tx.QueryRow(ctx, `select status from period_status where legal_entity_id = $1 and ledger_id = $2 and fiscal_period_id = $3 and module = $4`,
 			in.LegalEntityID, in.LedgerID, in.FiscalPeriodID, in.Module).Scan(&status)
@@ -186,15 +205,19 @@ func (s *Postgres) RequestReopen(ctx context.Context, in domain.StoredReopen) (d
 		in.Status = "pending"
 		in.Approvals = []domain.ReopenApproval{}
 		raw, _ := json.Marshal(in.Approvals)
-		_, err = tx.Exec(ctx, `insert into period_reopen_request(tenant_id, id, legal_entity_id, ledger_id, fiscal_period_id, module, reason, requested_by, approvals, required_approvals, status, expires_days)
-			values(current_setting('passage.tenant_id')::uuid, $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, 'pending', $10)`,
-			in.ID, in.LegalEntityID, in.LedgerID, in.FiscalPeriodID, in.Module, in.Reason, in.RequestedBy, raw, in.Required, in.ExpiresDays)
-		return uniquePending(err)
+		_, err = tx.Exec(ctx, `insert into period_reopen_request(tenant_id, id, legal_entity_id, ledger_id, fiscal_period_id, module, reason, requested_by, approvals, required_approvals, status, expires_days, idempotency_key, request_hash)
+			values(current_setting('passage.tenant_id')::uuid, $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, 'pending', $10, $11, $12)`,
+			in.ID, in.LegalEntityID, in.LedgerID, in.FiscalPeriodID, in.Module, in.Reason, in.RequestedBy, raw, in.Required, in.ExpiresDays, in.IdempotencyKey, in.RequestHash)
+		if err != nil {
+			return uniquePending(err)
+		}
+		out = in
+		return writePeriodChange(ctx, tx, p.TenantID, in.LegalEntityID, in.LedgerID, in.FiscalPeriodID, in.Module, domain.StatusClosed, domain.StatusClosed, in.RequestedBy, "reopen requested: "+in.Reason, nil)
 	})
 	if err != nil {
 		return domain.StoredReopen{}, err
 	}
-	return in, nil
+	return out, nil
 }
 
 func uniquePending(err error) error {
@@ -253,6 +276,10 @@ func (s *Postgres) ApproveReopen(ctx context.Context, id, actor string) (domain.
 }
 
 func (s *Postgres) RejectReopen(ctx context.Context, id, actor string) (domain.StoredReopen, error) {
+	p, ok := tenant.FromContext(ctx)
+	if !ok {
+		return domain.StoredReopen{}, errors.New("reject reopen: no principal")
+	}
 	var out domain.StoredReopen
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		req, err := scanReopen(tx.QueryRow(ctx, reopenSelect+` where id = $1 for update`, id))
@@ -265,12 +292,12 @@ func (s *Postgres) RejectReopen(ctx context.Context, id, actor string) (domain.S
 		if req.Status != "pending" {
 			return &domain.Error{Code: domain.CodeInvalidTransition, Detail: "reopen request is " + req.Status}
 		}
-		if _, err := tx.Exec(ctx, `update period_reopen_request set status = 'rejected', decided_at = now() where id = $1`, id); err != nil {
+		if _, err := tx.Exec(ctx, `update period_reopen_request set status = 'rejected', decided_at = now(), rejected_by = $2 where id = $1`, id, actor); err != nil {
 			return err
 		}
 		req.Status = "rejected"
 		out = req
-		return nil
+		return writePeriodChange(ctx, tx, p.TenantID, req.LegalEntityID, req.LedgerID, req.FiscalPeriodID, req.Module, domain.StatusClosed, domain.StatusClosed, actor, "reopen rejected: "+req.Reason, req.Approvals)
 	})
 	return out, err
 }
@@ -311,14 +338,16 @@ func (s *Postgres) ExpireReopened(ctx context.Context) (int, error) {
 	}
 	rows.Close()
 	closed := 0
+	var failed []error
 	for _, tenantID := range tenants {
 		n, err := s.expireTenant(ctx, tenantID)
 		if err != nil {
-			return closed, err
+			failed = append(failed, fmt.Errorf("tenant %s: %w", tenantID, err))
+			continue
 		}
 		closed += n
 	}
-	return closed, nil
+	return closed, errors.Join(failed...)
 }
 
 func (s *Postgres) expireTenant(ctx context.Context, tenantID string) (int, error) {

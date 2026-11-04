@@ -2,11 +2,14 @@ package api
 
 import (
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/close/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/close/internal/store"
 )
@@ -96,8 +99,15 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 			fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "legalEntityIds must be UUIDs"))
 			return
 		}
+		if !tenant.InLegalEntityScope(p, id) {
+			fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a legal entity is outside the caller's scope"))
+			return
+		}
 	}
-	out, err := a.checklists.CreateRun(r.Context(), req.TemplateID, req.FiscalPeriodID, p.UserID, req.LegalEntityIDs, r.Header.Get(idempotencyHeader), store.HashRequest(http.MethodPost, r.URL.Path, []byte(req.TemplateID+req.FiscalPeriodID)))
+	sortedEntities := append([]string(nil), req.LegalEntityIDs...)
+	sort.Strings(sortedEntities)
+	hash := store.HashRequest(http.MethodPost, r.URL.Path, hashKey(req.TemplateID, req.FiscalPeriodID, strings.Join(sortedEntities, ",")))
+	out, err := a.checklists.CreateRun(r.Context(), req.TemplateID, req.FiscalPeriodID, p.UserID, req.LegalEntityIDs, r.Header.Get(idempotencyHeader), hash)
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -172,6 +182,10 @@ func (a *API) reassignTask(w http.ResponseWriter, r *http.Request) {
 	var body reassignBody
 	if err := httpx.Decode(r, &body); err != nil {
 		fail(w, r, err)
+		return
+	}
+	if body.AssigneeUserID == "" {
+		fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "assigneeUserId is required"))
 		return
 	}
 	a.taskAction(w, r, func(id, actor string) (domain.BoardTask, error) {

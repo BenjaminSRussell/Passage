@@ -49,6 +49,7 @@ type ReclassLine struct {
 	AdjustmentAccount string          `json:"adjustmentAccount"`
 	TargetAccount     string          `json:"targetAccount"`
 	Amount            decimal.Decimal `json:"amount"`
+	SourceCredit      bool            `json:"sourceCredit,omitempty"`
 	Currency          string          `json:"currency,omitempty"`
 	Dimensions        string          `json:"dimensions,omitempty"`
 	Party             string          `json:"party,omitempty"`
@@ -88,13 +89,16 @@ func regroupRemainingTerm(items []OpenItem, used map[string]bool, rule Regroupin
 	if len(rule.Buckets) == 0 {
 		return nil, fail(CodeValidation, "remaining_term rules need at least one bucket")
 	}
-	type agg struct {
-		amount decimal.Decimal
-		ids    []string
+	type groupKey struct {
+		bucket int
 		curr   string
 		dims   string
 	}
-	groups := map[int]agg{}
+	type agg struct {
+		amount decimal.Decimal
+		ids    []string
+	}
+	groups := map[groupKey]agg{}
 	shortest := 0
 	for i, b := range rule.Buckets {
 		if b.FromDays < rule.Buckets[shortest].FromDays {
@@ -116,29 +120,37 @@ func regroupRemainingTerm(items []OpenItem, used map[string]bool, rule Regroupin
 			}
 		}
 		bucket := rule.Buckets[idx]
+		used[item.ID] = true
 		if bucket.AdjustmentAccount == "" || bucket.AdjustmentAccount == bucket.TargetAccount {
-			used[item.ID] = true
 			continue
 		}
-		g := groups[idx]
-		g.amount = g.amount.Add(item.Amount.Abs())
+		key := groupKey{bucket: idx, curr: item.Currency, dims: item.Dimensions}
+		g := groups[key]
+		g.amount = g.amount.Add(item.Amount)
 		g.ids = append(g.ids, item.ID)
-		g.curr, g.dims = item.Currency, item.Dimensions
-		groups[idx] = g
-		used[item.ID] = true
+		groups[key] = g
 	}
 	var lines []ReclassLine
-	for i, g := range groups {
+	for key, g := range groups {
 		if g.amount.IsZero() {
 			continue
 		}
-		b := rule.Buckets[i]
+		b := rule.Buckets[key.bucket]
 		lines = append(lines, ReclassLine{
 			RuleCode: rule.Code, AdjustmentAccount: b.AdjustmentAccount, TargetAccount: b.TargetAccount,
-			Amount: g.amount, Currency: g.curr, Dimensions: g.dims, ReverseOn: reverseOn, ItemIDs: g.ids,
+			Amount: g.amount.Abs(), SourceCredit: g.amount.IsNegative(), Currency: key.curr, Dimensions: key.dims, ReverseOn: reverseOn, ItemIDs: g.ids,
 		})
 	}
-	sort.Slice(lines, func(i, j int) bool { return lines[i].AdjustmentAccount < lines[j].AdjustmentAccount })
+	sort.Slice(lines, func(i, j int) bool {
+		a, b := lines[i], lines[j]
+		if a.AdjustmentAccount != b.AdjustmentAccount {
+			return a.AdjustmentAccount < b.AdjustmentAccount
+		}
+		if a.Currency != b.Currency {
+			return a.Currency < b.Currency
+		}
+		return a.Dimensions < b.Dimensions
+	})
 	return lines, nil
 }
 
@@ -190,10 +202,19 @@ func regroupDebitCredit(items []OpenItem, used map[string]bool, rule RegroupingR
 		}
 		lines = append(lines, ReclassLine{
 			RuleCode: rule.Code, AdjustmentAccount: rule.AdjustmentAccount, TargetAccount: rule.TargetAccount,
-			Amount: g.amount.Abs(), Currency: g.curr, Dimensions: g.dims, Party: g.party, ReverseOn: reverseOn, ItemIDs: g.ids,
+			Amount: g.amount.Abs(), SourceCredit: g.amount.IsNegative(), Currency: g.curr, Dimensions: g.dims, Party: g.party, ReverseOn: reverseOn, ItemIDs: g.ids,
 		})
 	}
-	sort.Slice(lines, func(i, j int) bool { return lines[i].Party < lines[j].Party })
+	sort.Slice(lines, func(i, j int) bool {
+		a, b := lines[i], lines[j]
+		if a.Party != b.Party {
+			return a.Party < b.Party
+		}
+		if a.Currency != b.Currency {
+			return a.Currency < b.Currency
+		}
+		return a.Dimensions < b.Dimensions
+	})
 	return lines, nil
 }
 
@@ -221,7 +242,7 @@ func regroupAccountSign(balances []Balance, rule RegroupingRule, reverseOn strin
 		}
 		lines = append(lines, ReclassLine{
 			RuleCode: rule.Code, AdjustmentAccount: rule.AdjustmentAccount, TargetAccount: rule.TargetAccount,
-			Amount: b.Amount.Abs(), Dimensions: b.Dimensions, ReverseOn: reverseOn,
+			Amount: b.Amount.Abs(), SourceCredit: b.Amount.IsNegative(), Dimensions: b.Dimensions, ReverseOn: reverseOn,
 		})
 	}
 	return lines, nil

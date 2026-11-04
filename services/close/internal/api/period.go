@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/close/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/close/internal/store"
 )
 
 func (a *API) listPeriods(w http.ResponseWriter, r *http.Request) {
@@ -101,7 +103,7 @@ type reopenRequestBody struct {
 }
 
 func (a *API) requestReopen(w http.ResponseWriter, r *http.Request) {
-	p, ok := a.principal(w, r)
+	p, ok := a.principalWithUser(w, r)
 	if !ok {
 		return
 	}
@@ -142,6 +144,8 @@ func (a *API) requestReopen(w http.ResponseWriter, r *http.Request) {
 	out, err := a.periods.RequestReopen(r.Context(), domain.StoredReopen{
 		LegalEntityID: p.LegalEntityID, LedgerID: req.LedgerID, FiscalPeriodID: periodID, Module: module,
 		Reason: req.Reason, RequestedBy: p.UserID, Required: a.reopenApprovers(), ExpiresDays: days,
+		IdempotencyKey: r.Header.Get(idempotencyHeader),
+		RequestHash:    store.HashRequest(http.MethodPost, r.URL.Path, hashKey(req.LedgerID, req.Reason, strconv.Itoa(days))),
 	})
 	if err != nil {
 		fail(w, r, err)
@@ -151,7 +155,7 @@ func (a *API) requestReopen(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) approveReopen(w http.ResponseWriter, r *http.Request) {
-	p, ok := a.principal(w, r)
+	p, ok := a.principalWithUser(w, r)
 	if !ok {
 		return
 	}
@@ -173,7 +177,7 @@ func (a *API) approveReopen(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) rejectReopen(w http.ResponseWriter, r *http.Request) {
-	p, ok := a.principal(w, r)
+	p, ok := a.principalWithUser(w, r)
 	if !ok {
 		return
 	}
@@ -192,6 +196,15 @@ func (a *API) rejectReopen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)
+}
+
+func (a *API) principalWithUser(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
+	p, ok := a.principal(w, r)
+	if ok && p.UserID == "" {
+		fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "an end user is required"))
+		return tenant.Principal{}, false
+	}
+	return p, ok
 }
 
 func (a *API) principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {

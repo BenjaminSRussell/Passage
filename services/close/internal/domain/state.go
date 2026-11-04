@@ -51,6 +51,8 @@ type StoredReopen struct {
 	Required       int              `json:"requiredApprovals"`
 	Status         string           `json:"status"`
 	ExpiresDays    int              `json:"expiresDays"`
+	IdempotencyKey string           `json:"-"`
+	RequestHash    string           `json:"-"`
 }
 
 type TemplateTask struct {
@@ -135,6 +137,7 @@ type AccrualDefinition struct {
 	Code          string       `json:"code"`
 	DebitAccount  string       `json:"debitAccount"`
 	CreditAccount string       `json:"creditAccount"`
+	Amount        string       `json:"amount"`
 	Frequency     string       `json:"frequency"`
 	Occurrences   int          `json:"occurrences"`
 	Spread        SpreadMethod `json:"spread"`
@@ -151,9 +154,15 @@ type AccrualRun struct {
 	Currency      string              `json:"currency"`
 	StartDate     string              `json:"startDate"`
 	Status        string              `json:"status"`
+	DebitAccount  string              `json:"debitAccount"`
+	CreditAccount string              `json:"creditAccount"`
+	AutoReverse   bool                `json:"autoReverse"`
 	Occurrences   []AccrualOccurrence `json:"occurrences"`
 	EntryIDs      map[string]string   `json:"entryIds"`
 	CreatedBy     string              `json:"createdBy"`
+	LastError     string              `json:"lastError,omitempty"`
+	NextDue       *time.Time          `json:"nextDue,omitempty"`
+	TenantID      string              `json:"-"`
 }
 
 type StoredRegroupingRule struct {
@@ -197,6 +206,13 @@ type TaskCompletedEvent struct {
 	Status string `json:"status"`
 	Actor  string `json:"actor"`
 	Late   bool   `json:"late"`
+}
+
+type TaskReassigned struct {
+	RunID    string `json:"runId"`
+	TaskID   string `json:"taskId"`
+	Assignee string `json:"assignee"`
+	Actor    string `json:"actor"`
 }
 
 type AllocationCompleted struct {

@@ -205,7 +205,10 @@ func (s *Postgres) StartTask(ctx context.Context, taskID, actor string) (domain.
 	return s.mutateTask(ctx, taskID, actor, func(tasks []domain.Task, id string) error {
 		return domain.Eligible(tasks, id)
 	}, func(ctx context.Context, tx pgx.Tx, taskID, actor string) error {
-		_, err := tx.Exec(ctx, `update close_task set status = 'in_progress', started_at = now() where id = $1 and status = 'not_started'`, taskID)
+		tag, err := tx.Exec(ctx, `update close_task set status = 'in_progress', started_at = now() where id = $1 and status = 'not_started'`, taskID)
+		if err == nil && tag.RowsAffected() == 0 {
+			return &domain.Error{Code: domain.CodeInvalidTransition, Detail: "task is already started"}
+		}
 		return err
 	})
 }
@@ -214,7 +217,10 @@ func (s *Postgres) CompleteTask(ctx context.Context, taskID, actor, evidence str
 	return s.mutateTask(ctx, taskID, actor, func(tasks []domain.Task, id string) error {
 		return domain.Complete(tasks, id)
 	}, func(ctx context.Context, tx pgx.Tx, taskID, actor string) error {
-		_, err := tx.Exec(ctx, `update close_task set status = 'completed', completed_at = now(), completed_by = $2, evidence_uri = nullif($3,'') where id = $1`, taskID, actor, evidence)
+		tag, err := tx.Exec(ctx, `update close_task set status = 'completed', completed_at = now(), completed_by = $2, evidence_uri = nullif($3,'') where id = $1 and (not evidence_required or $3 <> '')`, taskID, actor, evidence)
+		if err == nil && tag.RowsAffected() == 0 {
+			return &domain.Error{Code: domain.CodeValidation, Detail: "evidenceUri is required to complete this task"}
+		}
 		return err
 	})
 }
@@ -229,14 +235,25 @@ func (s *Postgres) SkipTask(ctx context.Context, taskID, actor, reason string) (
 }
 
 func (s *Postgres) ReassignTask(ctx context.Context, taskID, actor, assignee string) (domain.BoardTask, error) {
+	p, ok := tenant.FromContext(ctx)
+	if !ok {
+		return domain.BoardTask{}, errors.New("reassign task: no principal")
+	}
 	var out domain.BoardTask
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `update close_task set assignee_user_id = $2 where id = $1`, taskID, assignee); err != nil {
+		if _, err := tx.Exec(ctx, `update close_task set assignee_user_id = $2, reassigned_by = $3 where id = $1`, taskID, assignee, actor); err != nil {
 			return err
 		}
 		var err error
 		out, err = scanBoard(tx.QueryRow(ctx, boardSelect+` where id = $1`, taskID))
-		return err
+		if err != nil {
+			return err
+		}
+		evt, err := events.New(domain.EventCloseTaskReassigned, eventSource, out.ID, p.TenantID, domain.TaskReassigned{RunID: out.RunID, TaskID: out.ID, Assignee: assignee, Actor: actor})
+		if err != nil {
+			return err
+		}
+		return outbox.Enqueue(ctx, tx, "close_task", out.ID, evt)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, &domain.Error{Code: domain.CodeNoRun, Detail: "task not found"}

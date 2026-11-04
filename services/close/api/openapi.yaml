@@ -432,12 +432,12 @@ paths:
     post:
       operationId: applyAccrual
       x-passage-duty: close.accrual.run
-      description: Spreads an amount across occurrences and posts each through ledgerclient without PostClosed. Auto-reverse posts the reversing entry on the next occurrence date. Requires Idempotency-Key. Recurring journals stay in the ledger service.
+      description: Spreads the amount stored on the scheme (close.accrual.write sets it; the request carries no amount) across monthly occurrences stepped from month end, in the ledger currency (a different currency is 422 CLOSE-0011). Occurrences and reversals that are due today or earlier post now, each persisted as it posts; later ones are posted by the in-process sweeper with backoff, and a permanent ledger refusal parks the run. Requires Idempotency-Key. Recurring journals stay in the ledger service.
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
       responses:
-        '201': { description: Accrual run posted. }
+        '201': { description: Accrual run stored; status is scheduled until every occurrence and reversal has posted. }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -624,7 +624,7 @@ components:
         errors: { type: object, additionalProperties: { type: string } }
   responses:
     Problem:
-      description: RFC 9457 problem details (application/problem+json). 422 LEDGER-0013 period closed or never opened; 403 LEDGER-0014 period on hold; 400 CLOSE-0004 or COM-0001 validation; 404 CLOSE-0005 no fiscal period covers the date or the year's periods leave a gap; 404 CLOSE-0007 no such year-end run; 422 CLOSE-0008 the ledger rejected a year-end entry; 400 CLOSE-0009 the ledger's balances or chart cannot be closed; 409 CLOSE-0006 several periods cover it or overlap.
+      description: RFC 9457 problem details (application/problem+json). 422 LEDGER-0013 period closed or never opened; 403 LEDGER-0014 period on hold; 400 CLOSE-0004 or COM-0001 validation; 404 CLOSE-0005 no fiscal period covers the date or the year's periods leave a gap; 404 CLOSE-0007 no such year-end run; 422 CLOSE-0008 the ledger rejected a year-end entry; 422 CLOSE-0011 the request does not match the stored rule, ledger, period or currency, or there is nothing to post; 400 CLOSE-0009 the ledger's balances or chart cannot be closed; 409 CLOSE-0006 several periods cover it or overlap.
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }

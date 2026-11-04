@@ -122,7 +122,7 @@ func scanRegroupByKey(ctx context.Context, tx pgx.Tx, key string) (domain.Regrou
 func uniqueRegroup(err error) error {
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) && pg.Code == "23505" {
-		return &domain.Error{Code: domain.CodeRegroupingExists, Detail: "a posted regrouping already exists for this ledger, key date and rules"}
+		return &domain.Error{Code: domain.CodeRegroupingExists, Detail: "a regrouping already holds one of these rules for this ledger and key date"}
 	}
 	return err
 }
@@ -142,6 +142,22 @@ func (s *Postgres) RegroupingRun(ctx context.Context, id string) (domain.Regroup
 	}
 	_ = json.Unmarshal(proposal, &in.Proposal)
 	return in, nil
+}
+
+func (s *Postgres) ClaimRegroupingRules(ctx context.Context, runID string) error {
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `insert into regrouping_posted_rule(tenant_id, legal_entity_id, run_id, ledger_id, key_date, rule_code)
+			select tenant_id, legal_entity_id, id, ledger_id, key_date, unnest(rule_codes) from regrouping_run where id = $1
+			on conflict (tenant_id, run_id, rule_code) do nothing`, runID)
+		return uniqueRegroup(err)
+	})
+}
+
+func (s *Postgres) ReleaseRegroupingRules(ctx context.Context, runID string) error {
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `delete from regrouping_posted_rule where run_id = $1`, runID)
+		return err
+	})
 }
 
 func (s *Postgres) MarkRegroupingPosted(ctx context.Context, runID, entryID string) (domain.RegroupingRun, error) {
@@ -166,6 +182,11 @@ func (s *Postgres) finishRegroup(ctx context.Context, runID, sql, entryID string
 		run, err = s.scanRegroup(ctx, tx, runID)
 		if err != nil {
 			return err
+		}
+		if reversed {
+			if _, err := tx.Exec(ctx, `delete from regrouping_posted_rule where run_id = $1`, runID); err != nil {
+				return err
+			}
 		}
 		evt, err := events.New(domain.EventRegroupingCompleted, eventSource, run.ID, p.TenantID, domain.RegroupingCompleted{
 			RunID: run.ID, LedgerID: run.LedgerID, KeyDate: run.KeyDate, EntryID: entryID, Reversed: reversed,

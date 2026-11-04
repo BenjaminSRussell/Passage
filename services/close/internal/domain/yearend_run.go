@@ -17,6 +17,7 @@ const (
 	EventPeriodStatusChanged = "dev.passage.close.period.statuschanged.v1"
 	EventCloseRunCreated     = "dev.passage.close.run.created.v1"
 	EventCloseTaskCompleted  = "dev.passage.close.task.completed.v1"
+	EventCloseTaskReassigned = "dev.passage.close.task.reassigned.v1"
 	EventAllocationCompleted = "dev.passage.close.allocation.completed.v1"
 	EventAccrualScheduled    = "dev.passage.close.accrual.scheduled.v1"
 	EventRegroupingCompleted = "dev.passage.close.regrouping.completed.v1"

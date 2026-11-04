@@ -24,6 +24,8 @@ channels:
     messages:
       taskCompleted:
         $ref: '#/components/messages/taskCompleted'
+      taskReassigned:
+        $ref: '#/components/messages/taskReassigned'
   passage.close.allocation:
     address: passage.close.allocation
     messages:
@@ -64,6 +66,12 @@ operations:
       $ref: '#/channels/passage.close.task'
     messages:
       - $ref: '#/channels/passage.close.task/messages/taskCompleted'
+  onTaskReassigned:
+    action: send
+    channel:
+      $ref: '#/channels/passage.close.task'
+    messages:
+      - $ref: '#/channels/passage.close.task/messages/taskReassigned'
   onAllocationCompleted:
     action: send
     channel:
@@ -136,6 +144,18 @@ components:
           actor: { type: string }
           late: { type: boolean }
       x-passage-type: dev.passage.close.task.completed.v1
+    taskReassigned:
+      name: taskReassigned
+      title: Close checklist task reassigned
+      payload:
+        type: object
+        required: [runId, taskId, assignee, actor]
+        properties:
+          runId: { type: string, format: uuid }
+          taskId: { type: string, format: uuid }
+          assignee: { type: string }
+          actor: { type: string }
+      x-passage-type: dev.passage.close.task.reassigned.v1
     allocationCompleted:
       name: allocationCompleted
       title: Allocation posted or reversed

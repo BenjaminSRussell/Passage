@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS accrual_scheme (
   code varchar(20) NOT NULL,
   debit_account text NOT NULL,
   credit_account text NOT NULL,
+  amount numeric(20,6) NOT NULL CHECK (amount > 0),
   frequency text NOT NULL CHECK (frequency IN ('monthly', 'quarterly', 'custom')),
   occurrences int NOT NULL CHECK (occurrences BETWEEN 1 AND 120),
   spread text NOT NULL CHECK (spread IN ('equal', 'by_days', 'custom')),
@@ -64,10 +65,16 @@ CREATE TABLE IF NOT EXISTS accrual_run (
   scheme_code varchar(20) NOT NULL,
   amount numeric(20,6) NOT NULL,
   currency text NOT NULL,
+  debit_account text NOT NULL,
+  credit_account text NOT NULL,
+  auto_reverse boolean NOT NULL,
   start_date date NOT NULL,
-  status text NOT NULL CHECK (status IN ('scheduled', 'posted', 'reversed')),
+  status text NOT NULL CHECK (status IN ('scheduled', 'posted', 'reversed', 'parked')),
   occurrences jsonb NOT NULL,
   entry_ids jsonb NOT NULL DEFAULT '{}',
+  attempts int NOT NULL DEFAULT 0,
+  next_attempt_at timestamptz NOT NULL DEFAULT now(),
+  last_error text NOT NULL DEFAULT '',
   idempotency_key text NOT NULL,
   request_hash text NOT NULL,
   created_by text NOT NULL,
@@ -112,7 +119,55 @@ CREATE TABLE IF NOT EXISTS regrouping_run (
   PRIMARY KEY (tenant_id, id),
   UNIQUE (tenant_id, idempotency_key)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS regrouping_run_posted ON regrouping_run (tenant_id, ledger_id, key_date, rule_codes) WHERE status = 'posted';
+CREATE TABLE IF NOT EXISTS regrouping_posted_rule (
+  tenant_id uuid NOT NULL,
+  legal_entity_id uuid NOT NULL,
+  run_id uuid NOT NULL,
+  ledger_id uuid NOT NULL,
+  key_date date NOT NULL,
+  rule_code varchar(20) NOT NULL,
+  PRIMARY KEY (tenant_id, run_id, rule_code),
+  UNIQUE (tenant_id, ledger_id, key_date, rule_code)
+);
+CREATE TABLE IF NOT EXISTS accrual_due (
+  tenant_id uuid NOT NULL,
+  run_id uuid NOT NULL,
+  next_attempt_at timestamptz NOT NULL,
+  PRIMARY KEY (tenant_id, run_id)
+);
+CREATE INDEX IF NOT EXISTS accrual_due_next ON accrual_due (next_attempt_at);
+DO $do$
+BEGIN
+  EXECUTE format($f$
+    CREATE OR REPLACE FUNCTION accrual_run_track_due() RETURNS trigger
+      LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, %1$I, pg_temp
+      AS $body$
+    BEGIN
+      IF NEW.status = 'scheduled'::text THEN
+        INSERT INTO accrual_due(tenant_id, run_id, next_attempt_at) VALUES (NEW.tenant_id, NEW.id, NEW.next_attempt_at)
+        ON CONFLICT (tenant_id, run_id) DO UPDATE SET next_attempt_at = EXCLUDED.next_attempt_at;
+      ELSE
+        DELETE FROM accrual_due WHERE tenant_id = NEW.tenant_id AND run_id = NEW.id;
+      END IF;
+      RETURN NEW;
+    END
+    $body$;
+    CREATE OR REPLACE FUNCTION close_accrual_due_tenants() RETURNS SETOF uuid
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, %1$I, pg_temp
+      AS $body$ SELECT DISTINCT tenant_id FROM accrual_due WHERE next_attempt_at <= pg_catalog.now() $body$;
+  $f$, current_schema());
+END
+$do$;
+REVOKE ALL ON FUNCTION accrual_run_track_due() FROM PUBLIC;
+REVOKE ALL ON FUNCTION close_accrual_due_tenants() FROM PUBLIC;
+DROP TRIGGER IF EXISTS accrual_run_due ON accrual_run;
+CREATE TRIGGER accrual_run_due AFTER INSERT OR UPDATE ON accrual_run
+  FOR EACH ROW EXECUTE FUNCTION accrual_run_track_due();
+ALTER TABLE close_task ADD COLUMN IF NOT EXISTS reassigned_by text;
+ALTER TABLE period_reopen_request ADD COLUMN IF NOT EXISTS rejected_by text;
+ALTER TABLE period_reopen_request ADD COLUMN IF NOT EXISTS idempotency_key text NOT NULL DEFAULT '';
+ALTER TABLE period_reopen_request ADD COLUMN IF NOT EXISTS request_hash text NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX IF NOT EXISTS period_reopen_request_idempotency ON period_reopen_request (tenant_id, idempotency_key) WHERE idempotency_key <> '';
 ALTER TABLE close_run ADD COLUMN IF NOT EXISTS idempotency_key text NOT NULL DEFAULT '';
 ALTER TABLE close_run ADD COLUMN IF NOT EXISTS request_hash text NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX IF NOT EXISTS close_run_idempotency ON close_run (tenant_id, idempotency_key) WHERE idempotency_key <> '';
@@ -120,7 +175,7 @@ DO $$
 DECLARE
   t text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['allocation_rule', 'allocation_run', 'accrual_scheme', 'accrual_run', 'regrouping_rule', 'regrouping_run'] LOOP
+  FOREACH t IN ARRAY ARRAY['allocation_rule', 'allocation_run', 'accrual_scheme', 'accrual_run', 'regrouping_rule', 'regrouping_run', 'regrouping_posted_rule'] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
     EXECUTE format('CREATE POLICY %I ON %I AS PERMISSIVE USING (tenant_id = current_setting(''passage.tenant_id'', true)::uuid) WITH CHECK (tenant_id = current_setting(''passage.tenant_id'', true)::uuid)', t || '_tenant_access', t);
@@ -129,3 +184,5 @@ BEGIN
 END
 $$;
 GRANT SELECT, INSERT, UPDATE ON allocation_rule, allocation_run, accrual_scheme, accrual_run, regrouping_rule, regrouping_run TO passage_app;
+GRANT SELECT, INSERT, DELETE ON regrouping_posted_rule TO passage_app;
+GRANT EXECUTE ON FUNCTION close_accrual_due_tenants() TO passage_app;

@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -56,12 +55,16 @@ type AccrualStore interface {
 	AccrualScheme(ctx context.Context, ledgerID, code string) (domain.AccrualDefinition, error)
 	SaveAccrualRun(ctx context.Context, in domain.AccrualRun, key, requestHash string) (domain.AccrualRun, error)
 	AccrualRun(ctx context.Context, id string) (domain.AccrualRun, error)
+	DueAccrualRuns(ctx context.Context) ([]domain.AccrualRun, error)
+	RecordAccrualFailure(ctx context.Context, id, message string, park bool) error
 }
 
 type RegroupingStore interface {
 	PutRegroupingRule(ctx context.Context, in domain.StoredRegroupingRule) (domain.StoredRegroupingRule, error)
 	RegroupingRule(ctx context.Context, ledgerID, code string) (domain.StoredRegroupingRule, error)
 	ListRegroupingRules(ctx context.Context, ledgerID string, codes []string) ([]domain.StoredRegroupingRule, error)
+	ClaimRegroupingRules(ctx context.Context, runID string) error
+	ReleaseRegroupingRules(ctx context.Context, runID string) error
 	SaveRegroupingRun(ctx context.Context, in domain.RegroupingRun, key, requestHash string) (domain.RegroupingRun, error)
 	RegroupingRun(ctx context.Context, id string) (domain.RegroupingRun, error)
 	MarkRegroupingPosted(ctx context.Context, runID, entryID string) (domain.RegroupingRun, error)
@@ -79,21 +82,34 @@ func (a *API) ExpireReopened(ctx context.Context) (int, error) {
 	return a.periods.ExpireReopened(ctx)
 }
 
-func (a *API) requireOpenPeriod(r *http.Request, legalEntityID, ledgerID, date string) error {
+func (a *API) periodSpan(ctx context.Context, legalEntityID, ledgerID, date string) (domain.Span, error) {
 	day, err := time.Parse(dateLayout, date)
 	if err != nil {
-		return &domain.Error{Code: domain.CodeValidation, Detail: "posting date must be an ISO date"}
+		return domain.Span{}, &domain.Error{Code: domain.CodeValidation, Detail: "posting date must be an ISO date"}
 	}
-	spans, err := a.store.PeriodSpans(r.Context(), legalEntityID, ledgerID, day)
+	spans, err := a.store.PeriodSpans(ctx, legalEntityID, ledgerID, day)
 	if err != nil {
-		return err
+		return domain.Span{}, err
 	}
-	span, err := domain.SelectSpan(spans, day)
+	return domain.SelectSpan(spans, day)
+}
+
+func (a *API) requireOpenPeriod(ctx context.Context, legalEntityID, ledgerID, date string) error {
+	span, err := a.periodSpan(ctx, legalEntityID, ledgerID, date)
 	if err != nil {
 		return err
 	}
 	_, err = domain.Decide(span.Rows, domain.ModuleGL, "")
 	return err
+}
+
+func (a *API) today() time.Time {
+	now := time.Now
+	if a.clock != nil {
+		now = a.clock
+	}
+	y, m, d := now().UTC().Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
 func missingSlice(name string) error {

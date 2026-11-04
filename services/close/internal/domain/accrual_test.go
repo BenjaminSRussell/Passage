@@ -76,3 +76,48 @@ func TestSpreadAccrual_RejectsBadInput(t *testing.T) {
 		}
 	}
 }
+
+func TestSpreadAccrual_MonthEndStartStaysOnMonthEnds(t *testing.T) {
+	start := time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC)
+	got, err := domain.SpreadAccrual(decimal.RequireFromString("300.00"), start, domain.AccrualScheme{Occurrences: 4, Spread: domain.SpreadEqual, AutoReverse: true}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDates := []string{"2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30"}
+	wantReverse := []string{"2026-02-28", "2026-03-31", "2026-04-30", "2026-05-31"}
+	for i, o := range got {
+		if o.Date.Format("2006-01-02") != wantDates[i] || o.ReverseOn.Format("2006-01-02") != wantReverse[i] {
+			t.Errorf("occurrence %d on %s reversing %s, want %s and %s", i, o.Date.Format("2006-01-02"), o.ReverseOn.Format("2006-01-02"), wantDates[i], wantReverse[i])
+		}
+	}
+}
+
+func TestSpreadAccrual_MidMonthStartClampsToShortMonths(t *testing.T) {
+	start := time.Date(2026, 1, 30, 0, 0, 0, 0, time.UTC)
+	got, err := domain.SpreadAccrual(decimal.RequireFromString("90.00"), start, domain.AccrualScheme{Occurrences: 3, Spread: domain.SpreadEqual}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[1].Date.Format("2006-01-02") != "2026-02-28" || got[2].Date.Format("2006-01-02") != "2026-03-30" {
+		t.Fatalf("got %s and %s", got[1].Date.Format("2006-01-02"), got[2].Date.Format("2006-01-02"))
+	}
+}
+
+func TestSpreadAccrual_RejectsExtraDecimalsAndNegativeResidual(t *testing.T) {
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name  string
+		total string
+		n     int
+	}{
+		{"more decimals than the currency", "100.005", 2},
+		{"residual would be negative", "0.10", 12},
+		{"zero total", "0", 2},
+	}
+	for _, tc := range tests {
+		_, err := domain.SpreadAccrual(decimal.RequireFromString(tc.total), start, domain.AccrualScheme{Occurrences: tc.n, Spread: domain.SpreadEqual}, 2)
+		if code(err) != domain.CodeValidation {
+			t.Errorf("%s: got %v, want %s", tc.name, err, domain.CodeValidation)
+		}
+	}
+}
