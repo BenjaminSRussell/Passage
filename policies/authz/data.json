@@ -1679,6 +1679,7 @@
     ]},
     "transport.tender.execute": {"service_only": true, "permissions": [
       {"resource": "/v1/transport/loads/*:tender", "methods": ["POST"]},
+      {"resource": "/v1/transport/tenders", "methods": ["GET"]},
       {"resource": "/v1/transport/tenders/*", "methods": ["GET"]},
       {"resource": "/v1/transport/tenders:expire", "methods": ["POST"]}
     ]},

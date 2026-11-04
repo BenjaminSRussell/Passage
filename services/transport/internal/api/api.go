@@ -166,7 +166,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyPlan)).Post(prefix+"/loads/{id}:screen", a.screenLoad)
 	r.With(authz.RequireDuty(DutyView)).Get(prefix+"/transfer-rules/{incoterm}", a.transferRule)
 	r.With(requireTenderOrWorkflow).Post(prefix+"/loads/{id}:tender", a.startTender)
-	r.With(authz.RequireDuty(DutyTender)).Get(prefix+"/tenders", a.listTenders)
+	r.With(requireTenderOrWorkflow).Get(prefix+"/tenders", a.listTenders)
 	r.With(requireTenderOrWorkflow).Post(prefix+"/tenders:expire", a.expireTenders)
 	r.With(requireTenderOrWorkflow).Get(prefix+"/tenders/{id}", a.getTender)
 	r.With(authz.RequireDuty(DutyRespond)).Post(prefix+"/tenders/{id}:respond", a.respondTender)

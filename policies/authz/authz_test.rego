@@ -875,7 +875,7 @@ test_workflow_ts_transport_service_duty if {
 	allowed("transport.tender.execute", "POST", "/v1/transport/loads/l1:tender")
 	allowed("transport.tender.execute", "GET", "/v1/transport/tenders/t1")
 	allowed("transport.tender.execute", "POST", "/v1/transport/tenders:expire")
-	not allowed("transport.tender.execute", "GET", "/v1/transport/tenders")
+	allowed("transport.tender.execute", "GET", "/v1/transport/tenders")
 	not allowed("transport.tender.execute", "POST", "/v1/transport/tenders/t1:respond")
 	not allowed("transport.tender.execute", "POST", "/v1/transport/tracking-events")
 	not allowed("transport.tender.execute", "POST", "/v1/transport/freight-bills")

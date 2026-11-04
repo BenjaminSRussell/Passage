@@ -306,6 +306,7 @@ func TestTenderServiceDuty_ReachesOnlyTheWorkflowRoutes(t *testing.T) {
 	reach := []struct{ method, path string }{
 		{http.MethodPost, base + "/loads/" + loadID + ":tender"},
 		{http.MethodGet, base + "/tenders/" + tenderID},
+		{http.MethodGet, base + "/tenders?loadId=" + loadID},
 		{http.MethodPost, base + "/tenders:expire"},
 	}
 	for _, tc := range reach {
@@ -319,8 +320,14 @@ func TestTenderServiceDuty_ReachesOnlyTheWorkflowRoutes(t *testing.T) {
 			t.Fatalf("%s %s with the service duty from another issuer = %d, want 403", tc.method, tc.path, rec.Code)
 		}
 	}
+	// The open-tender lookup is the only list the service duty reaches.
+	if rec := doIssuedBy(t, h, "workflow-ts", http.MethodGet, base+"/tenders", api.DutyTenderExec); rec.Code != http.StatusBadRequest {
+		t.Fatalf("GET /tenders without loadId with the service duty = %d, want 400, body %s", rec.Code, rec.Body.String())
+	}
+	if rec := doIssuedBy(t, h, "workflow-ts", http.MethodGet, base+"/tenders", api.DutyTenderExec, api.DutyTender); rec.Code != http.StatusOK {
+		t.Fatalf("GET /tenders without loadId with the human duty = %d, want 200", rec.Code)
+	}
 	refuse := []struct{ method, path string }{
-		{http.MethodGet, base + "/tenders"},
 		{http.MethodPost, base + "/tenders/" + tenderID + ":respond"},
 		{http.MethodPost, base + "/tracking-events"},
 		{http.MethodPost, base + "/freight-bills"},
