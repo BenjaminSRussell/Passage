@@ -1717,6 +1717,11 @@ export interface IntakeError {
   resolvedBy?: string;
   resolvedAt?: string;
   resolutionNote?: string;
+  /** True while the refused request is kept so the error can be replayed (never returned). */
+  replayable: boolean;
+  replayCount: number;
+  /** The order a successful replay stored or found. */
+  replayedOrderId?: string;
   version: number;
 }
 
@@ -1743,6 +1748,39 @@ export function getIntakeError(id: string, signal?: AbortSignal): Promise<Versio
 /** Closes an OPEN intake error at its ETag with a note (1 to 500 characters). */
 export function resolveIntakeError(id: string, etag: string, note: string): Promise<Versioned<IntakeError>> {
   return versioned<IntakeError>(`/intake-errors/${encodeURIComponent(id)}:resolve`, { method: "POST", body: JSON.stringify({ note }), headers: { "If-Match": etag } });
+}
+
+/** The outcome of replaying one refused order (PRD §5.27.10). */
+export interface IntakeReplayResult {
+  intakeError: IntakeError;
+  /** The order was stored and the intake error closed. */
+  replayed: boolean;
+  orderId?: string;
+  orderNumber?: string;
+  /** Why intake refused the order again; present when replayed is false. */
+  failure?: { code: string; message: string };
+}
+
+/** Replays one OPEN intake error through order intake again. Intake refusing it again is still a result, not an error. */
+export async function replayIntakeError(id: string): Promise<IntakeReplayResult> {
+  return (await versioned<IntakeReplayResult>(`/intake-errors/${encodeURIComponent(id)}:replay`, { method: "POST" })).value;
+}
+
+export interface IntakeReplayBatch {
+  attempted: number;
+  replayed: number;
+  failed: number;
+  /** Dead letters (10 or more attempts) left for an operator. */
+  skipped: number;
+  items: IntakeReplayResult[];
+}
+
+/** Replays the open intake errors of the filter, oldest first. */
+export function replayIntakeErrors(filter: Pick<IntakeErrorFilter, "legalEntityId" | "channel" | "errorCode"> = {}): Promise<IntakeReplayBatch> {
+  return json<IntakeReplayBatch>(
+    `/intake-errors:replay${query({ legalEntityId: filter.legalEntityId, channel: filter.channel, errorCode: filter.errorCode })}`,
+    { method: "POST" },
+  );
 }
 
 export const PROGRESS_KINDS = ["DELIVERED", "INVOICED"] as const;

@@ -2359,6 +2359,84 @@ paths:
               schema: {$ref: "#/components/schemas/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/intake-errors/{id}:replay:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      summary: Replay one refused channel order through intake again, once its cause is fixed (PRD 5.27.10)
+      description: >-
+        Sends the request kept with an OPEN intake error through the order intake rules again, as the caller and under
+        the Idempotency-Key it arrived with (a derived key when it had none), so a replay that already stored its order
+        returns that order instead of adding another. The caller's own legal-entity scope and duties apply (a caller
+        holding sales.order.approve may accept a listing override the kept request asked for). When the order is stored (or found), the intake error is
+        RESOLVED with the order's number, the kept request is cleared and orderId is returned. When intake refuses it
+        again the answer is still 200 with replayed false and the new refusal in failure; the error stays OPEN with one
+        more attempt and replayCount.
+      operationId: replayIntakeError
+      x-passage-duty: sales.order.write
+      responses:
+        "200":
+          description: the replay outcome; the ETag header carries the intake error version
+          headers:
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/IntakeReplayResult"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: >-
+            SLS-0116 the intake error is already resolved; SLS-0118 its request was not kept (a row logged before replay
+            existed, or a one-time customer order refused while field encryption was not configured); SLS-0007 a
+            concurrent replay or retry is storing the same order (retry to receive it). None of them counts an attempt.
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "503":
+          description: SLS-0054 the kept request of a one-time customer order is sealed and field encryption is not configured
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+  /v1/sales/intake-errors:replay:
+    post:
+      summary: Replay the open intake errors of a legal entity, oldest first (the scheduled retry, PRD 5.27.10)
+      description: >-
+        Replays up to limit OPEN intake errors whose request was kept, oldest first, each as in the single replay.
+        Errors that already failed 10 times are the dead letters: they are counted in skipped and left for an operator
+        (replay one by id to try it anyway). Each replay runs in its own transactions; a row another replay is storing at
+        the same moment is left out of the counts. A server fault stops the batch with its problem (the replays done
+        before it are kept). Safe to repeat. The legal entity is the query parameter, or the caller's; without either,
+        an all-scope caller replays every legal entity.
+      operationId: replayIntakeErrors
+      x-passage-duty: sales.order.write
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: channel, in: query, description: only this channel, schema: {type: string, maxLength: 40}}
+        - {name: errorCode, in: query, description: only this problem code such as SLS-0011, schema: {type: string, maxLength: 40}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        "200":
+          description: counts and one result per attempted error
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attempted, replayed, failed, skipped, items]
+                properties:
+                  attempted: {type: integer}
+                  replayed: {type: integer, description: orders stored and intake errors closed}
+                  failed: {type: integer, description: refused again}
+                  skipped: {type: integer, description: dead letters (10 or more attempts) left alone}
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/IntakeReplayResult"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "503":
+          description: SLS-0054 a kept one-time customer request is sealed and field encryption is not configured
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
   /v1/sales/orders/{id}:record-progress:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -3720,7 +3798,7 @@ components:
         validTo: {type: string, format: date, description: last requested date the rule applies to; not before validFrom}
     IntakeError:
       type: object
-      required: [id, legalEntityId, channel, requestHash, errorCode, message, status, attempts, firstSeenAt, lastSeenAt, version]
+      required: [id, legalEntityId, channel, requestHash, errorCode, message, status, attempts, firstSeenAt, lastSeenAt, replayable, replayCount, version]
       properties:
         id: {type: string, format: uuid}
         legalEntityId: {type: string, format: uuid}
@@ -3736,7 +3814,25 @@ components:
         resolvedBy: {type: string}
         resolvedAt: {type: string, format: date-time}
         resolutionNote: {type: string}
+        replayable: {type: boolean, description: true while the refused request is kept so it can be replayed (the request itself is never returned; a one-time customer's is kept only sealed)}
+        replayCount: {type: integer, minimum: 0, description: replays tried}
+        replayedOrderId: {type: string, format: uuid, description: the order a successful replay stored or found}
         version: {type: integer}
+    IntakeReplayResult:
+      type: object
+      required: [intakeError, replayed]
+      properties:
+        intakeError: {$ref: "#/components/schemas/IntakeError"}
+        replayed: {type: boolean, description: the order was stored and the intake error closed}
+        orderId: {type: string, format: uuid}
+        orderNumber: {type: string}
+        failure:
+          type: object
+          description: why intake refused the order again; present when replayed is false
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
     AlternativeRule:
       allOf:
         - $ref: "#/components/schemas/AlternativeRuleRequest"
