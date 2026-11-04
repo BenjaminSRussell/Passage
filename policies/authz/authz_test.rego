@@ -847,6 +847,17 @@ test_workflow_ts_transport_service_duty if {
 	not allowed("transport.tender.execute", "POST", "/v1/transport/freight-bills")
 }
 
+test_workflow_ts_party_decision_grant if {
+	data.service_grants["workflow-ts"].party == ["party.approve"]
+	not data.duties["party.approve"].service_only
+	allowed("party.approve", "POST", "/v1/party/pending-changes/c1:approve")
+	allowed("party.approve", "POST", "/v1/party/pending-changes/c1:reject")
+	not allowed("party.approve", "GET", "/v1/party/pending-changes/c1")
+	not allowed("party.approve", "POST", "/v1/party/customers/c1/credit-limit")
+	not allowed("party.approve", "PUT", "/v1/party/legal-entities/le1/protected-fields")
+	not allowed("party.approve", "GET", "/v1/party/vendors/v1/bank-accounts:reveal")
+}
+
 principal_allowed(name, method, resource) if {
 	result := decision with input as {
 		"subject": {"tenant_id": "tenant-a", "user_id": sprintf("service:%s", [name])},

@@ -1,6 +1,4 @@
 import {
-  ActivityFailure,
-  ApplicationFailure,
   condition,
   defineQuery,
   defineSignal,
@@ -16,7 +14,7 @@ export * from "./tenderWorkflow.js";
 
 const { decidePartyChange } = proxyActivities<PartyDecisionActivities>({
   startToCloseTimeout: "30 seconds",
-  retry: { maximumInterval: "1 minute", maximumAttempts: 5 },
+  retry: { maximumInterval: "1 minute" },
 });
 
 export interface PartyChangeRef {
@@ -50,6 +48,10 @@ export interface ApprovalHistoryEntry {
 export interface ApprovalState {
   requestId: string;
   entityType: string;
+  /** Set for a party change approval, so the decision route can check the caller's tenant and legal entity. */
+  tenantId?: string;
+  legalEntityId?: string;
+  requester?: string;
   status: "pending" | "approved" | "rejected";
   levelId?: string;
   approver?: string;
@@ -58,10 +60,23 @@ export interface ApprovalState {
 
 export type ApprovalResult = ApprovalState;
 
-export const approveSignal = defineSignal<[actor: string]>("approve");
-export const rejectSignal = defineSignal<[actor: string]>("reject");
-export const delegateSignal = defineSignal<[actor: string, delegate: string]>("delegate");
+/**
+ * One decision on the current level. Only the decision route (src/decisionApi.ts) sends it, with the actor and legal-entity
+ * scope of the gateway-verified principal that called it; the workflow never takes an actor from anywhere else.
+ */
+export interface ApprovalDecision {
+  action: "approve" | "reject" | "delegate";
+  actor: string;
+  scope: string[];
+  delegate?: string;
+}
+
+export const approvalDecisionSignal = defineSignal<[decision: ApprovalDecision]>("approval-decision");
 export const approvalStateQuery = defineQuery<ApprovalState>("state");
+
+export function approvalWorkflowId(requestId: string): string {
+  return `approval:${requestId}`;
+}
 
 export async function approvalWorkflow(input: ApprovalInput): Promise<ApprovalResult> {
   validateInput(input);
@@ -69,35 +84,53 @@ export async function approvalWorkflow(input: ApprovalInput): Promise<ApprovalRe
   const state: ApprovalState = {
     requestId: input.requestId,
     entityType: input.entityType,
+    ...(input.partyChange ? { tenantId: input.partyChange.tenantId, legalEntityId: input.partyChange.legalEntityId } : {}),
+    ...(input.requester ? { requester: input.requester } : {}),
     status: "pending",
     history: [],
   };
   let decision: "approved" | "rejected" | undefined;
+  let decidedScope: string[] = [];
 
   setHandler(approvalStateQuery, () => snapshot(state));
-  setHandler(approveSignal, (actor) => {
-    if (actor === state.approver && actor !== input.requester) decision = "approved";
-  });
-  setHandler(rejectSignal, (actor) => {
-    if (actor === state.approver && actor !== input.requester) decision = "rejected";
-  });
-  setHandler(delegateSignal, (actor, delegate) => {
-    if (actor !== state.approver || delegate.length === 0 || delegate === input.requester || !state.levelId) return;
-    state.history.push({
-      action: "delegated",
-      levelId: state.levelId,
-      actor,
-      to: delegate,
-    });
-    state.approver = delegate;
-  });
+  // Decisions are queued and applied by the workflow once the current level is set: a signal delivered in the first
+  // activation, before the loop has named the approver, would otherwise be dropped.
+  const queued: ApprovalDecision[] = [];
+  setHandler(approvalDecisionSignal, (incoming) => void queued.push(incoming));
+  const apply = ({ action, actor, scope, delegate }: ApprovalDecision): void => {
+    if (decision !== undefined || !state.levelId || actor !== state.approver || actor === input.requester) return;
+    // A party change is decided under a service token for the actor, which may only name a legal entity in the actor's scope.
+    if (input.partyChange && !inScope(scope, input.partyChange.legalEntityId)) return;
+    if (action === "delegate") {
+      if (!delegate || delegate === actor || delegate === input.requester) return;
+      state.history.push({ action: "delegated", levelId: state.levelId, actor, to: delegate });
+      state.approver = delegate;
+      return;
+    }
+    decision = action === "approve" ? "approved" : "rejected";
+    decidedScope = [...scope];
+  };
+  /** Applies queued decisions until one decides the level; false when `timeoutMs` passes first. */
+  const decided = async (timeoutMs?: number): Promise<boolean> => {
+    const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
+    for (;;) {
+      while (queued.length > 0 && decision === undefined) apply(queued.shift()!);
+      if (decision !== undefined) return true;
+      if (deadline === undefined) {
+        await condition(() => queued.length > 0);
+        continue;
+      }
+      const left = deadline - Date.now();
+      if (left <= 0 || !(await condition(() => queued.length > 0, left))) return false;
+    }
+  };
 
   for (const level of input.levels) {
     state.levelId = level.id;
     state.approver = level.approver;
     decision = undefined;
 
-    const decidedBeforeSla = await condition(() => decision !== undefined, level.slaMs);
+    const decidedBeforeSla = await decided(level.slaMs);
     if (!decidedBeforeSla) {
       state.history.push({
         action: "escalated",
@@ -106,7 +139,7 @@ export async function approvalWorkflow(input: ApprovalInput): Promise<ApprovalRe
         to: level.escalationApprover,
       });
       state.approver = level.escalationApprover;
-      await condition(() => decision !== undefined);
+      await decided();
     }
 
     state.history.push({
@@ -116,7 +149,7 @@ export async function approvalWorkflow(input: ApprovalInput): Promise<ApprovalRe
     });
     if (decision === "rejected") {
       state.status = "rejected";
-      await recordPartyDecision(input, "rejected", state.history);
+      await recordPartyDecision(input, "rejected", state.history, decidedScope);
       return snapshot(state);
     }
   }
@@ -124,7 +157,7 @@ export async function approvalWorkflow(input: ApprovalInput): Promise<ApprovalRe
   state.status = "approved";
   state.levelId = undefined;
   state.approver = undefined;
-  await recordPartyDecision(input, "approved", state.history);
+  await recordPartyDecision(input, "approved", state.history, decidedScope);
   return snapshot(state);
 }
 
@@ -132,18 +165,16 @@ async function recordPartyDecision(
   input: ApprovalInput,
   decision: "approved" | "rejected",
   history: ApprovalHistoryEntry[],
+  scope: string[],
 ): Promise<void> {
   const decidedBy = history[history.length - 1]?.actor;
   if (!input.partyChange || !decidedBy) return;
-  try {
-    await decidePartyChange({ ...input.partyChange, decision, decidedBy });
-  } catch (error) {
-    if (!(error instanceof ActivityFailure)) throw error;
-    throw ApplicationFailure.nonRetryable(
-      `party decision for change ${input.partyChange.changeId} not recorded: decidePartyChange is not built on this worker (follow-up: authenticated signal actor for credit decisions)`,
-      "PartyDecisionNotBuilt",
-    );
-  }
+  await decidePartyChange({ ...input.partyChange, decision, decidedBy, scope });
+}
+
+function inScope(scope: readonly string[], legalEntityId: string): boolean {
+  const wanted = legalEntityId.trim().toLowerCase();
+  return !!wanted && scope.some((entry) => entry.trim().toLowerCase() === wanted);
 }
 
 export function validateInput(input: ApprovalInput): void {
