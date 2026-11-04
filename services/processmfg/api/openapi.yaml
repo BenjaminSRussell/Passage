@@ -1290,6 +1290,31 @@ paths:
           description: PMF-0118
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-records/{id}/pdf:
+    get:
+      operationId: getBatchRecordPdf
+      summary: The sealed batch record rendered as a PDF (FR-24.21)
+      description: >-
+        A plain PDF 1.4 rendering derived only from the sealed JSON document (a header with the batch, approval, seal,
+        content hash and signatures, then the sealed document itself, indented), the same bytes on every call.
+        X-Content-SHA256 is the content hash of the sealed JSON it shows; the sealed JSON stays the record of
+        authority. NOT PDF/A-2b: the font is not embedded and there is no XMP metadata or output intent, and there is
+        no conformance validator in the build; see NOT-IMPLEMENTED.md.
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The PDF.
+          content: { application/pdf: { schema: { type: string, format: binary } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0118
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0120 when the record is not sealed.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/production/batch-records/{id}/exceptions:
     post:
       operationId: raiseBatchRecordException
@@ -1320,20 +1345,24 @@ paths:
   /v1/production/batch-records/{id}/exceptions/{exceptionId}:disposition:
     post:
       operationId: dispositionBatchRecordException
-      summary: Decide an exception of a record in review with the signature behind it (BR-24.15)
+      summary: Decide and sign an exception of a record in review (BR-24.15, FR-24.22)
       description: >-
-        Accept it, raise a deviation or reject; this is the review step (PRD duty *Review batch records*). WARNING, NOT
-        21 CFR PART 11 COMPLIANT YET: the signature service (FR-24.22) is not built, so signatureId is stored exactly as
-        given and is NOT verified. Any well-formed UUID is accepted; there is no re-authentication, no binding of the
-        signature to the record hash and no check that the signature exists or belongs to the caller. The decision is
-        attributed to the authenticated caller (dispositionedBy), and the sealed document records signaturesVerified
-        false. A decision is final (409 PMF-0125). Writes
+        Accept it, raise a deviation or reject; this is the review step (PRD duty *Review batch records*). The decision
+        is signed by this call with the meaning reviewed (21 CFR 11.50): the caller re-authenticates (step-up assertion
+        in X-Passage-Reauth-Assertion), the service checks the BR-24.14 lockout, asks its re-authentication verifier
+        for proof bound to the caller, the record and the SHA-256 of the canonical JSON being signed (the record at
+        the version read, the exception and the decision), recomputes that hash under the row lock (409 PMF-0013 when
+        the record changed) and appends the signature (signer, printed name, meaning, time, the verified method,
+        never the client's claim, and the hash) to an append-only table; signatureId of the exception is that
+        signature. A client-made signatureId is refused (400). Without a verifier signing answers 503; a development
+        deployment binds a stand-in whose method is dev-unverified. A decision is final (409 PMF-0125). Writes
         dev.passage.production.batchrecord.exceptiondispositioned.v1.
       x-passage-duty: production.batch-record.write
       parameters:
         - $ref: '#/components/parameters/Id'
         - { name: exceptionId, in: path, required: true, schema: { type: string, format: uuid } }
         - $ref: '#/components/parameters/IdempotencyKey'
+        - { name: X-Passage-Reauth-Assertion, in: header, required: false, schema: { type: string }, description: 'The step-up re-authentication assertion (21 CFR 11.200) the verifier checks against the signer, the record and the signed hash.' }
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/DispositionExceptionRequest' } } }
@@ -1346,7 +1375,16 @@ paths:
           description: PMF-0118 when the record is not found; PMF-0122 when it has no such exception.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '409':
-          description: PMF-0104 when the version is stale; PMF-0120 when the record is no longer in review; PMF-0125 when the exception is already decided.
+          description: PMF-0104 when the version is stale; PMF-0120 when the record is no longer in review; PMF-0125 when the exception is already decided; PMF-0013 when the record changed after it was read for signing.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '403':
+          description: PMF-0010 when the re-authentication is rejected (counted; the third failure in a row locks signing).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '423':
+          description: PMF-0011 while signing is locked (15 minutes after three failed re-authentications, BR-24.14).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '503':
+          description: PMF-0135 when no re-authentication service is configured; signing fails closed.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
           description: idempotency_key_reuse.
@@ -1360,16 +1398,19 @@ paths:
         Refused with 422 PMF-0014 while any exception lacks a disposition or its signature, with 409 PMF-0121 when a
         value outside its limits was recorded after the last compile (compile again first), and with 422 PMF-0124 when
         the caller raised or decided an exception of this record or created its batch order (segregation of duties,
-        PRD 4.24.17). The signature ids behind the decisions are not verified (see the disposition operation). Once
-        approved, the content is frozen and the batch can be released. Writes
+        PRD 4.24.17). The approval is signed by this call with the meaning approved, as a disposition is (step-up
+        re-authentication, BR-24.14 lockout, the hash of the record at the version read with every decision,
+        recomputed under the row lock); approvalSignatureId names it. Once approved, the content is frozen and the
+        batch can be released. Writes
         dev.passage.production.batchrecord.approved.v1.
       x-passage-duty: production.batch-record.approve
       parameters:
         - $ref: '#/components/parameters/Id'
         - $ref: '#/components/parameters/IdempotencyKey'
+        - { name: X-Passage-Reauth-Assertion, in: header, required: false, schema: { type: string }, description: 'The step-up re-authentication assertion (21 CFR 11.200) the verifier checks against the signer, the record and the signed hash.' }
       requestBody:
         required: true
-        content: { application/json: { schema: { $ref: '#/components/schemas/VersionRequest' } } }
+        content: { application/json: { schema: { $ref: '#/components/schemas/ApproveRecordRequest' } } }
       responses:
         '200':
           description: 'The approved record at version + 1. A replay returns the first answer with Idempotent-Replayed: true.'
@@ -1379,7 +1420,16 @@ paths:
           description: PMF-0118
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '409':
-          description: PMF-0104 when the version is stale; PMF-0120 when the record is not in review; PMF-0121 when the record is out of date.
+          description: PMF-0104 when the version is stale; PMF-0120 when the record is not in review; PMF-0121 when the record is out of date; PMF-0013 when the record changed after it was read for signing.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '403':
+          description: PMF-0010 when the re-authentication is rejected (counted; the third failure in a row locks signing).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '423':
+          description: PMF-0011 while signing is locked (15 minutes after three failed re-authentications, BR-24.14).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '503':
+          description: PMF-0135 when no re-authentication service is configured; signing fails closed.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
           description: PMF-0014 while any exception lacks a disposition or a signature; PMF-0124 when the caller reviewed the record or created its batch order; idempotency_key_reuse.
@@ -1394,9 +1444,11 @@ paths:
         exceptions with their decisions, and its SHA-256: contentHash is the hex SHA-256 of the UTF-8 bytes of
         sealedDocument. Canonical means compact, object keys sorted at every level, no HTML escaping, numbers as first
         written (quantities and money are decimal strings) and times in UTC, so any sorted-keys JSON encoder
-        reproduces it. The document carries signaturesVerified false while the signature service is not built. A
-        sealed record never changes again; the database refuses any update or delete. No PDF/A rendition or document
-        archive yet. Writes dev.passage.production.batchrecord.sealed.v1.
+        reproduces it. The document carries every signature of the record and signaturesVerified, true only when every
+        decision and the approval are backed by a signature made here with a verified re-authentication (false for a
+        dev-unverified signature or a decision made before signatures were made by the service). A sealed record never
+        changes again; the database refuses any update or delete. GET .../pdf renders it; no PDF/A rendition or
+        document archive yet. Writes dev.passage.production.batchrecord.sealed.v1.
       x-passage-duty: production.batch-record.approve
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -2395,12 +2447,32 @@ components:
         severity: { type: string, enum: [minor, major, critical], default: major }
     DispositionExceptionRequest:
       type: object
-      required: [version, disposition, signatureId]
+      required: [version, disposition, printedName]
       properties:
         version: { type: integer, minimum: 1, description: The record version the caller read. }
         disposition: { type: string, enum: [accepted, deviation-raised, rejected] }
         comment: { type: string, maxLength: 500 }
-        signatureId: { type: string, format: uuid, description: 'The electronic signature (FR-24.22) meant to back the decision. NOT VERIFIED: stored as given until the signature service exists.' }
+        printedName: { type: string, minLength: 1, maxLength: 200, description: The signer's printed name (11.50(a)(1)). }
+        method: { type: string, maxLength: 64, description: 'The method the client used, passed to the verifier; the signature records the method the verifier proved.' }
+    ApproveRecordRequest:
+      type: object
+      required: [version, printedName]
+      properties:
+        version: { type: integer, minimum: 1, description: The record version the caller read. }
+        printedName: { type: string, minLength: 1, maxLength: 200, description: The signer's printed name (11.50(a)(1)). }
+        method: { type: string, maxLength: 64 }
+    RecordSignature:
+      type: object
+      required: [id, meaning, signerId, printedName, method, recordHash, signedAt]
+      properties:
+        id: { type: string, format: uuid }
+        exceptionId: { type: string, format: uuid, description: The exception a reviewed signature decided. }
+        meaning: { type: string, enum: [reviewed, approved] }
+        signerId: { type: string }
+        printedName: { type: string }
+        method: { type: string, description: 'The re-authentication method the verifier proved; dev-unverified for the development stand-in.' }
+        recordHash: { type: string, description: Hex SHA-256 of the canonical JSON that was signed. }
+        signedAt: { type: string, format: date-time }
     RecordException:
       type: object
       required: [id, sourceType, sourceId, description, severity, createdBy, createdAt]
@@ -2442,8 +2514,10 @@ components:
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         content: { type: object, additionalProperties: true, description: 'The compiled sections, batchOrder and batch. Only on the detail.' }
-        sealedDocument: { type: string, description: 'The canonical JSON document that was hashed (recordId, batch and profile ids, compiledAt, approvedBy, approvedAt, sealedBy, sealedAt, signaturesVerified, content, exceptions). Only on a sealed record''s detail.' }
+        sealedDocument: { type: string, description: 'The canonical JSON document that was hashed (recordId, batch and profile ids, compiledAt, approvedBy, approvedAt, sealedBy, sealedAt, signaturesVerified, content, exceptions, approvalSignatureId, signatures). Only on a sealed record''s detail.' }
         exceptions: { type: array, items: { $ref: '#/components/schemas/RecordException' }, description: Only on the detail and the commands. }
+        approvalSignatureId: { type: string, format: uuid, description: The QA signature (meaning approved) behind the approval. }
+        signatures: { type: array, items: { $ref: '#/components/schemas/RecordSignature' }, description: Every Part 11 signature of the record. Only on the detail and the commands. }
     Problem:
       type: object
       description: RFC 9457 problem details.

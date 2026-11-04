@@ -1,11 +1,17 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/services/processmfg/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/processmfg/internal/store"
 )
 
@@ -13,7 +19,6 @@ const (
 	ebrBatch     = "77777777-0000-4000-8000-0000000000b1"
 	ebrRecord    = "77777777-0000-4000-8000-0000000000c1"
 	ebrException = "77777777-0000-4000-8000-0000000000d1"
-	ebrSignature = "77777777-0000-4000-8000-0000000000e1"
 )
 
 // ebrCalls records what the handlers pass to the batch record methods.
@@ -26,7 +31,10 @@ type ebrCalls struct {
 	exception string
 	raise     store.NewException
 	dispose   store.ExceptionDisposition
+	sign      store.Signing
 	version   int
+	lockouts  map[string]domain.Lockout
+	record    *store.Record
 }
 
 func (f *fakeStore) DefineRecordProfile(_ context.Context, in store.RecordProfile, idem store.Idem) (store.RecordProfile, bool, error) {
@@ -60,7 +68,28 @@ func (f *fakeStore) ListRecords(_ context.Context, fl store.RecordFilter) ([]sto
 }
 
 func (f *fakeStore) GetRecord(_ context.Context, id string) (store.Record, error) {
-	return store.Record{ID: id, Version: 1}, f.err
+	if f.ebr.record != nil {
+		return *f.ebr.record, f.err
+	}
+	return store.Record{ID: id, Version: 1, Exceptions: []store.RecordException{{ID: ebrException, SourceType: "manual", SourceID: ebrException, Description: "Torn seal", Severity: "major"}}}, f.err
+}
+
+func (f *fakeStore) SignerLockout(_ context.Context, signer string) (domain.Lockout, error) {
+	return f.ebr.lockouts[signer], nil
+}
+
+func (f *fakeStore) RecordReauthResult(_ context.Context, signer string, failed bool, now time.Time) (domain.Lockout, error) {
+	if f.ebr.lockouts == nil {
+		f.ebr.lockouts = map[string]domain.Lockout{}
+	}
+	l := f.ebr.lockouts[signer]
+	if failed {
+		l.Fail(now)
+	} else {
+		l.Succeed()
+	}
+	f.ebr.lockouts[signer] = l
+	return l, nil
 }
 
 func (f *fakeStore) RaiseException(_ context.Context, id string, in store.NewException, version int, idem store.Idem) (store.Record, bool, error) {
@@ -73,8 +102,8 @@ func (f *fakeStore) DispositionException(_ context.Context, id, exception string
 	return store.Record{ID: id, Version: version + 1}, !f.replay, f.err
 }
 
-func (f *fakeStore) ApproveRecord(_ context.Context, id string, version int, idem store.Idem) (store.Record, bool, error) {
-	f.ebr.recordID, f.ebr.version, f.gotIdem = id, version, idem
+func (f *fakeStore) ApproveRecord(_ context.Context, id string, version int, sign store.Signing, idem store.Idem) (store.Record, bool, error) {
+	f.ebr.recordID, f.ebr.version, f.ebr.sign, f.gotIdem = id, version, sign, idem
 	return store.Record{ID: id, Status: store.RecordApproved, Version: version + 1}, !f.replay, f.err
 }
 
@@ -123,9 +152,16 @@ func TestProfile_Rejects(t *testing.T) {
 	}
 }
 
+// signRouter mounts the API with reauth as the step-up verifier.
+func signRouter(f *fakeStore, reauth Reauthenticator) http.Handler {
+	r := httpx.NewRouter()
+	New(f).WithReauth(reauth).Register(r)
+	return r
+}
+
 func TestRecord_CompileAndVersionedCommands(t *testing.T) {
 	f := &fakeStore{}
-	h := newRouter(f)
+	h := signRouter(f, DevReauth{})
 	rec := call{method: "POST", path: recordsPath, body: `{"batchId":"` + strings.ToUpper(ebrBatch) + `"}`, duties: DutyBatchRecordWrite, headers: key("c-1")}.do(h)
 	if rec.Code != http.StatusOK || f.ebr.batchID != ebrBatch {
 		t.Fatalf("compile %d %s batch %q", rec.Code, rec.Body, f.ebr.batchID)
@@ -146,16 +182,104 @@ func TestRecord_CompileAndVersionedCommands(t *testing.T) {
 	}
 
 	disp := call{method: "POST", path: recordsPath + "/" + ebrRecord + "/exceptions/" + ebrException + ":disposition", duties: DutyBatchRecordWrite, headers: key("d-1"),
-		body: `{"version":4,"disposition":"deviation-raised","comment":"DEV-12","signatureId":"` + ebrSignature + `"}`}.do(h)
-	if disp.Code != http.StatusOK || f.ebr.exception != ebrException || f.ebr.dispose.Disposition != "deviation-raised" || f.ebr.dispose.SignatureID != ebrSignature || f.ebr.version != 4 {
-		t.Fatalf("disposition %d %s %+v", disp.Code, disp.Body, f.ebr.dispose)
+		body: `{"version":4,"disposition":"deviation-raised","comment":"DEV-12","printedName":" Rita Reviewer ","method":"password"}`}.do(h)
+	rec0, _ := f.GetRecord(context.Background(), ebrRecord)
+	want, _ := store.DispositionHash(rec0, ebrException, "deviation-raised", "DEV-12")
+	d := f.ebr.dispose
+	// The signature records the method the verifier proved, never the client's claim.
+	if disp.Code != http.StatusOK || f.ebr.exception != ebrException || d.Disposition != "deviation-raised" || f.ebr.version != 4 ||
+		d.Sign.PrintedName != "Rita Reviewer" || d.Sign.Method != domain.AuthDevUnverified || !bytes.Equal(d.Sign.RecordHash, want) {
+		t.Fatalf("disposition %d %s %+v", disp.Code, disp.Body, d)
 	}
 
-	for _, step := range []string{"approve", "seal"} {
-		r := call{method: "POST", path: recordsPath + "/" + ebrRecord + ":" + step, body: `{"version":5}`, duties: DutyBatchRecordApprove, headers: key("s-" + step)}.do(h)
-		if r.Code != http.StatusOK || f.ebr.recordID != ebrRecord || f.ebr.version != 5 {
-			t.Fatalf("%s %d %s", step, r.Code, r.Body)
+	ap := call{method: "POST", path: recordsPath + "/" + ebrRecord + ":approve", body: `{"version":5,"printedName":"Quinn QA"}`, duties: DutyBatchRecordApprove, headers: key("s-approve")}.do(h)
+	wantAp, _ := store.ApprovalHash(rec0)
+	if ap.Code != http.StatusOK || f.ebr.recordID != ebrRecord || f.ebr.version != 5 || f.ebr.sign.PrintedName != "Quinn QA" || !bytes.Equal(f.ebr.sign.RecordHash, wantAp) {
+		t.Fatalf("approve %d %s %+v", ap.Code, ap.Body, f.ebr.sign)
+	}
+	seal := call{method: "POST", path: recordsPath + "/" + ebrRecord + ":seal", body: `{"version":6}`, duties: DutyBatchRecordApprove, headers: key("s-seal")}.do(h)
+	if seal.Code != http.StatusOK || f.ebr.version != 6 {
+		t.Fatalf("seal %d %s", seal.Code, seal.Body)
+	}
+}
+
+// Without a configured step-up verifier no batch record is signed (503).
+func TestRecord_SigningFailsClosed(t *testing.T) {
+	f := &fakeStore{}
+	h := newRouter(f)
+	disp := call{method: "POST", path: recordsPath + "/" + ebrRecord + "/exceptions/" + ebrException + ":disposition", duties: DutyBatchRecordWrite, headers: key("d"),
+		body: `{"version":1,"disposition":"accepted","printedName":"R"}`}.do(h)
+	ap := call{method: "POST", path: recordsPath + "/" + ebrRecord + ":approve", body: `{"version":1,"printedName":"Q"}`, duties: DutyBatchRecordApprove, headers: key("a")}.do(h)
+	for _, rec := range []*httptest.ResponseRecorder{disp, ap} {
+		if rec.Code != http.StatusServiceUnavailable || problemOf(t, rec).Code != domain.CodeSignatureUnavailable {
+			t.Fatalf("got %d %s", rec.Code, rec.Body)
 		}
+	}
+	if f.ebr.dispose.Disposition != "" || f.ebr.sign.PrintedName != "" {
+		t.Fatal("the store was called without a signature")
+	}
+}
+
+type reauthFunc func(context.Context, string, domain.Reauth) (string, error)
+
+func (fn reauthFunc) Verify(ctx context.Context, actor string, auth domain.Reauth) (string, error) {
+	return fn(ctx, actor, auth)
+}
+
+// BR-24.14: three rejected re-authentications lock signing for 15 minutes; the
+// verifier is not asked while locked, and a success afterwards clears the count.
+func TestRecord_SigningLockout(t *testing.T) {
+	f := &fakeStore{}
+	now := time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)
+	good := false
+	asked := 0
+	var gotAuth domain.Reauth
+	reauth := reauthFunc(func(_ context.Context, actor string, auth domain.Reauth) (string, error) {
+		asked++
+		gotAuth = auth
+		if good {
+			return "password+otp", nil
+		}
+		return "", &domain.Error{Code: domain.CodeSignatureRejected, Detail: "signature rejected: re-authentication failed"}
+	})
+	r := httpx.NewRouter()
+	New(f).WithReauth(reauth).WithClock(func() time.Time { return now }).Register(r)
+	approve := func(k string) *httptest.ResponseRecorder {
+		return call{method: "POST", path: recordsPath + "/" + ebrRecord + ":approve", body: `{"version":1,"printedName":"Q"}`, duties: DutyBatchRecordApprove,
+			headers: map[string]string{"Idempotency-Key": k, ReauthHeader: "assertion-" + k}}.do(r)
+	}
+	for i, want := range []int{http.StatusForbidden, http.StatusForbidden, http.StatusLocked, http.StatusLocked} {
+		rec := approve(fmt.Sprint("a", i))
+		if rec.Code != want {
+			t.Fatalf("attempt %d: got %d %s, want %d", i+1, rec.Code, rec.Body, want)
+		}
+	}
+	if asked != 3 || gotAuth.Assertion != "assertion-a2" || gotAuth.RecordID != ebrRecord || len(gotAuth.RecordHash) != 32 {
+		t.Fatalf("verifier asked %d times, last %+v", asked, gotAuth)
+	}
+	good = true
+	now = now.Add(domain.LockoutWindow + time.Second)
+	if rec := approve("a-ok"); rec.Code != http.StatusOK || f.ebr.sign.Method != "password+otp" {
+		t.Fatalf("after the lock: %d %s %+v", rec.Code, rec.Body, f.ebr.sign)
+	}
+}
+
+func TestRecord_PDF(t *testing.T) {
+	doc := `{"approvedAt":"2026-11-04T09:00:00Z","approvedBy":"qa-1","batchNumber":"L-1","content":{"batch":{"disposition":"quarantine"}},` +
+		`"exceptions":[],"recordId":"` + ebrRecord + `","sealedAt":"2026-11-04T10:00:00Z","sealedBy":"qa-1","signatures":[],"signaturesVerified":false}`
+	hash := store.HashHex(doc)
+	f := &fakeStore{}
+	f.ebr.record = &store.Record{ID: ebrRecord, BatchNumber: "L-1", Status: store.RecordSealed, SealedDocument: &doc, ContentHash: &hash}
+	h := newRouter(f)
+	rec := call{method: "GET", path: recordsPath + "/" + ebrRecord + "/pdf", duties: DutyRead}.do(h)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/pdf" || rec.Header().Get("X-Content-SHA256") != hash ||
+		!strings.HasPrefix(body, "%PDF-1.4") || !strings.Contains(body, hash) || !strings.Contains(body, "Signatures verified: NO") {
+		t.Fatalf("pdf %d %v %.300s", rec.Code, rec.Header(), body)
+	}
+	f.ebr.record = &store.Record{ID: ebrRecord, Status: store.RecordApproved}
+	if rec := (call{method: "GET", path: recordsPath + "/" + ebrRecord + "/pdf", duties: DutyRead}.do(h)); rec.Code != http.StatusConflict {
+		t.Fatalf("unsealed pdf %d", rec.Code)
 	}
 }
 
@@ -171,15 +295,17 @@ func TestRecord_RejectsAndDuties(t *testing.T) {
 		{"exception bad severity", exPath, `{"version":1,"description":"x","severity":"huge"}`, DutyBatchRecordWrite, 400},
 		{"exception no version", exPath, `{"description":"x"}`, DutyBatchRecordWrite, 400},
 		{"exception text too long", exPath, `{"version":1,"description":"` + strings.Repeat("x", 501) + `"}`, DutyBatchRecordWrite, 400},
-		{"disposition unknown", dispPath, `{"version":1,"disposition":"ignore","signatureId":"` + ebrSignature + `"}`, DutyBatchRecordWrite, 400},
-		{"disposition without signature", dispPath, `{"version":1,"disposition":"accepted"}`, DutyBatchRecordWrite, 400},
-		{"disposition bad exception id", exPath + "/x:disposition", `{"version":1,"disposition":"accepted","signatureId":"` + ebrSignature + `"}`, DutyBatchRecordWrite, 400},
+		{"disposition unknown", dispPath, `{"version":1,"disposition":"ignore","printedName":"R"}`, DutyBatchRecordWrite, 400},
+		{"disposition without printed name", dispPath, `{"version":1,"disposition":"accepted"}`, DutyBatchRecordWrite, 400},
+		{"client signature id refused", dispPath, `{"version":1,"disposition":"accepted","printedName":"R","signatureId":"X"}`, DutyBatchRecordWrite, 400},
+		{"approve without printed name", recordsPath + "/" + ebrRecord + ":approve", `{"version":1}`, DutyBatchRecordApprove, 400},
+		{"disposition bad exception id", exPath + "/x:disposition", `{"version":1,"disposition":"accepted","printedName":"R"}`, DutyBatchRecordWrite, 400},
 		{"approve without version", recordsPath + "/" + ebrRecord + ":approve", `{}`, DutyBatchRecordApprove, 400},
 		{"approve bad id", recordsPath + "/x:approve", `{"version":1}`, DutyBatchRecordApprove, 400},
 		{"seal needs approve duty", recordsPath + "/" + ebrRecord + ":seal", `{"version":1}`, DutyBatchRecordWrite, 403},
 		{"approve needs approve duty", recordsPath + "/" + ebrRecord + ":approve", `{"version":1}`, DutyBatchRecordWrite, 403},
-		{"disposition needs the review duty", dispPath, `{"version":1,"disposition":"accepted","signatureId":"` + ebrSignature + `"}`, DutyRead, 403},
-		{"approve duty alone does not decide", dispPath, `{"version":1,"disposition":"accepted","signatureId":"` + ebrSignature + `"}`, DutyBatchRecordApprove, 403},
+		{"disposition needs the review duty", dispPath, `{"version":1,"disposition":"accepted","printedName":"R"}`, DutyRead, 403},
+		{"approve duty alone does not decide", dispPath, `{"version":1,"disposition":"accepted","printedName":"R"}`, DutyBatchRecordApprove, 403},
 		{"compile needs write duty", recordsPath, `{"batchId":"` + ebrBatch + `"}`, DutyRead, 403},
 		{"profile needs write duty", profilesPath, `{"code":"A","itemId":"` + pickItem + `"}`, DutyRead, 403},
 	}

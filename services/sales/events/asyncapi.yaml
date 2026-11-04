@@ -932,6 +932,8 @@ components:
               delivered_qty: {type: string, description: the line's delivered quantity after the report}
               invoiced_qty: {type: string, description: the line's invoiced quantity after the report}
               line_status: {type: string, enum: [OPEN, RESERVED, PICKED, DELIVERED, INVOICED, CANCELLED]}
+              reported_weight: {type: string, description: "catch-weight lines on a DELIVERED report only (FR-24.7): the weight this report delivered (its actualWeight, else cases x nominal), decimal string in the product's inventory weight unit"}
+              delivered_weight: {type: string, description: "catch-weight lines on a DELIVERED report only: the line's delivered weight so far"}
         previous_status: {type: string}
         order_status: {type: string, enum: [CONFIRMED, PARTIALLY_SHIPPED, SHIPPED, INVOICED]}
         actor: {type: string}
@@ -1017,6 +1019,14 @@ components:
               confirmed_receipt_date: {type: string, format: date, description: "confirmed_ship_date plus the customer's transport days, rolled to its next receiving weekday (BR-27.2)"}
               atp_qty: {type: string, description: "quantity of the line whose schedule lines are CONFIRMED (promised by the requested date); a release caller sends it as atpQty on POST /v1/fulfillment/releases:run"}
               configuration_id: {type: string, format: uuid, description: the saved configuration of a configured line; production builds the line to it (absent on ordinary lines)}
+              catch_weight:
+                type: object
+                description: "catch-weight lines only (FR-24.7): quantity is then a count of cases; the spec is per case, decimal strings in the product's inventory weight unit"
+                required: [nominal, min, max]
+                properties:
+                  nominal: {type: string}
+                  min: {type: string}
+                  max: {type: string}
         net_total: {type: string}
         version: {type: integer}
         one_time:

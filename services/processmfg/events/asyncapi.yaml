@@ -588,7 +588,7 @@ components:
         sourceType: { type: string, enum: [attribute, manual] }
         severity: { type: string, enum: [minor, major, critical] }
         disposition: { type: string, enum: [accepted, deviation-raised, rejected], description: Set on exceptiondispositioned. }
-        signatureId: { type: string, format: uuid, description: 'Set on exceptiondispositioned. Stored as the caller gave it and NOT verified: the signature service (FR-24.22) is not built yet.' }
+        signatureId: { type: string, format: uuid, description: 'Set on exceptiondispositioned. The ebr_signature (meaning reviewed) the call made over the hash of the decision (FR-24.22); for decisions made before migration 0010, an unverified client-given id.' }
     ReworkOrderCreatedData:
       type: object
       required: [reworkId, batchOrderId, legalEntityId, itemId, sourceBatchId, inputQty, outputQty, keepBatchNumber, qualityOrderRequired, outputDisposition, varianceType]

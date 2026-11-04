@@ -131,6 +131,36 @@ func CanonicalJSON(v any) ([]byte, error) {
 	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }
 
+// CodeSignatureUnavailable answers a signing while no re-authentication
+// service is configured: signing fails closed (503). It is a service code.
+const CodeSignatureUnavailable = "PMF-0135"
+
+// AuthDevUnverified is the method the development re-authenticator records: no
+// re-authentication took place, so a signature with it is never verified.
+const AuthDevUnverified = "dev-unverified"
+
+// Signature meanings on the electronic batch record (11.50(a)(3)).
+const (
+	MeaningReviewed = "reviewed"
+	MeaningApproved = "approved"
+)
+
+// Reauth is the step-up proof a signer gives with a signing (11.200), bound to
+// the record and the hash of exactly what is signed.
+type Reauth struct {
+	UserID     string
+	Assertion  string
+	Method     string
+	RecordID   string
+	RecordHash []byte
+}
+
+// VerifiedMethod reports whether a signature made with method rests on a real
+// re-authentication (not the development stand-in).
+func VerifiedMethod(method string) bool {
+	return method != "" && method != AuthDevUnverified
+}
+
 // CheckSignatureValid returns PMF-0013 when the signed hash no longer matches the
 // current record hash: the signature is invalidated until re-signed (11.70).
 func CheckSignatureValid(signed, current []byte) error {

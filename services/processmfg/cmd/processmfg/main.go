@@ -53,7 +53,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 		}
 	}
 	router := httpx.NewRouter()
-	api.New(store.New(pool)).Register(router)
+	h := api.New(store.New(pool))
+	// Batch record signing fails closed (503) until a step-up verifier exists;
+	// only a dev deployment binds the stand-in, whose signatures say unverified.
+	if getenv("PASSAGE_ENV") == "dev" {
+		h.WithReauth(api.DevReauth{})
+	}
+	h.Register(router)
 	addr := getenv("HTTP_ADDR")
 	if addr == "" {
 		addr = defaultHTTPAddr
