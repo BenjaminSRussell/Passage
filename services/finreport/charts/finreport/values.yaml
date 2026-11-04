@@ -13,6 +13,8 @@ serviceMonitor: { enabled: false }
 # Tunables are validated at startup (internal/config); defaults follow PRD §2.15.13.
 reporting:
   maxLagSeconds: 30
+  # Seconds the lag stays above maxLagSeconds before lag.exceeded (lag-check job).
+  lagAlertSeconds: 60
   cellKeyLimit: 50000
   pageSize: 500
   retentionClosedYears: 7
@@ -46,3 +48,10 @@ consumer:
     group: reporting-balances
     username: finreport-consumer
     secret: ""
+# Lag alert (FR-15.1): `finreport lag-check` every minute for each tenant
+# listed; one lag.exceeded.v1 per episode. Runs as an in-process system actor,
+# so it needs no authz seed and no signing key.
+lagCheck:
+  enabled: false
+  schedule: "* * * * *"
+  tenantIds: []

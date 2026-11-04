@@ -16,6 +16,8 @@ export interface RunValues {
   periodsPerYear: string;
   firstYear: string;
   includeAdjustmentPeriods: boolean;
+  /** Accept a read model behind the lag gate (REPORT-0004); the run then carries a stale warning. */
+  allowStale?: boolean;
   /** Code of a published hierarchy whose nodes become the rows; empty runs the definition's own rows. */
   hierarchy: string;
   hierarchyVersion: string;
@@ -61,6 +63,7 @@ export function toRunRequest(v: RunValues): RunRequest {
     period,
     calendar,
     ...(v.includeAdjustmentPeriods ? { includeAdjustmentPeriods: true } : {}),
+    ...(v.allowStale ? { allowStale: true } : {}),
     ...(v.hierarchy !== ""
       ? {
           hierarchy: {
@@ -89,6 +92,7 @@ export function NewRunPage() {
     periodsPerYear: "12",
     firstYear: String(thisYear - 1),
     includeAdjustmentPeriods: false,
+    allowStale: false,
     hierarchy: "",
     hierarchyVersion: "",
     normalBalance: "debit",
@@ -111,15 +115,19 @@ export function NewRunPage() {
     key.current = newKey();
   }
 
-  async function submit(event: FormEvent) {
+  function submit(event: FormEvent) {
     event.preventDefault();
-    const found = validateRun(values);
+    return start(values);
+  }
+
+  async function start(sent: RunValues) {
+    const found = validateRun(sent);
     setErrors(found);
     setFailure(null);
     if (Object.keys(found).length > 0) return;
     setBusy(true);
     try {
-      const run = await createRun(toRunRequest(values), key.current);
+      const run = await createRun(toRunRequest(sent), key.current);
       navigate(`/finreport/runs/${run.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -238,6 +246,10 @@ export function NewRunPage() {
             />
             <label htmlFor="fr-run-adjustment">Include adjustment periods</label>
           </span>
+          <span className={styles.check}>
+            <Input id="fr-run-stale" type="checkbox" checked={values.allowStale} onChange={(e) => update({ allowStale: e.target.checked })} />
+            <label htmlFor="fr-run-stale">Accept stale results</label>
+          </span>
           <div className={styles.formActions}>
             <Button type="submit" variant="primary" loading={busy}>
               Run statement
@@ -248,7 +260,27 @@ export function NewRunPage() {
           </div>
         </form>
       </Card>
-      {failure ? (
+      {failure?.code === "REPORT-0004" ? (
+        <Alert
+          tone="warning"
+          title="The read model is behind the ledger"
+          live="alert"
+          action={
+            <Button
+              size="sm"
+              onClick={() => {
+                const next = { ...values, allowStale: true };
+                update({ allowStale: true });
+                void start(next);
+              }}
+            >
+              Run anyway
+            </Button>
+          }
+        >
+          {failure.message} ({failure.code})
+        </Alert>
+      ) : failure ? (
         <Alert tone="danger" title="The statement did not run" live="alert">
           {failure.message} ({failure.code})
         </Alert>

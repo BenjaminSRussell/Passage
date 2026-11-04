@@ -83,12 +83,13 @@ type API struct {
 	store     Store
 	linePage  int                    // drill level 2 default page size (REPORTING_PAGE_SIZE)
 	traceLink func(id string) string // trace viewer link of a line (REPORTING_TRACE_URL)
+	maxLag    int                    // lag gate in seconds (REPORTING_MAX_LAG_S)
 	verifier  Verifier               // balance verification against the ledger; nil when LEDGER_URL is not set
 }
 
 // New returns the API over st with the default reporting tunables.
 func New(st Store) *API {
-	return &API{store: st, linePage: domain.DefaultLinePage, traceLink: config.Reporting{}.TraceLink}
+	return &API{store: st, linePage: domain.DefaultLinePage, traceLink: config.Reporting{}.TraceLink, maxLag: 30}
 }
 
 // WithConfig applies the reporting tunables the handlers use.
@@ -97,6 +98,7 @@ func (a *API) WithConfig(cfg config.Reporting) *API {
 		a.linePage = cfg.PageSize
 	}
 	a.traceLink = cfg.TraceLink
+	a.maxLag = cfg.MaxLagSeconds
 	return a
 }
 
@@ -331,6 +333,9 @@ type runRequest struct {
 	Calendar          []periodDTO      `json:"calendar"`
 	IncludeAdjustment bool             `json:"includeAdjustmentPeriods"`
 	Hierarchy         *hierarchyRunDTO `json:"hierarchy"`
+	// AllowStale accepts a read model behind the lag gate: the run completes
+	// with the REPORT-0004 warning instead of being refused (FR-15.1).
+	AllowStale bool `json:"allowStale"`
 }
 
 // hierarchyRunDTO asks for the rows of the run to be the nodes of a published
@@ -381,6 +386,7 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 		Code: req.Definition, Version: req.DefinitionVersion, LedgerID: req.LedgerID, LegalEntityID: req.LegalEntityID, CurrencyType: req.CurrencyType,
 		PeriodYear: req.Period.Year, PeriodNo: req.Period.No, IncludeAdjustment: req.IncludeAdjustment, Calendar: cal,
 		RequestedBy: p.UserID, IdempotencyKey: key, RequestHash: hex.EncodeToString(sum[:]),
+		MaxLagSeconds: a.maxLag, AllowStale: req.AllowStale,
 	})
 	if err != nil {
 		fail(w, r, err)
@@ -649,7 +655,7 @@ func (a *API) lag(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": rows})
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": rows, "maxLagSeconds": a.maxLag})
 }
 
 // --- helpers ---------------------------------------------------------------

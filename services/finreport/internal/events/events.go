@@ -10,11 +10,12 @@ var (
 	DefinitionPublished = events.Type(Context, "definition", "published", 1)
 	HierarchyUnassigned = events.Type(Context, "hierarchy", "unassigned", 1)
 	BalanceVerified     = events.Type(Context, "balance", "verified", 1)
+	LagExceeded         = events.Type(Context, "lag", "exceeded", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{StatementGenerated, DefinitionPublished, HierarchyUnassigned, BalanceVerified}
+	return []string{StatementGenerated, DefinitionPublished, HierarchyUnassigned, BalanceVerified, LagExceeded}
 }
 
 // HierarchyUnassignedData is the payload of hierarchy.unassigned.v1: a member
@@ -77,4 +78,20 @@ type BalanceVerifiedData struct {
 	AccountsCompared int    `json:"accounts_compared"`
 	DiffCount        int    `json:"diff_count"`
 	Actor            string `json:"actor"`
+}
+
+// LagExceededData is the payload of lag.exceeded.v1 (PRD §2.15.5): the read
+// model of a ledger stayed behind by more than the lag gate for the alert
+// window. HWMLedger is the highest posting sequence the reporting service has
+// seen for the ledger (applied, or received and waiting for an earlier entry);
+// HWMReporting is the sequence it has applied.
+//
+// legal_entity_id (the ledger's owner) also becomes the event's legalentityid
+// extension, so a close board scoped to an entity sees its own ledgers only.
+type LagExceededData struct {
+	LedgerID      string `json:"ledger_id"`
+	LegalEntityID string `json:"legal_entity_id,omitempty"`
+	LagSeconds    int64  `json:"lag_seconds"`
+	HWMLedger     int64  `json:"hwm_ledger"`
+	HWMReporting  int64  `json:"hwm_reporting"`
 }

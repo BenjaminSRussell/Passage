@@ -1,0 +1,63 @@
+{{- if .Values.lagCheck.enabled }}
+{{- if not .Values.lagCheck.tenantIds }}
+{{- fail "lagCheck.tenantIds must list at least one tenant UUID when lagCheck.enabled is true" }}
+{{- end }}
+# FR-15.1 lag alert: `finreport lag-check` opens and closes lag episodes and
+# writes one dev.passage.reporting.lag.exceeded.v1 per episode. It runs in
+# process against the database (no route, no service call, no signing key).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-lag-check
+  labels:
+    app.kubernetes.io/name: finreport
+    app.kubernetes.io/component: lag-check
+spec:
+  schedule: {{ .Values.lagCheck.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 60
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 50
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: finreport
+            app.kubernetes.io/component: lag-check
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: finreport-lag-check
+              image: {{ if .Values.image.digest }}{{ printf "%s@%s" .Values.image.repository .Values.image.digest | quote }}{{ else }}{{ printf "%s:%s" .Values.image.repository (.Values.image.tag | default "latest") | quote }}{{ end }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args:
+                - lag-check
+                {{- range .Values.lagCheck.tenantIds }}
+                - {{ . | quote }}
+                {{- end }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.databaseSecret }}
+                      key: DATABASE_URL
+                - name: REPORTING_MAX_LAG_S
+                  value: {{ .Values.reporting.maxLagSeconds | quote }}
+                - name: REPORTING_LAG_ALERT_S
+                  value: {{ .Values.reporting.lagAlertSeconds | quote }}
+              resources:
+                requests: { cpu: 50m, memory: 64Mi }
+                limits: { cpu: 200m, memory: 128Mi }
+{{- end }}

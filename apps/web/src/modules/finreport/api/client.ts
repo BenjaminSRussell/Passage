@@ -183,6 +183,17 @@ export interface LagRow {
   entriesApplied?: number;
   /** Entries that arrived ahead of the mark and wait for an earlier one; absent from older services. */
   entriesPending?: number;
+  /** Seconds the oldest waiting entry has waited; 0 when nothing waits. Absent from older services. */
+  lagSeconds?: number;
+  /** Highest posting sequence seen for the ledger, applied or waiting. */
+  hwmLedger?: number;
+}
+
+/** The lag rows and the gate (reporting.max_lag_seconds) a run is refused above. */
+export interface LagStatus {
+  items: LagRow[];
+  /** Absent from older services. */
+  maxLagSeconds?: number;
 }
 
 export const VERIFICATION_STATUSES = ["matched", "differs", "inconclusive"] as const;
@@ -234,6 +245,8 @@ export interface RunRequest {
   period: CalendarPeriod;
   calendar: CalendarPeriod[];
   includeAdjustmentPeriods?: boolean;
+  /** Accepts a read model behind the lag gate: the run completes with a REPORT-0004 warning instead of being refused. */
+  allowStale?: boolean;
   /** Takes the rows from a published hierarchy; the definition supplies the columns. */
   hierarchy?: HierarchyRunRequest;
 }
@@ -388,8 +401,8 @@ export function drillLines(
   return get<LinePage>(`/runs/${seg(runId)}/cells/${seg(row)}/${seg(column)}/lines${qs ? `?${qs}` : ""}`, signal);
 }
 
-export async function getLag(signal?: AbortSignal): Promise<LagRow[]> {
-  return (await get<{ items: LagRow[] }>("/lag", signal)).items;
+export async function getLag(signal?: AbortSignal): Promise<LagStatus> {
+  return get<LagStatus>("/lag", signal);
 }
 
 export async function listVerifications(ledgerId: string, signal?: AbortSignal): Promise<VerificationSummary[]> {

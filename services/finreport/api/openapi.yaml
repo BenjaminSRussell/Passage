@@ -235,7 +235,7 @@ paths:
         '400': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
         '409':
-          description: idempotency_key_in_flight - the same key is being processed; retry
+          description: REPORT-0004 REPORT_STALE - the read model of the ledger is further behind than reporting.max_lag_seconds; repeat with allowStale true to accept a stale result. Also idempotency_key_in_flight - the same key is being processed; retry
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
@@ -587,16 +587,19 @@ paths:
       x-passage-duty: reporting.statement.view
       responses:
         '200':
-          description: Lag rows
+          description: Lag rows and the lag gate in force
           content:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required: [items, maxLagSeconds]
                 properties:
                   items:
                     type: array
                     items: {$ref: '#/components/schemas/LagRow'}
+                  maxLagSeconds: {type: integer, description: The lag gate (reporting.max_lag_seconds); a row with a larger lagSeconds is stale}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
   /v1/reporting/definitions/{code}:retire:
     parameters:
       - $ref: '#/components/parameters/Code'
@@ -1108,6 +1111,7 @@ components:
           items: {$ref: '#/components/schemas/Period'}
         includeAdjustmentPeriods: {type: boolean, description: Counts adjustment periods in P-n, YTD, Q and FY even when the definition does not}
         hierarchy: {$ref: '#/components/schemas/HierarchyRun'}
+        allowStale: {type: boolean, default: false, description: "Accepts a read model behind reporting.max_lag_seconds. The run completes with a REPORT-0004 warning in checks instead of being refused with 409 REPORT-0004."}
     HierarchyRun:
       type: object
       required: [code]
@@ -1285,6 +1289,8 @@ components:
         updatedAt: {type: string, format: date-time}
         entriesApplied: {type: integer, format: int64, description: Journal entries the ledger consumer has applied for this ledger}
         entriesPending: {type: integer, format: int64, description: Journal entries that arrived ahead of the high-water mark and wait for an earlier entry; a count that stays above zero means an entry is missing}
+        lagSeconds: {type: integer, format: int64, description: 'Age in seconds of the oldest entry waiting for an earlier one; 0 when none waits. A lower bound: entries the consumer has not received (consumer stopped or behind, an event lost with nothing after it) do not count'}
+        hwmLedger: {type: integer, format: int64, description: Highest posting sequence seen for the ledger, applied or waiting}
     StandardDefinition:
       type: object
       required: [code, name, kind, rows, columns]

@@ -6,6 +6,23 @@ keys and on to the journal lines, their source documents and traces. Phase 2
 exit wave. Reads from its own `reporting` database, fed by ledger
 events.
 
+## Slice 11: lag gate and lag alert
+
+`GET /v1/reporting/lag` returns per ledger `lagSeconds` (age of the oldest
+journal entry that arrived ahead of the mark and waits for an earlier one),
+`hwmLedger` (highest sequence seen, applied or waiting) and the gate
+`maxLagSeconds`. `POST /runs` refuses a ledger whose lag is above
+`REPORTING_MAX_LAG_S` with 409 REPORT-0004 unless the body sets `allowStale`
+(default false), which completes the run with REPORT-0004 stored as a warning.
+`finreport lag-check TENANT_ID...` (the chart's `lagCheck` CronJob, every
+minute, in process as `system:finreport-lag-check`, no route and no authz
+seed) keeps one `reporting_lag_alert` row (migration 0013) per ledger above
+the gate and writes one `lag.exceeded.v1` per episode once the lag has stayed
+above it for `REPORTING_LAG_ALERT_S`; checks of one tenant are serialised by an
+advisory lock. The measure is a lower bound: a consumer that is stopped or
+behind on its partitions, or an event lost with nothing after it, shows no lag
+(NOT-IMPLEMENTED.md).
+
 ## Slice 10: ledger verification
 
 `POST /v1/reporting/balance-verifications` (duty `reporting.balance.verify`,
@@ -248,6 +265,7 @@ tests check that `api/openapi.yaml` lists exactly the registered routes and that
 | Variable | Default | Allowed | Meaning (PRD §2.15.13) |
 | --- | --- | --- | --- |
 | `REPORTING_MAX_LAG_S` | 30 | 0-600 | Lag above which a run is blocked unless `allow_stale` |
+| `REPORTING_LAG_ALERT_S` | 60 | 0-3600 | Seconds the lag stays above the gate before `lag.exceeded` is raised |
 | `REPORTING_PAGE_SIZE` | 500 | 100-1000 | Drill level 2 page size |
 | `REPORTING_CELL_KEY_LIMIT` | 50000 | 1000-200000 | Keys stored before a cell becomes a query spec |
 | `REPORTING_RETENTION_CLOSED_YEARS` | 7 | 1-30 | Library retention for closed-period runs |
@@ -259,7 +277,8 @@ tests check that `api/openapi.yaml` lists exactly the registered routes and that
 | `REPORTING_TRACE_URL` | empty | http(s) URL containing `{traceId}` | Trace viewer link of a drill-down line (Tempo through Grafana) |
 
 The values are validated and logged. Drill level 2 reads `REPORTING_PAGE_SIZE`
-and `REPORTING_TRACE_URL`; the lag gate, large cells, the report library,
+and `REPORTING_TRACE_URL`; the lag gate reads `REPORTING_MAX_LAG_S` and the lag alert
+`REPORTING_LAG_ALERT_S`; large cells, the report library,
 distribution, the PDF renderer and dimension security that use the others are
 later slices (NOT-IMPLEMENTED.md).
 

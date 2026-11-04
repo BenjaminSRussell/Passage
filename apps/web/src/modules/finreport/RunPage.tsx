@@ -34,6 +34,7 @@ async function loadStatement(runId: string, signal: AbortSignal): Promise<Statem
 }
 
 const CHECK_TITLES: Record<string, string> = {
+  "REPORT-0004": "This statement is stale",
   "REPORT-0015": "Some expense lines have no functional area",
   "REPORT-0034": "Some members are not in the hierarchy",
 };

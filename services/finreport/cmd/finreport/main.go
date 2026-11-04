@@ -7,6 +7,8 @@
 //	LEDGER_URL, PASSAGE_SERVICE_*   balance verification when serving, and the consumer; KAFKA_* consume mode only
 //	HTTP_ADDR          listen address, default :8080
 //	REPORTING_*        tunables, validated at startup (see internal/config)
+//
+// `finreport lag-check TENANT_ID...` runs the lag alert once (the chart's CronJob).
 package main
 
 import (
@@ -39,8 +41,10 @@ func main() {
 	switch {
 	case len(os.Args) > 1 && os.Args[1] == "consume":
 		err = runWith(ctx, os.Getenv, true)
+	case len(os.Args) > 1 && os.Args[1] == lagCheckCommand:
+		err = lagCheck(ctx, os.Getenv, os.Args[2:])
 	case len(os.Args) > 1:
-		err = fmt.Errorf("unknown command %q (use no argument to serve or \"consume\" to run the ledger journal consumer)", os.Args[1])
+		err = fmt.Errorf("unknown command %q (use no argument to serve, \"consume\" to run the ledger journal consumer or \"lag-check TENANT_ID...\" to raise lag.exceeded)", os.Args[1])
 	default:
 		err = run(ctx, os.Getenv)
 	}

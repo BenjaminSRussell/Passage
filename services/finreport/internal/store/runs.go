@@ -32,6 +32,11 @@ type RunSpec struct {
 	RequestedBy       string
 	IdempotencyKey    string
 	RequestHash       string
+	// MaxLagSeconds is the lag gate (reporting.max_lag_seconds): a run on a
+	// ledger whose read model is further behind is refused with REPORT-0004
+	// unless AllowStale is set, in which case the run records the warning.
+	MaxLagSeconds int
+	AllowStale    bool
 	// Hierarchy, when set, replaces the definition's rows by the nodes of a
 	// published hierarchy (FR-15.4).
 	Hierarchy *HierarchyRun
@@ -81,17 +86,6 @@ type Run struct {
 	Replayed  bool          `json:"-"`
 }
 
-// LagRow reports how far the read model has advanced for one ledger (FR-15.1).
-type LagRow struct {
-	LedgerID        string    `json:"ledgerId"`
-	PostingSequence int64     `json:"postingSequence"`
-	UpdatedAt       time.Time `json:"updatedAt"`
-	EntriesApplied  int64     `json:"entriesApplied"`
-	// EntriesPending counts entries that arrived ahead of the mark and wait for
-	// an earlier one; a count that stays above zero means an entry is missing.
-	EntriesPending int64 `json:"entriesPending"`
-}
-
 // CreateRun evaluates a published definition over the reporting read model and
 // stores the run and its cells in one transaction. A repeated Idempotency-Key
 // with the same request returns the stored run; a different request is refused
@@ -131,6 +125,10 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 		if err != nil {
 			return err
 		}
+		stale, err := staleCheckTx(ctx, tx, spec.LedgerID, spec.MaxLagSeconds, spec.AllowStale)
+		if err != nil {
+			return err
+		}
 		balances, hwm, err := loadBalancesTx(ctx, tx, spec.LedgerID, def.CurrencyTypes(spec.CurrencyType), cal)
 		if err != nil {
 			return err
@@ -159,6 +157,7 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 			return err
 		}
 		checks := append(domain.RunChecks(def, res), extra...)
+		checks = append(checks, stale...)
 		checksJSON, err := json.Marshal(checks)
 		if err != nil {
 			return err
@@ -318,30 +317,6 @@ func (s *Postgres) GetCell(ctx context.Context, runID, row, column string) (doma
 		return err
 	})
 	return cell, err
-}
-
-// Lag returns the reporting high-water mark per ledger (FR-15.1).
-func (s *Postgres) Lag(ctx context.Context) ([]LagRow, error) {
-	var out []LagRow
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select h.ledger_id::text, h.posting_sequence, h.updated_at,
-			(select count(*) from reporting_entry_applied a where a.ledger_id = h.ledger_id),
-			(select count(*) from reporting_entry_pending w where w.ledger_id = h.ledger_id)
-			from reporting_hwm h order by h.ledger_id`)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var l LagRow
-			if err := rows.Scan(&l.LedgerID, &l.PostingSequence, &l.UpdatedAt, &l.EntriesApplied, &l.EntriesPending); err != nil {
-				return err
-			}
-			out = append(out, l)
-		}
-		return rows.Err()
-	})
-	return out, err
 }
 
 func loadDefinitionTx(ctx context.Context, tx pgx.Tx, code string, version int) (domain.Definition, int, error) {
