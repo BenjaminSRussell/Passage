@@ -312,7 +312,8 @@
       {"resource": "/v1/inventory/journals/*:submit", "methods": ["POST"]},
       {"resource": "/v1/inventory/journals/*:reopen", "methods": ["POST"]},
       {"resource": "/v1/inventory/journals/*:cancel", "methods": ["POST"]},
-      {"resource": "/v1/inventory/journals/*:reverse", "methods": ["POST"]}
+      {"resource": "/v1/inventory/journals/*:reverse", "methods": ["POST"]},
+      {"resource": "/v1/inventory/journals/*:copy", "methods": ["POST"]}
     ]},
     "inventory.journal.post": {"permissions": [
       {"resource": "/v1/inventory/journals/*:post", "methods": ["POST"]},
