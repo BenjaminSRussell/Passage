@@ -27,6 +27,7 @@ const (
 
 	HoldActive   = "ACTIVE"
 	HoldReleased = "RELEASED"
+	HoldRejected = "REJECTED"
 
 	// CreditReleaseDays is the default credit_release_validity_days: how long
 	// a CREDIT release stays valid when the legal entity saved no parameters

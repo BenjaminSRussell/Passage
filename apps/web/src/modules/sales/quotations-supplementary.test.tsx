@@ -298,6 +298,7 @@ const creditHold = {
   orderId: ORDER_ID,
   orderNumber: "SO-0000042",
   orderVersion: 2,
+  orderStatus: "OPEN",
   customerId: CUSTOMER,
   holdType: "CREDIT",
   reasonCode: "CR-1",
@@ -355,12 +356,68 @@ describe("Credit release queue", () => {
     expect(await screen.findByRole("heading", { name: "Nothing waiting for release" })).toBeInTheDocument();
   });
 
+  it("rejects a credit hold with a required comment at the order's ETag and cancels the order", async () => {
+    let rejected = false;
+    handler = (_url, init) => {
+      if (init.method === "POST") {
+        rejected = true;
+        return { status: 200, body: { id: ORDER_ID, orderNumber: "SO-0000042", status: "CANCELLED" }, etag: '"3"' };
+      }
+      return { status: 200, body: { items: rejected ? [] : [creditHold] } };
+    };
+    renderAt("/sales/credit-holds");
+    fireEvent.click(await screen.findByRole("button", { name: "Reject Credit hold on SO-0000042" }));
+    expect(await screen.findByText("Reject the credit hold on SO-0000042")).toBeInTheDocument();
+    // The comment is required: nothing is sent without one.
+    fireEvent.click(screen.getByRole("button", { name: "Reject hold and cancel order" }));
+    expect(await screen.findByText("Say why the hold is rejected.")).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    fireEvent.change(screen.getByLabelText(/Comment/), { target: { value: "  Exposure too high  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Reject hold and cancel order" }));
+    expect(await screen.findByText(/rejected and the order cancelled/)).toBeInTheDocument();
+    const post = calls.find((c) => c.method === "POST");
+    expect(post?.url.pathname).toBe(`/api/v1/sales/orders/${ORDER_ID}/holds/${HOLD_ID}:reject`);
+    expect(post?.headers.get("If-Match")).toBe('"2"');
+    expect(post?.body).toEqual({ comment: "Exposure too high" });
+    expect(await screen.findByRole("heading", { name: "Nothing waiting for release" })).toBeInTheDocument();
+    expect(screen.queryByText("Reject the credit hold on SO-0000042")).not.toBeInTheDocument();
+  });
+
+  it("shows the service's refusal of a rejection and keeps the form, and offers no reject for other hold types or confirmed orders", async () => {
+    handler = (_url, init) =>
+      init.method === "POST"
+        ? { status: 422, body: { code: "SLS-0062", detail: "only a CREDIT hold of an order awaiting confirmation can be rejected" } }
+        : {
+            status: 200,
+            body: {
+              items: [
+                creditHold,
+                { ...creditHold, holdId: "99999999-9999-4999-8999-999999999999", holdType: "FRAUD", orderNumber: "SO-0000043" },
+                { ...creditHold, holdId: "88888888-8888-4888-8888-888888888888", orderNumber: "SO-0000044", orderStatus: "CONFIRMED" },
+              ],
+            },
+          };
+    renderAt("/sales/credit-holds");
+    expect(await screen.findByRole("button", { name: "Release Fraud hold on SO-0000043" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reject Fraud hold on SO-0000043" })).not.toBeInTheDocument();
+    // A CREDIT hold raised on a confirmed order by a change is released, not rejected.
+    expect(screen.getByRole("button", { name: "Release Credit hold on SO-0000044" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reject Credit hold on SO-0000044" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reject Credit hold on SO-0000042" }));
+    fireEvent.change(await screen.findByLabelText(/Comment/), { target: { value: "no" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reject hold and cancel order" }));
+    expect(await screen.findByText(/SLS-0062/)).toBeInTheDocument();
+    expect(screen.getByText("Could not decide the hold")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Keep the hold" }));
+    expect(screen.queryByText("Reject the credit hold on SO-0000042")).not.toBeInTheDocument();
+  });
+
   it("shows a refused release, and filters by any hold type", async () => {
     handler = (_url, init) =>
       init.method === "POST" ? { status: 403, body: { code: "AUTH-0002", detail: "missing duty sales.credit.release" } } : { status: 200, body: { items: [creditHold] } };
     renderAt("/sales/credit-holds");
     fireEvent.click(await screen.findByRole("button", { name: "Release Credit hold on SO-0000042" }));
-    expect(await screen.findByText("Could not release the hold")).toBeInTheDocument();
+    expect(await screen.findByText("Could not decide the hold")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Hold type"), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Filter" }));
     await waitFor(() => expect(calls.at(-1)?.url.searchParams.has("holdType")).toBe(false));

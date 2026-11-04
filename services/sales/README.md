@@ -100,6 +100,7 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | GET | `/v1/sales/orders/{id}` | `sales.order.read` | ETag = version |
 | POST | `/v1/sales/orders/{id}:confirm` | `sales.order.confirm` | `If-Match`; failing credit check places a CREDIT hold; draws allocation quota per line (`SLS-0013` warning when a line moves to a later period, 422 when none can cover it) |
 | POST | `/v1/sales/orders/{id}/holds/{holdId}:release` | `sales.credit.release` (CREDIT) or `sales.order.hold` (other types) | `If-Match`; releasing the CREDIT hold confirms the order when nothing else blocks it (AC-27.3); when allocation quota cannot cover that confirmation the hold is still released and the order stays unconfirmed with an `SLS-0013` warning |
+| POST | `/v1/sales/orders/{id}/holds/{holdId}:reject` | `sales.credit.release` | `If-Match`; body `{comment}` (1 to 500 characters, required); rejects an ACTIVE CREDIT hold of a DRAFT or OPEN order and cancels the order in the same transaction (other ACTIVE holds are CLEARED, `orderhold.rejected` and `order.cancelled` are emitted); the applier may not reject their own hold |
 | PATCH | `/v1/sales/orders/{id}` | `sales.order.write` | `If-Match`; header and OPEN/RESERVED line edits; new version with a field-level diff; re-promises changed quantities/dates of a CONFIRMED order and re-runs credit when its total rises; emits `order.changed` |
 | POST | `/v1/sales/orders/{id}:plan-production` | `sales.order.plan-production` | creates, for each configured line of a CONFIRMED order, the production order built to the line's saved configuration (origin `SalesOrderLine`) through the production service and links it to the line in `order_line_production`; idempotent per line; a line's `configurationId` is checked against the product service on order create |
 | POST | `/v1/sales/orders/{id}:cancel` | `sales.order.confirm` | `If-Match`; optional `reason`; cancels OPEN/RESERVED lines, clears ACTIVE holds; emits `order.cancelled`. For a customer whose changes need approval, a caller without `sales.order.approve` gets 202 and a stored request of kind `CANCEL` instead (`SLS-0043` if one already waits) |
@@ -343,6 +344,7 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0052` | 422 | The agreement is closed: no release, schedule release, revision or second close |
 | `SLS-0053` | 422 | Agreement commitment revised below the quantity already released |
 | `SLS-0054` | 503 | One-time customer order while the service has no field encryption keys (`FIELDCRYPT_KEYS_FILE` / `FIELDCRYPT_CURRENT_KEY_ID`): the buyer is never stored or returned in clear |
+| `SLS-0062` | 422 | A hold cannot be rejected: it is not a CREDIT hold, or its order is no longer awaiting confirmation (DRAFT or OPEN) |
 | `SLS-0100` | 404 | Order not found |
 | `SLS-0101` | 404 | Hold not found |
 | `SLS-0102` | 404 | Credit profile not found |

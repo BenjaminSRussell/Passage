@@ -12,6 +12,7 @@ var (
 	OrderConfirmed       = events.Type(Context, "order", "confirmed", 1)
 	OrderHoldApplied     = events.Type(Context, "orderhold", "applied", 1)
 	OrderHoldReleased    = events.Type(Context, "orderhold", "released", 1)
+	OrderHoldRejected    = events.Type(Context, "orderhold", "rejected", 1)
 	CreditCheckEvaluated = events.Type(Context, "creditcheck", "evaluated", 1)
 	OrderChanged         = events.Type(Context, "order", "changed", 1)
 	OrderCancelled       = events.Type(Context, "order", "cancelled", 1)
@@ -52,7 +53,7 @@ var (
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{OrderConfirmed, OrderHoldApplied, OrderHoldReleased, CreditCheckEvaluated, OrderChanged, OrderCancelled, AgreementReleased,
+	return []string{OrderConfirmed, OrderHoldApplied, OrderHoldReleased, OrderHoldRejected, CreditCheckEvaluated, OrderChanged, OrderCancelled, AgreementReleased,
 		AgreementChanged, AgreementClosed, AgreementReturned,
 		QuotationConverted, QuotationExpired, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
 		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted, ParametersChanged, IntakeErrorRecorded, IntakeErrorResolved,
@@ -307,6 +308,20 @@ type OrderHoldData struct {
 	HoldID     string `json:"hold_id"`
 	HoldType   string `json:"hold_type"`
 	ReasonCode string `json:"reason_code"`
+	Actor      string `json:"actor"`
+	Version    int    `json:"version"`
+}
+
+// OrderHoldRejectedData is the data member of orderhold.rejected.v1: a credit
+// manager rejected a CREDIT hold with a comment, and the unconfirmed order was
+// cancelled in the same transaction (order.cancelled.v1 follows on the same
+// order). Version is the order's version after the cancellation.
+type OrderHoldRejectedData struct {
+	OrderID    string `json:"order_id"`
+	HoldID     string `json:"hold_id"`
+	HoldType   string `json:"hold_type"`
+	ReasonCode string `json:"reason_code"`
+	Comment    string `json:"comment"`
 	Actor      string `json:"actor"`
 	Version    int    `json:"version"`
 }

@@ -40,6 +40,7 @@ const (
 	CodeOneTimeLimit       = "SLS-0016"
 	CodeFieldCryptMissing  = "SLS-0054"
 	CodeHoldNotApplicable  = "SLS-0028"
+	CodeHoldNotRejectable  = "SLS-0062"
 	CodeAgreementNotValid  = "SLS-0029"
 	CodeAgreementClosed    = "SLS-0052"
 	CodeCommitmentBelow    = "SLS-0053"
@@ -120,6 +121,11 @@ type Hold struct {
 	ReleasedBy    *string         `json:"releasedBy,omitempty"`
 	ReleasedUntil *time.Time      `json:"releasedUntil,omitempty"`
 	AppliedAt     time.Time       `json:"appliedAt"`
+	// RejectedBy, RejectedAt and RejectionComment are set when a credit
+	// manager rejected the hold (status REJECTED, slice 26).
+	RejectedBy       *string    `json:"rejectedBy,omitempty"`
+	RejectedAt       *time.Time `json:"rejectedAt,omitempty"`
+	RejectionComment *string    `json:"rejectionComment,omitempty"`
 }
 
 // Order is a sales order header with its lines and holds.
@@ -263,6 +269,7 @@ type Store interface {
 	ListOrders(ctx context.Context, f OrderFilter) (OrderPage, error)
 	ConfirmOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ConfirmResult, error)
 	ReleaseHold(ctx context.Context, orderID, holdID string, version int, actor string, now time.Time) (ConfirmResult, error)
+	RejectHold(ctx context.Context, orderID, holdID string, version int, comment, actor string, now time.Time) (Order, error)
 	ChangeOrder(ctx context.Context, id string, version int, req ChangeRequest, actor string, now time.Time) (Order, error)
 	CancelOrderAs(ctx context.Context, id string, version int, reason, actor string, approver bool, now time.Time) (Order, error)
 	CancelRemainder(ctx context.Context, id string, version int, reason, actor string, now time.Time) (Order, error)
@@ -644,7 +651,8 @@ func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 		return Order{}, err
 	}
 	linkSupplementaryParents(o.Lines)
-	holdRows, err := tx.Query(ctx, `select id::text, hold_type, reason_code, status, order_amount::text, applied_by, released_by, released_until, applied_at
+	holdRows, err := tx.Query(ctx, `select id::text, hold_type, reason_code, status, order_amount::text, applied_by, released_by, released_until, applied_at,
+			rejected_by, rejected_at, rejection_comment
 		from order_hold where tenant_id = $1 and order_id = $2 order by applied_at, id`, tenantID, id)
 	if err != nil {
 		return Order{}, err
@@ -654,7 +662,8 @@ func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 	for holdRows.Next() {
 		var h Hold
 		var amount string
-		if err := holdRows.Scan(&h.ID, &h.HoldType, &h.ReasonCode, &h.Status, &amount, &h.AppliedBy, &h.ReleasedBy, &h.ReleasedUntil, &h.AppliedAt); err != nil {
+		if err := holdRows.Scan(&h.ID, &h.HoldType, &h.ReasonCode, &h.Status, &amount, &h.AppliedBy, &h.ReleasedBy, &h.ReleasedUntil, &h.AppliedAt,
+			&h.RejectedBy, &h.RejectedAt, &h.RejectionComment); err != nil {
 			return Order{}, err
 		}
 		h.OrderAmount = decimal.RequireFromString(amount)

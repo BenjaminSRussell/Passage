@@ -108,12 +108,16 @@ export interface Hold {
   id: string;
   holdType: HoldType;
   reasonCode: string;
-  status: "ACTIVE" | "RELEASED" | "CLEARED";
+  status: "ACTIVE" | "RELEASED" | "CLEARED" | "REJECTED";
   orderAmount: Decimal;
   appliedBy: string;
   releasedBy?: string;
   releasedUntil?: string;
   appliedAt: string;
+  /** Set when a credit manager rejected the hold (the order was cancelled with it). */
+  rejectedBy?: string;
+  rejectedAt?: string;
+  rejectionComment?: string;
 }
 
 export interface CreditRule {
@@ -578,6 +582,15 @@ export function releaseHold(orderId: string, holdId: string, etag: string): Prom
   });
 }
 
+/** Rejects an ACTIVE CREDIT hold of an unconfirmed order with a comment; the order is cancelled with it. */
+export function rejectHold(orderId: string, holdId: string, etag: string, comment: string): Promise<Versioned<Order>> {
+  return versioned<Order>(`/orders/${encodeURIComponent(orderId)}/holds/${encodeURIComponent(holdId)}:reject`, {
+    method: "POST",
+    body: JSON.stringify({ comment }),
+    headers: { "If-Match": etag },
+  });
+}
+
 /** reviewDueBy (YYYY-MM-DD) lists only profiles whose review date is on or before it, oldest first. */
 export async function listCreditProfiles(legalEntityId = "", signal?: AbortSignal, reviewDueBy = ""): Promise<CreditProfile[]> {
   const body = await json<{ items?: CreditProfile[] }>(`/credit-profiles${query({ legalEntityId, reviewDueBy, limit: 200 })}`, {}, signal);
@@ -880,6 +893,8 @@ export interface HoldQueueItem {
   orderNumber: string;
   /** The order's version; its ETag is what the release call must echo. */
   orderVersion: number;
+  /** The order's status: only a CREDIT hold of a DRAFT or OPEN order can be rejected. */
+  orderStatus: string;
   customerId: string;
   holdType: HoldType;
   reasonCode: string;

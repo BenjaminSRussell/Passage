@@ -243,6 +243,45 @@ paths:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/orders/{id}/holds/{holdId}:reject:
+    post:
+      summary: >-
+        Reject an ACTIVE CREDIT hold with a required comment and cancel the order (PRD 5.27.6
+        credit release queue). Only a CREDIT hold of an order awaiting confirmation (DRAFT or OPEN)
+        can be rejected; the user who applied the hold may not reject it. In one transaction the
+        hold becomes REJECTED with who, when and why, the order's other ACTIVE holds are CLEARED,
+        lines, allocation quota and agreement draw are returned as for :cancel, a version with the
+        comment is written, and orderhold.rejected and order.cancelled are emitted. If-Match carries
+        the order ETag, so a retry gets 412 and never rejects twice.
+      operationId: rejectOrderHold
+      x-passage-duty: sales.credit.release
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: holdId, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RejectHoldRequest"}
+      responses:
+        "200":
+          description: the cancelled order at its new version with the hold listed as REJECTED
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Order"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0022 the hold is not ACTIVE; SLS-0062 the hold is not a CREDIT hold, or its order is no longer awaiting confirmation
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
   /v1/sales/orders/{id}/holds:
     post:
       summary: >-
@@ -2730,6 +2769,11 @@ components:
       properties:
         holdType: {type: string, enum: [MANUAL, FRAUD, PRICE_REVIEW]}
         reasonCode: {type: string, minLength: 1, maxLength: 80}
+    RejectHoldRequest:
+      type: object
+      required: [comment]
+      properties:
+        comment: {type: string, minLength: 1, maxLength: 500, description: the credit manager's reason, kept on the hold and as the reason of the order version}
     ListingOverride:
       type: object
       description: A denied line accepted by a user with sales.order.approve (FR-27.15, AC-27.11)
@@ -3024,12 +3068,15 @@ components:
         id: {type: string, format: uuid}
         holdType: {type: string, enum: [CREDIT, FRAUD, MANUAL, PRICE_REVIEW]}
         reasonCode: {type: string}
-        status: {type: string, enum: [ACTIVE, RELEASED, CLEARED]}
+        status: {type: string, enum: [ACTIVE, RELEASED, CLEARED, REJECTED]}
         orderAmount: {$ref: "#/components/schemas/Money"}
         appliedBy: {type: string}
         releasedBy: {type: string}
         releasedUntil: {type: string, format: date-time}
         appliedAt: {type: string, format: date-time}
+        rejectedBy: {type: string, description: set when status is REJECTED}
+        rejectedAt: {type: string, format: date-time}
+        rejectionComment: {type: string}
     AtpPeriod:
       type: object
       required: [date, supply, demand]
@@ -3498,13 +3545,14 @@ components:
         order: {$ref: "#/components/schemas/Order"}
     HoldQueueItem:
       type: object
-      required: [holdId, legalEntityId, orderId, orderNumber, orderVersion, customerId, holdType, reasonCode, amount, currency, appliedBy, appliedAt, slaDueAt]
+      required: [holdId, legalEntityId, orderId, orderNumber, orderVersion, orderStatus, customerId, holdType, reasonCode, amount, currency, appliedBy, appliedAt, slaDueAt]
       properties:
         holdId: {type: string, format: uuid}
         legalEntityId: {type: string, format: uuid}
         orderId: {type: string, format: uuid}
         orderNumber: {type: string}
         orderVersion: {type: integer, description: the order's ETag value for the release call}
+        orderStatus: {type: string, description: the order's status; only a CREDIT hold of a DRAFT or OPEN order can be rejected}
         customerId: {type: string, format: uuid}
         holdType: {type: string, enum: [CREDIT, FRAUD, MANUAL, PRICE_REVIEW]}
         reasonCode: {type: string, description: the failed rule id (CR-1..CR-6) for CREDIT holds}
