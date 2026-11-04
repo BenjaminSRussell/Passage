@@ -2646,7 +2646,8 @@
     "sales.credit.maintain": {"permissions": [{"resource": "/v1/sales/credit-profiles/*", "methods": ["PUT"]}]},
     "sales.credit.release": {"permissions": [
       {"resource": "/v1/sales/holds", "methods": ["GET"]},
-      {"resource": "/v1/sales/orders/*/holds/*:release", "methods": ["POST"]}
+      {"resource": "/v1/sales/orders/*/holds/*:release", "methods": ["POST"]},
+      {"resource": "/v1/sales/orders/*/holds/*:reject", "methods": ["POST"]}
     ]},
     "sales.listing.maintain": {"permissions": [
       {"resource": "/v1/sales/product-listings", "methods": ["POST"]},
