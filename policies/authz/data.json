@@ -2778,7 +2778,9 @@
       {"resource": "/v1/sales/change-requests/*:withdraw", "methods": ["POST"]},
       {"resource": "/v1/sales/intake-errors/*:resolve", "methods": ["POST"]},
       {"resource": "/v1/sales/orders/*:cancel-remainder", "methods": ["POST"]},
-      {"resource": "/v1/sales/orders/*/lines/*:cancel-remainder", "methods": ["POST"]}
+      {"resource": "/v1/sales/orders/*/lines/*:cancel-remainder", "methods": ["POST"]},
+      {"resource": "/v1/sales/intake-errors/*:replay", "methods": ["POST"]},
+      {"resource": "/v1/sales/intake-errors:replay", "methods": ["POST"]}
     ]},
     "sales.parameter.maintain": {"permissions": [
       {"resource": "/v1/sales/parameters", "methods": ["PUT"]},
