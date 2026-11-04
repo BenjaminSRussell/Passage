@@ -53,6 +53,14 @@ type fakeStore struct {
 	created      bool
 	// balanceFilter is the last trial balance filter the handler passed down.
 	balanceFilter store.BalanceFilter
+	// trial is what TrialBalance returns.
+	trial store.TrialBalance
+	// linePages, when set, are served one per ListLines call (the last repeats) instead of linePage.
+	linePages []store.LinePage
+	// linePlan and planErr answer PlanLineExport (planErr only, so err can fail the pages that follow).
+	linePlan   store.LineExportPlan
+	planErr    error
+	planFilter *store.LineFilter
 	// putReasons records the reason codes the handlers wrote.
 	putReasons []store.ReasonCode
 	// structures and dimValues answer the structure reads; putStructures and
@@ -124,6 +132,19 @@ func (f *fakeStore) ListAccounts(context.Context, string, string, int) ([]store.
 	return f.accounts, f.err
 }
 
+func (f *fakeStore) GetAccount(_ context.Context, chart, number string) (store.Account, error) {
+	for _, a := range f.accounts {
+		if a.Number == number {
+			a.ChartCode = chart
+			return a, f.err
+		}
+	}
+	if f.err != nil {
+		return store.Account{}, f.err
+	}
+	return store.Account{}, httpx.NewProblem(http.StatusNotFound, "LEDGER_ACCOUNT_NOT_FOUND", "account not found")
+}
+
 func (f *fakeStore) CreateLedger(_ context.Context, in store.Ledger) (store.Ledger, error) {
 	in.ID = testLedger
 	return in, f.err
@@ -160,7 +181,7 @@ func (f *fakeStore) ValidateEntry(_ context.Context, in store.PostInput) (domain
 
 func (f *fakeStore) TrialBalance(_ context.Context, bf store.BalanceFilter) (store.TrialBalance, error) {
 	f.balanceFilter = bf
-	return store.TrialBalance{}, f.err
+	return f.trial, f.err
 }
 
 func (f *fakeStore) RebuildBalances(context.Context, string) (store.RebuildResult, error) {

@@ -130,6 +130,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyLedgerWrite)).Patch("/ledgers/{id}", a.patchLedger)
 		r.With(authz.RequireDuty(dutyAccountWrite)).Put("/charts/{chart}/accounts/{number}", a.putAccount)
 		r.With(authz.RequireAnyDuty(dutyRead, dutyAccountLookup)).Get("/charts/{chart}/accounts", a.listAccounts)
+		r.With(authz.RequireAnyDuty(dutyRead, dutyAccountLookup)).Get("/charts/{chart}/accounts/{number}", a.getAccount)
 		r.With(authz.RequireAnyDuty(dutyPost, dutyEntryPost)).Post("/journal-entries", a.postEntry)
 		r.With(authz.RequireDuty(dutyRead)).Get("/journal-entries/{id}", a.getEntry)
 		r.With(authz.RequireDuty(dutyReverse)).Post("/journal-entries/{id}/reverse", a.reverseEntry)
@@ -533,6 +534,15 @@ func (a *API) listAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
+	fields := map[string]string{}
+	if exportFormat(q, fields) == formatCSV {
+		a.exportAccounts(w, r, chi.URLParam(r, "chart"), q.Get("after"))
+		return
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
 	limit := defaultAccountPage
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -924,6 +934,7 @@ func (a *API) trialBalance(w http.ResponseWriter, r *http.Request) {
 	f := store.BalanceFilter{LedgerID: q.Get("ledger"), PeriodFrom: q.Get("period_from"), PeriodTo: q.Get("period_to"),
 		AccountFrom: q.Get("account_from"), AccountTo: q.Get("account_to")}
 	fields := map[string]string{}
+	format := exportFormat(q, fields)
 	if !ids.Valid(f.LedgerID) {
 		fields["ledger"] = "is required and must be a UUID"
 	}
@@ -978,6 +989,10 @@ func (a *API) trialBalance(w http.ResponseWriter, r *http.Request) {
 	tb, err := a.store.TrialBalance(r.Context(), f)
 	if err != nil {
 		a.fail(w, r, err)
+		return
+	}
+	if format == formatCSV {
+		exportTrialBalance(w, tb)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, tb)

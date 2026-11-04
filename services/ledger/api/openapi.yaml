@@ -41,6 +41,18 @@ components:
       required: false
       description: W3C traceparent; its trace id is copied to the entry. A 32-character id is minted when absent.
       schema: { type: string }
+    ExportFormat:
+      name: format
+      in: query
+      required: false
+      description: >-
+        json (default) returns the JSON page. csv returns one UTF-8 CSV file (with a byte order mark) of the whole
+        result instead of a page, up to 50,000 rows, under the same duty, filters, validation and legal-entity scope
+        as the JSON read; limit is ignored. Cells that start with = + - @, a tab or a carriage return are prefixed
+        with an apostrophe so a spreadsheet does not run them; plain numbers (a negative amount) are written as is.
+        A longer result is cut at the 50,000th row and flagged in X-Passage-Export-Truncated before the first byte.
+        The file is streamed: a failure after the first byte cuts the connection rather than ending a short file.
+      schema: { type: string, enum: [json, csv], default: json }
     ChartCode:
       name: chart
       in: path
@@ -1557,6 +1569,12 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/ViolationProblem" }
   headers:
+    ExportTruncated:
+      description: "true when the CSV export stopped at the 50,000 row cap; absent when the file is complete"
+      schema: { type: string, enum: ["true"] }
+    ExportNextCursor:
+      description: Where to continue a truncated export, as the cursor (lines) or after (accounts) of the next request
+      schema: { type: string }
     ConfigETag:
       description: The row's lockVersion as an entity tag, for If-Match on the next replacement
       schema: { type: string, example: '"2"' }
@@ -2205,8 +2223,13 @@ paths:
       operationId: listAccounts
       summary: List the accounts of a chart
       x-passage-duty: ledger.journal.read
+      description: >-
+        One keyset page of accounts as JSON. With format=csv it is the chart of accounts export: every account from
+        the after cursor as one CSV file (chart, account_number, name, account_type, is_postable, suspended_from,
+        reconciliation_account_type).
       parameters:
         - $ref: "#/components/parameters/ChartCode"
+        - $ref: "#/components/parameters/ExportFormat"
         - name: after
           in: query
           required: false
@@ -2231,10 +2254,35 @@ paths:
                   nextAfter:
                     type: string
                     description: Cursor for the next page (pass as `after`); empty when this page is the last
+            text/csv:
+              schema: { type: string }
+          headers:
+            X-Passage-Export-Truncated: { $ref: "#/components/headers/ExportTruncated" }
+            X-Passage-Export-Next-Cursor: { $ref: "#/components/headers/ExportNextCursor" }
         "400": { $ref: "#/components/responses/Problem400" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
   /v1/ledger/charts/{chart}/accounts/{number}:
+    get:
+      tags: [charts]
+      operationId: getAccount
+      summary: Read one account of a chart
+      x-passage-duty: ledger.journal.read
+      description: Returns the account with its lockVersion as ETag, to send as If-Match when replacing it.
+      parameters:
+        - $ref: "#/components/parameters/ChartCode"
+        - $ref: "#/components/parameters/AccountNumber"
+      responses:
+        "200":
+          description: The account
+          headers:
+            ETag: { $ref: "#/components/headers/ConfigETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
     put:
       tags: [charts]
       operationId: putAccount
@@ -2602,8 +2650,13 @@ paths:
     get:
       tags: [journal]
       operationId: listJournalLines
+      summary: Query the posted lines of a ledger
       x-passage-duty: ledger.journal.read
       description: |
+        With format=csv the same filters export every matching line in posting order as one CSV file (one column per
+        dimension attribute of the ledger, sorted, named dim.{ATTRIBUTE}), up to 50,000 lines; a longer result is cut
+        and X-Passage-Export-Next-Cursor is the cursor to continue from.
+
         Ledger transactions inquiry (FR-11.14): posted lines of one ledger in posting order
         (posting sequence, line number). account_from/account_to compare account numbers as text
         (inclusive); date_from/date_to bound the posting date (inclusive); voucher and source_system
@@ -2625,9 +2678,10 @@ paths:
         - { name: documentId, in: query, required: false, description: Only the lines of the entry posted for this source document, schema: { type: string, format: uuid } }
         - { name: cursor, in: query, required: false, description: The nextCursor of the previous page, schema: { type: string, pattern: '^[0-9]{1,18}\.[0-9]{1,5}$' } }
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 1000, default: 100 } }
+        - $ref: "#/components/parameters/ExportFormat"
       responses:
         "200":
-          description: One page of lines
+          description: One page of lines (JSON), or the whole export (CSV)
           content:
             application/json:
               schema:
@@ -2638,6 +2692,11 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/LedgerLine" }
                   nextCursor: { type: string, description: Present only when more lines follow }
+            text/csv:
+              schema: { type: string }
+          headers:
+            X-Passage-Export-Truncated: { $ref: "#/components/headers/ExportTruncated" }
+            X-Passage-Export-Next-Cursor: { $ref: "#/components/headers/ExportNextCursor" }
         "400": { $ref: "#/components/responses/Problem400" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
@@ -2697,12 +2756,18 @@ paths:
             This is the account by dimension inquiry (FR-11.14). A grouping of more than 10,000 rows is refused
             with 422 LEDGER_BALANCE_TOO_MANY_ROWS; narrow it with an account, period or dimension filter.
           schema: { type: string, pattern: '^[A-Z][A-Z0-9_]{0,19}(,[A-Z][A-Z0-9_]{0,19}){0,4}$' }
+        - $ref: "#/components/parameters/ExportFormat"
       responses:
         "200":
-          description: Trial balance
+          description: >-
+            Trial balance (JSON), or with format=csv one row per account (and group) with account, name, a dim.{ATTRIBUTE}
+            column per group_by attribute, debit, credit, net, line_count and quantity_net_by_unit (UNIT=net joined by
+            semicolons), closed by a TOTAL row
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TrialBalance" }
+            text/csv:
+              schema: { type: string }
         "400": { $ref: "#/components/responses/Problem400" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }

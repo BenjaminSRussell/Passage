@@ -2,8 +2,9 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
-import { fetchJournalLines, LedgerApiError, type JournalLine, type JournalLineQuery } from "./api/client";
+import { exportJournalLinesCsv, fetchJournalLines, LedgerApiError, type JournalLine, type JournalLineQuery } from "./api/client";
 import { parseDimensionFilter } from "./BatchLinesEditor";
+import { ExportButton } from "./ExportButton";
 import { UUID } from "./pages";
 import styles from "./pages.module.css";
 
@@ -214,6 +215,7 @@ export function LedgerLinesPage() {
               <span className={styles.note}>{rows.length} lines shown</span>
             </div>
           ) : null}
+          {rows.length > 0 && query ? <ExportButton label="Export lines (CSV)" run={() => exportJournalLinesCsv(query)} /> : null}
         </>
       )}
     </div>

@@ -67,6 +67,25 @@ func (s *Postgres) PutAccount(ctx context.Context, chartCode, number string, ifM
 	return out, created, nil
 }
 
+// GetAccount returns one account of chart. A missing account is 404 LEDGER_ACCOUNT_NOT_FOUND.
+func (s *Postgres) GetAccount(ctx context.Context, chartCode, number string) (Account, error) {
+	p, err := principalOf(ctx)
+	if err != nil {
+		return Account{}, err
+	}
+	var out Account
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var scanErr error
+		out, scanErr = scanAccount(tx.QueryRow(ctx, `select `+accountColumns+` from main_account
+			where tenant_id = $1 and chart_code = $2 and account_number = $3`, p.TenantID, chartCode, number))
+		if errors.Is(scanErr, pgx.ErrNoRows) {
+			return httpx.NewProblem(http.StatusNotFound, "LEDGER_ACCOUNT_NOT_FOUND", "account not found")
+		}
+		return scanErr
+	})
+	return out, err
+}
+
 // ListAccounts returns accounts of chart in account-number order after the cursor.
 func (s *Postgres) ListAccounts(ctx context.Context, chartCode, afterNumber string, limit int) ([]Account, error) {
 	p, err := principalOf(ctx)

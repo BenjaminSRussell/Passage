@@ -52,6 +52,12 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   `source_system` and `dim.{ATTRIBUTE}=value` (all pairs must match). Keyset pages of
   up to 1,000 lines (default 100): pass `nextCursor` back as `cursor`. Migration 0010
   indexes the date and account access paths.
+- CSV exports (slice 23): `format=csv` on `GET /charts/{chart}/accounts`, `GET /balances`
+  and `GET /journal-lines` returns one streamed UTF-8 CSV file (byte order mark) of the whole
+  result under the same duty, filters and legal-entity scope, up to 50,000 rows
+  (`X-Passage-Export-Truncated`, `X-Passage-Export-Next-Cursor` when cut). Cells starting with
+  `=`, `+`, `-`, `@`, tab or carriage return get an apostrophe unless they are plain numbers.
+  `GET /charts/{chart}/accounts/{number}` reads one account with its `ETag`.
 - Events through the outbox (same transaction): `dev.passage.ledger.journal.posted.v1`,
   `dev.passage.ledger.journal.reversed.v1`, `dev.passage.ledger.balance.rebuilt.v1`.
 - Database guarantees (FR-11.6, BR-11.1): every table has `tenant_id` with ENABLE and
@@ -233,7 +239,7 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 |---|---|
 | `ledger.ledger.write` | `POST /ledgers` |
 | `ledger.account.write` | `PUT /charts/{chart}/accounts/{number}`, `PUT /ledgers/{ledger}/open-item-accounts/{account}` |
-| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts` (also `ledger.account.lookup`, the service duty close signs to read the chart), `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]`, `GET /journal-names[/{code}]`, `GET /journal-batches[/{id}]`, `GET /journal-lines`, `GET /recurring-journals[/{id}[/runs]]`, `GET /ledgers/{ledger}/open-item-accounts`, `GET /ledgers/{ledger}/open-item-activations`, `GET /ledgers/{ledger}/tolerance-groups[/{code}]`, `GET /open-items`, `GET /clearings[/{id}]`, `GET /ledgers/{ledger}/auto-clearing-rules[/{id}]`, `GET /auto-clearing-runs[/{id}]` |
+| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts[/{number}]` (also `ledger.account.lookup`, the service duty close signs to read the chart), `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]`, `GET /journal-names[/{code}]`, `GET /journal-batches[/{id}]`, `GET /journal-lines`, `GET /recurring-journals[/{id}[/runs]]`, `GET /ledgers/{ledger}/open-item-accounts`, `GET /ledgers/{ledger}/open-item-activations`, `GET /ledgers/{ledger}/tolerance-groups[/{code}]`, `GET /open-items`, `GET /clearings[/{id}]`, `GET /ledgers/{ledger}/auto-clearing-rules[/{id}]`, `GET /auto-clearing-runs[/{id}]` |
 | `ledger.journal.post` | Umbrella: `POST /journal-entries`, `POST /validate`, `POST /journal-batches/{id}/post`, `POST /ledger-sets/{setId}/journal-entries` (PRD "Post ledger journals"). Each route also accepts its own narrow duty: `ledger.entry.post` (service only), `ledger.entry.validate`, `ledger.batch.post`, `ledger.set.post` |
 | `ledger.entry.lookup`, `ledger.ledger.lookup` | Service-only narrow reads, accepted beside `ledger.journal.read` on `GET /journal-lines` (which filters by `documentId`, the posting document's UUID) and `GET /ledgers/{id}` |
 | `ledger.journal.postledger` | Flag duty checked with `ledger.journal.post` on `POST /journal-entries` and `POST /journal-batches/{id}/post` when the entry's ledger is a non-leading member of a ledger set (FB50L, PRD "Post to ledger-specific ledger"); without it the post is refused 403 `AUTH-0003` |

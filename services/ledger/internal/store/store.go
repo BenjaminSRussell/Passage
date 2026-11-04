@@ -35,6 +35,7 @@ const uniqueViolation = "23505"
 type Store interface {
 	PutAccount(ctx context.Context, chartCode, number string, ifMatch int, in Account) (Account, bool, error)
 	ListAccounts(ctx context.Context, chartCode, afterNumber string, limit int) ([]Account, error)
+	GetAccount(ctx context.Context, chartCode, number string) (Account, error)
 	CreateLedger(ctx context.Context, in Ledger) (Ledger, error)
 	GetLedger(ctx context.Context, id string) (Ledger, error)
 	UpdateLedgerSettings(ctx context.Context, id string, version int, in LedgerSettings) (Ledger, error)
@@ -67,6 +68,7 @@ type Store interface {
 	CancelBatch(ctx context.Context, id string, version int) (Batch, error)
 	PostBatch(ctx context.Context, in PostBatchInput) (EntryResult, error)
 	ListLines(ctx context.Context, f LineFilter) (LinePage, error)
+	PlanLineExport(ctx context.Context, f LineFilter, n int) (LineExportPlan, error)
 	ListRecurring(ctx context.Context, status string, page Page) ([]RecurringJournal, error)
 	GetRecurring(ctx context.Context, id string) (RecurringJournal, error)
 	PutRecurring(ctx context.Context, id string, version int, in RecurringInput) (RecurringJournal, bool, error)

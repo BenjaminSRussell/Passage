@@ -173,8 +173,7 @@ async function getJSON<T>(url: string, schema: z.ZodType<T>, fetchImpl: FetchLik
   return schema.parse(await res.json());
 }
 
-/** GET /api/v1/ledger/balances (trial balance over a period and account range). */
-export function fetchTrialBalance(q: TrialBalanceQuery, fetchImpl: FetchLike = defaultFetch): Promise<TrialBalance> {
+function trialBalanceParams(q: TrialBalanceQuery): URLSearchParams {
   const params = new URLSearchParams({ ledger: q.ledgerId });
   if (q.periodFrom) params.set("period_from", q.periodFrom);
   if (q.periodTo) params.set("period_to", q.periodTo);
@@ -182,7 +181,35 @@ export function fetchTrialBalance(q: TrialBalanceQuery, fetchImpl: FetchLike = d
   if (q.accountTo) params.set("account_to", q.accountTo);
   for (const [attr, value] of Object.entries(q.dimensions ?? {})) params.set(`dim.${attr}`, value);
   if (q.groupBy && q.groupBy.length > 0) params.set("group_by", q.groupBy.join(","));
-  return getJSON(`/api/v1/ledger/balances?${params.toString()}`, trialBalanceSchema, fetchImpl);
+  return params;
+}
+
+/** GET /api/v1/ledger/balances (trial balance over a period and account range). */
+export function fetchTrialBalance(q: TrialBalanceQuery, fetchImpl: FetchLike = defaultFetch): Promise<TrialBalance> {
+  return getJSON(`/api/v1/ledger/balances?${trialBalanceParams(q).toString()}`, trialBalanceSchema, fetchImpl);
+}
+
+/** A CSV export the service built: the file, the name it suggests and whether it stopped at the row cap. */
+export interface CsvExport {
+  blob: Blob;
+  filename: string;
+  /** True when the result was longer than the export cap; the file holds the first rows only. */
+  truncated: boolean;
+}
+
+/** GET url with format=csv (the exports of the chart of accounts, the trial balance and the ledger lines). */
+async function fetchCsv(url: string, fetchImpl: FetchLike): Promise<CsvExport> {
+  const res = await fetchImpl(url, { headers: { Accept: "text/csv" } });
+  if (!res.ok) throw await readProblem(res);
+  const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1];
+  return { blob: await res.blob(), filename: name ?? "ledger-export.csv", truncated: res.headers.get("X-Passage-Export-Truncated") === "true" };
+}
+
+/** GET /api/v1/ledger/balances?format=csv: the trial balance as one CSV file. */
+export function exportTrialBalanceCsv(q: TrialBalanceQuery, fetchImpl: FetchLike = defaultFetch): Promise<CsvExport> {
+  const params = trialBalanceParams(q);
+  params.set("format", "csv");
+  return fetchCsv(`/api/v1/ledger/balances?${params.toString()}`, fetchImpl);
 }
 
 /** GET /api/v1/ledger/journal-entries/{id} (entry with lines). */
@@ -774,8 +801,8 @@ const journalLinePageSchema = z.object({
 });
 export type JournalLinePage = z.infer<typeof journalLinePageSchema>;
 
-/** GET /api/v1/ledger/journal-lines: one keyset page in posting order. */
-export function fetchJournalLines(q: JournalLineQuery, fetchImpl: FetchLike = defaultFetch): Promise<JournalLinePage> {
+/** One keyset page in posting order. */
+function journalLineParams(q: JournalLineQuery): URLSearchParams {
   const params = new URLSearchParams({ ledger: q.ledgerId });
   if (q.accountFrom) params.set("account_from", q.accountFrom);
   if (q.accountTo) params.set("account_to", q.accountTo);
@@ -786,7 +813,18 @@ export function fetchJournalLines(q: JournalLineQuery, fetchImpl: FetchLike = de
   for (const [attr, value] of Object.entries(q.dimensions ?? {})) params.set(`dim.${attr}`, value);
   if (q.cursor) params.set("cursor", q.cursor);
   if (q.limit) params.set("limit", String(q.limit));
-  return getJSON(`/api/v1/ledger/journal-lines?${params.toString()}`, journalLinePageSchema, fetchImpl);
+  return params;
+}
+
+export function fetchJournalLines(q: JournalLineQuery, fetchImpl: FetchLike = defaultFetch): Promise<JournalLinePage> {
+  return getJSON(`/api/v1/ledger/journal-lines?${journalLineParams(q).toString()}`, journalLinePageSchema, fetchImpl);
+}
+
+/** GET /api/v1/ledger/journal-lines?format=csv: every line matching the filter (not one page) as one CSV file. */
+export function exportJournalLinesCsv(q: JournalLineQuery, fetchImpl: FetchLike = defaultFetch): Promise<CsvExport> {
+  const params = journalLineParams({ ...q, cursor: undefined, limit: undefined });
+  params.set("format", "csv");
+  return fetchCsv(`/api/v1/ledger/journal-lines?${params.toString()}`, fetchImpl);
 }
 
 /** Recurring journal frequencies (FR-11.10). */
@@ -1715,4 +1753,56 @@ export async function deleteBatchAttachment(batchId: string, id: string, fetchIm
     headers: { Accept: "application/json" },
   });
   if (!res.ok) throw await readProblem(res);
+}
+
+export const ACCOUNT_TYPES = ["asset", "liability", "equity", "revenue", "expense", "profit_and_loss_total", "balance_sheet_total", "reporting"] as const;
+export type AccountType = (typeof ACCOUNT_TYPES)[number];
+export const RECON_TYPES = ["none", "customer", "vendor", "bank", "inventory", "fixed_asset"] as const;
+export type ReconType = (typeof RECON_TYPES)[number];
+
+/** A main account of a chart; lockVersion is its entity tag (If-Match on the next replacement). */
+export const accountSchema = z.object({
+  id: z.string(),
+  chartCode: z.string(),
+  accountNumber: z.string(),
+  name: z.string(),
+  accountType: z.string(),
+  isPostable: z.boolean(),
+  suspendedFrom: z.string().optional(),
+  reconciliationAccountType: z.string(),
+  lockVersion: z.number().int(),
+});
+export type Account = z.infer<typeof accountSchema>;
+
+const accountPageSchema = z.object({ items: z.array(accountSchema), nextAfter: z.string() });
+export type AccountPage = z.infer<typeof accountPageSchema>;
+
+export interface AccountInput {
+  name: string;
+  accountType: AccountType;
+  isPostable: boolean;
+  suspendedFrom?: string;
+  reconciliationAccountType: ReconType;
+}
+
+/** GET /api/v1/ledger/charts/{chart}/accounts: one keyset page by account number (`after` is the last number of the page before). */
+export function fetchAccounts(chart: string, after?: string, fetchImpl: FetchLike = defaultFetch): Promise<AccountPage> {
+  const params = new URLSearchParams({ limit: "200" });
+  if (after) params.set("after", after);
+  return getJSON(`/api/v1/ledger/charts/${encodeURIComponent(chart)}/accounts?${params.toString()}`, accountPageSchema, fetchImpl);
+}
+
+/** GET /api/v1/ledger/charts/{chart}/accounts/{number}; 404 LEDGER_ACCOUNT_NOT_FOUND when missing. */
+export function fetchAccount(chart: string, number: string, fetchImpl: FetchLike = defaultFetch): Promise<Account> {
+  return getJSON(`/api/v1/ledger/charts/${encodeURIComponent(chart)}/accounts/${encodeURIComponent(number)}`, accountSchema, fetchImpl);
+}
+
+/** PUT /api/v1/ledger/charts/{chart}/accounts/{number}: creates, or replaces an account at `lockVersion` (If-Match). */
+export function putAccount(chart: string, number: string, input: AccountInput, lockVersion?: number, fetchImpl: FetchLike = defaultFetch): Promise<Account> {
+  return sendJSON("PUT", `/api/v1/ledger/charts/${encodeURIComponent(chart)}/accounts/${encodeURIComponent(number)}`, accountSchema, fetchImpl, input, tagHeader(lockVersion));
+}
+
+/** GET /api/v1/ledger/charts/{chart}/accounts?format=csv: the chart of accounts export. */
+export function exportAccountsCsv(chart: string, fetchImpl: FetchLike = defaultFetch): Promise<CsvExport> {
+  return fetchCsv(`/api/v1/ledger/charts/${encodeURIComponent(chart)}/accounts?format=csv`, fetchImpl);
 }
