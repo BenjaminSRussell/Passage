@@ -135,7 +135,8 @@
       {"resource": "/v1/ledger/ledgers/*/realignments", "methods": ["GET"]},
       {"resource": "/v1/ledger/ledgers/*/realignments/*", "methods": ["GET"]},
       {"resource": "/v1/ledger/ledgers/*/advanced-rules", "methods": ["GET"]},
-      {"resource": "/v1/ledger/ledgers/*/advanced-rules/*", "methods": ["GET"]}
+      {"resource": "/v1/ledger/ledgers/*/advanced-rules/*", "methods": ["GET"]},
+      {"resource": "/v1/ledger/charts/*/accounts/*", "methods": ["GET"]}
     ]},
     "ledger.balance.read": {"permissions": [{"resource": "/v1/ledger/balances", "methods": ["GET"]}]},
     "ledger.balance.rebuild": {"permissions": [
