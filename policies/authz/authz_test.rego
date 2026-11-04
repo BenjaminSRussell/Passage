@@ -1376,3 +1376,22 @@ test_purchasing_action_routes_match_their_colon_suffix if {
 	allowed("PurchaseOrderMaintain", "POST", "/v1/procurement/requisition-lines/l1:split")
 	not allowed("PurchaseOrderMaintain", "POST", "/v1/procurement/inbound-changes/c1:apply")
 }
+
+# #472: expense posts the reimbursement liability with a signed token whose only ledger grant is
+# ledger.entry.post; the user-facing duties open only their own routes.
+test_expense_reimbursement_liability_and_employee_vendor_register if {
+	data.service_grants.expense == {"ledger": ["ledger.entry.post"]}
+	allowed("ledger.entry.post", "POST", "/v1/ledger/journal-entries")
+	not allowed("ledger.entry.post", "POST", "/v1/ledger/journal-entries/je-1/reverse")
+	not allowed("ledger.entry.post", "GET", "/v1/ledger/balances")
+	allowed("expense.gl.post", "POST", "/v1/expense/gl-postings")
+	not allowed("expense.gl.post", "POST", "/v1/expense/reports/r1/decide")
+	not allowed("expense.gl.post", "POST", "/v1/ledger/journal-entries")
+	not allowed("expense.approve", "POST", "/v1/expense/gl-postings")
+	not allowed("expense.report.write", "POST", "/v1/expense/gl-postings")
+	allowed("employee-vendor.maintain", "PUT", "/v1/payables/employee-vendors/w1")
+	not allowed("employee-vendor.maintain", "POST", "/v1/payables/payment-proposals")
+	not allowed("employee-vendor.maintain", "POST", "/v1/payables/vendors/v1:block")
+	not allowed("vendor-block.manage", "PUT", "/v1/payables/employee-vendors/w1")
+	not allowed("payment-proposal.write", "PUT", "/v1/payables/employee-vendors/w1")
+}

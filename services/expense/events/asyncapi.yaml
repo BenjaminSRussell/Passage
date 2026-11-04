@@ -13,8 +13,9 @@ info:
     publishes dev.passage.expense.cashadvance.paid.v1 when an APPROVED advance is recorded
     as paid by its AP prepayment, in the transaction that moves it to PAID (the PRD's
     cash-advance.paid.v1; the kernel naming rule allows no hyphen in the entity). PSG-43 AC3
-    publishes dev.passage.expense.report.approved.v1 when a report with a reimbursable
-    amount is approved; payables turns it into the employee's vendor open item. The payload
+    publishes dev.passage.expense.report.approved.v1 once an approved report's reimbursable
+    amount is booked as a liability in the general ledger (POST /v1/expense/gl-postings);
+    payables turns it into the employee's vendor open item. The payload
     type is platform/go/reimbursement.ReportApproved.
 channels:
   passage.expense.policy:
@@ -51,7 +52,7 @@ operations:
     action: send
     channel:
       $ref: '#/channels/passage.expense.report'
-    summary: An approver approved a report; its reimbursable amount is payable to the worker through AP (FR-43.14).
+    summary: An approved report's liability is in the general ledger (Dr expense, Cr AP control); its reimbursable amount is payable to the worker through AP (FR-43.14).
     messages:
       - $ref: '#/channels/passage.expense.report/messages/approved'
 components:

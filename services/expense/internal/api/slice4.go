@@ -83,6 +83,7 @@ type reportDTO struct {
 	Version       int        `json:"version"`
 	CreatedAt     string     `json:"createdAt"`
 	SubmittedAt   *string    `json:"submittedAt"`
+	GLEntryID     string     `json:"glEntryId,omitempty"`
 	Lines         []lineView `json:"lines"`
 }
 
@@ -348,7 +349,7 @@ func toReportDTO(rep store.Report) reportDTO {
 		Currency: rep.Currency, Status: rep.Status, Total: rep.Total.StringFixed(2),
 		Reimbursable: rep.Reimbursable.StringFixed(2), CompanyPaid: rep.CompanyPaid.StringFixed(2),
 		Submittable: rep.Status == string(domain.ReportDraft) && len(rep.Lines) > 0,
-		Version:     rep.Version, CreatedAt: rep.CreatedAt.UTC().Format(time.RFC3339), Lines: make([]lineView, 0, len(rep.Lines)),
+		Version:     rep.Version, CreatedAt: rep.CreatedAt.UTC().Format(time.RFC3339), GLEntryID: rep.GLEntryID, Lines: make([]lineView, 0, len(rep.Lines)),
 	}
 	if rep.SubmittedAt != nil {
 		s := rep.SubmittedAt.UTC().Format(time.RFC3339)

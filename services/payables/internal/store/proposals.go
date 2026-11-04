@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -101,6 +102,8 @@ type NewProposal struct {
 	RequestHash         string
 	CreatedBy           string
 	Groups              []domain.ProposalGroup
+	// Excluded are the due items left out of the proposal; they are kept with it so a replay reports them too.
+	Excluded []ExcludedItem
 }
 
 func (s *Postgres) Candidates(ctx context.Context, legalEntityID, dueBy string) ([]domain.ProposalCandidate, error) {
@@ -139,12 +142,12 @@ func (s *Postgres) Candidates(ctx context.Context, legalEntityID, dueBy string) 
 }
 
 const proposalColumns = `id::text, legal_entity_id::text, run_date::text, run_id, due_by::text, rate_date::text, legal_entity_currency, payment_method, status,
-	created_by, created_at, approved_by, approved_at, cancelled_by, cancelled_at, executed_at, failed_at, request_hash`
+	created_by, created_at, approved_by, approved_at, cancelled_by, cancelled_at, executed_at, failed_at, request_hash, excluded_items`
 
 func scanProposal(row pgx.Row) (Proposal, error) {
 	var p Proposal
 	err := row.Scan(&p.ID, &p.LegalEntityID, &p.RunDate, &p.RunID, &p.DueBy, &p.RateDate, &p.LegalEntityCurrency, &p.PaymentMethod, &p.Status,
-		&p.CreatedBy, &p.CreatedAt, &p.ApprovedBy, &p.ApprovedAt, &p.CancelledBy, &p.CancelledAt, &p.ExecutedAt, &p.FailedAt, &p.RequestHash)
+		&p.CreatedBy, &p.CreatedAt, &p.ApprovedBy, &p.ApprovedAt, &p.CancelledBy, &p.CancelledAt, &p.ExecutedAt, &p.FailedAt, &p.RequestHash, &p.ExcludedItems)
 	return p, err
 }
 
@@ -166,12 +169,16 @@ func (s *Postgres) FindProposal(ctx context.Context, legalEntityID, runDate, run
 func (s *Postgres) CreateProposal(ctx context.Context, in NewProposal) (Proposal, bool, error) {
 	p, _ := tenant.FromContext(ctx)
 	id := ""
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	excluded, err := json.Marshal(append([]ExcludedItem{}, in.Excluded...))
+	if err != nil {
+		return Proposal{}, false, err
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		err := tx.QueryRow(ctx, `insert into ap_payment_proposal (tenant_id, id, legal_entity_id, run_date, run_id, due_by, rate_date, legal_entity_currency,
-			payment_method, request_hash, status, created_by)
-			values ($1, $11::uuid, $2::uuid, $3::date, $4, $5::date, $6::date, $7, $8, $9, 'DRAFT', $10)
+			payment_method, request_hash, status, created_by, excluded_items)
+			values ($1, $11::uuid, $2::uuid, $3::date, $4, $5::date, $6::date, $7, $8, $9, 'DRAFT', $10, $12::jsonb)
 			on conflict (tenant_id, legal_entity_id, run_date, run_id) do nothing returning id::text`,
-			p.TenantID, in.LegalEntityID, in.RunDate, in.RunID, in.DueBy, in.RateDate, in.LegalEntityCurrency, in.PaymentMethod, in.RequestHash, in.CreatedBy, ids.New()).Scan(&id)
+			p.TenantID, in.LegalEntityID, in.RunDate, in.RunID, in.DueBy, in.RateDate, in.LegalEntityCurrency, in.PaymentMethod, in.RequestHash, in.CreatedBy, ids.New(), excluded).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			id = ""
 			return nil

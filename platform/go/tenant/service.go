@@ -123,6 +123,10 @@ var serviceGrants = map[string]map[string][]string{
 	"payroll": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
 	},
+	// expense posts the reimbursement liability of approved reports (#472) and reads nothing back.
+	"expense": {
+		"ledger": {"ledger.entry.post"},
+	},
 	"sales": {
 		"product":     {"product.configuration.read"},
 		"production":  {"production.order.create-from-sales"},

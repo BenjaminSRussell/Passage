@@ -46,6 +46,7 @@ type API struct {
 	proposals        *proposalDeps
 	runs             *runDeps
 	withholding      *withholdingDeps
+	employeeVendors  *employeeVendorDeps
 	// vendorGroupDim is the ledger dimension attribute that carries the vendor group code on the AP control account; empty posts and compares none.
 	vendorGroupDim string
 }
@@ -102,6 +103,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerAging(r)
 	a.registerProposals(r)
 	a.registerRuns(r)
+	a.registerEmployeeVendors(r)
 }
 
 func (a *API) ready(w http.ResponseWriter, r *http.Request) {
@@ -210,6 +212,9 @@ func (a *API) Metrics() http.Handler {
 		a.writeProposalMetrics(w)
 		a.writeRunMetrics(w)
 		a.writeWithholdingMetrics(w)
+		if a.employeeVendors != nil {
+			fmt.Fprintf(w, "# HELP payables_employee_vendors_registered_total Workers newly mapped to a vendor in the employee-vendor register.\n# TYPE payables_employee_vendors_registered_total counter\npayables_employee_vendors_registered_total %d\n", a.employeeVendors.registered.Load())
+		}
 		a.http.write(w)
 	})
 }

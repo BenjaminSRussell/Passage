@@ -182,6 +182,7 @@ components:
         currency: { type: string, pattern: "^[A-Z]{3}$" }
         open_amount: { type: string, description: "decimal string; the amount still open after this change" }
         status: { type: string, enum: [OPEN, PARTIALLY_SETTLED, SETTLED, REVERSED] }
+        payee_worker_id: { type: string, format: uuid, description: "HR worker an expense reimbursement pays; vendor_id is the vendor the employee-vendor register maps them to. Absent on vendor invoices" }
     OpenItemSettledData:
       type: object
       required: [open_item_id, legal_entity_id, vendor_id, source_invoice_id, currency, open_amount, status, settled_amount]
@@ -195,6 +196,7 @@ components:
         status: { type: string, enum: [PARTIALLY_SETTLED, SETTLED] }
         settled_amount: { type: string, description: "decimal string; the amount this settlement applied" }
         settlement_id: { type: string, description: "reference of the settlement that applied the amount; absent when the caller gave none" }
+        payee_worker_id: { type: string, format: uuid, description: "HR worker an expense reimbursement pays; vendor_id is the vendor the employee-vendor register maps them to. Absent on vendor invoices" }
     OpenItemHoldData:
       type: object
       required: [open_item_id, legal_entity_id, vendor_id, payment_hold, actor]

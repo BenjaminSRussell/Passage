@@ -177,3 +177,39 @@ func TestApprovedExpenseReport_BecomesAnOpenItemAndAPaymentRunSettlesIt(t *testi
 		t.Fatalf("settled events = %+v; want the report's open item settled in full for the employee", got)
 	}
 }
+
+func TestHandleExpenseReportApproved_PaysTheVendorTheWorkerIsRegisteredTo(t *testing.T) {
+	s := setup(t)
+	const vendorID, laterReport = "00000000-0000-0000-0000-0000000000f1", "00000000-0000-0000-0000-0000000000e2"
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: le, UserID: "hana"})
+	if err := HandleExpenseReportApproved(context.Background(), s, approvedEvent(t, nil)); err != nil {
+		t.Fatal(err)
+	}
+	reg, created, err := s.RegisterEmployeeVendor(ctx, le, workerID, vendorID, "hana")
+	if err != nil || !created || reg.Repointed != 1 {
+		t.Fatalf("register = %+v created=%v err=%v; want the waiting item moved", reg, created, err)
+	}
+	if _, _, err := s.RegisterEmployeeVendor(ctx, le, workerID, "00000000-0000-0000-0000-0000000000f2", "hana"); !errors.Is(err, store.ErrEmployeeVendorTaken) {
+		t.Fatalf("remap = %v; want %v", err, store.ErrEmployeeVendorTaken)
+	}
+	for range 2 {
+		if err := HandleExpenseReportApproved(context.Background(), s, approvedEvent(t, nil)); err != nil {
+			t.Fatalf("redelivery after the move: %v", err)
+		}
+		if err := HandleExpenseReportApproved(context.Background(), s, approvedEvent(t, func(d *reimbursement.ReportApproved) { d.ReportID = laterReport })); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, err := s.List(ctx, store.Filter{VendorID: vendorID}, 10)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("items = %+v err=%v; want both reports paid to the vendor", items, err)
+	}
+	for _, it := range items {
+		if it.PayeeUnverified || it.PayeeWorkerID != workerID {
+			t.Fatalf("item = %+v; want a verified payee naming the worker", it)
+		}
+	}
+	if left, _ := s.List(ctx, store.Filter{VendorID: workerID}, 10); len(left) != 0 {
+		t.Fatalf("items still naming the worker = %+v", left)
+	}
+}

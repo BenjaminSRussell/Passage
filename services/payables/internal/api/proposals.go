@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,7 +28,6 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/fx"
-	"github.com/BenjaminSRussell/passage/services/payables/internal/party"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/store"
 )
 
@@ -84,7 +84,10 @@ type proposalDeps struct {
 	selfApprovals atomic.Int64
 	rateFaults    atomic.Int64
 	unverified    atomic.Int64
-	holds         holdCounters
+	// unverifiedSeen holds the ids of the items already counted in unverified, so an item left out of
+	// several proposals is counted once per process.
+	unverifiedSeen sync.Map
+	holds          holdCounters
 }
 
 func (a *API) WithProposals(s PayablesStore, rates RateSource) *API {
@@ -434,10 +437,7 @@ func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {
 		a.fault(w, r, "payment proposal candidates failed", err)
 		return
 	}
-	candidates, excluded, ok := a.knownPayees(w, r, le, candidates)
-	if !ok {
-		return
-	}
+	candidates, excluded := a.knownPayees(r, le, candidates)
 	rateDate := runDate
 	if today := a.today(); runDate.After(today) {
 		rateDate = today
@@ -461,7 +461,8 @@ func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {
 	if len(groups) == 0 {
 		detail := "no open items are due for payment on or before " + req.DueBy
 		if len(excluded) > 0 {
-			detail = fmt.Sprintf("%s; %d open items were left out with reason %s because their payee is not in the vendor master", detail, len(excluded), store.ReasonPayeeUnverified)
+			a.countUnverified(excluded)
+			detail = fmt.Sprintf("%s; %d open items were left out with reason %s because their payee is not in the employee-vendor register", detail, len(excluded), store.ReasonPayeeUnverified)
 		}
 		a.problem(w, r, http.StatusUnprocessableEntity, domain.CodeNothingDue, detail)
 		return
@@ -471,7 +472,7 @@ func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {
 	}
 	proposal, created, err := a.proposals.store.CreateProposal(ctx, store.NewProposal{
 		LegalEntityID: le, RunDate: req.RunDate, RunID: req.RunID, DueBy: req.DueBy, RateDate: rateDate.Format(time.DateOnly),
-		LegalEntityCurrency: req.LegalEntityCurrency, PaymentMethod: req.PaymentMethod, RequestHash: req.hash(), CreatedBy: caller.UserID, Groups: groups,
+		LegalEntityCurrency: req.LegalEntityCurrency, PaymentMethod: req.PaymentMethod, RequestHash: req.hash(), CreatedBy: caller.UserID, Groups: groups, Excluded: excluded,
 	})
 	if errors.Is(err, store.ErrItemsChanged) {
 		a.problem(w, r, http.StatusConflict, domain.CodeProposalConflict, err.Error()+"; retry the request")
@@ -486,7 +487,7 @@ func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.proposals.created.Add(1)
-	proposal.ExcludedItems = excluded
+	a.countUnverified(excluded)
 	w.Header().Set("Location", pathProposals+"/"+proposal.ID)
 	httpx.JSON(w, http.StatusCreated, proposal)
 }
@@ -676,42 +677,37 @@ func (a *API) writeProposalMetrics(w http.ResponseWriter) {
 	fmt.Fprintf(w, "# HELP payables_payment_holds_total Payment hold and vendor block commands by outcome.\n# TYPE payables_payment_holds_total counter\npayables_payment_holds_total{outcome=\"held\"} %d\npayables_payment_holds_total{outcome=\"released\"} %d\npayables_payment_holds_total{outcome=\"vendor_blocked\"} %d\npayables_payment_holds_total{outcome=\"vendor_unblocked\"} %d\n",
 		a.proposals.holds.held.Load(), a.proposals.holds.released.Load(), a.proposals.holds.blocked.Load(), a.proposals.holds.unblocked.Load())
 	fmt.Fprintf(w, "# HELP payables_fx_rate_faults_total Exchange rate lookups that failed on a server or transport fault.\n# TYPE payables_fx_rate_faults_total counter\npayables_fx_rate_faults_total %d\n", a.proposals.rateFaults.Load())
-	fmt.Fprintf(w, "# HELP payables_payee_unverified_excluded_total Open items left out of a proposal because their payee is not in the vendor master.\n# TYPE payables_payee_unverified_excluded_total counter\npayables_payee_unverified_excluded_total %d\n", a.proposals.unverified.Load())
+	fmt.Fprintf(w, "# HELP payables_payee_unverified_excluded_total Distinct open items left out of a proposal because their payee is not in the employee-vendor register.\n# TYPE payables_payee_unverified_excluded_total counter\npayables_payee_unverified_excluded_total %d\n", a.proposals.unverified.Load())
 }
 
-// knownPayees leaves out open items whose payee is not yet in the party vendor master (expense
-// reimbursements to employees) so that one of them cannot make approval refuse the whole
-// proposal, and reports each one with reason PAYEE_UNVERIFIED. Items of other payees are left
-// to the bank binding at approval.
-func (a *API) knownPayees(w http.ResponseWriter, r *http.Request, le string, in []domain.ProposalCandidate) ([]domain.ProposalCandidate, []store.ExcludedItem, bool) {
+// knownPayees leaves out open items whose payee is not yet a vendor (expense reimbursements to a worker
+// the employee-vendor register does not map) so that one of them cannot make approval refuse the whole
+// proposal, and reports each one with reason PAYEE_UNVERIFIED. Registering the worker moves their items
+// to the vendor and clears the flag, so no party call is needed here; items of other payees are left to
+// the bank binding at approval.
+func (a *API) knownPayees(r *http.Request, le string, in []domain.ProposalCandidate) ([]domain.ProposalCandidate, []store.ExcludedItem) {
 	if a.runs == nil || a.runs.banks == nil {
-		return in, nil, true
+		return in, nil
 	}
-	known := map[string]bool{}
 	out := make([]domain.ProposalCandidate, 0, len(in))
 	var excluded []store.ExcludedItem
 	for _, c := range in {
 		if c.PayeeUnverified {
-			ok, seen := known[c.VendorID]
-			if !seen {
-				_, err := a.runs.banks.BankAccounts(r.Context(), le, c.VendorID)
-				if err != nil && !errors.Is(err, party.ErrVendorNotFound) {
-					a.partyUnavailable(w, r, err)
-					return nil, nil, false
-				}
-				ok = err == nil
-				known[c.VendorID] = ok
-			}
-			if !ok {
-				excluded = append(excluded, store.ExcludedItem{ItemID: c.ID, VendorID: c.VendorID, Reason: store.ReasonPayeeUnverified})
-				continue
-			}
+			excluded = append(excluded, store.ExcludedItem{ItemID: c.ID, VendorID: c.VendorID, Reason: store.ReasonPayeeUnverified})
+			continue
 		}
 		out = append(out, c)
 	}
 	if len(excluded) > 0 {
-		a.proposals.unverified.Add(int64(len(excluded)))
-		slog.Warn("open items left out of a payment proposal: payee not in the vendor master", "legalEntityId", le, "count", len(excluded), "reason", store.ReasonPayeeUnverified, "correlationId", middleware.GetReqID(r.Context()))
+		slog.Warn("open items left out of a payment proposal: payee not in the employee-vendor register", "legalEntityId", le, "count", len(excluded), "reason", store.ReasonPayeeUnverified, "correlationId", middleware.GetReqID(r.Context()))
 	}
-	return out, excluded, true
+	return out, excluded
+}
+
+func (a *API) countUnverified(excluded []store.ExcludedItem) {
+	for _, e := range excluded {
+		if _, seen := a.proposals.unverifiedSeen.LoadOrStore(e.ItemID, struct{}{}); !seen {
+			a.proposals.unverified.Add(1)
+		}
+	}
 }

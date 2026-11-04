@@ -681,6 +681,9 @@
       {"resource": "/v1/payables/open-items/*:hold", "methods": ["POST"]},
       {"resource": "/v1/payables/open-items/*:release", "methods": ["POST"]}
     ]},
+    "employee-vendor.maintain": {"permissions": [
+      {"resource": "/v1/payables/employee-vendors/*", "methods": ["PUT"]}
+    ]},
     "vendor-block.manage": {"permissions": [
       {"resource": "/v1/payables/vendors/*:block", "methods": ["POST"]},
       {"resource": "/v1/payables/vendors/*:unblock", "methods": ["POST"]}
@@ -2073,6 +2076,9 @@
       {"resource": "/v1/expense/reports/*/decide", "methods": ["POST"]},
       {"resource": "/v1/expense/travel-requisitions/*/decide", "methods": ["POST"]}
     ]},
+    "expense.gl.post": {"permissions": [
+      {"resource": "/v1/expense/gl-postings", "methods": ["POST"]}
+    ]},
     "expense.card.import": {"permissions": [
       {"resource": "/v1/expense/card-transactions/import", "methods": ["POST"]},
       {"resource": "/v1/expense/card-transactions:parse", "methods": ["POST"]}
@@ -3255,6 +3261,9 @@
     },
     "payroll": {
       "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
+    },
+    "expense": {
+      "ledger": ["ledger.entry.post"]
     },
     "sales": {
       "product": ["product.configuration.read"],

@@ -360,7 +360,7 @@ func newRunFixture(t *testing.T, opts fixtureOptions) *runFixture {
 	if !opts.noParty {
 		banks = party.New(partySrv.URL, nil).WithSigner(signer)
 	}
-	a := api.New(app, opts.validator, func() time.Time { return clock }).WithProposals(pg, fx.New(fxServer(t).URL, "", nil)).WithPaymentRuns(pg, ledger.New(srv.URL, nil).WithSigner(signer), runProfiles).WithVendorBanks(banks, keys)
+	a := api.New(app, opts.validator, func() time.Time { return clock }).WithProposals(pg, fx.New(fxServer(t).URL, "", nil)).WithPaymentRuns(pg, ledger.New(srv.URL, nil).WithSigner(signer), runProfiles).WithVendorBanks(banks, keys).WithEmployeeVendors(pg)
 	if !opts.noTax {
 		a.WithWithholding(tax.New(taxSrv.URL, nil).WithSigner(signer), pg, runProfiles)
 	}

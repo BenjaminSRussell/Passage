@@ -1,6 +1,7 @@
 // Package reimbursement holds the wire contract between expense and payables for
 // paying an approved expense report: expense publishes ReportApproved, payables turns
-// it into a vendor open item, and payables publishes OpenItemSettled when a payment
+// it into a vendor open item (expense publishes it once the report's liability is in the
+// general ledger), and payables publishes OpenItemSettled when a payment
 // run settles that item.
 package reimbursement
 
@@ -35,4 +36,7 @@ type OpenItemSettled struct {
 	Status          string `json:"status"`
 	SettledAmount   string `json:"settled_amount"`
 	SettlementID    string `json:"settlement_id"`
+	// PayeeWorkerID is the worker a reimbursement pays when VendorID is the vendor the employee-vendor
+	// register maps them to; empty while the item still names the worker as VendorID.
+	PayeeWorkerID string `json:"payee_worker_id,omitempty"`
 }
