@@ -31,6 +31,8 @@ describe("expected scan class (BR-32.2)", () => {
     ["unprefixed 10-01-02 is a location, not AI 10", "10-01-02", "LOCATION", null],
     ["LP scanned where a location is expected is a mismatch", "LP-000123", "LOCATION", "MOB-0101"],
     ["ANY accepts plain text", "whatever 123", "ANY", null],
+    ["GS1 GTIN+lot+expiry with GS satisfies LOT", "]C1010950123456789110LOT42\u001d17261231", "LOT", null],
+    ["GS1 SSCC where a lot is expected is a mismatch", "]C100340123456789012340", "LOT", "MOB-0101"],
   ])("%s", (_name, raw, expected, code) => {
     const d = routeScan(raw, scanStep(expected));
     if (code === null) expect(d).toMatchObject({ kind: "accepted", scanClass: expected });

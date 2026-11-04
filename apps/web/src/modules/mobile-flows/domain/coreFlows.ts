@@ -76,6 +76,20 @@ export const MOVE_FLOW: FlowDraft = {
   ],
 };
 
+/**
+ * Load a packed shipping container onto a dock door (outbound confirm for AC1).
+ * Not one of the seven flows-core-v1 graphs; the Vite stub seeds it on the device menu.
+ */
+export const SHIP_LOAD_FLOW: FlowDraft = {
+  code: "SHIP_LOAD",
+  entryStepId: "scan_container",
+  steps: [
+    { id: "scan_container", type: "scan", prompt: "Scan the shipping container", expectedScan: ["LP"], next: { default: "scan_dock" } },
+    { id: "scan_dock", type: "scan", prompt: "Scan the dock door", expectedScan: ["LOCATION"], next: { default: "confirm_load" } },
+    { id: "confirm_load", type: "confirm", prompt: "Confirm the load", next: { default: null } },
+  ],
+};
+
 /** Count a location's stock, planned or spot (FR-32.4). Offline is off by default (§6.32.13). */
 export const COUNT_FLOW: FlowDraft = {
   code: "COUNT",

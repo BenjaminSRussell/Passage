@@ -11,7 +11,8 @@ release.
   (`GET /api/v1/mobile/menus/{id}`) and falls back to the seven bundled core flows
   (`coreFlows.ts`: receive/put-away, pick, cluster pick, pack, move, count, inquiry); Menu
   leaves the current flow. A publish arrives over SSE (and a 30 s poll) without an app
-  update. The shared runner decides every step:
+  update. After a confirm the next run of the same code uses the latest published graph;
+  an in-flight run keeps the graph it started (BR-32.9). The shared runner decides every step:
   one input per screen, Enter or a hardware scan advances, Back returns one step (§6.32.6).
   Scan steps check the expected class and the GS1 label (MOB-0101..0104, BR-32.1, BR-32.2);
   input, select and branch steps take a value or an outcome. A finished flow is queued as a

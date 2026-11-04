@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { DEFAULT_MENU_ID } from "./api/client";
+import { outcomeFromReplayStatus } from "./api/replayApply";
 import { ClusterPanel } from "./ClusterPanel";
 import { ExceptionsPanel } from "./ExceptionsPanel";
 import { completionFor, CONFIRM_WORK_LINE, confirmationPayload, CORE_FLOWS } from "./domain/coreFlows";
@@ -7,7 +8,8 @@ import type { FlowDraft } from "./domain/flowGraph";
 import { goBack, startFlow, submitStep, type RunnerResult, type RunnerState } from "./domain/flowRunner";
 import { CLASS_LABEL } from "./domain/gs1";
 import { fontSizePx, targetSizePx, textDirection } from "./domain/layout";
-import { type ApplyOutcome, DEFAULT_LIMITS, OfflineQueue, type QueuedTx } from "./domain/offlineQueue";
+import { graphForRestart } from "./domain/menuSync";
+import { DEFAULT_LIMITS, OfflineQueue, type QueuedTx } from "./domain/offlineQueue";
 import {
   AesGcmSealer,
   IndexedDbStore,
@@ -26,16 +28,13 @@ import "./deviceApp.css";
 const REPLAY_URL = "/api/v1/mobile/offline:replay";
 
 /** Sends one queued confirmation. The server enforces ordering and idempotency per key. */
-async function applyOne(tx: QueuedTx): Promise<ApplyOutcome> {
+async function applyOne(tx: QueuedTx) {
   const res = await fetch(REPLAY_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Idempotency-Key": tx.idempotencyKey },
     body: JSON.stringify({ idempotencyKey: tx.idempotencyKey, command: tx.command, payload: tx.payload, capturedAt: tx.capturedAt }),
   });
-  if (res.ok) return { status: "APPLIED" };
-  if (res.status === 409) return { status: "CONFLICT", reason: "conflict reported by the server" };
-  if (res.status >= 500) throw new Error("server unavailable");
-  return { status: "REJECTED", reason: `rejected with ${res.status}` };
+  return outcomeFromReplayStatus(res.status);
 }
 
 interface DeviceStorage {
@@ -155,6 +154,11 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID }:
 
   function restart() {
     if (!flow) return;
+    const next = graphForRestart(menu, flow);
+    if (next !== flow) {
+      setFlow(next);
+      return;
+    }
     const started = startFlow(flow, Date.now());
     if (started.ok) setRunner(started.state);
   }

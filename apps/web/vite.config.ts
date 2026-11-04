@@ -11,10 +11,14 @@ import { devProxy } from "./src/shell/devProxy";
  * src/shell/federation.ts. The @module-federation/vite plugin is a lockfile
  * Need; discovery in tests and `vite` uses import.meta.glob.
  */
+function enableMobileStub(env: Record<string, string>, command: string): boolean {
+  return command === "serve" && env.PASSAGE_MOBILE_STUB !== "0" && !env.PASSAGE_SVC_MOBILE_URL;
+}
+
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, decodeURIComponent(new URL(".", import.meta.url).pathname), "PASSAGE_");
   return {
-    plugins: [react(), ...(command === "serve" ? [mobileDevStub()] : [])],
+    plugins: [react(), ...(enableMobileStub(env, command) ? [mobileDevStub()] : [])],
     define: {
       __PASSAGE_REMOTES__: JSON.stringify(federationRemotes),
       __PASSAGE_DEV_DUTIES__: JSON.stringify(command === "serve" && mode !== "test" ? (env.PASSAGE_DEV_DUTIES ?? "") : ""),
@@ -23,7 +27,7 @@ export default defineConfig(({ mode, command }) => {
     server: {
       port: 5173,
       proxy: devProxy(env),
-      fs: { allow: ["../warehouse-mobile", ...(mode === "test" ? ["../../policies/authz"] : []), "."] },
+      fs: { allow: ["../warehouse-mobile/public", ...(mode === "test" ? ["../../policies/authz"] : []), "."] },
     },
     test: { environment: "jsdom", globals: true, setupFiles: ["./src/test-setup.ts"], exclude: [...configDefaults.exclude, "e2e/**"] },
   };

@@ -19,7 +19,7 @@ const v2 = {
       status: "PUBLISHED",
       steps: [
         ...RECEIVE_PUTAWAY_FLOW.steps.slice(0, 2),
-        { id: "confirm_lot", type: "scan", prompt: "Scan the lot", expectedScan: ["ANY"], next: { default: "confirm_putaway" } } satisfies FlowStep,
+        { id: "confirm_lot", type: "scan", prompt: "Scan the lot", expectedScan: ["LOT"], next: { default: "confirm_putaway" } } satisfies FlowStep,
         RECEIVE_PUTAWAY_FLOW.steps[2],
       ],
     },
@@ -72,5 +72,43 @@ describe("useDeviceFlows", () => {
       sources[0]?.listeners.get("flow.published")?.({ data: JSON.stringify({ flow_id: "RECEIVE_PUTAWAY", code: "RECEIVE_PUTAWAY", version: 2 }) } as MessageEvent);
     });
     await waitFor(() => expect(result.current.flows[0]?.steps.map((s) => s.id)).toContain("confirm_lot"));
+  });
+
+  it("ignores a stale menu response that finishes after a newer load", async () => {
+    let releaseFirst: (value: Response) => void = () => undefined;
+    const first = new Promise<Response>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const sources: FakeEventSource[] = [];
+    class FakeEventSource {
+      listeners = new Map<string, (ev: MessageEvent) => void>();
+      constructor() {
+        sources.push(this);
+      }
+      addEventListener(type: string, listener: (ev: MessageEvent) => void) {
+        this.listeners.set(type, listener);
+      }
+      close() {}
+    }
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => first)
+      .mockImplementation(async () => new Response(JSON.stringify(v2), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() =>
+      useDeviceFlows({ fallback: [PICK_FLOW], EventSource: FakeEventSource as unknown as typeof EventSource }),
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(result.current.source).toBe("bundled");
+    act(() => {
+      sources[0]?.listeners.get("flow.published")?.({
+        data: JSON.stringify({ flow_id: "RECEIVE_PUTAWAY", code: "RECEIVE_PUTAWAY", version: 2 }),
+      } as MessageEvent);
+    });
+    await waitFor(() => expect(result.current.flows[0]?.steps.map((s) => s.id)).toContain("confirm_lot"));
+    await act(async () => {
+      releaseFirst(new Response(JSON.stringify(published), { status: 200 }));
+    });
+    expect(result.current.flows[0]?.steps.map((s) => s.id)).toContain("confirm_lot");
   });
 });

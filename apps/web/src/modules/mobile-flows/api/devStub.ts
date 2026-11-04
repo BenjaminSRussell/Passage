@@ -41,8 +41,9 @@ function pathOf(req: StubReq): string {
 }
 
 /**
- * Serves GET/POST `/api/v1/mobile/{flows,menus,events}` from an in-process store seeded
- * with the bundled core flows. Unhandled `/api/v1/mobile/*` paths fall through to the proxy.
+ * Serves GET/POST `/api/v1/mobile/{flows,menus,events}` and `POST .../offline:replay`
+ * from an in-process store. Installed only when `vite serve` has no `PASSAGE_SVC_MOBILE_URL`
+ * and `PASSAGE_MOBILE_STUB` is not `0`. Unhandled `/api/v1/mobile/*` paths fall through.
  */
 export function mobileDevStub(): Plugin {
   const store = createMobileStore();
@@ -82,6 +83,11 @@ export function mobileDevStub(): Plugin {
     if (req.method === "GET" && path.startsWith("/api/v1/mobile/menus/")) {
       const id = decodeURIComponent(path.slice("/api/v1/mobile/menus/".length));
       send(res, 200, store.menu(id || "default"));
+      return;
+    }
+    if (req.method === "POST" && path === "/api/v1/mobile/offline:replay") {
+      const body = JSON.parse(await readBody(req)) as { idempotencyKey: string; command: string };
+      send(res, 200, store.replay(body));
       return;
     }
     if (req.method === "POST" && path === "/api/v1/mobile/flows") {

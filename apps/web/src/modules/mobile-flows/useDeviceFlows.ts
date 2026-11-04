@@ -29,15 +29,21 @@ export function useDeviceFlows(opts: UseDeviceFlowsOpts = {}): DeviceFlows {
 
   useEffect(() => {
     let cancelled = false;
-    const load = () =>
-      fetchMenu(menuId).then(
+    let next = 0;
+    let applied = 0;
+    const load = () => {
+      const mine = ++next;
+      return fetchMenu(menuId).then(
         (menu) => {
-          if (!cancelled) setState({ flows: publishedDrafts(menu.flows), source: "menu" });
+          if (cancelled || mine <= applied) return;
+          applied = mine;
+          setState({ flows: publishedDrafts(menu.flows), source: "menu" });
         },
         () => {
           /* Keep whatever is on the device: bundled at start, last menu after a blip. */
         },
       );
+    };
     void load();
     const timer = window.setInterval(() => void load(), pollMs);
     const stop = subscribePublishes(() => void load(), { EventSource: opts.EventSource });

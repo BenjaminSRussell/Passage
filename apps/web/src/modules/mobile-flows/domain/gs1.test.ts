@@ -283,6 +283,14 @@ describe("classifyScan and scan routing (BR-32.2)", () => {
     expect(matchScanClass("GTIN", classifyScan("0109501234567891", { expectGs1: true }))).toBeNull();
     expect(matchScanClass("GTIN", classifyScan("09501101020918"))).not.toBeNull();
   });
+
+  it("accepts AI 10 (lot) on a LOT step, including a multi-AI label joined by GS", () => {
+    const joined = "]C1" + "0109501234567891" + "10LOT42" + GS + "17261231";
+    expect(matchScanClass("LOT", classifyScan("]C110LOT42"))).toBeNull();
+    expect(matchScanClass("LOT", classifyScan(joined))).toBeNull();
+    expect(matchScanClass("GTIN", classifyScan(joined))).toBeNull();
+    expect(matchScanClass("LOT", classifyScan("]C10109501234567891"))).toBe("Expected lot, scanned GTIN.");
+  });
 });
 
 describe("company-internal AIs and symbology identifiers", () => {

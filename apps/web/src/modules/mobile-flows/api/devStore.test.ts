@@ -15,7 +15,7 @@ describe("mobile dev store", () => {
     const store = createMobileStore();
     const seen: { code: string; version: number }[] = [];
     store.onPublish((e) => seen.push({ code: e.code, version: e.version }));
-    const lot: FlowStep = { id: "confirm_lot", type: "scan", prompt: "Scan the lot", expectedScan: ["ANY"], next: { default: "confirm_putaway" } };
+    const lot: FlowStep = { id: "confirm_lot", type: "scan", prompt: "Scan the lot", expectedScan: ["LOT"], next: { default: "confirm_putaway" } };
     const withLot = {
       ...RECEIVE_PUTAWAY_FLOW,
       steps: [...RECEIVE_PUTAWAY_FLOW.steps.slice(0, 2), lot, RECEIVE_PUTAWAY_FLOW.steps[2]],
@@ -28,5 +28,15 @@ describe("mobile dev store", () => {
     expect(published.status).toBe("PUBLISHED");
     expect(store.menu("default").flows.find((f) => f.code === "RECEIVE_PUTAWAY")?.steps.map((s) => s.id)).toContain("confirm_lot");
     expect(seen).toEqual([{ code: "RECEIVE_PUTAWAY", version: 2 }]);
+  });
+
+  it("applies replay keys once so a second Sync is a no-op", () => {
+    const store = createMobileStore();
+    expect(store.menu("default").flows.map((f) => f.code)).toContain("SHIP_LOAD");
+    const first = store.replay({ idempotencyKey: "e2e-ac1:1", command: "ConfirmWorkLine" });
+    const again = store.replay({ idempotencyKey: "e2e-ac1:1", command: "ConfirmWorkLine" });
+    expect(first).toEqual({ applied: true, idempotencyKey: "e2e-ac1:1", duplicate: false });
+    expect(again.duplicate).toBe(true);
+    expect(store.replayed()).toHaveLength(1);
   });
 });
