@@ -115,3 +115,34 @@ func TestIssueClaim_ConcurrentClaimsAgainstOneHoldAdmitOnlyTheFreeQuantity(t *te
 		t.Fatalf("%d claims admitted against 3 free units", admitted.Load())
 	}
 }
+
+// A claim that names a batch with no hold must not take another batch's held
+// stock: not by claiming more than its batch has, and not on top of batchless
+// claims that already took the warehouse's free quantity.
+func TestIssueClaim_ABatchWithoutAHoldCannotReachAnotherBatchsHeldStock(t *testing.T) {
+	s, _, _ := setup(t)
+	ctx := entityCtx(1, ids.New())
+	product := ids.New()
+	post(t, ctx, s, domain.JournalOpeningBalance, line(product, "10", "1", dims("warehouse", "W1", "batch", "B1")),
+		line(product, "10", "1", dims("warehouse", "W1", "batch", "B2")))
+	if _, err := s.PlaceHold(ctx, holdInput(ctx, product, "h1", "10", "qo-1", dims("warehouse", "W1", "batch", "B2"))); err != nil {
+		t.Fatal(err)
+	}
+	b1 := func(key, qty string) store.IssueClaimInput {
+		c := claimOf(ctx, product, key, "PICK", qty)
+		c.Batch = "B1"
+		return c
+	}
+	if _, err := s.ClaimIssue(ctx, b1("over", "12")); problemCode(err) != domain.CodeQualityHold {
+		t.Fatalf("12 of batch B1 (10 on hand) with all of B2 held: %v, want %s", err, domain.CodeQualityHold)
+	}
+	if _, err := s.ClaimIssue(ctx, claimOf(ctx, product, "any", "PICK", "6")); err != nil {
+		t.Fatalf("batchless 6 of the warehouse's free 10: %v", err)
+	}
+	if _, err := s.ClaimIssue(ctx, b1("after", "6")); problemCode(err) != domain.CodeQualityHold {
+		t.Fatalf("6 of B1 after 6 batchless of the free 10: %v, want %s", err, domain.CodeQualityHold)
+	}
+	if _, err := s.ClaimIssue(ctx, b1("fits", "4")); err != nil {
+		t.Fatalf("the 4 left free: %v", err)
+	}
+}

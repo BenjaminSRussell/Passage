@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 	"pgregory.net/rapid"
@@ -95,6 +97,74 @@ func TestPostPackingSlip_SumsLinesOfOneProductBeforeChecking(t *testing.T) {
 	}
 	if !holds.Claimed(product, issueclaim.Ship).IsZero() {
 		t.Fatalf("refused post left %s claimed", holds.Claimed(product, issueclaim.Ship))
+	}
+}
+
+// racingClaimer holds the first claim until a competing post of the same
+// shipment version has taken its own claim, so both posts pass every check and
+// only the version bump decides which one commits.
+type racingClaimer struct {
+	*issueclaim.Fake
+	mu      sync.Mutex
+	calls   int
+	compete func()
+	rival   chan struct{}
+}
+
+func (r *racingClaimer) Claim(ctx context.Context, c issueclaim.Claim) error {
+	err := r.Fake.Claim(ctx, c)
+	r.mu.Lock()
+	r.calls++
+	first := r.calls == 1
+	r.mu.Unlock()
+	if !first {
+		close(r.rival)
+		return err
+	}
+	go r.compete()
+	select {
+	case <-r.rival:
+	case <-time.After(10 * time.Second):
+		return errors.New("the competing post never claimed")
+	}
+	return err
+}
+
+// A double submit of one packing slip at the same version: one post commits,
+// the other fails, and the failed one's withdrawal must not take
+// the committed shipment's quantity out of the SHIP tally.
+func TestPostPackingSlip_FailedDoubleSubmitKeepsTheCommittedClaim(t *testing.T) {
+	s, _ := setup(t)
+	ctx := ctxFor(1, "")
+	warehouse, entity, product := ids.New(), ids.New(), ids.New()
+	keepOpen(t, s, ctx, warehouse, entity)
+	packed, in := packedIn(t, s, ctx, warehouse, entity, []string{product}, 2)
+	racer := &racingClaimer{Fake: &issueclaim.Fake{}, rival: make(chan struct{})}
+	racer.Set(product, qn(10), qn(6))
+	s.WithHolds(racer)
+	errs := make(chan error, 2)
+	racer.compete = func() {
+		_, err := s.PostPackingSlip(ctx, packed.Shipment.ID, packed.Shipment.Version, in, idem("second"))
+		errs <- err
+	}
+	_, err := s.PostPackingSlip(ctx, packed.Shipment.ID, packed.Shipment.Version, in, idem("first"))
+	errs <- err
+	var ok, failed int
+	for range 2 {
+		// The loser fails on the shipped-within-packed check or the version.
+		if err := <-errs; err == nil {
+			ok++
+		} else if problemCode(err) == store.CodeQualityHold {
+			t.Fatalf("free quantity refused: %v", err)
+		} else {
+			failed++
+		}
+	}
+	if ok != 1 || failed != 1 {
+		t.Fatalf("%d posts committed and %d failed, want 1 and 1", ok, failed)
+	}
+	if got := racer.Claimed(product, issueclaim.Ship); !got.Equal(qn(2)) {
+		t.Fatalf("SHIP tally %s after the double submit, want the committed 2", got)
 	}
 }
 

@@ -445,7 +445,7 @@ func (s *Store) claimPick(ctx context.Context, w domain.Work, line domain.WorkLi
 		claims.fns = append(claims.fns, undo)
 		return nil
 	case issueclaim.Refused(err):
-		return &domain.Error{Code: domain.CodeHoldBlocked, Detail: fmt.Sprintf("item %s is on quality hold; pick not allowed", line.ItemID)}
+		return &domain.Error{Code: domain.CodeHoldBlocked, Detail: fmt.Sprintf("item %s %s; pick not allowed", line.ItemID, issueclaim.Reason(err))}
 	}
 	return httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "inventory hold check failed")
 }

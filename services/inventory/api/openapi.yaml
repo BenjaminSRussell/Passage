@@ -864,9 +864,10 @@ paths:
       description: |
         Service-to-service call of warehouse (pick), fulfillment (packing-slip post) and production
         (consume). Under the row locks of the product's on-hand it refuses a claim that would reach
-        held stock: with any quantity held in the warehouse (and batch), only physical - held minus
-        the claims of the same kind already taken is free. BLOCKED and QUARANTINE rows are not
-        counted. The Idempotency-Key names the movement; a repeat is a replay.
+        held stock: with any quantity held in the warehouse, only physical - held minus the claims of
+        the same kind already taken is free; a claim that names a batch must also fit within that
+        batch. BLOCKED and QUARANTINE rows are not counted. The Idempotency-Key names the claim; a
+        repeat is a replay.
       x-passage-duty: inventory.issue.claim
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'

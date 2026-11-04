@@ -116,7 +116,11 @@ func TestStore_PickOfAnItemThatIsNotAProductFailsClosed(t *testing.T) {
 	st, ctx, wh := setup(t)
 	st.WithHolds(&issueclaim.Fake{})
 	w := pickReady(t, st, ctx, wh, "BOLT", "10")
-	assertCode(t, pickConfirm(st, ctx, w, "10"), domain.CodeHoldBlocked)
+	err := pickConfirm(st, ctx, w, "10")
+	assertCode(t, err, domain.CodeHoldBlocked)
+	if !strings.Contains(err.Error(), "not an inventory product id") {
+		t.Fatalf("the refusal must say why, not report a hold: %v", err)
+	}
 	if q := stockAt(t, st, ctx, wh, "P-01", "BOLT"); !q.Equal(dq("10")) {
 		t.Fatalf("unchecked item moved stock: %s", q)
 	}

@@ -383,7 +383,7 @@ func (s *Postgres) claimShipment(ctx context.Context, sh Shipment) (func(), erro
 	case err == nil:
 		return undo, nil
 	case issueclaim.Refused(err):
-		return undo, httpx.NewProblem(http.StatusUnprocessableEntity, CodeQualityHold, "an item of this shipment is on quality hold; ship not allowed")
+		return undo, httpx.NewProblem(http.StatusUnprocessableEntity, CodeQualityHold, "an item of this shipment "+issueclaim.Reason(err)+"; ship not allowed")
 	}
 	return undo, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "inventory hold check failed")
 }

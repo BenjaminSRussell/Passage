@@ -95,8 +95,12 @@ func TestClientClaim_RefusesAnItemThatIsNotAProductWithoutCalling(t *testing.T) 
 	c := newClient(t, func(http.ResponseWriter, *http.Request) { called = true })
 	cl := claim("k", 1)
 	cl.ProductID = "BOLT"
-	if err := c.Claim(principalCtx(), cl); !errors.Is(err, issueclaim.ErrNotProduct) || called {
+	err := c.Claim(principalCtx(), cl)
+	if !errors.Is(err, issueclaim.ErrNotProduct) || called || !issueclaim.Refused(err) {
 		t.Fatalf("non-UUID item: %v called=%t", err, called)
+	}
+	if issueclaim.Reason(err) == issueclaim.Reason(issueclaim.ErrHeld) {
+		t.Fatalf("a non-product item is reported as held: %s", issueclaim.Reason(err))
 	}
 }
 
@@ -154,5 +158,32 @@ func TestClaimAll_MergesAKeyAndWithdrawsEarlierClaimsOnRefusal(t *testing.T) {
 	}
 	if !f.Claimed(a, issueclaim.Ship).IsZero() {
 		t.Fatal("the first product's claim survived the second's refusal")
+	}
+}
+
+// Two attempts of one movement (a double submit at the same version) must not
+// share a claim: the attempt that fails withdraws only its own, so the claim
+// of the attempt that commits stays in the tally.
+func TestClaimAll_EachAttemptOwnsItsClaim(t *testing.T) {
+	f := &issueclaim.Fake{}
+	product := ids.New()
+	f.Set(product, d(10), d(6))
+	movement := issueclaim.Claim{LegalEntityID: entityID, ProductID: product, Warehouse: "W", Kind: issueclaim.Ship, Qty: d(2), Key: "ship:s1:v3"}
+	if _, err := issueclaim.ClaimAll(context.Background(), f, []issueclaim.Claim{movement}); err != nil {
+		t.Fatalf("attempt that commits: %v", err)
+	}
+	undoLoser, err := issueclaim.ClaimAll(context.Background(), f, []issueclaim.Claim{movement})
+	if err != nil {
+		t.Fatalf("attempt that fails later: %v", err)
+	}
+	if !f.Claimed(product, issueclaim.Ship).Equal(d(4)) {
+		t.Fatalf("two attempts claimed %s, want 4 (each its own)", f.Claimed(product, issueclaim.Ship))
+	}
+	undoLoser()
+	if !f.Claimed(product, issueclaim.Ship).Equal(d(2)) {
+		t.Fatalf("the failed attempt's withdrawal left %s claimed, want the committed 2", f.Claimed(product, issueclaim.Ship))
+	}
+	if _, err := issueclaim.ClaimAll(context.Background(), f, []issueclaim.Claim{movement, movement}); !errors.Is(err, issueclaim.ErrHeld) {
+		t.Fatalf("2+2 more against the 2 left free: %v", err)
 	}
 }

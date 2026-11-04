@@ -51,9 +51,19 @@ var (
 // opposed to an outage, which is retryable).
 func Refused(err error) bool { return errors.Is(err, ErrHeld) || errors.Is(err, ErrNotProduct) }
 
+// Reason completes "item X ..." for a refusal, so an item that is not a
+// product id is not reported as held.
+func Reason(err error) string {
+	if errors.Is(err, ErrNotProduct) {
+		return "is not an inventory product id, so its quality holds cannot be checked"
+	}
+	return "is on quality hold"
+}
+
 // Claim is one movement of Qty of a product out of a warehouse (and optional
-// batch). Key identifies the movement: a repeat of it is a replay, never a
-// second claim.
+// batch). Key names the movement; inventory treats a repeat of the key it
+// receives as a replay, never a second claim. ClaimAll sends Key with an
+// attempt suffix, so each attempt of a movement owns its claim.
 type Claim struct {
 	LegalEntityID string
 	ProductID     string
@@ -75,7 +85,16 @@ type Claimer interface {
 // one movement), claims each, and withdraws the earlier ones when a later one
 // is refused. The returned undo withdraws them all, for a movement whose own
 // transaction fails after the claims were taken.
+//
+// Each call is one attempt and sends every key with a fresh attempt id. Two
+// attempts of one movement (a double submit at the same version, or a retry
+// that starts while the failed attempt is still withdrawing) therefore never
+// share a claim: if they did, the attempt that fails would withdraw the claim
+// the attempt that commits relies on, and its quantity would leave the tally.
+// A claim whose withdrawal is lost stays and only makes later movements of its
+// kind stricter.
 func ClaimAll(ctx context.Context, c Claimer, claims []Claim) (undo func(), err error) {
+	attempt := ids.New()
 	merged := make([]Claim, 0, len(claims))
 	for _, cl := range claims {
 		if !cl.Qty.IsPositive() {
@@ -94,6 +113,7 @@ func ClaimAll(ctx context.Context, c Claimer, claims []Claim) (undo func(), err 
 		}
 	}
 	for _, cl := range merged {
+		cl.Key += ":" + attempt
 		if err := c.Claim(ctx, cl); err != nil {
 			undo()
 			return func() {}, err

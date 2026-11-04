@@ -31,7 +31,8 @@ type IssueClaimInput struct {
 // concurrent hold placement or an earlier claim has committed; the claims of
 // the same kind already recorded stand in for the issues that inventory does
 // not see as journals. Restricted (BLOCKED, QUARANTINE) rows are not free
-// stock. A repeated key is a replay.
+// stock. The rule holds over the whole warehouse and, for a claim that names
+// a batch, within that batch too. A repeated key is a replay.
 func (s *Postgres) ClaimIssue(ctx context.Context, in IssueClaimInput) (replayed bool, err error) {
 	tp, _ := tenant.FromContext(ctx)
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -54,23 +55,33 @@ func (s *Postgres) ClaimIssue(ctx context.Context, in IssueClaimInput) (replayed
 		if err != nil {
 			return err
 		}
-		var physical, held decimal.Decimal
-		for _, r := range rows {
-			if r.dims[domain.DimWarehouse] != in.Warehouse || (in.Batch != "" && r.dims[domain.DimBatch] != in.Batch) ||
-				domain.IsRestricted(r.dims[domain.DimStatus]) {
-				continue
+		// The warehouse is always checked: a claim that names a batch with no
+		// hold of its own must still not reach held stock of another batch
+		// (more than its batch has, or what batchless claims already took).
+		// A batch claim is checked within its batch as well.
+		scopes := []string{""}
+		if in.Batch != "" {
+			scopes = append(scopes, in.Batch)
+		}
+		for _, batch := range scopes {
+			var physical, held decimal.Decimal
+			for _, r := range rows {
+				if r.dims[domain.DimWarehouse] != in.Warehouse || (batch != "" && r.dims[domain.DimBatch] != batch) ||
+					domain.IsRestricted(r.dims[domain.DimStatus]) {
+					continue
+				}
+				physical, held = physical.Add(r.oh.PhysicalInvent()), held.Add(r.oh.HeldPhysical)
 			}
-			physical, held = physical.Add(r.oh.PhysicalInvent()), held.Add(r.oh.HeldPhysical)
-		}
-		var claimed string
-		if err := tx.QueryRow(ctx, `select coalesce(sum(qty), 0)::text from inventory_issue_claim
-			where tenant_id = $1 and legal_entity_id = $2 and product_id = $3 and warehouse = $4 and kind = $5
-			  and ($6 = '' or batch = '' or batch = $6)`,
-			tp.TenantID, in.LegalEntityID, in.ProductID, in.Warehouse, in.Kind, in.Batch).Scan(&claimed); err != nil {
-			return err
-		}
-		if err := domain.CheckIssueClaim(in.Qty, physical, held, decimal.RequireFromString(claimed)); err != nil {
-			return domainProblem(err)
+			var claimed string
+			if err := tx.QueryRow(ctx, `select coalesce(sum(qty), 0)::text from inventory_issue_claim
+				where tenant_id = $1 and legal_entity_id = $2 and product_id = $3 and warehouse = $4 and kind = $5
+				  and ($6 = '' or batch = '' or batch = $6)`,
+				tp.TenantID, in.LegalEntityID, in.ProductID, in.Warehouse, in.Kind, batch).Scan(&claimed); err != nil {
+				return err
+			}
+			if err := domain.CheckIssueClaim(in.Qty, physical, held, decimal.RequireFromString(claimed)); err != nil {
+				return domainProblem(err)
+			}
 		}
 		_, err = tx.Exec(ctx, `insert into inventory_issue_claim (tenant_id, legal_entity_id, idempotency_key, product_id, warehouse, batch, kind, qty)
 			values ($1, $2, $3, $4, $5, $6, $7, $8)`,

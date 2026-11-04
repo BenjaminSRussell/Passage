@@ -893,7 +893,7 @@ func (c *claimScope) rollback() {
 
 // issue claims the quantity consumed per item at the order's warehouse, summed
 // over the journal's lines, so held stock is never consumed. The key names the
-// journal and the quantity: a retry of the same post replays its claim.
+// journal and the quantity; ClaimAll adds the attempt, so each post owns its claim.
 func (c *claimScope) issue(ctx context.Context, h orderHead, journalID string, byItem map[string]decimal.Decimal) error {
 	if c == nil || c.claimer == nil || len(byItem) == 0 {
 		return nil
@@ -909,7 +909,7 @@ func (c *claimScope) issue(ctx context.Context, h orderHead, journalID string, b
 		c.undo = append(c.undo, undo)
 		return nil
 	case issueclaim.Refused(err):
-		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeQualityHold, "an item of this order is on quality hold; consume not allowed")
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeQualityHold, "an item of this order "+issueclaim.Reason(err)+"; consume not allowed")
 	}
 	return httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "inventory hold check failed")
 }
