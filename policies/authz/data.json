@@ -259,12 +259,21 @@
       {"resource": "/v1/hub/dead-letters", "methods": ["GET"]},
       {"resource": "/v1/hub/clients", "methods": ["GET"]},
       {"resource": "/v1/hub/clients/*", "methods": ["GET"]},
-      {"resource": "/v1/hub/clients/*/usage", "methods": ["GET"]}
+      {"resource": "/v1/hub/clients/*/usage", "methods": ["GET"]},
+      {"resource": "/v1/hub/catalog", "methods": ["GET"]},
+      {"resource": "/v1/hub/catalog/*", "methods": ["GET"]},
+      {"resource": "/v1/hub/catalog/*/spec", "methods": ["GET"]}
     ]},
     "hub.client.write": {"permissions": [
       {"resource": "/v1/hub/clients", "methods": ["POST"]},
       {"resource": "/v1/hub/clients/*", "methods": ["PATCH"]},
       {"resource": "/v1/hub/clients/*:revoke", "methods": ["POST"]}
+    ]},
+    "hub.catalog.write": {"permissions": [
+      {"resource": "/v1/hub/catalog", "methods": ["POST"]},
+      {"resource": "/v1/hub/catalog/*", "methods": ["PATCH"]},
+      {"resource": "/v1/hub/catalog/*:deprecate", "methods": ["POST"]},
+      {"resource": "/v1/hub/catalog/*:retire", "methods": ["POST"]}
     ]},
     "hub.client.consume": {"service_only": true, "permissions": [{"resource": "/v1/hub/clients:consume", "methods": ["POST"]}]},
     "inventory.read": {"permissions": [
