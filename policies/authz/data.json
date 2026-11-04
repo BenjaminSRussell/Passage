@@ -2797,6 +2797,7 @@
       {"resource": "/v1/scheduling/resources/*/capacity-overrides/*", "methods": ["DELETE"]},
       {"resource": "/v1/scheduling/capacity-blocks/*", "methods": ["PATCH"]}
     ]},
+    "scheduling.constraints.override": {"flag": true, "permissions": []},
     "scheduling.downtime.apply": {"permissions": [
       {"resource": "/v1/scheduling/resources/*/capacity-overrides", "methods": ["POST"]}
     ]},
