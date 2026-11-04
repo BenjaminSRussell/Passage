@@ -2328,8 +2328,10 @@
       {"resource": "/v1/pricing/procedures/*:activate", "methods": ["POST"]},
       {"resource": "/v1/pricing/procedures/*:revise", "methods": ["POST"]},
       {"resource": "/v1/pricing/parameters", "methods": ["PUT"]},
-      {"resource": "/v1/pricing/procedure-assignments", "methods": ["PUT", "DELETE"]}
+      {"resource": "/v1/pricing/procedure-assignments", "methods": ["PUT", "DELETE"]},
+      {"resource": "/v1/pricing/tenant-parameters", "methods": ["PUT"]}
     ]},
+    "pricing.cache.invalidate": {"flag": true, "permissions": []},
     "pricing.commission.maintain": {"permissions": [
       {"resource": "/v1/pricing/commission/postings", "methods": ["POST"]},
       {"resource": "/v1/pricing/commission/rules", "methods": ["POST"]},
@@ -2447,7 +2449,8 @@
       {"resource": "/v1/pricing/compare", "methods": ["POST"]},
       {"resource": "/v1/pricing/price-list", "methods": ["GET"]},
       {"resource": "/v1/pricing/price-list/net-prices", "methods": ["GET"]},
-      {"resource": "/v1/pricing/condition-records:export", "methods": ["GET"]}
+      {"resource": "/v1/pricing/condition-records:export", "methods": ["GET"]},
+      {"resource": "/v1/pricing/tenant-parameters", "methods": ["GET"]}
     ]},
     "product.configuration.read": {"service_only": true, "permissions": [{"resource": "/v1/product/saved-configurations/*", "methods": ["GET"]}]},
     "product.configure": {"permissions": [{"resource": "/v1/product/configuration-models/*:solve", "methods": ["POST"]}]},
@@ -3176,6 +3179,7 @@
   },
   "service_principals": {
     "finreport-ledger": ["ledger.entry.lookup"],
+    "pricing-cache": ["pricing.cache.invalidate"],
     "purchasing-inbound": ["purchasing.inbound.apply"],
     "fulfillment-order": ["fulfillment.order.sync"],
     "integration-hub": ["migration.outbound.render", "migration.xref.record"],

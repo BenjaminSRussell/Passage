@@ -34,7 +34,7 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	flag_duties := {"ARWriteOffApprove", "purchasing.inbound.apply", "EDI_PII_VIEW", "Maintain tax codes", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "production.order.zero-output", "scheduling.constraints.override", "scheduling.order.import", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
+	flag_duties := {"ARWriteOffApprove", "purchasing.inbound.apply", "EDI_PII_VIEW", "Maintain tax codes", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "production.order.zero-output", "scheduling.constraints.override", "scheduling.order.import", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
 	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0
@@ -1312,4 +1312,16 @@ test_org_package_manage_reaches_only_export_and_import if {
 	not allowed("org.package.manage", "GET", "/v1/org/legal-entities")
 	not allowed("org.read", "POST", "/v1/org/export")
 	not allowed("org.read", "POST", "/v1/org/import")
+}
+
+test_pricing_tenant_parameters_read_with_view_and_change_with_admin if {
+	allowed("pricing.view", "GET", "/v1/pricing/tenant-parameters")
+	not allowed("pricing.view", "PUT", "/v1/pricing/tenant-parameters")
+	allowed("pricing.admin", "PUT", "/v1/pricing/tenant-parameters")
+	not allowed("pricing.admin", "GET", "/v1/pricing/tenant-parameters")
+}
+
+test_pricing_cache_principal_holds_only_its_flag if {
+	data.service_principals["pricing-cache"] == ["pricing.cache.invalidate"]
+	not principal_allowed("pricing-cache", "GET", "/v1/pricing/parameters")
 }
