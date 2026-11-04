@@ -146,6 +146,8 @@ type Store interface {
 	ListSigningLimits(ctx context.Context, f SigningLimitFilter, after string, limit int) (Page[domain.SigningLimit], error)
 	SigningLimitsFor(ctx context.Context, legalEntityID, workerID, documentType string) ([]domain.SigningLimit, error)
 	RecertifySigningLimit(ctx context.Context, id string, ifMatch int, today domain.Day, idem Idem) (domain.SigningLimit, error)
+	GetInboundChange(ctx context.Context, id string) (InboundChange, error)
+	ListInboundChanges(ctx context.Context, f InboundFilter, after string, limit int) (Page[InboundChange], error)
 	Ping(ctx context.Context) error
 }
 

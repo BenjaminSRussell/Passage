@@ -59,6 +59,8 @@ Procurement workspace for wave 17 (PSG-17), wired to `services/purchasing` throu
 | `/purchasing/model-service-specs` | Model service specifications with status and code or name filters and load-more paging (nav item gated on PurchaseOrderInquire; writes need ProcurementPolicyMaintain in the service) | `GET /model-service-specs` |
 | `/purchasing/model-service-specs/new` | Legal entity, code, name, currency and the outline rows | `POST /model-service-specs` |
 | `/purchasing/model-service-specs/:id` | The model with its outline table and a change form for name, currency, status and outline; stale version shown with PRC-SRV-007 | `GET /model-service-specs/{id}`, `PUT /model-service-specs/{id}` (If-Match) |
+| `/purchasing/inbound-changes` | Changes other services asked of purchase orders (planning messages a planner applied, closed drop-ship remainders) with the effect on the line, status (applied, refused, ignored) and reason; filter by source and status, or by one order (`?purchaseOrderId=`, linked from the order page) | `GET /inbound-changes` |
+| `/purchasing/inbound-changes/:id` | One change: what was asked and by whom, the effect, the order version it went into, a refused change's rule and code, a waiting re-approval | `GET /inbound-changes/{id}` |
 | `/purchasing/policies` | Saved purchasing policies per legal entity (change management default, PO four-eyes, invoice before receipt, category access), open any legal entity by id | `GET /purchasing-policies` |
 | `/purchasing/policies/:legalEntityId` | The settings with their meaning, including the category access mode (hard, soft, off); Save policy (unsaved entity, If-Match 0) or Update policy; stale version shown with PRC-POL-003 | `GET /purchasing-policies/{legalEntityId}`, `PUT /purchasing-policies/{legalEntityId}` (If-Match) |
 
@@ -69,5 +71,5 @@ floats. Ids are typed as UUIDs until the vendor, product and legal-entity picker
 waves 6 to 8 are available to modules.
 
 Tests: `npx vitest --run src/modules/purchasing` (`pages.test.tsx`, `agreements.test.tsx`,
-`consolidation.test.tsx`, `openSupply.test.tsx`, `orderLifecycle.test.tsx`, `rfq.test.tsx`, `rfqSealed.test.tsx`, `invoicingPlan.test.tsx`, `reprice.test.tsx`, `scheduling.test.tsx`, `signing.test.tsx`, `charges.test.tsx` and `service.test.tsx` drive every route against a stubbed `fetch` through
+`consolidation.test.tsx`, `openSupply.test.tsx`, `orderLifecycle.test.tsx`, `rfq.test.tsx`, `rfqSealed.test.tsx`, `invoicingPlan.test.tsx`, `reprice.test.tsx`, `scheduling.test.tsx`, `signing.test.tsx`, `charges.test.tsx`, `service.test.tsx` and `inbound.test.tsx` drive every route against a stubbed `fetch` through
 `testHarness.tsx`).

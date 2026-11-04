@@ -38,6 +38,7 @@ var allTypes = map[string]string{
 	events.ServiceSpecChanged:        "servicespec",
 	events.ModelServiceSpecCreated:   "modelservicespec",
 	events.ModelServiceSpecChanged:   "modelservicespec",
+	events.InboundChangeRecorded:     "inboundchange",
 }
 
 func TestEventTypesFollowTheNamingRule(t *testing.T) {
@@ -99,6 +100,7 @@ func TestPayloadFieldsAreInTheAsyncAPI(t *testing.T) {
 		events.DeliveryScheduleConfirmedData{ProductID: "p", PreviousConfirmedDate: "2027-01-01", ConfirmedBy: "u"},
 		events.ServiceSpecData{ContractAgreementLineID: "a", ModelID: "m", ChangedBy: "u"},
 		events.ModelServiceSpecData{ChangedBy: "u"},
+		events.InboundChangeData{POID: "p", Number: "n", LineNo: 1, ReasonCode: "c", Reason: "r", QtyBefore: "1", QtyAfter: "1", DateBefore: "2027-01-01", DateAfter: "2027-01-01", VersionNo: 2},
 	} {
 		keys = append(keys, jsonKeys(t, v)...)
 	}

@@ -265,6 +265,8 @@ func (a *API) Register(r chi.Router) {
 		a.registerServiceRoutes(r)
 		// Signing limits and their requests (FR-17.17).
 		a.registerSigningRoutes(r)
+		// Changes other services asked of purchase orders (slice 18).
+		a.registerInboundRoutes(r)
 	})
 }
 

@@ -111,6 +111,24 @@ channels:
     messages:
       deliveryScheduleConfirmed:
         $ref: '#/components/messages/DeliveryScheduleConfirmed'
+  inboundchange:
+    address: passage.procurement.inboundchange
+    description: Changes other services asked of purchase orders (slice 18); the Kafka key is the change id.
+    messages:
+      inboundChangeRecorded:
+        $ref: '#/components/messages/InboundChangeRecorded'
+  fulfillmentDropShip:
+    address: passage.fulfillment.dropship
+    description: Drop-ship events of fulfillment (wave 28); purchasing follows dropship.closed.v1. Other events on the topic are skipped.
+    messages:
+      dropShipClosed:
+        $ref: '#/components/messages/DropShipClosedConsumed'
+  planningMessage:
+    address: passage.planning.plan
+    description: The plan channel of master planning (wave 22), where planning writes its plan and action message events keyed by the plan; purchasing follows message.applied.v1. Other events on the topic are skipped.
+    messages:
+      messageApplied:
+        $ref: '#/components/messages/MessageAppliedConsumed'
   servicespec:
     address: passage.procurement.servicespec
     description: Service specifications of PO lines (FR-17.23); the Kafka key is the PO id.
@@ -132,6 +150,24 @@ channels:
       saReleaseCreated:
         $ref: '#/components/messages/SAReleaseCreated'
 operations:
+  publishInboundChangeRecorded:
+    action: send
+    channel:
+      $ref: '#/channels/inboundchange'
+    messages:
+      - $ref: '#/channels/inboundchange/messages/inboundChangeRecorded'
+  receiveDropShipClosed:
+    action: receive
+    channel:
+      $ref: '#/channels/fulfillmentDropShip'
+    messages:
+      - $ref: '#/channels/fulfillmentDropShip/messages/dropShipClosed'
+  receiveMessageApplied:
+    action: receive
+    channel:
+      $ref: '#/channels/planningMessage'
+    messages:
+      - $ref: '#/channels/planningMessage/messages/messageApplied'
   publishServiceSpecChanged:
     action: send
     channel:
@@ -296,6 +332,38 @@ operations:
       - $ref: '#/channels/catalogimport/messages/catalogImportCommitted'
 components:
   messages:
+    InboundChangeRecorded:
+      name: InboundChangeRecorded
+      title: inboundchange.recorded.v1
+      x-passage-type: dev.passage.procurement.inboundchange.recorded.v1
+      summary: A change another service asked of a purchase order was applied, refused by a purchasing rule or ignored (slice 18).
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.inboundchange.recorded.v1 }
+              subject: { type: string, format: uuid, description: change id }
+              data: { $ref: '#/components/schemas/InboundChangeData' }
+    DropShipClosedConsumed:
+      name: DropShipClosedConsumed
+      title: dropship.closed.v1 (consumed)
+      x-passage-type: dev.passage.fulfillment.dropship.closed.v1
+      summary: Fulfillment closed the remainder of a drop-ship; purchasing lowers the PO line it bought against by qty_closed (consumed).
+      description: Published by fulfillment (wave 28), source `fulfillment`. Only the members below are read; the drop-ship id with qty_closed (its running total) is the idempotency key, and a drop-ship closed more than once lowers the line by what each closing adds.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/DropShipClosedIn'
+    MessageAppliedConsumed:
+      name: MessageAppliedConsumed
+      title: message.applied.v1 (consumed)
+      x-passage-type: dev.passage.planning.message.applied.v1
+      summary: A planner applied an action message; purchasing moves the PO line of the item on the purchase order supply_ref names (consumed).
+      description: Published by planning (wave 22), source `planning`. Only postpone, advance, cancel, decrease and increase change a purchase order; the message id is the idempotency key.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/MessageAppliedIn'
     ServiceSpecChanged:
       name: ServiceSpecChanged
       title: servicespec.changed.v1
@@ -675,6 +743,52 @@ components:
               subject: { type: string, format: uuid, description: RFQ id }
               data: { $ref: '#/components/schemas/RFQAwardedData' }
   schemas:
+    InboundChangeData:
+      type: object
+      required: [change_id, legal_entity_id, source, source_key, action, status, reapproval_required]
+      additionalProperties: false
+      properties:
+        change_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        source: { type: string, enum: [PLANNING_MESSAGE, DROPSHIP_CLOSED] }
+        source_key: { type: string, description: 'The planning message id, or the drop-ship id and its running closed total (<drop-ship id>:<qty_closed>); the idempotency key.' }
+        action: { type: string, description: 'The planning action (postpone, advance, cancel, decrease, increase) or close-remainder for a drop-ship.' }
+        status: { type: string, enum: [APPLIED, REFUSED, IGNORED] }
+        po_id: { type: string, format: uuid }
+        number: { type: string, example: PO-00000001 }
+        line_no: { type: integer, minimum: 1 }
+        reason_code: { type: string, description: 'Set when the change was refused or ignored, for example PRC-PO-007 or PRC-INB-004.' }
+        reason: { type: string }
+        qty_before: { type: string, description: Decimal string. Set when the change was applied. }
+        qty_after: { type: string, description: Decimal string. Set when the change was applied. }
+        date_before: { type: string, format: date }
+        date_after: { type: string, format: date }
+        version_no: { type: integer, minimum: 1, description: The PO version the change went into. }
+        reapproval_required: { type: boolean, description: True when the change waits for re-approval as the next version. }
+    DropShipClosedIn:
+      type: object
+      required: [drop_ship_id, legal_entity_id, purchase_order_id, purchase_order_line_id, qty_closed]
+      properties:
+        drop_ship_id: { type: string, format: uuid }
+        drop_ship_number: { type: string, example: DS-0000001 }
+        legal_entity_id: { type: string, format: uuid }
+        purchase_order_id: { type: string, format: uuid }
+        purchase_order_line_id: { type: string, format: uuid, description: 'The id of the PO line (the id member of a line of GET /purchase-orders/{id}).' }
+        qty_closed: { type: string, description: 'Decimal string. The running total the drop-ship has closed after this event (fulfillment closes a drop-ship in parts when sales cuts the order back, then the rest); the line goes down by what it adds to the closings already handled.' }
+    MessageAppliedIn:
+      type: object
+      required: [message_id, legal_entity_id, action, item_id, warehouse_id, supply_ref, suggested_date, qty, decided_by, note]
+      properties:
+        message_id: { type: string, format: uuid }
+        legal_entity_id: { type: [string, 'null'], format: uuid, description: A plan with no legal entity changes no purchase order. }
+        action: { type: string, description: 'Only postpone, advance, cancel, decrease and increase are read; any other action is skipped.' }
+        item_id: { type: string, format: uuid, description: The product of the PO line. }
+        warehouse_id: { type: [string, 'null'], format: uuid, description: Narrows the lines to the planning scope; null for the site scope. }
+        supply_ref: { type: string, description: The number of the purchase order; any other supply is skipped. }
+        suggested_date: { type: string, format: date }
+        qty: { type: string, description: Decimal string. For decrease and increase the quantity to take off or add. }
+        decided_by: { type: string }
+        note: { type: string }
     Envelope:
       type: object
       description: CloudEvents 1.0 structured envelope with Passage extensions.

@@ -89,6 +89,9 @@ type fakeStore struct {
 	// Signing limits and their requests (FR-17.17).
 	signing signingLog
 
+	// Changes other services asked of purchase orders (slice 18).
+	inbound inboundLog
+
 	// Procurement catalogs: what the catalog methods received and answer.
 	cat catalogLog
 	imp importLog

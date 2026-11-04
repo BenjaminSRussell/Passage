@@ -132,6 +132,8 @@ export interface RequisitionInput {
 }
 
 export interface PurchaseOrderLine {
+  /** The line's stable id, the purchase_order_line_id a drop-ship names. Set by the service. */
+  id?: string;
   lineNo: number;
   productId?: string;
   description?: string;
@@ -1962,4 +1964,59 @@ export interface ServiceLimitCheck {
 /** Whether an entry of unplanned services fits the line's limits (BR-17.19); a refusal is allowed false with code PRC-SRV-003, not an error. Changes nothing. */
 export function checkServiceLimit(poId: string, lineNo: number, unplanned: string, entry: string, signal?: AbortSignal) {
   return send<ServiceLimitCheck>("GET", `${servicePath(poId, lineNo)}/limit-check${query({ unplanned, entry })}`, { signal });
+}
+
+// --- Changes other services asked of purchase orders (slice 18) ---
+
+export type InboundSource = "PLANNING_MESSAGE" | "DROPSHIP_CLOSED";
+export type InboundStatus = "APPLIED" | "REFUSED" | "IGNORED";
+
+/**
+ * One planning message a planner applied to a purchase order, or one closed drop-ship remainder, as the
+ * purchasing consumer handled it. REFUSED rows are for a buyer to settle by hand.
+ */
+export interface InboundChange {
+  id: string;
+  legalEntityId: string;
+  source: InboundSource;
+  sourceKey: string;
+  eventId: string;
+  action: string;
+  purchaseOrderId?: string;
+  poNumber?: string;
+  lineNo?: number;
+  lineId?: string;
+  productId?: string;
+  status: InboundStatus;
+  reasonCode?: string;
+  reason?: string;
+  requestedQty?: string;
+  requestedDate?: string;
+  qtyBefore?: string;
+  qtyAfter?: string;
+  dateBefore?: string;
+  dateAfter?: string;
+  versionNo?: number;
+  reapprovalRequired: boolean;
+  requestedBy?: string;
+  note?: string;
+  createdAt: string;
+}
+
+export interface InboundFilters {
+  source?: InboundSource | "";
+  status?: InboundStatus | "";
+  purchaseOrderId?: string;
+}
+
+export function listInboundChanges(filters: InboundFilters = {}, options: ListOptions = {}) {
+  return list<InboundChange>(
+    "/inbound-changes",
+    { source: filters.source || undefined, status: filters.status || undefined, purchaseOrderId: filters.purchaseOrderId || undefined },
+    options,
+  );
+}
+
+export function getInboundChange(id: string, signal?: AbortSignal) {
+  return send<InboundChange>("GET", `/inbound-changes/${encodeURIComponent(id)}`, { signal });
 }

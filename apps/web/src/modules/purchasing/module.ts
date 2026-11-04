@@ -7,6 +7,7 @@ import { AutoChargeCreatePage, AutoChargeDetailPage, AutoChargesPage, ChargeCode
 import { CategoryManagersPage, CategoryVendorCreatePage, CategoryVendorDetailPage, CategoryVendorsPage } from "./CategoryPages";
 import { ConsolidationPage } from "./ConsolidationPage";
 import { DeliverySchedulePage } from "./DeliverySchedulePage";
+import { InboundChangeDetailPage, InboundChangesPage } from "./InboundPages";
 import { InvoicingPlanPage } from "./InvoicingPlanPage";
 import { OpenSupplyPage } from "./OpenSupplyPage";
 import { PolicyDetailPage, PolicyListPage } from "./PolicyPages";
@@ -36,7 +37,7 @@ const purchasing: PassageModule = {
   id: "purchasing",
   title: "Purchasing",
   description:
-    "Requisitions, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, delivery warehouse per line and the open supply list, invoicing plans, delivery schedules and subsequent price changes, purchase, scheduling and trade agreements with releases, price lookup, procurement catalogs that requesters pick from, category vendor assignments and managers, charge codes and auto charges for freight, handling and fees, service lines with outlines, unplanned limits and model service specifications, signing limits with their requests and recertification, and the purchasing policy per legal entity.",
+    "Requisitions, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, delivery warehouse per line and the open supply list, invoicing plans, delivery schedules and subsequent price changes, purchase, scheduling and trade agreements with releases, price lookup, procurement catalogs that requesters pick from, category vendor assignments and managers, charge codes and auto charges for freight, handling and fees, service lines with outlines, unplanned limits and model service specifications, the changes planning messages and closed drop-ships made to purchase orders, signing limits with their requests and recertification, and the purchasing policy per legal entity.",
   routes: [
     { path: "/purchasing", element: createElement(WorkspacePage) },
     { path: "/purchasing/requisitions", element: createElement(RequisitionsPage) },
@@ -44,6 +45,8 @@ const purchasing: PassageModule = {
     { path: "/purchasing/requisitions/:id", element: createElement(RequisitionDetailPage), handle: { title: "Requisition" } },
     { path: "/purchasing/consolidation", element: createElement(ConsolidationPage) },
     { path: "/purchasing/open-supply", element: createElement(OpenSupplyPage), handle: { title: "Open supply" } },
+    { path: "/purchasing/inbound-changes", element: createElement(InboundChangesPage) },
+    { path: "/purchasing/inbound-changes/:id", element: createElement(InboundChangeDetailPage), handle: { title: "Change from another service" } },
     { path: "/purchasing/rfqs", element: createElement(RFQsPage) },
     { path: "/purchasing/rfqs/new", element: createElement(RFQCreatePage), handle: { title: "New request for quotation" } },
     { path: "/purchasing/rfqs/:id", element: createElement(RFQDetailPage), handle: { title: "Request for quotation" } },
@@ -121,6 +124,7 @@ const purchasing: PassageModule = {
     { label: "Requests for quotation", to: "/purchasing/rfqs", duty: "RFQMaintain" },
     { label: "Purchase orders", to: "/purchasing/purchase-orders", duty: "PurchaseOrderInquire" },
     { label: "Open supply", to: "/purchasing/open-supply", duty: "PurchaseOrderInquire" },
+    { label: "Changes from other services", to: "/purchasing/inbound-changes", duty: "PurchaseOrderInquire" },
     { label: "Price changes", to: "/purchasing/reprice", duty: "PurchaseOrderInquire" },
     { label: "Purchase agreements", to: "/purchasing/agreements", duty: "AgreementMaintain" },
     { label: "Scheduling agreements", to: "/purchasing/scheduling-agreements", duty: "AgreementMaintain" },

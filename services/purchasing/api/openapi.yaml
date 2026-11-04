@@ -260,6 +260,46 @@ components:
         vendorId: { type: string, format: uuid, description: "Required for a VENDOR debit (which then needs a LEDGER credit); optional for a VENDOR credit, which is payable to this vendor instead of the PO vendor; refused when neither side is VENDOR." }
         allocationRule: { type: string, enum: [QTY, AMOUNT, LINES], default: AMOUNT }
         status: { type: string, enum: [ACTIVE, INACTIVE], default: ACTIVE }
+    InboundChange:
+      type: object
+      description: >-
+        One change another service asked of a purchase order (slice 18): a planning message a planner applied, or the closed
+        remainder of a drop-ship. APPLIED means the line moved (as version versionNo, waiting for re-approval when
+        reapprovalRequired); REFUSED means a purchasing rule stopped it and reason says which, for a buyer to settle by hand;
+        IGNORED means there was nothing to change.
+      required: [id, legalEntityId, source, sourceKey, eventId, action, status, reapprovalRequired, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        source: { type: string, enum: [PLANNING_MESSAGE, DROPSHIP_CLOSED] }
+        sourceKey: { type: string, description: 'The planning message id, or the drop-ship id and its running closed total (<drop-ship id>:<qty_closed>); the idempotency key.' }
+        eventId: { type: string, description: Id of the event that carried the request. }
+        action: { type: string, description: 'postpone, advance, cancel, decrease or increase for a planning message; close-remainder for a drop-ship.' }
+        purchaseOrderId: { type: string, format: uuid }
+        poNumber: { type: string, example: PO-00000001 }
+        lineNo: { type: integer, minimum: 1 }
+        lineId: { type: string, format: uuid, description: The id of the PO line. }
+        productId: { type: string, format: uuid }
+        status: { type: string, enum: [APPLIED, REFUSED, IGNORED] }
+        reasonCode: { type: string, description: 'Why the change was refused or ignored: a PRC-PO-* or PRC-AGR-* code of the PO edit, or PRC-INB-001 to PRC-INB-007 (not applicable, no line, ambiguous line, quantity, date, order state, no change).' }
+        reason: { type: string }
+        requestedQty: { $ref: '#/components/schemas/Money', description: 'The message quantity of a planning message; for a drop-ship, the quantity this closing adds to the closings of the drop-ship already recorded.' }
+        requestedDate: { type: string, format: date }
+        qtyBefore: { $ref: '#/components/schemas/Money' }
+        qtyAfter: { $ref: '#/components/schemas/Money' }
+        dateBefore: { type: string, format: date }
+        dateAfter: { type: string, format: date }
+        versionNo: { type: integer, minimum: 1, description: The PO version the change went into. }
+        reapprovalRequired: { type: boolean }
+        requestedBy: { type: string, description: The planner who applied the message. }
+        note: { type: string, description: The planner's reason, or the drop-ship number. }
+        createdAt: { type: string, format: date-time }
+    InboundChangePage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/InboundChange' } }
+        nextCursor: { type: string, format: uuid }
     ChargeCodePage:
       type: object
       required: [items]
@@ -501,6 +541,7 @@ components:
     PurchaseOrderLine:
       type: object
       properties:
+        id: { type: string, format: uuid, description: "The line's stable id (slice 18): the purchase_order_line_id a drop-ship names. Set by the service; ignored on a write." }
         lineNo: { type: integer }
         productId: { type: string, format: uuid }
         description: { type: string }
@@ -3559,6 +3600,47 @@ paths:
         '412': { description: If-Match is not the stored version (PRC-CAT-013), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: Validation - status or window (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/inbound-changes:
+    get:
+      operationId: listInboundChanges
+      x-passage-duty: PurchaseOrderInquire
+      summary: List the changes other services asked of purchase orders, newest first (slice 18)
+      description: >-
+        One row per planning message a planner applied to a purchase order (message.applied.v1) and per closed drop-ship remainder
+        (dropship.closed.v1) the purchasing consumer handled, applied or not. Filter by source, status (REFUSED lists what a buyer
+        has to settle by hand), purchase order and legal entity.
+      parameters:
+        - { name: source, in: query, required: false, schema: { type: string, enum: [PLANNING_MESSAGE, DROPSHIP_CLOSED] } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [APPLIED, REFUSED, IGNORED] } }
+        - { name: purchaseOrderId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InboundChangePage' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty PurchaseOrderInquire (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: A filter is malformed (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/inbound-changes/{id}:
+    get:
+      operationId: getInboundChange
+      x-passage-duty: PurchaseOrderInquire
+      summary: Read one change another service asked of a purchase order (slice 18)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: The change
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InboundChange' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty PurchaseOrderInquire (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Change not found (PRC-INB-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: id is not a UUID (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/charge-codes:
     post:
       operationId: createChargeCode
