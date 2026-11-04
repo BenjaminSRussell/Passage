@@ -44,6 +44,36 @@ Two more pure modules:
   one segment, a trailing `**` one or more; `validatePattern` explains a bad pattern,
   `matchesType` / `matchesAny` decide delivery.
 
+## Slice 12 scope
+
+Subscription filters, signing-secret rotation and upkeep:
+
+- `src/cesql.ts`: the CESQL subset a subscription's `filter` is written in. It parses
+  once (a syntax error names the position), is stored in `hub_subscription.event_filter`
+  and is evaluated for each event after the type patterns, for webhook and rest-push
+  alike. Attributes are the CloudEvents context (`id type source subject time tenantid
+  actor legalentityid passagesequence`); `data.<path>` reaches into the payload.
+  An expression that cannot be evaluated for an event does not match it. Limits are
+  checked while parsing, before any evaluation (1,024 characters, 32 levels checked on the
+  way down, 200 terms), and the LIKE walks of one evaluation share a budget of 1,000,000
+  character steps (past it the event does not match), because one consumer thread evaluates
+  every tenant's filters. A stored filter that no longer compiles matches nothing for its
+  own subscription and does not fail the event for the others.
+- `POST /v1/hub/subscriptions/{id}:rotate`: a new signing secret, shown once; the old one
+  keeps signing for `graceSeconds` (default a day, at most a week, 0 ends it) and every
+  delivery in that window carries `v1=` for each secret in `Passage-Signature`, so a
+  receiver verifying with either secret keeps working. `verify` in `src/webhook.ts` accepts
+  any `v1`.
+- `src/maintenance.ts`, started by `src/main.ts` every `HUB_MAINTENANCE_INTERVAL_MS`
+  (default five minutes): re-seals secrets and credentials sealed under a key other than
+  `FIELDCRYPT_CURRENT_KEY_ID`, drops previous secrets past their grace period, and deletes
+  `hub_client_usage` rows older than `HUB_USAGE_RETENTION_DAYS` (default 90; the
+  `hub_purge_client_usage` function itself never deletes the last two days and at most
+  10,000 rows a call, whatever its caller passes). Key rotation:
+  add the new key, switch the current key id, wait until `hub_reseal_due(<id>, now(), 1)`
+  is empty, then remove the old key.
+- A caller may register a client, or add scopes to one, only with duties they hold.
+
 ## Slice 5 scope
 
 `src/plm.ts`, the PLM import precedence the reference connector will apply (FR-35.15,

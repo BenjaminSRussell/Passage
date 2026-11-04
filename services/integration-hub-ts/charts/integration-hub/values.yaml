@@ -7,6 +7,10 @@ replicaCount: 2
 pollIntervalMs: 2000
 # api_deprecation_months (PRD 6.35.13): the least notice between deprecating a catalog entry and its sunset date. 12 or more; a lower value is raised to 12.
 apiDeprecationMonths: 12
+# Per-minute API client usage (hub_client_usage) is kept this many days, 2 to 3650 (the usage page reads at most one day).
+usageRetentionDays: 90
+# How often the hub re-seals stored secrets after a master key rotation, removes rotated signing secrets past their grace period and purges old usage.
+maintenanceIntervalMs: 300000
 # Webhook signing secrets are sealed at rest (fieldcrypt envelope v1). Secret with the key
 # "keys" (comma- or newline-separated id=base64 32-byte master keys) and the id to seal with.
 # Empty: creating a subscription answers 501 and nothing can be signed.

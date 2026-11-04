@@ -14,6 +14,7 @@ export const EVENT_TYPES = [
   "dev.passage.hub.subscription.deleted.v1",
   "dev.passage.hub.subscription.paused.v1",
   "dev.passage.hub.subscription.resumed.v1",
+  "dev.passage.hub.subscription.secretrotated.v1",
   "dev.passage.hub.webhook.delivered.v1",
   "dev.passage.hub.webhook.deadlettered.v1",
   "dev.passage.hub.apiclient.registered.v1",

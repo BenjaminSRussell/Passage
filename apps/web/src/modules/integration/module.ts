@@ -12,6 +12,7 @@ import { MessagesPage } from "./MessagesPage";
 import { NewCatalogEntryPage } from "./NewCatalogEntryPage";
 import { NewClientPage } from "./NewClientPage";
 import { NewSyncSubscriptionPage } from "./NewSyncSubscriptionPage";
+import { NewWebhookSubscriptionPage } from "./NewWebhookSubscriptionPage";
 import { NewPartnerPage } from "./NewPartnerPage";
 import { OutboundDocumentPage } from "./OutboundDocumentPage";
 import { PartnerDetailPage } from "./PartnerDetailPage";
@@ -30,7 +31,7 @@ const integration: PassageModule = {
   id: "integration",
   title: "Integration",
   description:
-    "EDI trading partners, received and sent interchanges with their 997s and masked raw payload, the message monitor with single and bulk reprocess, the partner SLA dashboard, outbound 856/810/855 documents, the map tester, the punchout cart check, self-billing match and Peppol invoice dry runs, and outbound sync to the customer's legacy ERP: REST push subscriptions, the delivery monitor and dead letters with replay, API clients with scopes, request quotas and usage, and the API and event catalog with versions, sunset notices and retirement.",
+    "EDI trading partners, received and sent interchanges with their 997s and masked raw payload, the message monitor with single and bulk reprocess, the partner SLA dashboard, outbound 856/810/855 documents, the map tester, the punchout cart check, self-billing match and Peppol invoice dry runs, and outbound sync: signed webhook subscriptions with a CESQL event filter and signing-secret rotation, REST push subscriptions into the customer's legacy ERP, the delivery monitor and dead letters with replay, API clients with scopes, request quotas and usage, and the API and event catalog with versions, sunset notices and retirement.",
   routes: [
     { path: "/integration/partners", element: createElement(PartnersPage), handle: { title: "Trading partners" } },
     { path: "/integration/partners/new", element: createElement(NewPartnerPage), handle: { title: "New trading partner" } },
@@ -48,6 +49,7 @@ const integration: PassageModule = {
     { path: "/integration/peppol", element: createElement(PeppolInvoicePage), handle: { title: "Peppol invoice" } },
     { path: "/integration/sync", element: createElement(SyncSubscriptionsPage), handle: { title: "Outbound sync" } },
     { path: "/integration/sync/new", element: createElement(NewSyncSubscriptionPage), handle: { title: "New REST push", duty: "hub.subscription.write" } },
+    { path: "/integration/sync/new-webhook", element: createElement(NewWebhookSubscriptionPage), handle: { title: "New webhook", duty: "hub.subscription.write" } },
     { path: "/integration/sync/deliveries", element: createElement(SyncDeliveriesPage), handle: { title: "Sync deliveries" } },
     { path: "/integration/sync/dead-letters", element: createElement(SyncDeadLettersPage), handle: { title: "Sync dead letters" } },
     { path: "/integration/clients", element: createElement(ClientsPage), handle: { title: "API clients" } },

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Passage integration hub
-  version: 0.4.0
+  version: 0.5.0
   description: |
     Webhook and rest-push subscriptions, the delivery log, the dead-letter list, resume after a
     410 pause and replay (FR-35.9, FR-35.10). Callers reach these routes through the
@@ -72,7 +72,14 @@ paths:
         supplied, is sealed at rest, and is returned only in this response. A
         repeated Idempotency-Key returns the subscription created first, without the
         secret. Without field encryption keys the hub cannot store secrets and
-        answers 501 HUB-0501.
+        answers 501 HUB-0501. An optional `filter` (webhook and rest-push) is a CloudEvents
+        SQL (CESQL) expression over the event: the subscription takes an event only when
+        its type matches a pattern and the expression holds. An expression that does not
+        parse, or that is not a true-or-false condition, is 400 HUB-0400 with the position.
+        At delivery time an expression that cannot be evaluated for an event (a missing
+        attribute, a value that cannot be read as the other side's type, a division by
+        zero, or LIKE patterns that would take more than 1,000,000 character steps over
+        the event's values) does not match it.
       x-passage-duty: hub.subscription.write
       parameters:
         - {$ref: "#/components/parameters/IdempotencyKey"}
@@ -184,6 +191,41 @@ paths:
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
+  /v1/hub/subscriptions/{subscriptionId}:rotate:
+    parameters:
+      - {$ref: "#/components/parameters/SubscriptionId"}
+    post:
+      operationId: rotateSubscriptionSecret
+      summary: Rotate a webhook subscription's signing secret, keeping the old one for a grace period
+      description: |
+        Replaces the signing secret with a generated one (or `secret`, 16 to 256 characters) and
+        returns it once in this response. The previous secret keeps signing for `graceSeconds`
+        (default 86,400, at most 604,800; 0 ends it at once): while it does, every delivery's
+        `Passage-Signature` carries one `v1=` per secret (`t=..,v1=<new>,v1=<previous>`), and a
+        receiver that accepts either secret switches over without losing events. Only the secret
+        before this rotation is kept; a second rotation inside the grace period drops the first
+        old secret. Optimistic: `version` must be the version last read, otherwise 409 HUB-0409.
+        Only webhook subscriptions have a signing secret (a rest-push subscription answers 409).
+        Writes `dev.passage.hub.subscription.secretrotated.v1` (no secret in it). Without field
+        encryption keys the hub answers 501 HUB-0501.
+      x-passage-duty: hub.subscription.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RotateSecret"}
+      responses:
+        "200":
+          description: The subscription at its new version; the body carries the new signing secret once.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreatedSubscription"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "501": {$ref: "#/components/responses/Problem"}
   /v1/hub/subscriptions/{subscriptionId}:test:
     parameters:
       - {$ref: "#/components/parameters/SubscriptionId"}
@@ -341,7 +383,8 @@ paths:
         `burst` (default 100) set the token bucket. `sandboxTenantId` names the tenant the
         developer portal's test console may use and must not be the caller's own tenant.
         A repeated Idempotency-Key returns the client created first; a client id already
-        registered in the tenant is 409 HUB-0409.
+        registered in the tenant is 409 HUB-0409. A caller may grant only duties they hold
+        themselves: a scope the caller's token does not carry is 403 HUB-0403 naming it.
       x-passage-duty: hub.client.write
       parameters:
         - {$ref: "#/components/parameters/ClientIdempotencyKey"}
@@ -406,7 +449,8 @@ paths:
       description: |
         Optimistic: `version` must be the version last read, otherwise 409 HUB-0409. A revoked
         client cannot be changed (409). A lower burst takes effect at once: tokens above it are
-        dropped on the next request.
+        dropped on the next request. Scopes the client already has stay whoever changes the
+        client; a scope the change adds must be a duty the caller holds (403 HUB-0403 names it).
       x-passage-duty: hub.client.write
       requestBody:
         required: true
@@ -864,6 +908,21 @@ components:
           maxItems: 50
           items: {type: string, examples: ["dev.passage.sales.**"]}
         secret: {type: string, minLength: 16, maxLength: 256, description: "Signing secret; generated when omitted."}
+        filter: {$ref: "#/components/schemas/EventFilter"}
+    EventFilter:
+      type: string
+      minLength: 1
+      maxLength: 1024
+      description: "A CESQL condition over the event: context attributes (id, type, source, subject, time, tenantid, actor, legalentityid, passagesequence) and `data.<path>` for the JSON payload. Operators = != <> < <= > >= AND OR XOR NOT LIKE IN EXISTS + - * / %; functions LENGTH CONCAT CONCAT_WS LOWER UPPER TRIM LEFT RIGHT SUBSTRING ABS INT STRING BOOL. Integers are 32-bit; decimal amounts in Passage events are strings, so compare them as text or with INT."
+      examples: ["data.currency = 'USD' AND EXISTS actor"]
+    RotateSecret:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: {type: integer, minimum: 1}
+        secret: {type: string, minLength: 16, maxLength: 256, description: "The new signing secret; generated when omitted."}
+        graceSeconds: {type: integer, minimum: 0, maximum: 604800, default: 86400, description: "How long the previous secret keeps signing next to the new one; 0 ends it at once."}
     SubscriptionPatch:
       type: object
       additionalProperties: false
@@ -877,6 +936,11 @@ components:
           minItems: 1
           maxItems: 50
           items: {type: string}
+        filter:
+          description: "A CESQL condition; null removes the filter."
+          anyOf:
+            - {$ref: "#/components/schemas/EventFilter"}
+            - {type: "null"}
         outboundMappingId: {type: string, format: uuid, description: "rest-push."}
         method: {type: string, enum: [POST, PUT, PATCH], description: "rest-push."}
         responseKeyPath: {type: string, maxLength: 200, description: "rest-push."}
@@ -890,7 +954,7 @@ components:
         auth: {$ref: "#/components/schemas/RestAuth"}
     Subscription:
       type: object
-      required: [id, kind, rest, name, url, patterns, status, pausedReason, version, createdAt, updatedAt]
+      required: [id, kind, rest, name, url, patterns, filter, status, pausedReason, version, secretRotatedAt, previousSecretExpiresAt, createdAt, updatedAt]
       properties:
         id: {type: string, format: uuid}
         kind: {type: string, enum: [webhook, rest-push]}
@@ -901,9 +965,12 @@ components:
         name: {type: string}
         url: {type: string}
         patterns: {type: array, items: {type: string}}
+        filter: {type: [string, "null"], description: "The CESQL filter, or null."}
         status: {type: string, enum: [active, paused]}
         pausedReason: {type: [string, "null"], description: "HUB-0114 after a 410 Gone."}
         version: {type: integer}
+        secretRotatedAt: {type: [string, "null"], format: date-time, description: "Webhook: when the signing secret was last rotated."}
+        previousSecretExpiresAt: {type: [string, "null"], format: date-time, description: "Webhook: until when the secret before the last rotation still signs deliveries (a past time or null: none does)."}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
     CreatedSubscription:

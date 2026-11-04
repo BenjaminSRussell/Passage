@@ -132,7 +132,7 @@ export function NewClientPage() {
         <form className={styles.form} onSubmit={submit} noValidate>
           {text("clientId", "Client id", "The Keycloak client id the gateway sees in the token, such as acme-erp.", false, { spellCheck: false, maxLength: 64 })}
           {text("name", "Name", undefined, false, { maxLength: 200 })}
-          <FormField id="client-scopes" label="Scopes" hint="Duties the client may use, one per line, such as sales.order.read." error={errors.scopes}>
+          <FormField id="client-scopes" label="Scopes" hint="Duties the client may use, one per line, such as sales.order.read. You can grant only duties you hold yourself." error={errors.scopes}>
             {(control) => <Textarea {...control} rows={4} mono value={values.scopes} onChange={(event) => update({ scopes: event.target.value })} invalid={Boolean(errors.scopes)} spellCheck={false} />}
           </FormField>
           {text("quotaPerMin", "Requests per minute", `${QUOTA_MIN} to ${QUOTA_MAX}; the default is ${DEFAULT_QUOTA_PER_MIN}.`, false, { inputMode: "numeric" })}

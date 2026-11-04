@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Passage integration hub events
-  version: 0.2.0
+  version: 0.3.0
   description: |
     The hub's own CloudEvents 1.0 (platform/go/events envelope), written to the outbox
     in the same transaction as the change (src/events.ts) and relayed by Debezium. The
@@ -29,6 +29,8 @@ channels:
         $ref: '#/components/messages/subscriptionPaused'
       subscriptionResumed:
         $ref: '#/components/messages/subscriptionResumed'
+      subscriptionSecretRotated:
+        $ref: '#/components/messages/subscriptionSecretRotated'
   passage.hub.webhook:
     address: passage.hub.webhook
     messages:
@@ -92,6 +94,13 @@ operations:
     summary: "A paused subscription was resumed."
     messages:
       - $ref: '#/channels/passage.hub.subscription/messages/subscriptionResumed'
+  publishSubscriptionSecretRotated:
+    action: send
+    channel:
+      $ref: '#/channels/passage.hub.subscription'
+    summary: "A webhook subscription's signing secret was rotated; the data never carries a secret."
+    messages:
+      - $ref: '#/channels/passage.hub.subscription/messages/subscriptionSecretRotated'
   publishWebhookDelivered:
     action: send
     channel:
@@ -187,6 +196,12 @@ components:
       summary: "A paused subscription was resumed."
       payload:
         $ref: '#/components/schemas/SubscriptionData'
+    subscriptionSecretRotated:
+      name: dev.passage.hub.subscription.secretrotated.v1
+      title: subscription.secretrotated
+      summary: "A webhook subscription's signing secret was rotated; the data never carries a secret."
+      payload:
+        $ref: '#/components/schemas/SubscriptionSecretRotatedData'
     webhookDelivered:
       name: dev.passage.hub.webhook.delivered.v1
       title: webhook.delivered
@@ -244,16 +259,32 @@ components:
   schemas:
     SubscriptionData:
       type: object
-      required: [subscription_id, kind, name, patterns, status, paused_reason, version]
+      required: [subscription_id, kind, name, patterns, filter, status, paused_reason, version]
       additionalProperties: false
       properties:
         subscription_id: {type: string, format: uuid}
         kind: {type: string, enum: [webhook, rest-push]}
         name: {type: string}
         patterns: {type: array, items: {type: string}}
+        filter: {type: [string, "null"], description: "The CESQL filter expression, or null."}
         status: {type: string, enum: [active, paused]}
         paused_reason: {type: [string, "null"], description: "HUB-0114 after a 410 Gone."}
         version: {type: integer, minimum: 1}
+    SubscriptionSecretRotatedData:
+      type: object
+      required: [subscription_id, kind, name, patterns, filter, status, paused_reason, version, secret_rotated_at, previous_secret_expires_at]
+      additionalProperties: false
+      properties:
+        subscription_id: {type: string, format: uuid}
+        kind: {type: string, enum: [webhook]}
+        name: {type: string}
+        patterns: {type: array, items: {type: string}}
+        filter: {type: [string, "null"], description: "The CESQL filter expression, or null."}
+        status: {type: string, enum: [active, paused]}
+        paused_reason: {type: [string, "null"], description: "HUB-0114 after a 410 Gone."}
+        version: {type: integer, minimum: 1}
+        secret_rotated_at: {type: string, format: date-time}
+        previous_secret_expires_at: {type: [string, "null"], format: date-time, description: "When the previous secret stops signing; null when it was ended at once."}
     DeliveredData:
       type: object
       required: [subscription_id, event_id, attempts]

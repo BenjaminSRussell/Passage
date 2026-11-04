@@ -20,6 +20,7 @@ import {
   validateScopes,
   type ApiClientPatch,
 } from "./clients.ts";
+import { validateFilter, MAX_EXPRESSION_LENGTH } from "./cesql.ts";
 import { parseEvent } from "./consumer.ts";
 import {
   CATALOG_KINDS,
@@ -294,8 +295,35 @@ function patternsOf(body: Record<string, unknown>): string[] {
   return [...new Set(v as string[])];
 }
 
+/** A CESQL filter: absent is undefined, null (patch only) removes it, text must parse. */
+function filterOf(body: Record<string, unknown>, allowNull: boolean): string | null | undefined {
+  const v = body["filter"];
+  if (v === undefined) return undefined;
+  if (v === null && allowNull) return null;
+  if (typeof v !== "string") {
+    throw new ApiError(400, "HUB-0400", `filter must be a CESQL expression of at most ${MAX_EXPRESSION_LENGTH} characters${allowNull ? " or null" : ""}`);
+  }
+  const bad = validateFilter(v);
+  if (bad !== null) {
+    throw new ApiError(400, "HUB-0400", `filter: ${bad}`);
+  }
+  return v;
+}
+
+/** A caller may grant a client only duties they hold themselves (no escalation through a client's scopes). */
+function requireHeld(p: Principal, scopes: readonly string[]): void {
+  const missing = scopes.filter((s) => !p.duties.has(s));
+  if (missing.length > 0) {
+    throw new ApiError(403, "HUB-0403", `you cannot grant duties you do not hold: ${missing.join(", ")}`);
+  }
+}
+
+/** Seconds the previous signing secret keeps signing after a rotation: a day unless the caller says otherwise, at most a week. */
+const DEFAULT_GRACE_SECONDS = 86_400;
+const MAX_GRACE_SECONDS = 7 * 86_400;
+
 const SUBSCRIPTIONS = "/v1/hub/subscriptions";
-const ONE = new RegExp(`^${SUBSCRIPTIONS}/([0-9a-fA-F-]{36})(?::(resume|replay|test))?$`);
+const ONE = new RegExp(`^${SUBSCRIPTIONS}/([0-9a-fA-F-]{36})(?::(resume|replay|test|rotate))?$`);
 const CLIENTS = "/v1/hub/clients";
 const CLIENT_ONE = new RegExp(`^${CLIENTS}/([0-9a-fA-F-]{36})(?::(revoke)|/(usage))?$`);
 const CATALOG = "/v1/hub/catalog";
@@ -384,6 +412,7 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
         const clientId = requireString(body, "clientId", 64);
         validateClientId(clientId);
         const scopes = scopesOf(body["scopes"]);
+        requireHeld(p, scopes);
         const ownerContact = requireString(body, "ownerContact", 320);
         validateOwner(ownerContact);
         const { created, client } = await clients.create(p.tenantId, {
@@ -454,7 +483,15 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
         }
         const patch: ApiClientPatch = { version };
         if (body["name"] !== undefined) patch.name = requireString(body, "name", 200);
-        if (body["scopes"] !== undefined) patch.scopes = scopesOf(body["scopes"]);
+        if (body["scopes"] !== undefined) {
+          patch.scopes = scopesOf(body["scopes"]);
+          // Scopes the client already has stay whoever holds them; only an addition is a grant.
+          const current = await clients.get(p.tenantId, id);
+          if (current === null) {
+            throw new ApiError(404, "HUB-0404", "no such API client");
+          }
+          requireHeld(p, patch.scopes.filter((s) => !current.scopes.includes(s)));
+        }
         const rate = intOf(body, "quotaPerMin");
         if (rate !== undefined) patch.quotaPerMin = rate;
         const burst = intOf(body, "burst");
@@ -602,7 +639,7 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
         if (key !== undefined && key.length > 200) {
           throw new ApiError(400, "HUB-0400", "Idempotency-Key must be at most 200 characters");
         }
-        const body = object(await readBody(req), ["kind", "name", "url", "patterns", "secret", ...REST_FIELDS]);
+        const body = object(await readBody(req), ["kind", "name", "url", "patterns", "filter", "secret", ...REST_FIELDS]);
         const kind = body["kind"] ?? "webhook";
         if (kind !== "webhook" && kind !== "rest-push") {
           throw new ApiError(400, "HUB-0400", "kind must be webhook or rest-push");
@@ -610,6 +647,7 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
         const name = requireString(body, "name", 200);
         const target = requireString(body, "url", 2048);
         const patterns = patternsOf(body);
+        const filter = filterOf(body, false) ?? null;
         if (kind === "rest-push") {
           if (body["secret"] !== undefined) {
             throw new ApiError(400, "HUB-0400", "a rest-push subscription has no signing secret; send auth instead");
@@ -624,7 +662,7 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
           }
           const { credentials, ...config } = input;
           const { subscription, created } = await store.createSubscription(p.tenantId, {
-            name, url: target, secret: "", patterns, createdBy: p.userId, idempotencyKey: key === undefined || key === "" ? null : key,
+            name, url: target, secret: "", patterns, filter, createdBy: p.userId, idempotencyKey: key === undefined || key === "" ? null : key,
             rest: { config, credentials },
           });
           return { name: "createSubscription", status: created ? 201 : 200, body: subscription };
@@ -645,7 +683,7 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
         }
         await checkUrl(target);
         const { subscription, created } = await store.createSubscription(p.tenantId, {
-          name, url: target, secret, patterns, createdBy: p.userId, idempotencyKey: key === undefined || key === "" ? null : key,
+          name, url: target, secret, patterns, filter, createdBy: p.userId, idempotencyKey: key === undefined || key === "" ? null : key,
         });
         // The secret is shown once, on the response that created the subscription.
         return { name: "createSubscription", status: created ? 201 : 200, body: created ? { ...subscription, secret } : subscription };
@@ -678,7 +716,7 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
         if (method === "PATCH") {
           const p = principalFromHeaders(req.headers);
           requireDuty(p, DUTY_SUBSCRIPTION_WRITE);
-          const body = object(await readBody(req), ["version", "name", "url", "patterns", ...REST_FIELDS]);
+          const body = object(await readBody(req), ["version", "name", "url", "patterns", "filter", ...REST_FIELDS]);
           const version = body["version"];
           if (typeof version !== "number" || !Number.isInteger(version) || version < 1) {
             throw new ApiError(400, "HUB-0400", "version must be the subscription's current version");
@@ -709,6 +747,8 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
             if (patch.url !== undefined) await checkUrl(patch.url);
           }
           if (body["patterns"] !== undefined) patch.patterns = patternsOf(body);
+          const filter = filterOf(body, true);
+          if (filter !== undefined) patch.filter = filter;
           const sub = await store.patchSubscription(p.tenantId, id, patch, p.userId);
           if (sub === null) {
             throw new ApiError(404, "HUB-0404", "no such subscription");
@@ -737,6 +777,32 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
           throw new ApiError(404, "HUB-0404", "no such subscription");
         }
         return { name: "resumeSubscription", status: 200, body: sub };
+      }
+      if (action === "rotate") {
+        const body = object(await readBody(req), ["version", "secret", "graceSeconds"]);
+        const version = body["version"];
+        if (typeof version !== "number" || !Number.isInteger(version) || version < 1) {
+          throw new ApiError(400, "HUB-0400", "version must be the subscription's current version");
+        }
+        const grace = intOf(body, "graceSeconds") ?? DEFAULT_GRACE_SECONDS;
+        if (grace < 0 || grace > MAX_GRACE_SECONDS) {
+          throw new ApiError(400, "HUB-0400", `graceSeconds must be an integer in 0..${MAX_GRACE_SECONDS}`);
+        }
+        let secret: string;
+        if (body["secret"] === undefined) {
+          secret = `whsec_${randomBytes(24).toString("base64url")}`;
+        } else {
+          secret = requireString(body, "secret", 256);
+          if (secret.length < 16) {
+            throw new ApiError(400, "HUB-0400", "secret must be at least 16 characters");
+          }
+        }
+        const rotated = await store.rotateSecret(p.tenantId, id, { version, secret, graceSeconds: grace }, p.userId);
+        if (rotated === null) {
+          throw new ApiError(404, "HUB-0404", "no such subscription");
+        }
+        // The new secret is shown once, on this response.
+        return { name: "rotateSubscriptionSecret", status: 200, body: { ...rotated, secret } };
       }
       if (action === "test") {
         const body = object(await readBody(req), ["event", "send"]);
