@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -107,17 +109,18 @@ func (a *API) putSiteMapping(w http.ResponseWriter, r *http.Request) {
 }
 
 type releaseSessionBody struct {
-	ID              string            `json:"id,omitempty"`
-	Number          string            `json:"number"`
-	CreatedBy       string            `json:"createdBy,omitempty"`
-	Source          string            `json:"source,omitempty"`
-	PolicyID        string            `json:"policyId"`
-	EcoID           string            `json:"ecoId,omitempty"`
-	EngineeringLEID string            `json:"engineeringLeId,omitempty"`
-	ProductID       string            `json:"productId"`
-	VersionCode     string            `json:"versionCode"`
-	LegalEntities   []string          `json:"legalEntities"`
-	Lines           []releaseLineBody `json:"lines,omitempty"`
+	ID                string            `json:"id,omitempty"`
+	Number            string            `json:"number"`
+	CreatedBy         string            `json:"createdBy,omitempty"`
+	Source            string            `json:"source,omitempty"`
+	PolicyID          string            `json:"policyId"`
+	EcoID             string            `json:"ecoId,omitempty"`
+	ReadinessPolicyID string            `json:"readinessPolicyId,omitempty"`
+	EngineeringLEID   string            `json:"engineeringLeId"`
+	ProductID         string            `json:"productId"`
+	VersionCode       string            `json:"versionCode"`
+	LegalEntities     []string          `json:"legalEntities"`
+	Lines             []releaseLineBody `json:"lines,omitempty"`
 }
 
 type releaseLineBody struct {
@@ -138,7 +141,7 @@ func bodyFromReleaseLine(l domain.ReleaseLine) releaseLineBody {
 }
 
 func bodyFromReleaseSession(rec store.ReleaseSessionRecord) releaseSessionBody {
-	body := releaseSessionBody{ID: rec.Session.ID, Number: rec.Session.Number, CreatedBy: rec.Session.CreatedBy, Source: rec.Session.Source, PolicyID: rec.Session.PolicyID, EcoID: rec.Session.EcoID, Lines: make([]releaseLineBody, len(rec.Lines))}
+	body := releaseSessionBody{ID: rec.Session.ID, Number: rec.Session.Number, CreatedBy: rec.Session.CreatedBy, Source: rec.Session.Source, PolicyID: rec.Session.PolicyID, EcoID: rec.Session.EcoID, ReadinessPolicyID: rec.Session.ReadinessPolicyID, EngineeringLEID: rec.Session.EngineeringLEID, Lines: make([]releaseLineBody, len(rec.Lines))}
 	for i, l := range rec.Lines {
 		body.Lines[i] = bodyFromReleaseLine(l)
 	}
@@ -155,27 +158,47 @@ func (a *API) createReleaseSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, _ := tenant.FromContext(r.Context())
+	if p.UserID == "" {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "creating a release session needs the acting user"))
+		return
+	}
 	fields := map[string]string{}
 	checkUUID("policyId", body.PolicyID, fields)
 	if body.PolicyID == "" {
 		fields["policyId"] = "must be a UUID"
 	}
 	checkUUID("ecoId", body.EcoID, fields)
+	checkUUID("readinessPolicyId", body.ReadinessPolicyID, fields)
+	if body.CreatedBy != "" {
+		fields["createdBy"] = "is the signed-in user and cannot be set"
+	}
+	validID("engineeringLeId", body.EngineeringLEID, fields)
+	switch body.Source {
+	case "", domain.ReleaseManual, domain.ReleaseEco, domain.ReleaseJob:
+	default:
+		fields["source"] = "must be manual, eco or job"
+	}
+	if body.Number != "" {
+		validID("number", body.Number, fields)
+	}
 	validID("productId", body.ProductID, fields)
 	validID("versionCode", body.VersionCode, fields)
-	if len(body.LegalEntities) == 0 {
-		fields["legalEntities"] = "must list at least one legal entity"
+	if n := len(body.LegalEntities); n == 0 || n > maxReleaseEntities {
+		fields["legalEntities"] = fmt.Sprintf("must list 1 to %d legal entities", maxReleaseEntities)
+	}
+	seen := map[string]bool{}
+	for _, le := range body.LegalEntities {
+		if n := len(strings.TrimSpace(le)); n == 0 || n > maxIDLength || seen[le] {
+			fields["legalEntities"] = "each legal entity must be 1 to 64 characters and listed once"
+		}
+		seen[le] = true
 	}
 	if len(fields) > 0 {
 		invalid(w, r, fields)
 		return
 	}
-	createdBy := body.CreatedBy
-	if createdBy == "" {
-		createdBy = p.UserID
-	}
 	rec, err := a.store.CreateReleaseSession(r.Context(), store.ReleaseSessionInput{
-		Number: body.Number, CreatedBy: createdBy, Source: body.Source, PolicyID: body.PolicyID, EcoID: body.EcoID,
+		Number: body.Number, CreatedBy: p.UserID, Source: body.Source, PolicyID: body.PolicyID, EcoID: body.EcoID, ReadinessPolicyID: body.ReadinessPolicyID,
 		EngineeringLEID: body.EngineeringLEID, ProductID: body.ProductID, VersionCode: body.VersionCode, LegalEntities: body.LegalEntities,
 	}, idemOf(r, body))
 	if err != nil {
@@ -183,7 +206,7 @@ func (a *API) createReleaseSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := bodyFromReleaseSession(rec)
-	out.ProductID, out.VersionCode, out.EngineeringLEID = body.ProductID, body.VersionCode, body.EngineeringLEID
+	out.ProductID, out.VersionCode = body.ProductID, body.VersionCode
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -192,7 +215,7 @@ func (a *API) listReleaseSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	listPage(a, w, r, "list release sessions", &a.bomFailed, a.store.ListReleaseSessions, func(s domain.ReleaseSession) releaseSessionBody {
-		return releaseSessionBody{ID: s.ID, Number: s.Number, CreatedBy: s.CreatedBy, Source: s.Source, PolicyID: s.PolicyID, EcoID: s.EcoID}
+		return releaseSessionBody{ID: s.ID, Number: s.Number, CreatedBy: s.CreatedBy, Source: s.Source, PolicyID: s.PolicyID, EcoID: s.EcoID, ReadinessPolicyID: s.ReadinessPolicyID, EngineeringLEID: s.EngineeringLEID}
 	})
 }
 

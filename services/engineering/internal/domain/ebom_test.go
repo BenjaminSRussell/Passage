@@ -17,8 +17,8 @@ func TestImportEbom_UnknownPartsBecomeExceptionsAndKnownLinesDraftABom(t *testin
 			known[part] = part
 		}
 	}
-	result := ImportEbom(payload, known, nil)
-	if result.Draft == nil || len(result.Draft.Lines) != 115 {
+	result, err := ImportEbom(payload, known, nil)
+	if err != nil || result.Draft == nil || len(result.Draft.Lines) != 115 {
 		t.Fatalf("draft lines = %d; want 115", len(result.Draft.Lines))
 	}
 	if result.ECR == nil || result.ECR.State != EcrDraft {
@@ -46,8 +46,8 @@ func TestImportEbom_ComparisonCounts(t *testing.T) {
 		{LineNo: 20, ComponentProductID: "B", Quantity: decimal.NewFromInt(1)},
 		{LineNo: 40, ComponentProductID: "D", Quantity: decimal.NewFromInt(1)},
 	}}
-	result := ImportEbom(payload, known, active)
-	if result.Comparison.Added != 1 || result.Comparison.Removed != 1 || result.Comparison.Changed != 1 {
+	result, err := ImportEbom(payload, known, active)
+	if err != nil || result.Comparison.Added != 1 || result.Comparison.Removed != 1 || result.Comparison.Changed != 1 {
 		t.Fatalf("comparison = %+v; want added 1 (C), removed 1 (D), changed 1 (A qty)", result.Comparison)
 	}
 }
@@ -60,5 +60,44 @@ func TestImportEbom_ReleasedRevisionIsRejected(t *testing.T) {
 	draft := EbomImport{Status: EbomDraft}
 	if err := draft.CanReimport(); err != nil {
 		t.Fatalf("draft reimport = %v", err)
+	}
+}
+
+func TestImportEbom_FlagsUnknownHeaderOnceAndRefusesBadLines(t *testing.T) {
+	payload := EbomPayload{PartNumber: "NEW", Revision: "A", Lines: []EbomLine{
+		{FindNumber: 10, PartNumber: "X", Quantity: decimal.NewFromInt(1)},
+		{FindNumber: 20, PartNumber: "X", Quantity: decimal.NewFromInt(1)},
+	}}
+	result, err := ImportEbom(payload, map[string]string{}, nil)
+	if err != nil || len(result.Exceptions) != 2 {
+		t.Fatalf("exceptions = %+v, %v; want the header and X once each", result.Exceptions, err)
+	}
+	negative := EbomPayload{PartNumber: "P", Revision: "A", Lines: []EbomLine{{PartNumber: "A", Quantity: decimal.NewFromInt(-3)}}}
+	if _, err := ImportEbom(negative, map[string]string{"P": "P", "A": "A"}, nil); !HasCode(err, CodeBomLine) {
+		t.Fatalf("negative quantity = %v; want %s", err, CodeBomLine)
+	}
+	zero := EbomPayload{PartNumber: "P", Revision: "A", Lines: []EbomLine{{PartNumber: "A"}}}
+	if _, err := ImportEbom(zero, map[string]string{"P": "P", "A": "A"}, nil); !HasCode(err, CodeBomLine) {
+		t.Fatalf("zero quantity = %v; want %s, not a silent 1", err, CodeBomLine)
+	}
+}
+
+func TestImportEbom_AutoFindNumbersSkipExplicitOnes(t *testing.T) {
+	payload := EbomPayload{PartNumber: "P", Revision: "A", Lines: []EbomLine{
+		{PartNumber: "A", Quantity: decimal.NewFromInt(1)},
+		{FindNumber: 20, PartNumber: "B", Quantity: decimal.NewFromInt(1)},
+		{PartNumber: "C", Quantity: decimal.NewFromInt(1)},
+	}}
+	known := map[string]string{"P": "P", "A": "A", "B": "B", "C": "C"}
+	result, err := ImportEbom(payload, known, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[int]bool{}
+	for _, l := range result.Draft.Lines {
+		if seen[l.LineNo] {
+			t.Fatalf("find number %d used twice: %+v", l.LineNo, result.Draft.Lines)
+		}
+		seen[l.LineNo] = true
 	}
 }

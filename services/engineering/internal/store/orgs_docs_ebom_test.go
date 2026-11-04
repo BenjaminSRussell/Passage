@@ -7,34 +7,60 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/engineering/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/engineering/internal/store"
 	"github.com/BenjaminSRussell/passage/services/engineering/migrations"
 )
 
-func TestPostgres_AC911_ReleaseAcceptanceSplit(t *testing.T) {
-	s, _, ctx := newStore(t, 1)
-	if _, err := s.CreateOrganization(ctx, domain.EngineeringOrganization{LegalEntityID: "ENG1", Code: "ENG", Name: "Engineering"}, store.Idem{}); err != nil {
+func leContext(n int, user, legalEntities string) context.Context {
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), UserID: user, LegalEntityID: legalEntities})
+}
+
+func newAppStore(t *testing.T, n int) (*store.Postgres, *pgxpool.Pool, context.Context) {
+	t.Helper()
+	admin, app := testkit.DBWithApp(t)
+	ctx := principalContext(n)
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	policy := domain.ReleasePolicy{
-		Code: "RP-1", CopyBOM: true, ActivateBOM: true, CopyRoute: true, ActivateRoute: true,
-		RequireAcceptance: map[string]bool{"USMF": true, "DEMF": false},
+	return store.New(app), admin, ctx
+}
+
+func rowCount(t *testing.T, pool *pgxpool.Pool, query string, args ...any) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(context.Background(), query, args...).Scan(&n); err != nil {
+		t.Fatal(err)
 	}
-	created, err := s.CreateReleasePolicy(ctx, policy, store.Idem{Key: "rp", Hash: "h"})
+	return n
+}
+
+type releaseFixture struct {
+	policyID string
+	bomID    string
+}
+
+func seedRelease(t *testing.T, s *store.Postgres, ctx context.Context, engineeringSite string, policy domain.ReleasePolicy) releaseFixture {
+	t.Helper()
+	created, err := s.CreateReleasePolicy(ctx, policy, store.Idem{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutSiteMapping(ctx, domain.SiteMapping{EngineeringLEID: "ENG1", OperationalLEID: "DEMF", OperationalSite: "DEMF-S"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.PutSiteMapping(ctx, domain.SiteMapping{EngineeringLEID: "ENG1", OperationalLEID: "USMF", OperationalSite: "USMF-S"}); err != nil {
-		t.Fatal(err)
+	for _, m := range []domain.SiteMapping{
+		{EngineeringLEID: "ENG1", OperationalLEID: "DEMF", EngineeringSite: engineeringSite, OperationalSite: "DEMF-S"},
+		{EngineeringLEID: "ENG1", OperationalLEID: "USMF", EngineeringSite: engineeringSite, OperationalSite: "USMF-S"},
+	} {
+		if err := s.PutSiteMapping(ctx, m); err != nil {
+			t.Fatal(err)
+		}
 	}
 	bom := version("P", domain.StatusActive, releaseDay, "WHEEL")
 	bom.SiteID = "ENG-S"
@@ -48,13 +74,28 @@ func TestPostgres_AC911_ReleaseAcceptanceSplit(t *testing.T) {
 	if _, err := s.ActivateRouteVersion(ctx, route.ID); err != nil {
 		t.Fatal(err)
 	}
+	return releaseFixture{policyID: created.ID, bomID: bom.ID}
+}
 
-	rec, err := s.CreateReleaseSession(ctx, store.ReleaseSessionInput{
-		Number: "REL-2026-00001", CreatedBy: "rita", PolicyID: created.ID, EngineeringLEID: "ENG1",
-		ProductID: "P", VersionCode: "V-02", LegalEntities: []string{"DEMF", "USMF"},
-	}, store.Idem{Key: "rel", Hash: "h"})
+func fullPolicy(code string, acceptance map[string]bool) domain.ReleasePolicy {
+	return domain.ReleasePolicy{Code: code, CopyBOM: true, ActivateBOM: true, CopyRoute: true, ActivateRoute: true, RequireAcceptance: acceptance}
+}
+
+func releaseInput(number, policyID string, legalEntities ...string) store.ReleaseSessionInput {
+	return store.ReleaseSessionInput{Number: number, CreatedBy: "rita", PolicyID: policyID, EngineeringLEID: "ENG1", ProductID: "P", VersionCode: "V-02", LegalEntities: legalEntities}
+}
+
+func TestPostgres_AC911_ReleaseAcceptanceSplit(t *testing.T) {
+	s, _, setup := newStore(t, 1)
+	fx := seedRelease(t, s, setup, "ENG-S", fullPolicy("RP-1", map[string]bool{"USMF": true, "DEMF": false}))
+	creator := leContext(1, "rita", "ENG1,DEMF")
+
+	rec, err := s.CreateReleaseSession(creator, releaseInput("REL-2026-00001", fx.policyID, "DEMF", "USMF"), store.Idem{Key: "rel", Hash: "h"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if rec.Session.EngineeringLEID != "ENG1" {
+		t.Fatalf("session = %+v; want the engineering entity stored", rec.Session)
 	}
 	byLE := map[string]domain.ReleaseLine{}
 	for _, l := range rec.Lines {
@@ -63,25 +104,137 @@ func TestPostgres_AC911_ReleaseAcceptanceSplit(t *testing.T) {
 	if byLE["DEMF"].Status != domain.LineAccepted || byLE["DEMF"].CopiedBOMVersionID == "" || byLE["DEMF"].CopiedRouteVersionID == "" {
 		t.Fatalf("DEMF = %+v; want accepted with copied BOM and route", byLE["DEMF"])
 	}
-	copied, err := s.GetBomVersion(ctx, byLE["DEMF"].CopiedBOMVersionID)
-	if err != nil || copied.Status != domain.StatusActive || copied.SiteID != "DEMF-S" {
-		t.Fatalf("DEMF BOM = %+v, %v; want active on DEMF-S", copied, err)
+	copied, err := s.GetBomVersion(creator, byLE["DEMF"].CopiedBOMVersionID)
+	if err != nil || copied.Status != domain.StatusActive || copied.SiteID != "DEMF-S" || copied.CopiedFrom != fx.bomID {
+		t.Fatalf("DEMF BOM = %+v, %v; want active on DEMF-S copied from the engineering BOM", copied, err)
 	}
 	if byLE["USMF"].Status != domain.LineSent {
 		t.Fatalf("USMF = %s; want sent (open product releases)", byLE["USMF"].Status)
 	}
-
-	open, err := s.ListReleaseLines(ctx, store.ReleaseLineFilter{Status: domain.LineSent}, "", store.MaxPageSize)
+	open, err := s.ListReleaseLines(creator, store.ReleaseLineFilter{Status: domain.LineSent}, "", store.MaxPageSize)
 	if err != nil || len(open.Items) != 1 || open.Items[0].LegalEntityID != "USMF" {
 		t.Fatalf("open releases = %+v, %v", open, err)
 	}
-	accepted, err := s.DecideReleaseLine(ctx, byLE["USMF"].ID, "bob", "", true)
+
+	accepted, err := s.DecideReleaseLine(leContext(1, "bob", "USMF"), byLE["USMF"].ID, "bob", "", true)
 	if err != nil || accepted.Status != domain.LineAccepted || accepted.CopiedBOMVersionID == "" {
 		t.Fatalf("USMF accept = %+v, %v", accepted, err)
 	}
-	products, err := s.ListReleasedProducts(ctx, "USMF", "", store.MaxPageSize)
+	usmf, err := s.GetBomVersion(creator, accepted.CopiedBOMVersionID)
+	if err != nil || usmf.SiteID != "USMF-S" || usmf.Status != domain.StatusActive {
+		t.Fatalf("USMF BOM = %+v, %v; want the mapped site USMF-S, not the legal entity id", usmf, err)
+	}
+	products, err := s.ListReleasedProducts(creator, "USMF", "", store.MaxPageSize)
 	if err != nil || len(products.Items) != 1 || products.Items[0].ProductID != "P" {
 		t.Fatalf("USMF released products = %+v, %v", products, err)
+	}
+}
+
+func TestPostgres_ReleaseIsScopedToTheCallersLegalEntities(t *testing.T) {
+	s, pool, setup := newStore(t, 1)
+	fx := seedRelease(t, s, setup, "", fullPolicy("RP-S", map[string]bool{"USMF": true}))
+
+	if _, err := s.CreateReleaseSession(leContext(1, "rita", "ENG1"), releaseInput("REL-A", fx.policyID, "DEMF"), store.Idem{}); !domain.HasCode(err, domain.CodeReleaseScope) {
+		t.Fatalf("auto-accepting into an entity outside the caller's scope = %v; want %s", err, domain.CodeReleaseScope)
+	}
+	if _, err := s.CreateReleaseSession(leContext(1, "rita", "OTHER"), releaseInput("REL-B", fx.policyID, "USMF"), store.Idem{}); !domain.HasCode(err, domain.CodeReleaseScope) {
+		t.Fatalf("releasing from an engineering entity outside the caller's scope = %v; want %s", err, domain.CodeReleaseScope)
+	}
+	if n := rowCount(t, pool, `select count(*) from release_session`); n != 0 {
+		t.Fatalf("%d sessions persisted by refused requests", n)
+	}
+	rec, err := s.CreateReleaseSession(leContext(1, "rita", "ENG1"), releaseInput("REL-C", fx.policyID, "USMF"), store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := rec.Lines[0].ID
+	for _, accept := range []bool{true, false} {
+		if _, err := s.DecideReleaseLine(leContext(1, "mallory", "DEMF"), line, "mallory", "no", accept); !domain.HasCode(err, domain.CodeReleaseScope) {
+			t.Fatalf("accept=%v from another entity = %v; want %s", accept, err, domain.CodeReleaseScope)
+		}
+	}
+	if _, err := s.DecideReleaseLine(principalContext(1), line, "nobody", "", true); !domain.HasCode(err, domain.CodeReleaseScope) {
+		t.Fatalf("a caller with no entity claim and no tenant administration = %v; want %s", err, domain.CodeReleaseScope)
+	}
+	if got := rowCount(t, pool, `select count(*) from release_line where status = 'sent'`); got != 1 {
+		t.Fatalf("the line must stay sent, %d are", got)
+	}
+}
+
+func TestPostgres_ReReleaseExpiresThePreviousCopy(t *testing.T) {
+	s, pool, setup := newStore(t, 1)
+	fx := seedRelease(t, s, setup, "", fullPolicy("RP-R", map[string]bool{}))
+	ctx := leContext(1, "rita", "ENG1,DEMF")
+	first, err := s.CreateReleaseSession(ctx, releaseInput("REL-1", fx.policyID, "DEMF"), store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.CreateReleaseSession(ctx, releaseInput("REL-2", fx.policyID, "DEMF"), store.Idem{})
+	if err != nil {
+		t.Fatalf("re-release = %v; want the previous operational copy expired, not ENG-BOM-OVERLAP", err)
+	}
+	for _, q := range []string{
+		`select count(*) from bom_version where product_id = 'P' and site_id = 'DEMF-S' and status = 'active'`,
+		`select count(*) from route_version where product_id = 'P' and site_id = 'DEMF-S' and status = 'active'`,
+	} {
+		if n := rowCount(t, pool, q); n != 1 {
+			t.Fatalf("%s = %d; want exactly one active copy", q, n)
+		}
+	}
+	if n := rowCount(t, pool, `select count(*) from bom_version where id = $1::uuid and status = 'expired'`, first.Lines[0].CopiedBOMVersionID); n != 1 {
+		t.Fatal("the first copy must be expired")
+	}
+	newest, err := s.GetBomVersion(ctx, second.Lines[0].CopiedBOMVersionID)
+	if err != nil || newest.CopiedFrom != fx.bomID || newest.Status != domain.StatusActive {
+		t.Fatalf("second copy = %+v, %v; want active and sourced from the engineering BOM, not the first copy", newest, err)
+	}
+}
+
+func TestPostgres_DraftCopiesDoNotPassReadiness(t *testing.T) {
+	s, _, setup := newStore(t, 1)
+	rdy, err := s.CreateReadinessPolicy(setup, domain.ReadinessPolicy{Code: "RDY-A", Checks: []domain.ReadinessCheck{{Key: "active_bom", Kind: domain.CheckAuto, Mandatory: true}}}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := fullPolicy("RP-D", map[string]bool{})
+	policy.ActivateBOM, policy.CopyRoute = false, false
+	fx := seedRelease(t, s, setup, "", policy)
+	in := releaseInput("REL-D", fx.policyID, "DEMF")
+	in.ReadinessPolicyID = rdy.ID
+	rec, err := s.CreateReleaseSession(leContext(1, "rita", "ENG1,DEMF"), in, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := s.GetBomVersion(setup, rec.Lines[0].CopiedBOMVersionID)
+	if err != nil || draft.Status != domain.StatusDraft {
+		t.Fatalf("copy = %+v, %v; want a draft", draft, err)
+	}
+	page, err := s.ListReleasedProducts(setup, "DEMF", "", store.MaxPageSize)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("released = %+v, %v", page, err)
+	}
+	got, err := s.GetReleasedProduct(setup, page.Items[0].ID)
+	if err != nil || got.State != domain.ReadinessPending || len(got.Checks) != 1 || got.Checks[0].Status != domain.CheckPending {
+		t.Fatalf("released product = %+v, %v; a draft BOM must not satisfy active_bom", got, err)
+	}
+}
+
+func TestPostgres_RouteActivationFailureRefusesTheRelease(t *testing.T) {
+	s, pool, setup := newStore(t, 1)
+	fx := seedRelease(t, s, setup, "", fullPolicy("RP-F", map[string]bool{}))
+	blocker := newRoute("P", "DEMF-S", 1, releaseDay, routeOp(10, 0))
+	if _, err := s.CreateRouteVersion(setup, blocker, store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ActivateRouteVersion(setup, blocker.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.CreateReleaseSession(leContext(1, "rita", "ENG1,DEMF"), releaseInput("REL-F", fx.policyID, "DEMF"), store.Idem{})
+	if !domain.HasCode(err, domain.CodeRouteOverlap) {
+		t.Fatalf("release onto a site with its own active route = %v; want %s, not a silent draft", err, domain.CodeRouteOverlap)
+	}
+	if n := rowCount(t, pool, `select count(*) from release_session`) + rowCount(t, pool, `select count(*) from released_product`); n != 0 {
+		t.Fatalf("%d rows persisted by a refused release", n)
 	}
 }
 
@@ -92,16 +245,10 @@ func TestPostgres_AC912_ReadinessBlocksThenActivates(t *testing.T) {
 		{Key: "tax_group", Kind: domain.CheckAuto, Mandatory: true},
 		{Key: "warehouse_setup", Kind: domain.CheckAuto, Mandatory: true},
 		{Key: "quality_signoff", Kind: domain.CheckManual, Mandatory: true},
+		{Key: "safety_signoff", Kind: domain.CheckManual, Mandatory: true},
 	}}
 	rdy, err := s.CreateReadinessPolicy(ctx, policy, store.Idem{})
 	if err != nil {
-		t.Fatal(err)
-	}
-	cat, err := s.CreateCategory(ctx, domain.EngineeringCategory{Code: "FIN", Name: "Finished", TrackVersions: true, ReadinessPolicyID: rdy.ID}, store.Idem{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.CreateEngineeringVersion(ctx, domain.EngineeringVersion{ProductID: "P", VersionCode: "V-01", EngineeringLEID: "ENG1", CategoryID: cat.ID}, store.Idem{}); err != nil {
 		t.Fatal(err)
 	}
 	rel, err := s.CreateReleasePolicy(ctx, domain.ReleasePolicy{Code: "RP", CopyBOM: true, ActivateBOM: true, RequireAcceptance: map[string]bool{}}, store.Idem{})
@@ -112,11 +259,13 @@ func TestPostgres_AC912_ReadinessBlocksThenActivates(t *testing.T) {
 	if _, err := s.CreateBomVersion(ctx, bom, store.Idem{}, noCheck); err != nil {
 		t.Fatal(err)
 	}
-	session, err := s.CreateReleaseSession(ctx, store.ReleaseSessionInput{
-		Number: "REL-1", CreatedBy: "rita", PolicyID: rel.ID, ProductID: "P", VersionCode: "V-01", LegalEntities: []string{"USMF"}, ReadinessPolicyID: rdy.ID,
-	}, store.Idem{})
+	in := store.ReleaseSessionInput{Number: "REL-1", CreatedBy: "rita", PolicyID: rel.ID, EngineeringLEID: "ENG1", ProductID: "P", VersionCode: "V-01", LegalEntities: []string{"USMF"}, ReadinessPolicyID: rdy.ID}
+	session, err := s.CreateReleaseSession(leContext(1, "rita", "ENG1,USMF"), in, store.Idem{})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if session.Session.ReadinessPolicyID != rdy.ID {
+		t.Fatalf("session = %+v; want the readiness policy stored", session.Session)
 	}
 	page, err := s.ListReleasedProducts(ctx, "USMF", "", store.MaxPageSize)
 	if err != nil || len(page.Items) != 1 {
@@ -132,12 +281,47 @@ func TestPostgres_AC912_ReadinessBlocksThenActivates(t *testing.T) {
 	if _, err := s.SignReadinessCheck(ctx, got.ID, "quality_signoff", "rita"); !domain.HasCode(err, domain.CodeReadinessSelfSign) {
 		t.Fatalf("creator sign = %v; want %s", err, domain.CodeReadinessSelfSign)
 	}
-	signed, err := s.SignReadinessCheck(ctx, got.ID, "quality_signoff", "carol")
+	half, err := s.SignReadinessCheck(ctx, got.ID, "quality_signoff", "carol")
+	if err != nil || half.State != domain.ReadinessPending {
+		t.Fatalf("after one of two signatures = %+v, %v; the session's readiness policy must keep it pending", half, err)
+	}
+	signed, err := s.SignReadinessCheck(ctx, got.ID, "safety_signoff", "carol")
 	if err != nil || signed.State != domain.ReleasedActive {
-		t.Fatalf("after sign = %+v, %v; want Active (session %s)", signed, err, session.Session.ID)
+		t.Fatalf("after both signatures = %+v, %v; want Active", signed, err)
 	}
 	if code := domain.ProcessPolicy(signed.State, "sales_order"); code != "" {
 		t.Fatalf("active product still blocked: %s", code)
+	}
+}
+
+func TestPostgres_ReleaseNumbersComeFromASequence(t *testing.T) {
+	s, _, setup := newStore(t, 1)
+	fx := seedRelease(t, s, setup, "", fullPolicy("RP-N", map[string]bool{"USMF": true}))
+	ctx := leContext(1, "rita", "ENG1")
+	seen := map[string]bool{}
+	for i := 0; i < 3; i++ {
+		in := releaseInput("", fx.policyID, "USMF")
+		rec, err := s.CreateReleaseSession(ctx, in, store.Idem{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(rec.Session.Number, "REL-") || seen[rec.Session.Number] {
+			t.Fatalf("number %q repeated or malformed", rec.Session.Number)
+		}
+		seen[rec.Session.Number] = true
+	}
+}
+
+func TestPostgres_EngineeringVersionsBelongToOneOrganization(t *testing.T) {
+	s, _, ctx := newStore(t, 1)
+	if _, err := s.CreateEngineeringVersion(ctx, domain.EngineeringVersion{ProductID: "P", VersionCode: "V-01", EngineeringLEID: "ENG1"}, store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateEngineeringVersion(ctx, domain.EngineeringVersion{ProductID: "P", VersionCode: "V-02", EngineeringLEID: "USMF"}, store.Idem{}); !domain.HasCode(err, domain.CodeOwnedField) {
+		t.Fatalf("version from another organization = %v; want %s", err, domain.CodeOwnedField)
+	}
+	if _, err := s.CreateEngineeringVersion(ctx, domain.EngineeringVersion{ProductID: "P", VersionCode: "V-02", EngineeringLEID: "ENG1"}, store.Idem{}); err != nil {
+		t.Fatalf("version from the owner = %v", err)
 	}
 }
 
@@ -164,94 +348,170 @@ func TestPostgres_AC913_NomenclatureOverflowAndLetters(t *testing.T) {
 	}
 }
 
-func TestPostgres_AC916_DocumentSignatureAndECO(t *testing.T) {
-	s, pool, ctx := newStore(t, 1)
-	typ, err := s.CreateDocumentType(ctx, domain.DocumentType{Code: "DRW", Name: "Drawing", ChangeControlled: true, SignatureOnRelease: true, IndependentReview: true, SignatureMeaning: "Approved for release"}, store.Idem{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	v01 := domain.Document{TypeCode: typ.Code, Number: "DRW-1", Version: "01", LastEditor: "rita", Originals: []domain.DocumentOriginal{{StorageKey: "a", SHA256: "aaa"}}}
-	first, err := s.CreateDocument(ctx, v01, store.Idem{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.TransitionDocument(ctx, first.ID, domain.DocInReview, "rita", nil); err != nil {
-		t.Fatal(err)
-	}
-	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
-	sig01, err := domain.SignDocument(typ, first, domain.DocReleased, domain.Reauth{UserID: "carol", Assertion: "ok", Method: domain.AuthPassword}, "carol", "Carol Kane", now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.TransitionDocument(ctx, first.ID, domain.DocReleased, "carol", &sig01); err != nil {
-		t.Fatal(err)
-	}
+var signedAt = time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
 
-	v02 := domain.Document{TypeCode: typ.Code, Number: "DRW-1", Version: "02", LastEditor: "rita", Originals: []domain.DocumentOriginal{{StorageKey: "b", SHA256: "bbb"}}}
-	next, err := s.CreateDocument(ctx, v02, store.Idem{})
+func newDrawingType(t *testing.T, s *store.Postgres, ctx context.Context) domain.DocumentType {
+	t.Helper()
+	if _, err := s.CreateDocumentType(ctx, domain.DocumentType{Code: "DRW", Name: "Drawing", ChangeControlled: true, SignatureOnRelease: true, IndependentReview: true, SignatureMeaning: "Approved for release"}, store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	typ, err := s.GetDocumentType(ctx, "DRW")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.TransitionDocument(ctx, next.ID, domain.DocInReview, "rita", nil); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := s.GetDocument(ctx, next.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sig02, err := domain.SignDocument(typ, loaded, domain.DocReleased, domain.Reauth{UserID: "carol", Assertion: "ok"}, "carol", "Carol Kane", now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.TransitionDocument(ctx, next.ID, domain.DocReleased, "carol", &sig02); !domain.HasCode(err, domain.CodeDocEcoRequired) {
-		t.Fatalf("release without ECO = %v; want %s", err, domain.CodeDocEcoRequired)
-	}
+	return typ
+}
 
-	eco := domain.Eco{ID: ids.New(), Number: "ECO-DOC", State: domain.EcoSubmitted, CreatedBy: "rita", Documents: []domain.DocumentReplacement{{OldDocumentID: first.ID, NewDocumentID: next.ID}}}
+func inReview(t *testing.T, s *store.Postgres, ctx context.Context, typ domain.DocumentType, number, version string) domain.Document {
+	t.Helper()
+	doc, err := s.CreateDocument(ctx, domain.Document{TypeCode: typ.Code, Number: number, Version: version, LastEditor: "rita", Originals: []domain.DocumentOriginal{{StorageKey: "k/" + version, SHA256: strings.Repeat("a", 64)}}}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.TransitionDocument(ctx, doc.ID, domain.DocInReview, "rita", nil); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := s.GetDocument(ctx, doc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return loaded
+}
+
+func sign(t *testing.T, typ domain.DocumentType, doc domain.Document) domain.Signature {
+	t.Helper()
+	sig, err := domain.SignDocument(typ, doc, domain.DocReleased, domain.AuthPassword, "carol", "Carol Kane", signedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sig
+}
+
+func releasedDocument(t *testing.T, s *store.Postgres, ctx context.Context, typ domain.DocumentType, number, version string) domain.Document {
+	t.Helper()
+	doc := inReview(t, s, ctx, typ, number, version)
+	sig := sign(t, typ, doc)
+	released, err := s.TransitionDocument(ctx, doc.ID, domain.DocReleased, "carol", &sig)
+	if err != nil || released.Status != domain.DocReleased {
+		t.Fatalf("first release = %+v, %v", released, err)
+	}
+	return released
+}
+
+func submitDocumentEco(t *testing.T, s *store.Postgres, ctx context.Context, pool *pgxpool.Pool, number, state string, pairs ...domain.DocumentReplacement) domain.Eco {
+	t.Helper()
+	eco := domain.Eco{ID: ids.New(), Number: number, State: domain.EcoSubmitted, CreatedBy: "rita", Documents: pairs}
 	if _, err := s.CreateEco(ctx, eco, store.Idem{}); err != nil {
 		t.Fatal(err)
 	}
-	withEco, err := s.GetDocument(ctx, next.ID)
-	if err != nil || withEco.EcoID != eco.ID {
-		t.Fatalf("new DIR should name the ECO, got %+v, %v", withEco, err)
-	}
-	sig02, err = domain.SignDocument(typ, withEco, domain.DocReleased, domain.Reauth{UserID: "carol", Assertion: "ok"}, "carol", "Carol Kane", now)
-	if err != nil {
+	if _, err := pool.Exec(context.Background(), `update eco set state = $2 where id = $1::uuid`, eco.ID, state); err != nil {
 		t.Fatal(err)
 	}
-	signed, err := s.TransitionDocument(ctx, next.ID, domain.DocReleased, "carol", &sig02)
-	if err != nil || signed.Status != domain.DocReleased || signed.SignedAt.IsZero() {
-		t.Fatalf("signed release = %+v, %v", signed, err)
+	eco.State = domain.EcoState(state)
+	return eco
+}
+
+func releaseEco(ctx context.Context, s *store.Postgres, eco domain.Eco) error {
+	eco.State = domain.EcoApproved
+	plan, err := eco.Release(nil, releaseDay)
+	if err != nil {
+		return err
+	}
+	eco.State, eco.DecidedBy = domain.EcoReleased, "carol"
+	return s.ReleaseEco(ctx, eco, domain.EcoApproved, plan)
+}
+
+func TestPostgres_AC916_DocumentSignatureAndECO(t *testing.T) {
+	s, pool, ctx := newStore(t, 1)
+	typ := newDrawingType(t, s, ctx)
+	first := releasedDocument(t, s, ctx, typ, "DRW-1", "01")
+	next := inReview(t, s, ctx, typ, "DRW-1", "02")
+	sig := sign(t, typ, next)
+
+	if _, err := s.TransitionDocument(ctx, next.ID, domain.DocReleased, "carol", &sig); !domain.HasCode(err, domain.CodeDocEcoRequired) {
+		t.Fatalf("release without ECO = %v; want %s", err, domain.CodeDocEcoRequired)
+	}
+	submitted := submitDocumentEco(t, s, ctx, pool, "ECO-DOC", "submitted", domain.DocumentReplacement{OldDocumentID: first.ID, NewDocumentID: next.ID})
+	withEco, err := s.GetDocument(ctx, next.ID)
+	if err != nil || withEco.EcoID != submitted.ID {
+		t.Fatalf("new DIR should name the ECO, got %+v, %v", withEco, err)
+	}
+	if _, err := s.TransitionDocument(ctx, next.ID, domain.DocReleased, "carol", &sig); !domain.HasCode(err, domain.CodeDocEcoRequired) {
+		t.Fatalf("release under a submitted ECO = %v; want %s", err, domain.CodeDocEcoRequired)
+	}
+	if n := rowCount(t, pool, `select count(*) from document_signature`); n != 1 {
+		t.Fatalf("%d signatures persisted; want only the first version's", n)
+	}
+
+	if _, err := pool.Exec(context.Background(), `update eco set state = 'approved' where id = $1::uuid`, submitted.ID); err != nil {
+		t.Fatal(err)
+	}
+	signed, err := s.TransitionDocument(ctx, next.ID, domain.DocReleased, "carol", &sig)
+	if err != nil || signed.Status != domain.DocInReview || signed.SignedAt.IsZero() {
+		t.Fatalf("signature under an approved ECO = %+v, %v; want signed and still in review until the ECO releases", signed, err)
+	}
+	if _, err := s.TransitionDocument(ctx, next.ID, domain.DocReleased, "carol", &sig); !domain.HasCode(err, domain.CodeDocState) {
+		t.Fatalf("second signature = %v; want %s", err, domain.CodeDocState)
 	}
 	sigs, err := s.ListSignatures(ctx, next.ID)
-	if err != nil || len(sigs) != 1 || sigs[0].Meaning != "Approved for release" || sigs[0].SignerID != "carol" || sigs[0].RecordID != next.ID || sigs[0].OriginalsHash == "" {
+	if err != nil || len(sigs) != 1 || sigs[0].Meaning != "Approved for release" || sigs[0].SignerID != "carol" || sigs[0].RecordID != next.ID || sigs[0].OriginalsHash != domain.HashRecord(next) {
 		t.Fatalf("signatures = %+v, %v", sigs, err)
 	}
 
-	plan, err := func() (domain.ReleasePlan, error) {
-		loaded := eco
-		loaded.State = domain.EcoApproved
-		return loaded.Release(nil, releaseDay)
-	}()
-	if err != nil {
-		t.Fatal(err)
-	}
-	released := eco
-	released.State = domain.EcoReleased
-	released.DecidedBy = "carol"
-	if err := s.ReleaseEco(ctx, released, domain.EcoSubmitted, plan); err != nil {
+	if err := releaseEco(ctx, s, submitted); err != nil {
 		t.Fatal(err)
 	}
 	old, err := s.GetDocument(ctx, first.ID)
 	if err != nil || old.Status != domain.DocObsolete {
 		t.Fatalf("previous = %+v, %v; want obsolete", old, err)
 	}
+	now, err := s.GetDocument(ctx, next.ID)
+	if err != nil || now.Status != domain.DocReleased {
+		t.Fatalf("replacement = %+v, %v; want released", now, err)
+	}
 
-	if _, err := pool.Exec(ctx, `update document_signature set meaning = 'tamper' where id = $1::uuid`, sigs[0].ID); err == nil || !strings.Contains(err.Error(), "append-only") {
+	tamper := func(query string) error {
+		return dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, query, sigs[0].ID)
+			return err
+		})
+	}
+	if err := tamper(`update document_signature set meaning = 'tamper' where id = $1::uuid`); err == nil || !strings.Contains(err.Error(), "append-only") {
 		t.Fatalf("update error = %v; want append-only", err)
 	}
-	if _, err := pool.Exec(ctx, `delete from document_signature where id = $1::uuid`, sigs[0].ID); err == nil || !strings.Contains(err.Error(), "append-only") {
+	if err := tamper(`delete from document_signature where id = $1::uuid`); err == nil || !strings.Contains(err.Error(), "append-only") {
 		t.Fatalf("delete error = %v; want append-only", err)
+	}
+}
+
+func TestPostgres_EcoDocumentReleaseValidatesThePair(t *testing.T) {
+	s, pool, ctx := newStore(t, 1)
+	typ := newDrawingType(t, s, ctx)
+
+	oldA := releasedDocument(t, s, ctx, typ, "DRW-A", "01")
+	newA := inReview(t, s, ctx, typ, "DRW-A", "02")
+	unsigned := submitDocumentEco(t, s, ctx, pool, "ECO-UNSIGNED", "approved", domain.DocumentReplacement{OldDocumentID: oldA.ID, NewDocumentID: newA.ID})
+	if err := releaseEco(ctx, s, unsigned); !domain.HasCode(err, domain.CodeDocUnsigned) {
+		t.Fatalf("ECO release of an unsigned document = %v; want %s", err, domain.CodeDocUnsigned)
+	}
+	if kept, err := s.GetDocument(ctx, oldA.ID); err != nil || kept.Status != domain.DocReleased {
+		t.Fatalf("a refused ECO release must leave the old version released: %+v, %v", kept, err)
+	}
+
+	oldB := releasedDocument(t, s, ctx, typ, "DRW-B", "01")
+	otherNumber := inReview(t, s, ctx, typ, "DRW-C", "02")
+	mismatch := submitDocumentEco(t, s, ctx, pool, "ECO-MISMATCH", "approved", domain.DocumentReplacement{OldDocumentID: oldB.ID, NewDocumentID: otherNumber.ID})
+	if err := releaseEco(ctx, s, mismatch); !domain.HasCode(err, domain.CodeDocState) {
+		t.Fatalf("ECO pairing different documents = %v; want %s", err, domain.CodeDocState)
+	}
+
+	inWork, err := s.CreateDocument(ctx, domain.Document{TypeCode: typ.Code, Number: "DRW-B", Version: "02", LastEditor: "rita"}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	notReviewed := submitDocumentEco(t, s, ctx, pool, "ECO-INWORK", "approved", domain.DocumentReplacement{OldDocumentID: oldB.ID, NewDocumentID: inWork.ID})
+	if err := releaseEco(ctx, s, notReviewed); !domain.HasCode(err, domain.CodeDocState) {
+		t.Fatalf("ECO release of a document still in work = %v; want %s", err, domain.CodeDocState)
 	}
 }
 
@@ -270,12 +530,13 @@ func TestPostgres_AC917_EbomImportUnknownParts(t *testing.T) {
 	for i := 1; i <= 5; i++ {
 		payload.Lines = append(payload.Lines, domain.EbomLine{FindNumber: 9000 + i, PartNumber: "UNKNOWN-" + strconv.Itoa(i), Quantity: decimal.NewFromInt(1)})
 	}
+	payload.Lines = append(payload.Lines, domain.EbomLine{FindNumber: 9100, PartNumber: "UNKNOWN-1", Quantity: decimal.NewFromInt(2)})
 	rec, err := s.ImportEbom(ctx, store.EbomImportInput{Source: "cad", Payload: payload, Actor: "rita"}, store.Idem{Key: "ebom", Hash: "h"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rec.BOMVersionID == "" || rec.EcrID == "" || len(rec.Exceptions) != 5 || rec.Comparison.Added != 115 {
-		t.Fatalf("import = %+v; want draft BOM, ECR, 5 exceptions, 115 added components", rec)
+		t.Fatalf("import = %+v; want draft BOM, ECR, 5 exceptions (a repeated unknown part once), 115 added components", rec)
 	}
 	draft, err := s.GetBomVersion(ctx, rec.BOMVersionID)
 	if err != nil || draft.Status != domain.StatusDraft || len(draft.Lines) != 115 {
@@ -293,6 +554,222 @@ func TestPostgres_AC917_EbomImportUnknownParts(t *testing.T) {
 	replay, err := s.ImportEbom(ctx, store.EbomImportInput{Source: "cad", Payload: payload}, store.Idem{Key: "ebom", Hash: "h"})
 	if err != nil || replay.ID != rec.ID {
 		t.Fatalf("replay = %+v, %v", replay, err)
+	}
+}
+
+func TestPostgres_EbomImportFlagsUnknownHeaderAndRefusesCycles(t *testing.T) {
+	s, pool, ctx := newStore(t, 1)
+	if err := s.PutIdentifier(ctx, "cad_part", "BIKE-CAD", "BIKE"); err != nil {
+		t.Fatal(err)
+	}
+	one := decimal.NewFromInt(1)
+
+	unknownHeader, err := s.ImportEbom(ctx, store.EbomImportInput{Source: "cad", Payload: domain.EbomPayload{PartNumber: "GHOST", Revision: "A", Lines: []domain.EbomLine{{PartNumber: "GHOST-PART", Quantity: one}}}}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flagged := map[string]bool{}
+	for _, ex := range unknownHeader.Exceptions {
+		flagged[ex.PartNumber] = true
+	}
+	if !flagged["GHOST"] || !flagged["GHOST-PART"] {
+		t.Fatalf("exceptions = %+v; want the unknown header flagged with its unknown line", unknownHeader.Exceptions)
+	}
+
+	alias := domain.EbomPayload{PartNumber: "BIKE", Revision: "A", Lines: []domain.EbomLine{{PartNumber: "BIKE-CAD", Quantity: one}}}
+	if _, err := s.ImportEbom(ctx, store.EbomImportInput{Source: "cad", Payload: alias}, store.Idem{}); !domain.HasCode(err, domain.CodeBomCycle) {
+		t.Fatalf("assembly listed under its own CAD alias = %v; want %s", err, domain.CodeBomCycle)
+	}
+
+	wheel := version("WHEEL", domain.StatusActive, releaseDay, "BIKE")
+	if _, err := s.CreateBomVersion(ctx, wheel, store.Idem{}, noCheck); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutIdentifier(ctx, "product_number", "WHEEL", "WHEEL"); err != nil {
+		t.Fatal(err)
+	}
+	indirect := domain.EbomPayload{PartNumber: "BIKE", Revision: "B", Lines: []domain.EbomLine{{PartNumber: "WHEEL", Quantity: one}}}
+	if _, err := s.ImportEbom(ctx, store.EbomImportInput{Source: "cad", Payload: indirect}, store.Idem{}); !domain.HasCode(err, domain.CodeBomCycle) {
+		t.Fatalf("indirect cycle through an existing BOM = %v; want %s", err, domain.CodeBomCycle)
+	}
+	if n := rowCount(t, pool, `select count(*) from ebom_import where part_number = 'BIKE'`); n != 0 {
+		t.Fatalf("%d imports persisted by refused payloads", n)
+	}
+}
+
+func TestPostgres_DocumentStructureRejectsCycle(t *testing.T) {
+	s, _, ctx := newStore(t, 1)
+	a, err := s.CreateDocument(ctx, domain.Document{TypeCode: "DRW", Number: "A"}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.CreateDocument(ctx, domain.Document{TypeCode: "DRW", Number: "B"}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetDocumentStructure(ctx, a.ID, []string{b.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetDocumentStructure(ctx, b.ID, []string{a.ID}); !domain.HasCode(err, domain.CodeDocCycle) {
+		t.Fatalf("cycle = %v; want %s", err, domain.CodeDocCycle)
+	}
+	if err := s.SetDocumentStructure(ctx, a.ID, []string{ids.New()}); problemCode(err) != "ENG-DOC-NOTFOUND" {
+		t.Fatalf("unknown child = %v; want ENG-DOC-NOTFOUND", err)
+	}
+	used, err := s.DocumentWhereUsed(ctx, b.ID)
+	if err != nil || len(used) != 1 || used[0].ParentID != a.ID {
+		t.Fatalf("where-used = %+v, %v", used, err)
+	}
+}
+
+func TestPostgres_DocumentStructureRefusesSignedAndReleasedDocuments(t *testing.T) {
+	s, _, ctx := newStore(t, 1)
+	typ := newDrawingType(t, s, ctx)
+	released := releasedDocument(t, s, ctx, typ, "DRW-R", "01")
+	child, err := s.CreateDocument(ctx, domain.Document{TypeCode: typ.Code, Number: "DRW-CH"}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetDocumentStructure(ctx, released.ID, []string{child.ID}); !domain.HasCode(err, domain.CodeDocSigned) {
+		t.Fatalf("structure of a released document = %v; want %s", err, domain.CodeDocSigned)
+	}
+}
+
+func TestPostgres_ReleaseLineStateMachine(t *testing.T) {
+	s, _, setup := newStore(t, 1)
+	policy, err := s.CreateReleasePolicy(setup, domain.ReleasePolicy{Code: "RP", RequireAcceptance: map[string]bool{"USMF": true}}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := s.CreateReleaseSession(leContext(1, "rita", "ENG1"), releaseInput("REL-X", policy.ID, "USMF"), store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiver := leContext(1, "bob", "USMF")
+	if _, err := s.DecideReleaseLine(receiver, rec.Lines[0].ID, "bob", "no", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DecideReleaseLine(receiver, rec.Lines[0].ID, "bob", "", true); !domain.HasCode(err, domain.CodeReleaseState) {
+		t.Fatalf("accept rejected line = %v; want %s", err, domain.CodeReleaseState)
+	}
+}
+
+func TestPostgres_ReleaseSession_IdempotentReplay(t *testing.T) {
+	s, _, setup := newStore(t, 1)
+	policy, err := s.CreateReleasePolicy(setup, domain.ReleasePolicy{Code: "RP2", RequireAcceptance: map[string]bool{"DEMF": true}}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := leContext(1, "rita", "ENG1")
+	in := releaseInput("REL-Y", policy.ID, "DEMF")
+	first, err := s.CreateReleaseSession(ctx, in, store.Idem{Key: "k", Hash: "h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := s.CreateReleaseSession(ctx, in, store.Idem{Key: "k", Hash: "h"})
+	if err != nil || replay.Session.ID != first.Session.ID {
+		t.Fatalf("replay = %+v, %v", replay, err)
+	}
+}
+
+func TestPostgres_AppRole_ReleaseReadinessStructureAndAudit(t *testing.T) {
+	s, admin, setup := newAppStore(t, 1)
+	rdy, err := s.CreateReadinessPolicy(setup, domain.ReadinessPolicy{Code: "RDY-APP", Checks: []domain.ReadinessCheck{
+		{Key: "active_bom", Kind: domain.CheckAuto, Mandatory: true},
+		{Key: "quality_signoff", Kind: domain.CheckManual, Mandatory: true},
+	}}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fx := seedRelease(t, s, setup, "ENG-S", fullPolicy("RP-APP", map[string]bool{"USMF": true, "DEMF": false}))
+
+	in := releaseInput("", fx.policyID, "DEMF", "USMF")
+	in.ReadinessPolicyID = rdy.ID
+	rec, err := s.CreateReleaseSession(leContext(1, "rita", "ENG1,DEMF"), in, store.Idem{})
+	if err != nil {
+		t.Fatalf("release session as the app role: %v", err)
+	}
+	if !strings.HasPrefix(rec.Session.Number, "REL-") {
+		t.Fatalf("number = %q", rec.Session.Number)
+	}
+	var usmfLine string
+	for _, l := range rec.Lines {
+		if l.LegalEntityID == "USMF" {
+			usmfLine = l.ID
+		}
+	}
+	if _, err := s.DecideReleaseLine(leContext(1, "bob", "USMF"), usmfLine, "bob", "", true); err != nil {
+		t.Fatalf("accept as the app role: %v", err)
+	}
+	page, err := s.ListReleasedProducts(setup, "DEMF", "", store.MaxPageSize)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("released = %+v, %v", page, err)
+	}
+	if got, err := s.SignReadinessCheck(setup, page.Items[0].ID, "quality_signoff", "carol"); err != nil || got.State != domain.ReleasedActive {
+		t.Fatalf("readiness sign as the app role = %+v, %v", got, err)
+	}
+
+	typ := newDrawingType(t, s, setup)
+	parent, err := s.CreateDocument(setup, domain.Document{TypeCode: typ.Code, Number: "STR-P"}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := s.CreateDocument(setup, domain.Document{TypeCode: typ.Code, Number: "STR-C"}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := s.CreateDocument(setup, domain.Document{TypeCode: typ.Code, Number: "STR-O"}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetDocumentStructure(setup, parent.ID, []string{child.ID}); err != nil {
+		t.Fatalf("structure as the app role: %v", err)
+	}
+	if err := s.SetDocumentStructure(setup, parent.ID, []string{other.ID}); err != nil {
+		t.Fatalf("replacing a structure as the app role (DELETE grant): %v", err)
+	}
+
+	doc := inReview(t, s, setup, typ, "SIG-1", "01")
+	sig := sign(t, typ, doc)
+	if _, err := s.TransitionDocument(setup, doc.ID, domain.DocReleased, "carol", &sig); err != nil {
+		t.Fatalf("sign as the app role: %v", err)
+	}
+	if n := rowCount(t, admin, `select count(*) from audit_outbox where id = $1::uuid and delivered_at is null`, sig.ID); n != 1 {
+		t.Fatalf("the audit record must be queued in the signing transaction, found %d", n)
+	}
+	jobs, err := s.ClaimAudit(setup, 10, time.Minute)
+	if err != nil || len(jobs) != 1 || jobs[0].Signature.RecordID != doc.ID || jobs[0].UserID != "alice" || jobs[0].TenantID != testkit.TenantID(1) {
+		t.Fatalf("claim = %+v, %v", jobs, err)
+	}
+	if again, err := s.ClaimAudit(setup, 10, time.Minute); err != nil || len(again) != 0 {
+		t.Fatalf("a leased record must not be claimed twice: %+v, %v", again, err)
+	}
+	if err := s.FailAudit(setup, jobs[0].ID, 1, context.DeadlineExceeded, 0); err != nil {
+		t.Fatal(err)
+	}
+	retry, err := s.ClaimAudit(setup, 10, time.Minute)
+	if err != nil || len(retry) != 1 || retry[0].Attempts != 1 {
+		t.Fatalf("a failed record comes back with its attempts: %+v, %v", retry, err)
+	}
+	if err := s.CompleteAudit(setup, retry[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if done, err := s.ClaimAudit(setup, 10, time.Minute); err != nil || len(done) != 0 {
+		t.Fatalf("a delivered record is done: %+v, %v", done, err)
+	}
+}
+
+func TestPostgres_RefusedSignatureQueuesNoAuditRecord(t *testing.T) {
+	s, pool, ctx := newStore(t, 1)
+	typ := newDrawingType(t, s, ctx)
+	doc := inReview(t, s, ctx, typ, "SIG-2", "01")
+	sig := sign(t, typ, doc)
+	sig.RecordID = ids.New()
+	if _, err := s.TransitionDocument(ctx, doc.ID, domain.DocReleased, "carol", &sig); err == nil {
+		t.Fatal("a signature for another record must be refused")
+	}
+	if n := rowCount(t, pool, `select count(*) from audit_outbox`) + rowCount(t, pool, `select count(*) from document_signature`); n != 0 {
+		t.Fatalf("%d signature or audit rows persisted by a refused sign", n)
 	}
 }
 
@@ -318,66 +795,6 @@ func TestPostgres_OrgsDocsEbom_RLSHidesOtherTenant(t *testing.T) {
 	}
 	if page, err := s.ListDocuments(intruder, "", "", store.MaxPageSize); err != nil || len(page.Items) != 0 {
 		t.Fatalf("doc list = %+v, %v", page, err)
-	}
-}
-
-func TestPostgres_DocumentStructureRejectsCycle(t *testing.T) {
-	s, _, ctx := newStore(t, 1)
-	a, err := s.CreateDocument(ctx, domain.Document{TypeCode: "DRW", Number: "A"}, store.Idem{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := s.CreateDocument(ctx, domain.Document{TypeCode: "DRW", Number: "B"}, store.Idem{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SetDocumentStructure(ctx, a.ID, []string{b.ID}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SetDocumentStructure(ctx, b.ID, []string{a.ID}); !domain.HasCode(err, domain.CodeDocCycle) {
-		t.Fatalf("cycle = %v; want %s", err, domain.CodeDocCycle)
-	}
-	used, err := s.DocumentWhereUsed(ctx, b.ID)
-	if err != nil || len(used) != 1 || used[0].ParentID != a.ID {
-		t.Fatalf("where-used = %+v, %v", used, err)
-	}
-}
-
-func TestPostgres_OwnedFieldAndReleaseLineState(t *testing.T) {
-	if err := domain.CheckOwnedField("BOM", "ENG1", "USMF"); !domain.HasCode(err, domain.CodeOwnedField) {
-		t.Fatalf("got %v", err)
-	}
-	s, _, ctx := newStore(t, 1)
-	policy, err := s.CreateReleasePolicy(ctx, domain.ReleasePolicy{Code: "RP", RequireAcceptance: map[string]bool{"USMF": true}}, store.Idem{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rec, err := s.CreateReleaseSession(ctx, store.ReleaseSessionInput{Number: "REL-X", CreatedBy: "rita", PolicyID: policy.ID, ProductID: "P", VersionCode: "V-01", LegalEntities: []string{"USMF"}}, store.Idem{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.DecideReleaseLine(ctx, rec.Lines[0].ID, "bob", "no", false); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.DecideReleaseLine(ctx, rec.Lines[0].ID, "bob", "", true); !domain.HasCode(err, domain.CodeReleaseState) {
-		t.Fatalf("accept rejected line = %v; want %s", err, domain.CodeReleaseState)
-	}
-}
-
-func TestPostgres_ReleaseSession_IdempotentReplay(t *testing.T) {
-	s, _, ctx := newStore(t, 1)
-	policy, err := s.CreateReleasePolicy(ctx, domain.ReleasePolicy{Code: "RP2", RequireAcceptance: map[string]bool{}}, store.Idem{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	in := store.ReleaseSessionInput{Number: "REL-Y", CreatedBy: "rita", PolicyID: policy.ID, ProductID: "P", VersionCode: "V-01", LegalEntities: []string{"DEMF"}}
-	first, err := s.CreateReleaseSession(ctx, in, store.Idem{Key: "k", Hash: "h"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	replay, err := s.CreateReleaseSession(ctx, in, store.Idem{Key: "k", Hash: "h"})
-	if err != nil || replay.Session.ID != first.Session.ID {
-		t.Fatalf("replay = %+v, %v", replay, err)
 	}
 }
 

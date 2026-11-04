@@ -204,12 +204,28 @@ func (s *Postgres) ListDocuments(ctx context.Context, number, afterID string, li
 	return trimPage(items, limit, func(d domain.Document) string { return d.ID }), err
 }
 
+func lockDocument(ctx context.Context, tx pgx.Tx, tenantID, id string) error {
+	var locked string
+	err := tx.QueryRow(ctx, `select id::text from document where tenant_id = $1 and id = $2::uuid for update`, tenantID, id).Scan(&locked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return httpx.NewProblem(http.StatusNotFound, "ENG-DOC-NOTFOUND", "document not found")
+	}
+	return err
+}
+
+func hasReleaseSignature(ctx context.Context, tx pgx.Tx, tenantID, documentID string) (bool, error) {
+	var signed bool
+	err := tx.QueryRow(ctx, `select exists(select 1 from document_signature where tenant_id = $1 and document_id = $2::uuid and transition = 'released')`, tenantID, documentID).Scan(&signed)
+	return signed, err
+}
+
 func (s *Postgres) TransitionDocument(ctx context.Context, id, to, actor string, sig *domain.Signature) (domain.Document, error) {
-	var doc domain.Document
 	p, _ := tenant.FromContext(ctx)
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		var err error
-		doc, err = getDocument(ctx, tx, p.TenantID, id)
+		if err := lockDocument(ctx, tx, p.TenantID, id); err != nil {
+			return err
+		}
+		doc, err := getDocument(ctx, tx, p.TenantID, id)
 		if err != nil {
 			return err
 		}
@@ -220,18 +236,37 @@ func (s *Postgres) TransitionDocument(ctx context.Context, id, to, actor string,
 		if err := typ.Network.CanTransition(doc.Status, to, ""); err != nil {
 			return err
 		}
+		awaitingEco := false
 		if to == domain.DocReleased {
 			prev, err := previousReleased(ctx, tx, p.TenantID, doc.Number, doc.ID)
 			if err != nil {
 				return err
 			}
-			if err := doc.CanRelease(typ, prev, doc.EcoID); err != nil {
+			var eco *domain.Eco
+			if doc.EcoID != "" {
+				loaded, err := getEco(ctx, tx, p.TenantID, doc.EcoID)
+				if err != nil {
+					return err
+				}
+				eco = &loaded
+			}
+			if err := doc.CanRelease(typ, prev, eco); err != nil {
 				return err
 			}
+			awaitingEco = typ.ChangeControlled && prev.ID != ""
 		}
 		if typ.Network.RequiresSignature(doc.Status, to) {
-			if sig == nil {
-				return &domain.Error{Code: domain.CodeDocReauth, Detail: "this transition requires a Part 11 signature"}
+			if sig == nil || sig.RecordID != doc.ID || sig.Transition != to {
+				return &domain.Error{Code: domain.CodeDocReauth, Detail: "this transition requires a Part 11 signature for this document"}
+			}
+			if awaitingEco {
+				signed, err := hasReleaseSignature(ctx, tx, p.TenantID, doc.ID)
+				if err != nil {
+					return err
+				}
+				if signed {
+					return &domain.Error{Code: domain.CodeDocState, Detail: "the document is signed and waits for its ECO to release"}
+				}
 			}
 			if sig.ID == "" {
 				sig.ID = ids.New()
@@ -247,22 +282,25 @@ func (s *Postgres) TransitionDocument(ctx context.Context, id, to, actor string,
 			if err := emit(ctx, tx, p, doc.ID, engevents.DocumentSigned, aggregateDocument, doc.ID, *sig); err != nil {
 				return err
 			}
+			if err := enqueueAudit(ctx, tx, p, *sig); err != nil {
+				return err
+			}
+			if awaitingEco {
+				return nil
+			}
 		}
 		if _, err := tx.Exec(ctx, `update document set status = $3, last_editor = case when $3 = 'in_work' then $4 else last_editor end where tenant_id = $1 and id = $2::uuid`,
 			p.TenantID, doc.ID, to, actor); err != nil {
 			return err
 		}
 		doc.Status = to
-		if sig != nil {
-			doc.SignedAt = sig.SignedAt
-		}
 		if to == domain.DocReleased {
 			return emit(ctx, tx, p, doc.ID, engevents.DocumentReleased, aggregateDocument, doc.ID, doc)
 		}
 		return nil
 	})
 	if err != nil {
-		return doc, err
+		return domain.Document{}, err
 	}
 	return s.GetDocument(ctx, id)
 }
@@ -341,6 +379,23 @@ func (s *Postgres) DocumentWhereUsed(ctx context.Context, id string) ([]domain.D
 func (s *Postgres) SetDocumentStructure(ctx context.Context, parentID string, children []string) error {
 	p, _ := tenant.FromContext(ctx)
 	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := lockDocument(ctx, tx, p.TenantID, parentID); err != nil {
+			return err
+		}
+		parent, err := getDocument(ctx, tx, p.TenantID, parentID)
+		if err != nil {
+			return err
+		}
+		if err := parent.AssertUnlocked(); err != nil {
+			return err
+		}
+		var known int
+		if err := tx.QueryRow(ctx, `select count(*) from document where tenant_id = $1 and id = any($2::uuid[])`, p.TenantID, children).Scan(&known); err != nil {
+			return err
+		}
+		if known != len(children) {
+			return httpx.NewProblem(http.StatusNotFound, "ENG-DOC-NOTFOUND", "a child document does not exist")
+		}
 		existing := map[string][]string{}
 		rows, err := tx.Query(ctx, `select parent_id::text, child_id::text from document_structure where tenant_id = $1`, p.TenantID)
 		if err != nil {
@@ -373,21 +428,36 @@ func (s *Postgres) SetDocumentStructure(ctx context.Context, parentID string, ch
 	})
 }
 
-func releaseEcoDocuments(ctx context.Context, tx pgx.Tx, tenantID string, e domain.Eco) error {
+func releaseEcoDocuments(ctx context.Context, tx pgx.Tx, p tenant.Principal, e domain.Eco) error {
 	for _, r := range e.Documents {
-		prev, err := getDocument(ctx, tx, tenantID, r.OldDocumentID)
+		for _, id := range []string{r.OldDocumentID, r.NewDocumentID} {
+			if err := lockDocument(ctx, tx, p.TenantID, id); err != nil {
+				return err
+			}
+		}
+		prev, err := getDocument(ctx, tx, p.TenantID, r.OldDocumentID)
 		if err != nil {
 			return err
 		}
-		cur, err := getDocument(ctx, tx, tenantID, r.NewDocumentID)
+		cur, err := getDocument(ctx, tx, p.TenantID, r.NewDocumentID)
 		if err != nil {
+			return err
+		}
+		signed, err := hasReleaseSignature(ctx, tx, p.TenantID, cur.ID)
+		if err != nil {
+			return err
+		}
+		if err := domain.ValidateReplacement(prev, cur, signed); err != nil {
 			return err
 		}
 		pair := domain.ReleasePair(prev, cur)
-		if _, err := tx.Exec(ctx, `update document set status = $3 where tenant_id = $1 and id = $2::uuid`, tenantID, pair.Previous.ID, pair.Previous.Status); err != nil {
+		if _, err := tx.Exec(ctx, `update document set status = $3 where tenant_id = $1 and id = $2::uuid`, p.TenantID, pair.Previous.ID, pair.Previous.Status); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `update document set status = $3, eco_id = $4 where tenant_id = $1 and id = $2::uuid`, tenantID, pair.Current.ID, pair.Current.Status, e.ID); err != nil {
+		if _, err := tx.Exec(ctx, `update document set status = $3, eco_id = $4 where tenant_id = $1 and id = $2::uuid`, p.TenantID, pair.Current.ID, pair.Current.Status, e.ID); err != nil {
+			return err
+		}
+		if err := emit(ctx, tx, p, pair.Current.ID, engevents.DocumentReleased, aggregateDocument, pair.Current.ID, pair.Current); err != nil {
 			return err
 		}
 	}

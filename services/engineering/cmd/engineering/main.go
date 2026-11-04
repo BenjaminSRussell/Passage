@@ -22,6 +22,8 @@ import (
 const (
 	defaultHTTPAddr  = ":8080"
 	defaultAdminAddr = ":9090"
+	devEnvironment   = "dev"
+	auditRelayEvery  = 5 * time.Second
 )
 
 var errApproverNotConfigured = errors.New("no ECO approval workflow is configured")
@@ -56,6 +58,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")
 	}
+	dev := getenv("PASSAGE_ENV") == devEnvironment
+	auditURL := getenv("AUDIT_URL")
+	if auditURL == "" && !dev {
+		return errors.New("AUDIT_URL is required unless PASSAGE_ENV=dev: signatures must reach the audit service")
+	}
 	pool, err := dbx.Connect(ctx, databaseURL)
 	if err != nil {
 		return fmt.Errorf("connect database: %w", err)
@@ -67,13 +74,24 @@ func run(ctx context.Context, getenv func(string) string) error {
 		}
 	}
 	slog.WarnContext(ctx, "fail-closed ECO approver bound, :release returns 503 until a workflow approver is wired", "err", errApproverNotConfigured)
-	a := api.New(store.New(pool), failClosedApprover{}, time.Now)
-	if u := getenv("AUDIT_URL"); u != "" {
+	st := store.New(pool)
+	a := api.New(st, failClosedApprover{}, time.Now)
+	var auditor api.Auditor = api.NopAuditor{}
+	if auditURL != "" {
 		signer, err := tenant.ServiceSignerFromEnv(getenv)
 		if err != nil {
 			return fmt.Errorf("audit signer: %w", err)
 		}
-		a.WithAuditor(api.NewHTTPAuditor(u, signer))
+		if signer == nil {
+			return errors.New("audit signer: PASSAGE_SERVICE_SIGNING_KEY is required when AUDIT_URL is set")
+		}
+		auditor = api.NewHTTPAuditor(auditURL, signer)
+	}
+	if dev {
+		slog.WarnContext(ctx, "development re-authentication bound: document signatures accept the acting user without a step-up proof")
+		a.WithReauth(api.DevReauth{})
+	} else {
+		slog.WarnContext(ctx, "fail-closed re-authentication bound, document signing returns 503 until a step-up verifier is wired")
 	}
 	router := httpx.NewRouter()
 	a.Register(router)
@@ -82,6 +100,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	go api.NewAuditRelay(st, auditor).Run(ctx, auditRelayEvery)
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()

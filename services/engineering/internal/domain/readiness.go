@@ -61,10 +61,10 @@ type ReadinessCheckResult struct {
 }
 
 var autoKeys = map[string]func(ReadinessFacts) (observed, implemented bool){
-	"item_model_group":       func(f ReadinessFacts) (bool, bool) { return f.ItemModelGroupSet, true },
-	"storage_group":          func(f ReadinessFacts) (bool, bool) { return f.StorageGroupSet, true },
-	"tracking_group":         func(f ReadinessFacts) (bool, bool) { return f.TrackingGroupSet, true },
-	"default_order_settings": func(f ReadinessFacts) (bool, bool) { return f.OrderSettingsSet, true },
+	"item_model_group":       func(f ReadinessFacts) (bool, bool) { return f.ItemModelGroupSet, false },
+	"storage_group":          func(f ReadinessFacts) (bool, bool) { return f.StorageGroupSet, false },
+	"tracking_group":         func(f ReadinessFacts) (bool, bool) { return f.TrackingGroupSet, false },
+	"default_order_settings": func(f ReadinessFacts) (bool, bool) { return f.OrderSettingsSet, false },
 	"active_bom":             func(f ReadinessFacts) (bool, bool) { return f.ActiveBOM, true },
 	"active_route":           func(f ReadinessFacts) (bool, bool) { return f.ActiveRoute, true },
 	"tax_group":              func(f ReadinessFacts) (bool, bool) { return f.TaxGroupSet, false },

@@ -14,15 +14,6 @@ func TestReleaseLineMachine(t *testing.T) {
 	if err := again.Reject("bob", "site mismatch"); err != nil || again.Status != LineRejected || again.Reason != "site mismatch" {
 		t.Fatalf("sent -> rejected = %+v, %v", again, err)
 	}
-	failed := ReleaseLine{Status: LineSent}
-	for i := 0; i < 4; i++ {
-		if err := failed.FailAttempt(); err != nil {
-			t.Fatalf("retry %d: %v", i, err)
-		}
-	}
-	if err := failed.FailAttempt(); err != nil || failed.Status != LineFailed {
-		t.Fatalf("5th retry should fail the line = %+v, %v", failed, err)
-	}
 	terminal := ReleaseLine{Status: LineRejected}
 	if err := terminal.Accept("bob", ""); !HasCode(err, CodeReleaseState) {
 		t.Fatalf("rejected is terminal = %v", err)

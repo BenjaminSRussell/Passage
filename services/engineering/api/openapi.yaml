@@ -1448,15 +1448,24 @@ paths:
       x-passage-duty: engineering.doc.sign
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: X-Passage-Reauth-Assertion, in: header, required: true, schema: { type: string }, description: Step-up assertion from re-authentication of the signer (21 CFR 11.200). The acting user must match the assertion. }
+        - { name: X-Passage-Reauth-Assertion, in: header, required: false, schema: { type: string }, description: 'Step-up proof from re-authentication of the signer (21 CFR 11.200), bound to the document id and record hash. No step-up issuer is configured yet, so outside PASSAGE_ENV=dev every sign is refused with 503 ENG-DOC-REAUTH-UNAVAILABLE; the web form never asks the user to type it.' }
       requestBody:
         content: { application/json: { schema: { type: object, properties: { printedName: { type: string }, method: { type: string }, to: { type: string } } } } }
       responses:
         '200':
-          description: The signed document. Records meaning, timestamp, record id and originals hash, then posts an immutable change to the audit service.
+          description: The signed document. Records meaning, timestamp, record id and the record hash (id, number, version, type and the sorted originals) in an append-only signature, and queues the audit change in the same transaction; a relay delivers it to the audit service with retry and backoff. A successor of a released change-controlled version stays in_review, signed, until its approved ECO releases it.
           content: { application/json: { schema: { $ref: '#/components/schemas/Document' } } }
         '403':
           description: ENG-DOC-REAUTH, missing or mismatched re-authentication; ENG-DOC-SIGNER, the last editor cannot independently review their own document.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: ENG-DOC-ECO-REQUIRED, a change-controlled successor needs an approved ECO that lists it; ENG-DOC-STATE, it is already signed and waits for its ECO.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: ENG-DOC-NOT-SIGNABLE, the requested move needs no signature (only transitions of the status network that carry one are signed); ENG-DOC-NO-ORIGINALS, a type signed on release needs at least one original.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '503':
+          description: ENG-DOC-REAUTH-UNAVAILABLE, no re-authentication verifier is configured.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/documents/{id}/signatures:
@@ -2004,15 +2013,16 @@ components:
     ReleaseSession:
       type: object
       additionalProperties: false
-      required: [policyId, productId, versionCode, legalEntities]
+      required: [policyId, engineeringLeId, productId, versionCode, legalEntities]
       properties:
         id: { type: string, format: uuid }
-        number: { type: string }
-        createdBy: { type: string }
-        source: { type: string }
+        number: { type: string, description: Generated as REL-{yyyy}-{#####} from a sequence when omitted. }
+        createdBy: { type: string, readOnly: true, description: The signed-in user; a request that sets it is refused with 400. }
+        source: { type: string, enum: [manual, eco, job] }
         policyId: { type: string, format: uuid }
         ecoId: { type: string, format: uuid }
-        engineeringLeId: { type: string }
+        readinessPolicyId: { type: string, format: uuid, description: Evaluates each received product; falls back to the engineering category's policy. }
+        engineeringLeId: { type: string, maxLength: 64, description: The owning engineering legal entity. The caller must be scoped to it, and to every receiving entity that accepts without review (403 ENG-RELEASE-SCOPE). }
         productId: { type: string, maxLength: 64 }
         versionCode: { type: string, maxLength: 64 }
         legalEntities: { type: array, minItems: 1, items: { type: string } }
@@ -2076,7 +2086,7 @@ components:
         description: { type: string }
         status: { type: string, enum: [in_work, in_review, released, obsolete, cancelled] }
         lastEditor: { type: string }
-        ecoId: { type: string, format: uuid }
+        ecoId: { type: string, format: uuid, readOnly: true, description: Set by the ECO that replaces the document; a create that sets it is refused with 400. }
         signedAt: { type: string, format: date-time }
         originals:
           type: array
@@ -2084,9 +2094,9 @@ components:
             type: object
             required: [storageKey, sha256]
             properties:
-              storageKey: { type: string }
-              sha256: { type: string }
-              sizeBytes: { type: integer }
+              storageKey: { type: string, maxLength: 512, description: 'Must start with the tenant id and a slash; the file is not fetched from storage yet.' }
+              sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+              sizeBytes: { type: integer, minimum: 0 }
         links:
           type: array
           items:
@@ -2107,7 +2117,7 @@ components:
         printedName: { type: string }
         meaning: { type: string }
         signedAt: { type: string, format: date-time }
-        originalsHash: { type: string }
+        originalsHash: { type: string, description: 'sha256 of the canonical record: id, number, version, type and the originals sorted by key (name kept for compatibility).' }
         method: { type: string }
     DocumentWhereUsed:
       type: object
@@ -2132,13 +2142,15 @@ components:
         changed: { type: integer }
         lines:
           type: array
+          minItems: 1
+          maxItems: 5000
           items:
             type: object
-            required: [partNumber]
+            required: [partNumber, quantity]
             properties:
-              findNumber: { type: integer }
-              partNumber: { type: string }
-              quantity: { type: string }
+              findNumber: { type: integer, minimum: 0, maximum: 99999, description: Unique within the import; 0 or omitted takes the next free multiple of ten. }
+              partNumber: { type: string, maxLength: 64, description: Must differ from the assembly's partNumber. }
+              quantity: { type: string, description: Positive decimal string; required. }
               unit: { type: string }
         exceptions:
           type: array

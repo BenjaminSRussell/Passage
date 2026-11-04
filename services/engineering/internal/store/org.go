@@ -131,7 +131,15 @@ func (s *Postgres) CreateEngineeringVersion(ctx context.Context, v domain.Engine
 		v.ID = ids.New()
 	}
 	return createOnce(s, ctx, idem, v.ID, v, func(ctx context.Context, tx pgx.Tx, tenantID string, row domain.EngineeringVersion) error {
-		_, err := tx.Exec(ctx, `insert into engineering_version (tenant_id, id, product_id, version_code, engineering_le_id, category_id, bom_version_id, route_version_id, lifecycle_state)
+		var owner string
+		err := tx.QueryRow(ctx, `select engineering_le_id from engineering_version where tenant_id = $1 and product_id = $2 order by id limit 1`, tenantID, row.ProductID).Scan(&owner)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err := domain.CheckOwnedField("engineering versions of "+row.ProductID, owner, row.EngineeringLEID); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `insert into engineering_version (tenant_id, id, product_id, version_code, engineering_le_id, category_id, bom_version_id, route_version_id, lifecycle_state)
 			values ($1, $2, $3, $4, $5, nullif($6, '')::uuid, nullif($7, '')::uuid, nullif($8, '')::uuid, $9)`,
 			tenantID, row.ID, row.ProductID, row.VersionCode, row.EngineeringLEID, row.CategoryID, row.BOMVersionID, row.RouteVersionID, row.LifecycleState)
 		return err
@@ -177,36 +185,12 @@ func (s *Postgres) ListEngineeringVersions(ctx context.Context, productID, after
 	return trimPage(items, limit, func(v domain.EngineeringVersion) string { return v.ID }), err
 }
 
-func (s *Postgres) LastVersionCode(ctx context.Context, productID string) (string, error) {
-	var code string
-	err := withTenant(s, ctx, func(ctx context.Context, tx pgx.Tx, tenantID string) error {
-		err := tx.QueryRow(ctx, `select coalesce(max(version_code), '') from engineering_version where tenant_id = $1 and product_id = $2`, tenantID, productID).Scan(&code)
-		return err
-	})
-	return code, err
-}
-
 func (s *Postgres) PutIdentifier(ctx context.Context, idType, value, productID string) error {
 	return withTenant(s, ctx, func(ctx context.Context, tx pgx.Tx, tenantID string) error {
 		_, err := tx.Exec(ctx, `insert into product_identifier (tenant_id, id_type, value, product_id) values ($1, $2, $3, $4)
 			on conflict (tenant_id, id_type, value) do update set product_id = excluded.product_id`, tenantID, idType, value, productID)
 		return err
 	})
-}
-
-func (s *Postgres) ResolvePart(ctx context.Context, partNumber string) (string, bool, error) {
-	var productID string
-	err := withTenant(s, ctx, func(ctx context.Context, tx pgx.Tx, tenantID string) error {
-		err := tx.QueryRow(ctx, `select product_id from product_identifier where tenant_id = $1 and ((id_type = 'cad_part' and value = $2) or (id_type = 'product_number' and value = $2))
-			union select product_id from engineering_version where tenant_id = $1 and product_id = $2
-			union select product_id from bom_version where tenant_id = $1 and product_id = $2
-			limit 1`, tenantID, partNumber).Scan(&productID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		return err
-	})
-	return productID, productID != "", err
 }
 
 func withTenant(s *Postgres, ctx context.Context, fn func(context.Context, pgx.Tx, string) error) error {

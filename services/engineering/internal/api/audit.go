@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -15,11 +16,16 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/engineering/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/engineering/internal/store"
 )
 
 const (
 	auditTimeout     = 3 * time.Second
 	auditMaxResponse = 1 << 20
+	auditBatch       = 50
+	auditLease       = time.Minute
+	auditRetryBase   = 5 * time.Second
+	auditRetryMax    = 15 * time.Minute
 )
 
 // Auditor records a Part 11 signature in the audit service (POST /v1/audit/changes).
@@ -27,21 +33,27 @@ type Auditor interface {
 	RecordSignature(ctx context.Context, sig domain.Signature) error
 }
 
-// Reauthenticator is the step-up seam (21 CFR 11.200). Production can swap in a Keycloak check.
+// Reauthenticator is the step-up seam (21 CFR 11.200): it proves the actor just re-authenticated,
+// with a proof bound to the document and record hash in auth.
 type Reauthenticator interface {
 	Verify(ctx context.Context, actor string, auth domain.Reauth) error
 }
 
-// NopAuditor is used when AUDIT_URL is unset (local/dev).
+// NopAuditor discards records; it is bound only when PASSAGE_ENV=dev and AUDIT_URL is unset.
 type NopAuditor struct{}
 
 func (NopAuditor) RecordSignature(context.Context, domain.Signature) error { return nil }
 
-// AssertionReauth accepts a non-empty assertion whose user matches the acting user.
-type AssertionReauth struct{}
+type FailClosedReauth struct{}
 
-func (AssertionReauth) Verify(_ context.Context, actor string, auth domain.Reauth) error {
-	if auth.Assertion == "" || auth.UserID == "" || auth.UserID != actor {
+func (FailClosedReauth) Verify(context.Context, string, domain.Reauth) error {
+	return httpx.NewProblem(http.StatusServiceUnavailable, domain.CodeDocReauthUnavailable, "signing is unavailable: no re-authentication service is configured")
+}
+
+type DevReauth struct{}
+
+func (DevReauth) Verify(_ context.Context, actor string, auth domain.Reauth) error {
+	if actor == "" || auth.UserID != actor {
 		return &domain.Error{Code: domain.CodeDocReauth, Detail: "signature rejected: re-authentication failed"}
 	}
 	return nil
@@ -74,8 +86,8 @@ func NewHTTPAuditor(baseURL string, signer *tenant.ServiceSigner) *HTTPAuditor {
 }
 
 func (c *HTTPAuditor) RecordSignature(ctx context.Context, sig domain.Signature) error {
-	if c == nil || c.baseURL == "" {
-		return nil
+	if c == nil || c.baseURL == "" || c.signer == nil {
+		return httpx.NewProblem(http.StatusServiceUnavailable, "ENG-AUDIT-UNAVAILABLE", "audit service is not configured")
 	}
 	traceID := middleware.GetReqID(ctx)
 	if traceID == "" {
@@ -83,7 +95,7 @@ func (c *HTTPAuditor) RecordSignature(ctx context.Context, sig domain.Signature)
 	}
 	payload, err := json.Marshal(auditChange{
 		Entity: "document", RecordID: sig.RecordID, Field: "signature",
-		NewValue: fmt.Sprintf("%s by %s at %s", sig.Meaning, sig.SignerID, sig.SignedAt.UTC().Format(time.RFC3339)),
+		NewValue: fmt.Sprintf("%s: %s (%s) signed %s %s to %s at %s; record hash %s", sig.Meaning, sig.PrintedName, sig.SignerID, sig.DocumentNumber, sig.DocumentVersion, sig.Transition, sig.SignedAt.UTC().Format(time.RFC3339), sig.OriginalsHash),
 		UserID:   sig.SignerID, TraceID: traceID, OccurredAt: sig.SignedAt.UTC(),
 	})
 	if err != nil {
@@ -95,15 +107,12 @@ func (c *HTTPAuditor) RecordSignature(ctx context.Context, sig domain.Signature)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	p, _ := tenant.FromContext(ctx)
-	if c.signer != nil {
-		if _, err := c.signer.ApplyDuties(req, p, "audit", p.LegalEntityID, []string{"audit.write"}); err != nil {
-			return err
-		}
+	legalEntity := ""
+	if scopes := tenant.LegalEntityScopeList(p); len(scopes) > 0 {
+		legalEntity = scopes[0]
 	}
-	if req.Header.Get(tenant.HeaderServiceToken) == "" {
-		req.Header.Set(tenant.HeaderTenant, p.TenantID)
-		req.Header.Set(tenant.HeaderUser, p.UserID)
-		req.Header.Set(tenant.HeaderDuties, "audit.write")
+	if _, err := c.signer.ApplyDuties(req, p, "audit", legalEntity, []string{"audit.write"}); err != nil {
+		return err
 	}
 	res, err := c.http.Do(req)
 	if err != nil {
@@ -115,4 +124,55 @@ func (c *HTTPAuditor) RecordSignature(ctx context.Context, sig domain.Signature)
 		return httpx.NewProblem(http.StatusServiceUnavailable, "ENG-AUDIT-UNAVAILABLE", "audit service refused the signature record")
 	}
 	return nil
+}
+
+type AuditRelay struct {
+	store   store.Store
+	auditor Auditor
+}
+
+func NewAuditRelay(s store.Store, a Auditor) *AuditRelay {
+	return &AuditRelay{store: s, auditor: a}
+}
+
+func auditBackoff(attempts int) time.Duration {
+	return min(auditRetryBase<<min(attempts, 10), auditRetryMax)
+}
+
+func (r *AuditRelay) Drain(ctx context.Context) (int, error) {
+	jobs, err := r.store.ClaimAudit(ctx, auditBatch, auditLease)
+	if err != nil {
+		return 0, err
+	}
+	delivered := 0
+	for _, job := range jobs {
+		callCtx := tenant.With(ctx, tenant.Principal{TenantID: job.TenantID, UserID: job.UserID, LegalEntityID: job.LegalEntityID})
+		if err := r.auditor.RecordSignature(callCtx, job.Signature); err != nil {
+			slog.ErrorContext(ctx, "audit delivery failed", "signature", job.ID, "attempts", job.Attempts+1, "err", err)
+			if failErr := r.store.FailAudit(ctx, job.ID, job.Attempts+1, err, auditBackoff(job.Attempts+1)); failErr != nil {
+				return delivered, failErr
+			}
+			continue
+		}
+		if err := r.store.CompleteAudit(ctx, job.ID); err != nil {
+			return delivered, err
+		}
+		delivered++
+	}
+	return delivered, nil
+}
+
+func (r *AuditRelay) Run(ctx context.Context, every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		if _, err := r.Drain(ctx); err != nil && ctx.Err() == nil {
+			slog.ErrorContext(ctx, "audit relay pass failed", "err", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }

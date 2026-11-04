@@ -12,8 +12,6 @@ const (
 	ReleaseManual = "manual"
 	ReleaseEco    = "eco"
 	ReleaseJob    = "job"
-
-	maxReleaseRetries = 5
 )
 
 // EngineeringOrganization flags a legal entity that owns engineering products (FR-9.14).
@@ -80,6 +78,9 @@ type ReleaseSession struct {
 	Source    string
 	PolicyID  string
 	EcoID     string
+
+	EngineeringLEID   string
+	ReadinessPolicyID string
 }
 
 // ReleaseLine is one (product, engineering version, legal entity) row (BR-9.13).
@@ -118,17 +119,6 @@ func (l *ReleaseLine) Reject(actor, reason string) error {
 		return errf(CodeReleaseState, "release line is %s, only a sent line can be rejected", l.Status)
 	}
 	l.Status, l.AcceptedBy, l.Reason = LineRejected, actor, reason
-	return nil
-}
-
-func (l *ReleaseLine) FailAttempt() error {
-	if l.Status != LineSent && l.Status != LinePending {
-		return errf(CodeReleaseState, "release line is %s", l.Status)
-	}
-	l.Retries++
-	if l.Retries >= maxReleaseRetries {
-		l.Status = LineFailed
-	}
 	return nil
 }
 

@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/engineering/internal/domain"
@@ -22,6 +23,12 @@ type wave09State struct {
 	doc       domain.Document
 	sigs      []domain.Signature
 	ebom      store.EbomImportRecord
+	sessionIn store.ReleaseSessionInput
+	transits  int
+	audit     []store.AuditJob
+	completed []string
+	failed    map[string]int
+	retryIn   time.Duration
 }
 
 func (f *fakeStore) w() *wave09State {
@@ -86,12 +93,8 @@ func (f *fakeStore) GetEngineeringVersion(context.Context, string) (domain.Engin
 func (f *fakeStore) ListEngineeringVersions(context.Context, string, string, int) (store.Page[domain.EngineeringVersion], error) {
 	return store.Page[domain.EngineeringVersion]{}, f.err
 }
-func (f *fakeStore) LastVersionCode(context.Context, string) (string, error) { return "", f.err }
 func (f *fakeStore) PutIdentifier(context.Context, string, string, string) error {
 	return f.err
-}
-func (f *fakeStore) ResolvePart(context.Context, string) (string, bool, error) {
-	return "", false, f.err
 }
 func (f *fakeStore) CreateReleasePolicy(_ context.Context, p domain.ReleasePolicy, _ store.Idem) (domain.ReleasePolicy, error) {
 	p.ID = withID(p.ID)
@@ -106,7 +109,8 @@ func (f *fakeStore) ListReleasePolicies(context.Context, string, int) (store.Pag
 }
 func (f *fakeStore) PutSiteMapping(context.Context, domain.SiteMapping) error { return f.err }
 func (f *fakeStore) CreateReleaseSession(_ context.Context, in store.ReleaseSessionInput, _ store.Idem) (store.ReleaseSessionRecord, error) {
-	rec := store.ReleaseSessionRecord{Session: domain.ReleaseSession{ID: ids.New(), Number: in.Number, CreatedBy: in.CreatedBy, Source: in.Source, PolicyID: in.PolicyID}}
+	f.w().sessionIn = in
+	rec := store.ReleaseSessionRecord{Session: domain.ReleaseSession{ID: ids.New(), Number: in.Number, CreatedBy: in.CreatedBy, Source: in.Source, PolicyID: in.PolicyID, EngineeringLEID: in.EngineeringLEID}}
 	for _, le := range in.LegalEntities {
 		rec.Lines = append(rec.Lines, domain.ReleaseLine{ID: ids.New(), LegalEntityID: le, ProductID: in.ProductID, EngineeringVersion: in.VersionCode, Status: domain.LineSent})
 	}
@@ -152,9 +156,6 @@ func (f *fakeStore) ListReleasedProducts(context.Context, string, string, int) (
 func (f *fakeStore) SignReadinessCheck(context.Context, string, string, string) (store.ReleasedProduct, error) {
 	return f.w().released, f.err
 }
-func (f *fakeStore) EvaluateReleasedProduct(context.Context, string) (store.ReleasedProduct, error) {
-	return f.w().released, f.err
-}
 func (f *fakeStore) CreateDocumentType(_ context.Context, t domain.DocumentType, _ store.Idem) (domain.DocumentType, error) {
 	t.ID = withID(t.ID)
 	f.w().docType = t
@@ -181,6 +182,7 @@ func (f *fakeStore) ListDocuments(context.Context, string, string, int) (store.P
 	return store.Page[domain.Document]{}, f.err
 }
 func (f *fakeStore) TransitionDocument(_ context.Context, id, to, _ string, sig *domain.Signature) (domain.Document, error) {
+	f.w().transits++
 	d := f.w().doc
 	d.ID, d.Status = id, to
 	if sig != nil {
@@ -207,4 +209,21 @@ func (f *fakeStore) GetEbomImport(context.Context, string) (store.EbomImportReco
 }
 func (f *fakeStore) ListEbomImports(context.Context, string, int) (store.Page[store.EbomImportRecord], error) {
 	return store.Page[store.EbomImportRecord]{}, f.err
+}
+
+func (f *fakeStore) ClaimAudit(context.Context, int, time.Duration) ([]store.AuditJob, error) {
+	jobs := f.w().audit
+	f.w().audit = nil
+	return jobs, f.err
+}
+func (f *fakeStore) CompleteAudit(_ context.Context, id string) error {
+	f.w().completed = append(f.w().completed, id)
+	return nil
+}
+func (f *fakeStore) FailAudit(_ context.Context, id string, attempts int, _ error, retryAfter time.Duration) error {
+	if f.w().failed == nil {
+		f.w().failed = map[string]int{}
+	}
+	f.w().failed[id], f.w().retryIn = attempts, retryAfter
+	return nil
 }

@@ -4,7 +4,7 @@ Wave 9 (PSG-9): engineering data for the `product` context: BOMs, routings, engi
 
 ## Layout
 
-- `cmd/engineering/main.go`: wiring. Env: `DATABASE_URL` (required, from Secret `engineering-db`), `MIGRATE_ON_START=true` (dev only), `HTTP_ADDR` (default `:8080`), `ADMIN_ADDR` (default `:9090`, serves `/metrics`), `AUDIT_URL` (optional; when set, Part 11 signatures are posted to `POST /v1/audit/changes` with an `engineering → audit.write` service token).
+- `cmd/engineering/main.go`: wiring. Env: `DATABASE_URL` (required, from Secret `engineering-db`), `MIGRATE_ON_START=true` (dev only), `HTTP_ADDR` (default `:8080`), `ADMIN_ADDR` (default `:9090`, serves `/metrics`), `AUDIT_URL` (required unless `PASSAGE_ENV=dev`; Part 11 signatures are queued in `audit_outbox` with the signature and relayed to `POST /v1/audit/changes` with an `engineering → audit.write` service token, retrying with backoff), `PASSAGE_ENV=dev` (binds the development re-authenticator; anywhere else document signing returns 503 until a step-up verifier exists).
 - `internal/domain/bom.go`: as-of version resolution, multi-level explosion, implosion (where-used), cycle and overlap checks, cost roll-up skeleton.
 - `internal/domain/routing.go`: operation DAG validation and lead time (sequential sum, parallel branches take the max and a secondary starts with its primary, efficiency, overlap transfer batches).
 - `internal/domain/eco.go`: ECO state machine, `Approver` seam to the Temporal approval workflow, release plan (expire old at `release_date - 1`, activate new).
@@ -34,7 +34,7 @@ Wave 9 (PSG-9): engineering data for the `product` context: BOMs, routings, engi
 | `POST /v1/engineering/route-versions/{id}:activate` | `engineering.route.write` |
 | `POST/GET /v1/engineering/organizations`, nomenclatures, categories, versions; `PUT /identifiers`; `POST/GET` release policies, sessions, readiness policies, document types, documents, eBOM imports | `engineering.bom.write` / `engineering.read` |
 | `POST /v1/engineering/release-lines/{id}:accept`, `:reject`; `POST /released-products/{id}/checks/{key}:sign` | `engineering.release.accept` |
-| `POST /v1/engineering/documents/{id}:sign` | `engineering.doc.sign` (re-auth via `X-Passage-Reauth-Assertion`, meaning, timestamp, record id, then `POST /v1/audit/changes`) |
+| `POST /v1/engineering/documents/{id}:sign` | `engineering.doc.sign` (fail-closed re-authentication seam bound to the document and record hash, meaning, timestamp, record id, audit record queued in the same transaction) |
 
 Calendar, group, capability and resource creates honour `Idempotency-Key` (a different body under the same key is 422 `idempotency_key_reuse`); `:generate` is state-based, so a repeat upserts the same days. A calendar template is exactly seven day patterns, Monday first. `GET /resources/{id}` returns capabilities and `effectiveCalendarId`. Malformed bodies are 400 `COM-0001` with an `errors` map. Counters: `engineering_calendars_created_total`, `engineering_resources_created_total`, `engineering_resource_requests_failed_total`.
 

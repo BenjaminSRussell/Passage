@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 
@@ -45,22 +46,9 @@ func (s *Postgres) ImportEbom(ctx context.Context, in EbomImportInput, idem Idem
 			rec = loaded
 			return err
 		}
-		known := map[string]string{}
-		partNumbers := []string{in.Payload.PartNumber}
-		for _, line := range in.Payload.Lines {
-			partNumbers = append(partNumbers, line.PartNumber)
-		}
-		for _, pn := range partNumbers {
-			var productID string
-			scanErr := tx.QueryRow(ctx, `select product_id from product_identifier where tenant_id = $1 and ((id_type = 'cad_part' and value = $2) or (id_type = 'product_number' and value = $2))
-				union select product_id from engineering_version where tenant_id = $1 and product_id = $2
-				union select product_id from bom_version where tenant_id = $1 and product_id = $2
-				limit 1`, p.TenantID, pn).Scan(&productID)
-			if scanErr == nil {
-				known[pn] = productID
-			} else if !errors.Is(scanErr, pgx.ErrNoRows) {
-				return scanErr
-			}
+		known, err := resolveParts(ctx, tx, p.TenantID, in.Payload)
+		if err != nil {
+			return err
 		}
 		var active *domain.BomVersion
 		productID := known[in.Payload.PartNumber]
@@ -74,14 +62,27 @@ func (s *Postgres) ImportEbom(ctx context.Context, in EbomImportInput, idem Idem
 		if len(foundActive) > 0 {
 			active = &foundActive[0]
 		}
-		result := domain.ImportEbom(in.Payload, known, active)
-		if result.Draft != nil {
-			result.Draft.ID = ids.New()
-			if err := insertVersion(ctx, tx, p.TenantID, *result.Draft); err != nil {
+		result, err := domain.ImportEbom(in.Payload, known, active)
+		if err != nil {
+			return err
+		}
+		if err := lockProducts(ctx, tx, p.TenantID, result.Draft.ProductID); err != nil {
+			return err
+		}
+		snapshot, err := loadSnapshot(ctx, tx, p.TenantID, versionRoots(*result.Draft), false)
+		if err != nil {
+			return err
+		}
+		for _, l := range result.Draft.Lines {
+			if err := domain.CheckCycle(snapshot, result.Draft.ProductID, l.ComponentProductID, result.Draft.EffectiveFrom); err != nil {
 				return err
 			}
-			rec.BOMVersionID = result.Draft.ID
 		}
+		result.Draft.ID = ids.New()
+		if err := insertVersion(ctx, tx, p.TenantID, *result.Draft); err != nil {
+			return err
+		}
+		rec.BOMVersionID = result.Draft.ID
 		if result.ECR != nil {
 			result.ECR.ID = ids.New()
 			result.ECR.RequestedBy = in.Actor
@@ -120,6 +121,35 @@ func (s *Postgres) ImportEbom(ctx context.Context, in EbomImportInput, idem Idem
 		return remember(ctx, tx, p.TenantID, idem, rec.ID)
 	})
 	return rec, conflictOnDuplicate(err)
+}
+
+func resolveParts(ctx context.Context, tx pgx.Tx, tenantID string, payload domain.EbomPayload) (map[string]string, error) {
+	parts := []string{payload.PartNumber}
+	for _, line := range payload.Lines {
+		parts = append(parts, line.PartNumber)
+	}
+	slices.Sort(parts)
+	parts = slices.Compact(parts)
+	rows, err := tx.Query(ctx, `select value, product_id from (
+			select value, product_id, 1 as rank from product_identifier where tenant_id = $1 and id_type in ('cad_part', 'product_number') and value = any($2)
+			union all select product_id, product_id, 2 from engineering_version where tenant_id = $1 and product_id = any($2)
+			union all select product_id, product_id, 2 from bom_version where tenant_id = $1 and product_id = any($2)) known
+		order by rank`, tenantID, parts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	known := make(map[string]string, len(parts))
+	for rows.Next() {
+		var part, productID string
+		if err := rows.Scan(&part, &productID); err != nil {
+			return nil, err
+		}
+		if _, ok := known[part]; !ok {
+			known[part] = productID
+		}
+	}
+	return known, rows.Err()
 }
 
 func (s *Postgres) GetEbomImport(ctx context.Context, id string) (EbomImportRecord, error) {

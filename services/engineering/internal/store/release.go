@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -133,14 +134,26 @@ func (s *Postgres) ListReadinessPolicies(ctx context.Context, afterID string, li
 		})
 }
 
-func (s *Postgres) CreateReleaseSession(ctx context.Context, in ReleaseSessionInput, idem Idem) (ReleaseSessionRecord, error) {
-	if in.Number == "" {
-		in.Number = domain.ReleaseNumber(time.Now().UTC().Year(), int(time.Now().UTC().Unix()%100000))
+func ActsForLegalEntity(p tenant.Principal, legalEntity string) bool {
+	if p.LegalEntityID == "" {
+		return tenant.IsTenantAdmin(p)
 	}
+	for _, part := range strings.Split(p.LegalEntityID, ",") {
+		if strings.TrimSpace(part) == legalEntity {
+			return true
+		}
+	}
+	return false
+}
+
+func outOfScope(legalEntity string) error {
+	return &domain.Error{Code: domain.CodeReleaseScope, Detail: "the caller is not scoped to legal entity " + legalEntity}
+}
+
+func (s *Postgres) CreateReleaseSession(ctx context.Context, in ReleaseSessionInput, idem Idem) (ReleaseSessionRecord, error) {
 	if in.Source == "" {
 		in.Source = domain.ReleaseManual
 	}
-	session := domain.ReleaseSession{ID: ids.New(), Number: in.Number, CreatedBy: in.CreatedBy, Source: in.Source, PolicyID: in.PolicyID, EcoID: in.EcoID}
 	var rec ReleaseSessionRecord
 	p, _ := tenant.FromContext(ctx)
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -153,13 +166,30 @@ func (s *Postgres) CreateReleaseSession(ctx context.Context, in ReleaseSessionIn
 			rec = loaded
 			return err
 		}
+		if in.EngineeringLEID != "" && !ActsForLegalEntity(p, in.EngineeringLEID) {
+			return outOfScope(in.EngineeringLEID)
+		}
+		if in.Number == "" {
+			var seq int
+			if err := tx.QueryRow(ctx, `select nextval('release_number_seq')`).Scan(&seq); err != nil {
+				return err
+			}
+			in.Number = domain.ReleaseNumber(time.Now().UTC().Year(), seq)
+		}
+		session := domain.ReleaseSession{ID: ids.New(), Number: in.Number, CreatedBy: in.CreatedBy, Source: in.Source, PolicyID: in.PolicyID, EcoID: in.EcoID, EngineeringLEID: in.EngineeringLEID, ReadinessPolicyID: in.ReadinessPolicyID}
 		policy, err := getReleasePolicyTx(ctx, tx, p.TenantID, in.PolicyID)
 		if err != nil {
 			return err
 		}
 		lines := domain.ApplyRelease(session, policy, in.ProductID, in.VersionCode, in.LegalEntities)
-		if _, err := tx.Exec(ctx, `insert into release_session (tenant_id, id, number, created_by, source, policy_id, eco_id)
-			values ($1, $2, $3, $4, $5, $6, nullif($7, '')::uuid)`, p.TenantID, session.ID, session.Number, session.CreatedBy, session.Source, session.PolicyID, session.EcoID); err != nil {
+		for _, l := range lines {
+			if l.Status == domain.LineAccepted && !ActsForLegalEntity(p, l.LegalEntityID) {
+				return outOfScope(l.LegalEntityID)
+			}
+		}
+		if _, err := tx.Exec(ctx, `insert into release_session (tenant_id, id, number, created_by, source, policy_id, eco_id, engineering_le_id, readiness_policy_id)
+			values ($1, $2, $3, $4, $5, $6, nullif($7, '')::uuid, $8, nullif($9, '')::uuid)`,
+			p.TenantID, session.ID, session.Number, session.CreatedBy, session.Source, session.PolicyID, session.EcoID, session.EngineeringLEID, session.ReadinessPolicyID); err != nil {
 			return err
 		}
 		for i := range lines {
@@ -206,38 +236,59 @@ func applyAcceptedLine(ctx context.Context, tx pgx.Tx, p tenant.Principal, polic
 	if line.Status != domain.LineAccepted {
 		return nil
 	}
-	site := mappedSite(ctx, tx, p.TenantID, in.EngineeringLEID, line.LegalEntityID)
+	engineeringSite, site, err := mappedSites(ctx, tx, p.TenantID, in.EngineeringLEID, line.LegalEntityID)
+	if err != nil {
+		return err
+	}
 	if policy.CopyBOM {
-		copied, err := copyActiveBOM(ctx, tx, p, line.ProductID, site, policy.ActivateBOM)
+		copied, err := copyActiveBOM(ctx, tx, p, line.ProductID, engineeringSite, site, policy.ActivateBOM)
 		if err != nil {
 			return err
 		}
 		line.CopiedBOMVersionID = copied
 	}
 	if policy.CopyRoute {
-		copied, err := copyActiveRoute(ctx, tx, p, line.ProductID, site, policy.ActivateRoute)
+		copied, err := copyActiveRoute(ctx, tx, p, line.ProductID, engineeringSite, site, policy.ActivateRoute)
 		if err != nil {
 			return err
 		}
 		line.CopiedRouteVersionID = copied
 	}
-	return upsertReleasedProduct(ctx, tx, p, in, *line)
+	facts := in.Facts
+	if err := tx.QueryRow(ctx, `select
+			exists(select 1 from bom_version where tenant_id = $1 and product_id = $2 and site_id = $3 and status = 'active'),
+			exists(select 1 from route_version where tenant_id = $1 and product_id = $2 and site_id = $3 and status = 'active')`,
+		p.TenantID, line.ProductID, site).Scan(&facts.ActiveBOM, &facts.ActiveRoute); err != nil {
+		return err
+	}
+	return upsertReleasedProduct(ctx, tx, p, in, facts, *line)
 }
 
-func mappedSite(ctx context.Context, tx pgx.Tx, tenantID, engLE, opLE string) string {
-	var site string
-	err := tx.QueryRow(ctx, `select operational_site from site_mapping where tenant_id = $1 and engineering_le_id = $2 and operational_le_id = $3 order by engineering_site limit 1`, tenantID, engLE, opLE).Scan(&site)
-	if err != nil {
-		return opLE
+func mappedSites(ctx context.Context, tx pgx.Tx, tenantID, engineeringLE, operationalLE string) (engineeringSite, operationalSite string, err error) {
+	err = tx.QueryRow(ctx, `select engineering_site, operational_site from site_mapping where tenant_id = $1 and engineering_le_id = $2 and operational_le_id = $3 order by engineering_site limit 1`,
+		tenantID, engineeringLE, operationalLE).Scan(&engineeringSite, &operationalSite)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", operationalLE, nil
 	}
-	if site == "" {
-		return opLE
+	if operationalSite == "" {
+		operationalSite = operationalLE
 	}
-	return site
+	return engineeringSite, operationalSite, err
 }
 
-func copyActiveBOM(ctx context.Context, tx pgx.Tx, p tenant.Principal, productID, site string, activate bool) (string, error) {
-	found, err := loadVersions(ctx, tx, p.TenantID, `product_id = $2 and status = 'active'`, productID)
+func copySource(engineeringSite, site string) (condition, siteArg string) {
+	if engineeringSite != "" {
+		return `product_id = $2 and status = 'active' and site_id = $3`, engineeringSite
+	}
+	return `product_id = $2 and status = 'active' and copied_from_version_id is null and site_id <> $3`, site
+}
+
+func copyActiveBOM(ctx context.Context, tx pgx.Tx, p tenant.Principal, productID, engineeringSite, site string, activate bool) (string, error) {
+	if err := lockProducts(ctx, tx, p.TenantID, productID); err != nil {
+		return "", err
+	}
+	cond, siteArg := copySource(engineeringSite, site)
+	found, err := loadVersions(ctx, tx, p.TenantID, cond, productID, siteArg)
 	if err != nil || len(found) == 0 {
 		return "", err
 	}
@@ -251,6 +302,11 @@ func copyActiveBOM(ctx context.Context, tx pgx.Tx, p tenant.Principal, productID
 	copy.ID, copy.SiteID, copy.CopiedFrom, copy.Status = ids.New(), site, src.ID, domain.StatusDraft
 	if activate {
 		copy.Status = domain.StatusActive
+		if _, err := tx.Exec(ctx, `update bom_version set status = 'expired', effective_to = greatest(effective_from, $5::date), version = version + 1
+			where tenant_id = $1 and product_id = $2 and site_id = $3 and usage = $4 and category = $6 and status = 'active' and copied_from_version_id is not null`,
+			p.TenantID, productID, site, usageOrDefault(copy.Usage), copy.EffectiveFrom.AddDate(0, 0, -1), categoryOrDefault(copy.Category)); err != nil {
+			return "", err
+		}
 	}
 	if err := insertVersion(ctx, tx, p.TenantID, copy); err != nil {
 		return "", err
@@ -266,9 +322,10 @@ func copyActiveBOM(ctx context.Context, tx pgx.Tx, p tenant.Principal, productID
 	return copy.ID, nil
 }
 
-func copyActiveRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, productID, site string, activate bool) (string, error) {
+func copyActiveRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, productID, engineeringSite, site string, activate bool) (string, error) {
+	cond, siteArg := copySource(engineeringSite, site)
 	var srcID string
-	err := tx.QueryRow(ctx, `select id::text from route_version where tenant_id = $1 and product_id = $2 and status = 'active' order by effective_from desc, id limit 1`, p.TenantID, productID).Scan(&srcID)
+	err := tx.QueryRow(ctx, `select id::text from route_version where tenant_id = $1 and (`+cond+`) order by effective_from desc, id limit 1`, p.TenantID, productID, siteArg).Scan(&srcID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
@@ -287,9 +344,14 @@ func copyActiveRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, product
 	if !activate {
 		return copy.ID, nil
 	}
+	if _, err := tx.Exec(ctx, `update route_version set status = 'expired', effective_to = greatest(effective_from, $4::date), version = version + 1
+		where tenant_id = $1 and product_id = $2 and site_id = $3 and status = 'active' and copied_from_version_id is not null and id <> $5::uuid`,
+		p.TenantID, productID, site, copy.EffectiveFrom.AddDate(0, 0, -1), copy.ID); err != nil {
+		return "", err
+	}
 	activated, err := activateRouteInTx(ctx, tx, p, copy.ID)
 	if err != nil {
-		return copy.ID, nil
+		return "", err
 	}
 	return activated.ID, nil
 }
@@ -320,7 +382,7 @@ func activateRouteInTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id st
 	return v, emit(ctx, tx, p, id, engevents.RouteVersionActivated, aggregateRouteVersion, id, v.ActivatedEvent())
 }
 
-func upsertReleasedProduct(ctx context.Context, tx pgx.Tx, p tenant.Principal, in ReleaseSessionInput, line domain.ReleaseLine) error {
+func upsertReleasedProduct(ctx context.Context, tx pgx.Tx, p tenant.Principal, in ReleaseSessionInput, facts domain.ReadinessFacts, line domain.ReleaseLine) error {
 	id := ids.New()
 	var existing string
 	err := tx.QueryRow(ctx, `select id::text from released_product where tenant_id = $1 and product_id = $2 and legal_entity_id = $3`, p.TenantID, line.ProductID, line.LegalEntityID).Scan(&existing)
@@ -340,13 +402,6 @@ func upsertReleasedProduct(ctx context.Context, tx pgx.Tx, p tenant.Principal, i
 	policy, err := readinessPolicyFor(ctx, tx, p.TenantID, in)
 	if err != nil {
 		return err
-	}
-	facts := in.Facts
-	if line.CopiedBOMVersionID != "" {
-		facts.ActiveBOM = true
-	}
-	if line.CopiedRouteVersionID != "" {
-		facts.ActiveRoute = true
 	}
 	results := domain.EvaluateReadiness(policy, facts, nil)
 	state, _ := domain.ReadinessState(policy, results)
@@ -394,8 +449,8 @@ func (s *Postgres) GetReleaseSession(ctx context.Context, id string) (ReleaseSes
 
 func getReleaseSession(ctx context.Context, tx pgx.Tx, tenantID, id string) (ReleaseSessionRecord, error) {
 	var rec ReleaseSessionRecord
-	err := tx.QueryRow(ctx, `select id::text, number, created_by, source, policy_id::text, coalesce(eco_id::text, '') from release_session where tenant_id = $1 and id = $2::uuid`, tenantID, id).
-		Scan(&rec.Session.ID, &rec.Session.Number, &rec.Session.CreatedBy, &rec.Session.Source, &rec.Session.PolicyID, &rec.Session.EcoID)
+	err := tx.QueryRow(ctx, `select id::text, number, created_by, source, policy_id::text, coalesce(eco_id::text, ''), engineering_le_id, coalesce(readiness_policy_id::text, '') from release_session where tenant_id = $1 and id = $2::uuid`, tenantID, id).
+		Scan(&rec.Session.ID, &rec.Session.Number, &rec.Session.CreatedBy, &rec.Session.Source, &rec.Session.PolicyID, &rec.Session.EcoID, &rec.Session.EngineeringLEID, &rec.Session.ReadinessPolicyID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return rec, httpx.NewProblem(http.StatusNotFound, "ENG-RELEASE-NOTFOUND", "release session not found")
 	}
@@ -419,10 +474,10 @@ func getReleaseSession(ctx context.Context, tx pgx.Tx, tenantID, id string) (Rel
 }
 
 func (s *Postgres) ListReleaseSessions(ctx context.Context, afterID string, limit int) (Page[domain.ReleaseSession], error) {
-	return listSimple(s, ctx, afterID, limit, `select id::text, number, created_by, source, policy_id::text, coalesce(eco_id::text, '') from release_session where tenant_id = $1 and id > $2::uuid order by id limit $3`,
+	return listSimple(s, ctx, afterID, limit, `select id::text, number, created_by, source, policy_id::text, coalesce(eco_id::text, ''), engineering_le_id, coalesce(readiness_policy_id::text, '') from release_session where tenant_id = $1 and id > $2::uuid order by id limit $3`,
 		func(row pgx.Row) (domain.ReleaseSession, error) {
 			var s domain.ReleaseSession
-			return s, row.Scan(&s.ID, &s.Number, &s.CreatedBy, &s.Source, &s.PolicyID, &s.EcoID)
+			return s, row.Scan(&s.ID, &s.Number, &s.CreatedBy, &s.Source, &s.PolicyID, &s.EcoID, &s.EngineeringLEID, &s.ReadinessPolicyID)
 		})
 }
 
@@ -465,6 +520,9 @@ func (s *Postgres) DecideReleaseLine(ctx context.Context, id, actor, reason stri
 		if err != nil {
 			return err
 		}
+		if !ActsForLegalEntity(p, line.LegalEntityID) {
+			return outOfScope(line.LegalEntityID)
+		}
 		if accept {
 			err = line.Accept(actor, reason)
 		} else {
@@ -480,16 +538,18 @@ func (s *Postgres) DecideReleaseLine(ctx context.Context, id, actor, reason stri
 		if !accept {
 			return nil
 		}
-		var createdBy, policyID, ecoID string
-		if err := tx.QueryRow(ctx, `select created_by, policy_id::text, coalesce(eco_id::text, '') from release_session where tenant_id = $1 and id = $2::uuid`, p.TenantID, line.SessionID).
-			Scan(&createdBy, &policyID, &ecoID); err != nil {
-			return err
-		}
-		policy, err := getReleasePolicyTx(ctx, tx, p.TenantID, policyID)
+		session, err := getReleaseSession(ctx, tx, p.TenantID, line.SessionID)
 		if err != nil {
 			return err
 		}
-		in := ReleaseSessionInput{CreatedBy: createdBy, PolicyID: policyID, EcoID: ecoID, ProductID: line.ProductID, VersionCode: line.EngineeringVersion, EngineeringLEID: ""}
+		policy, err := getReleasePolicyTx(ctx, tx, p.TenantID, session.Session.PolicyID)
+		if err != nil {
+			return err
+		}
+		in := ReleaseSessionInput{
+			CreatedBy: session.Session.CreatedBy, PolicyID: session.Session.PolicyID, EcoID: session.Session.EcoID, ProductID: line.ProductID, VersionCode: line.EngineeringVersion,
+			EngineeringLEID: session.Session.EngineeringLEID, ReadinessPolicyID: session.Session.ReadinessPolicyID,
+		}
 		if err := applyAcceptedLine(ctx, tx, p, policy, in, &line); err != nil {
 			return err
 		}
@@ -513,10 +573,10 @@ func (s *Postgres) GetReleasedProduct(ctx context.Context, id string) (ReleasedP
 
 func getReleasedProduct(ctx context.Context, tx pgx.Tx, tenantID, id string) (ReleasedProduct, error) {
 	var rec ReleasedProduct
-	err := tx.QueryRow(ctx, `select r.id::text, r.product_id, r.legal_entity_id, r.engineering_version, coalesce(r.session_id::text, ''), r.state, coalesce(s.created_by, '')
+	err := tx.QueryRow(ctx, `select r.id::text, r.product_id, r.legal_entity_id, r.engineering_version, coalesce(r.session_id::text, ''), r.state, coalesce(s.created_by, ''), coalesce(s.readiness_policy_id::text, '')
 		from released_product r left join release_session s on s.tenant_id = r.tenant_id and s.id = r.session_id
 		where r.tenant_id = $1 and r.id = $2::uuid`, tenantID, id).
-		Scan(&rec.ID, &rec.ProductID, &rec.LegalEntityID, &rec.EngineeringVersion, &rec.SessionID, &rec.State, &rec.SessionCreator)
+		Scan(&rec.ID, &rec.ProductID, &rec.LegalEntityID, &rec.EngineeringVersion, &rec.SessionID, &rec.State, &rec.SessionCreator, &rec.ReadinessPolicyID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return rec, httpx.NewProblem(http.StatusNotFound, "ENG-RELEASED-NOTFOUND", "released product not found")
 	}
@@ -590,44 +650,12 @@ func (s *Postgres) SignReadinessCheck(ctx context.Context, releasedProductID, ke
 	return s.GetReleasedProduct(ctx, releasedProductID)
 }
 
-func (s *Postgres) EvaluateReleasedProduct(ctx context.Context, id string) (ReleasedProduct, error) {
-	p, _ := tenant.FromContext(ctx)
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rec, err := getReleasedProduct(ctx, tx, p.TenantID, id)
-		if err != nil {
-			return err
-		}
-		in := ReleaseSessionInput{ProductID: rec.ProductID}
-		policy, err := readinessPolicyFor(ctx, tx, p.TenantID, in)
-		if err != nil {
-			return err
-		}
-		facts := domain.ReadinessFacts{}
-		var n int
-		if err := tx.QueryRow(ctx, `select count(*) from bom_version where tenant_id = $1 and product_id = $2 and status = 'active'`, p.TenantID, rec.ProductID).Scan(&n); err != nil {
-			return err
-		}
-		facts.ActiveBOM = n > 0
-		if err := tx.QueryRow(ctx, `select count(*) from route_version where tenant_id = $1 and product_id = $2 and status = 'active'`, p.TenantID, rec.ProductID).Scan(&n); err != nil {
-			return err
-		}
-		facts.ActiveRoute = n > 0
-		results := domain.EvaluateReadiness(policy, facts, rec.Checks)
-		return refreshReadiness(ctx, tx, p, id, results)
-	})
-	if err != nil {
-		return ReleasedProduct{}, err
-	}
-	return s.GetReleasedProduct(ctx, id)
-}
-
 func refreshReadiness(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, results []domain.ReadinessCheckResult) error {
 	rec, err := getReleasedProduct(ctx, tx, p.TenantID, id)
 	if err != nil {
 		return err
 	}
-	in := ReleaseSessionInput{ProductID: rec.ProductID}
-	policy, err := readinessPolicyFor(ctx, tx, p.TenantID, in)
+	policy, err := readinessPolicyFor(ctx, tx, p.TenantID, ReleaseSessionInput{ProductID: rec.ProductID, ReadinessPolicyID: rec.ReadinessPolicyID})
 	if err != nil {
 		return err
 	}

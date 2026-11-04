@@ -138,9 +138,7 @@ type Store interface {
 	CreateEngineeringVersion(ctx context.Context, v domain.EngineeringVersion, idem Idem) (domain.EngineeringVersion, error)
 	GetEngineeringVersion(ctx context.Context, id string) (domain.EngineeringVersion, error)
 	ListEngineeringVersions(ctx context.Context, productID, afterID string, limit int) (Page[domain.EngineeringVersion], error)
-	LastVersionCode(ctx context.Context, productID string) (string, error)
 	PutIdentifier(ctx context.Context, idType, value, productID string) error
-	ResolvePart(ctx context.Context, partNumber string) (string, bool, error)
 
 	CreateReleasePolicy(ctx context.Context, p domain.ReleasePolicy, idem Idem) (domain.ReleasePolicy, error)
 	GetReleasePolicy(ctx context.Context, id string) (domain.ReleasePolicy, error)
@@ -157,7 +155,6 @@ type Store interface {
 	GetReleasedProduct(ctx context.Context, id string) (ReleasedProduct, error)
 	ListReleasedProducts(ctx context.Context, legalEntityID, afterID string, limit int) (Page[ReleasedProduct], error)
 	SignReadinessCheck(ctx context.Context, releasedProductID, key, signer string) (ReleasedProduct, error)
-	EvaluateReleasedProduct(ctx context.Context, id string) (ReleasedProduct, error)
 
 	CreateDocumentType(ctx context.Context, t domain.DocumentType, idem Idem) (domain.DocumentType, error)
 	GetDocumentType(ctx context.Context, code string) (domain.DocumentType, error)
@@ -173,6 +170,10 @@ type Store interface {
 	ImportEbom(ctx context.Context, in EbomImportInput, idem Idem) (EbomImportRecord, error)
 	GetEbomImport(ctx context.Context, id string) (EbomImportRecord, error)
 	ListEbomImports(ctx context.Context, afterID string, limit int) (Page[EbomImportRecord], error)
+
+	ClaimAudit(ctx context.Context, limit int, lease time.Duration) ([]AuditJob, error)
+	CompleteAudit(ctx context.Context, id string) error
+	FailAudit(ctx context.Context, id string, attempts int, cause error, retryAfter time.Duration) error
 }
 
 // ReleaseSessionInput is one FR-9.15 workflow: a product version sent to receiving legal entities.
@@ -211,6 +212,7 @@ type ReleasedProduct struct {
 	State              string
 	Checks             []domain.ReadinessCheckResult
 	SessionCreator     string
+	ReadinessPolicyID  string
 }
 
 // EbomImportInput is one CAD/PLM payload (FR-9.27).
@@ -888,7 +890,7 @@ func (s *Postgres) ReleaseEco(ctx context.Context, e domain.Eco, prev domain.Eco
 			}
 		}
 		if e.State == domain.EcoReleased {
-			if err := releaseEcoDocuments(ctx, tx, p.TenantID, e); err != nil {
+			if err := releaseEcoDocuments(ctx, tx, p, e); err != nil {
 				return err
 			}
 			return emit(ctx, tx, p, e.ID, engevents.EcoReleased, aggregateEco, e.ID, e.EventData())

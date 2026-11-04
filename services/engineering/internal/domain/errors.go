@@ -90,6 +90,11 @@ const (
 	CodeDocReauth            = "ENG-DOC-REAUTH"
 	CodeDocSignerSame        = "ENG-DOC-SIGNER"
 	CodeDocState             = "ENG-DOC-STATE"
+	CodeDocNotSignable       = "ENG-DOC-NOT-SIGNABLE"
+	CodeDocNoOriginals       = "ENG-DOC-NO-ORIGINALS"
+	CodeDocUnsigned          = "ENG-DOC-UNSIGNED"
+	CodeDocReauthUnavailable = "ENG-DOC-REAUTH-UNAVAILABLE"
+	CodeReleaseScope         = "ENG-RELEASE-SCOPE"
 	CodeEbomPartUnknown      = "ENG-EBOM-PART-UNKNOWN"
 	CodeEbomRevisionReleased = "ENG-EBOM-REVISION-RELEASED"
 )

@@ -1,7 +1,9 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/shopspring/decimal"
 
@@ -62,21 +64,27 @@ func (a *API) importEbom(w http.ResponseWriter, r *http.Request) {
 	validID("source", body.Source, fields)
 	validID("partNumber", body.PartNumber, fields)
 	validID("revision", body.Revision, fields)
+	if n := len(body.Lines); n == 0 || n > maxLines {
+		fields["lines"] = fmt.Sprintf("must contain 1 to %d lines", maxLines)
+	}
 	payload := domain.EbomPayload{PartNumber: body.PartNumber, Revision: body.Revision}
-	for _, l := range body.Lines {
-		if l.PartNumber == "" {
-			fields["lines"] = "each line needs a partNumber"
-			break
+	findNumbers := map[int]bool{}
+	for i, l := range body.Lines {
+		field := fmt.Sprintf("lines[%d]", i)
+		qty, err := decimal.NewFromString(l.Quantity)
+		switch {
+		case len(strings.TrimSpace(l.PartNumber)) == 0 || len(l.PartNumber) > maxIDLength:
+			fields[field] = "partNumber must be 1 to 64 characters"
+		case l.PartNumber == body.PartNumber:
+			fields[field] = "a line cannot be the assembly itself"
+		case l.Quantity == "" || err != nil || !qty.IsPositive() || !finite(qty):
+			fields[field] = "quantity must be a positive decimal"
+		case l.FindNumber < 0 || l.FindNumber > maxFindNumber:
+			fields[field] = fmt.Sprintf("findNumber must be 0 to %d", maxFindNumber)
+		case l.FindNumber != 0 && findNumbers[l.FindNumber]:
+			fields[field] = "findNumber is used by another line"
 		}
-		qty := decimal.NewFromInt(1)
-		if l.Quantity != "" {
-			parsed, err := decimal.NewFromString(l.Quantity)
-			if err != nil {
-				fields["lines"] = "quantity must be a decimal string"
-				break
-			}
-			qty = parsed
-		}
+		findNumbers[l.FindNumber] = true
 		payload.Lines = append(payload.Lines, domain.EbomLine{FindNumber: l.FindNumber, PartNumber: l.PartNumber, Quantity: qty, Unit: l.Unit})
 	}
 	if len(fields) > 0 {

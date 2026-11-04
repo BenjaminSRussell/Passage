@@ -2,11 +2,15 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/engineering/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/engineering/internal/store"
@@ -119,6 +123,30 @@ func bodyFromDocument(d domain.Document) documentBody {
 	return body
 }
 
+var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+func validOriginals(tenantID string, originals []originalBody, fields map[string]string) {
+	if len(originals) > maxOriginals {
+		fields["originals"] = fmt.Sprintf("must list at most %d files", maxOriginals)
+		return
+	}
+	seen := map[string]bool{}
+	for i, o := range originals {
+		field := fmt.Sprintf("originals[%d]", i)
+		switch {
+		case !strings.HasPrefix(o.StorageKey, tenantID+"/") || len(o.StorageKey) > maxStorageKey || strings.Contains(o.StorageKey, ".."):
+			fields[field] = "storageKey must start with the tenant id and a slash and must not contain .."
+		case !sha256Hex.MatchString(o.SHA256):
+			fields[field] = "sha256 must be 64 lowercase hex characters"
+		case o.SizeBytes < 0:
+			fields[field] = "sizeBytes must not be negative"
+		case seen[o.StorageKey]:
+			fields[field] = "storageKey is listed twice"
+		}
+		seen[o.StorageKey] = true
+	}
+}
+
 func (a *API) createDocument(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -132,12 +160,19 @@ func (a *API) createDocument(w http.ResponseWriter, r *http.Request) {
 	fields := map[string]string{}
 	validID("typeCode", body.TypeCode, fields)
 	validID("number", body.Number, fields)
-	checkUUID("ecoId", body.EcoID, fields)
+	if body.EcoID != "" {
+		fields["ecoId"] = "is set by the ECO that replaces the document, not on create"
+	}
+	validOriginals(p.TenantID, body.Originals, fields)
 	if len(fields) > 0 {
 		invalid(w, r, fields)
 		return
 	}
-	doc := domain.Document{TypeCode: body.TypeCode, Number: body.Number, Part: body.Part, Version: body.Version, Description: body.Description, LastEditor: p.UserID, EcoID: body.EcoID}
+	if _, err := a.store.GetDocumentType(r.Context(), body.TypeCode); err != nil {
+		a.fail(w, r, "create document", err, &a.bomFailed)
+		return
+	}
+	doc := domain.Document{TypeCode: body.TypeCode, Number: body.Number, Part: body.Part, Version: body.Version, Description: body.Description, LastEditor: p.UserID}
 	for _, o := range body.Originals {
 		doc.Originals = append(doc.Originals, domain.DocumentOriginal{StorageKey: o.StorageKey, SHA256: o.SHA256, SizeBytes: o.SizeBytes})
 	}
@@ -244,23 +279,19 @@ func (a *API) signDocument(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, "sign document", err, &a.bomFailed)
 		return
 	}
-	auth := domain.Reauth{UserID: p.UserID, Assertion: r.Header.Get(reauthHeader), Method: body.Method}
-	if err := a.reauth.Verify(r.Context(), p.UserID, auth); err != nil {
-		a.fail(w, r, "reauth", err, &a.bomFailed)
-		return
-	}
-	sig, err := domain.SignDocument(typ, doc, to, auth, p.UserID, body.PrintedName, a.now())
+	sig, err := domain.SignDocument(typ, doc, to, body.Method, p.UserID, body.PrintedName, a.now())
 	if err != nil {
 		a.fail(w, r, "sign document", err, &a.bomFailed)
+		return
+	}
+	auth := domain.Reauth{UserID: p.UserID, Assertion: r.Header.Get(reauthHeader), Method: body.Method, DocumentID: doc.ID, RecordHash: sig.OriginalsHash}
+	if err := a.reauth.Verify(r.Context(), p.UserID, auth); err != nil {
+		a.fail(w, r, "reauth", err, &a.bomFailed)
 		return
 	}
 	signed, err := a.store.TransitionDocument(r.Context(), id, to, p.UserID, &sig)
 	if err != nil {
 		a.fail(w, r, "sign document", err, &a.bomFailed)
-		return
-	}
-	if err := a.auditor.RecordSignature(r.Context(), sig); err != nil {
-		a.fail(w, r, "audit signature", err, &a.bomFailed)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, bodyFromDocument(signed))
@@ -333,6 +364,24 @@ func (a *API) setDocumentStructure(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := httpx.Decode(r, &body); err != nil {
 		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if len(body.Children) > maxDocumentChildren {
+		fields["children"] = fmt.Sprintf("must list at most %d documents", maxDocumentChildren)
+	}
+	seen := map[string]bool{}
+	for i, child := range body.Children {
+		field := fmt.Sprintf("children[%d]", i)
+		if !ids.Valid(child) {
+			fields[field] = "must be a UUID"
+		} else if seen[child] {
+			fields[field] = "is listed twice"
+		}
+		seen[child] = true
+	}
+	if len(fields) > 0 {
+		invalid(w, r, fields)
 		return
 	}
 	if err := a.store.SetDocumentStructure(r.Context(), id, body.Children); err != nil {

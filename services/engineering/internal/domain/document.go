@@ -1,10 +1,11 @@
 package domain
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"slices"
-	"strings"
 	"time"
 )
 
@@ -74,11 +75,13 @@ type DocumentLink struct {
 	TargetID   string
 }
 
-// Reauth is the step-up proof the signer just completed (21 CFR 11.200).
+// Reauth is the step-up proof the signer just completed (21 CFR 11.200), bound to the record being signed.
 type Reauth struct {
-	UserID    string
-	Assertion string
-	Method    string
+	UserID     string
+	Assertion  string
+	Method     string
+	DocumentID string
+	RecordHash string
 }
 
 // Signature is the 21 CFR 11.50/11.70 manifestation: signer, meaning, timestamp, record link, originals hash.
@@ -134,21 +137,30 @@ func (n StatusNetwork) RequiresSignature(from, to string) bool {
 	return false
 }
 
-// CanRelease enforces FR-9.25: a change-controlled type cannot release a successor outside an ECO.
-func (d Document) CanRelease(typ DocumentType, previous Document, ecoID string) error {
-	if !typ.ChangeControlled {
+// CanRelease enforces FR-9.25: a change-controlled type cannot release a successor of a released version
+// outside an approved ECO that lists this document as the replacing version.
+func (d Document) CanRelease(typ DocumentType, previous Document, eco *Eco) error {
+	if !typ.ChangeControlled || previous.ID == "" || previous.Status != DocReleased {
 		return nil
 	}
-	if previous.ID != "" && previous.Status == DocReleased && ecoID == "" {
+	if d.EcoID == "" || eco == nil || eco.ID != d.EcoID {
 		return errf(CodeDocEcoRequired, "Document type %s is change-controlled; release through an ECO.", typ.Code)
+	}
+	if eco.State != EcoApproved && eco.State != EcoScheduled && eco.State != EcoReleased {
+		return errf(CodeDocEcoRequired, "ECO %s is %s; the replacing document releases only through an approved ECO.", eco.Number, eco.State)
+	}
+	if !slices.ContainsFunc(eco.Documents, func(r DocumentReplacement) bool { return r.NewDocumentID == d.ID && r.OldDocumentID == previous.ID }) {
+		return errf(CodeDocEcoRequired, "ECO %s does not replace document %s with this version.", eco.Number, previous.Number)
 	}
 	return nil
 }
 
-// SignDocument records a Part 11 signature after re-authentication (FR-9.24, BR-9.18).
-func SignDocument(typ DocumentType, doc Document, to string, auth Reauth, actor, printedName string, now time.Time) (Signature, error) {
-	if auth.Assertion == "" || auth.UserID == "" || auth.UserID != actor {
-		return Signature{}, errf(CodeDocReauth, "signature rejected: re-authentication failed")
+func SignDocument(typ DocumentType, doc Document, to, method, actor, printedName string, now time.Time) (Signature, error) {
+	if !typ.Network.RequiresSignature(doc.Status, to) {
+		return Signature{}, errf(CodeDocNotSignable, "moving a document from %s to %s needs no signature", doc.Status, to)
+	}
+	if typ.SignatureOnRelease && len(doc.Originals) == 0 {
+		return Signature{}, errf(CodeDocNoOriginals, "a document type that is signed on release needs at least one original.")
 	}
 	if typ.IndependentReview && doc.LastEditor != "" && actor == doc.LastEditor {
 		return Signature{}, errf(CodeDocSignerSame, "signer must differ from the last editor")
@@ -169,25 +181,52 @@ func SignDocument(typ DocumentType, doc Document, to string, auth Reauth, actor,
 		PrintedName:     printedName,
 		Meaning:         meaning,
 		SignedAt:        now.UTC(),
-		OriginalsHash:   HashOriginals(doc.Originals),
-		Method:          auth.Method,
+		OriginalsHash:   HashRecord(doc),
+		Method:          method,
 	}, nil
 }
 
-// HashOriginals is the sha256 of the sorted original hashes, binding the signature to the files (11.70).
-func HashOriginals(files []DocumentOriginal) string {
-	hashes := make([]string, 0, len(files))
-	for _, f := range files {
-		hashes = append(hashes, f.SHA256)
+func HashRecord(doc Document) string {
+	type original struct {
+		Key  string `json:"key"`
+		Hash string `json:"sha256"`
+		Size int64  `json:"size"`
 	}
-	slices.Sort(hashes)
-	sum := sha256.Sum256([]byte(strings.Join(hashes, ",")))
+	files := make([]original, 0, len(doc.Originals))
+	for _, f := range doc.Originals {
+		files = append(files, original{f.StorageKey, f.SHA256, f.SizeBytes})
+	}
+	slices.SortFunc(files, func(a, b original) int {
+		return cmp.Or(cmp.Compare(a.Key, b.Key), cmp.Compare(a.Hash, b.Hash))
+	})
+	raw, _ := json.Marshal(struct {
+		ID        string     `json:"id"`
+		Number    string     `json:"number"`
+		Version   string     `json:"version"`
+		Type      string     `json:"type"`
+		Originals []original `json:"originals"`
+	}{doc.ID, doc.Number, doc.Version, doc.TypeCode, files})
+	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
 
 func (d Document) AssertUnlocked() error {
-	if !d.SignedAt.IsZero() {
-		return errf(CodeDocSigned, "Originals are locked by signature on %s.", d.SignedAt.UTC().Format(time.RFC3339))
+	if !d.SignedAt.IsZero() || d.Status == DocReleased || d.Status == DocObsolete {
+		return errf(CodeDocSigned, "Document %s is locked: it is signed or released.", d.Number)
+	}
+	return nil
+}
+
+func ValidateReplacement(previous, current Document, signed bool) error {
+	switch {
+	case previous.Number != current.Number || previous.TypeCode != current.TypeCode:
+		return errf(CodeDocState, "documents %s and %s are not versions of the same document", previous.Number, current.Number)
+	case previous.Status != DocReleased:
+		return errf(CodeDocState, "replaced document %s is %s, only a released version can be replaced", previous.Number, previous.Status)
+	case current.Status != DocInReview:
+		return errf(CodeDocState, "replacing document %s is %s, it must be in review", current.Number, current.Status)
+	case !signed:
+		return errf(CodeDocUnsigned, "replacing document %s version %s has no release signature", current.Number, current.Version)
 	}
 	return nil
 }

@@ -68,8 +68,10 @@ func (e EbomImport) CanReimport() error {
 }
 
 // ImportEbom resolves part numbers through known product ids (product number or cad_part identifier).
-// Unknown parts become ENG-EBOM-PART-UNKNOWN exceptions and are left out of the draft (AC-9.17).
-func ImportEbom(payload EbomPayload, knownProducts map[string]string, active *BomVersion) EbomResult {
+// Unknown parts, the header included, become ENG-EBOM-PART-UNKNOWN exceptions (one per part number); unknown
+// lines are left out of the draft (AC-9.17). Find numbers are kept as given; a line without one takes the next
+// free multiple of ten. A line that does not validate refuses the whole import.
+func ImportEbom(payload EbomPayload, knownProducts map[string]string, active *BomVersion) (EbomResult, error) {
 	result := EbomResult{}
 	draft := BomVersion{
 		ProductID:     payload.PartNumber,
@@ -78,26 +80,42 @@ func ImportEbom(payload EbomPayload, knownProducts map[string]string, active *Bo
 		Usage:         UsageEngineering,
 		Category:      CategoryMaterial,
 	}
+	flagged := map[string]bool{}
+	flag := func(part string) {
+		if !flagged[part] {
+			flagged[part] = true
+			result.Exceptions = append(result.Exceptions, EbomException{PartNumber: part, Code: CodeEbomPartUnknown})
+		}
+	}
 	if id, ok := knownProducts[payload.PartNumber]; ok {
 		draft.ProductID = id
+	} else {
+		flag(payload.PartNumber)
 	}
+	taken := map[int]bool{}
+	for _, line := range payload.Lines {
+		if line.FindNumber != 0 {
+			taken[line.FindNumber] = true
+		}
+	}
+	next := 0
 	for _, line := range payload.Lines {
 		productID, ok := knownProducts[line.PartNumber]
 		if !ok {
-			result.Exceptions = append(result.Exceptions, EbomException{PartNumber: line.PartNumber, Code: CodeEbomPartUnknown})
+			flag(line.PartNumber)
 			continue
-		}
-		qty := line.Quantity
-		if qty.IsZero() {
-			qty = decimal.NewFromInt(1)
 		}
 		no := line.FindNumber
 		if no == 0 {
-			no = (len(draft.Lines) + 1) * 10
+			for next += 10; taken[next]; next += 10 {
+			}
+			no = next
 		}
-		draft.Lines = append(draft.Lines, BomLine{
-			LineNo: no, ComponentProductID: productID, Quantity: qty, Series: decimal.NewFromInt(1), LineType: LineItem,
-		})
+		bomLine := BomLine{LineNo: no, ComponentProductID: productID, Quantity: line.Quantity, Series: decimal.NewFromInt(1), LineType: LineItem}
+		if err := ValidateLine(bomLine); err != nil {
+			return result, err
+		}
+		draft.Lines = append(draft.Lines, bomLine)
 	}
 	result.Draft = &draft
 	result.ECR = &Ecr{
@@ -108,7 +126,7 @@ func ImportEbom(payload EbomPayload, knownProducts map[string]string, active *Bo
 		Products: []string{draft.ProductID},
 	}
 	result.Comparison = CompareEbom(draft, active)
-	return result
+	return result, nil
 }
 
 // CompareEbom counts added, removed and quantity-changed component rows against the active mBOM.

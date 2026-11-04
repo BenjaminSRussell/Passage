@@ -78,10 +78,13 @@ CREATE TABLE IF NOT EXISTS release_session (
   source text NOT NULL CHECK (source IN ('manual', 'eco', 'job')),
   policy_id uuid NOT NULL,
   eco_id uuid,
+  engineering_le_id text NOT NULL DEFAULT '',
+  readiness_policy_id uuid,
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, id),
   UNIQUE (tenant_id, number)
 );
+CREATE SEQUENCE IF NOT EXISTS release_number_seq;
 CREATE TABLE IF NOT EXISTS release_line (
   tenant_id uuid NOT NULL,
   id uuid NOT NULL,
@@ -218,6 +221,18 @@ CREATE TABLE IF NOT EXISTS eco_document_replacement (
   PRIMARY KEY (tenant_id, eco_id, new_document_id),
   FOREIGN KEY (tenant_id, eco_id) REFERENCES eco (tenant_id, id)
 );
+CREATE TABLE IF NOT EXISTS audit_outbox (
+  id uuid PRIMARY KEY,
+  tenant_id uuid NOT NULL,
+  user_id text NOT NULL,
+  legal_entity_id text NOT NULL DEFAULT '',
+  payload jsonb NOT NULL,
+  attempts integer NOT NULL DEFAULT 0,
+  next_attempt_at timestamptz NOT NULL DEFAULT now(),
+  delivered_at timestamptz,
+  last_error text NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS "IX-ENG-12" ON audit_outbox (next_attempt_at) WHERE delivered_at IS NULL;
 CREATE TABLE IF NOT EXISTS product_identifier (
   tenant_id uuid NOT NULL,
   id_type text NOT NULL,
@@ -271,7 +286,10 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
     EXECUTE format('GRANT USAGE ON SCHEMA %I TO passage_app', current_schema());
     EXECUTE 'GRANT SELECT, INSERT, UPDATE ON engineering_organization, version_nomenclature, engineering_category, engineering_version, release_policy, site_mapping, release_session, release_line, readiness_policy, released_product, readiness_check_result, document_type, document, document_original, document_link, document_structure, eco_document_replacement, product_identifier, ebom_import, ebom_exception TO passage_app';
+    EXECUTE 'GRANT DELETE ON readiness_check_result, document_structure TO passage_app';
     EXECUTE 'GRANT SELECT, INSERT ON document_signature TO passage_app';
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE ON audit_outbox TO passage_app';
+    EXECUTE 'GRANT USAGE, SELECT ON SEQUENCE release_number_seq TO passage_app';
   END IF;
 END
 $$;

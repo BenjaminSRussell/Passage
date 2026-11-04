@@ -28,27 +28,32 @@ import (
 )
 
 const (
-	readyTimeout      = 500 * time.Millisecond
-	idempotencyKey    = "Idempotency-Key"
-	dutyRead          = "engineering.read"
-	dutyBomWrite      = "engineering.bom.write"
-	dutyEcoApprove    = "engineering.eco.approve"
-	dutyEcoWorkflow   = "engineering.eco.workflow"
-	dutyEcrReview     = "engineering.ecr.review"
-	dutyResourceWrite = "engineering.resource.write"
-	dutyRouteWrite    = "engineering.route.write"
-	dutyReleaseAccept = "engineering.release.accept"
-	dutyDocSign       = "engineering.doc.sign"
-	reauthHeader      = "X-Passage-Reauth-Assertion"
-	dateLayout        = "2006-01-02"
-	validationDetail  = "request failed validation"
-	maxIDLength       = 64
-	maxLines          = 5000
-	maxOperations     = 500
-	maxNumberLength   = 40
-	maxReasonLength   = 200
-	maxDecimalExp     = 15
-	minDecimalExp     = -12
+	readyTimeout        = 500 * time.Millisecond
+	idempotencyKey      = "Idempotency-Key"
+	dutyRead            = "engineering.read"
+	dutyBomWrite        = "engineering.bom.write"
+	dutyEcoApprove      = "engineering.eco.approve"
+	dutyEcoWorkflow     = "engineering.eco.workflow"
+	dutyEcrReview       = "engineering.ecr.review"
+	dutyResourceWrite   = "engineering.resource.write"
+	dutyRouteWrite      = "engineering.route.write"
+	dutyReleaseAccept   = "engineering.release.accept"
+	dutyDocSign         = "engineering.doc.sign"
+	reauthHeader        = "X-Passage-Reauth-Assertion"
+	dateLayout          = "2006-01-02"
+	validationDetail    = "request failed validation"
+	maxIDLength         = 64
+	maxReleaseEntities  = 100
+	maxFindNumber       = 99999
+	maxOriginals        = 50
+	maxStorageKey       = 512
+	maxDocumentChildren = 500
+	maxLines            = 5000
+	maxOperations       = 500
+	maxNumberLength     = 40
+	maxReasonLength     = 200
+	maxDecimalExp       = 15
+	minDecimalExp       = -12
 )
 
 var (
@@ -60,7 +65,6 @@ var (
 type API struct {
 	store        store.Store
 	approver     domain.Approver
-	auditor      Auditor
 	reauth       Reauthenticator
 	now          func() time.Time
 	bomCreated   atomic.Int64
@@ -93,14 +97,7 @@ type API struct {
 }
 
 func New(s store.Store, approver domain.Approver, now func() time.Time) *API {
-	return &API{store: s, approver: approver, auditor: NopAuditor{}, reauth: AssertionReauth{}, now: now, stats: routeStats{routes: map[string]*routeStat{}}}
-}
-
-func (a *API) WithAuditor(aud Auditor) *API {
-	if aud != nil {
-		a.auditor = aud
-	}
-	return a
+	return &API{store: s, approver: approver, reauth: FailClosedReauth{}, now: now, stats: routeStats{routes: map[string]*routeStat{}}}
 }
 
 func (a *API) WithReauth(r Reauthenticator) *API {
@@ -994,7 +991,7 @@ func problemFrom(de *domain.Error) *httpx.Problem {
 		status = http.StatusConflict
 	case domain.CodeEcoApproverUnavailable:
 		status = http.StatusServiceUnavailable
-	case domain.CodeEcoSelfApproval, domain.CodeEcrSelfApproval, domain.CodeEcrNotRequester, domain.CodeEcoCreatorUnknown, domain.CodeEcoBackdateDuty, domain.CodeDocReauth, domain.CodeDocSignerSame, domain.CodeReadinessSelfSign, domain.CodeOwnedField:
+	case domain.CodeEcoSelfApproval, domain.CodeEcrSelfApproval, domain.CodeEcrNotRequester, domain.CodeEcoCreatorUnknown, domain.CodeEcoBackdateDuty, domain.CodeDocReauth, domain.CodeDocSignerSame, domain.CodeReadinessSelfSign, domain.CodeOwnedField, domain.CodeReleaseScope:
 		status = http.StatusForbidden
 	}
 	return httpx.NewProblem(status, de.Code, de.Detail)
