@@ -5,17 +5,21 @@ import {
   describeProblem,
   getColumnSet,
   getRowSet,
+  getTree,
   listColumnTemplates,
   saveColumnSet,
   saveRowSet,
+  saveTree,
   type ColumnSet,
   type DefinitionColumn,
   type DefinitionRow,
   type Problem,
   type RowSet,
+  type Tree,
 } from "./api/client";
 import { DEFINITION_CODE } from "./format";
 import { ColumnsEditor, RowsEditor } from "./PartEditors";
+import { TreeUnitsEditor } from "./TreeEditor";
 import { cleanColumn, cleanRow } from "./DefinitionEditorPage";
 import styles from "./pages.module.css";
 
@@ -68,6 +72,26 @@ const columnSetKind: PartKind<ColumnSet> = {
   },
   body: (part, change) => <ColumnsEditor columns={part.columns} onChange={(columns) => change({ columns })} />,
   description: "A named list of statement columns, with period expressions and variance calculations.",
+};
+
+export function blankTree(): Tree {
+  return { code: "", name: "", attribute: "", units: [{ code: "U1", name: "", values: [] }] };
+}
+
+const treeKind: PartKind<Tree> = {
+  noun: "tree",
+  listPath: "/finreport/trees",
+  load: (code, signal) => getTree(code, signal),
+  save: (part, etag) => saveTree(part, etag),
+  blank: blankTree,
+  clean: (t) => ({
+    code: t.code.trim(),
+    name: t.name,
+    attribute: t.attribute.trim(),
+    units: t.units.map((u) => ({ code: u.code.trim(), name: u.name, ...(u.parent ? { parent: u.parent } : {}), ...(u.values && u.values.length > 0 ? { values: u.values } : {}) })),
+  }),
+  body: (part, change) => <TreeUnitsEditor tree={part} onChange={change} />,
+  description: "Reporting units over the values of one dimension attribute, with roll-up. A statement run can be limited to one unit.",
 };
 
 function PartEditor<T extends { code: string; name: string; description?: string }>({ kind }: { kind: PartKind<T> }) {
@@ -229,4 +253,8 @@ export function RowSetEditorPage() {
 
 export function ColumnSetEditorPage() {
   return <PartEditor kind={columnSetKind} />;
+}
+
+export function TreeEditorPage() {
+  return <PartEditor kind={treeKind} />;
 }

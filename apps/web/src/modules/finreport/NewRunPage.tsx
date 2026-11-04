@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Button, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
-import { createRun, CURRENCY_TYPES, describeProblem, listDefinitions, listHierarchies, newKey, type CurrencyType, type Problem, type RunRequest } from "./api/client";
+import { createRun, CURRENCY_TYPES, describeProblem, listDefinitions, listHierarchies, listTrees, newKey, type CurrencyType, type Problem, type RunRequest } from "./api/client";
 import { CURRENCY_TYPE_LABELS, fiscalCalendar, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -24,6 +24,10 @@ export interface RunValues {
   normalBalance: "debit" | "credit";
   accountFrom: string;
   accountTo: string;
+  /** Code of a reporting tree the run is limited to; empty runs the whole ledger. */
+  tree?: string;
+  /** Unit of the tree; empty is the whole tree (the roll-up of every unit). */
+  treeUnit?: string;
 }
 
 type Errors = Partial<Record<keyof RunValues, string>>;
@@ -74,6 +78,7 @@ export function toRunRequest(v: RunValues): RunRequest {
           },
         }
       : {}),
+    ...(v.tree ? { tree: { code: v.tree, ...(v.treeUnit ? { unit: v.treeUnit } : {}) } } : {}),
   };
 }
 
@@ -98,6 +103,8 @@ export function NewRunPage() {
     normalBalance: "debit",
     accountFrom: "",
     accountTo: "",
+    tree: "",
+    treeUnit: "",
   });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -109,6 +116,8 @@ export function NewRunPage() {
   // Categories need master data this service does not have yet, so only account and dimension hierarchies can drive a run.
   const usable = (hierarchies.data ?? []).filter((h) => h.latestVersion > 0 && h.subject !== "main_account_category");
   const chosen = usable.find((h) => h.code === values.hierarchy);
+  const trees = useLoad((signal) => listTrees(signal), "trees");
+  const chosenTree = (trees.data ?? []).find((t) => t.code === values.tree);
 
   function update(patch: Partial<RunValues>) {
     setValues((prev) => ({ ...prev, ...patch }));
@@ -232,6 +241,41 @@ export function NewRunPage() {
                 </>
               ) : null}
             </>
+          ) : null}
+          <FormField
+            id="fr-run-tree"
+            label="Limit to reporting tree"
+            optional
+            hint={
+              trees.error
+                ? `The trees could not be loaded (${trees.error.code}). The run covers the whole ledger.`
+                : "Run the statement for one unit of a tree, rolled up over the units below it. Empty covers the whole ledger."
+            }
+          >
+            {(control) => (
+              <Select {...control} value={values.tree ?? ""} onChange={(e) => update({ tree: e.target.value, treeUnit: "" })} disabled={(trees.data ?? []).length === 0}>
+                <option value="">{trees.loading ? "Loading trees…" : (trees.data ?? []).length === 0 ? "No reporting trees" : "Whole ledger"}</option>
+                {(trees.data ?? []).map((t) => (
+                  <option key={t.code} value={t.code}>
+                    {t.code} {t.name}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+          {chosenTree ? (
+            <FormField id="fr-run-tree-unit" label="Tree unit" optional hint="A parent unit gives the roll-up of its children. Empty is the whole tree.">
+              {(control) => (
+                <Select {...control} value={values.treeUnit ?? ""} onChange={(e) => update({ treeUnit: e.target.value })}>
+                  <option value="">Whole tree</option>
+                  {chosenTree.units.map((u) => (
+                    <option key={u.code} value={u.code}>
+                      {u.code} {u.name}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </FormField>
           ) : null}
           {text("fr-run-year", "year", "Fiscal year", { inputMode: "numeric" })}
           {text("fr-run-period", "period", "Period", { hint: "0 is the opening period.", inputMode: "numeric" })}

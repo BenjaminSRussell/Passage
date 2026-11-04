@@ -80,6 +80,9 @@ type Store interface {
 	ListColumnSets(ctx context.Context) ([]domain.ColumnSet, error)
 	GetColumnSet(ctx context.Context, code string) (domain.ColumnSet, int, error)
 	SaveColumnSet(ctx context.Context, cs domain.ColumnSet, ifMatch *int) (domain.ColumnSet, int, error)
+	ListTrees(ctx context.Context) ([]domain.Tree, error)
+	GetTree(ctx context.Context, code string) (domain.Tree, int, error)
+	SaveTree(ctx context.Context, t domain.Tree, ifMatch *int) (domain.Tree, int, error)
 	AuditTrail(ctx context.Context, f domain.AuditFilter, after *domain.AuditCursor, limit int) (store.AuditPage, error)
 	ExportAuditTrail(ctx context.Context, f domain.AuditFilter) (store.AuditExport, error)
 }
@@ -123,6 +126,10 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyMaintain)).Get("/column-sets", a.listColumnSets)
 		r.With(authz.RequireDuty(DutyMaintain)).Get("/column-sets/{code}", a.getColumnSet)
 		r.With(authz.RequireDuty(DutyMaintain)).Put("/column-sets/{code}", a.putColumnSet)
+		// Statement runners list the trees (with their units) to pick one on the run form.
+		r.With(authz.RequireAnyDuty(DutyMaintain, DutyRun)).Get("/trees", a.listTrees)
+		r.With(authz.RequireDuty(DutyMaintain)).Get("/trees/{code}", a.getTree)
+		r.With(authz.RequireDuty(DutyMaintain)).Put("/trees/{code}", a.putTree)
 		r.With(authz.RequireDuty(DutyMaintain)).Get("/column-set-templates", a.listColumnTemplates)
 		r.With(authz.RequireDuty(DutyMaintain)).Post("/definitions/*", a.definitionAction)
 		r.With(authz.RequireDuty(DutyRun)).Post("/runs", a.createRun)
@@ -347,6 +354,7 @@ type runRequest struct {
 	Calendar          []periodDTO      `json:"calendar"`
 	IncludeAdjustment bool             `json:"includeAdjustmentPeriods"`
 	Hierarchy         *hierarchyRunDTO `json:"hierarchy"`
+	Tree              *treeRunDTO      `json:"tree"`
 	// AllowStale accepts a read model behind the lag gate: the run completes
 	// with the REPORT-0004 warning instead of being refused (FR-15.1).
 	AllowStale bool `json:"allowStale"`
@@ -360,6 +368,13 @@ type hierarchyRunDTO struct {
 	NormalBalance string `json:"normalBalance"`
 	AccountFrom   string `json:"accountFrom"`
 	AccountTo     string `json:"accountTo"`
+}
+
+// treeRunDTO limits the run to the balances of one reporting unit, rolled up
+// over the units below it (FR-15.4); no unit means the whole tree.
+type treeRunDTO struct {
+	Code string `json:"code"`
+	Unit string `json:"unit"`
 }
 
 func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
@@ -396,7 +411,11 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 	if h := req.Hierarchy; h != nil {
 		hier = &store.HierarchyRun{Code: h.Code, Version: h.Version, NormalBalance: h.NormalBalance, AccountFrom: h.AccountFrom, AccountTo: h.AccountTo}
 	}
-	run, err := a.store.CreateRun(r.Context(), store.RunSpec{Hierarchy: hier,
+	var tree *store.TreeRun
+	if t := req.Tree; t != nil {
+		tree = &store.TreeRun{Code: t.Code, Unit: t.Unit}
+	}
+	run, err := a.store.CreateRun(r.Context(), store.RunSpec{Hierarchy: hier, Tree: tree,
 		Code: req.Definition, Version: req.DefinitionVersion, LedgerID: req.LedgerID, LegalEntityID: req.LegalEntityID, CurrencyType: req.CurrencyType,
 		PeriodYear: req.Period.Year, PeriodNo: req.Period.No, IncludeAdjustment: req.IncludeAdjustment, Calendar: cal,
 		RequestedBy: p.UserID, IdempotencyKey: key, RequestHash: hex.EncodeToString(sum[:]),
@@ -475,6 +494,9 @@ func validateRun(req runRequest) error {
 		case h.NormalBalance != "" && h.NormalBalance != "debit" && h.NormalBalance != "credit":
 			return bad("hierarchy.normalBalance must be debit or credit")
 		}
+	}
+	if t := req.Tree; t != nil && !domain.ValidReportCode(t.Code) {
+		return bad("tree.code is required")
 	}
 	return nil
 }

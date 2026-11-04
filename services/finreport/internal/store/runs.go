@@ -40,6 +40,23 @@ type RunSpec struct {
 	// Hierarchy, when set, replaces the definition's rows by the nodes of a
 	// published hierarchy (FR-15.4).
 	Hierarchy *HierarchyRun
+	// Tree, when set, limits the run to the balances of one unit of a reporting
+	// tree, rolled up (FR-15.4).
+	Tree *TreeRun
+}
+
+// TreeRun names the reporting tree and unit a run is limited to. An empty Unit
+// is the whole tree (the roll-up of every unit).
+type TreeRun struct {
+	Code string
+	Unit string
+}
+
+// RunTree is the tree, unit and tree revision a stored run used.
+type RunTree struct {
+	Code     string `json:"code"`
+	Unit     string `json:"unit"`
+	Revision int    `json:"revision"`
 }
 
 // HierarchyRun names the hierarchy a run takes its rows from. Version 0 is the
@@ -83,7 +100,10 @@ type Run struct {
 	// run's own definition (GET /runs/{id}/definition) then differs from the
 	// published one.
 	Hierarchy *RunHierarchy `json:"hierarchy,omitempty"`
-	Replayed  bool          `json:"-"`
+	// Tree is set when the run is limited to a unit of a reporting tree; unit
+	// is empty for the whole tree.
+	Tree     *RunTree `json:"tree,omitempty"`
+	Replayed bool     `json:"-"`
 }
 
 // CreateRun evaluates a published definition over the reporting read model and
@@ -133,12 +153,24 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 		if err != nil {
 			return err
 		}
-		var hier *RunHierarchy
+		var tree *RunTree
 		var extra []domain.Check
-		if spec.Hierarchy != nil {
-			if def, hier, extra, err = expandRunHierarchyTx(ctx, tx, def, spec, balances); err != nil {
+		if spec.Tree != nil {
+			if def.Kind == domain.KindCashFlow {
+				return problem(422, domain.CodeTreeRun, "a cash flow definition cannot be limited to a tree unit; its net income and cash reconcile over the whole ledger.")
+			}
+			if balances, tree, extra, err = limitRunToTreeTx(ctx, tx, spec.Tree, balances); err != nil {
 				return err
 			}
+		}
+		var hier *RunHierarchy
+		if spec.Hierarchy != nil {
+			// Appended, not assigned: a tree run over a hierarchy keeps REPORT-0041.
+			var hierChecks []domain.Check
+			if def, hier, hierChecks, err = expandRunHierarchyTx(ctx, tx, def, spec, balances); err != nil {
+				return err
+			}
+			extra = append(extra, hierChecks...)
 		}
 		in := domain.Input{Definition: def, LedgerID: spec.LedgerID, CurrencyType: spec.CurrencyType,
 			IncludeAdjustmentPeriods: spec.IncludeAdjustment, Calendar: cal, At: at, Balances: balances}
@@ -178,20 +210,25 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 			}
 			hierCode, hierVersion, runDef = hier.Code, hier.Version, body
 		}
+		var treeCode, treeUnit, treeRev any
+		if tree != nil {
+			treeCode, treeUnit, treeRev = tree.Code, tree.Unit, tree.Revision
+		}
 		run = Run{
 			Hierarchy: hier,
 			ID:        ids.New(), DefinitionCode: def.Code, DefinitionVersion: def.Version, LedgerID: spec.LedgerID,
 			CurrencyType: spec.CurrencyType, PeriodYear: spec.PeriodYear, PeriodNo: spec.PeriodNo, Status: "completed",
 			HWMByLedger: hwm, ResultHash: res.Hash, CellCount: len(res.Cells), RequestedBy: spec.RequestedBy, StartedAt: started,
-			Checks: checks,
+			Checks: checks, Tree: tree,
 		}
 		_, err = tx.Exec(ctx, `insert into statement_run(tenant_id, id, definition_code, definition_version, ledger_id, currency_type,
 			period_year, period_no, include_adjustment, status, hwm, result_hash, cell_count, requested_by, request_hash, idempotency_key,
-			started_at, completed_at, duration_ms, checks, legal_entity_id, hierarchy_code, hierarchy_version, run_definition)
-			values($1,$2,$3,$4,$5,$6,$7,$8,$9,'completed',$10,$11,$12,$13,$14,$15,$16,now(),$17,$18,nullif($19,'')::uuid,$20,$21,$22)`,
+			started_at, completed_at, duration_ms, checks, legal_entity_id, hierarchy_code, hierarchy_version, run_definition,
+			tree_code, tree_unit, tree_revision)
+			values($1,$2,$3,$4,$5,$6,$7,$8,$9,'completed',$10,$11,$12,$13,$14,$15,$16,now(),$17,$18,nullif($19,'')::uuid,$20,$21,$22,$23,$24,$25)`,
 			tenantID(ctx), run.ID, def.Code, def.Version, spec.LedgerID, spec.CurrencyType, spec.PeriodYear, spec.PeriodNo,
 			spec.IncludeAdjustment, hwmJSON, hash, len(res.Cells), spec.RequestedBy, spec.RequestHash, nullable(spec.IdempotencyKey),
-			started, int(time.Since(started).Milliseconds()), checksJSON, entity, hierCode, hierVersion, runDef)
+			started, int(time.Since(started).Milliseconds()), checksJSON, entity, hierCode, hierVersion, runDef, treeCode, treeUnit, treeRev)
 		if err != nil {
 			return err
 		}
@@ -218,7 +255,7 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 		if err := enqueue(ctx, tx, "statement", run.ID, events.StatementGenerated, tenantID(ctx), events.StatementGeneratedData{
 			RunID: run.ID, DefinitionCode: def.Code, DefinitionVersion: def.Version, LedgerID: spec.LedgerID, Period: period,
 			CurrencyType: spec.CurrencyType, HWMByLedger: hwm, ResultHash: res.Hash, Outputs: []events.OutputRef{},
-			Parameters: runParameters(period, hier),
+			Parameters: runParameters(period, hier, tree),
 		}); err != nil {
 			return err
 		}
@@ -228,6 +265,9 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 		}
 		if hier != nil {
 			details["hierarchy"] = hierarchyRef(hier)
+		}
+		if tree != nil {
+			details["tree"] = treeRef(tree)
 		}
 		return recordAuditTx(ctx, tx, domain.AuditEntry{Kind: domain.AuditStatementRun, LedgerID: spec.LedgerID, LegalEntityID: entity, Period: period,
 			ActorID: spec.RequestedBy, ObjectRef: "run:" + run.ID, Details: details})
@@ -394,7 +434,7 @@ func loadBalancesTx(ctx context.Context, tx pgx.Tx, ledgerID string, currencies 
 }
 
 const runColumns = `id::text, definition_code, definition_version, ledger_id::text, currency_type, period_year, period_no,
-	status, hwm, result_hash, cell_count, requested_by, started_at, duration_ms, checks, hierarchy_code, hierarchy_version`
+	status, hwm, result_hash, cell_count, requested_by, started_at, duration_ms, checks, hierarchy_code, hierarchy_version, tree_code, tree_unit, tree_revision`
 
 func getRunTx(ctx context.Context, tx pgx.Tx, id string) (Run, error) {
 	run, err := scanRun(tx.QueryRow(ctx, `select `+runColumns+` from statement_run where id=$1::uuid`, id))
@@ -407,14 +447,17 @@ func getRunTx(ctx context.Context, tx pgx.Tx, id string) (Run, error) {
 func scanRun(r rowScanner) (Run, error) {
 	var run Run
 	var hwm, hash, checks []byte
-	var duration, hierVersion *int
-	var hierCode *string
+	var duration, hierVersion, treeRev *int
+	var hierCode, treeCode, treeUnit *string
 	if err := r.Scan(&run.ID, &run.DefinitionCode, &run.DefinitionVersion, &run.LedgerID, &run.CurrencyType, &run.PeriodYear, &run.PeriodNo,
-		&run.Status, &hwm, &hash, &run.CellCount, &run.RequestedBy, &run.StartedAt, &duration, &checks, &hierCode, &hierVersion); err != nil {
+		&run.Status, &hwm, &hash, &run.CellCount, &run.RequestedBy, &run.StartedAt, &duration, &checks, &hierCode, &hierVersion, &treeCode, &treeUnit, &treeRev); err != nil {
 		return run, err
 	}
 	if hierCode != nil && hierVersion != nil {
 		run.Hierarchy = &RunHierarchy{Code: *hierCode, Version: *hierVersion}
+	}
+	if treeCode != nil && treeUnit != nil && treeRev != nil {
+		run.Tree = &RunTree{Code: *treeCode, Unit: *treeUnit, Revision: *treeRev}
 	}
 	run.Checks = []domain.Check{}
 	if err := json.Unmarshal(checks, &run.Checks); err != nil {

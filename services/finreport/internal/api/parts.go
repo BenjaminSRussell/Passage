@@ -237,3 +237,73 @@ func (a *API) composeDefinition(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.JSON(w, http.StatusOK, def)
 }
+
+// Reporting trees (FR-15.4, PRD §2.15.5 /trees): reporting units over the
+// values of one dimension attribute, with roll-up; a statement run takes a unit.
+
+func (a *API) listTrees(w http.ResponseWriter, r *http.Request) {
+	if !principal(r) {
+		httpx.Fail(w, r, unauthenticated())
+		return
+	}
+	items, err := a.store.ListTrees(r.Context())
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *API) getTree(w http.ResponseWriter, r *http.Request) {
+	if !principal(r) {
+		httpx.Fail(w, r, unauthenticated())
+		return
+	}
+	t, rev, err := a.store.GetTree(r.Context(), chi.URLParam(r, "code"))
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	w.Header().Set("ETag", etag(rev))
+	httpx.JSON(w, http.StatusOK, t)
+}
+
+// putTree creates or replaces a reporting tree. The units are checked with the
+// tree rules (REPORT-0039); replacing needs If-Match. Repeating a PUT with the
+// current revision gives the same tree (PUT idempotent).
+func (a *API) putTree(w http.ResponseWriter, r *http.Request) {
+	p, ok := tenant.FromContext(r.Context())
+	if !ok {
+		httpx.Fail(w, r, unauthenticated())
+		return
+	}
+	var t domain.Tree
+	if !readPart(w, r, &t) {
+		return
+	}
+	code := chi.URLParam(r, "code")
+	if t.Code == "" {
+		t.Code = code
+	}
+	if t.Code != code {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeTreeInvalid, "code: body code does not match the path"))
+		return
+	}
+	if issues := t.Validate(); len(issues) > 0 {
+		httpx.Fail(w, r, issueProblem(issues))
+		return
+	}
+	ifMatch, err := parseIfMatch(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	t.UpdatedBy = p.UserID
+	saved, rev, err := a.store.SaveTree(r.Context(), t, ifMatch)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	w.Header().Set("ETag", etag(rev))
+	httpx.JSON(w, http.StatusOK, saved)
+}

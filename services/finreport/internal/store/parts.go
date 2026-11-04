@@ -21,6 +21,7 @@ type partTable string
 const (
 	rowSetTable    partTable = "report_row_set"
 	columnSetTable partTable = "report_column_set"
+	treeTable      partTable = "report_tree"
 )
 
 // listPart returns the bodies of every part of the tenant, by code.
@@ -134,4 +135,20 @@ func (s *Postgres) GetColumnSet(ctx context.Context, code string) (domain.Column
 func (s *Postgres) SaveColumnSet(ctx context.Context, cs domain.ColumnSet, ifMatch *int) (domain.ColumnSet, int, error) {
 	rev, err := savePart(ctx, s, columnSetTable, "column set", cs.Code, cs.UpdatedBy, cs, ifMatch)
 	return cs, rev, err
+}
+
+// ListTrees returns every reporting tree of the tenant, by code.
+func (s *Postgres) ListTrees(ctx context.Context) ([]domain.Tree, error) {
+	return listPart[domain.Tree](ctx, s, treeTable)
+}
+
+// GetTree returns one reporting tree and its revision.
+func (s *Postgres) GetTree(ctx context.Context, code string) (domain.Tree, int, error) {
+	return getPart[domain.Tree](ctx, s, treeTable, "tree", code)
+}
+
+// SaveTree creates or replaces a reporting tree (FR-15.4) and returns its new revision.
+func (s *Postgres) SaveTree(ctx context.Context, t domain.Tree, ifMatch *int) (domain.Tree, int, error) {
+	rev, err := savePart(ctx, s, treeTable, "tree", t.Code, t.UpdatedBy, t, ifMatch)
+	return t, rev, err
 }

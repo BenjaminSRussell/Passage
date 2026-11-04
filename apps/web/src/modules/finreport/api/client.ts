@@ -101,6 +101,8 @@ export interface RunSummary {
   checks?: RunCheck[];
   /** Set when the rows of the run are the nodes of a hierarchy version. */
   hierarchy?: { code: string; version: number };
+  /** Set when the run is limited to a unit of a reporting tree; unit is empty for the whole tree. */
+  tree?: { code: string; unit: string; revision: number };
 }
 
 export interface CellSummary {
@@ -249,6 +251,13 @@ export interface RunRequest {
   allowStale?: boolean;
   /** Takes the rows from a published hierarchy; the definition supplies the columns. */
   hierarchy?: HierarchyRunRequest;
+  /** Limits the run to the balances of one unit of a reporting tree, rolled up; no unit means the whole tree. */
+  tree?: TreeRunRequest;
+}
+
+export interface TreeRunRequest {
+  code: string;
+  unit?: string;
 }
 
 export interface HierarchyRunRequest {
@@ -651,6 +660,43 @@ export async function saveColumnSet(set: ColumnSet, etag: string | null): Promis
 /** The comparative column sets the service ships (actual against prior year, and so on). */
 export async function listColumnTemplates(signal?: AbortSignal): Promise<ColumnSet[]> {
   return (await get<{ items: ColumnSet[] }>("/column-set-templates", signal)).items;
+}
+
+// --- reporting trees (FR-15.4) ---------------------------------------------
+
+/** A reporting unit: values of the tree's dimension attribute, grouped under a parent for roll-up. */
+export interface TreeUnit {
+  code: string;
+  name: string;
+  parent?: string;
+  /** Values that belong to the unit itself; the unit also covers the values of the units below it. */
+  values?: string[];
+}
+
+export interface Tree {
+  code: string;
+  name: string;
+  /** The dimension attribute the units group, such as profit_center. */
+  attribute: string;
+  units: TreeUnit[];
+  updatedBy?: string;
+}
+
+export async function listTrees(signal?: AbortSignal): Promise<Tree[]> {
+  return (await get<{ items: Tree[] }>("/trees", signal)).items;
+}
+
+export async function getTree(code: string, signal?: AbortSignal): Promise<{ part: Tree; etag: string | null }> {
+  const sent = await send<Tree>(`/trees/${seg(code)}`, {}, signal);
+  return { part: sent.body, etag: sent.etag };
+}
+
+/** Creates (etag null) or replaces a tree. A stale etag answers 412 conflict_version. */
+export async function saveTree(tree: Tree, etag: string | null): Promise<{ part: Tree; etag: string | null }> {
+  const headers: Record<string, string> = {};
+  if (etag) headers["If-Match"] = etag;
+  const sent = await send<Tree>(`/trees/${seg(tree.code)}`, { method: "PUT", headers, body: JSON.stringify(tree) });
+  return { part: sent.body, etag: sent.etag };
 }
 
 // --- audit trail (FR-15.10) ------------------------------------------------

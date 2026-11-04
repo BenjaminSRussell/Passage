@@ -97,7 +97,7 @@ components:
                 size: {type: integer}
           parameters:
             type: object
-            description: Run parameters; always period, and hierarchy as CODE@version when the rows of the run are the nodes of a hierarchy
+            description: Run parameters; always period, hierarchy as CODE@version when the rows of the run are the nodes of a hierarchy, and tree as CODE@revision with treeUnit when the run is limited to a unit of a reporting tree
             additionalProperties: {type: string}
     DefinitionPublished:
       name: dev.passage.reporting.definition.published.v1

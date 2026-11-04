@@ -919,6 +919,87 @@ paths:
         '412': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
         '428': {$ref: '#/components/responses/Problem'}
+  /v1/reporting/trees:
+    get:
+      operationId: listTrees
+      summary: Reporting trees ordered by code (FR-15.4)
+      description: >-
+        Maintainers and statement runners (the run form picks a tree and a unit from this list,
+        which carries every tree's units) list trees; reading one tree and changing it take
+        reporting.definition.maintain.
+      x-passage-duty: reporting.definition.maintain or reporting.statement.run
+      responses:
+        '200':
+          description: Trees
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Tree'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /v1/reporting/trees/{code}:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    get:
+      operationId: getTree
+      summary: Read a reporting tree
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: The tree
+          headers:
+            ETag:
+              description: Tree revision, echoed in If-Match to replace it
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Tree'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: putTree
+      summary: Create or replace a reporting tree (idempotent)
+      description: >-
+        A tree groups the values of one dimension attribute into reporting units with parents
+        for roll-up (FR-15.4). At most 500 units nested up to 10 levels; unit codes are unique;
+        every parent exists; a unit without child units lists at least one value; a dimension
+        value belongs to at most one unit, so a roll-up never counts it twice. Field errors
+        answer 422 REPORT-0039. updatedBy is read-only and ignored when sent. A statement run
+        names a tree and a unit (POST /runs with tree).
+      x-passage-duty: reporting.definition.maintain
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: Required when the tree exists; the ETag last read. Missing gives 428, stale gives 412 conflict_version. Without If-Match the PUT only creates; when two requests create the same code at once, one succeeds and the other answers 409 conflict_version.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Tree'}
+      responses:
+        '200':
+          description: Saved tree
+          headers:
+            ETag:
+              description: New revision
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Tree'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
   /v1/reporting/column-sets:
     get:
       operationId: listColumnSets
@@ -1330,6 +1411,7 @@ components:
           items: {$ref: '#/components/schemas/Period'}
         includeAdjustmentPeriods: {type: boolean, description: Counts adjustment periods in P-n, YTD, Q and FY even when the definition does not}
         hierarchy: {$ref: '#/components/schemas/HierarchyRun'}
+        tree: {$ref: '#/components/schemas/TreeRun'}
         allowStale: {type: boolean, default: false, description: "Accepts a read model behind reporting.max_lag_seconds. The run completes with a REPORT-0004 warning in checks instead of being refused with 409 REPORT-0004."}
     HierarchyRun:
       type: object
@@ -1347,6 +1429,45 @@ components:
         normalBalance: {type: string, enum: [debit, credit], description: How amounts are presented; debit when omitted}
         accountFrom: {type: string, description: Dimension hierarchies only; with accountTo, limits the rows to this account range}
         accountTo: {type: string}
+    Tree:
+      type: object
+      required: [code, name, attribute, units]
+      properties:
+        code: {type: string, pattern: '^[A-Z][A-Z0-9-]{1,29}$'}
+        name: {type: string, minLength: 1, maxLength: 120}
+        attribute: {type: string, description: The dimension attribute the units group, such as profit_center}
+        units:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: {$ref: '#/components/schemas/TreeUnit'}
+        updatedBy: {type: string, readOnly: true}
+    TreeUnit:
+      type: object
+      required: [code, name]
+      properties:
+        code: {type: string, pattern: '^[A-Z0-9][A-Z0-9_.-]{0,29}$'}
+        name: {type: string, minLength: 1, maxLength: 120}
+        parent: {type: string, description: Code of the parent unit; omitted for a top-level unit}
+        values:
+          type: array
+          maxItems: 200
+          description: Values of the tree's dimension attribute that belong to this unit itself; the unit also covers the values of every unit below it
+          items: {type: string, minLength: 1, maxLength: 60}
+    TreeRun:
+      type: object
+      required: [code]
+      description: >-
+        Limits the run to the balances whose dimension attribute value belongs to a unit of a
+        reporting tree, rolled up over the units below it (FR-15.4). One run per unit gives one
+        report per unit; the run of a parent unit is the roll-up of its children. Without
+        unit the run covers the whole tree and carries a REPORT-0041 warning when the ledger
+        has balances for values the tree does not list or without a value. The rows and
+        columns come from the definition; a cash flow definition cannot be limited to a unit
+        (REPORT-0040), nor can an unknown tree or unit.
+      properties:
+        code: {type: string, description: Tree code}
+        unit: {type: string, description: Unit code; omitted or empty means the whole tree}
     Period:
       type: object
       required: [year, no, quarter]
@@ -1376,6 +1497,13 @@ components:
           properties:
             code: {type: string}
             version: {type: integer}
+        tree:
+          type: object
+          description: Present when the run is limited to a unit of a reporting tree
+          properties:
+            code: {type: string}
+            unit: {type: string, description: Empty for the whole tree}
+            revision: {type: integer, description: Tree revision the run used}
         cellCount: {type: integer}
         requestedBy: {type: string}
         startedAt: {type: string, format: date-time}

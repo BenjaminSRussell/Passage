@@ -18,11 +18,12 @@ type partStore struct {
 	Store
 	rows    map[string]domain.RowSet
 	cols    map[string]domain.ColumnSet
+	trees   map[string]domain.Tree
 	ifMatch *int
 }
 
 func newPartStore() *partStore {
-	return &partStore{rows: map[string]domain.RowSet{}, cols: map[string]domain.ColumnSet{}}
+	return &partStore{rows: map[string]domain.RowSet{}, cols: map[string]domain.ColumnSet{}, trees: map[string]domain.Tree{}}
 }
 
 func missing(noun, code string) error {
@@ -184,5 +185,90 @@ func TestCompose_UsesStoredSetsThenTemplates(t *testing.T) {
 	}
 	if w := call(r, http.MethodPost, "/v1/reporting/definitions:compose", body("MY-CMP"), nil, DutyRun); w.Code != http.StatusForbidden {
 		t.Fatalf("run duty = %d, want 403", w.Code)
+	}
+}
+
+// partStore also keeps reporting trees.
+func (s *partStore) ListTrees(context.Context) ([]domain.Tree, error) {
+	out := []domain.Tree{}
+	for _, v := range s.trees {
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+func (s *partStore) GetTree(_ context.Context, code string) (domain.Tree, int, error) {
+	if v, ok := s.trees[code]; ok {
+		return v, 2, nil
+	}
+	return domain.Tree{}, 0, missing("tree", code)
+}
+
+func (s *partStore) SaveTree(_ context.Context, t domain.Tree, ifMatch *int) (domain.Tree, int, error) {
+	s.trees[t.Code], s.ifMatch = t, ifMatch
+	return t, 3, nil
+}
+
+const treeBody = `{"code":"PC-TREE","name":"Profit centers","attribute":"profit_center","units":[
+	{"code":"ALL","name":"Group"},
+	{"code":"DE","name":"Germany","parent":"ALL","values":["PC10","PC11"]},
+	{"code":"US","name":"United States","parent":"ALL","values":["PC30"]}]}`
+
+func TestTrees_PutGetListAndDuties(t *testing.T) {
+	st := newPartStore()
+	r := scheduleRouter(st)
+	w := call(r, http.MethodPut, "/v1/reporting/trees/PC-TREE", treeBody, map[string]string{"If-Match": `"2"`}, DutyMaintain)
+	if w.Code != http.StatusOK || w.Header().Get("ETag") != `"3"` {
+		t.Fatalf("put = %d %s etag %q", w.Code, w.Body.String(), w.Header().Get("ETag"))
+	}
+	if st.ifMatch == nil || *st.ifMatch != 2 || st.trees["PC-TREE"].UpdatedBy != "u1" || len(st.trees["PC-TREE"].Units) != 3 {
+		t.Fatalf("saved %+v If-Match %v", st.trees["PC-TREE"], st.ifMatch)
+	}
+	if w := call(r, http.MethodGet, "/v1/reporting/trees/PC-TREE", "", nil, DutyMaintain); w.Code != http.StatusOK || w.Header().Get("ETag") != `"2"` {
+		t.Fatalf("get = %d etag %q", w.Code, w.Header().Get("ETag"))
+	}
+	// Statement runners list the trees with their units (the run form picks one),
+	// like GET /hierarchies; reading one tree for editing and writing stay with maintainers.
+	if w := call(r, http.MethodGet, "/v1/reporting/trees/PC-TREE", "", nil, DutyRun); w.Code != http.StatusForbidden {
+		t.Fatalf("get with the run duty = %d, want 403", w.Code)
+	}
+	for _, duty := range []string{DutyMaintain, DutyRun} {
+		var list struct{ Items []domain.Tree }
+		w := call(r, http.MethodGet, "/v1/reporting/trees", "", nil, duty)
+		if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil || len(list.Items) != 1 {
+			t.Fatalf("list with %s = %d %s", duty, w.Code, w.Body.String())
+		}
+	}
+	if w := call(r, http.MethodGet, "/v1/reporting/trees/NOPE", "", nil, DutyMaintain); w.Code != http.StatusNotFound || problemCode(t, w) != domain.CodePartNotFound {
+		t.Fatalf("missing tree = %d %s", w.Code, w.Body.String())
+	}
+	for _, duty := range []string{DutyView, DutyRun} {
+		if w := call(r, http.MethodPut, "/v1/reporting/trees/PC-TREE", treeBody, nil, duty); w.Code != http.StatusForbidden {
+			t.Fatalf("put with %s = %d, want 403", duty, w.Code)
+		}
+	}
+	if w := call(r, http.MethodGet, "/v1/reporting/trees", "", nil, DutyView); w.Code != http.StatusForbidden {
+		t.Fatalf("list with view duty = %d, want 403", w.Code)
+	}
+}
+
+func TestTrees_RejectBadBodies(t *testing.T) {
+	r := scheduleRouter(newPartStore())
+	cases := map[string]struct {
+		path, body string
+		status     int
+		code       string
+	}{
+		"path and body code differ": {"/v1/reporting/trees/OTHER", treeBody, 422, domain.CodeTreeInvalid},
+		"value in two units":        {"/v1/reporting/trees/PC-TREE", strings.Replace(treeBody, `["PC30"]`, `["PC10"]`, 1), 422, domain.CodeTreeInvalid},
+		"unknown parent":            {"/v1/reporting/trees/PC-TREE", strings.Replace(treeBody, `"parent":"ALL","values":["PC30"]`, `"parent":"XX","values":["PC30"]`, 1), 422, domain.CodeTreeInvalid},
+		"unknown field":             {"/v1/reporting/trees/PC-TREE", strings.Replace(treeBody, `"name":"Profit centers"`, `"name":"Profit centers","colour":"red"`, 1), 400, "COM-0002"},
+		"no attribute":              {"/v1/reporting/trees/PC-TREE", strings.Replace(treeBody, `"attribute":"profit_center",`, ``, 1), 422, domain.CodeTreeInvalid},
+	}
+	for name, c := range cases {
+		w := call(r, http.MethodPut, c.path, c.body, nil, DutyMaintain)
+		if w.Code != c.status || problemCode(t, w) != c.code {
+			t.Errorf("%s: %d %s, want %d %s", name, w.Code, w.Body.String(), c.status, c.code)
+		}
 	}
 }

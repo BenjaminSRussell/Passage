@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, PageHeader, type DataTableColumn } from "../../shell/ui";
-import { listColumnSets, listColumnTemplates, listRowSets, type ColumnSet, type RowSet } from "./api/client";
+import { listColumnSets, listColumnTemplates, listRowSets, listTrees, type ColumnSet, type RowSet, type Tree } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -17,6 +17,48 @@ const columnSetColumns: DataTableColumn<ColumnSet>[] = [
   { key: "columns", header: "Columns", mono: true, align: "end", render: (s) => String(s.columns.length) },
   { key: "periods", header: "Periods", mono: true, render: (s) => s.columns.map((c) => c.periodExpr).join(" ") },
 ];
+
+const treeColumns: DataTableColumn<Tree>[] = [
+  { key: "code", header: "Code", mono: true },
+  { key: "name", header: "Name" },
+  { key: "attribute", header: "Dimension", mono: true },
+  { key: "units", header: "Units", mono: true, align: "end", render: (t) => String(t.units.length) },
+  { key: "updatedBy", header: "Last edited by", mono: true, render: (t) => t.updatedBy ?? "—" },
+];
+
+/** Reporting trees (FR-15.4): reporting units with roll-up that a statement run can be limited to. */
+export function TreesPage() {
+  const navigate = useNavigate();
+  const state = useLoad((signal) => listTrees(signal), "trees");
+  return (
+    <div className={styles.stack}>
+      <PageHeader
+        title="Reporting trees"
+        description="Reporting units, such as profit centers grouped by region. Run a statement for one unit and its roll-up."
+        actions={
+          <Link className={buttonClassName("primary")} to="/finreport/trees/new">
+            New tree
+          </Link>
+        }
+      />
+      {state.error ? (
+        <Alert tone="danger" title="Could not load the trees" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
+          {state.error.message} ({state.error.code})
+        </Alert>
+      ) : (
+        <DataTable
+          label="Reporting trees"
+          columns={treeColumns}
+          rows={state.data ?? []}
+          getRowKey={(t) => t.code}
+          loading={state.loading}
+          empty={{ title: "No reporting trees yet", description: "Create a tree to run statements per profit center, segment or other dimension value." }}
+          onRowOpen={(t) => navigate(`/finreport/trees/${encodeURIComponent(t.code)}`)}
+        />
+      )}
+    </div>
+  );
+}
 
 /** Row sets (FR-15.2): named lists of rows that report definitions start from. */
 export function RowSetsPage() {
