@@ -56,6 +56,7 @@ type API struct {
 	now         func() time.Time
 	opened      atomic.Int64
 	posted      atomic.Int64
+	published   atomic.Int64
 	replayed    atomic.Int64
 	slaWarnings atomic.Int64
 	slaBreaches atomic.Int64
@@ -93,6 +94,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerCases(r)
 	a.registerClaims(r)
 	a.registerIntake(r)
+	a.registerDispatch(r)
 }
 
 // Metrics serves the service counters in Prometheus text format.
@@ -100,6 +102,7 @@ func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "# HELP service_cases_opened_total Cases opened; idempotent replays are not counted.\n# TYPE service_cases_opened_total counter\nservice_cases_opened_total %d\n", a.opened.Load())
 		fmt.Fprintf(w, "# HELP service_workorders_posted_total Work orders posted; idempotent replays are not counted.\n# TYPE service_workorders_posted_total counter\nservice_workorders_posted_total %d\n", a.posted.Load())
+		fmt.Fprintf(w, "# HELP service_dispatch_published_total Territory-days published to technicians; idempotent replays are not counted.\n# TYPE service_dispatch_published_total counter\nservice_dispatch_published_total %d\n", a.published.Load())
 		fmt.Fprintf(w, "# HELP service_idempotent_replays_total Requests answered from a stored Idempotency-Key.\n# TYPE service_idempotent_replays_total counter\nservice_idempotent_replays_total %d\n", a.replayed.Load())
 		fmt.Fprintf(w, "# HELP service_sla_warnings_total SLA warnings emitted by the monitor.\n# TYPE service_sla_warnings_total counter\nservice_sla_warnings_total %d\n", a.slaWarnings.Load())
 		fmt.Fprintf(w, "# HELP service_sla_breaches_total SLA breaches emitted by the monitor (transitions that find a breach are not counted).\n# TYPE service_sla_breaches_total counter\nservice_sla_breaches_total %d\n", a.slaBreaches.Load())
@@ -366,6 +369,13 @@ type workOrderRequest struct {
 	EstDurationMinutes int               `json:"estDurationMinutes"`
 	Currency           string            `json:"currency"`
 	Lines              []domain.WorkLine `json:"lines"`
+	// Scheduling data (FR-45.6); all optional on create.
+	RequiredSkills []string   `json:"requiredSkills"`
+	WindowStart    *time.Time `json:"windowStart"`
+	WindowEnd      *time.Time `json:"windowEnd"`
+	Address        string     `json:"address"`
+	Latitude       *float64   `json:"latitude"`
+	Longitude      *float64   `json:"longitude"`
 }
 
 func (a *API) createWorkOrder(w http.ResponseWriter, r *http.Request) {
@@ -393,6 +403,8 @@ func (a *API) createWorkOrder(w http.ResponseWriter, r *http.Request) {
 	if len(req.Lines) > maxLines {
 		fields["lines"] = fmt.Sprintf("must hold at most %d lines", maxLines)
 	}
+	sc := schedulingOf(fields, schedulingRequest{RequiredSkills: req.RequiredSkills, WindowStart: req.WindowStart, WindowEnd: req.WindowEnd,
+		Address: req.Address, Latitude: req.Latitude, Longitude: req.Longitude, EstDurationMinutes: req.EstDurationMinutes})
 	// Fingerprint the body as sent, before server-generated line ids are filled
 	// in, so a retry of the same request replays instead of failing as a reuse.
 	requestHash := hashOf(req)
@@ -409,7 +421,8 @@ func (a *API) createWorkOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	in := store.WorkOrder{CustomerPartyID: req.CustomerPartyID, LegalEntityID: req.LegalEntityID, TerritoryID: req.TerritoryID,
 		CaseID: req.CaseID, AgreementID: req.AgreementID, IncidentTypeID: req.IncidentTypeID,
-		EstDurationMinutes: req.EstDurationMinutes, Currency: req.Currency, Lines: req.Lines}
+		EstDurationMinutes: req.EstDurationMinutes, Currency: req.Currency, Lines: req.Lines,
+		RequiredSkills: sc.RequiredSkills, WindowStart: sc.WindowStart, WindowEnd: sc.WindowEnd, Address: sc.Address, Latitude: sc.Latitude, Longitude: sc.Longitude}
 	created, replayed, err := a.store.CreateWorkOrder(r.Context(), in, key, requestHash)
 	if err != nil {
 		a.fail(w, r, "create work order", err)

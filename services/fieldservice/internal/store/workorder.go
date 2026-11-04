@@ -41,7 +41,19 @@ type WorkOrder struct {
 	// (PRD 8.45.4, BR-45.5); it is absent before completion.
 	FirstTimeFix *bool `json:"firstTimeFix,omitempty"`
 	Version      int   `json:"version"`
-	postKey      string
+	// Scheduling data (PRD 8.45.4): the skills a visit needs, the customer's promised
+	// window, the site address and position, and the one active assignment.
+	RequiredSkills   []string   `json:"requiredSkills"`
+	WindowStart      *time.Time `json:"windowStart,omitempty"`
+	WindowEnd        *time.Time `json:"windowEnd,omitempty"`
+	Address          string     `json:"address"`
+	Latitude         *float64   `json:"latitude,omitempty"`
+	Longitude        *float64   `json:"longitude,omitempty"`
+	TechnicianID     *string    `json:"technicianId,omitempty"`
+	AssignedStart    *time.Time `json:"assignedStart,omitempty"`
+	AssignedEnd      *time.Time `json:"assignedEnd,omitempty"`
+	AssignmentPinned bool       `json:"assignmentPinned"`
+	postKey          string
 }
 
 // CreateWorkOrder stores a work order in UNSCHEDULED status.
@@ -78,11 +90,17 @@ func (s *Postgres) CreateWorkOrder(ctx context.Context, in WorkOrder, key, reque
 		out.Number = number
 		out.Status = string(domain.WOUnscheduled)
 		out.Version = 1
+		if in.RequiredSkills == nil {
+			in.RequiredSkills = []string{}
+		}
+		out.RequiredSkills = in.RequiredSkills
 		_, err = tx.Exec(ctx, `insert into service_work_order (tenant_id, id, number, case_id, agreement_id, customer_party_id, legal_entity_id,
-			territory_id, incident_type_id, est_duration_minutes, currency, status, lines, version, idempotency_key, request_hash)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1, $14, $15)`,
+			territory_id, incident_type_id, est_duration_minutes, currency, status, lines, version, idempotency_key, request_hash,
+			required_skills, window_start, window_end, address, geo_lat, geo_lon)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1, $14, $15, $16, $17, $18, $19, $20, $21)`,
 			tid, out.ID, number, in.CaseID, in.AgreementID, in.CustomerPartyID, in.LegalEntityID, in.TerritoryID, in.IncidentTypeID,
-			in.EstDurationMinutes, in.Currency, out.Status, lines, nullable(key), requestHash)
+			in.EstDurationMinutes, in.Currency, out.Status, lines, nullable(key), requestHash,
+			in.RequiredSkills, in.WindowStart, in.WindowEnd, in.Address, in.Latitude, in.Longitude)
 		return err
 	})
 	if err != nil {
@@ -296,15 +314,20 @@ func versionConflict(current int) error {
 
 const workOrderColumns = `id::text, number, case_id::text, agreement_id::text, customer_party_id::text, legal_entity_id::text,
 	territory_id::text, incident_type_id::text, est_duration_minutes, currency, status, lines, posting, version, coalesce(post_key, ''),
-	follow_up_of::text, completed_at, first_time_fix`
+	follow_up_of::text, completed_at, first_time_fix, required_skills, window_start, window_end, address, geo_lat::float8, geo_lon::float8,
+	technician_id::text, assigned_start, assigned_end, assignment_pinned`
 
 func scanWorkOrder(row pgx.Row) (WorkOrder, error) {
 	var wo WorkOrder
 	var lines, posting []byte
 	if err := row.Scan(&wo.ID, &wo.Number, &wo.CaseID, &wo.AgreementID, &wo.CustomerPartyID, &wo.LegalEntityID, &wo.TerritoryID,
 		&wo.IncidentTypeID, &wo.EstDurationMinutes, &wo.Currency, &wo.Status, &lines, &posting, &wo.Version, &wo.postKey,
-		&wo.FollowUpOf, &wo.CompletedAt, &wo.FirstTimeFix); err != nil {
+		&wo.FollowUpOf, &wo.CompletedAt, &wo.FirstTimeFix, &wo.RequiredSkills, &wo.WindowStart, &wo.WindowEnd, &wo.Address, &wo.Latitude,
+		&wo.Longitude, &wo.TechnicianID, &wo.AssignedStart, &wo.AssignedEnd, &wo.AssignmentPinned); err != nil {
 		return wo, err
+	}
+	if wo.RequiredSkills == nil {
+		wo.RequiredSkills = []string{}
 	}
 	if err := json.Unmarshal(lines, &wo.Lines); err != nil {
 		return wo, err

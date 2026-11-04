@@ -24,7 +24,7 @@ func dbRouter(t *testing.T) (http.Handler, context.Context) {
 	t.Helper()
 	admin, pool := testkit.DBWithApp(t)
 	duties := map[string]struct{}{tenant.DutyAllScope: {}}
-	for _, d := range []string{dutyAgreement, dutyCaseCreate, dutyCaseMaintain, dutyWorkOrder, dutyBilling, dutyInquire} {
+	for _, d := range []string{dutyAgreement, dutyCaseCreate, dutyCaseMaintain, dutyWorkOrder, dutyBilling, dutyInquire, dutyDispatch} {
 		duties[d] = struct{}{}
 	}
 	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "u", Duties: duties})

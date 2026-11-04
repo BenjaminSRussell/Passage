@@ -24,6 +24,13 @@ var (
 	// included visit of an agreement line was consumed (FR-45.3).
 	AgreementVisitRecorded = events.Type(Context, "agreementvisit", "recorded", 1)
 
+	// AssignmentChanged is dev.passage.service.assignment.changed.v1: a work order was
+	// given to a technician at a time, or taken off the schedule (FR-45.7).
+	AssignmentChanged = events.Type(Context, "assignment", "changed", 1)
+	// DispatchPublished is dev.passage.service.dispatch.published.v1 (PRD 8.45.5): the
+	// SCHEDULED work orders of a territory-day were dispatched to their technicians.
+	DispatchPublished = events.Type(Context, "dispatch", "published", 1)
+
 	// ArticlePublished is dev.passage.knowledge.article.published.v1 (PRD 8.45.5):
 	// the knowledge base is its own context in the event catalog.
 	ArticlePublished = events.Type(KnowledgeContext, "article", "published", 1)
@@ -185,4 +192,47 @@ type AgreementVisitRecordedData struct {
 	VisitDate       string  `json:"visitDate"`
 	WorkOrderID     *string `json:"workOrderId"`
 	VisitsLeft      int     `json:"visitsLeft"`
+}
+
+// AssignmentChangedData is the payload of AssignmentChanged. Action is ASSIGNED (also
+// a move to another technician or time) or UNASSIGNED; the technician and times of an
+// UNASSIGNED event are the ones the order lost. PreviousTechnicianID is set when an
+// assignment replaced another technician's.
+type AssignmentChangedData struct {
+	WorkOrderID          string  `json:"workOrderId"`
+	Number               string  `json:"number"`
+	LegalEntityID        string  `json:"legalEntityId"`
+	TerritoryID          string  `json:"territoryId"`
+	Action               string  `json:"action"`
+	TechnicianID         *string `json:"technicianId"`
+	PreviousTechnicianID *string `json:"previousTechnicianId"`
+	Start                *string `json:"start"`
+	End                  *string `json:"end"`
+	Pinned               bool    `json:"pinned"`
+	At                   string  `json:"at"`
+	Actor                string  `json:"actor"`
+}
+
+// DispatchedOrder is one work order of a published territory-day, in the technician's
+// route order.
+type DispatchedOrder struct {
+	WorkOrderID  string `json:"workOrderId"`
+	Number       string `json:"number"`
+	TechnicianID string `json:"technicianId"`
+	Sequence     int    `json:"sequence"`
+	Start        string `json:"start"`
+	End          string `json:"end"`
+}
+
+// DispatchPublishedData is the payload of DispatchPublished: the technicians' mobile
+// apps and customer notifications consume it.
+type DispatchPublishedData struct {
+	RunID         string            `json:"runId"`
+	LegalEntityID string            `json:"legalEntityId"`
+	TerritoryID   string            `json:"territoryId"`
+	Date          string            `json:"date"`
+	TimeZone      string            `json:"timeZone"`
+	PublishedAt   string            `json:"publishedAt"`
+	Actor         string            `json:"actor"`
+	Assignments   []DispatchedOrder `json:"assignments"`
 }

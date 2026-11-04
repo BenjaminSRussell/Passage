@@ -19,6 +19,7 @@ import {
 } from "./api/client";
 import { ActivityPanel } from "./ActivitiesPage";
 import { CoverageBadge } from "./badges";
+import { SchedulingPanel } from "./SchedulingPanel";
 import { Details } from "./Details";
 import { dash, duration, formatDateTime, money, sentence, shortId } from "./format";
 import styles from "./pages.module.css";
@@ -184,6 +185,7 @@ export function WorkOrderDetailPage() {
           ]}
         />
       </Card>
+      <SchedulingPanel key={wo.id} workOrder={wo} etag={etag} onSaved={setLatest} onConflict={state.reload} />
       <Card title="Lines" headingLevel={3}>
         <DataTable label="Work order lines" columns={lineColumns} rows={wo.lines} getRowKey={(row) => row.id} empty={{ title: "No lines", description: "This work order has nothing to bill." }} />
       </Card>
