@@ -182,6 +182,7 @@ describe("shipment detail", () => {
       if (url.pathname === `/api/v1/fulfillment/shipments/${SH}`) return json(200, current());
       if (url.pathname === `/api/v1/fulfillment/shipments/${SH}/tracking`) return json(200, { items: [] });
       if (url.pathname === "/api/v1/fulfillment/packing-slips") return json(200, { items: slips });
+      if (url.pathname === "/api/v1/fulfillment/delivery-tolerances") return json(200, { items: [] });
       return undefined;
     };
   }

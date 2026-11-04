@@ -31,6 +31,8 @@ export interface ShipmentLine {
   trackingRequired?: boolean;
   /** Released for less than the order line quantity because ATP was short; a later run releases the rest. */
   partial?: boolean;
+  /** Over-delivery tolerance in percent of the planned quantity in force when the pick was last confirmed (BR-28.7); absent or 0 when none. */
+  overTolerancePct?: string;
   /** Batch, serial and location entries captured at pick. */
   tracking?: TrackingEntry[];
 }
@@ -133,6 +135,19 @@ export interface ReleaseRule {
 }
 
 export type ReleaseRuleInput = Pick<ReleaseRule, "horizonDays" | "requireFullAtp" | "waveMaxLines" | "waveMaxOrders"> & { legalEntityId: string };
+
+/** The over-delivery tolerance of one scope (BR-28.7): the percentage of the planned quantity a pick may exceed. */
+export interface DeliveryTolerance {
+  id: string;
+  /** Null: every product. */
+  productId: string | null;
+  /** Null: every customer. */
+  customerId: string | null;
+  /** Decimal string, 0 to 100, at most 4 decimals. */
+  overdeliveryPct: string;
+  version: number;
+  updatedAt: string;
+}
 
 /** Packing slip posting defaults of a legal entity (section 5.28.13). */
 export interface LegalEntitySetting {
@@ -728,6 +743,20 @@ export function listReleaseRules(signal?: AbortSignal): Promise<ReleaseRule[]> {
 export function saveReleaseRule(warehouseId: string, version: number, input: ReleaseRuleInput, key: string): Promise<ReleaseRule> {
   const headers = { "Idempotency-Key": key, "If-Match": `"${version}"` };
   return send<ReleaseRule>(`/release-rules/${encodeURIComponent(warehouseId)}`, { method: "PUT", headers, body: JSON.stringify(input) });
+}
+
+export function listDeliveryTolerances(signal?: AbortSignal): Promise<DeliveryTolerance[]> {
+  return items<DeliveryTolerance>(`/delivery-tolerances${query({ limit: 500 })}`, signal);
+}
+
+/** Sets the tolerance of a product and customer scope; version is the one read (0 when the scope has none). */
+export function saveDeliveryTolerance(
+  input: { productId: string | null; customerId: string | null; overdeliveryPct: string },
+  version: number,
+  key: string,
+): Promise<DeliveryTolerance> {
+  const headers = { "Idempotency-Key": key, "If-Match": `"${version}"` };
+  return send<DeliveryTolerance>("/delivery-tolerances", { method: "PUT", headers, body: JSON.stringify(input) });
 }
 
 /** The ledger setup duty that changing cogs_at_shipment needs (the service enforces it). */

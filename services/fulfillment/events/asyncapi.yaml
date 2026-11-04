@@ -71,6 +71,11 @@ channels:
     messages:
       warehouseReleaseRuleChanged:
         $ref: "#/components/messages/WarehouseReleaseRuleChanged"
+  deliveryToleranceChanged:
+    address: passage.fulfillment.deliverytolerance
+    messages:
+      deliveryToleranceChanged:
+        $ref: "#/components/messages/DeliveryToleranceChanged"
   legalEntitySettingChanged:
     address: passage.fulfillment.legalentitysetting
     messages:
@@ -254,6 +259,11 @@ operations:
     channel: { $ref: "#/channels/warehouseReleaseRuleChanged" }
     messages:
       - $ref: "#/channels/warehouseReleaseRuleChanged/messages/warehouseReleaseRuleChanged"
+  publishDeliveryToleranceChanged:
+    action: send
+    channel: { $ref: "#/channels/deliveryToleranceChanged" }
+    messages:
+      - $ref: "#/channels/deliveryToleranceChanged/messages/deliveryToleranceChanged"
   publishLegalEntitySettingChanged:
     action: send
     channel: { $ref: "#/channels/legalEntitySettingChanged" }
@@ -397,6 +407,7 @@ components:
                 order_line_id: { type: string, format: uuid }
                 qty: { type: string }
                 backordered: { type: string }
+                over_picked: { type: string, description: "Quantity picked above the planned one, allowed by the over-delivery tolerance (BR-28.7); present only for such a pick, when backordered is 0." }
                 short_reason: { type: string, enum: [OUT_OF_STOCK, DAMAGED, NOT_FOUND, QUALITY_HOLD, OTHER], description: "Reason of the short pick, present when one was given." }
     PackingSlipPosted:
       name: dev.passage.fulfillment.packingslip.posted.v1
@@ -622,6 +633,24 @@ components:
           previous_release_requires_full_atp: { type: boolean }
           previous_wave_max_lines: { type: integer, minimum: 1, maximum: 2000 }
           previous_wave_max_orders: { type: integer, minimum: 1, maximum: 500 }
+          version: { type: integer, minimum: 1 }
+    DeliveryToleranceChanged:
+      name: dev.passage.fulfillment.deliverytolerance.changed.v1
+      title: Delivery tolerance changed
+      summary: >
+        The over-delivery tolerance of a product and customer scope was saved (BR-28.7): the
+        percentage of the planned quantity a pick may exceed, with the value it replaces (absent
+        for a new scope). A scope that names no product or no customer applies to every one.
+      contentType: application/json
+      payload:
+        type: object
+        required: [tolerance_id, overdelivery_pct, version]
+        properties:
+          tolerance_id: { type: string, format: uuid }
+          product_id: { type: string, format: uuid, description: "Absent when the tolerance applies to every product." }
+          customer_id: { type: string, format: uuid, description: "Absent when the tolerance applies to every customer." }
+          overdelivery_pct: { type: string, description: "0 to 100, at most 4 decimals." }
+          previous_overdelivery_pct: { type: string, description: "The value replaced; absent for a new scope." }
           version: { type: integer, minimum: 1 }
     LegalEntitySettingChanged:
       name: dev.passage.fulfillment.legalentitysetting.changed.v1

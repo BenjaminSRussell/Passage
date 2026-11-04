@@ -421,6 +421,39 @@ Handoffs and gaps from slice 22:
 | Balances that existed before migration 0026 have no earlier movements; the first movement of such a balance shows `balance_after` after a change from a balance the history never saw. | deviation | There is no data to backfill from: only the balance was stored. |
 | Movements are listed newest first up to `limit` (default 100, max 500) with no cursor. | deviation | As the other report lists of this service. |
 
+Slice 23 builds the over-delivery tolerance (BR-28.7, FUL-0005, `overdelivery_pct` of section 5.27). Migration 0027 adds
+`delivery_tolerance` (tenant RLS enabled and forced; SELECT, INSERT and UPDATE for `passage_app`; one row per product and customer
+scope, a missing product or customer meaning every one, unique per scope, with a version) and, on `shipment_line`,
+`over_tolerance_pct` with the check `qty_picked <= qty_planned * (1 + over_tolerance_pct / 100)` in place of
+`qty_picked <= qty_planned`. `GET /v1/fulfillment/delivery-tolerances` (`WarehouseView`, filters `productId`, `customerId`, `limit`) and
+`PUT /v1/fulfillment/delivery-tolerances` (`PackingRuleMaintain`; `If-Match` with the version read, 0 for a new scope;
+`Idempotency-Key`; body `productId`, `customerId`, `overdeliveryPct`, 0 to 100 with at most 4 decimals) keep them and write
+`dev.passage.fulfillment.deliverytolerance.changed.v1` with the value replaced. Confirm-pick (single shipment and wave) looks the
+tolerance up only for a quantity above plan: the most specific scope wins (product and customer, product, customer, general),
+and none means 0. A pick above plan is FUL-0004 with no tolerance, FUL-0005 above planned plus the tolerance (the ceiling is cut to
+6 decimals), and accepted within it; the line keeps the percentage in force, `shipment.line.overTolerancePct`, and
+`pick.confirmed` carries `over_picked`. The over-picked quantity packs and posts as picked (the slip, journal, ASN and
+`packingslip.posted` carry the whole quantity), a shipment whose lines all reached plan is SHIPPED, and an over-shipped line has
+nothing to close (`PostTarget`, `CloseRemainder`, the remainder-cancel planner and the backorder report treat a negative
+remainder as 0; a remainder cut that leaves every line shipped completes the shipment even with an over-shipped line). When
+sales cancelled the remainder of the order line (`order_line_kept`, slice 20), a pick above plan is also refused with FUL-0066
+once the line would carry more than the order line keeps (its other live shipment lines count with the larger of planned and
+picked, an active drop-ship with its open quantity): the post would refuse it anyway (`checkKeptQty`). Web: `/fulfillment/delivery-tolerances` (list, edit, save with version; the form only for `PackingRuleMaintain`),
+the pick form on the shipment detail accepts a quantity within the ceiling of the saved tolerances and explains FUL-0004 and
+FUL-0005 before calling, and the lines table shows the excess over plan. Tests: domain, API, Postgres store (resolution order,
+version, replay, event, tenant isolation, pick to post to cancel of an over-shipped line, the database check) and web.
+
+Handoffs and gaps from slice 23:
+
+| Item | Status | Reason |
+|---|---|---|
+| Authz seed: `PackingRuleMaintain` gains `{"resource": "/v1/fulfillment/delivery-tolerances", "methods": ["PUT"]}` and `WarehouseView` gains `{"resource": "/v1/fulfillment/delivery-tolerances", "methods": ["GET"]}` in `policies/authz/data.json`. No new duty: section 5.28.17 lists none for the tolerance, so it follows the other packing and delivery master data (Warehouse admin). | handoff for #313 (authz seed) | Policies are outside this wave's paths. Until seeded the routes answer 403 in a real deployment. |
+| Wave 27 (sales) holds its own `overdelivery_pct` for agreements (BR-27.9) and the order's shipped quantity; it must accept `qty` above the ordered quantity on `packingslip.posted.v1` (the line `qty` can now exceed the shipment line's planned quantity) and may read `deliverytolerance.changed.v1`. Billing (wave 29) invoices the shipped quantity. | handoff to sales (wave 27) and billing (wave 29) | Neither is read from here. Fulfillment does not know the order line's ordered quantity, only what each shipment line plans: the tolerance applies per shipment line, so an order line split over several shipments may exceed its ordered quantity by at most the tolerance overall. The order's quantity limits the pick only once sales cancelled the remainder (`order_line_kept`, FUL-0066). Billing proposes from the slip lines and does not compare them with the order (checked: `services/billing/internal/domain/shipment.go`). |
+| An over-pick confirmed before sales' `order.remaindercancelled.v1` arrives is not trimmed by the cut (the planner cuts the planned quantity, never the picked excess above it); once packed, the post is refused with FUL-0066 and the picker re-picks down to the kept quantity. | deviation | Trimming picked stock without a pick confirmation would leave inventory unaware of where the excess went. |
+| Inventory (wave 16) issues the `packingslip.posted.v1` quantity, so the unreserved excess is taken from on-hand; reservations only cover the planned quantity. | handoff to inventory (wave 16) | Reservations are owned by wave 16. |
+| The tolerance is looked up per product and customer of the shipment; the PRD's "product group" scope and a per-line override are not modelled. | deviation | Product groups belong to the product master (wave 8). |
+| The wave detail pick form (`WaveDetailPage`) still refuses a quantity above plan before calling (FUL-0004); the service accepts it within the tolerance. Over-picking in a wave goes through the shipment detail pick form. | later slice of PSG-28 | The wave line payload carries no customer to resolve the tolerance with. |
+
 ## Important gaps (read first)
 
 | Item | Status | Reason |
@@ -642,7 +675,7 @@ slips to 5); the comparison with the ledger's GL 1405 is a handoff to ledger.
 | SSCC no reuse for 12 months (`sscc_no_reuse_months`) | deviation | `UNIQUE (tenant_id, sscc)` means an SSCC is never issued twice in a tenant, which is stricter than 12 months. The tenant setting `sscc_no_reuse_months` (12 to 60) is not stored: this service has no tenant settings yet, so the register's `noReuseUntil` always uses the default 12. |
 | SSCC register columns `printed_at` and "reused flag" (section 5.28.14) | deviation | Labels are rendered on request and not stored (`label_ref` is not built, see D1), so there is no print time; the register returns `issuedAt` instead. An SSCC cannot be reused (unique per tenant), so a reused flag would always be false; the register returns `noReuseUntil` instead. |
 | SSCC sequence check (nightly 00:30, alert on duplicates or check-digit failures) | later slice of PSG-28 | No scheduler is wired in this service. The database refuses duplicates and the label endpoint checks the check digit (FUL-0007). |
-| Period check (FUL-0002), negative on-hand (FUL-0003), tolerance (FUL-0005) on post (the tracking dims check, FUL-0006, is built in slice 10) | later slice of PSG-28 | Period control is wave 14. Negative on-hand is wave 16. |
+| Period check (FUL-0002), negative on-hand (FUL-0003) on post (the tracking dims check, FUL-0006, is built in slice 10; the tolerance, FUL-0005, in slice 23) | later slice of PSG-28 | Period control is wave 14. Negative on-hand is wave 16. |
 | Consolidation (BR-28.8, FUL-0011, `consolidation_enabled`, flag `fulfillment.consolidation`) | later slice of PSG-28 | A shipment holds one order (`order_id`), has no delivery address, and the order's `ship_separately` flag is not read from sales (wave 27). Consolidating needs multi-order shipments, the address on the shipment and the flag, so the FUL-0011 check is not built until release can use it. |
 | Shipment cancel of a packed shipment | built (unpack first, slice 8) | `POST /shipments/{id}:cancel` (slice 3) cancels from OPEN to PACKED while nothing has shipped and the shipment holds no container. A shipment with containers cannot cancel (FUL-0021) until they are unpacked one by one (slice 8, `:unpack`). |
 | DNI report (FR-28.12) | built | `GET /delivered-not-invoiced` (`WarehouseView`) and the web screen. It is computed from the slip journals on read, not from a stored projection. |

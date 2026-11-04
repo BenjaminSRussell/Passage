@@ -2,6 +2,7 @@ import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { BackordersPage } from "./BackordersPage";
 import { ContainerTypesPage } from "./ContainerTypesPage";
+import { DeliveryTolerancesPage } from "./DeliveryTolerancesPage";
 import { DeliveredNotInvoicedPage } from "./DeliveredNotInvoicedPage";
 import { ExceptionDetailPage } from "./ExceptionDetailPage";
 import { ExceptionsPage } from "./ExceptionsPage";
@@ -57,6 +58,7 @@ const fulfillment: PassageModule = {
     { path: "/fulfillment/returnable-packaging", element: createElement(ReturnablePackagingPage), handle: { title: "Returnable packaging" } },
     { path: "/fulfillment/warehouse-settings", element: createElement(WarehouseSettingsPage), handle: { title: "Warehouse settings" } },
     { path: "/fulfillment/release-rules", element: createElement(ReleaseRulesPage), handle: { title: "Release rules" } },
+    { path: "/fulfillment/delivery-tolerances", element: createElement(DeliveryTolerancesPage), handle: { title: "Over-delivery tolerances" } },
     { path: "/fulfillment/legal-entity-settings", element: createElement(LegalEntitySettingsPage), handle: { title: "Posting settings" } },
     { path: "/fulfillment/returnable-movements", element: createElement(ReturnableMovementsPage), handle: { title: "Returnable packaging movements" } },
     { path: "/fulfillment/returnable-aging", element: createElement(ReturnableAgingPage), handle: { title: "Returnable packaging aging" } },
@@ -83,6 +85,7 @@ const fulfillment: PassageModule = {
     { label: "Returnable aging", to: "/fulfillment/returnable-aging", duty: "WarehouseView" },
     { label: "Warehouse settings", to: "/fulfillment/warehouse-settings", duty: "WarehouseView" },
     { label: "Release rules", to: "/fulfillment/release-rules", duty: "WarehouseView" },
+    { label: "Over-delivery tolerances", to: "/fulfillment/delivery-tolerances", duty: "WarehouseView" },
     { label: "Posting settings", to: "/fulfillment/legal-entity-settings", duty: "WarehouseView" },
   ],
 };

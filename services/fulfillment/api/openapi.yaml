@@ -217,6 +217,21 @@ components:
         waveMaxOrders: { type: integer, minimum: 1, maximum: 500, description: "wave_max_orders: the picking workbench default when a call names no maxOrders." }
         version: { type: integer, minimum: 0, description: "0 when no rule is saved." }
         updatedAt: { type: [string, "null"], format: date-time }
+    DeliveryTolerance:
+      type: object
+      required: [id, productId, customerId, overdeliveryPct, version, updatedAt]
+      description: >
+        The over-delivery tolerance of one scope (BR-28.7, overdelivery_pct of section 5.27):
+        the percentage of the planned quantity a pick may exceed. A pick takes the most specific
+        saved scope: product and customer, then product, then customer, then the general one
+        (neither named); none saved means 0.
+      properties:
+        id: { type: string, format: uuid }
+        productId: { type: [string, "null"], format: uuid, description: "Null for every product." }
+        customerId: { type: [string, "null"], format: uuid, description: "Null for every customer." }
+        overdeliveryPct: { $ref: "#/components/schemas/Decimal", description: "0 to 100 with at most 4 decimals." }
+        version: { type: integer, minimum: 1 }
+        updatedAt: { type: string, format: date-time }
     LegalEntitySetting:
       type: object
       required: [legalEntityId, cogsAtShipment, asnEnabled, version]
@@ -298,6 +313,7 @@ components:
         zone: { type: [string, "null"], description: "Pick zone, given at release (FR-28.13)." }
         shortPickReason: { type: [string, "null"], enum: [OUT_OF_STOCK, DAMAGED, NOT_FOUND, QUALITY_HOLD, OTHER, null], description: "Reason given for the latest short pick, if any." }
         trackingRequired: { type: boolean, description: "The product carries a batch or serial tracking dimension (BR-28.10); the slip cannot post until the quantity it ships is covered by tracking entries (FUL-0006)." }
+        overTolerancePct: { $ref: "#/components/schemas/Decimal", description: "Over-delivery tolerance in percent of the planned quantity in force when the pick was last confirmed (BR-28.7); qtyPicked may exceed qtyPlanned by up to that much. 0 when none applies." }
         partial: { type: boolean, description: "Released for less than the order line quantity because ATP was short (release_requires_full_atp false); a later release run releases the open remainder." }
         tracking:
           type: array
@@ -727,7 +743,7 @@ paths:
         "404": { description: "FUL-0020 shipment or FUL-0041 line not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "409": { description: FUL-0021 invalid move, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0001 status, FUL-0065 a JOURNAL order, FUL-0004 over-pick, FUL-0030 negative, FUL-0035 below the captured batch and serial entries, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 status, FUL-0065 a JOURNAL order, FUL-0004 over-pick (no tolerance applies), FUL-0005 above the planned quantity plus the over-delivery tolerance, FUL-0066 above plan beyond the quantity the order line keeps after sales cancelled the remainder, FUL-0030 negative, FUL-0035 below the captured batch and serial entries, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/shipments/{id}/containers:
     post:
@@ -1781,6 +1797,71 @@ paths:
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: "FUL-0057 the warehouse belongs to another legal entity, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/delivery-tolerances:
+    get:
+      operationId: listDeliveryTolerances
+      summary: Over-delivery tolerances per product and customer (BR-28.7)
+      description: >
+        The saved over-delivery tolerances, the most specific scopes first, optionally of one
+        product or one customer.
+      x-passage-duty: WarehouseView
+      parameters:
+        - { name: productId, in: query, required: false, schema: { type: string, format: uuid }, description: "Only the tolerances saved for this product." }
+        - { name: customerId, in: query, required: false, schema: { type: string, format: uuid }, description: "Only the tolerances saved for this customer." }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500, default: 100 }, description: "Most rows returned." }
+      responses:
+        "200":
+          description: Delivery tolerances
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/DeliveryTolerance" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: saveDeliveryTolerance
+      summary: Set the over-delivery tolerance of a product and customer scope (BR-28.7)
+      description: >
+        Creates or replaces the tolerance of the scope named by productId and customerId (either
+        or both may be left out; both left out is the general tolerance). If-Match carries the
+        version read, 0 when the scope has none; of two first saves at the same moment one is
+        written and the other gets 412. A confirm-pick above the planned quantity is accepted up
+        to planned plus this percentage; above it is refused with FUL-0005, and with no tolerance
+        it is FUL-0004. Publishes deliverytolerance.changed with the value replaced.
+      x-passage-duty: PackingRuleMaintain
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [overdeliveryPct]
+              properties:
+                productId: { type: [string, "null"], format: uuid }
+                customerId: { type: [string, "null"], format: uuid }
+                overdeliveryPct: { $ref: "#/components/schemas/Decimal", description: "0 to 100, at most 4 decimals." }
+      responses:
+        "200":
+          description: The saved tolerance; ETag carries the new version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeliveryTolerance" }
+          headers:
+            ETag: { schema: { type: string } }
+        "400": { description: "FUL-0050 validation (If-Match, productId, customerId, overdeliveryPct), FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/legal-entity-settings:
     get:
       operationId: listLegalEntitySettings
@@ -2196,7 +2277,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: "FUL-0052 wave or FUL-0041 line not in the wave", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0001 wave CLOSED or shipment status, FUL-0065 a JOURNAL order, FUL-0004 over-pick, FUL-0030 negative, FUL-0035 below the captured batch and serial entries, FUL-0050 nothing left to pick or reason on a full pick, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 wave CLOSED or shipment status, FUL-0065 a JOURNAL order, FUL-0004 over-pick (no tolerance applies), FUL-0005 above the planned quantity plus the over-delivery tolerance, FUL-0066 above plan beyond the quantity the order line keeps after sales cancelled the remainder, FUL-0030 negative, FUL-0035 below the captured batch and serial entries, FUL-0050 nothing left to pick or reason on a full pick, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/waves/{id}:assign:
     post:
       operationId: assignWave

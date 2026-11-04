@@ -224,7 +224,7 @@ func cutsFor(orderLineID string, kept decimal.Decimal, rows []openLine) ([]cutLi
 	shipped, unshipped := decimal.Zero, decimal.Zero
 	for _, r := range rows {
 		shipped = shipped.Add(r.shipped)
-		unshipped = unshipped.Add(r.planned.Sub(r.shipped))
+		unshipped = unshipped.Add(decimal.Max(decimal.Zero, r.planned.Sub(r.shipped)))
 	}
 	allowed := decimal.Max(decimal.Zero, kept.Sub(shipped))
 	remaining := decimal.Max(decimal.Zero, unshipped.Sub(allowed))
@@ -347,7 +347,8 @@ func applyCuts(ctx context.Context, tx pgx.Tx, tenantID, shipmentID string, cuts
 		if l.Shipped.IsPositive() {
 			anyShipped = true
 		}
-		if !l.Shipped.Equal(l.Planned) {
+		// An over-shipped line (BR-28.7 tolerance) has shipped its plan too.
+		if l.Shipped.LessThan(l.Planned) {
 			allShipped = false
 		}
 		if l.Packed.GreaterThan(l.Shipped) {
