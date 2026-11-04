@@ -10,6 +10,7 @@ import {
   listModelServiceSpecs,
   putServiceSpec,
   changeRFQ,
+  createRFQFromRequisitions,
   compareRFQ,
   confirmDeliveryDate,
   deleteDeliverySchedule,
@@ -188,6 +189,20 @@ describe("purchasing API client", () => {
       "/api/v1/procurement/rfqs/q1/compare",
       "/api/v1/procurement/rfqs/q1/compare?rule=LEAD_TIME",
     ]);
+  });
+
+  it("starts an RFQ from requisition lines with an Idempotency-Key", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ id: "q1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await createRFQFromRequisitions({ requisitionLineIds: ["l1"], replyDeadline: "2099-01-15T17:00:00.000Z" }, "key-r");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/v1/procurement/rfqs:from-requisitions");
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBe("key-r");
+    expect(JSON.parse(String(init.body))).toEqual({
+      requisitionLineIds: ["l1"],
+      replyDeadline: "2099-01-15T17:00:00.000Z",
+    });
   });
 
   it("awards and closes RFQs with If-Match and an Idempotency-Key", async () => {

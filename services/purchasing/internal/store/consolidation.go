@@ -52,7 +52,7 @@ func scanSourcingLine(row pgx.CollectableRow) (SourcingLine, error) {
 }
 
 // ListOpenRequisitionLines is the consolidation queue: OPEN lines of APPROVED
-// requisitions, newest first by line id. NEEDS_SOURCING keeps lines without a
+// requisitions that no running RFQ is sourcing (DRAFT, SENT, REPLIES_OPEN or CLOSED), newest first by line id. NEEDS_SOURCING keeps lines without a
 // preferred vendor, HAS_VENDOR those with one; VendorID keeps one vendor's lines.
 func (s *Postgres) ListOpenRequisitionLines(ctx context.Context, f SourcingFilter, after string, limit int) (Page[SourcingLine], error) {
 	p, _ := tenant.FromContext(ctx)
@@ -65,6 +65,8 @@ func (s *Postgres) ListOpenRequisitionLines(ctx context.Context, f SourcingFilte
 			where l.tenant_id = $1 and l.status = 'OPEN' and r.status = 'APPROVED'
 			and ($2 = '' or ($2 = 'NEEDS_SOURCING') = (l.preferred_vendor_id is null))
 			and ($3 = '' or l.preferred_vendor_id::text = $3)
+			and not exists (select 1 from purchase_rfq_line rl join purchase_rfq q on q.tenant_id = rl.tenant_id and q.id = rl.rfq_id
+				where rl.tenant_id = l.tenant_id and rl.requisition_line_id = l.id and q.status in ('DRAFT', 'SENT', 'REPLIES_OPEN', 'CLOSED'))
 			and ($4::uuid is null or l.id < $4::uuid)
 			order by l.id desc limit $5`, p.TenantID, f.Sourcing, f.VendorID, nullable(after), limit+1)
 		if err != nil {
@@ -125,6 +127,9 @@ func (s *Postgres) ConsolidateRequisitionLines(ctx context.Context, orders []Pur
 			out, err = loadLinkedOrders(ctx, tx, lineIDs)
 			return err
 		}
+		if _, err := lockRequisitionLines(ctx, tx, orders); err != nil {
+			return err
+		}
 		for _, o := range orders {
 			o.ID = ids.New()
 			po, err := insertPurchaseOrder(ctx, tx, o)
@@ -136,6 +141,25 @@ func (s *Postgres) ConsolidateRequisitionLines(ctx context.Context, orders []Pur
 		return nil
 	})
 	return out, err
+}
+
+// lockRequisitionLines locks every requisition line the orders reference in one statement, in line id order,
+// before any order claims its own. A write that creates several POs (consolidation, an RFQ award) would
+// otherwise lock them PO by PO, out of id order, and could deadlock with a consolidation or a new RFQ locking
+// the same lines in id order.
+func lockRequisitionLines(ctx context.Context, tx pgx.Tx, orders []PurchaseOrder) ([]SourcingLine, error) {
+	var lineIDs []string
+	for _, o := range orders {
+		for _, l := range o.Lines {
+			if l.RequisitionLineID != "" {
+				lineIDs = append(lineIDs, l.RequisitionLineID)
+			}
+		}
+	}
+	if len(lineIDs) == 0 {
+		return nil, nil
+	}
+	return loadSourcingLines(ctx, tx, lineIDs, true)
 }
 
 // claimRequisitionLines locks the requisition lines a PO references and checks
@@ -174,6 +198,12 @@ func claimRequisitionLines(ctx context.Context, tx pgx.Tx, po PurchaseOrder) ([]
 		if s.LegalEntityID != po.LegalEntityID {
 			return nil, httpx.NewProblem(http.StatusUnprocessableEntity, CodeRequisitionLegalEntity, fmt.Sprintf(
 				"requisition %s belongs to another legal entity than the purchase order", s.RequisitionNumber))
+		}
+		if number, held, err := liveRFQOf(ctx, tx, id); err != nil {
+			return nil, err
+		} else if held {
+			return nil, httpx.NewProblem(http.StatusConflict, CodeRequisitionOnRFQ, fmt.Sprintf(
+				"requisition %s line %d is being sourced on %s; award or cancel the RFQ first", s.RequisitionNumber, s.LineNo, number))
 		}
 		if !seen[s.RequisitionID] {
 			seen[s.RequisitionID] = true

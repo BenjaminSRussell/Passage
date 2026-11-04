@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import {
   consolidateRequisitions,
+  createRFQFromRequisitions,
   describeProblem,
   listOpenRequisitionLines,
   newIdempotencyKey,
@@ -12,6 +13,7 @@ import {
   type SourcingLine,
   type Warning,
 } from "./api/client";
+import { defaultDeadline } from "./RfqPages";
 import { LoadError, ShortId, money, useResource, uuidPattern, type Failure } from "./parts";
 import styles from "./pages.module.css";
 
@@ -46,12 +48,29 @@ export function validateConsolidation(rows: SourcingLine[], selected: Set<string
 }
 
 /**
+ * Checks the selection before an RFQ is started: at least one line, all of one legal entity (the service
+ * refuses a mix with PRC-REQ-005), and a reply deadline in the future (FR-17.3, FR-17.4).
+ */
+export function validateSourcing(rows: SourcingLine[], selected: Set<string>, deadline: string, now = new Date()): Errors {
+  const errors: Errors = {};
+  const chosen = rows.filter((l) => selected.has(l.id));
+  if (chosen.length === 0) errors.lines = "Select at least one line.";
+  else if (new Set(chosen.map((l) => l.legalEntityId)).size > 1) errors.lines = "Select lines of one legal entity: an RFQ belongs to one.";
+  const when = new Date(deadline);
+  if (deadline === "" || Number.isNaN(when.getTime())) errors.replyDeadline = "Enter the reply deadline.";
+  else if (when <= now) errors.replyDeadline = "Choose a deadline in the future.";
+  return errors;
+}
+
+/**
  * Consolidation board (FR-17.3, 3.17.6): approved requisition lines waiting to
  * be ordered. The buyer selects lines, may override the vendor per line, and
  * the service groups them into one purchase order per vendor, currency, site
  * and delivery window.
  */
 export function ConsolidationPage() {
+  const navigate = useNavigate();
+  const [deadline, setDeadline] = useState(() => defaultDeadline());
   const [sourcing, setSourcing] = useState<SourcingFilter | "">("");
   const [cursor, setCursor] = useState<string | undefined>();
   const [rows, setRows] = useState<SourcingLine[]>([]);
@@ -73,6 +92,8 @@ export function ConsolidationPage() {
     [sourcing, cursor, tick],
   );
   const key = useMemo(() => newIdempotencyKey(), [selected, vendors, windowDays]);
+  // One key per selection and deadline, so a retry after a lost response returns the RFQ already started.
+  const rfqKey = useMemo(() => newIdempotencyKey(), [selected, deadline]);
 
   const toggle = (id: string, on: boolean) =>
     setSelected((s) => {
@@ -107,6 +128,29 @@ export function ConsolidationPage() {
     } catch (error) {
       setFailure(describeProblem(error));
     } finally {
+      setBusy(false);
+    }
+  }
+
+  async function startRFQ() {
+    const found = validateSourcing(rows, selected, deadline);
+    setErrors(found);
+    setFailure(null);
+    setCreated([]);
+    setWarnings([]);
+    if (Object.keys(found).length > 0) return;
+    setBusy(true);
+    try {
+      const { body } = await createRFQFromRequisitions(
+        {
+          requisitionLineIds: rows.filter((l) => selected.has(l.id)).map((l) => l.id),
+          replyDeadline: new Date(deadline).toISOString(),
+        },
+        rfqKey,
+      );
+      navigate(`/purchasing/rfqs/${body.id}`);
+    } catch (error) {
+      setFailure(describeProblem(error));
       setBusy(false);
     }
   }
@@ -156,12 +200,12 @@ export function ConsolidationPage() {
     },
   ];
 
-  const lineErrors = Object.entries(errors).filter(([k]) => k !== "windowDays");
+  const lineErrors = Object.entries(errors).filter(([k]) => k !== "windowDays" && k !== "replyDeadline");
   return (
     <div className={styles.stack}>
       <PageHeader
         title="Consolidation"
-        description="Approved requisition lines waiting to be ordered. Select lines and create purchase orders: one per vendor, currency, site, warehouse and delivery window."
+        description="Approved requisition lines waiting to be ordered. Select lines and create purchase orders: one per vendor, currency, site, warehouse and delivery window. Lines with no vendor can start an RFQ instead; they stay out of this list until the RFQ is awarded or cancelled."
       />
       <div className={styles.toolbar}>
         <div className={styles.filter}>
@@ -187,6 +231,11 @@ export function ConsolidationPage() {
         <div className={styles.filter}>
           <FormField id="cons-window" label="Delivery window (days)" hint="Lines requested within this many days share an order" error={errors.windowDays}>
             {(c) => <Input {...c} inputMode="numeric" value={windowDays} onChange={(e) => setWindowDays(e.target.value)} />}
+          </FormField>
+        </div>
+        <div className={styles.filter}>
+          <FormField id="cons-deadline" label="RFQ reply deadline" hint="Your local time; used by Start RFQ" error={errors.replyDeadline}>
+            {(c) => <Input {...c} type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} />}
           </FormField>
         </div>
       </div>
@@ -223,6 +272,9 @@ export function ConsolidationPage() {
       <div className={styles.actions}>
         <Button variant="primary" loading={busy} onClick={() => void consolidate()}>
           Create purchase orders
+        </Button>
+        <Button loading={busy} onClick={() => void startRFQ()}>
+          Start RFQ for selected lines
         </Button>
         <p className={styles.muted}>{selected.size === 1 ? "1 line selected" : `${selected.size} lines selected`}</p>
       </div>

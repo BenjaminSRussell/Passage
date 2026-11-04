@@ -208,6 +208,8 @@ func (a *API) Register(r chi.Router) {
 		rfqMaintain := r.With(authz.RequireDuty(dutyRFQMaintain))
 		rfqRead := r.With(authz.Require(anyDuty{dutyRFQMaintain, dutyRFQAward}, dutyRFQMaintain+" or "+dutyRFQAward, ""))
 		rfqMaintain.Post("/rfqs", a.createRFQ)
+		// Requisition lines that need sourcing become a DRAFT RFQ (FR-17.3).
+		rfqMaintain.Post("/rfqs:from-requisitions", a.createRFQFromRequisitions)
 		rfqRead.Get("/rfqs", a.listRFQs)
 		rfqRead.Get("/rfqs/{id}", a.getRFQ)
 		r.Post("/rfqs/{id}", a.rfqAction)

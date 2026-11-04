@@ -485,7 +485,7 @@ func buildAwardOrders(rfq domain.RFQ, awards []domain.Award, today domain.Day) (
 		po.Order.Lines = append(po.Order.Lines, store.PurchaseOrderLine{LineNo: len(po.Order.Lines) + 1,
 			ProductID: ln.ProductID, Description: ln.Description, Qty: ln.Qty, Unit: ln.Unit,
 			UnitPrice: rp.UnitPrice, PriceUnit: unit, DiscountPct: decimal.Zero, DeliveryDate: due,
-			PriceSource: "RFQ_REPLY:" + rp.ID})
+			PriceSource: "RFQ_REPLY:" + rp.ID, RequisitionLineID: ln.RequisitionLineID})
 		po.ReplyIDs = append(po.ReplyIDs, rp.ID)
 		inputs[i] = append(inputs[i], domain.LineInput{Qty: ln.Qty, UnitPrice: rp.UnitPrice, PriceUnit: unit,
 			DiscountPct: decimal.Zero, Tax: decimal.Zero})

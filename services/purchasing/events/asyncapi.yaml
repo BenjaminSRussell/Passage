@@ -1104,6 +1104,7 @@ components:
               qty: { type: string, description: decimal string }
               unit: { type: string }
               required_date: { type: string, format: date }
+              requisition_line_id: { type: string, format: uuid, description: The requisition line the RFQ line was raised for, when it was }
     RFQAwardedData:
       type: object
       required: [rfq_id, number, legal_entity_id, awards]
@@ -1123,6 +1124,7 @@ components:
               line_id: { type: string, format: uuid }
               reply_id: { type: string, format: uuid }
               vendor_id: { type: string, format: uuid }
+              requisition_line_id: { type: string, format: uuid, description: The requisition line the awarded RFQ line was raised for, when it was }
               unit_price: { type: string, description: decimal string }
               price_unit: { type: string, description: decimal string }
               currency: { type: string, pattern: '^[A-Z]{3}$' }

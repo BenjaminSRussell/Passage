@@ -85,10 +85,14 @@ func insertRFQ(ctx context.Context, tx pgx.Tx, in domain.RFQ) (domain.RFQ, error
 			return domain.RFQ{}, err
 		}
 	}
+	if err := claimRFQRequisitionLines(ctx, tx, in); err != nil {
+		return domain.RFQ{}, err
+	}
 	for i, l := range in.Lines {
-		if _, err := tx.Exec(ctx, `insert into purchase_rfq_line (tenant_id, rfq_id, line_no, id, product_id, description, qty, unit, required_date)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, p.TenantID, in.ID, i+1, ids.New(), nullable(l.ProductID), l.Description,
-			l.Qty, l.Unit, optDay(l.RequiredDate)); err != nil {
+		if _, err := tx.Exec(ctx, `insert into purchase_rfq_line (tenant_id, rfq_id, line_no, id, product_id, description, qty, unit, required_date,
+			requisition_line_id)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`, p.TenantID, in.ID, i+1, ids.New(), nullable(l.ProductID), l.Description,
+			l.Qty, l.Unit, optDay(l.RequiredDate), nullable(l.RequisitionLineID)); err != nil {
 			return domain.RFQ{}, err
 		}
 	}
@@ -199,7 +203,7 @@ func rfqSentData(r domain.RFQ, vendorIDs []string) purchasingevents.RFQSentData 
 		ReplyDeadline: r.ReplyDeadline.UTC().Format(time.RFC3339), Lines: make([]purchasingevents.RFQLineData, 0, len(r.Lines))}
 	for _, l := range r.Lines {
 		line := purchasingevents.RFQLineData{LineNo: l.LineNo, LineID: l.ID, ProductID: l.ProductID, Description: l.Description,
-			Qty: l.Qty.String(), Unit: l.Unit}
+			Qty: l.Qty.String(), Unit: l.Unit, RequisitionLineID: l.RequisitionLineID}
 		if l.RequiredDate != nil {
 			line.RequiredDate = l.RequiredDate.String()
 		}
@@ -366,6 +370,21 @@ func (s *Postgres) AwardRFQ(ctx context.Context, id string, ifMatch int, awards 
 		if err := checkOrdersMatchAwards(awards, orders); err != nil {
 			return err
 		}
+		// The RFQ is AWARDED before the POs are written, so the requisition lines it was raised for are
+		// no longer held by a running RFQ when the PO lines claim them; it is one transaction, so a PO that
+		// cannot be written (a requisition line no longer OPEN) rolls the status back with everything else.
+		if err := bumpRFQ(ctx, tx, id, domain.RFQAwarded, cur.Version); err != nil {
+			return err
+		}
+		awarded := make([]PurchaseOrder, len(orders))
+		for i, ao := range orders {
+			awarded[i] = ao.Order
+		}
+		src, err := lockRequisitionLines(ctx, tx, awarded)
+		if err != nil {
+			return err
+		}
+		fromRequisition(orders, src)
 		poByReply := make(map[string]string, len(awards))
 		for _, ao := range orders {
 			order := ao.Order
@@ -388,8 +407,10 @@ func (s *Postgres) AwardRFQ(ctx context.Context, id string, ifMatch int, awards 
 			replies[r.ID] = r
 		}
 		lineNo := make(map[string]int, len(cur.Lines))
+		reqLine := make(map[string]string, len(cur.Lines))
 		for _, l := range cur.Lines {
 			lineNo[l.ID] = l.LineNo
+			reqLine[l.ID] = l.RequisitionLineID
 		}
 		data := purchasingevents.RFQAwardedData{RFQID: id, Number: cur.Number, LegalEntityID: cur.LegalEntityID}
 		for _, a := range awards {
@@ -403,11 +424,8 @@ func (s *Postgres) AwardRFQ(ctx context.Context, id string, ifMatch int, awards 
 				return err
 			}
 			data.Awards = append(data.Awards, purchasingevents.RFQAwardedLine{LineNo: lineNo[a.LineID], LineID: a.LineID, ReplyID: a.ReplyID,
-				VendorID: rp.VendorID, UnitPrice: rp.UnitPrice.String(), PriceUnit: rp.PriceUnit.String(), Currency: rp.Currency,
+				VendorID: rp.VendorID, RequisitionLineID: reqLine[a.LineID], UnitPrice: rp.UnitPrice.String(), PriceUnit: rp.PriceUnit.String(), Currency: rp.Currency,
 				LeadTimeDays: rp.LeadTimeDays, PurchaseOrderID: poByReply[a.ReplyID], OverrideReason: reason})
-		}
-		if err := bumpRFQ(ctx, tx, id, domain.RFQAwarded, cur.Version); err != nil {
-			return err
 		}
 		if err := enqueue(ctx, tx, "rfq", id, purchasingevents.RFQAwarded, data); err != nil {
 			return err
@@ -416,6 +434,34 @@ func (s *Postgres) AwardRFQ(ctx context.Context, id string, ifMatch int, awards 
 		return err
 	})
 	return out, pos, err
+}
+
+// fromRequisition gives an awarded PO line raised for a requisition line what consolidation would have
+// taken from it (FR-17.3): its procurement category and where it is delivered (site and warehouse). The RFQ
+// line does not carry them, and an award groups lines by vendor and currency only, so they go on the line.
+func fromRequisition(orders []AwardedOrder, src []SourcingLine) {
+	byID := make(map[string]SourcingLine, len(src))
+	for _, s := range src {
+		byID[s.ID] = s
+	}
+	for i := range orders {
+		for j := range orders[i].Order.Lines {
+			l := &orders[i].Order.Lines[j]
+			s, ok := byID[l.RequisitionLineID]
+			if !ok {
+				continue
+			}
+			if l.Category == "" {
+				l.Category = s.Category
+			}
+			if l.SiteID == "" {
+				l.SiteID = s.SiteID
+			}
+			if l.WarehouseID == "" {
+				l.WarehouseID = s.WarehouseID
+			}
+		}
+	}
 }
 
 // checkOrdersMatchAwards guards against orders built from another read of the
@@ -545,7 +591,8 @@ func loadRFQ(ctx context.Context, tx pgx.Tx, id string) (domain.RFQ, error) {
 		return domain.RFQ{}, err
 	}
 
-	lines, err := tx.Query(ctx, `select id, line_no, coalesce(product_id::text, ''), description, qty, unit, required_date
+	lines, err := tx.Query(ctx, `select id, line_no, coalesce(product_id::text, ''), description, qty, unit, required_date,
+		coalesce(requisition_line_id::text, '')
 		from purchase_rfq_line where tenant_id = $1 and rfq_id = $2 order by line_no`, p.TenantID, id)
 	if err != nil {
 		return domain.RFQ{}, err
@@ -553,7 +600,7 @@ func loadRFQ(ctx context.Context, tx pgx.Tx, id string) (domain.RFQ, error) {
 	o.Lines, err = pgx.CollectRows(lines, func(row pgx.CollectableRow) (domain.RFQLine, error) {
 		var l domain.RFQLine
 		var due *time.Time
-		err := row.Scan(&l.ID, &l.LineNo, &l.ProductID, &l.Description, &l.Qty, &l.Unit, &due)
+		err := row.Scan(&l.ID, &l.LineNo, &l.ProductID, &l.Description, &l.Qty, &l.Unit, &due, &l.RequisitionLineID)
 		l.RequiredDate = dayOrNil(due)
 		return l, err
 	})
@@ -633,4 +680,68 @@ func loadAwardedOrders(ctx context.Context, tx pgx.Tx, rfqID string) ([]Purchase
 		out = append(out, po)
 	}
 	return out, nil
+}
+
+// liveRFQOf names the running RFQ (DRAFT, SENT, REPLIES_OPEN or CLOSED) that holds a requisition line, if any.
+func liveRFQOf(ctx context.Context, tx pgx.Tx, requisitionLineID string) (string, bool, error) {
+	p, _ := tenant.FromContext(ctx)
+	var number string
+	err := tx.QueryRow(ctx, `select q.number from purchase_rfq_line rl
+		join purchase_rfq q on q.tenant_id = rl.tenant_id and q.id = rl.rfq_id
+		where rl.tenant_id = $1 and rl.requisition_line_id = $2 and q.status in ('DRAFT', 'SENT', 'REPLIES_OPEN', 'CLOSED')
+		order by q.number limit 1`, p.TenantID, requisitionLineID).Scan(&number)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	return number, err == nil, err
+}
+
+// claimRFQRequisitionLines locks the requisition lines a new RFQ is raised for and checks that each is OPEN on an
+// APPROVED requisition of the RFQ's legal entity, listed once, and not held by another running RFQ (FR-17.3).
+func claimRFQRequisitionLines(ctx context.Context, tx pgx.Tx, in domain.RFQ) error {
+	var lineIDs []string
+	seen := map[string]bool{}
+	for _, l := range in.Lines {
+		if l.RequisitionLineID == "" {
+			continue
+		}
+		if seen[l.RequisitionLineID] {
+			return &domain.Error{Code: domain.CodeValidation, Detail: "requisition line " + l.RequisitionLineID + " is listed twice"}
+		}
+		seen[l.RequisitionLineID] = true
+		lineIDs = append(lineIDs, l.RequisitionLineID)
+	}
+	if len(lineIDs) == 0 {
+		return nil
+	}
+	src, err := loadSourcingLines(ctx, tx, lineIDs, true)
+	if err != nil {
+		return err
+	}
+	byID := make(map[string]SourcingLine, len(src))
+	for _, s := range src {
+		byID[s.ID] = s
+	}
+	for _, id := range lineIDs {
+		s, ok := byID[id]
+		if !ok {
+			return httpx.NewProblem(http.StatusNotFound, CodeRequisitionLineNotFound, "requisition line "+id+" not found")
+		}
+		if s.Status != "OPEN" || s.RequisitionStatus != RequisitionApproved {
+			return httpx.NewProblem(http.StatusConflict, CodeRequisitionState, fmt.Sprintf(
+				"requisition %s line %d is %s on a %s requisition; only OPEN lines of APPROVED requisitions can be sourced",
+				s.RequisitionNumber, s.LineNo, s.Status, s.RequisitionStatus))
+		}
+		if s.LegalEntityID != in.LegalEntityID {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeRequisitionLegalEntity, fmt.Sprintf(
+				"requisition %s belongs to another legal entity than the RFQ", s.RequisitionNumber))
+		}
+		if number, held, err := liveRFQOf(ctx, tx, id); err != nil {
+			return err
+		} else if held {
+			return httpx.NewProblem(http.StatusConflict, CodeRequisitionOnRFQ, fmt.Sprintf(
+				"requisition %s line %d is already being sourced on %s", s.RequisitionNumber, s.LineNo, number))
+		}
+	}
+	return nil
 }

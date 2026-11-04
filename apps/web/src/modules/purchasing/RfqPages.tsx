@@ -424,6 +424,11 @@ const lineColumns: DataTableColumn<RFQLine>[] = [
   { key: "item", header: "Item", render: lineItem },
   { key: "qty", header: "Quantity", align: "end", render: (l) => `${l.qty} ${l.unit}` },
   { key: "requiredDate", header: "Required by", mono: true, render: (l) => l.requiredDate ?? "—" },
+  {
+    key: "requisitionLineId",
+    header: "Requisition line",
+    render: (l) => (l.requisitionLineId ? <ShortId id={l.requisitionLineId} /> : "—"),
+  },
 ];
 
 const invitationColumns: DataTableColumn<RFQInvitation>[] = [

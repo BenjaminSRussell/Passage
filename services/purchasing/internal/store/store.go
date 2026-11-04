@@ -28,10 +28,12 @@ const (
 	CodeRequisitionState        = "PRC-REQ-STATE"
 	CodeRequisitionLineNotFound = "PRC-REQ-LINE-NOT-FOUND"
 	CodeRequisitionLegalEntity  = "PRC-REQ-005"
-	CodeAgreementNotFound       = "PRC-AGR-NOT-FOUND"
-	CodeVersionConflict         = "PRC-VERSION-CONFLICT"
-	CodeIdempotencyReuse        = "idempotency_key_reuse"
-	eventSource                 = "/passage/procurement/purchasing"
+	// CodeRequisitionOnRFQ is the 409 for a requisition line a running RFQ is sourcing (FR-17.3).
+	CodeRequisitionOnRFQ  = "PRC-REQ-006"
+	CodeAgreementNotFound = "PRC-AGR-NOT-FOUND"
+	CodeVersionConflict   = "PRC-VERSION-CONFLICT"
+	CodeIdempotencyReuse  = "idempotency_key_reuse"
+	eventSource           = "/passage/procurement/purchasing"
 )
 
 // Page sizes for the list endpoints.

@@ -672,6 +672,8 @@ export interface RFQLine {
   qty: string;
   unit: string;
   requiredDate?: string;
+  /** The requisition line the RFQ line was raised for; an award orders it. */
+  requisitionLineId?: string;
 }
 
 export interface RFQInvitation {
@@ -818,6 +820,21 @@ export function getRFQ(id: string, signal?: AbortSignal) {
 
 export function createRFQ(input: RFQInput, idempotencyKey = newIdempotencyKey()) {
   return send<RFQ>("POST", "/rfqs", { body: input, headers: { "Idempotency-Key": idempotencyKey } });
+}
+
+/** Input of POST /rfqs:from-requisitions: OPEN lines of APPROVED requisitions of one legal entity (FR-17.3). */
+export interface RFQFromRequisitionsInput {
+  requisitionLineIds: string[];
+  /** RFC 3339 instant, in the future. */
+  replyDeadline: string;
+  rankingRule?: RankingRule;
+  sealed?: boolean;
+  criteria?: { name: string; weight: string }[];
+}
+
+/** Starts a DRAFT RFQ from requisition lines that need sourcing; the lines leave the consolidation queue. */
+export function createRFQFromRequisitions(input: RFQFromRequisitionsInput, idempotencyKey = newIdempotencyKey()) {
+  return send<RFQ>("POST", "/rfqs:from-requisitions", { body: input, headers: { "Idempotency-Key": idempotencyKey } });
 }
 
 /** Sends a DRAFT RFQ to vendors; version is the ETag read when it was loaded. */

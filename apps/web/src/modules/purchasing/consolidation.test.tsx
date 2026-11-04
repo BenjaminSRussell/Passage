@@ -1,6 +1,8 @@
 import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { SourcingLine } from "./api/client";
+import { validateSourcing } from "./ConsolidationPage";
 import { json, pageViolations, problem, renderAt, stubFetch } from "./testHarness";
 
 const LE = "11111111-1111-4111-8111-111111111111";
@@ -112,5 +114,72 @@ describe("consolidation board", () => {
     fireEvent.click(await screen.findByLabelText("Select PR-00000007 line 1"));
     fireEvent.click(screen.getByRole("button", { name: "Create purchase orders" }));
     expect(await screen.findByText(/is CONSOLIDATED \(PRC-REQ-STATE\)/)).toBeInTheDocument();
+  });
+
+  it("starts an RFQ from the selected lines and opens it", async () => {
+    const RFQ_ID = "99999999-9999-4999-8999-999999999999";
+    const rfq = {
+      id: RFQ_ID,
+      number: "RFQ-00000001",
+      legalEntityId: LE,
+      status: "DRAFT",
+      version: 1,
+      replyDeadline: "2099-01-15T17:00:00Z",
+      rankingRule: "LOWEST_PRICE",
+      createdAt: "2026-11-04T00:00:00Z",
+      updatedAt: "2026-11-04T00:00:00Z",
+      lines: [{ id: "l1", lineNo: 1, description: "Item 2", qty: "2", unit: "EA", requisitionLineId: L2 }],
+      invitations: [],
+      replies: [],
+      criteria: [],
+      scores: [],
+    };
+    const fetchMock = stubFetch((url, init) =>
+      init.method === "POST" ? json(rfq, 201) : json(String(url).includes("/rfqs/") ? rfq : queue),
+    );
+    renderAt("/purchasing/consolidation");
+    fireEvent.click(await screen.findByLabelText("Select PR-00000007 line 2"));
+    fireEvent.change(screen.getByLabelText("RFQ reply deadline"), { target: { value: "2099-01-15T17:00" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start RFQ for selected lines" }));
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(([, init]) => (init as RequestInit).method === "POST") as [string, RequestInit];
+      expect(post[0]).toBe("/api/v1/procurement/rfqs:from-requisitions");
+      expect((post[1].headers as Record<string, string>)["Idempotency-Key"]).toBeTruthy();
+      expect(JSON.parse(String(post[1].body))).toEqual({
+        requisitionLineIds: [L2],
+        replyDeadline: new Date("2099-01-15T17:00").toISOString(),
+      });
+    });
+    // The new RFQ opens, its line naming the requisition line it was raised for.
+    const lines = await findTable({ name: "RFQ lines" });
+    expect(within(lines).getByText(L2.slice(0, 8), { exact: false })).toBeInTheDocument();
+  });
+
+  it("checks the RFQ selection and deadline before calling the service and shows a refusal", async () => {
+    const fetchMock = stubFetch((_url, init) =>
+      init.method === "POST"
+        ? problem(409, "PRC-REQ-006", "requisition PR-00000007 line 1 is already being sourced on RFQ-00000002")
+        : json(queue),
+    );
+    renderAt("/purchasing/consolidation");
+    fireEvent.click(await screen.findByRole("button", { name: "Start RFQ for selected lines" }));
+    expect(await screen.findByText("Select at least one line.")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Select PR-00000007 line 1"));
+    fireEvent.change(screen.getByLabelText("RFQ reply deadline"), { target: { value: "2020-01-01T10:00" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start RFQ for selected lines" }));
+    expect(await screen.findByText("Choose a deadline in the future.")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.every(([, init]) => (init as RequestInit | undefined)?.method !== "POST")).toBe(true);
+    fireEvent.change(screen.getByLabelText("RFQ reply deadline"), { target: { value: "2099-01-15T17:00" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start RFQ for selected lines" }));
+    expect(await screen.findByText(/already being sourced on RFQ-00000002 \(PRC-REQ-006\)/)).toBeInTheDocument();
+  });
+
+  it("refuses an RFQ for lines of two legal entities before the round trip", () => {
+    const rows = [line(L1, 1), { ...line(L2, 2), legalEntityId: "88888888-8888-4888-8888-888888888888" }] as unknown as SourcingLine[];
+    const now = new Date("2026-11-04T00:00:00Z");
+    expect(validateSourcing(rows, new Set([L1, L2]), "2099-01-15T17:00", now).lines).toBe(
+      "Select lines of one legal entity: an RFQ belongs to one.",
+    );
+    expect(validateSourcing(rows, new Set([L1]), "2099-01-15T17:00", now)).toEqual({});
   });
 });
