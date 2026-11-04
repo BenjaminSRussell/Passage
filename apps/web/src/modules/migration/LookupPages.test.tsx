@@ -6,7 +6,7 @@ import { PrincipalProvider } from "../../shell/principal";
 import { findTable } from "../../test-utils";
 import type { LookupTable } from "./api/client";
 import migration from "./module";
-import { filterEntries, parseEntriesText, parseLookupForm } from "./lookupDomain";
+import { checkImportText, filterEntries, parseEntriesText, parseLookupForm } from "./lookupDomain";
 
 type Reply = { status: number; body: unknown };
 let handler: (url: URL, init: RequestInit) => Reply | undefined;
@@ -234,5 +234,104 @@ describe("lookup table detail", () => {
     routes((url) => (url.pathname.includes("/lookup-tables/") ? json(404, { code: "MIG-LOOKUP-NOT-FOUND", detail: "lookup table not found" }) : undefined));
     renderAt(`/migration/lookups/${ID}`);
     expect(await screen.findByText(/lookup table not found \(MIG-LOOKUP-NOT-FOUND\)/)).toBeInTheDocument();
+  });
+});
+
+describe("lookup table CSV import", () => {
+  const importUrl = (url: URL) => url.pathname.endsWith(`/lookup-tables/${ID}:import`);
+  const result = (over: object = {}) => ({ table: { ...table, version: 3, entryCount: 4 }, summary: { rows: 2, added: 1, changed: 1, unchanged: 0, removed: 0 }, written: true, ...over });
+
+  it("sends the pasted lines under the current version and shows the outcome", async () => {
+    routes((url, init) => {
+      if (importUrl(url) && init.method === "POST") return json(200, result());
+      if (url.pathname.endsWith(`/lookup-tables/${ID}/versions`) && calls.some((c) => c.method === "POST")) return json(200, { items: [{ ...versions[0], version: 3 }, ...versions] });
+      return undefined;
+    });
+    const { container } = renderAt(`/migration/lookups/${ID}`);
+    await screen.findByRole("heading", { name: "unit-codes" });
+    expect(await screen.findByRole("link", { name: "Download as CSV" })).toHaveAttribute("href", `/api/v1/integration/lookup-tables/${ID}/entries.csv`);
+    expect(violations(container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Import as version 3" }));
+    expect(await screen.findByText("Choose a CSV file or paste its lines.")).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+
+    fireEvent.change(screen.getByLabelText("CSV lines"), { target: { value: "pallet,PAL\nkg,KG\n" } });
+    fireEvent.change(screen.getByLabelText("Entries not in the file"), { target: { value: "replace" } });
+    fireEvent.click(screen.getByLabelText("The first line is a header"));
+    fireEvent.click(screen.getByRole("button", { name: "Import as version 3" }));
+    expect(await screen.findByText("Saved as version 3: 1 added, 1 changed, 0 unchanged, 0 removed.")).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ version: 2, mode: "replace", hasHeader: true, csv: "pallet,PAL\nkg,KG\n" });
+    expect((screen.getByLabelText("CSV lines") as HTMLTextAreaElement).value).toBe("");
+    expect(await screen.findByRole("button", { name: "Import as version 4" })).toBeInTheDocument();
+  });
+
+  it("reads a chosen file into the lines box", async () => {
+    routes();
+    renderAt(`/migration/lookups/${ID}`);
+    await screen.findByRole("heading", { name: "unit-codes" });
+    const file = new File(["pallet,PAL\n"], "units.csv", { type: "text/csv" });
+    fireEvent.change(screen.getByLabelText(/CSV file/), { target: { files: [file] } });
+    await waitFor(() => expect((screen.getByLabelText("CSV lines") as HTMLTextAreaElement).value).toBe("pallet,PAL\n"));
+  });
+
+  it("says when the file changes nothing and keeps the lines", async () => {
+    routes((url, init) => (importUrl(url) && init.method === "POST" ? json(200, result({ written: false, table, summary: { rows: 1, added: 0, changed: 0, unchanged: 1, removed: 0 } })) : undefined));
+    renderAt(`/migration/lookups/${ID}`);
+    await screen.findByRole("heading", { name: "unit-codes" });
+    fireEvent.change(screen.getByLabelText("CSV lines"), { target: { value: "kg,KGM\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "Import as version 3" }));
+    expect(await screen.findByText(/Nothing to save: every line already matches version 2/)).toBeInTheDocument();
+    expect((screen.getByLabelText("CSV lines") as HTMLTextAreaElement).value).toBe("kg,KGM\n");
+  });
+
+  it("lets a reader download the version on screen", async () => {
+    routes();
+    renderAt(`/migration/lookups/${ID}`, ["migration.run"]);
+    await screen.findByRole("heading", { name: "unit-codes" });
+    expect(screen.getByRole("link", { name: "Download as CSV" })).toHaveAttribute("href", `/api/v1/integration/lookup-tables/${ID}/entries.csv`);
+    fireEvent.click(await screen.findByRole("button", { name: "Show v1" }));
+    await screen.findByText("Entries, version 1");
+    expect(screen.getByRole("link", { name: "Download as CSV" })).toHaveAttribute("href", `/api/v1/integration/lookup-tables/${ID}/entries.csv?version=1`);
+  });
+
+  it("offers a reload when the table changed since it was opened", async () => {
+    routes((url, init) => (importUrl(url) && init.method === "POST" ? json(409, { code: "MIG-VERSION-CONFLICT", detail: "current version is 3" }) : undefined));
+    renderAt(`/migration/lookups/${ID}`);
+    await screen.findByRole("heading", { name: "unit-codes" });
+    fireEvent.change(screen.getByLabelText("CSV lines"), { target: { value: "kg,KGM\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "Import as version 3" }));
+    expect(await screen.findByText(/current version is 3 \(MIG-VERSION-CONFLICT\)/)).toBeInTheDocument();
+    const before = calls.filter((c) => c.method === "GET").length;
+    fireEvent.click(screen.getByRole("button", { name: "Reload the table" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "GET").length).toBeGreaterThan(before));
+  });
+
+  it("shows the service's line errors", async () => {
+    routes((url, init) => (importUrl(url) && init.method === "POST" ? json(422, { code: "MIG-LOOKUP-INVALID", detail: "line 2: price needs a decimal" }) : undefined));
+    renderAt(`/migration/lookups/${ID}`);
+    await screen.findByRole("heading", { name: "unit-codes" });
+    fireEvent.change(screen.getByLabelText("CSV lines"), { target: { value: "kg,KGM\nbox,x\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "Import as version 3" }));
+    expect(await screen.findByText(/line 2: price needs a decimal \(MIG-LOOKUP-INVALID\)/)).toBeInTheDocument();
+  });
+
+  it("is hidden without the write duty and for an archived table", async () => {
+    routes();
+    const first = renderAt(`/migration/lookups/${ID}`, ["migration.run"]);
+    await screen.findByRole("heading", { name: "unit-codes" });
+    expect(screen.queryByText("Import from CSV")).not.toBeInTheDocument();
+    first.unmount();
+    routes((url) => (url.pathname.endsWith(`/lookup-tables/${ID}`) ? json(200, { ...table, status: "archived" }) : undefined));
+    renderAt(`/migration/lookups/${ID}`);
+    await screen.findByText("This table is archived");
+    expect(screen.queryByText("Import from CSV")).not.toBeInTheDocument();
+  });
+});
+
+describe("lookup import helpers", () => {
+  it("checks the text locally", () => {
+    expect(checkImportText("  \n")).toMatch(/Choose a CSV file/);
+    expect(checkImportText("x".repeat(2 * 1024 * 1024 + 1))).toMatch(/larger than 2 MB/);
+    expect(checkImportText("a,b")).toBeUndefined();
   });
 });

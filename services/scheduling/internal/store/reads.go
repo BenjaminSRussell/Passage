@@ -18,8 +18,8 @@ import (
 
 const (
 	resourceCols = "id::text, code, name, finite, time_zone, shifts, version, created_at, engineering_resource_id::text, efficiency_pct"
-	opCols       = "id::text, order_id::text, oper_number, minutes, due_at, ready_at, priority, candidate_resource_ids::text[], secondary_resource_ids::text[], setup_group, setup_minutes, attributes, network_id::text, status, created_at"
-	runCols      = "id::text, scope, mode, direction, finite, algorithm, status, operations_count, makespan_minutes, total_lateness_minutes, solver_status, messages, warnings, created_at"
+	opCols       = "id::text, order_id::text, oper_number, minutes, due_at, ready_at, priority, candidate_resource_ids::text[], secondary_resource_ids::text[], setup_group, setup_minutes, queue_before_minutes, queue_after_minutes, quantity::text, overlap_quantity::text, attributes, network_id::text, status, created_at, version, updated_at"
+	runCols      = "id::text, scope, mode, direction, finite, algorithm, status, operations_count, makespan_minutes, total_lateness_minutes, solver_status, messages, warnings, created_at, snapshot, rollback_of::text"
 )
 
 func scanResource(row pgx.Row, fp *string) (Resource, error) {
@@ -152,7 +152,7 @@ func scanOperation(row pgx.Row, fp *string) (Operation, error) {
 	var due, ready *time.Time
 	var attrs []byte
 	dest := []any{&o.ID, &o.OrderID, &o.OperNumber, &o.Minutes, &due, &ready, &o.Priority, &o.ResourceIDs, &o.SecondaryResourceIDs,
-		&o.SetupGroup, &o.SetupMinutes, &attrs, &o.NetworkID, &o.Status, &o.CreatedAt}
+		&o.SetupGroup, &o.SetupMinutes, &o.QueueBeforeMinutes, &o.QueueAfterMinutes, &o.Quantity, &o.OverlapQuantity, &attrs, &o.NetworkID, &o.Status, &o.CreatedAt, &o.Version, &o.UpdatedAt}
 	if fp != nil {
 		dest = append([]any{fp}, dest...)
 	}
@@ -223,10 +223,10 @@ func (s *Postgres) CreateOperation(ctx context.Context, in Operation, idem Idem)
 			}
 		}
 		row, err := scanOperation(tx.QueryRow(ctx, `insert into scheduling_operation (tenant_id, id, order_id, oper_number, minutes, due_at, ready_at, priority,
-				candidate_resource_ids, secondary_resource_ids, setup_group, setup_minutes, attributes, network_id, idempotency_key, idempotency_fingerprint)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10::uuid[], $11, $12, $13, $14, $15, $16) returning `+opCols,
+				candidate_resource_ids, secondary_resource_ids, setup_group, setup_minutes, queue_before_minutes, queue_after_minutes, quantity, overlap_quantity, attributes, network_id, idempotency_key, idempotency_fingerprint)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10::uuid[], $11, $12, $13, $14, $15::text::numeric, $16::text::numeric, $17, $18, $19, $20) returning `+opCols,
 			tenantOf(ctx), ids.New(), in.OrderID, in.OperNumber, in.Minutes, in.DueAt, in.ReadyAt, in.Priority, in.ResourceIDs, in.SecondaryResourceIDs,
-			in.SetupGroup, in.SetupMinutes, attrs, in.NetworkID, nullable(idem.Key), nullable(idem.Fingerprint)), nil)
+			in.SetupGroup, in.SetupMinutes, in.QueueBeforeMinutes, in.QueueAfterMinutes, in.Quantity, in.OverlapQuantity, attrs, in.NetworkID, nullable(idem.Key), nullable(idem.Fingerprint)), nil)
 		if err != nil {
 			return err
 		}
@@ -266,7 +266,7 @@ func scanRun(row pgx.Row, fp *string) (Run, error) {
 	var r Run
 	var msgs, warnings []byte
 	dest := []any{&r.ID, &r.Scope, &r.Mode, &r.Direction, &r.Finite, &r.Algorithm, &r.Status, &r.OperationsCount,
-		&r.MakespanMinutes, &r.TotalLatenessMinutes, &r.SolverStatus, &msgs, &warnings, &r.CreatedAt}
+		&r.MakespanMinutes, &r.TotalLatenessMinutes, &r.SolverStatus, &msgs, &warnings, &r.CreatedAt, &r.Snapshot, &r.RollbackOf}
 	if fp != nil {
 		dest = append([]any{fp}, dest...)
 	}
@@ -295,10 +295,10 @@ func insertRun(ctx context.Context, tx pgx.Tx, r *Run, idem Idem) error {
 		return err
 	}
 	return tx.QueryRow(ctx, `insert into schedule_run (tenant_id, id, scope, mode, direction, finite, algorithm, status, operations_count,
-		makespan_minutes, total_lateness_minutes, messages, warnings, idempotency_key, idempotency_fingerprint, finished_at)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now()) returning created_at`,
+		makespan_minutes, total_lateness_minutes, messages, warnings, idempotency_key, idempotency_fingerprint, finished_at, snapshot, rollback_of)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now(), $16, $17) returning created_at`,
 		tenantOf(ctx), r.ID, r.Scope, r.Mode, r.Direction, r.Finite, r.Algorithm, r.Status, r.OperationsCount,
-		r.MakespanMinutes, r.TotalLatenessMinutes, msgs, warnings, nullable(idem.Key), nullable(idem.Fingerprint)).Scan(&r.CreatedAt)
+		r.MakespanMinutes, r.TotalLatenessMinutes, msgs, warnings, nullable(idem.Key), nullable(idem.Fingerprint), r.Snapshot, r.RollbackOf).Scan(&r.CreatedAt)
 }
 
 // GetRun returns one schedule run.
@@ -382,7 +382,7 @@ func loadResources(ctx context.Context, tx pgx.Tx) ([]domain.Resource, map[strin
 // concurrent runs and moves over the same operations serialize.
 func loadOperations(ctx context.Context, tx pgx.Tx, where string, lock bool, args ...any) ([]domain.Operation, error) {
 	q := `select o.id::text, o.order_id::text, o.oper_number, o.minutes, o.due_at, o.ready_at, o.priority, o.candidate_resource_ids::text[], o.secondary_resource_ids::text[],
-			coalesce(o.setup_group, ''), o.setup_minutes, o.attributes, coalesce(n.code, '')
+			coalesce(o.setup_group, ''), o.setup_minutes, o.queue_before_minutes, o.queue_after_minutes, o.quantity::text, o.overlap_quantity::text, o.attributes, coalesce(n.code, '')
 		from scheduling_operation o
 		left join scheduling_resource_network n on n.tenant_id = o.tenant_id and n.id = o.network_id
 		where ` + where + ` order by o.order_id, o.oper_number`
@@ -399,10 +399,12 @@ func loadOperations(ctx context.Context, tx pgx.Tx, where string, lock bool, arg
 		var op domain.Operation
 		var due, ready *time.Time
 		var attrs []byte
+		var quantity, overlap *string
 		if err := rows.Scan(&op.ID, &op.OrderID, &op.OperNumber, &op.Minutes, &due, &ready, &op.Priority, &op.Candidates, &op.Secondaries,
-			&op.SetupGroup, &op.SetupMinutes, &attrs, &op.Network); err != nil {
+			&op.SetupGroup, &op.SetupMinutes, &op.QueueBefore, &op.QueueAfter, &quantity, &overlap, &attrs, &op.Network); err != nil {
 			return nil, err
 		}
+		op.OverlapBP = overlapShare(quantity, overlap)
 		if err := json.Unmarshal(attrs, &op.Attributes); err != nil {
 			return nil, err
 		}
@@ -458,9 +460,11 @@ func scanBusy(rows pgx.Rows) ([]domain.Busy, error) {
 // placementsOfOrders rebuilds each scheduled operation's placement of the
 // given orders from its segments, keyed by operation id.
 func placementsOfOrders(ctx context.Context, tx pgx.Tx, orderIDs []string) (map[string]domain.Placement, error) {
-	rows, err := tx.Query(ctx, `select job_id::text, order_id::text, oper_number, resource_id::text, start_at, end_at, late_minutes, changeover_minutes,
-			changeover_cost::text, changeover_currency, coalesce(cleaning_operation_set_id, '')
-		from scheduled_job where order_id = any($1::uuid[]) order by job_id, segment_no`, orderIDs)
+	rows, err := tx.Query(ctx, `select j.job_id::text, j.order_id::text, j.oper_number, j.resource_id::text, j.start_at, j.end_at, j.late_minutes, j.changeover_minutes,
+			j.changeover_cost::text, j.changeover_currency, coalesce(j.cleaning_operation_set_id, ''), coalesce(o.queue_after_minutes, 0), o.quantity::text, o.overlap_quantity::text
+		from scheduled_job j
+		left join scheduling_operation o on o.tenant_id = j.tenant_id and o.id = j.job_id
+		where j.order_id = any($1::uuid[]) order by j.job_id, j.segment_no`, orderIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -469,15 +473,16 @@ func placementsOfOrders(ctx context.Context, tx pgx.Tx, orderIDs []string) (map[
 	for rows.Next() {
 		var jobID, oid, rid, cleaning string
 		var cost, currency *string
-		var oper, late, changeover int
+		var oper, late, changeover, queueAfter int
+		var quantity, overlap *string
 		var start, end time.Time
-		if err := rows.Scan(&jobID, &oid, &oper, &rid, &start, &end, &late, &changeover, &cost, &currency, &cleaning); err != nil {
+		if err := rows.Scan(&jobID, &oid, &oper, &rid, &start, &end, &late, &changeover, &cost, &currency, &cleaning, &queueAfter, &quantity, &overlap); err != nil {
 			return nil, err
 		}
 		pl, ok := out[jobID]
 		if !ok {
 			pl = domain.Placement{OperationID: jobID, OrderID: oid, OperNumber: oper, ResourceID: rid, Start: start, LateMinutes: late,
-				ChangeoverMinutes: changeover, CleaningSetID: cleaning}
+				ChangeoverMinutes: changeover, CleaningSetID: cleaning, QueueAfter: queueAfter, OverlapBP: overlapShare(quantity, overlap)}
 			if cost != nil && currency != nil {
 				pl.ChangeoverCost = &money.Amount{Value: dec(*cost), Currency: *currency}
 			}
@@ -598,4 +603,13 @@ func efficiencyOrDefault(pct int) int {
 		return 100
 	}
 	return pct
+}
+
+// overlapShare is the operation's overlap share in basis points (BR-23.5)
+// from its stored quantity and overlap quantity; 0 when either is missing.
+func overlapShare(quantity, overlap *string) int {
+	if quantity == nil || overlap == nil {
+		return 0
+	}
+	return domain.OverlapShareBP(dec(*overlap), dec(*quantity))
 }

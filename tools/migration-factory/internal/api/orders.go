@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -140,7 +141,7 @@ func (s *Server) startOpenOrdersRun(w http.ResponseWriter, r *http.Request) {
 	run := domain.PackRun{
 		RunID: ids.New(), TenantID: p.TenantID, Pack: domain.PackOpenOrders, SourceSystem: sys, SourceCompany: company,
 		CutoffTS: req.CutoffTS.UTC(), InputHash: domain.HashOpenOrders(lines), Status: domain.StatusExtracted,
-		RecordsIn: len(lines), RecordsQuarantined: len(quarantined), Quarantined: quarantined,
+		RecordsIn: len(lines), RecordsQuarantined: len(quarantined), Quarantined: quarantined, Parties: orderMasterIDs(masters),
 	}
 	if err := run.Advance(domain.StatusValidated); err != nil {
 		fail(w, r, err)
@@ -152,4 +153,17 @@ func (s *Server) startOpenOrdersRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, http.StatusCreated, replayed, toRunDTO(out))
+}
+
+// orderMasterIDs keeps the masters a run validated against as prefixed ids in the run's master
+// snapshot, so a later release checks the corrected line against them.
+func orderMasterIDs(m domain.OrderMasters) []string {
+	var out []string
+	for prefix, set := range map[string]map[string]struct{}{"item:": m.Items, "customer:": m.Customers, "vendor:": m.Vendors} {
+		for id := range set {
+			out = append(out, prefix+id)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

@@ -89,6 +89,7 @@ type API struct {
 
 	requisitionsCreated   atomic.Int64
 	requisitionsSubmitted atomic.Int64
+	requisitionLinesSplit atomic.Int64
 	ordersCreated         atomic.Int64
 	agreementsCreated     atomic.Int64
 	priceLookups          atomic.Int64
@@ -123,9 +124,12 @@ type API struct {
 	catalogImportsStaged    atomic.Int64
 	catalogImportsCommitted atomic.Int64
 
-	categoryVendorsSaved atomic.Int64
-	chargeCodesSaved     atomic.Int64
-	autoChargesSaved     atomic.Int64
+	categoryVendorsSaved   atomic.Int64
+	chargeCodesSaved       atomic.Int64
+	serviceSpecsSaved      atomic.Int64
+	serviceLimitChecks     atomic.Int64
+	modelServiceSpecsSaved atomic.Int64
+	autoChargesSaved       atomic.Int64
 }
 
 // New returns the API over s using the default approval policy (FR-17.2) and
@@ -156,6 +160,8 @@ func (a *API) Register(r chi.Router) {
 		// The consolidation queue and :consolidate (FR-17.3).
 		maintain.Get("/requisition-lines", a.listOpenRequisitionLines)
 		maintain.Post("/requisitions:consolidate", a.consolidateRequisitions)
+		// ":split" arrives as one path segment; see requisitionLineAction.
+		maintain.Post("/requisition-lines/{id}", a.requisitionLineAction)
 		r.With(authz.RequireDuty(dutyPurchaseOrderInquire)).Get("/purchase-orders", a.listOrders)
 		inquire := r.With(authz.RequireDuty(dutyPurchaseOrderInquire))
 		lookup := r.With(authz.RequireAnyDuty(dutyPurchaseOrderInquire, dutyPurchaseOrderLookup))
@@ -170,6 +176,10 @@ func (a *API) Register(r chi.Router) {
 		// PurchaseOrderInquire and apply PurchaseOrderConfirm, checked in repriceRun.
 		r.Post("/purchase-orders:reprice", a.repriceRun)
 		inquire.Get("/purchase-order-lines", a.listOpenOrderLines)
+		// Purchasing inquiries (PRD 3.17.14): open orders by vendor, overdue lines, order price history.
+		inquire.Get("/inquiries/open-orders-by-vendor", a.listOpenOrdersByVendor)
+		inquire.Get("/inquiries/overdue-lines", a.listOverdueLines)
+		inquire.Get("/inquiries/price-history", a.listPriceHistory)
 		inquire.Get("/purchase-orders/{id}/versions", a.orderVersions)
 		inquire.Get("/purchase-orders/{id}/versions/{n}/diff", a.orderVersionDiff)
 		// Invoicing plans per PO line (FR-17.21); a line amount change
@@ -205,6 +215,8 @@ func (a *API) Register(r chi.Router) {
 		rfqMaintain := r.With(authz.RequireDuty(dutyRFQMaintain))
 		rfqRead := r.With(authz.Require(anyDuty{dutyRFQMaintain, dutyRFQAward}, dutyRFQMaintain+" or "+dutyRFQAward, ""))
 		rfqMaintain.Post("/rfqs", a.createRFQ)
+		// Requisition lines that need sourcing become a DRAFT RFQ (FR-17.3).
+		rfqMaintain.Post("/rfqs:from-requisitions", a.createRFQFromRequisitions)
 		rfqRead.Get("/rfqs", a.listRFQs)
 		rfqRead.Get("/rfqs/{id}", a.getRFQ)
 		r.Post("/rfqs/{id}", a.rfqAction)
@@ -258,8 +270,12 @@ func (a *API) Register(r chi.Router) {
 		a.registerCategoryRoutes(r)
 		// Charge codes and auto charges (FR-17.9).
 		a.registerChargeRoutes(r)
+		// Service lines and model service specifications (FR-17.23).
+		a.registerServiceRoutes(r)
 		// Signing limits and their requests (FR-17.17).
 		a.registerSigningRoutes(r)
+		// Changes other services asked of purchase orders (slice 18).
+		a.registerInboundRoutes(r)
 	})
 }
 
@@ -274,6 +290,7 @@ func (a *API) Metrics() http.Handler {
 		}{
 			{"purchasing_requisitions_created_total", "Requisitions created; idempotent replays are counted.", a.requisitionsCreated.Load()},
 			{"purchasing_requisitions_submitted_total", "Requisitions submitted for approval.", a.requisitionsSubmitted.Load()},
+			{"purchasing_requisition_lines_split_total", "Requisition lines split into several lines (FR-17.3).", a.requisitionLinesSplit.Load()},
 			{"purchasing_purchase_orders_created_total", "Purchase orders created.", a.ordersCreated.Load()},
 			{"purchasing_trade_agreements_created_total", "Trade agreement rows created.", a.agreementsCreated.Load()},
 			{"purchasing_price_lookups_total", "Trade agreement price lookups answered.", a.priceLookups.Load()},
@@ -301,6 +318,9 @@ func (a *API) Metrics() http.Handler {
 			{"purchasing_catalog_imports_committed_total", "Vendor catalog imports committed to a catalog.", a.catalogImportsCommitted.Load()},
 			{"purchasing_category_vendor_assignments_saved_total", "Category vendor assignments created or changed.", a.categoryVendorsSaved.Load()},
 			{"purchasing_charge_codes_saved_total", "Charge codes created or changed.", a.chargeCodesSaved.Load()},
+			{"purchasing_service_specs_saved_total", "Service line specifications written by PUT.", a.serviceSpecsSaved.Load()},
+			{"purchasing_service_limit_checks_total", "Unplanned service limit checks answered (BR-17.19), allowed or refused.", a.serviceLimitChecks.Load()},
+			{"purchasing_model_service_specs_saved_total", "Model service specifications created or changed.", a.modelServiceSpecsSaved.Load()},
 			{"purchasing_auto_charges_saved_total", "Auto charges created or changed.", a.autoChargesSaved.Load()},
 		} {
 			fmt.Fprintf(w, "# HELP %[1]s %[2]s\n# TYPE %[1]s counter\n%[1]s %[3]d\n", c.name, c.help, c.value)

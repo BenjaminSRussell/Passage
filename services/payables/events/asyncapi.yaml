@@ -110,7 +110,7 @@ components:
     OpenItemGrouped:
       name: dev.passage.payables.openitem.grouped.v1
       summary: >-
-        A redelivered dev.passage.payables.invoice.posted.v1 carried the vendor group of an open item that was created
+        A redelivered dev.passage.payables.invoice.posted.v1 carried the vendor group (id or code) of an open item that was created
         without one, and the group was assigned. Emitted once per open item; a group is never overwritten.
       contentType: application/cloudevents+json
       payload:
@@ -177,6 +177,7 @@ components:
         legal_entity_id: { type: string, format: uuid }
         vendor_id: { type: string, format: uuid }
         vendor_group_id: { type: string, format: uuid, description: "vendor group the open item was created under; absent when unknown" }
+        vendor_group_code: { type: string, pattern: "^[A-Z0-9_-]{1,10}$", description: "short code of the vendor group (the VENDGRP ledger dimension value of the invoice's vendor-control credit); absent when invoice.posted carried none" }
         source_invoice_id: { type: string, format: uuid, description: "id of the source document (a posted invoice, or an approved expense report) that created the open item" }
         currency: { type: string, pattern: "^[A-Z]{3}$" }
         open_amount: { type: string, description: "decimal string; the amount still open after this change" }

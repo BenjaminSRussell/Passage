@@ -40,6 +40,13 @@ var (
 	TimeProfileSaved  = events.Type(Context, "timeprofile", "saved", 1)
 	PayAgreementSaved = events.Type(Context, "payagreement", "saved", 1)
 	WorkerAssigned    = events.Type(Context, "worker", "assigned", 1)
+	// WorkerSaved is not in the PRD event table: payroll (w43) and reporting need to know when a
+	// worker's name, cost rate or active state changes, as the pay lines of earlier days keep the
+	// rate they were calculated with.
+	WorkerSaved = events.Type(Context, "worker", "saved", 1)
+	// WorkerCostRateSet is not in the PRD event table: payroll (w43) and costing (w21, w39) learn
+	// the dated hourly rate a worker's days are priced at.
+	WorkerCostRateSet = events.Type(Context, "workercostrate", "set", 1)
 	// AbsenceCodeSaved is not in the PRD event table: payroll (w43) needs the pay terms
 	// behind the absence lines of a worker-day.
 	AbsenceCodeSaved = events.Type(Context, "absencecode", "saved", 1)
@@ -49,16 +56,19 @@ var (
 	// DowntimeReasonSaved is not in the PRD event table: OEE reporting and the andon consumers
 	// need the planned or unplanned category behind a coded downtime.
 	DowntimeReasonSaved = events.Type(Context, "downtimereason", "saved", 1)
-	EdgeNodeSaved       = events.Type(Context, "edgenode", "saved", 1)
-	EdgeConfigPublished = events.Type(Context, "edgeconfig", "published", 1)
-	EdgeConfigApplied   = events.Type(Context, "edgeconfig", "applied", 1)
+	// ProcessCategorySaved is not in the PRD event table: the consuming contexts (w21, w24, w33, w35)
+	// need the destinations and limits a category routes with.
+	ProcessCategorySaved = events.Type(Context, "processcategory", "saved", 1)
+	EdgeNodeSaved        = events.Type(Context, "edgenode", "saved", 1)
+	EdgeConfigPublished  = events.Type(Context, "edgeconfig", "published", 1)
+	EdgeConfigApplied    = events.Type(Context, "edgeconfig", "applied", 1)
 )
 
 // All lists every event type the service publishes (used by the startup registry check).
 func All() []string {
 	return []string{RegistrationPosted, PaydayApproved, PaydayExported, AndonRaised, ProcessMessageReceived, ProcessMessageDelivered, ProcessMessageDeleted,
-		OEEBucketUpdated, OEEBucketRemoved, JobReported, JobReopened, RegistrationCorrected, PaydayRevised, TimeProfileSaved, PayAgreementSaved, WorkerAssigned, AbsenceCodeSaved,
-		EdgeNodeSaved, EdgeConfigPublished, EdgeConfigApplied, DowntimeReasonSaved}
+		OEEBucketUpdated, OEEBucketRemoved, JobReported, JobReopened, RegistrationCorrected, PaydayRevised, TimeProfileSaved, PayAgreementSaved, WorkerAssigned, WorkerSaved, WorkerCostRateSet, AbsenceCodeSaved,
+		EdgeNodeSaved, EdgeConfigPublished, EdgeConfigApplied, DowntimeReasonSaved, ProcessCategorySaved}
 }
 
 // ProcessMessageReceivedData is the payload of dev.passage.shopfloor.processmessage.received.v1,
@@ -317,6 +327,37 @@ type WorkerAssignedData struct {
 	AssignedBy        string  `json:"assignedBy"`
 }
 
+// WorkerSavedData is the payload of dev.passage.shopfloor.worker.saved.v1, published when a
+// worker's own fields change or the worker is deactivated or reactivated. Change is
+// "updated", "deactivated" or "reactivated"; Reason is set for a deactivation. The badge is a
+// personal identifier and is not published. CostRate is a decimal string. Days already calculated
+// keep the rate they were calculated with until a supervisor recalculates them.
+type WorkerSavedData struct {
+	WorkerID string  `json:"workerId"`
+	Name     string  `json:"name"`
+	UserID   *string `json:"userId"`
+	CostRate string  `json:"costRate"`
+	Currency string  `json:"currency"`
+	Active   bool    `json:"active"`
+	Version  int     `json:"version"`
+	Change   string  `json:"change"`
+	Reason   *string `json:"reason"`
+	SavedBy  string  `json:"savedBy"`
+}
+
+// WorkerCostRateSetData is the payload of dev.passage.shopfloor.workercostrate.set.v1, published when
+// a dated cost rate is added to a worker. CostRate is a decimal string per hour in Currency, and holds
+// for days from EffectiveFrom (YYYY-MM-DD) until the next dated rate. Days already calculated keep
+// the rate they were calculated with until a supervisor recalculates or revises them.
+type WorkerCostRateSetData struct {
+	WorkerID      string `json:"workerId"`
+	CostRateID    string `json:"costRateId"`
+	EffectiveFrom string `json:"effectiveFrom"`
+	CostRate      string `json:"costRate"`
+	Currency      string `json:"currency"`
+	SetBy         string `json:"setBy"`
+}
+
 // AbsenceCodeSavedData is the payload of dev.passage.shopfloor.absencecode.saved.v1,
 // published when an absence code is created or changed. PayMultiplier is a decimal string.
 type AbsenceCodeSavedData struct {
@@ -340,6 +381,30 @@ type DowntimeReasonSavedData struct {
 	Active   bool   `json:"active"`
 	Version  int    `json:"version"`
 	SavedBy  string `json:"savedBy"`
+}
+
+// ProcessCategorySavedData is the payload of dev.passage.shopfloor.processcategory.saved.v1,
+// published when a process message category is created or changed.
+type ProcessCategorySavedData struct {
+	CategoryID       string                     `json:"categoryId"`
+	Code             string                     `json:"code"`
+	Name             string                     `json:"name"`
+	Destinations     []string                   `json:"destinations"`
+	RejectOutOfLimit bool                       `json:"rejectOutOfLimit"`
+	Characteristics  []ProcessCategoryCharacter `json:"characteristics"`
+	Active           bool                       `json:"active"`
+	Version          int                        `json:"version"`
+	SavedBy          string                     `json:"savedBy"`
+}
+
+// ProcessCategoryCharacter is one characteristic definition of a saved category.
+type ProcessCategoryCharacter struct {
+	Name     string  `json:"name"`
+	Type     string  `json:"type"`
+	Unit     *string `json:"unit,omitempty"`
+	Min      *string `json:"min,omitempty"`
+	Max      *string `json:"max,omitempty"`
+	Required bool    `json:"required"`
 }
 
 // EdgeNodeSavedData is the payload of dev.passage.shopfloor.edgenode.saved.v1, published when

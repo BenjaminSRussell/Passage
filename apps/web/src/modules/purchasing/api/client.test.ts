@@ -3,7 +3,15 @@ import {
   ProcurementApiError,
   actOnPurchaseOrder,
   awardRFQ,
+  changeModelServiceSpec,
+  checkServiceLimit,
+  createModelServiceSpec,
+  deleteServiceSpec,
+  listModelServiceSpecs,
+  putServiceSpec,
   changeRFQ,
+  createRFQFromRequisitions,
+  splitRequisitionLine,
   compareRFQ,
   confirmDeliveryDate,
   deleteDeliverySchedule,
@@ -184,6 +192,32 @@ describe("purchasing API client", () => {
     ]);
   });
 
+  it("starts an RFQ from requisition lines with an Idempotency-Key", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ id: "q1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await createRFQFromRequisitions({ requisitionLineIds: ["l1"], replyDeadline: "2099-01-15T17:00:00.000Z" }, "key-r");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/v1/procurement/rfqs:from-requisitions");
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBe("key-r");
+    expect(JSON.parse(String(init.body))).toEqual({
+      requisitionLineIds: ["l1"],
+      replyDeadline: "2099-01-15T17:00:00.000Z",
+    });
+  });
+
+  it("splits a requisition line with the requisition version and an Idempotency-Key", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ id: "r1", lines: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await splitRequisitionLine("l1", 4, ["40", "35"], "key-s");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/v1/procurement/requisition-lines/l1:split");
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBe("key-s");
+    expect((init.headers as Record<string, string>)["If-Match"]).toBe('"4"');
+    expect(JSON.parse(String(init.body))).toEqual({ quantities: ["40", "35"] });
+  });
+
   it("awards and closes RFQs with If-Match and an Idempotency-Key", async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ rfq: { id: "q1" }, purchaseOrders: [] }));
     vi.stubGlobal("fetch", fetchMock);
@@ -235,5 +269,39 @@ describe("purchasing API client", () => {
     ]);
     expect(JSON.parse(String(calls[0][1].body))).toEqual(input);
     expect(JSON.parse(String(calls[2][1].body))).toEqual({ scores: [{ criterionId: "c1", score: 7 }] });
+  });
+
+  it("writes service specifications with If-Match, checks limits and reads the row version from a 204 delete", async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) =>
+      init.method === "DELETE" ? new Response(null, { status: 204, headers: { ETag: '"9"' } }) : jsonResponse({ poRowVersion: 8, allowed: true }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const input = { valueLimit: "2000", outline: [{ kind: "ITEM" as const, description: "x", qty: "1", unit: "h", unitPrice: "5" }] };
+    expect((await putServiceSpec("p1", 3, 7, input)).body.poRowVersion).toBe(8);
+    expect(await deleteServiceSpec("p1", 3, 8)).toBe(9);
+    expect((await checkServiceLimit("p1", 3, "1900", "100")).body.allowed).toBe(true);
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.map(([url, init]) => `${init.method} ${url} ${(init.headers as Record<string, string> | undefined)?.["If-Match"]}`)).toEqual([
+      'PUT /api/v1/procurement/purchase-orders/p1/lines/3/service "7"',
+      'DELETE /api/v1/procurement/purchase-orders/p1/lines/3/service "8"',
+      "GET /api/v1/procurement/purchase-orders/p1/lines/3/service/limit-check?unplanned=1900&entry=100 undefined",
+    ]);
+    expect(JSON.parse(String(calls[0][1].body))).toEqual(input);
+  });
+
+  it("creates models under an Idempotency-Key and changes them under If-Match", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ id: "m1", version: 1 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await createModelServiceSpec({ legalEntityId: "le", code: "MAINT", name: "n", currency: "USD" }, "key-1");
+    await changeModelServiceSpec("m1", { name: "n2", currency: "USD" }, 4);
+    await listModelServiceSpecs({ status: "ACTIVE", q: "main" }, { limit: 50 });
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.map(([url, init]) => `${init.method} ${url}`)).toEqual([
+      "POST /api/v1/procurement/model-service-specs",
+      "PUT /api/v1/procurement/model-service-specs/m1",
+      "GET /api/v1/procurement/model-service-specs?status=ACTIVE&q=main&limit=50",
+    ]);
+    expect((calls[0][1].headers as Record<string, string>)["Idempotency-Key"]).toBe("key-1");
+    expect((calls[1][1].headers as Record<string, string>)["If-Match"]).toBe('"4"');
   });
 });

@@ -113,9 +113,12 @@ const operation: Operation = {
   secondaryResourceIds: [],
   setupGroup: null,
   setupMinutes: 0,
+  queueBeforeMinutes: 0,
+  queueAfterMinutes: 0,
   attributes: {},
   networkId: null,
   status: "unplaced",
+  version: 1,
   createdAt: "2026-10-26T06:00:00Z",
 };
 
@@ -536,13 +539,15 @@ describe("Operations", () => {
   });
 
   it("validates a new operation", () => {
-    const values = { ...emptyOperation, orderId: "x", operNumber: "0", priority: "2000", setupGroup: "white", setupMinutes: "99999", attributes: "color" };
+    const values = { ...emptyOperation, orderId: "x", operNumber: "0", priority: "2000", setupGroup: "white", setupMinutes: "99999", queueBeforeMinutes: "-5", queueAfterMinutes: "x", attributes: "color" };
     expect(Object.keys(validateOperation(values).errors).sort()).toEqual([
       "attributes",
       "minutes",
       "operNumber",
       "orderId",
       "priority",
+      "queueAfterMinutes",
+      "queueBeforeMinutes",
       "resourceIds",
       "setupGroup",
       "setupMinutes",
@@ -595,6 +600,8 @@ describe("Operations", () => {
     fireEvent.change(screen.getByLabelText("Minutes"), { target: { value: "60" } });
     fireEvent.change(screen.getByLabelText(/^Setup group/), { target: { value: "WHITE" } });
     fireEvent.change(screen.getByLabelText(/^Route setup/), { target: { value: "25" } });
+    fireEvent.change(screen.getByLabelText(/^Queue before/), { target: { value: "30" } });
+    fireEvent.change(screen.getByLabelText(/^Queue after/), { target: { value: "45" } });
     fireEvent.change(screen.getByLabelText(/^Resource network/), { target: { value: NETWORK } });
     fireEvent.change(screen.getByLabelText(/^Attributes/), { target: { value: "color = white\ngrade = 2" } });
     fireEvent.click(screen.getByRole("button", { name: "Add operation" }));
@@ -606,6 +613,8 @@ describe("Operations", () => {
       resourceIds: [FILL],
       setupGroup: "WHITE",
       setupMinutes: 25,
+      queueBeforeMinutes: 30,
+      queueAfterMinutes: 45,
       attributes: { color: "white", grade: "2" },
       networkId: NETWORK,
     });

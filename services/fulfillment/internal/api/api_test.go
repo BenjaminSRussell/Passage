@@ -49,6 +49,9 @@ type fakeStore struct {
 	ssccCalls       int
 	reports         reportCalls
 	orderTypes      map[string]string
+	exceptionFilter store.ExceptionFilter
+	resolved        string
+	resolvedVersion int
 	heldOrders      map[string]bool
 }
 

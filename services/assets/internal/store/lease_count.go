@@ -63,6 +63,8 @@ type LeaseModification struct {
 	ROUAdjustment    decimal.Decimal `json:"rouAdjustment"`
 	ProfitLossExcess decimal.Decimal `json:"profitLossExcess"`
 	CreatedAt        time.Time       `json:"createdAt"`
+	// Superseded marks a modification that a later one, taking effect in an earlier period, replaced: its schedule and adjustments no longer apply.
+	Superseded bool `json:"superseded,omitempty"`
 }
 
 // LeaseModificationResult is the recorded modification, the lease after it
@@ -128,7 +130,28 @@ func loadLease(ctx context.Context, tx pgx.Tx, tenantID, id string, forUpdate bo
 		}
 		l.Modifications = append(l.Modifications, m)
 	}
-	return l, mods.Err()
+	if err := mods.Err(); err != nil {
+		return Lease{}, err
+	}
+	mods.Close()
+	markSuperseded(l.Modifications)
+	if l.Termination, err = loadTermination(ctx, tx, tenantID, id); err != nil {
+		return Lease{}, err
+	}
+	return l, nil
+}
+
+// markSuperseded flags every modification (in the order they were recorded) that a later one replaced by taking effect in an earlier
+// period: the later one rewrote the schedule from its own period, so the earlier one's adjustments are no longer in it.
+func markSuperseded(mods []LeaseModification) {
+	for i := range mods {
+		for _, later := range mods[i+1:] {
+			if later.EffectivePeriod < mods[i].EffectivePeriod {
+				mods[i].Superseded = true
+				break
+			}
+		}
+	}
 }
 
 // insertLeaseLines writes schedule lines of a lease.
@@ -166,6 +189,9 @@ func (s *Postgres) ModifyLease(ctx context.Context, leaseID string, in LeaseModi
 				return LeaseModificationResult{}, httpx.NewProblem(http.StatusPreconditionFailed, CodeVersionConflict,
 					fmt.Sprintf("the lease changed since you read it (version %d, current %d); reload and try again", in.Version, lease.Version))
 			}
+			if err := domain.CanMaintainRecognized(lease.Election); err != nil {
+				return LeaseModificationResult{}, err
+			}
 			if err := domain.CanModify(lease.Status); err != nil {
 				return LeaseModificationResult{}, err
 			}
@@ -182,13 +208,29 @@ func (s *Postgres) ModifyLease(ctx context.Context, leaseID string, in LeaseModi
 				return LeaseModificationResult{}, &domain.Error{Code: CodeLeasePeriodPosted,
 					Detail: fmt.Sprintf("a period from %d on is already posted; modify from the first unposted period", in.EffectivePeriod)}
 			}
+			var inFlight bool
+			if err := tx.QueryRow(ctx, `select exists (select 1 from asset_pending_booking where tenant_id = $1 and book_code = 'LEASE' and document_id = $2)`,
+				p.TenantID, leaseID).Scan(&inFlight); err != nil {
+				return LeaseModificationResult{}, err
+			}
+			if inFlight {
+				return LeaseModificationResult{}, &domain.Error{Code: CodeLeasePeriodPosted,
+					Detail: "a ledger booking of this lease is awaiting the ledger's answer; post the lease again to settle it, then modify"}
+			}
 			minor := money.MinorUnits(lease.Currency)
 			payment := in.PaymentAmount.Round(minor)
 			paid := in.EffectivePeriod - 1
 			line := lease.Schedule[paid]
+			// The ROU still to depreciate from the effective period on, less the ROU adjustments of modifications that take effect after it:
+			// this modification replaces the schedule from its period, so those are superseded and their adjustments are not carried.
 			carrying := decimal.Zero
 			for _, l := range lease.Schedule[paid:] {
 				carrying = carrying.Add(l.ROUDepreciation)
+			}
+			for _, m := range lease.Modifications {
+				if !m.Superseded && m.EffectivePeriod > in.EffectivePeriod {
+					carrying = carrying.Sub(m.ROUAdjustment)
+				}
 			}
 			rate, term := lease.IBRRate, lease.TermMonths
 			if in.ScopeChange && in.IBRRate != nil {

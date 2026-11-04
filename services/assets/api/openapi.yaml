@@ -1217,6 +1217,10 @@ paths:
           $ref: "#/components/responses/Problem"
     post:
       summary: Recognize an IFRS 16 lease and compute its schedule
+      description: |
+        Recognizes the lease with its liability, ROU asset and schedule. With election ShortTerm or LowValue
+        (IFRS 16.5-8) nothing is recognized: the liability and ROU asset are 0 and each period expenses its payment
+        when posted. Publishes dev.passage.assets.lease.recognized.v1.
       operationId: createLease
       x-passage-duty: LeaseMaintain
       parameters:
@@ -1308,6 +1312,216 @@ paths:
         "422":
           $ref: "#/components/responses/Problem"
         "428":
+          $ref: "#/components/responses/Problem"
+  /v1/leases/{id}/terminate:
+    post:
+      summary: Terminate a lease early (D4c)
+      description: |
+        Ends an Active or Modified lease at the end of payment period afterPeriod (1 up to the one before the last
+        period of the schedule). The schedule after that period is dropped; the liability at that point and the ROU
+        asset carrying amount are derecognized, and gainLoss = liability - ROU carrying - terminationPayment is
+        recorded (positive for a gain). The lease becomes Terminated and the response carries the AST-0036 message.
+        A period after afterPeriod that is already posted to the ledger, or a ledger booking of the lease in flight,
+        refuses the request (AST-0027). The termination takes effect at the latest at the end of the payment period
+        running today: a period afterPeriod that starts after today is refused (AST-0036), since ending the lease at a
+        later date agreed now is a change of the lease term, booked as a modification (POST /v1/leases/{id}/modify with
+        the shorter termMonths). A termination inside a payment period is not supported; it ends on a period's last day.
+        A termination payment with more decimals than the currency allows is refused (AST-0036). The termination journal (Dr liability and accumulated depreciation, Cr gross ROU
+        asset and payment clearing, the gain or loss on the termination gain / loss account of the lease posting profile) is booked by POST /v1/leases/gl-postings
+        after every period up to the termination. Publishes dev.passage.assets.lease.terminated.v1.
+        A lease under a short-term or low-value election has nothing to derecognize and is refused (AST-0037).
+        Requires If-Match with the lease ETag and an Idempotency-Key.
+      operationId: terminateLease
+      x-passage-duty: LeaseMaintain
+      parameters:
+        - $ref: "#/components/parameters/LeaseId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TerminateLeaseRequest"
+      responses:
+        "201":
+          description: Lease terminated
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeaseTerminationResult"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+  /v1/leases/gl-postings:
+    post:
+      summary: Book lease recognition and schedule periods in the general ledger (D4d)
+      operationId: postLeasesToGL
+      x-passage-duty: AssetPostJournal
+      description: |
+        Books the IFRS 16 journals of the leases of a legal entity (or of one lease) that are not in the general ledger yet and are dated on or
+        before postThrough. The recognition journal is dated at commencement (debit the ROU asset, credit the lease liability); each schedule
+        period gets one journal dated on its last day (commencement plus the period's months, less one day): interest expense against the
+        liability, the payment against the payment clearing account, ROU depreciation against accumulated depreciation, and on the period a
+        modification takes effect the remeasurement (debit or credit the ROU asset against the liability, the part beyond the ROU carrying
+        amount to the remeasurement gain account). Accounts come from the legal entity's lease posting profile or the documented placeholder.
+        Journals go in period order; a lease whose journal the ledger refuses (a closed period, for one) stops there and is listed under failed
+        with the ledger's problem code, and the next request retries it. A retry resends the stored journal, so nothing is booked twice.
+        At most 200 journals per request (more is true when others wait). A terminated lease's derecognition journal follows its last period (once every period up to the termination is booked). Publishes dev.passage.assets.lease.posted.v1 per journal.
+        Signs only ledger.entry.post. Without a configured ledger the route answers 503 AST-0602.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, ledgerId, postThrough]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                ledgerId: { type: string, format: uuid }
+                leaseId: { type: string, format: uuid, description: Book only this lease; all leases of the legal entity when omitted. }
+                postThrough: { type: string, format: date, description: Book journals dated on or before this day. }
+      responses:
+        "200":
+          description: What was booked and what the ledger refused
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [booked, failed, more]
+                properties:
+                  booked:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        leaseId: { type: string, format: uuid }
+                        leaseNumber: { type: string }
+                        period: { type: integer, description: "0 is the recognition journal, -1 the termination journal of a terminated lease, otherwise the schedule period." }
+                        entryId: { type: string, format: uuid }
+                        lines: { type: integer }
+                        placeholderProfile: { type: boolean }
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        leaseId: { type: string, format: uuid }
+                        leaseNumber: { type: string }
+                        period: { type: integer, description: "0 is the recognition journal, -1 the termination journal, otherwise the schedule period." }
+                        code: { type: string, description: "The ledger's problem code, AST-0601, or AST-0610 when a line's remeasurement does not agree with its modifications." }
+                  more: { type: boolean }
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /v1/leases/posting-profile:
+    get:
+      summary: Lease posting profile of a legal entity
+      operationId: getLeasePostingProfile
+      x-passage-duty: LeaseMaintain
+      description: |
+        The accounts the lease journals of a legal entity use. With no profile the response is the built-in placeholder (ROU asset 1700,
+        accumulated depreciation 1790, liability 2400, interest expense 7200, depreciation expense 6820, payment clearing 2110,
+        remeasurement gain 7120) with placeholder true, to be replaced by the accountant. AssetConfigure also reads it.
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The profile or the placeholder
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LeasePostingProfile" }
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+    put:
+      summary: Create or replace the lease posting profile
+      operationId: saveLeasePostingProfile
+      x-passage-duty: AssetConfigure
+      description: Creates the profile (no If-Match) or replaces it (If-Match with the version) for a legal entity. Journals already booked keep their accounts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LeasePostingProfile" }
+      responses:
+        "200":
+          description: Replaced
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LeasePostingProfile" }
+        "201":
+          description: Created
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LeasePostingProfile" }
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /v1/leases/{id}/gl-postings:
+    get:
+      summary: Which journals of a lease are in the general ledger
+      operationId: getLeasePostings
+      x-passage-duty: LeaseMaintain
+      description: The ledger entry of the recognition journal and of every period of the schedule in force; null means not booked yet.
+      parameters:
+        - $ref: "#/components/parameters/LeaseId"
+      responses:
+        "200":
+          description: Booking state of the lease
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [leaseId, recognitionJournalId, terminationJournalId, periods]
+                properties:
+                  leaseId: { type: string, format: uuid }
+                  recognitionJournalId: { type: string, format: uuid, nullable: true }
+                  terminationJournalId: { type: string, format: uuid, nullable: true, description: Null unless the lease was terminated and its derecognition journal is booked. }
+                  periods:
+                    type: array
+                    items:
+                      type: object
+                      required: [periodNo, periodEnd, postedJournalId]
+                      properties:
+                        periodNo: { type: integer }
+                        periodEnd: { type: string, format: date, description: The posting date of the period's journal. }
+                        postedJournalId: { type: string, format: uuid, nullable: true }
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "503":
           $ref: "#/components/responses/Problem"
   /v1/assets/gl-postings:
     post:
@@ -1530,6 +1744,24 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
   schemas:
+    LeasePostingProfile:
+      type: object
+      required: [legalEntityId, rouAssetAccount, rouAccumulatedDepreciationAccount, liabilityAccount, interestExpenseAccount, depreciationExpenseAccount, paymentClearingAccount, remeasurementGainAccount]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        rouAssetAccount: { type: string, description: Debited on recognition and on an upward remeasurement. }
+        rouAccumulatedDepreciationAccount: { type: string }
+        liabilityAccount: { type: string }
+        interestExpenseAccount: { type: string }
+        depreciationExpenseAccount: { type: string }
+        paymentClearingAccount: { type: string, description: Credited by the lease payment of each period (cash or payables clearing). }
+        remeasurementGainAccount: { type: string, description: Credited with the part of a downward remeasurement beyond the ROU carrying amount. }
+        terminationGainLossAccount: { type: string, description: "Takes the gain (credit) or loss (debit) of an early termination. Optional on PUT: omitted, it is the remeasurement gain account." }
+        exemptLeaseExpenseAccount: { type: string, description: "Debited with the payment of each period of a lease under a short-term or low-value election. Optional on PUT: omitted, it is the depreciation expense account." }
+        version: { type: integer, readOnly: true }
+        updatedBy: { type: string, readOnly: true }
+        updatedAt: { type: string, format: date-time, readOnly: true }
+        placeholder: { type: boolean, readOnly: true, description: True when the legal entity has no profile and the built-in defaults apply. }
     AssetPostingProfile:
       type: object
       required: [costAccount, accumulatedDepreciationAccount, depreciationExpenseAccount, impairmentAccount, revaluationAccount, acquisitionClearingAccount, proceedsAccount, gainAccount, lossAccount, transferClearingAccount]
@@ -1730,6 +1962,26 @@ components:
           default: Nominal
           description: "lease.periodicRateMethod: Nominal is ibrRate / paymentsPerYear, Effective is (1 + ibrRate)^(1 / paymentsPerYear) - 1"
         currency: { type: string, pattern: "^[A-Z]{3}$" }
+        election:
+          type: string
+          enum: [None, ShortTerm, LowValue]
+          default: None
+          description: |
+            IFRS 16.5-8 recognition exemption (D4c), recorded per lease. ShortTerm needs a term of 12 months or less
+            and no purchase option; LowValue needs underlyingAssetValue, at most 5,000 in underlyingAssetCurrency (USD
+            or EUR, the lease.lowValueThreshold default). A lease under an election has no liability and no ROU asset,
+            its schedule lines carry only the payment, and each period expenses that payment, which is the
+            straight-line expense since the payments are level (the exempt lease expense account of the lease posting
+            profile against payment clearing). It cannot be modified or terminated. A refused election is AST-0037.
+        purchaseOption: { type: boolean, default: false, description: "The lease contains a purchase option; such a lease is not short-term (IFRS 16 Appendix A)" }
+        underlyingAssetValue: { type: string, description: "Value of the underlying asset when new, in underlyingAssetCurrency; required for LowValue, not allowed otherwise" }
+        underlyingAssetCurrency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+          description: |
+            Currency underlyingAssetValue is stated in: USD or EUR, the currencies the low-value threshold is set in,
+            whatever the lease currency. Omitted, it is the lease currency (so a lease in another currency must name
+            USD or EUR). Not allowed without underlyingAssetValue.
     ModifyLeaseRequest:
       type: object
       additionalProperties: false
@@ -1753,11 +2005,45 @@ components:
         liabilityBefore: { type: string, description: "Carrying liability at the start of the effective period" }
         liabilityAfter: { type: string, description: "Present value of the remaining payments under the revised terms" }
         adjustment: { type: string, description: "liabilityAfter - liabilityBefore" }
-        rouBefore: { type: string }
+        rouBefore: { type: string, description: "ROU carrying amount at the start of the effective period, without the adjustments of modifications this one supersedes" }
         rouAfter: { type: string, description: "Never negative" }
         rouAdjustment: { type: string, description: "rouAfter - rouBefore; equals adjustment unless the ROU reached zero" }
         profitLossExcess: { type: string, description: "Part of a negative adjustment beyond the ROU carrying amount, recognized in P&L" }
         createdAt: { type: string, format: date-time }
+        superseded: { type: boolean, description: "True when a later modification taking effect in an earlier period replaced the schedule this one produced; its adjustments are no longer applied or booked. Omitted when false" }
+    TerminateLeaseRequest:
+      type: object
+      additionalProperties: false
+      required: [afterPeriod]
+      properties:
+        afterPeriod: { type: integer, minimum: 1, description: "The last payment period the lease stays in force; its last day is the termination date" }
+        terminationPayment: { type: string, description: "What the lessee pays to end the lease, a decimal of 0 or more (default 0)" }
+        reason: { type: string, maxLength: 500 }
+    LeaseTermination:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        leaseId: { type: string, format: uuid }
+        afterPeriod: { type: integer }
+        terminationDate: { type: string, format: date }
+        reason: { type: string }
+        currency: { type: string }
+        liabilityDerecognized: { type: string }
+        rouGross: { type: string, description: "Gross ROU asset written off (accumulated plus carrying)" }
+        rouAccumulated: { type: string }
+        rouCarrying: { type: string }
+        terminationPayment: { type: string }
+        gainLoss: { type: string, description: "Liability - ROU carrying - termination payment; positive for a gain" }
+        journalId: { type: string, format: uuid, nullable: true, description: "The ledger entry of the termination journal, null until booked" }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    LeaseTerminationResult:
+      type: object
+      required: [termination, lease, messages]
+      properties:
+        termination: { $ref: "#/components/schemas/LeaseTermination" }
+        lease: { $ref: "#/components/schemas/Lease" }
+        messages: { type: array, items: { type: string }, description: "The AST-0036 info message" }
     LeaseModificationResult:
       type: object
       required: [modification, lease, messages]
@@ -1788,6 +2074,10 @@ components:
         paymentTiming: { type: string, enum: [arrears, advance] }
         ibrRate: { type: string, description: "Rate in force (the revised rate after a scope change)" }
         rateMethod: { type: string, enum: [Nominal, Effective] }
+        election: { type: string, enum: [None, ShortTerm, LowValue], description: "Recognition exemption; a lease under an election has liability and rouAsset 0" }
+        purchaseOption: { type: boolean, description: "The lease contains a purchase option" }
+        underlyingAssetValue: { type: string, description: "Value of the underlying asset when new, for LowValue only" }
+        underlyingAssetCurrency: { type: string, description: "Currency underlyingAssetValue is stated in (USD or EUR), for LowValue only" }
         currency: { type: string }
         liability: { type: string, description: "Liability at initial recognition" }
         rouAsset: { type: string, description: "ROU asset at initial recognition" }
@@ -1802,6 +2092,8 @@ components:
           type: array
           description: Remeasurements in order; present on GET /v1/leases/{id} once the lease was modified
           items: { $ref: "#/components/schemas/LeaseModification" }
+        termination:
+          $ref: "#/components/schemas/LeaseTermination"
     LeasePage:
       type: object
       required: [items]

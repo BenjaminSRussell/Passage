@@ -256,6 +256,15 @@ func (s *Postgres) RecordFeedback(ctx context.Context, jobID string, in Feedback
 				failed = append(failed, r.Code)
 			}
 		}
+		postedFailed := []string{}
+		for _, r := range posted {
+			if !r.Pass {
+				postedFailed = append(postedFailed, r.Code)
+			}
+		}
+		if err := qualityFailAndon(ctx, tx, p.TenantID, job, postedFailed, failed, recordedAt); err != nil {
+			return err
+		}
 		if err := enqueue(ctx, tx, jobAggregate, jobID, sfevents.JobReported, p.TenantID, sfevents.JobReportedData{
 			JobID: jobID, FeedbackID: in.ID, OrderRef: job.OrderRef, OperationRef: job.OperationRef, ResourceID: job.ResourceID,
 			QtyGood: in.GoodQty, QtyScrap: in.ScrapQty, ScrapReasonID: in.ScrapReasonID,

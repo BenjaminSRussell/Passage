@@ -11,9 +11,13 @@ temporal:
 resources:
   requests: { cpu: 50m, memory: 128Mi }
   limits: { cpu: 500m, memory: 512Mi }
-payablesUrl: http://payables.passage.svc
-engineeringUrl: http://engineering.passage.svc
-qualityUrl: http://quality.passage.svc
+# Each target Service listens on 8080. payables, engineering, quality and party name their Service after the
+# release (these defaults assume the release is named like the chart); transport names it after the chart.
+payablesUrl: http://payables.passage.svc:8080
+engineeringUrl: http://engineering.passage.svc:8080
+qualityUrl: http://quality.passage.svc:8080
+transportUrl: http://transport.passage.svc:8080
+partyUrl: http://party.passage.svc:8080
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""

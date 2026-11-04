@@ -296,6 +296,13 @@ func (s *Postgres) ShipTransfer(ctx context.Context, id string, version int, shi
 		if err := moveStockBatch(ctx, tx, tp.TenantID, doc, moves, own); err != nil {
 			return err
 		}
+		// Without a transit warehouse the shipment is the receipt: the stock reaches
+		// the receiving warehouse now, so the reservations against it convert now.
+		if !o.UseTransit {
+			if err := convertReceivedReservations(ctx, tx, tp.TenantID, o.LegalEntityID, moves); err != nil {
+				return err
+			}
+		}
 		if err := announceTransferSupply(ctx, tx, tp.TenantID, o.LegalEntityID, supply); err != nil {
 			return err
 		}
@@ -377,6 +384,9 @@ func (s *Postgres) ReceiveTransfer(ctx context.Context, id string, version int, 
 			return err
 		}
 		if err := moveStockBatch(ctx, tx, tp.TenantID, doc, moves, own); err != nil {
+			return err
+		}
+		if err := convertReceivedReservations(ctx, tx, tp.TenantID, o.LegalEntityID, moves); err != nil {
 			return err
 		}
 		if err := announceTransferSupply(ctx, tx, tp.TenantID, o.LegalEntityID, supply); err != nil {

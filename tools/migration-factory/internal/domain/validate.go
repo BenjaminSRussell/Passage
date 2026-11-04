@@ -42,12 +42,15 @@ var iso4217 = map[string]struct{}{
 // addresses it within its run; Status is OPEN until a release loads the corrected record,
 // which is kept in Released.
 type Quarantined struct {
-	Seq        int
-	Record     Record
-	Rule       string
-	Reason     string
-	Status     string
-	Released   *Record
+	Seq      int
+	Record   Record
+	Rule     string
+	Reason   string
+	Status   string
+	Released *Record
+	// Line is the whole extracted line of a pack whose record shape is lossy (bank_balances,
+	// onhand): the release corrects and loads it. Nil for the other packs.
+	Line       any
 	ReleasedBy string
 	ReleasedAt *time.Time
 }

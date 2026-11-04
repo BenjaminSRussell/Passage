@@ -33,6 +33,32 @@ var (
 	languageRe    = regexp.MustCompile(`^[a-z]{2}(-[A-Z]{2})?$`)
 )
 
+// Journal name settings (PRD 2.11): who may post a name's batches and where its
+// default description language comes from.
+const (
+	PostingNone             = "none"
+	PostingOwnJournalsOnly  = "own_journals_only"
+	DescriptionLanguageLE   = "legal_entity"
+	DescriptionLanguageUser = "user"
+)
+
+// DescriptionLanguages lists the languages to try for a default description,
+// most specific first: the requested tag, its base language, then the default.
+// An empty or malformed request gives the default only.
+func DescriptionLanguages(requested string) []string {
+	out := []string{}
+	if ValidLanguage(requested) {
+		out = append(out, requested)
+		if base := requested[:2]; base != requested {
+			out = append(out, base)
+		}
+	}
+	if len(out) == 0 || out[len(out)-1] != DefaultDescriptionLanguage {
+		out = append(out, DefaultDescriptionLanguage)
+	}
+	return out
+}
+
 // ValidSourceType reports whether s is a usable source type key.
 func ValidSourceType(s string) bool { return sourceTypeRe.MatchString(s) }
 

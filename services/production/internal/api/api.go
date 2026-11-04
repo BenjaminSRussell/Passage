@@ -58,7 +58,7 @@ const (
 	maxBOMDepth       = 12
 	maxBOMLines       = 5000
 	maxOperations     = 500
-	maxCoProducts     = 50
+	maxCoProducts     = domain.MaxCoProducts
 	defaultPageSize   = 50
 	maxPageSize       = 200
 	readyTimeout      = 500 * time.Millisecond
@@ -157,6 +157,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyCostRead)).Get("/v1/production/variances", a.varianceReport)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/subcontract-operations", a.subcontractReport)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/operations", a.operationsOverview)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/material-requirements", a.materialRequirements)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/material-requirements/by-item", a.materialItems)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/journals", a.journalInquiry)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/kpi", a.orderKPIs)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/jobs", a.listJobs)

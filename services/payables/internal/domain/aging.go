@@ -23,9 +23,11 @@ var bucketRank = map[Bucket]int{BucketCurrent: 0, Bucket1to30: 1, Bucket31to60: 
 type AgingRow struct {
 	VendorID      string
 	VendorGroupID string
-	Currency      string
-	DueDate       time.Time
-	OpenAmount    decimal.Decimal
+	// VendorGroupCode is the short vendor group code (ledger dimension VENDGRP); empty when unknown.
+	VendorGroupCode string
+	Currency        string
+	DueDate         time.Time
+	OpenAmount      decimal.Decimal
 }
 
 type AgingTotal struct {
@@ -120,41 +122,81 @@ func Reconcile(totals []AgingTotal, ledgerCurrency string, ledgerBalance decimal
 
 const UnassignedGroup = "UNASSIGNED"
 
-const ReasonSingleControlAccount = "the ledger exposes one AP control balance per ledger; group lines break down the currency total"
+const (
+	ReasonLedgerNoGroupDimension = "the ledger does not define the vendor group dimension; add it with addDimensionAttributes"
+	ReasonGroupsOff              = "the vendor group dimension is switched off"
+)
 
+// GroupReconciliation compares the AP subledger of one vendor group (by its short code) with the
+// vendor-control balance of the ledger lines carrying that code as the VENDGRP dimension.
 type GroupReconciliation struct {
-	VendorGroupID  string          `json:"vendorGroupId"`
-	Currency       string          `json:"currency"`
-	SubledgerTotal decimal.Decimal `json:"subledgerTotal"`
-	Comparable     bool            `json:"comparable"`
-	Reason         string          `json:"reason"`
+	VendorGroupCode string           `json:"vendorGroupCode"`
+	Currency        string           `json:"currency"`
+	SubledgerTotal  decimal.Decimal  `json:"subledgerTotal"`
+	LedgerBalance   *decimal.Decimal `json:"ledgerBalance,omitempty"`
+	Difference      *decimal.Decimal `json:"difference,omitempty"`
+	Comparable      bool             `json:"comparable"`
+	Reconciled      bool             `json:"reconciled"`
+	Reason          string           `json:"reason,omitempty"`
 }
 
-func GroupBreakdown(rows []AgingRow) []GroupReconciliation {
+// ReconcileGroups compares per vendor group code. ledger maps a dimension value ("" for lines with no
+// value, shown as UNASSIGNED) to credits minus debits of the control account in ledgerCurrency; nil with a
+// reason means the ledger side is unavailable. A group that has a ledger balance but no open items is
+// listed with a zero subledger, so a stray balance shows as a difference.
+func ReconcileGroups(rows []AgingRow, ledgerCurrency string, ledger map[string]decimal.Decimal, unavailable string) []GroupReconciliation {
 	sums := map[[2]string]decimal.Decimal{}
+	currencies := map[string]bool{ledgerCurrency: true}
 	for _, r := range rows {
 		if !r.OpenAmount.IsPositive() {
 			continue
 		}
-		group := r.VendorGroupID
-		if group == "" {
-			group = UnassignedGroup
+		code := r.VendorGroupCode
+		if code == "" {
+			code = UnassignedGroup
 		}
-		k := [2]string{r.Currency, group}
+		k := [2]string{r.Currency, code}
 		sums[k] = sums[k].Add(r.OpenAmount)
+		currencies[r.Currency] = true
+	}
+	ledgerByCode := map[string]decimal.Decimal{}
+	for value, bal := range ledger {
+		code := value
+		if code == "" {
+			code = UnassignedGroup
+		}
+		ledgerByCode[code] = ledgerByCode[code].Add(bal)
+		if _, ok := sums[[2]string{ledgerCurrency, code}]; !ok {
+			sums[[2]string{ledgerCurrency, code}] = decimal.Zero
+		}
 	}
 	out := make([]GroupReconciliation, 0, len(sums))
-	for k, v := range sums {
-		out = append(out, GroupReconciliation{VendorGroupID: k[1], Currency: k[0], SubledgerTotal: v, Reason: ReasonSingleControlAccount})
+	for k, total := range sums {
+		g := GroupReconciliation{VendorGroupCode: k[1], Currency: k[0], SubledgerTotal: total}
+		switch {
+		case k[0] != ledgerCurrency:
+			g.Reason = ReasonForeignCurrency
+		case unavailable != "":
+			g.Reason = unavailable
+		case len(currencies) > 1:
+			bal := ledgerByCode[k[1]]
+			g.LedgerBalance = &bal
+			g.Reason = ReasonForeignCurrency
+		default:
+			bal := ledgerByCode[k[1]]
+			diff := total.Sub(bal)
+			g.LedgerBalance, g.Difference, g.Comparable, g.Reconciled = &bal, &diff, true, diff.IsZero()
+		}
+		out = append(out, g)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Currency != out[j].Currency {
 			return out[i].Currency < out[j].Currency
 		}
-		if (out[i].VendorGroupID == UnassignedGroup) != (out[j].VendorGroupID == UnassignedGroup) {
-			return out[j].VendorGroupID == UnassignedGroup
+		if (out[i].VendorGroupCode == UnassignedGroup) != (out[j].VendorGroupCode == UnassignedGroup) {
+			return out[j].VendorGroupCode == UnassignedGroup
 		}
-		return out[i].VendorGroupID < out[j].VendorGroupID
+		return out[i].VendorGroupCode < out[j].VendorGroupCode
 	})
 	return out
 }

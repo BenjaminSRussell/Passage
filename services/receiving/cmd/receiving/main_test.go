@@ -89,6 +89,19 @@ func TestBuildProfile(t *testing.T) {
 	if profile.LedgerID != "0a1b2c3d-0000-4000-8000-000000000001" {
 		t.Fatalf("ledger id %q", profile.LedgerID)
 	}
+	if profile.VendorGroupDimension != "VENDGRP" {
+		t.Fatalf("vendor group dimension %q, want the VENDGRP default", profile.VendorGroupDimension)
+	}
+	for dim, want := range map[string]string{"-": "", "GROUP_X": "GROUP_X"} {
+		env := withAccounts(map[string]string{"POSTING_VENDOR_GROUP_DIMENSION": dim})
+		if p, err := buildProfile(func(k string) string { return env[k] }, false); err != nil || p.VendorGroupDimension != want {
+			t.Fatalf("dimension %q gave %q, %v; want %q", dim, p.VendorGroupDimension, err, want)
+		}
+	}
+	badDim := withAccounts(map[string]string{"POSTING_VENDOR_GROUP_DIMENSION": "vend grp"})
+	if _, err := buildProfile(func(k string) string { return badDim[k] }, false); err == nil || !strings.Contains(err.Error(), "POSTING_VENDOR_GROUP_DIMENSION") {
+		t.Fatalf("got %v, want a malformed dimension rejected", err)
+	}
 	notUUID := withAccounts(map[string]string{})
 	notUUID["POSTING_LEDGER_ID"] = "ledger-1"
 	if _, err := buildProfile(func(k string) string { return notUUID[k] }, false); err == nil || !strings.Contains(err.Error(), "POSTING_LEDGER_ID must be a UUID") {

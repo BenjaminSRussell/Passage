@@ -9,11 +9,13 @@ var (
 	StatementGenerated  = events.Type(Context, "statement", "generated", 1)
 	DefinitionPublished = events.Type(Context, "definition", "published", 1)
 	HierarchyUnassigned = events.Type(Context, "hierarchy", "unassigned", 1)
+	BalanceVerified     = events.Type(Context, "balance", "verified", 1)
+	LagExceeded         = events.Type(Context, "lag", "exceeded", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{StatementGenerated, DefinitionPublished, HierarchyUnassigned}
+	return []string{StatementGenerated, DefinitionPublished, HierarchyUnassigned, BalanceVerified, LagExceeded}
 }
 
 // HierarchyUnassignedData is the payload of hierarchy.unassigned.v1: a member
@@ -56,4 +58,40 @@ type DefinitionPublishedData struct {
 	Version     int    `json:"version"`
 	Actor       string `json:"actor"`
 	DiffSummary string `json:"diff_summary"`
+}
+
+// BalanceVerifiedData is the payload of balance.verified.v1: the reporting read
+// model of a ledger was compared with the ledger's trial balance (FR-15.1).
+// Status is matched, differs or inconclusive (the high-water mark moved
+// during the check, or entries waited ahead of it); DiffCount is the number of
+// accounts that differ. legal_entity_id (the ledger's owner) also becomes the
+// event's legalentityid extension. Account amounts are not in the event: they
+// are ledger balances, served only to callers that may read the ledger.
+type BalanceVerifiedData struct {
+	VerificationID   string `json:"verification_id"`
+	LedgerID         string `json:"ledger_id"`
+	LegalEntityID    string `json:"legal_entity_id,omitempty"`
+	Status           string `json:"status"`
+	HWMBefore        int64  `json:"hwm_before"`
+	HWMAfter         int64  `json:"hwm_after"`
+	EntriesPending   int    `json:"entries_pending"`
+	AccountsCompared int    `json:"accounts_compared"`
+	DiffCount        int    `json:"diff_count"`
+	Actor            string `json:"actor"`
+}
+
+// LagExceededData is the payload of lag.exceeded.v1 (PRD §2.15.5): the read
+// model of a ledger stayed behind by more than the lag gate for the alert
+// window. HWMLedger is the highest posting sequence the reporting service has
+// seen for the ledger (applied, or received and waiting for an earlier entry);
+// HWMReporting is the sequence it has applied.
+//
+// legal_entity_id (the ledger's owner) also becomes the event's legalentityid
+// extension, so a close board scoped to an entity sees its own ledgers only.
+type LagExceededData struct {
+	LedgerID      string `json:"ledger_id"`
+	LegalEntityID string `json:"legal_entity_id,omitempty"`
+	LagSeconds    int64  `json:"lag_seconds"`
+	HWMLedger     int64  `json:"hwm_ledger"`
+	HWMReporting  int64  `json:"hwm_reporting"`
 }

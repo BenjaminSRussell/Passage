@@ -74,6 +74,8 @@ type lineBody struct {
 	Account     string     `json:"account"`
 	DebitCredit string     `json:"debitCredit"`
 	Amount      amountBody `json:"amount"`
+	// Dimensions are ledger dimension values of the line (vendor group code).
+	Dimensions map[string]string `json:"dimensions,omitempty"`
 }
 
 type requestBody struct {
@@ -83,6 +85,9 @@ type requestBody struct {
 	DocumentDate string     `json:"documentDate,omitempty"`
 	Source       sourceBody `json:"source"`
 	Lines        []lineBody `json:"lines"`
+	// OptionalDimensions name dimensions the ledger drops instead of refusing
+	// when it does not define them (the vendor group dimension).
+	OptionalDimensions []string `json:"optionalDimensions,omitempty"`
 }
 
 type reverseBody struct {
@@ -137,6 +142,8 @@ func buildBody(entry domain.JournalEntry) (requestBody, error) {
 		PostingDate: entry.PostingDate.Format(dateFormat),
 		Source:      sourceBody{System: sourceSystem, Type: entry.Source.DocumentType, ID: entry.Source.DocumentID},
 		Lines:       make([]lineBody, 0, len(entry.Lines)),
+
+		OptionalDimensions: entry.OptionalDimensions,
 	}
 	if !entry.DocumentDate.IsZero() {
 		body.DocumentDate = entry.DocumentDate.Format(dateFormat)
@@ -154,6 +161,7 @@ func buildBody(entry domain.JournalEntry) (requestBody, error) {
 			Account:     l.Account,
 			DebitCredit: side,
 			Amount:      amountBody{Currency: currency, Value: abs.Value.StringFixed(money.MinorUnits(currency))},
+			Dimensions:  l.Dimensions,
 		})
 	}
 	return body, nil

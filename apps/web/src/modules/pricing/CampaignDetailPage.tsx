@@ -13,6 +13,7 @@ import {
   type ConditionRecord,
   type Problem,
 } from "./api/client";
+import { CampaignEditCard } from "./CampaignEditCard";
 import { CAMPAIGN_STATES, campaignState, describeTarget } from "./campaignFormat";
 import { describeCustomer, describePercent, describeProduct, today, TYPE_LABELS } from "./format";
 import styles from "./pages.module.css";
@@ -150,6 +151,7 @@ export function CampaignDetailPage() {
           onRowOpen={(row) => navigate(`/pricing/agreements/${row.id}`)}
         />
       </Card>
+      <CampaignEditCard campaign={campaign} onChange={setChanged} />
       <Card title="Kill switch">
         <div className={styles.stack}>
           <p className={styles.note}>

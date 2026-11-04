@@ -2,7 +2,10 @@ import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { BackordersPage } from "./BackordersPage";
 import { ContainerTypesPage } from "./ContainerTypesPage";
+import { DeliveryTolerancesPage } from "./DeliveryTolerancesPage";
 import { DeliveredNotInvoicedPage } from "./DeliveredNotInvoicedPage";
+import { ExceptionDetailPage } from "./ExceptionDetailPage";
+import { ExceptionsPage } from "./ExceptionsPage";
 import { DropShipDetailPage } from "./DropShipDetailPage";
 import { DropShipsPage } from "./DropShipsPage";
 import { LegalEntitySettingsPage } from "./LegalEntitySettingsPage";
@@ -14,6 +17,7 @@ import { ProductPackagingPage } from "./ProductPackagingPage";
 import { ReleasePage } from "./ReleasePage";
 import { ReleaseRulesPage } from "./ReleaseRulesPage";
 import { ReturnableAgingPage } from "./ReturnableAgingPage";
+import { ReturnableMovementsPage } from "./ReturnableMovementsPage";
 import { ReturnablePackagingPage } from "./ReturnablePackagingPage";
 import { ScanPage } from "./ScanPage";
 import { ShipmentDetailPage } from "./ShipmentDetailPage";
@@ -41,6 +45,8 @@ const fulfillment: PassageModule = {
     { path: "/fulfillment/packing-slips/:id", element: createElement(PackingSlipDetailPage), handle: { title: "Packing slip" } },
     { path: "/fulfillment/drop-ships", element: createElement(DropShipsPage), handle: { title: "Drop-ships" } },
     { path: "/fulfillment/drop-ships/:id", element: createElement(DropShipDetailPage), handle: { title: "Drop-ship" } },
+    { path: "/fulfillment/exceptions", element: createElement(ExceptionsPage), handle: { title: "Warehouse exceptions" } },
+    { path: "/fulfillment/exceptions/:id", element: createElement(ExceptionDetailPage), handle: { title: "Warehouse exception" } },
     { path: "/fulfillment/delivered-not-invoiced", element: createElement(DeliveredNotInvoicedPage), handle: { title: "Delivered not invoiced" } },
     { path: "/fulfillment/backorders", element: createElement(BackordersPage), handle: { title: "Short picks and backorders" } },
     { path: "/fulfillment/sscc-register", element: createElement(SsccRegisterPage), handle: { title: "SSCC register" } },
@@ -52,7 +58,9 @@ const fulfillment: PassageModule = {
     { path: "/fulfillment/returnable-packaging", element: createElement(ReturnablePackagingPage), handle: { title: "Returnable packaging" } },
     { path: "/fulfillment/warehouse-settings", element: createElement(WarehouseSettingsPage), handle: { title: "Warehouse settings" } },
     { path: "/fulfillment/release-rules", element: createElement(ReleaseRulesPage), handle: { title: "Release rules" } },
+    { path: "/fulfillment/delivery-tolerances", element: createElement(DeliveryTolerancesPage), handle: { title: "Over-delivery tolerances" } },
     { path: "/fulfillment/legal-entity-settings", element: createElement(LegalEntitySettingsPage), handle: { title: "Posting settings" } },
+    { path: "/fulfillment/returnable-movements", element: createElement(ReturnableMovementsPage), handle: { title: "Returnable packaging movements" } },
     { path: "/fulfillment/returnable-aging", element: createElement(ReturnableAgingPage), handle: { title: "Returnable packaging aging" } },
   ],
   nav: [
@@ -63,6 +71,7 @@ const fulfillment: PassageModule = {
     { label: "Shipments", to: "/fulfillment/shipments", duty: "WarehouseView" },
     { label: "Packing slips", to: "/fulfillment/packing-slips", duty: "WarehouseView" },
     { label: "Drop-ships", to: "/fulfillment/drop-ships", duty: "WarehouseView" },
+    { label: "Exceptions", to: "/fulfillment/exceptions", duty: "WarehouseView" },
     { label: "Delivered not invoiced", to: "/fulfillment/delivered-not-invoiced", duty: "WarehouseView" },
     { label: "Short picks and backorders", to: "/fulfillment/backorders", duty: "WarehouseView" },
     { label: "SSCC register", to: "/fulfillment/sscc-register", duty: "WarehouseView" },
@@ -72,9 +81,11 @@ const fulfillment: PassageModule = {
     { label: "Packaging materials", to: "/fulfillment/packaging-materials", duty: "WarehouseView" },
     { label: "Packaging fees", to: "/fulfillment/packaging-fees", duty: "PackagingFeeMaintain" },
     { label: "Returnable packaging", to: "/fulfillment/returnable-packaging", duty: "WarehouseView" },
+    { label: "Returnable movements", to: "/fulfillment/returnable-movements", duty: "WarehouseView" },
     { label: "Returnable aging", to: "/fulfillment/returnable-aging", duty: "WarehouseView" },
     { label: "Warehouse settings", to: "/fulfillment/warehouse-settings", duty: "WarehouseView" },
     { label: "Release rules", to: "/fulfillment/release-rules", duty: "WarehouseView" },
+    { label: "Over-delivery tolerances", to: "/fulfillment/delivery-tolerances", duty: "WarehouseView" },
     { label: "Posting settings", to: "/fulfillment/legal-entity-settings", duty: "WarehouseView" },
   ],
 };

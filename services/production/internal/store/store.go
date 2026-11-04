@@ -251,6 +251,8 @@ type Store interface {
 	SubcontractOperations(ctx context.Context, f SubcontractFilter) (SubcontractReport, error)
 	OperationsOverview(ctx context.Context, f OperationFilter) (OperationsOverview, error)
 	JournalInquiry(ctx context.Context, f JournalFilter) (JournalInquiry, error)
+	MaterialRequirements(ctx context.Context, f MaterialFilter) (MaterialRequirements, error)
+	MaterialItems(ctx context.Context, f MaterialFilter) (MaterialItems, error)
 	KPIs(ctx context.Context, f KPIFilter) (KPIReport, error)
 	ApplyOperationCommand(ctx context.Context, c OperationCommand) (Order, OperationOutcome, error)
 	StaleCreatedOrders(ctx context.Context, in HousekeepingScan, defaultDays int) ([]HousekeepingOrder, int, error)

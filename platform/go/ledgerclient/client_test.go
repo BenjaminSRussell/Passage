@@ -237,6 +237,48 @@ func TestBalance_SumsTheRequestedAccountOnly(t *testing.T) {
 	}
 }
 
+func TestBalances_ReturnsOneRowPerAccountOfTheRange(t *testing.T) {
+	var query map[string][]string
+	c, _ := newClientAs(t, "payables", func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.Query()
+		_, _ = w.Write([]byte(`{"currency":"EUR","rows":[{"account":"600100","debit":"100.00","credit":"40.25"},{"account":"600200","debit":"8","credit":"0"}]}`))
+	})
+	set, err := c.Balances(principalCtx(), ledgerclient.BalanceQuery{LegalEntityID: entityID, LedgerID: ledgerID, Account: "600000", AccountTo: "609999", PeriodFrom: "2026-09", PeriodTo: "2026-09"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if set.Currency != "EUR" || len(set.Rows) != 2 || !set.Rows[0].Net().Equal(decimal.RequireFromString("59.75")) || set.Rows[1].Account != "600200" ||
+		query["account_from"][0] != "600000" || query["account_to"][0] != "609999" {
+		t.Fatalf("balances %+v query %v", set, query)
+	}
+}
+
+func TestBalances_ExcludeYearEndClosingSendsTheOptionAndNeedsTheEcho(t *testing.T) {
+	var query map[string][]string
+	echoed := true
+	c, _ := newClientAs(t, "costacct", func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.Query()
+		body := `{"currency":"USD","excludesYearEndClosing":true,"rows":[{"account":"600100","debit":"7.00","credit":"0"}]}`
+		if !echoed {
+			body = `{"currency":"USD","rows":[{"account":"600100","debit":"7.00","credit":"0"}]}`
+		}
+		_, _ = w.Write([]byte(body))
+	})
+	q := ledgerclient.BalanceQuery{LegalEntityID: entityID, LedgerID: ledgerID, Account: "600000", AccountTo: "609999", ExcludeYearEndClosing: true}
+	set, err := c.Balances(principalCtx(), q)
+	if err != nil || !set.ExcludedYearEndClosing || query["exclude_year_end_closing"][0] != "true" {
+		t.Fatalf("balances %+v query %v err %v", set, query, err)
+	}
+	echoed = false
+	if _, err := c.Balances(principalCtx(), q); !errors.Is(err, ledgerclient.ErrExclusionNotApplied) {
+		t.Fatalf("an old ledger that ignores the option must fail closed, got %v", err)
+	}
+	q.ExcludeYearEndClosing = false
+	if _, err := c.Balances(principalCtx(), q); err != nil || query["exclude_year_end_closing"] != nil {
+		t.Fatalf("without the option nothing is sent or needed: %v %v", query, err)
+	}
+}
+
 func TestBalance_RejectsAnUnusableBody(t *testing.T) {
 	c, _ := newClientAs(t, "payables", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"currency":"USD","rows":[{"account":"1400","debit":"x","credit":"0"}]}`))

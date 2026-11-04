@@ -1,4 +1,4 @@
-import { problem } from "./fakePayables.js";
+import { decodeClaims, problem, type ServiceClaims } from "./fakePayables.js";
 
 type Response0 = "PENDING" | "ACCEPTED" | "DECLINED" | "EXPIRED";
 
@@ -20,10 +20,14 @@ export class FakeTransport {
   timeoutMs = 0;
   starts = 0;
   sweeps = 0;
-  readonly identities: Record<string, string | null>[] = [];
+  readonly tokens: ServiceClaims[] = [];
+  reads = 0;
   skewMs = 0;
   frozenSweeps = false;
-  private startKey?: string;
+  readOutage = false;
+  lookups = 0;
+  duringNextRead?: () => Promise<void>;
+  startKey?: string;
 
   private now(): number {
     return Date.now() + this.skewMs;
@@ -31,8 +35,11 @@ export class FakeTransport {
 
   readonly fetch: typeof fetch = async (input, init) => {
     const headers = new Headers(init?.headers);
-    if (headers.get("X-Passage-Duties") !== "TMS_TENDER" || !headers.get("X-Passage-Tenant") || !headers.get("X-Passage-User")) return problem(401, "missing identity", "AUTH-0001");
-    this.identities.push({ tenant: headers.get("X-Passage-Tenant"), legalEntity: headers.get("X-Passage-Legal-Entity"), user: headers.get("X-Passage-User") });
+    const claims = decodeClaims(headers.get("X-Passage-Service-Token"));
+    if (!claims || claims.iss !== "workflow-ts" || claims.aud !== "transport" || claims.duties.join() !== "transport.tender.execute" || !claims.act) {
+      return problem(401, "missing or wrong service token", "AUTH-0001");
+    }
+    this.tokens.push(claims);
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     const method = init?.method ?? "GET";
 
@@ -54,9 +61,31 @@ export class FakeTransport {
       if (!this.frozenSweeps) this.tick(this.now());
       return new Response(JSON.stringify({ items: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
-    if (method === "GET" && url.pathname === `/v1/transport/tenders/${TENDER_ID}`) return this.reply(200);
+    if (method === "GET" && url.pathname === `/v1/transport/tenders/${TENDER_ID}`) {
+      this.reads += 1;
+      if (this.readOutage) return problem(503, "transport is down");
+      const snapshot = this.reply(200);
+      const hook = this.duringNextRead;
+      this.duringNextRead = undefined;
+      await hook?.();
+      return snapshot;
+    }
+    if (method === "GET" && url.pathname === "/v1/transport/tenders" && url.searchParams.get("loadId") === LOAD_ID) {
+      this.lookups += 1;
+      const items = this.startKey === undefined ? [] : [await this.reply(200).json()];
+      return new Response(JSON.stringify({ items }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
     return problem(404, "unknown route");
   };
+
+  /** A tender a planner or an earlier run of the workflow opened under another key. */
+  openEarlier(key: string, timeoutMin: number): void {
+    this.startKey = key;
+    this.starts += 1;
+    this.carriers = [...CARRIERS];
+    this.timeoutMs = timeoutMin * 60_000;
+    this.offerNext(this.now());
+  }
 
   respond(carrierId: string, accept: boolean): void {
     this.tick(this.now());

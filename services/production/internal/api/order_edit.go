@@ -61,7 +61,7 @@ func validateOrderEdits(e domain.OrderEdits) map[string]string {
 	fields := map[string]string{}
 	switch n := e.Count(); {
 	case n == 0:
-		fields["lines"] = "at least one line or operation edit is required"
+		fields["lines"] = "at least one line, operation or co-product edit is required"
 	case n > maxOrderEdits:
 		fields["lines"] = fmt.Sprintf("at most %d edits in one request", maxOrderEdits)
 	}
@@ -122,6 +122,28 @@ func validateOrderEdits(e domain.OrderEdits) map[string]string {
 		optional(at+".queueBeforeH", op.QueueBeforeH)
 		optional(at+".queueAfterH", op.QueueAfterH)
 		optional(at+".transitH", op.TransitH)
+	}
+	for i, c := range e.CoProducts {
+		at := fmt.Sprintf("coProducts[%d]", i)
+		if !c.Op.Valid() {
+			fields[at+".op"] = "must be add, remove or change"
+		}
+		if c.LineNo == "" || len(c.LineNo) > maxLineNo {
+			fields[at+".lineNo"] = fmt.Sprintf("is required, at most %d characters", maxLineNo)
+		}
+		if c.ItemID != nil && !ids.Valid(*c.ItemID) {
+			fields[at+".itemId"] = "must be a UUID"
+		}
+		if c.Type != nil && *c.Type != domain.CoProductTypeCo && *c.Type != domain.CoProductTypeBy {
+			fields[at+".type"] = "must be co-product or by-product"
+		}
+		if c.Op == domain.EditAdd && (c.ItemID == nil || c.QtyPer == nil) {
+			fields[at] = "an added co-product needs itemId and qtyPer"
+		}
+		if c.Op == domain.EditRemove && (c.Type != nil || c.ItemID != nil || c.QtyPer != nil) {
+			fields[at] = "a removal carries lineNo only"
+		}
+		optional(at+".qtyPer", c.QtyPer)
 	}
 	return fields
 }

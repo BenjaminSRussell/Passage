@@ -17,6 +17,12 @@ import { ALL_DIMENSIONS, ProblemAlert, RowAction, stateTones } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
+/** What a reservation holds; a converted one says when its expected receipt arrived. */
+function reservesLabel(row: Reservation): string {
+  if (row.kind === "ORDERED") return "Expected receipt";
+  return row.convertedAt ? `Stock on hand (receipt arrived ${formatDateTime(row.convertedAt)})` : "Stock on hand";
+}
+
 /** Reservation inquiry (PRD 3.16.14) with release of active reservations. */
 export function ReservationsPage() {
   const [status, setStatus] = useState<ReservationStatus | "">("ACTIVE");
@@ -76,7 +82,7 @@ export function ReservationsPage() {
       render: (row) => `${sentence(row.demandType)} ${row.demandId}${row.demandSegment ? ` (segment ${row.demandSegment})` : ""}`,
     },
     { key: "policy", header: "Policy", render: (row) => row.policy },
-    { key: "kind", header: "Reserves", render: (row) => (row.kind === "ORDERED" ? "Expected receipt" : "Stock on hand") },
+    { key: "kind", header: "Reserves", render: reservesLabel },
     { key: "expiresAt", header: "Expires", render: (row) => (row.expiresAt ? formatDateTime(row.expiresAt) : dash) },
     { key: "status", header: "Status", render: (row) => <Badge tone={stateTones[row.status] ?? "neutral"}>{sentence(row.status)}</Badge> },
     {

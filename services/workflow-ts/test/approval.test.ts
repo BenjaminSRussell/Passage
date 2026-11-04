@@ -4,10 +4,9 @@ import { Worker } from "@temporalio/worker";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import type { WorkflowHandle } from "@temporalio/client";
 import {
+  approvalDecisionSignal,
   approvalStateQuery,
-  approveSignal,
   approvalWorkflow,
-  delegateSignal,
   validateInput,
   type ApprovalInput,
   type ApprovalState,
@@ -47,15 +46,15 @@ describe("approval workflow", () => {
         }],
       });
 
-      await handle.signal(approveSignal, "alice");
+      await handle.signal(approvalDecisionSignal, { action: "approve", actor: "alice", scope: [] });
       await waitForLevel(handle, "director");
-      await handle.signal(delegateSignal, "bob", "dana");
-      await handle.signal(approveSignal, "dana");
+      await handle.signal(approvalDecisionSignal, { action: "delegate", actor: "bob", scope: [], delegate: "dana" });
+      await handle.signal(approvalDecisionSignal, { action: "approve", actor: "dana", scope: [] });
       await waitForLevel(handle, "controller");
 
       await environment.sleep(3_600_001);
       await waitForApprover(handle, "cfo");
-      await handle.signal(approveSignal, "cfo");
+      await handle.signal(approvalDecisionSignal, { action: "approve", actor: "cfo", scope: [] });
 
       const result = await handle.result();
       expect(result.status).toBe("approved");
@@ -68,6 +67,34 @@ describe("approval workflow", () => {
       ]);
     });
   }, 30_000);
+});
+
+describe("approval decision in the first activation", () => {
+  it("applies a decision signalled with the start, before the workflow named the approver", async () => {
+    const environment = await TestWorkflowEnvironment.createTimeSkipping();
+    try {
+      const taskQueue = "approval-first-activation";
+      const worker = await Worker.create({
+        connection: environment.nativeConnection,
+        taskQueue,
+        workflowsPath: fileURLToPath(new URL("../src/workflows.ts", import.meta.url)),
+      });
+      await worker.runUntil(async () => {
+        const handle = await environment.client.workflow.signalWithStart(approvalWorkflow, {
+          workflowId: "approval:first-activation",
+          taskQueue,
+          args: [{ requestId: "first-activation", entityType: "purchase-requisition", levels: [{ id: "l1", approver: "alice", escalationApprover: "cfo", slaMs: 3_600_000 }] }],
+          signal: approvalDecisionSignal,
+          signalArgs: [{ action: "reject", actor: "alice", scope: [] }],
+        });
+        const result = await handle.result();
+        expect(result.status).toBe("rejected");
+        expect(result.history).toEqual([{ action: "rejected", levelId: "l1", actor: "alice" }]);
+      });
+    } finally {
+      await environment.teardown();
+    }
+  }, 60_000);
 });
 
 describe("validateInput", () => {

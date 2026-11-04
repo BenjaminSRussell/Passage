@@ -141,6 +141,12 @@ describe("new REST push", () => {
       method: "POST", onClientError: "dead_letter", auth: { type: "basic", username: "svc", password: "pw-123456" },
     });
     expect(validateSync({ ...good, responseKeyPath: "$.data.id", patterns: "a.b\nc.d, a.b" }).input).toMatchObject({ responseKeyPath: "$.data.id", patterns: ["a.b", "c.d"] });
+    const lines = validateSync({ ...good, responseKeyPath: "$.data.id", lineKeyPath: "$.data.lines[*].id", lineBodyPath: "Lines[*].LineNum", lineResponsePath: "$.data.lines[*].lineNo" });
+    expect(lines.input).toMatchObject({ lineKeyPath: "$.data.lines[*].id", lineCorrelation: { bodyPath: "Lines[*].LineNum", responsePath: "$.data.lines[*].lineNo" } });
+    expect(validateSync({ ...good, responseKeyPath: "$.id", lineKeyPath: "$.lines[*].id" }).input).not.toHaveProperty("lineCorrelation");
+    expect(validateSync({ ...good, lineKeyPath: "$.lines[*].id" }).errors.lineKeyPath).toMatch(/legacy key in the response/);
+    expect(validateSync({ ...good, responseKeyPath: "$.id", lineKeyPath: "lines.id" }).errors.lineKeyPath).toMatch(/one \[\*\]/);
+    expect(validateSync({ ...good, responseKeyPath: "$.id", lineKeyPath: "l[*].id", lineBodyPath: "Lines[*].n" }).errors.lineResponsePath).toBeDefined();
     const bad = validateSync({ ...EMPTY_SYNC, patterns: " ", url: "https://{host}.example/x", responseKeyPath: "$..x" });
     expect(Object.keys(bad.errors).sort()).toEqual(["name", "outboundMappingId", "password", "patterns", "responseKeyPath", "url", "username"]);
     expect(validateSync({ ...good, url: "ftp://erp" }).errors.url).toBeDefined();
@@ -294,6 +300,17 @@ describe("delivery monitor", () => {
 
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "dead_letter" } });
     await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("status")).toBe("dead_letter"));
+  });
+
+  it("shows each line's ERP key and the lookup table versions the render read", async () => {
+    handler = (url) =>
+      url.pathname === "/api/v1/hub/deliveries"
+        ? json(200, { items: [delivery({ lineKeys: [{ index: 0, legacyKey: "SOL-1" }, { index: 1, legacyKey: "SOL-2" }], lookups: [{ name: "Lines.uom", table: "uom_conversion", version: 4 }] }), delivery({ id: "0195f0a0-0000-7000-8000-0000000000d9", aggregateId: "order-9" })], nextCursor: null })
+        : undefined;
+    renderAt("/integration/sync/deliveries");
+    const table = await findTable({ name: "Sync deliveries" });
+    await waitFor(() => expect(within(table).getByText("SOL-1, SOL-2")).toBeInTheDocument());
+    expect(within(table).getByText("uom_conversion v4")).toBeInTheDocument();
   });
 
   it("scopes to one subscription from the query string and ignores a malformed id", async () => {

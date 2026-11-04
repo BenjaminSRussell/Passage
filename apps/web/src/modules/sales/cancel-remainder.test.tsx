@@ -97,6 +97,38 @@ describe("Cancel the remainder", () => {
     expect(screen.queryByText("Cancel the remainder")).toBeNull();
   });
 
+  it("closes one line only when a line is picked, and says the order stays partly shipped", async () => {
+    const after = order({ version: 5, netTotal: "50" });
+    after.lines = [after.lines[0], { ...after.lines[1], quantity: "1", lineNet: "0", lineStatus: "CANCELLED" }];
+    handler = (url, init) => (init.method === "POST" ? { status: 200, body: after, etag: '"5"' } : reportsOrOrder(order())(url));
+    renderAt(`/sales/orders/${ORDER_ID}`);
+    fireEvent.change(await screen.findByLabelText("Close"), { target: { value: "2" } });
+    expect(screen.getByText(/closing line 2 cancels what it has not delivered/)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Cancel what is not yet delivered on line 2"));
+    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: "line 2 dropped" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel remainder" }));
+    await vi.waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    const post = calls.find((c) => c.method === "POST");
+    expect(post?.url.pathname).toBe(`/api/v1/sales/orders/${ORDER_ID}/lines/2:cancel-remainder`);
+    expect(post?.headers.get("If-Match")).toBe('"4"');
+    expect(post?.body).toEqual({ reason: "line 2 dropped" });
+    expect(await screen.findByText(/The remainder of the line is cancelled; order SO-0000042 stays partly shipped with a total of 50 USD\./)).toBeInTheDocument();
+    // Only line 1 has quantity left, so the line choice is gone.
+    expect(screen.queryByLabelText("Close")).toBeNull();
+  });
+
+  it("shows the refusal of a one-line close", async () => {
+    handler = (url, init) =>
+      init.method === "POST"
+        ? { status: 422, body: { type: "about:blank", title: "Unprocessable", status: 422, code: "SLS-0025", detail: "line 1 is already delivered or cancelled; nothing is left to cancel" } }
+        : reportsOrOrder(order())(url);
+    renderAt(`/sales/orders/${ORDER_ID}`);
+    fireEvent.change(await screen.findByLabelText("Close"), { target: { value: "1" } });
+    fireEvent.click(screen.getByLabelText("Cancel what is not yet delivered on line 1"));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel remainder" }));
+    expect(await screen.findByText(/nothing is left to cancel \(SLS-0025\)/)).toBeInTheDocument();
+  });
+
   it("is hidden without the duty and on an order that is not partly shipped", async () => {
     handler = (url) => reportsOrOrder(order())(url);
     const first = renderAt(`/sales/orders/${ORDER_ID}`, ["sales.order.read", "sales.order.confirm"]);

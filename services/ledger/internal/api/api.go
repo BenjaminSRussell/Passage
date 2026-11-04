@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -129,6 +130,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyLedgerWrite)).Patch("/ledgers/{id}", a.patchLedger)
 		r.With(authz.RequireDuty(dutyAccountWrite)).Put("/charts/{chart}/accounts/{number}", a.putAccount)
 		r.With(authz.RequireAnyDuty(dutyRead, dutyAccountLookup)).Get("/charts/{chart}/accounts", a.listAccounts)
+		r.With(authz.RequireAnyDuty(dutyRead, dutyAccountLookup)).Get("/charts/{chart}/accounts/{number}", a.getAccount)
 		r.With(authz.RequireAnyDuty(dutyPost, dutyEntryPost)).Post("/journal-entries", a.postEntry)
 		r.With(authz.RequireDuty(dutyRead)).Get("/journal-entries/{id}", a.getEntry)
 		r.With(authz.RequireDuty(dutyReverse)).Post("/journal-entries/{id}/reverse", a.reverseEntry)
@@ -287,6 +289,8 @@ type createLedgerRequest struct {
 	// ReversalReasonRequired defaults to true (FR-11.15); NegativePostingEnabled to false (BR-11.16).
 	ReversalReasonRequired *bool `json:"reversalReasonRequired"`
 	NegativePostingEnabled *bool `json:"negativePostingEnabled"`
+	// AllowReinstate defaults to true: reversing a reversing entry re-instates the original (FR-11.8).
+	AllowReinstate *bool `json:"allowReinstate"`
 }
 
 var (
@@ -298,6 +302,11 @@ type patchLedgerRequest struct {
 	CalendarCode        *string `json:"calendarCode"`
 	AccountingPrinciple *string `json:"accountingPrinciple"`
 	ReportingCurrency   *string `json:"reportingCurrency"`
+	// AddDimensionAttributes appends dimension attributes (for example VENDGRP);
+	// existing ones stay and an attribute already on the ledger is ignored.
+	AddDimensionAttributes []string `json:"addDimensionAttributes"`
+	// AllowReinstate turns reinstatement by reversing a reversal on or off (FR-11.8).
+	AllowReinstate *bool `json:"allowReinstate"`
 }
 
 func (a *API) patchLedger(w http.ResponseWriter, r *http.Request) {
@@ -315,8 +324,18 @@ func (a *API) patchLedger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields := map[string]string{}
-	if req.CalendarCode == nil && req.AccountingPrinciple == nil && req.ReportingCurrency == nil {
-		fields["body"] = "send at least one of calendarCode, accountingPrinciple, reportingCurrency (an empty string clears it)"
+	if req.CalendarCode == nil && req.AccountingPrinciple == nil && req.ReportingCurrency == nil && req.AllowReinstate == nil && len(req.AddDimensionAttributes) == 0 {
+		fields["body"] = "send at least one of calendarCode, accountingPrinciple, reportingCurrency (an empty string clears it), allowReinstate, addDimensionAttributes"
+	}
+	seenAttr := map[string]bool{}
+	for _, attr := range req.AddDimensionAttributes {
+		if !dimAttrRe.MatchString(attr) || seenAttr[attr] {
+			fields["addDimensionAttributes"] = "each attribute must be unique, A-Z with digits or underscores, at most 20 characters"
+		}
+		seenAttr[attr] = true
+	}
+	if len(req.AddDimensionAttributes) > domain.MaxDimensionAttributes {
+		fields["addDimensionAttributes"] = fmt.Sprintf("at most %d attributes per ledger", domain.MaxDimensionAttributes)
 	}
 	if v := req.CalendarCode; v != nil && *v != "" && !calendarCodeRe.MatchString(*v) {
 		fields["calendarCode"] = "must be 1 to 20 characters of A-Z, 0-9, '_' or '-'"
@@ -412,7 +431,7 @@ func (a *API) createLedger(w http.ResponseWriter, r *http.Request) {
 	created, err := a.store.CreateLedger(r.Context(), store.Ledger{LegalEntityID: req.LegalEntityID, Code: req.Code,
 		Name: req.Name, ChartCode: req.ChartCode, Currency: req.Currency, DimensionAttributes: req.DimensionAttributes,
 		FirstOpenDate: firstOpen, FuturePostingDays: future, ReversalReasonRequired: reasonRequired,
-		NegativePostingEnabled: negativeEnabled})
+		NegativePostingEnabled: negativeEnabled, AllowReinstate: req.AllowReinstate})
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -452,6 +471,10 @@ func (a *API) putAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	chart, number := chi.URLParam(r, "chart"), chi.URLParam(r, "number")
+	tag, tagOK := replaceTag(w, r)
+	if !tagOK {
+		return
+	}
 	var req putAccountRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -493,7 +516,7 @@ func (a *API) putAccount(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	acct, created, err := a.store.PutAccount(r.Context(), chart, number, store.Account{Name: req.Name, Type: req.AccountType,
+	acct, created, err := a.store.PutAccount(r.Context(), chart, number, tag, store.Account{Name: req.Name, Type: req.AccountType,
 		Postable: postable, SuspendedFrom: req.SuspendedFrom, ReconType: reconType})
 	if err != nil {
 		a.fail(w, r, err)
@@ -503,7 +526,7 @@ func (a *API) putAccount(w http.ResponseWriter, r *http.Request) {
 	if created {
 		status = http.StatusCreated
 	}
-	httpx.JSON(w, status, acct)
+	writeTagged(w, status, acct.LockVersion, acct)
 }
 
 func (a *API) listAccounts(w http.ResponseWriter, r *http.Request) {
@@ -511,6 +534,15 @@ func (a *API) listAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
+	fields := map[string]string{}
+	if exportFormat(q, fields) == formatCSV {
+		a.exportAccounts(w, r, chi.URLParam(r, "chart"), q.Get("after"))
+		return
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
 	limit := defaultAccountPage
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -565,11 +597,54 @@ type postEntryRequest struct {
 	Description  string    `json:"description"`
 	Source       sourceDTO `json:"source"`
 	Lines        []lineDTO `json:"lines"`
+	// OptionalDimensions name dimension attributes that are dropped from the
+	// lines of a ledger that does not define them instead of refused.
+	OptionalDimensions []string `json:"optionalDimensions,omitempty"`
 }
 
 type singleEntryRequest struct {
 	postEntryRequest
 	LedgerLines []ledgerLinesDTO `json:"ledgerLines,omitempty"`
+}
+
+// withoutOptional is the request as the idempotency hash sees it: optional dimensions are best-effort tags
+// (the vendor group code comes from a party lookup that can fail on one attempt and answer on the next), so
+// their values and the optionalDimensions list are left out and a retry that tags differently replays the
+// entry the first attempt posted. A request without optionalDimensions is hashed exactly as before.
+func withoutOptional(req postEntryRequest, groups []ledgerLinesDTO) (postEntryRequest, []ledgerLinesDTO) {
+	if len(req.OptionalDimensions) == 0 {
+		return req, groups
+	}
+	strip := func(lines []lineDTO) []lineDTO {
+		out := make([]lineDTO, len(lines))
+		for i, l := range lines {
+			out[i] = l
+			if len(l.Dimensions) == 0 {
+				continue
+			}
+			dims := map[string]string{}
+			for k, v := range l.Dimensions {
+				if !slices.Contains(req.OptionalDimensions, k) {
+					dims[k] = v
+				}
+			}
+			if len(dims) == 0 {
+				dims = nil
+			}
+			out[i].Dimensions = dims
+		}
+		return out
+	}
+	req.Lines = strip(req.Lines)
+	req.OptionalDimensions = nil
+	stripped := make([]ledgerLinesDTO, len(groups))
+	for i, g := range groups {
+		stripped[i] = ledgerLinesDTO{LedgerID: g.LedgerID, Lines: strip(g.Lines)}
+	}
+	if groups == nil {
+		stripped = nil
+	}
+	return req, stripped
 }
 
 // toPostInput checks the request's syntax and builds the store input. Rule
@@ -613,6 +688,15 @@ func (a *API) toPostInput(req postEntryRequest, r *http.Request) (store.PostInpu
 	for i, l := range req.Lines {
 		in.Lines = append(in.Lines, lineInput(fmt.Sprintf("lines[%d]", i), l, fields))
 	}
+	if len(req.OptionalDimensions) > domain.MaxDimensionAttributes {
+		fields["optionalDimensions"] = fmt.Sprintf("at most %d attributes", domain.MaxDimensionAttributes)
+	}
+	for _, attr := range req.OptionalDimensions {
+		if !dimAttrRe.MatchString(attr) {
+			fields["optionalDimensions"] = "each attribute must be A-Z with digits or underscores, at most 20 characters"
+		}
+	}
+	in.OptionalDimensions = req.OptionalDimensions
 	in.TraceID = traceID(r)
 	return in, fields
 }
@@ -665,8 +749,10 @@ func (a *API) postEntry(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	req.LedgerLines = canonicalGroups(req.LedgerLines)
-	hash, err := domain.HashPayload(req)
+	hashed := req
+	hashed.postEntryRequest, hashed.LedgerLines = withoutOptional(req.postEntryRequest, req.LedgerLines)
+	hashed.LedgerLines = canonicalGroups(hashed.LedgerLines)
+	hash, err := domain.HashPayload(hashed)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
@@ -848,6 +934,7 @@ func (a *API) trialBalance(w http.ResponseWriter, r *http.Request) {
 	f := store.BalanceFilter{LedgerID: q.Get("ledger"), PeriodFrom: q.Get("period_from"), PeriodTo: q.Get("period_to"),
 		AccountFrom: q.Get("account_from"), AccountTo: q.Get("account_to")}
 	fields := map[string]string{}
+	format := exportFormat(q, fields)
 	if !ids.Valid(f.LedgerID) {
 		fields["ledger"] = "is required and must be a UUID"
 	}
@@ -855,6 +942,13 @@ func (a *API) trialBalance(w http.ResponseWriter, r *http.Request) {
 		if v != "" && !periodRe.MatchString(v) {
 			fields[name] = "must be a period as YYYY-MM"
 		}
+	}
+	switch q.Get("exclude_year_end_closing") {
+	case "":
+	case "true":
+		f.ExcludeYearEndClosing = true
+	default:
+		fields["exclude_year_end_closing"] = "must be true when given"
 	}
 	f.Dimensions = map[string]string{}
 	for key, values := range q {
@@ -885,6 +979,9 @@ func (a *API) trialBalance(w http.ResponseWriter, r *http.Request) {
 			fields["group_by"] = "must list at most 5 dimension attributes"
 		}
 	}
+	if f.ExcludeYearEndClosing && (len(f.Dimensions) > 0 || len(f.GroupBy) > 0) {
+		fields["exclude_year_end_closing"] = "cannot be combined with dim.* filters or group_by"
+	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
@@ -892,6 +989,10 @@ func (a *API) trialBalance(w http.ResponseWriter, r *http.Request) {
 	tb, err := a.store.TrialBalance(r.Context(), f)
 	if err != nil {
 		a.fail(w, r, err)
+		return
+	}
+	if format == formatCSV {
+		exportTrialBalance(w, tb)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, tb)
@@ -930,4 +1031,27 @@ func parseQuantity(v string) (decimal.Decimal, bool) {
 	}
 	q, err := decimal.NewFromString(v)
 	return q, err == nil
+}
+
+// checkLineQuantity validates the statistical quantity and unit of a request line (BR-11.2) and
+// returns the quantity at the stored scale, or "" when the line has none. Problems go to fields
+// under prefix, the line's field path.
+func checkLineQuantity(fields map[string]string, prefix, quantity, unit string) string {
+	qty, ok := parseQuantity(quantity)
+	switch {
+	case !ok || qty.IsNegative():
+		fields[prefix+"quantity"] = "must be a non-negative decimal string"
+	case !qty.Round(domain.QuantityScale).Equal(qty):
+		fields[prefix+"quantity"] = fmt.Sprintf("has more than %d decimals", domain.QuantityScale)
+	case qty.GreaterThanOrEqual(domain.MaxQuantity):
+		fields[prefix+"quantity"] = "is too large"
+	case qty.IsZero() != (unit == ""):
+		fields[prefix+"unit"] = "quantity and unit are set together"
+	case unit != "" && !domain.ValidUnit(unit):
+		fields[prefix+"unit"] = "must be 1 to 10 characters of A-Z or 0-9"
+	}
+	if ok && !qty.IsZero() {
+		return qty.StringFixed(domain.QuantityScale)
+	}
+	return ""
 }

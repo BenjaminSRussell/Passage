@@ -71,7 +71,7 @@ describe("RunsPage", () => {
   it("lists the runs newest first and shows the read-model lag", async () => {
     server.handler = (url) => {
       if (url.pathname === "/api/v1/reporting/runs") return json(200, { items: [run] });
-      if (url.pathname === "/api/v1/reporting/lag") return json(200, { items: [{ ledgerId: LEDGER, postingSequence: 4711, updatedAt: "2026-04-02T07:59:00Z" }] });
+      if (url.pathname === "/api/v1/reporting/lag") return json(200, { items: [{ ledgerId: LEDGER, postingSequence: 4711, updatedAt: "2026-04-02T07:59:00Z", entriesApplied: 4711 }] });
       return undefined;
     };
     const { container } = renderAt("/finreport");
@@ -81,7 +81,21 @@ describe("RunsPage", () => {
     expect(within(table).getByText("abababababab")).toBeInTheDocument();
     const lag = await screen.findByRole("list", { name: "Read-model lag" });
     expect(lag).toHaveTextContent("As of sequence 4711");
+    expect(lag).toHaveTextContent("4711 entries applied");
+    expect(lag).not.toHaveTextContent("wait");
     expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("shows entries waiting for a missing earlier entry", async () => {
+    server.handler = (url) => {
+      if (url.pathname === "/api/v1/reporting/runs") return json(200, { items: [] });
+      if (url.pathname === "/api/v1/reporting/lag")
+        return json(200, { items: [{ ledgerId: LEDGER, postingSequence: 41, updatedAt: "2026-04-02T07:59:00Z", entriesApplied: 41, entriesPending: 3 }] });
+      return undefined;
+    };
+    renderAt("/finreport");
+    const lag = await screen.findByRole("list", { name: "Read-model lag" });
+    expect(lag).toHaveTextContent("3 later entries wait for sequence 42");
   });
 
   it("filters by definition code", async () => {
@@ -132,6 +146,11 @@ describe("NewRunPage", () => {
     periodsPerYear: "12",
     firstYear: "2025",
     includeAdjustmentPeriods: false,
+    hierarchy: "",
+    hierarchyVersion: "",
+    normalBalance: "debit",
+    accountFrom: "",
+    accountTo: "",
   };
 
   it("checks the form before sending", () => {

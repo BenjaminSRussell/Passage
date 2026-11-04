@@ -101,6 +101,10 @@ func TestEditOrder_Refusals(t *testing.T) {
 		{name: "queue and transit hours", call: editCall(id, `{"operations":[{"op":"change","operNumber":10,"queueBeforeH":"-1","transitH":"0.1234567"},
 			{"op":"remove","operNumber":20,"queueAfterH":"1"}]}`, DutyWrite),
 			status: http.StatusBadRequest, code: validationCode, fields: []string{"operations[0].queueBeforeH", "operations[0].transitH", "operations[1]"}},
+		{name: "co-product shapes", call: editCall(id, `{"coProducts":[{"op":"swap","lineNo":"","itemId":"x","type":"waste","qtyPer":"-1"},
+			{"op":"add","lineNo":"C2"},{"op":"remove","lineNo":"C1","qtyPer":"1"}]}`, DutyWrite),
+			status: http.StatusBadRequest, code: validationCode,
+			fields: []string{"coProducts[0].op", "coProducts[0].lineNo", "coProducts[0].itemId", "coProducts[0].type", "coProducts[0].qtyPer", "coProducts[1]", "coProducts[2]"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -225,5 +229,15 @@ func TestVarianceReport_FormatsTotalsAndNet(t *testing.T) {
 		if _, ok := p.Errors[name]; !ok {
 			t.Errorf("no error for %s: %v", name, p.Errors)
 		}
+	}
+}
+
+func TestEditOrder_CoProductsAloneReachTheStore(t *testing.T) {
+	f := &fakeStore{}
+	_, h := newServer(t, f)
+	id, item := ids.New(), ids.New()
+	rec := do(h, editCall(id, `{"coProducts":[{"op":"add","lineNo":"C2","type":"by-product","itemId":"`+item+`","qtyPer":"0.05"},{"op":"remove","lineNo":"C1"}]}`, DutyWrite))
+	if rec.Code != http.StatusOK || len(f.edits) != 1 || len(f.edits[0].Edits.CoProducts) != 2 || *f.edits[0].Edits.CoProducts[0].Type != domain.CoProductTypeBy {
+		t.Fatalf("status %d edits %+v", rec.Code, f.edits)
 	}
 }

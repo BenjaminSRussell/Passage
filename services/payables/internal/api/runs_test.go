@@ -214,6 +214,9 @@ type fixtureOptions struct {
 	noSeedItems          bool
 	noTax                bool
 	noWithholdingAccount bool
+	// vendorOneGroupCode is the vendor group code of the items of vendorOne.
+	vendorOneGroupCode string
+	noGroupDimension   bool
 }
 
 type runFixture struct {
@@ -306,6 +309,9 @@ func newRunFixture(t *testing.T, opts fixtureOptions) *runFixture {
 	seed := func(source, vendor, due, currency, amount, discount string) store.OpenItem {
 		in := store.OpenItem{LegalEntityID: entityA, VendorID: vendor, SourceInvoiceID: source, InvoiceNumber: "INV-" + source[len(source)-2:],
 			InvoiceDate: "2025-12-01", DueDate: due, Currency: currency, Amount: decimal.RequireFromString(amount), DiscountAmount: decimal.RequireFromString(discount)}
+		if vendor == vendorOne {
+			in.VendorGroupCode = opts.vendorOneGroupCode
+		}
 		if discount != "0" {
 			day := "2026-01-10"
 			in.DiscountDate = &day
@@ -357,6 +363,9 @@ func newRunFixture(t *testing.T, opts fixtureOptions) *runFixture {
 	a := api.New(app, opts.validator, func() time.Time { return clock }).WithProposals(pg, fx.New(fxServer(t).URL, "", nil)).WithPaymentRuns(pg, ledger.New(srv.URL, nil).WithSigner(signer), runProfiles).WithVendorBanks(banks, keys)
 	if !opts.noTax {
 		a.WithWithholding(tax.New(taxSrv.URL, nil).WithSigner(signer), pg, runProfiles)
+	}
+	if opts.noGroupDimension {
+		a.WithVendorGroupDimension("")
 	}
 	router := httpx.NewRouter()
 	a.Register(router)
@@ -468,6 +477,77 @@ func TestPaymentRun_EndToEndWithRealXSDAndLedgerReplay(t *testing.T) {
 		if !strings.Contains(metrics, want) {
 			t.Errorf("metrics lack %q:\n%s", want, metrics)
 		}
+	}
+}
+
+func TestPaymentRun_ControlDebitsCarryTheVendorGroupCodeOfTheirItems(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts fixtureOptions
+		want map[string]string
+	}{
+		{"code known", fixtureOptions{vendorOneGroupCode: "DOM"}, map[string]string{"150.00": "DOM", "200.00": ""}},
+		{"dimension switched off", fixtureOptions{vendorOneGroupCode: "DOM", noGroupDimension: true}, map[string]string{"150.00": "", "200.00": ""}},
+		{"no code on the items", fixtureOptions{}, map[string]string{"150.00": "", "200.00": ""}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRunFixture(t, tc.opts)
+			f.approve()
+			runID := f.start()["id"].(string)
+			if rec := f.step(f.erin, runID, "generate-file"); rec.Code != http.StatusOK {
+				t.Fatalf("generate-file: %d %s", rec.Code, rec.Body)
+			}
+			if rec := f.step(f.erin, runID, "post-journal"); rec.Code != http.StatusOK {
+				t.Fatalf("post-journal: %d %s", rec.Code, rec.Body)
+			}
+			got := map[string]string{}
+			for _, l := range f.ledger.bodies[0]["lines"].([]any) {
+				line := l.(map[string]any)
+				if line["account"] != "2000" {
+					continue
+				}
+				dims, _ := line["dimensions"].(map[string]any)
+				code, _ := dims["VENDGRP"].(string)
+				got[line["amount"].(map[string]any)["value"].(string)] = code
+			}
+			if fmt.Sprint(got) != fmt.Sprint(tc.want) {
+				t.Fatalf("control debits %v, want %v", got, tc.want)
+			}
+			// The dimension is optional for the ledger, so a ledger without VENDGRP drops it instead of refusing the run.
+			tagged := tc.want["150.00"] != ""
+			if opt, _ := f.ledger.bodies[0]["optionalDimensions"].([]any); tagged != (len(opt) == 1 && opt[0] == "VENDGRP") || (!tagged && opt != nil) {
+				t.Fatalf("optionalDimensions %v, want [VENDGRP] only when a line is tagged", f.ledger.bodies[0]["optionalDimensions"])
+			}
+		})
+	}
+}
+
+// The control debits are split by vendor group code, which can change between two attempts, so the ledger may answer
+// a retry with 409 LEDGER_IDEMPOTENCY_CONFLICT: the entry the earlier attempt posted is found by its totals and
+// recorded. A conflict with no entry of the run behind it stays a retryable failure and is never a rejection.
+func TestPaymentRun_IdempotencyConflictRecordsTheEntryAnEarlierAttemptPosted(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{vendorOneGroupCode: "DOM"})
+	f.approve()
+	runID := f.start()["id"].(string)
+	f.step(f.erin, runID, "generate-file")
+	f.ledger.rejectWith, f.ledger.rejectCode = http.StatusConflict, "LEDGER_IDEMPOTENCY_CONFLICT"
+	wantProblem(t, f.step(f.erin, runID, "post-journal"), http.StatusBadGateway, "COM-0502")
+	if got := decode(t, f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID, "")); got["journalRejectedAt"] != nil || got["journalEntryId"] != nil {
+		t.Fatalf("a conflict without an entry of the run was recorded: %v", got)
+	}
+	f.ledger.rejectWith, f.ledger.rejectCode = 0, ""
+	f.ledger.dropReplies = 1
+	wantProblem(t, f.step(f.erin, runID, "post-journal"), http.StatusBadGateway, "COM-0502")
+	if f.ledger.posted() != 1 {
+		t.Fatalf("entries %d, want the one the lost reply committed", f.ledger.posted())
+	}
+	// The committed entry split the control debit by code; this attempt's body differs, so the ledger answers 409.
+	lines := f.ledger.bodies[0]["lines"].([]any)
+	f.ledger.bodies[0]["lines"] = append(lines[:len(lines):len(lines)], map[string]any{"account": "2000", "debitCredit": "D", "amount": map[string]any{"value": "0.00", "currency": "USD"}})
+	f.ledger.rejectWith, f.ledger.rejectCode = http.StatusConflict, "LEDGER_IDEMPOTENCY_CONFLICT"
+	rec := f.step(f.erin, runID, "post-journal")
+	if got := decode(t, rec); rec.Code != http.StatusOK || got["journalEntryId"] != "entry-1" || got["journalRejectedAt"] != nil {
+		t.Fatalf("conflict after a committed attempt = %d %v; want the earlier entry recorded", rec.Code, got)
 	}
 }
 
@@ -982,7 +1062,7 @@ func TestPaymentRun_OnlyDefinitiveLedgerRejectionsAreRecordedAndNothingElseRelea
 	}{
 		"401": {http.StatusUnauthorized, ""}, "403": {http.StatusForbidden, ""}, "404": {http.StatusNotFound, ""},
 		"408": {http.StatusRequestTimeout, ""}, "429": {http.StatusTooManyRequests, ""}, "500": {http.StatusInternalServerError, ""},
-		"409 conflict": {http.StatusConflict, "LEDGER_IDEMPOTENCY_CONFLICT"}, "409 in progress": {http.StatusConflict, "LEDGER_IDEMPOTENCY_IN_PROGRESS"},
+		"409 in progress": {http.StatusConflict, "LEDGER_IDEMPOTENCY_IN_PROGRESS"},
 	}
 	for name, tc := range cases {
 		f := newRunFixture(t, fixtureOptions{})

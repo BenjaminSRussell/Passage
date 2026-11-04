@@ -62,6 +62,9 @@ type fakeStore struct {
 	subFilters     []store.SubcontractFilter
 	opFilters      []store.OperationFilter
 	opOverview     store.OperationsOverview
+	matFilters     []store.MaterialFilter
+	matLines       store.MaterialRequirements
+	matItems       store.MaterialItems
 	journalFilters []store.JournalFilter
 	journalPage    store.JournalInquiry
 	kpiFilters     []store.KPIFilter

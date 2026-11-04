@@ -53,12 +53,58 @@ export interface Operation {
   setupGroup: string | null;
   /** Route setup time, used when the matrix has no entry for a pair (SCHED-0012). */
   setupMinutes: number;
+  /** Elapsed wait in front of and behind the operation; no resource is booked (FR-23.3). */
+  queueBeforeMinutes: number;
+  queueAfterMinutes: number;
+  /** Order quantity the operation works on, a decimal string (4 decimals); null when not set. */
+  quantity?: string | null;
+  /** Part of the quantity that must be through before the next operation may start (BR-23.5); null when none. */
+  overlapQuantity?: string | null;
   /** Product or order attributes that capacity block conditions match on (FR-23.17). */
   attributes: Record<string, string>;
   /** Network governing the step from the order's previous operation into this one (FR-23.13). */
   networkId: string | null;
   status: OperationStatus;
   createdAt: string;
+  /** Starts at 1; the If-Match of a change or delete. */
+  version: number;
+  updatedAt?: string;
+}
+
+/** Fields left out stay as they are; the service cannot clear a date. */
+export interface OperationPatch {
+  minutes?: number;
+  dueAt?: string;
+  readyAt?: string;
+  priority?: number;
+  setupMinutes?: number;
+  queueBeforeMinutes?: number;
+  queueAfterMinutes?: number;
+  /** Decimal strings; an overlapQuantity of "0" clears the overlap (BR-23.5). */
+  quantity?: string;
+  overlapQuantity?: string;
+  /** Replaces the candidate resources, in priority order. */
+  resourceIds?: string[];
+}
+
+/** The changed operation; jobsRemoved is true when its non-firmed jobs left the schedule. */
+export type OperationUpdate = Operation & { jobsRemoved: boolean };
+
+export interface OperationRemoval {
+  operationId: string;
+  orderId: string;
+  operNumber: number;
+  jobsRemoved: boolean;
+}
+
+export interface OrderUnschedule {
+  orderId: string;
+  /** Operation numbers that are open again. */
+  operations: number[];
+  /** How many operations lost jobs. */
+  jobsRemoved: number;
+  /** Operation numbers a firmed job holds; they stay where they are. */
+  keptFirmed: number[];
 }
 
 export interface NewOperation {
@@ -73,6 +119,11 @@ export interface NewOperation {
   secondaryResourceIds?: string[];
   setupGroup?: string;
   setupMinutes?: number;
+  queueBeforeMinutes?: number;
+  queueAfterMinutes?: number;
+  /** Decimal strings; an overlap needs a quantity and cannot exceed it (BR-23.5). */
+  quantity?: string;
+  overlapQuantity?: string;
   attributes?: Record<string, string>;
   networkId?: string;
 }
@@ -93,7 +144,7 @@ export interface RunWarning {
 
 export interface Run {
   id: string;
-  scope: "site" | "selection" | "move";
+  scope: "site" | "selection" | "order" | "move" | "rollback";
   mode: string;
   direction: string;
   finite: boolean;
@@ -108,6 +159,10 @@ export interface Run {
   /** Findings on placed operations (SCHED-0010, SCHED-0012, SCHED-0014). */
   warnings: RunWarning[];
   createdAt: string;
+  /** True when the run kept its jobs, so it can be compared and rolled back to (slice 29). */
+  snapshot?: boolean;
+  /** The run a rollback restored; null for other runs. */
+  rollbackOf?: string | null;
 }
 
 export interface NewRun {
@@ -150,6 +205,13 @@ export interface GanttBar {
    * now, e.g. inside a downtime added after it was booked (SCHED-0002, AC-23.7).
    */
   outsideCapacity: boolean;
+  /**
+   * The segment lies in open capacity but in time the resource's active
+   * capacity blocks do not leave a job with the operation's attributes
+   * (BR-23.15), e.g. after a block was added or its condition changed. The job
+   * stays where it is until the next run or move. Absent on older servers.
+   */
+  blockBreach?: boolean;
 }
 
 export interface MoveRequest {
@@ -158,6 +220,12 @@ export interface MoveRequest {
   dryRun: boolean;
   /** Also push the orders pegged to the moved order forward behind their parents (FR-23.8). */
   propagate?: boolean;
+  /**
+   * Commit or preview the move over capacity violations of the moved job
+   * (SCHED-0002, SCHED-0005). Needs the scheduling.constraints.override duty;
+   * the service answers 403 SCHED-0141 without it.
+   */
+  overrideConstraints?: boolean;
 }
 
 export interface MoveViolation {
@@ -189,6 +257,8 @@ export interface DependentChange {
 export interface MoveResponse {
   dryRun: boolean;
   feasible: boolean;
+  /** With overridden true, the violations the move went over (feasible is true). */
+  overridden?: boolean;
   violations: MoveViolation[];
   changes: MoveChange[];
   orderId?: string;
@@ -196,7 +266,7 @@ export interface MoveResponse {
   orderEnd?: string;
   /** Pegged orders that move too, parents first (propagate only). */
   dependents?: DependentChange[];
-  /** The dependent walk stopped at 500 orders or 5 levels (SCHED-0007, BR-23.10). */
+  /** The dependent walk stopped at the propagation limit of the scheduling parameters (SCHED-0007, BR-23.10). */
   truncated?: boolean;
   run?: Run;
 }
@@ -353,6 +423,26 @@ export function listOperations(filter: { status?: OperationStatus | ""; orderId?
   return items<Operation>(`/operations${query({ status: filter.status, orderId: filter.orderId, limit: filter.limit })}`, signal);
 }
 
+export function getOperation(id: string, signal?: AbortSignal): Promise<Operation> {
+  return send<Operation>(`/operations/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function updateOperation(id: string, version: number, patch: OperationPatch, key: string = newKey()): Promise<OperationUpdate> {
+  return send<OperationUpdate>(`/operations/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
+    body: JSON.stringify(patch),
+  });
+}
+
+export function deleteOperation(id: string, version: number, key: string = newKey()): Promise<OperationRemoval> {
+  return send<OperationRemoval>(`/operations/${encodeURIComponent(id)}`, { method: "DELETE", headers: { "Idempotency-Key": key, "If-Match": `"${version}"` } });
+}
+
+export function unscheduleOrder(orderId: string, key: string = newKey()): Promise<OrderUnschedule> {
+  return post<OrderUnschedule>(`/orders/${encodeURIComponent(orderId)}:unschedule`, undefined, key);
+}
+
 export function createOperation(input: NewOperation, key: string = newKey()): Promise<Operation> {
   return post<Operation>("/operations", input, key);
 }
@@ -367,6 +457,11 @@ export function getRun(id: string, signal?: AbortSignal): Promise<Run> {
 
 export function startRun(input: NewRun, key: string = newKey()): Promise<Run> {
   return post<Run>("/runs", input, key);
+}
+
+/** Schedules every operation of one order (POST /orders/{orderId}:schedule, scope order). */
+export function scheduleOrder(orderId: string, input: { finite?: boolean; direction?: "forward" | "backward" } = {}, key: string = newKey()): Promise<Run> {
+  return post<Run>(`/orders/${encodeURIComponent(orderId)}:schedule`, input, key);
 }
 
 export function fetchGantt(from: string, to: string, resourceIds: string[] = [], signal?: AbortSignal): Promise<GanttBar[]> {
@@ -478,6 +573,50 @@ export async function fetchLateOrders(minLateMinutes: number, signal?: AbortSign
     throw new SchedulingApiError(0, "COM-0001", "The response has no items");
   }
   return { items: body.items, truncated: body.truncated === true };
+}
+
+/** One numbered line of a resource's dispatch list (PRD 4.23.15). */
+export interface DispatchLine {
+  sequence: number;
+  jobId: string;
+  orderId: string;
+  operNumber: number;
+  segment: number;
+  role: "primary" | "secondary";
+  start: string;
+  end: string;
+  minutesInWindow: number;
+  setupGroup?: string;
+  changeoverMinutes: number;
+  finite: boolean;
+  firmed: boolean;
+  lateMinutes: number;
+}
+
+export interface DispatchList {
+  resource: { id: string; code: string; name: string; timeZone: string };
+  date: string;
+  days: number;
+  windowStart: string;
+  windowEnd: string;
+  totalMinutes: number;
+  lines: DispatchLine[];
+  truncated: boolean;
+}
+
+/** The jobs booked on a resource in a window of its local calendar: a date and a minute-of-day range (a night shift ends after 1440). */
+export async function fetchDispatchList(
+  resourceId: string,
+  date: string,
+  startMinute: number,
+  endMinute: number,
+  signal?: AbortSignal,
+): Promise<DispatchList> {
+  const body = await send<Partial<DispatchList>>(`/dispatch-list${query({ resourceId, date, startMinute, endMinute })}`, {}, signal);
+  if (!Array.isArray(body.lines) || !body.resource) {
+    throw new SchedulingApiError(0, "COM-0001", "The response has no lines");
+  }
+  return body as DispatchList;
 }
 
 /** Why an operation of a production order was not registered (or was left as it was). */
@@ -1075,4 +1214,110 @@ export async function deleteCapacityOverride(resourceId: string, id: string): Pr
   if (!res.ok) {
     throw await toError(res);
   }
+}
+
+/** Tenant scheduling parameters (PRD 4.23.13): the defaults of runs and moves. */
+export interface SchedulingParameters {
+  defaultMode: "jobs" | "operations";
+  defaultDirection: "forward" | "backward";
+  defaultFinite: boolean;
+  /** Grid a Gantt drag snaps to, in minutes (1 to 60). */
+  dragSnapMinutes: number;
+  /** Most dependent orders a propagated move re-plans (BR-23.10). */
+  propagationOrders: number;
+  /** Deepest peg level a propagated move reaches (BR-23.10). */
+  propagationLevels: number;
+  /** 1 until the first change; the If-Match of a change. */
+  version: number;
+  updatedAt: string | null;
+}
+
+export type SchedulingParametersPatch = Partial<Omit<SchedulingParameters, "version" | "updatedAt">>;
+
+export function getParameters(signal?: AbortSignal): Promise<SchedulingParameters> {
+  return send<SchedulingParameters>("/parameters", {}, signal);
+}
+
+/** Changes the parameters under the version the planner saw (If-Match). */
+export function updateParameters(version: number, patch: SchedulingParametersPatch, key: string = newKey()): Promise<SchedulingParameters> {
+  return send<SchedulingParameters>("/parameters", {
+    method: "PATCH",
+    headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
+    body: JSON.stringify(patch),
+  });
+}
+
+// Slice 29: run comparison and rollback to a previous run (PRD 4.23.14).
+
+export interface RunCompareJob {
+  jobId: string;
+  orderId: string;
+  operNumber: number;
+  resourceId: string;
+  start: string;
+  end: string;
+  lateMinutes: number;
+}
+
+export interface RunCompareChange {
+  jobId: string;
+  orderId: string;
+  operNumber: number;
+  fromResourceId: string;
+  toResourceId: string;
+  fromStart: string;
+  toStart: string;
+  fromEnd: string;
+  toEnd: string;
+  /** The other run minus the base run, in minutes; negative when earlier. */
+  startShiftMinutes: number;
+  endShiftMinutes: number;
+  lateDeltaMinutes: number;
+}
+
+export interface RunMeasures {
+  jobs: number;
+  orders: number;
+  lateJobs: number;
+  totalLateMinutes: number;
+  maxLateMinutes: number;
+  changeoverMinutes: number;
+  makespanMinutes: number;
+  /** Minutes booked on the run's resources (primary and secondary) and their open minutes over the run's span. */
+  bookedMinutes: number;
+  openMinutes: number;
+  utilizationPct: number;
+}
+
+export interface RunComparison {
+  base: { run: Run; measures: RunMeasures };
+  other: { run: Run; measures: RunMeasures };
+  addedCount: number;
+  removedCount: number;
+  changedCount: number;
+  unchangedCount: number;
+  added: RunCompareJob[];
+  removed: RunCompareJob[];
+  changed: RunCompareChange[];
+  /** True when a list was cut at 500 entries; the counts stay exact. */
+  truncated: boolean;
+}
+
+export interface RunRollback {
+  run: Run;
+  restored: number;
+  skipped: { jobId: string; reason: "firmed" | "operation_missing" | "operation_changed" | "resource_missing" }[];
+}
+
+export async function compareRuns(id: string, to: string, signal?: AbortSignal): Promise<RunComparison> {
+  const body = await send<Partial<RunComparison>>(`/runs/${encodeURIComponent(id)}/compare${query({ to })}`, {}, signal);
+  if (!body.base || !body.other || !Array.isArray(body.changed)) {
+    throw new SchedulingApiError(0, "COM-0001", "The response is not a run comparison");
+  }
+  return body as RunComparison;
+}
+
+/** Restores the jobs a previous run placed as the current plan (POST /runs/{id}:rollback). */
+export function rollbackRun(id: string, key: string = newKey()): Promise<RunRollback> {
+  return post<RunRollback>(`/runs/${encodeURIComponent(id)}:rollback`, {}, key);
 }

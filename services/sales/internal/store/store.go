@@ -40,6 +40,7 @@ const (
 	CodeOneTimeLimit       = "SLS-0016"
 	CodeFieldCryptMissing  = "SLS-0054"
 	CodeHoldNotApplicable  = "SLS-0028"
+	CodeHoldNotRejectable  = "SLS-0062"
 	CodeAgreementNotValid  = "SLS-0029"
 	CodeAgreementClosed    = "SLS-0052"
 	CodeCommitmentBelow    = "SLS-0053"
@@ -99,6 +100,8 @@ type Line struct {
 	// quantity per base, kept so a parent change recomputes the line.
 	suppBase    decimal.Decimal
 	suppPerBase decimal.Decimal
+	// added marks a line a change adds in memory, still to be inserted.
+	added bool
 }
 
 // Notice is a non-blocking message returned with a result, such as the
@@ -120,6 +123,11 @@ type Hold struct {
 	ReleasedBy    *string         `json:"releasedBy,omitempty"`
 	ReleasedUntil *time.Time      `json:"releasedUntil,omitempty"`
 	AppliedAt     time.Time       `json:"appliedAt"`
+	// RejectedBy, RejectedAt and RejectionComment are set when a credit
+	// manager rejected the hold (status REJECTED, slice 26).
+	RejectedBy       *string    `json:"rejectedBy,omitempty"`
+	RejectedAt       *time.Time `json:"rejectedAt,omitempty"`
+	RejectionComment *string    `json:"rejectionComment,omitempty"`
 }
 
 // Order is a sales order header with its lines and holds.
@@ -263,9 +271,11 @@ type Store interface {
 	ListOrders(ctx context.Context, f OrderFilter) (OrderPage, error)
 	ConfirmOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ConfirmResult, error)
 	ReleaseHold(ctx context.Context, orderID, holdID string, version int, actor string, now time.Time) (ConfirmResult, error)
+	RejectHold(ctx context.Context, orderID, holdID string, version int, comment, actor string, now time.Time) (Order, error)
 	ChangeOrder(ctx context.Context, id string, version int, req ChangeRequest, actor string, now time.Time) (Order, error)
 	CancelOrderAs(ctx context.Context, id string, version int, reason, actor string, approver bool, now time.Time) (Order, error)
 	CancelRemainder(ctx context.Context, id string, version int, reason, actor string, now time.Time) (Order, error)
+	CancelLineRemainder(ctx context.Context, id string, lineNo, version int, reason, actor string, now time.Time) (Order, error)
 	ListOrderVersions(ctx context.Context, id string) ([]OrderVersion, error)
 	GetCreditProfile(ctx context.Context, legalEntityID, customerID string) (CreditProfile, error)
 	ListCreditProfiles(ctx context.Context, legalEntityID string, limit int) ([]CreditProfile, error)
@@ -335,6 +345,11 @@ type Store interface {
 	ListIntakeErrors(ctx context.Context, f IntakeErrorFilter) ([]IntakeError, error)
 	GetIntakeError(ctx context.Context, id string) (IntakeError, error)
 	ResolveIntakeError(ctx context.Context, id string, version int, note, actor string, now time.Time) (IntakeError, error)
+	GetIntakeReplay(ctx context.Context, id string) (IntakeReplay, error)
+	ListIntakeReplays(ctx context.Context, f IntakeErrorFilter) ([]IntakeReplay, int, error)
+	AutoCloseOrders(ctx context.Context, f AutoCloseFilter, actor string, now time.Time) (AutoCloseResult, error)
+	RecordReplayFailure(ctx context.Context, id, code, message string, now time.Time) (IntakeError, error)
+	ResolveReplayed(ctx context.Context, id, orderID, orderNumber, actor string, now time.Time) (IntakeError, error)
 	GetParameters(ctx context.Context, legalEntityID string) (SalesParameters, error)
 	PutParameters(ctx context.Context, in SalesParameters, version int, actor string) (SalesParameters, error)
 	Ping(ctx context.Context) error
@@ -643,7 +658,8 @@ func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 		return Order{}, err
 	}
 	linkSupplementaryParents(o.Lines)
-	holdRows, err := tx.Query(ctx, `select id::text, hold_type, reason_code, status, order_amount::text, applied_by, released_by, released_until, applied_at
+	holdRows, err := tx.Query(ctx, `select id::text, hold_type, reason_code, status, order_amount::text, applied_by, released_by, released_until, applied_at,
+			rejected_by, rejected_at, rejection_comment
 		from order_hold where tenant_id = $1 and order_id = $2 order by applied_at, id`, tenantID, id)
 	if err != nil {
 		return Order{}, err
@@ -653,7 +669,8 @@ func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 	for holdRows.Next() {
 		var h Hold
 		var amount string
-		if err := holdRows.Scan(&h.ID, &h.HoldType, &h.ReasonCode, &h.Status, &amount, &h.AppliedBy, &h.ReleasedBy, &h.ReleasedUntil, &h.AppliedAt); err != nil {
+		if err := holdRows.Scan(&h.ID, &h.HoldType, &h.ReasonCode, &h.Status, &amount, &h.AppliedBy, &h.ReleasedBy, &h.ReleasedUntil, &h.AppliedAt,
+			&h.RejectedBy, &h.RejectedAt, &h.RejectionComment); err != nil {
 			return Order{}, err
 		}
 		h.OrderAmount = decimal.RequireFromString(amount)
@@ -768,19 +785,38 @@ func checksAtTx(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, point s
 	return params.ChecksAt(point), nil
 }
 
+// undeliveredNetSQL is the value of what a line (alias l) has not delivered:
+// its net less the net of the delivered quantity at the same price and
+// discount. It is read only for lines with delivered_qty < quantity. SQL round
+// is half away from zero where domain.LineNet rounds half to even, so the
+// figure can differ from a Go recomputation by at most 0.0001 on an exact tie.
+// It assumes line_net is quantity x price less the discount; a line priced
+// another way (such as by catch weight) needs its own delivered net here.
+const undeliveredNetSQL = `(l.line_net - round(l.delivered_qty * l.unit_price * (100 - l.disc_pct) / 100, 4))`
+
 // openOrdersTx is the customer's exposure from orders in this service: the net
-// total of the customer's other CONFIRMED and PARTIALLY_SHIPPED ORDER and
-// SUBSCRIPTION orders in the credit profile currency (BR-27.3 open orders).
+// total of the customer's other CONFIRMED ORDER and SUBSCRIPTION orders, and
+// only the undelivered part of a PARTIALLY_SHIPPED one, in the credit profile
+// currency (BR-27.3 open orders; what was delivered is open AR, owned by the
+// receivables wave).
 // Orders in another currency cannot be converted without an FX rate (w12):
 // they are returned per currency so the evaluation and the profile flag them
 // instead of understating the exposure silently. The sum reads the partial
 // index sales_order_open_exposure (migration 0022).
 func openOrdersTx(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, customerID, currency, exceptOrderID string) (decimal.Decimal, []domain.CurrencyAmount, error) {
-	rows, err := tx.Query(ctx, `select currency::text, sum(net_total)::text from sales_order
+	rows, err := tx.Query(ctx, `select currency::text, sum(amount)::text from (
+		select currency, net_total as amount from sales_order
 		where tenant_id = $1 and legal_entity_id = $2 and customer_id = $3
-		  and status in ('CONFIRMED', 'PARTIALLY_SHIPPED') and order_type in ('ORDER', 'SUBSCRIPTION')
+		  and status = 'CONFIRMED' and order_type in ('ORDER', 'SUBSCRIPTION')
 		  and ($4::uuid is null or id <> $4::uuid)
-		group by currency order by currency`,
+		union all
+		select o.currency, `+undeliveredNetSQL+` as amount
+		from sales_order o join sales_order_line l on l.tenant_id = o.tenant_id and l.order_id = o.id
+		where o.tenant_id = $1 and o.legal_entity_id = $2 and o.customer_id = $3
+		  and o.status = 'PARTIALLY_SHIPPED' and o.order_type in ('ORDER', 'SUBSCRIPTION')
+		  and ($4::uuid is null or o.id <> $4::uuid)
+		  and l.line_status <> 'CANCELLED' and l.delivered_qty < l.quantity
+	) open_amounts group by currency order by currency`,
 		tenantID, legalEntityID, customerID, nullIfEmpty(exceptOrderID))
 	if err != nil {
 		return decimal.Zero, nil, err
@@ -806,11 +842,62 @@ func openOrdersTx(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, custo
 	return total, other, rows.Err()
 }
 
-// withOpenOrders replaces the stored open-orders figures of c with the ones
-// computed from the orders (a value sent with the profile is never used).
+// deliveredNotInvoicedSQL is the value of what a line (alias l) has delivered
+// and not invoiced: the delivered less the invoiced quantity at the line's
+// price and discount. It is read only for lines with delivered_qty >
+// invoiced_qty. Like undeliveredNetSQL it assumes a quantity x price line.
+const deliveredNotInvoicedSQL = `round((l.delivered_qty - l.invoiced_qty) * l.unit_price * (100 - l.disc_pct) / 100, 4)`
+
+// deliveredNotInvoicedTx is the customer's delivered, not yet invoiced goods
+// (BR-27.3 deliveredNotInvoiced) from the lines of the customer's other ORDER
+// orders that are PARTIALLY_SHIPPED or SHIPPED, in the profile currency; other
+// currencies are returned per currency, as for open orders. SUBSCRIPTION
+// orders are invoiced per period by billing, not per line quantity, and JOURNAL
+// orders post no slip or invoice, so neither counts. The order being checked is
+// left out: its whole net total is the amount under check.
+func deliveredNotInvoicedTx(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, customerID, currency, exceptOrderID string) (decimal.Decimal, []domain.CurrencyAmount, error) {
+	rows, err := tx.Query(ctx, `select o.currency::text, sum(`+deliveredNotInvoicedSQL+`)::text
+		from sales_order o join sales_order_line l on l.tenant_id = o.tenant_id and l.order_id = o.id
+		where o.tenant_id = $1 and o.legal_entity_id = $2 and o.customer_id = $3
+		  and o.status in ('PARTIALLY_SHIPPED', 'SHIPPED') and o.order_type = 'ORDER'
+		  and ($4::uuid is null or o.id <> $4::uuid)
+		  and l.delivered_qty > l.invoiced_qty
+		group by o.currency order by o.currency`,
+		tenantID, legalEntityID, customerID, nullIfEmpty(exceptOrderID))
+	if err != nil {
+		return decimal.Zero, nil, err
+	}
+	defer rows.Close()
+	total := decimal.Zero
+	var other []domain.CurrencyAmount
+	for rows.Next() {
+		var cur, sum string
+		if err := rows.Scan(&cur, &sum); err != nil {
+			return decimal.Zero, nil, err
+		}
+		amount, err := decimal.NewFromString(sum)
+		if err != nil {
+			return decimal.Zero, nil, err
+		}
+		if cur == currency {
+			total = amount
+		} else {
+			other = append(other, domain.CurrencyAmount{Currency: cur, Amount: amount})
+		}
+	}
+	return total, other, rows.Err()
+}
+
+// withOpenOrders replaces the stored open-orders and delivered-not-invoiced
+// figures of c with the ones computed from the orders (a value sent with the
+// profile is never used).
 func withOpenOrders(ctx context.Context, tx pgx.Tx, tenantID string, c *CreditProfile, exceptOrderID string) error {
 	var err error
 	c.Exposure.OpenOrders, c.Exposure.OpenOrdersOtherCurrencies, err = openOrdersTx(ctx, tx, tenantID, c.LegalEntityID, c.CustomerID, c.Currency, exceptOrderID)
+	if err != nil {
+		return err
+	}
+	c.Exposure.DeliveredNotInvoiced, c.Exposure.DeliveredNotInvoicedOtherCurrencies, err = deliveredNotInvoicedTx(ctx, tx, tenantID, c.LegalEntityID, c.CustomerID, c.Currency, exceptOrderID)
 	return err
 }
 
@@ -1134,9 +1221,10 @@ func (s *Postgres) GetCreditProfile(ctx context.Context, legalEntityID, customer
 // it when version matches the stored version (optimistic concurrency).
 func (s *Postgres) PutCreditProfile(ctx context.Context, in CreditProfile, version int) (CreditProfile, error) {
 	p, _ := tenant.FromContext(ctx)
-	// Open orders are computed from the orders on every read; a figure sent
-	// with the profile is not stored.
+	// Open orders and delivered-not-invoiced goods are computed from the
+	// orders on every read; a figure sent with the profile is not stored.
 	in.Exposure.OpenOrders, in.Exposure.OpenOrdersOtherCurrencies = decimal.Zero, nil
+	in.Exposure.DeliveredNotInvoiced, in.Exposure.DeliveredNotInvoicedOtherCurrencies = decimal.Zero, nil
 	exposure, err := json.Marshal(in.Exposure)
 	if err != nil {
 		return CreditProfile{}, err
@@ -1264,8 +1352,9 @@ func (s *Postgres) listProfiles(ctx context.Context, legalEntityID, dueBy string
 	return out, err
 }
 
-// listOpenOrdersTx fills the computed open-orders figures of a page of
-// profiles with one grouped query rather than one per profile.
+// listOpenOrdersTx fills the computed open-orders and delivered-not-invoiced
+// figures of a page of profiles with one grouped query each rather than one
+// per profile.
 func listOpenOrdersTx(ctx context.Context, tx pgx.Tx, tenantID string, profiles []CreditProfile) error {
 	if len(profiles) == 0 {
 		return nil
@@ -1276,11 +1365,19 @@ func listOpenOrdersTx(ctx context.Context, tx pgx.Tx, tenantID string, profiles 
 		les[i], customers[i] = c.LegalEntityID, c.CustomerID
 		at[[2]string{c.LegalEntityID, c.CustomerID}] = i
 		profiles[i].Exposure.OpenOrders, profiles[i].Exposure.OpenOrdersOtherCurrencies = decimal.Zero, nil
+		profiles[i].Exposure.DeliveredNotInvoiced, profiles[i].Exposure.DeliveredNotInvoicedOtherCurrencies = decimal.Zero, nil
 	}
-	rows, err := tx.Query(ctx, `select o.legal_entity_id::text, o.customer_id::text, o.currency::text, sum(o.net_total)::text
+	rows, err := tx.Query(ctx, `select legal_entity_id::text, customer_id::text, currency::text, sum(amount)::text from (
+		select o.legal_entity_id, o.customer_id, o.currency, o.net_total as amount
 		from sales_order o join unnest($2::uuid[], $3::uuid[]) as k(le, customer) on o.legal_entity_id = k.le and o.customer_id = k.customer
-		where o.tenant_id = $1 and o.status in ('CONFIRMED', 'PARTIALLY_SHIPPED') and o.order_type in ('ORDER', 'SUBSCRIPTION')
-		group by o.legal_entity_id, o.customer_id, o.currency order by o.currency`, tenantID, les, customers)
+		where o.tenant_id = $1 and o.status = 'CONFIRMED' and o.order_type in ('ORDER', 'SUBSCRIPTION')
+		union all
+		select o.legal_entity_id, o.customer_id, o.currency, `+undeliveredNetSQL+`
+		from sales_order o join unnest($2::uuid[], $3::uuid[]) as k(le, customer) on o.legal_entity_id = k.le and o.customer_id = k.customer
+		join sales_order_line l on l.tenant_id = o.tenant_id and l.order_id = o.id
+		where o.tenant_id = $1 and o.status = 'PARTIALLY_SHIPPED' and o.order_type in ('ORDER', 'SUBSCRIPTION')
+		  and l.line_status <> 'CANCELLED' and l.delivered_qty < l.quantity
+	) open_amounts group by legal_entity_id, customer_id, currency order by currency`, tenantID, les, customers)
 	if err != nil {
 		return err
 	}
@@ -1299,6 +1396,37 @@ func listOpenOrdersTx(ctx context.Context, tx pgx.Tx, tenantID string, profiles 
 			c.Exposure.OpenOrders = amount
 		} else {
 			c.Exposure.OpenOrdersOtherCurrencies = append(c.Exposure.OpenOrdersOtherCurrencies, domain.CurrencyAmount{Currency: cur, Amount: amount})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+	// Delivered, not invoiced goods, grouped the same way.
+	rows, err = tx.Query(ctx, `select o.legal_entity_id::text, o.customer_id::text, o.currency::text, sum(`+deliveredNotInvoicedSQL+`)::text
+		from sales_order o join unnest($2::uuid[], $3::uuid[]) as k(le, customer) on o.legal_entity_id = k.le and o.customer_id = k.customer
+		join sales_order_line l on l.tenant_id = o.tenant_id and l.order_id = o.id
+		where o.tenant_id = $1 and o.status in ('PARTIALLY_SHIPPED', 'SHIPPED') and o.order_type = 'ORDER'
+		  and l.delivered_qty > l.invoiced_qty
+		group by o.legal_entity_id, o.customer_id, o.currency order by o.currency`, tenantID, les, customers)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var le, customer, cur, sum string
+		if err := rows.Scan(&le, &customer, &cur, &sum); err != nil {
+			return err
+		}
+		amount, err := decimal.NewFromString(sum)
+		if err != nil {
+			return err
+		}
+		c := &profiles[at[[2]string{le, customer}]]
+		if cur == c.Currency {
+			c.Exposure.DeliveredNotInvoiced = amount
+		} else {
+			c.Exposure.DeliveredNotInvoicedOtherCurrencies = append(c.Exposure.DeliveredNotInvoicedOtherCurrencies, domain.CurrencyAmount{Currency: cur, Amount: amount})
 		}
 	}
 	return rows.Err()

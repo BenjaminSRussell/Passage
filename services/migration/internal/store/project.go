@@ -45,10 +45,12 @@ type Project struct {
 	Status              string     `json:"status"`
 	CutoverAt           *time.Time `json:"cutoverAt,omitempty"`
 	ScheduleCron        string     `json:"scheduleCron,omitempty"`
-	Version             int        `json:"version"`
-	CreatedBy           string     `json:"createdBy"`
-	CreatedAt           time.Time  `json:"createdAt"`
-	UpdatedAt           time.Time  `json:"updatedAt"`
+	// ScheduleTimezone is the IANA time zone ScheduleCron is read in (UTC unless set).
+	ScheduleTimezone string    `json:"scheduleTimezone"`
+	Version          int       `json:"version"`
+	CreatedBy        string    `json:"createdBy"`
+	CreatedAt        time.Time `json:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
 }
 
 // ProjectCursor is the keyset position after the last project of a page (name order).
@@ -83,7 +85,15 @@ func versionConflict(current int) error {
 
 func sameProject(a, b Project) bool {
 	return a.Name == b.Name && a.Type == b.Type && a.SourceSystem == b.SourceSystem && a.SourceLegalEntityID == b.SourceLegalEntityID &&
-		a.TargetLegalEntityID == b.TargetLegalEntityID && a.ConnectionProfileID == b.ConnectionProfileID && a.ScheduleCron == b.ScheduleCron && sameTime(a.CutoverAt, b.CutoverAt)
+		a.TargetLegalEntityID == b.TargetLegalEntityID && a.ConnectionProfileID == b.ConnectionProfileID && a.ScheduleCron == b.ScheduleCron && zoneOf(a.ScheduleTimezone) == zoneOf(b.ScheduleTimezone) && sameTime(a.CutoverAt, b.CutoverAt)
+}
+
+// zoneOf is the stored zone name: UTC when none was given.
+func zoneOf(name string) string {
+	if name == "" {
+		return domain.DefaultScheduleTimezone
+	}
+	return name
 }
 
 func sameTime(a, b *time.Time) bool {
@@ -94,11 +104,11 @@ func sameTime(a, b *time.Time) bool {
 }
 
 const projectColumns = `id, name, project_type, coalesce(source_system, ''), coalesce(source_legal_entity_id::text, ''), coalesce(target_legal_entity_id::text, ''),
-	coalesce(connection_profile_id::text, ''), status, cutover_at, coalesce(schedule_cron, ''), version, created_by, created_at, updated_at`
+	coalesce(connection_profile_id::text, ''), status, cutover_at, coalesce(schedule_cron, ''), schedule_timezone, version, created_by, created_at, updated_at`
 
 func scanProject(row pgx.Row) (Project, error) {
 	var p Project
-	err := row.Scan(&p.ID, &p.Name, &p.Type, &p.SourceSystem, &p.SourceLegalEntityID, &p.TargetLegalEntityID, &p.ConnectionProfileID, &p.Status, &p.CutoverAt, &p.ScheduleCron,
+	err := row.Scan(&p.ID, &p.Name, &p.Type, &p.SourceSystem, &p.SourceLegalEntityID, &p.TargetLegalEntityID, &p.ConnectionProfileID, &p.Status, &p.CutoverAt, &p.ScheduleCron, &p.ScheduleTimezone,
 		&p.Version, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
 	return p, err
 }
@@ -144,12 +154,12 @@ func (s *Postgres) SaveProject(ctx context.Context, in Project, idempotencyKey s
 		// A concurrent request with the same key may insert first: the key conflict is skipped and its row replayed.
 		var err error
 		saved, err = scanProject(tx.QueryRow(ctx, `insert into migration.project
-			(tenant_id, id, name, project_type, source_system, source_legal_entity_id, target_legal_entity_id, connection_profile_id, status, cutover_at, schedule_cron, created_by, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			(tenant_id, id, name, project_type, source_system, source_legal_entity_id, target_legal_entity_id, connection_profile_id, status, cutover_at, schedule_cron, schedule_timezone, created_by, idempotency_key)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 			on conflict (tenant_id, idempotency_key) do nothing
 			returning `+projectColumns,
 			p.TenantID, in.ID, in.Name, in.Type, nullIfEmpty(in.SourceSystem), nullIfEmpty(in.SourceLegalEntityID), nullIfEmpty(in.TargetLegalEntityID),
-			nullIfEmpty(in.ConnectionProfileID), in.Status, in.CutoverAt, nullIfEmpty(in.ScheduleCron), p.UserID, nullIfEmpty(idempotencyKey)))
+			nullIfEmpty(in.ConnectionProfileID), in.Status, in.CutoverAt, nullIfEmpty(in.ScheduleCron), zoneOf(in.ScheduleTimezone), p.UserID, nullIfEmpty(idempotencyKey)))
 		if errors.Is(err, pgx.ErrNoRows) {
 			prior, err := scanProject(tx.QueryRow(ctx, `select `+projectColumns+` from migration.project where tenant_id = $1 and idempotency_key = $2`, p.TenantID, idempotencyKey))
 			if err != nil {
@@ -269,8 +279,8 @@ func (s *Postgres) UpdateProject(ctx context.Context, id string, version int, ed
 		if err := edit(&cur); err != nil {
 			return err
 		}
-		out, err = scanProject(tx.QueryRow(ctx, `update migration.project set name = $3, status = $4, cutover_at = $5, schedule_cron = $6, connection_profile_id = $7, version = version + 1, updated_at = now()
-			where tenant_id = $1 and id = $2 returning `+projectColumns, p.TenantID, id, cur.Name, cur.Status, cur.CutoverAt, nullIfEmpty(cur.ScheduleCron), nullIfEmpty(cur.ConnectionProfileID)))
+		out, err = scanProject(tx.QueryRow(ctx, `update migration.project set name = $3, status = $4, cutover_at = $5, schedule_cron = $6, connection_profile_id = $7, schedule_timezone = $8, version = version + 1, updated_at = now()
+			where tenant_id = $1 and id = $2 returning `+projectColumns, p.TenantID, id, cur.Name, cur.Status, cur.CutoverAt, nullIfEmpty(cur.ScheduleCron), nullIfEmpty(cur.ConnectionProfileID), zoneOf(cur.ScheduleTimezone)))
 		return err
 	})
 	if isForeignKeyViolation(err, "project_connection_profile_fk") {
@@ -441,6 +451,7 @@ func (m *Mem) SaveProject(ctx context.Context, in Project, idempotencyKey string
 	}
 	now := time.Now().UTC()
 	in.ID, in.Version, in.CreatedAt, in.UpdatedAt = ids.New(), 1, now, now
+	in.ScheduleTimezone = zoneOf(in.ScheduleTimezone)
 	if p, ok := tenant.FromContext(ctx); ok {
 		in.CreatedBy = p.UserID
 	}
@@ -499,6 +510,7 @@ func (m *Mem) UpdateProject(_ context.Context, id string, version int, edit func
 			}
 		}
 		cur.Version++
+		cur.ScheduleTimezone = zoneOf(cur.ScheduleTimezone)
 		cur.UpdatedAt = time.Now().UTC()
 		st.items[i] = cur
 		return cur, nil

@@ -83,7 +83,7 @@ func ValidateOnhand(in []OnhandLine, items map[string]struct{}) (accepted []Onha
 	seenKey := make(map[string]struct{}, len(in))
 	seenSerial := make(map[string]struct{})
 	hold := func(o OnhandLine, rule, reason string) {
-		quarantined = append(quarantined, Quarantined{Record: o.Record(), Rule: rule, Reason: reason})
+		quarantined = append(quarantined, Quarantined{Record: o.Record(), Rule: rule, Reason: reason, Line: o})
 	}
 	for _, o := range in {
 		if strings.TrimSpace(o.LegacyID) == "" {
@@ -216,6 +216,9 @@ func ReconcileOnhand(r *PackRun, source, accepted []OnhandLine, loaded int, held
 		}
 	}
 	r.Totals = totals
+	if err := r.applyTolerances(); err != nil {
+		return err
+	}
 	if !r.HasMismatch() {
 		return r.Advance(StatusReconciled)
 	}

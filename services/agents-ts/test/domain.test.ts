@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildActionRecord, OUTPUT_CAP_BYTES } from "../src/domain/audit.js";
-import { addUsage, assertCanStartRun, assertRunWithinCap, budgetStatus, estimateTokens, type TokenBudget } from "../src/domain/budget.js";
+import { addUsage, assertCanStartRun, assertRunWithinCap, budgetStatus, estimateTokens, outputBudgetForCall, type TokenBudget } from "../src/domain/budget.js";
 import { canCallTool, selfApprovalBlocked } from "../src/domain/authz.js";
 import { compareMoney, scaled6, sumMoney } from "../src/domain/money.js";
 import { CASH_APP_MAX_INVOICES_DEFAULT, checkCashApplication, decideDisposition, isApprovalExpired, validatePolicy, type ModePolicy, type Proposal } from "../src/domain/policy.js";
@@ -157,6 +157,9 @@ describe("token budgets (FR-47.11)", () => {
     expect(() => assertCanStartRun(b(1000))).toThrow("AGT-0202");
     expect(() => assertCanStartRun(b(10))).not.toThrow();
     expect(() => assertRunWithinCap(401, 400)).toThrow("AGT-0202");
+    expect(outputBudgetForCall(400, 0, 100)).toBe(300);
+    expect(() => outputBudgetForCall(400, 0, 400)).toThrow("AGT-0202");
+    expect(() => outputBudgetForCall(400, 450, 1)).toThrow("AGT-0202");
   });
 
   it("estimates tokens at four characters each and accumulates usage", () => {

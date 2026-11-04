@@ -20,6 +20,15 @@ var (
 	// is not in the PRD event table and is added so the ledger and analytics
 	// see every change of the lease liability and ROU asset.
 	LeaseRemeasured = events.Type(Context, "lease", "remeasured", 1)
+	// LeasePosted is published for every lease journal the ledger accepted: the
+	// recognition at commencement and each schedule period (D4d). It is not in the
+	// PRD event table; it tells the ledger's consumers and analytics which entry
+	// carries which period of the liability and ROU asset.
+	LeasePosted = events.Type(Context, "lease", "posted", 1)
+	// LeaseTerminated is published when a lease is terminated early (D4c): the
+	// liability and ROU asset are derecognized with the gain or loss. It is not in
+	// the PRD event table; the ledger's consumers and analytics need it.
+	LeaseTerminated = events.Type(Context, "lease", "terminated", 1)
 	// CapexApproved is published when a capex request is approved (FR-37.17);
 	// budget (wave 38) and the depreciation forecast consume it.
 	CapexApproved = events.Type(Context, "capexrequest", "approved", 1)
@@ -99,6 +108,24 @@ type LeaseRemeasuredData struct {
 	Currency         string `json:"currency"`
 }
 
+// LeaseTerminatedData is the payload of LeaseTerminated. AfterPeriod is the last
+// payment period in force and TerminationDate its last day. GainLoss is positive
+// for a gain. Amounts are decimal strings in Currency.
+type LeaseTerminatedData struct {
+	LeaseID               string `json:"leaseId"`
+	TerminationID         string `json:"terminationId"`
+	LegalEntityID         string `json:"legalEntityId"`
+	AfterPeriod           int    `json:"afterPeriod"`
+	TerminationDate       string `json:"terminationDate"`
+	LiabilityDerecognized string `json:"liabilityDerecognized"`
+	ROUGross              string `json:"rouGross"`
+	ROUAccumulated        string `json:"rouAccumulated"`
+	ROUCarrying           string `json:"rouCarrying"`
+	TerminationPayment    string `json:"terminationPayment"`
+	GainLoss              string `json:"gainLoss"`
+	Currency              string `json:"currency"`
+}
+
 // AssetAdjustedData is the payload of AssetAdjusted: one adjustment on one
 // book. Deltas are signed decimal strings.
 type AssetAdjustedData struct {
@@ -160,4 +187,29 @@ type LeaseRecognizedData struct {
 	Currency   string `json:"currency"`
 	TermMonths int    `json:"termMonths"`
 	Rate       string `json:"rate"`
+	// Election is None, ShortTerm or LowValue; a lease under an election has liability and rouAsset 0.
+	Election string `json:"election"`
+}
+
+// LeasePostedData is the payload of LeasePosted. Kind is Termination (Period is the last period in force; Liability and ROUAsset are the amounts derecognized, with TerminationPayment and GainLoss), Recognition (period 0:
+// Liability and ROUAsset are set) or Period (Interest, Payment, ROUDepreciation
+// and Remeasurement are set). Amounts are decimal strings in Currency.
+type LeasePostedData struct {
+	LeaseID         string `json:"leaseId"`
+	LegalEntityID   string `json:"legalEntityId"`
+	Kind            string `json:"kind"`
+	Period          int    `json:"period"`
+	PostingDate     string `json:"postingDate"`
+	JournalEntryID  string `json:"journalEntryId"`
+	LedgerID        string `json:"ledgerId"`
+	Currency        string `json:"currency"`
+	Liability       string `json:"liability,omitempty"`
+	ROUAsset        string `json:"rouAsset,omitempty"`
+	Interest        string `json:"interest,omitempty"`
+	Payment         string `json:"payment,omitempty"`
+	ROUDepreciation string `json:"rouDepreciation,omitempty"`
+	Remeasurement   string `json:"remeasurement,omitempty"`
+	// Termination only: the payment to end the lease and the gain (positive) or loss.
+	TerminationPayment string `json:"terminationPayment,omitempty"`
+	GainLoss           string `json:"gainLoss,omitempty"`
 }

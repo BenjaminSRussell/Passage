@@ -95,6 +95,8 @@ type Store interface {
 	GetHierarchyVersion(ctx context.Context, id string) (HierarchyVersion, error)
 	DeleteHierarchyDraft(ctx context.Context, id string, version int) error
 	CreateHierarchyDraft(ctx context.Context, typeID, idempotencyKey, editedBy string) (HierarchyVersion, error)
+	HierarchyVersionDraftKeys(ctx context.Context, typeID string) (map[string]string, error)
+	TreeLimits() domain.TreeLimits
 	ReplaceHierarchyNodes(ctx context.Context, id string, version int, nodes []HierarchyNode, editedBy string) (HierarchyVersion, error)
 	PublishHierarchyVersion(ctx context.Context, id string, version int, effectiveFrom time.Time, reason, idempotencyKey, publishedBy string, backdated bool) (HierarchyVersion, error)
 	HierarchyAsOf(ctx context.Context, typeID string, date time.Time, orgUnitID string) (HierarchyAsOf, error)
@@ -147,6 +149,9 @@ func (s *Postgres) WithTreeLimits(l domain.TreeLimits) *Postgres {
 }
 
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
+
+// TreeLimits are the depth and node limits a hierarchy version is held to (ORG_HIERARCHY_MAX_*).
+func (s *Postgres) TreeLimits() domain.TreeLimits { return s.limits }
 
 const legalEntityColumns = "id, code, name, country, currency, time_zone, default_language, registration_number, primary_address_id, fiscal_calendar_id, status, version, created_at, updated_at"
 

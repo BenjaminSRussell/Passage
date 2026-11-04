@@ -16,7 +16,7 @@ func TestFromEnv_DefaultsMatchPRD(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Reporting{
-		MaxLagSeconds: 30, PageSize: 500, CellKeyLimit: 50000,
+		MaxLagSeconds: 30, LagAlertSeconds: 60, PageSize: 500, CellKeyLimit: 50000,
 		RetentionClosedYears: 7, RetentionAdhocDays: 90, AttachmentLimitMB: 20,
 		ShareLinkExpiryDays: 14, PDFConcurrencyPerPod: 4, OPACacheSeconds: 60,
 	}

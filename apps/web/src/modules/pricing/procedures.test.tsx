@@ -41,6 +41,9 @@ describe("procedure step rules", () => {
       validateSteps([step(10, "PRICE"), step(20, "LINE_DISC", { exclusionGroup: "EG1", exclusionMode: "BEST" }), step(30, "TOTAL_DISC", { exclusionGroup: "EG1", exclusionMode: "FIRST" })]),
     ).toHaveProperty(["steps[2].exclusionMode"], "Group EG1 already uses BEST.");
     expect(validateSteps([step(10, "PRICE", { requirementCel: "x".repeat(513) })])).toHaveProperty(["steps[0].requirementCel"]);
+    expect(validateSteps([step(10, "PRICE"), step(20, "LINE_DISC"), step(30, "LINE_DISC", { exclusionGroup: "EG1", exclusionMode: "BEST" })])).toEqual({
+      "steps[2].conditionType": "This condition type is already step 20; use each type once.",
+    });
     expect(validateProcedure({ legalEntityId: "x", name: "ax standard", steps: referenceSteps() })).toEqual({
       legalEntityId: "Enter the legal entity id (a UUID).",
       name: "Use upper-case letters, digits, _ or -, such as AX_STANDARD.",
@@ -103,7 +106,8 @@ describe("New pricing procedure", () => {
     expect(body.legalEntityId).toBe(LE);
     expect(body.name).toBe("AX_STANDARD");
     expect(body.steps.map((s) => s.stepNo)).toEqual([10, 20, 30, 40, 50, 60]);
-    expect(body.steps[5]).toMatchObject({ conditionType: "LINE_DISC", exclusionGroup: "EG1", exclusionMode: "FIRST", requirementCel: "line.qty > 10" });
+    // The new step starts at the first condition type the procedure does not use yet.
+    expect(body.steps[5]).toMatchObject({ conditionType: "FREIGHT", exclusionGroup: "EG1", exclusionMode: "FIRST", requirementCel: "line.qty > 10" });
     expect(idempotencyKey(post)).toBeTruthy();
   });
 

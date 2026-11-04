@@ -11,6 +11,7 @@ import {
   FormField,
   Input,
   PageHeader,
+  Select,
   StatGroup,
   StatTile,
   StatusPill,
@@ -46,6 +47,9 @@ const EXPORT_FILES: { file: ExportFile; label: string }[] = [
 ];
 
 const WHOLE = /^\d{1,5}$/;
+
+/** The entity filter value for the plan-wide steps of a per-entity runbook. */
+const ALL_ENTITY = "__plan__";
 
 /** How often the runbook timer refreshes while a step runs. */
 const TICK_MS = 30_000;
@@ -100,6 +104,7 @@ export function CutoverPlanDetailPage() {
   const [confirming, setConfirming] = useState(false);
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
+  const [entityFilter, setEntityFilter] = useState("");
   const stepKey = useRef(newKey());
   const startKey = useRef(newKey());
   const rollbackKey = useRef(newKey());
@@ -119,10 +124,15 @@ export function CutoverPlanDetailPage() {
     .map((step) => ({ step, elapsed: elapsedOf(step, now) ?? 0 }))
     .filter(({ step, elapsed }) => overrunTone(step.plannedDurationMin, elapsed) !== "ok");
 
+  const planSteps = plan?.steps ?? [];
+  const stepEntities = [...new Set(planSteps.map((s) => s.entity).filter((e): e is string => Boolean(e)))];
+  const shownSteps = entityFilter === "" ? planSteps : planSteps.filter((s) => (entityFilter === ALL_ENTITY ? !s.entity : s.entity === entityFilter));
+
   const columns: DataTableColumn<RunbookStep>[] = [
     { key: "seq", header: "Seq", mono: true },
     { key: "offsetMin", header: "T offset", mono: true, render: (row) => formatOffset(row.offsetMin) },
     { key: "name", header: "Step" },
+    ...(stepEntities.length > 0 ? [{ key: "entity", header: "Entity", render: (row: RunbookStep) => row.entity ?? "All" }] : []),
     { key: "owner", header: "Owner" },
     { key: "plannedDurationMin", header: "Planned (min)", align: "end" },
     {
@@ -349,11 +359,28 @@ export function CutoverPlanDetailPage() {
           ) : null}
         </>
       ) : null}
+      {!state.error && stepEntities.length > 0 ? (
+        <div className={styles.form}>
+          <FormField id="plan-entity-filter" label="Show steps for" hint={`${shownSteps.length} of ${planSteps.length} steps.`} optional>
+            {(control) => (
+              <Select {...control} value={entityFilter} onChange={(event) => setEntityFilter(event.target.value)}>
+                <option value="">All steps</option>
+                <option value={ALL_ENTITY}>Plan-wide steps</option>
+                {stepEntities.map((e) => (
+                  <option key={e} value={e}>
+                    {e}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+        </div>
+      ) : null}
       {!state.error ? (
         <DataTable
           label="Runbook steps"
           columns={columns}
-          rows={plan?.steps ?? []}
+          rows={shownSteps}
           getRowKey={(row) => String(row.seq)}
           loading={state.loading}
           empty={{ title: "No steps", description: "The plan has no steps." }}

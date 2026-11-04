@@ -123,10 +123,10 @@ and `npx tsc --noEmit` in `apps/web`.
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | `/v1/fulfillment/releases:run` | WarehouseRelease | Idempotency-Key. Creates shipments per (order, warehouse, ship date); a line already on an open shipment is skipped as `already_released`, a line with an active drop-ship as `drop_ship`; runs per warehouse are serialised |
+| POST | `/v1/fulfillment/releases:run` | WarehouseRelease | Idempotency-Key. Creates shipments per (order, warehouse, ship date); a line already on an open shipment is skipped as `already_released`, a line with an active drop-ship as `drop_ship`; a line whose remainder sales cancelled is released only up to the quantity it keeps (`order_line_kept`) and skipped as `order_remainder_cancelled` when nothing is left; runs per warehouse are serialised |
 | GET | `/v1/fulfillment/shipments` | WarehouseView | Delivery monitor; filters `status`, `warehouseId`, `orderId`, `limit` (1 to 500, default 100) |
 | GET | `/v1/fulfillment/shipments/{id}` | WarehouseView | ETag carries the version |
-| POST | `/v1/fulfillment/shipments/{id}:confirm-pick` | WarehousePick | Idempotency-Key, If-Match |
+| POST | `/v1/fulfillment/shipments/{id}:confirm-pick` | WarehousePick | Idempotency-Key, If-Match; above plan only within the over-delivery tolerance (FUL-0004 with none, FUL-0005 above it) and never beyond what the order line keeps after sales cancelled the remainder (FUL-0066) |
 | POST | `/v1/fulfillment/shipments/{id}/containers` | WarehousePack | Packs and closes a container with an SSCC; Idempotency-Key, If-Match |
 | POST | `/v1/fulfillment/shipments/{id}:post-packing-slip` | PackingSlipPost | Slip, journal, containers SHIPPED and outbox in one transaction; Idempotency-Key, If-Match |
 | GET | `/v1/fulfillment/packing-slips` | WarehouseView | Packing slip journal; filters `shipmentId`, `orderId`, `status`, `limit` |
@@ -205,6 +205,8 @@ the ASN gives each carton its `parent_sscc`.
 | GET | `/v1/fulfillment/warehouse-settings` | WarehouseView | The short pick action (FR-28.8) of every warehouse the caller sees shipments or a saved setting for, with its `legalEntityId`; REMAINDER_BACKORDER (the default) at version 0 when none is saved |
 | GET | `/v1/fulfillment/warehouse-settings/{warehouseId}` | WarehouseView | One warehouse; ETag carries the version (0 when none is saved) |
 | PUT | `/v1/fulfillment/warehouse-settings/{warehouseId}` | WarehouseRelease | Idempotency-Key, If-Match (0 when none is saved); body `shortPickAction` (KEEP_OPEN, CANCEL_REMAINDER, REMAINDER_BACKORDER) and `legalEntityId`; FUL-0057 when the warehouse belongs to another legal entity; `warehousesetting.changed` |
+| GET | `/v1/fulfillment/delivery-tolerances` | WarehouseView | Over-delivery tolerances (BR-28.7), most specific scope first; filters `productId`, `customerId`, `limit` |
+| PUT | `/v1/fulfillment/delivery-tolerances` | PackingRuleMaintain | Idempotency-Key, If-Match (0 for a new scope); body `productId`, `customerId` (either may be null), `overdeliveryPct` (0 to 100, 4 decimals); `deliverytolerance.changed` |
 | POST | `/v1/fulfillment/shipments/{id}:backorder-remainder` | WarehouseRelease | Idempotency-Key, If-Match; optional `plannedShipDate`; the rules of `:close-remainder`, and the closed quantity moves to a new RELEASED shipment (`backorderOfId`); `shipment.closed` with `backorder_shipment_id`, then `shipment.released` with `backorder_of` |
 
 The setting is per warehouse and scoped by its legal entity. When a packing slip
@@ -242,10 +244,10 @@ with a stable `code`.
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | `/v1/fulfillment/drop-ships` | WarehouseRelease | Idempotency-Key; links an order line to its purchase order line at the PO cost (`unitCost` positive, `currency`); one active drop-ship per order line (FUL-0061); a line on a warehouse shipment that is not cancelled is refused (FUL-0062); `dropship.created` |
+| POST | `/v1/fulfillment/drop-ships` | WarehouseRelease | Idempotency-Key; links an order line to its purchase order line at the PO cost (`unitCost` positive, `currency`); one active drop-ship per order line (FUL-0061); a line on a warehouse shipment that is not cancelled is refused (FUL-0062), and a qty above what the line keeps after sales cancelled the remainder (FUL-0066); `dropship.created` |
 | GET | `/v1/fulfillment/drop-ships` | WarehouseView | Newest first; filters `status` (OPEN, CONFIRMED, CANCELLED), `orderId`, `vendorId`, `limit` |
 | GET | `/v1/fulfillment/drop-ships/{id}` | WarehouseView | One drop-ship with its journal; ETag carries the version |
-| POST | `/v1/fulfillment/drop-ships/{id}:confirm` | PurchaseOrderConfirm | Idempotency-Key, If-Match; body `shippedOn`, optional `vendorShipmentRef`, `postingDate`; books Dr 5000 / Cr 2110 at the PO cost with no inventory transaction; `dropship.confirmed` carries the journal; final |
+| POST | `/v1/fulfillment/drop-ships/{id}:confirm` | PurchaseOrderConfirm | Idempotency-Key, If-Match; body `shippedOn`, optional `vendorShipmentRef`, `postingDate`; books Dr 5000 / Cr 2110 at the PO cost with no inventory transaction; a confirmed total above what the line keeps after sales cancelled the remainder is refused (FUL-0066); `dropship.confirmed` carries the journal; final |
 | POST | `/v1/fulfillment/drop-ships/{id}:cancel` | WarehouseRelease | Idempotency-Key, If-Match; only an OPEN drop-ship (a CONFIRMED one is refused with FUL-0001); `dropship.cancelled` |
 
 The `short_pick_action` default is REMAINDER_BACKORDER (migration 0016); KEEP_OPEN and
@@ -258,7 +260,8 @@ Codes raised in this slice:
 | Code | Meaning |
 |---|---|
 | `FUL-0001` | Shipment status does not allow the command (for example, not PACKED) |
-| `FUL-0004` | Over-pick: picked exceeds planned |
+| `FUL-0004` | Over-pick: picked exceeds planned and no over-delivery tolerance applies |
+| `FUL-0005` | Over-ship: picked exceeds planned plus the customer's over-delivery tolerance (422) |
 | `FUL-0007` | The container's stored SSCC failed its check digit; no label is printed (422) |
 | `FUL-0010` | Cannot cancel: the packing slip is invoiced (409) |
 | `FUL-0012` | Warning in the auto-pack response: no packing rule for the product; the line stays unpacked |
@@ -298,9 +301,9 @@ Codes raised in this slice:
 | `conflict_version` | `If-Match` does not match the current version (412) |
 | `idempotency_key_reuse` | Same Idempotency-Key with a different body (422) |
 
-Catalog codes `FUL-0002`, `FUL-0003`, `FUL-0005`, `FUL-0006`, `FUL-0008`,
+Catalog codes `FUL-0002`, `FUL-0003`, `FUL-0006`, `FUL-0008`,
 `FUL-0009` and `FUL-0011` belong to later slices (period control, negative
-stock, tolerance, tracking dimensions, carrier, saga, consolidation).
+stock, tracking dimensions, carrier, saga, consolidation).
 
 ## Dependencies
 

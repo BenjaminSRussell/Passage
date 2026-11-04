@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -165,8 +166,13 @@ func TestRun_StoredCoverageWithoutLeadTimeKeepsRequestLead(t *testing.T) {
 	}
 }
 
+// noCoverageBody is bareBody with the order type and lead time sent inline, so
+// only the coverage is left to the default group.
+var noCoverageBody = strings.Replace(bareBody, `"onHand"`, `"orderType":"production","leadTimeDays":7,"onHand"`, 1)
+
 // TestRun_BareItemWithoutStoredCoverageIsRefused: with nothing stored, a run
-// item without coverage code and order type is a 400 naming both fields.
+// item without an order type is a 400 naming it; the coverage is no longer
+// asked for because the default group REQ applies (FR-22.2, 4.22.13).
 func TestRun_BareItemWithoutStoredCoverageIsRefused(t *testing.T) {
 	st := &fakeStore{}
 	rec := do(t, st, http.MethodPost, "/v1/planning/plans/MAIN:run", bareBody, "planning.run", true, "k-bare")
@@ -177,11 +183,62 @@ func TestRun_BareItemWithoutStoredCoverageIsRefused(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil {
 		t.Fatal(err)
 	}
-	if p.Errors["items[0].coverage.code"] == "" || p.Errors["items[0].orderType"] == "" {
-		t.Fatalf("field errors %v; want coverage.code and orderType of items[0]", p.Errors)
+	if p.Errors["items[0].orderType"] == "" || p.Errors["items[0].coverage.code"] != "" {
+		t.Fatalf("field errors %v; want only the orderType of items[0]", p.Errors)
 	}
 	if st.runs != nil {
 		t.Fatal("a refused run must not reach the store")
+	}
+}
+
+// TestRun_DefaultCoverageGroupBuiltin: an item with neither coverage nor stored
+// item coverage is planned with requirement coverage and the FR-22.2 defaults
+// when the tenant stored no group REQ, like the same item sent that coverage inline.
+func TestRun_DefaultCoverageGroupBuiltin(t *testing.T) {
+	want, _ := runVersion(t, &fakeStore{}, runBody, "k-inline")
+	got, req := runVersion(t, &fakeStore{}, noCoverageBody, "k-default")
+	if got.PlanHash != want.PlanHash {
+		t.Fatalf("hash %s, want the inline requirement coverage's %s", got.PlanHash, want.PlanHash)
+	}
+	if len(req.Result.Orders) == 0 {
+		t.Fatal("the default coverage planned nothing")
+	}
+}
+
+// TestRun_DefaultCoverageGroupStored: the stored group REQ replaces the built-in
+// settings for items without coverage, and an item with a stored item coverage
+// or inline coverage never takes it.
+func TestRun_DefaultCoverageGroupStored(t *testing.T) {
+	builtin, _ := runVersion(t, &fakeStore{}, noCoverageBody, "k-builtin")
+	spec := domain.DefaultCoverageGroup(defaultCoverageCode, domain.CoverageManual)
+	st := &fakeStore{groups: []store.CoverageGroup{{ID: "g1", Version: 1, Spec: spec}}}
+	got, req := runVersion(t, st, noCoverageBody, "k-stored-req")
+	if got.PlanHash == builtin.PlanHash || len(req.Result.Orders) != 0 {
+		t.Fatalf("manual REQ must plan no orders: hash %s builtin %s orders %v", got.PlanHash, builtin.PlanHash, req.Result.Orders)
+	}
+	// An item coverage of its own wins over REQ.
+	st.runCovs = map[string]store.RunCoverage{fgID: requirementCoverage()}
+	if _, req = runVersion(t, st, noCoverageBody, "k-own"); len(req.Result.Orders) == 0 {
+		t.Fatal("the item's own coverage was replaced by REQ")
+	}
+	// Inline coverage wins over REQ.
+	st.runCovs = nil
+	if _, req = runVersion(t, st, runBody, "k-inline-wins"); len(req.Result.Orders) == 0 {
+		t.Fatal("inline coverage was replaced by REQ")
+	}
+}
+
+// TestRun_DefaultCoverageGroupLookupFails: a failure reading the group REQ other
+// than "not found" fails the run instead of planning with the built-in defaults,
+// and REQ is not read at all when every item has coverage of its own.
+func TestRun_DefaultCoverageGroupLookupFails(t *testing.T) {
+	st := &fakeStore{groupErr: errors.New("database down")}
+	rec := do(t, st, http.MethodPost, "/v1/planning/plans/MAIN:run", noCoverageBody, "planning.run", true, "k-req-down")
+	if rec.Code != http.StatusInternalServerError || st.runs != nil {
+		t.Fatalf("status %d body %s; want 500 before the store", rec.Code, rec.Body.String())
+	}
+	if _, req := runVersion(t, st, runBody, "k-inline-no-req"); len(req.Result.Orders) == 0 {
+		t.Fatal("a run whose items carry coverage must not need REQ")
 	}
 }
 
@@ -213,7 +270,7 @@ func TestRun_ReplayAfterStoredCoverageChanged(t *testing.T) {
 func TestWithStoredCoverage_LeavesUnknownItemsAlone(t *testing.T) {
 	lead := 2
 	items := []itemDTO{{ItemID: fgID, Coverage: coverageDTO{Code: "manual"}, OrderType: "transfer", LeadTimeDays: &lead}}
-	if fields := withStoredCoverage(items, map[string]store.RunCoverage{"other": {PlannedOrderType: "production"}}); len(fields) != 0 {
+	if fields := withStoredCoverage(items, map[string]store.RunCoverage{"other": {PlannedOrderType: "production"}}, nil); len(fields) != 0 {
 		t.Fatalf("fields %v", fields)
 	}
 	if items[0].OrderType != "transfer" || *items[0].LeadTimeDays != 2 || items[0].Coverage.Code != "manual" {

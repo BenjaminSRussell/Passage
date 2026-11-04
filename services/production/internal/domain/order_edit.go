@@ -26,6 +26,7 @@ type EditTarget string
 const (
 	TargetLine      EditTarget = "line"
 	TargetOperation EditTarget = "operation"
+	TargetCoProduct EditTarget = "coproduct"
 )
 
 // Stable error codes of the order-specific BOM and route edits (FR-21.18).
@@ -81,21 +82,37 @@ func (e OperationEdit) HasFields() bool {
 		e.Subcontract != nil || e.SubcontractPrice != nil || e.QueueBeforeH != nil || e.QueueAfterH != nil || e.TransitH != nil
 }
 
+// CoProductEdit is one edit of a declared co-product or by-product (FR-21.14,
+// FR-21.18). add needs itemId and qtyPer (type co-product by default); change sets
+// the fields it carries; remove reads lineNo only.
+type CoProductEdit struct {
+	Op     EditOp           `json:"op"`
+	LineNo string           `json:"lineNo"`
+	Type   *string          `json:"type,omitempty"`
+	ItemID *string          `json:"itemId,omitempty"`
+	QtyPer *decimal.Decimal `json:"qtyPer,omitempty"`
+}
+
 // OrderEdits is one request of edits: the line edits are applied first, in order,
-// then the operation edits.
+// then the operation edits, then the co-product edits.
 type OrderEdits struct {
 	Lines      []LineEdit      `json:"lines"`
 	Operations []OperationEdit `json:"operations"`
+	CoProducts []CoProductEdit `json:"coProducts"`
 }
 
 // Count is the number of edits in the request.
-func (e OrderEdits) Count() int { return len(e.Lines) + len(e.Operations) }
+func (e OrderEdits) Count() int { return len(e.Lines) + len(e.Operations) + len(e.CoProducts) }
+
+// RouteCount is the number of line and operation edits (the edits that touch the BOM or route).
+func (e OrderEdits) RouteCount() int { return len(e.Lines) + len(e.Operations) }
 
 // InUse names the lines and operations that journals reference (posted, reversed
 // or draft). Consumption and route feedback are read from the lines and operations.
 type InUse struct {
 	Lines      map[string]bool
 	Operations map[int]bool
+	CoProducts map[string]bool
 }
 
 // EditAudit is the audit diff of one applied edit: the line or operation before
@@ -108,6 +125,8 @@ type EditAudit struct {
 	LineAfter  *OrderLine
 	OperBefore *Operation
 	OperAfter  *Operation
+	CoBefore   *CoProduct
+	CoAfter    *CoProduct
 }
 
 // EditResult is the order's lines and operations after the edits, the operations
@@ -136,7 +155,7 @@ func CheckOrderEditable(s Status) error {
 // resource, and a requirement never drops below what was consumed. The order
 // keeps at least one operation. The inputs are not modified.
 func ApplyOrderEdits(lines []OrderLine, ops []Operation, orderQty decimal.Decimal, edits OrderEdits, inUse InUse) (EditResult, error) {
-	if edits.Count() == 0 {
+	if edits.RouteCount() == 0 {
 		return EditResult{}, invalidEdit("at least one line or operation edit is required")
 	}
 	outLines := append([]OrderLine(nil), lines...)
@@ -406,4 +425,121 @@ func missingLine(lineNo string) error {
 
 func missingOperation(n int) error {
 	return &Error{Code: CodeEditTargetMissing, Detail: fmt.Sprintf("operation %d is not on the order", n)}
+}
+
+// MaxCoProducts bounds the co-products and by-products declared on one order.
+const MaxCoProducts = 50
+
+// ApplyCoProductEdits applies the co-product edits to a copy of cos for an order of
+// orderQty units of productID (FR-21.14, FR-21.18) and returns the lines after the
+// edits with one audit row per edit. Planned quantities follow PlanCoProducts. As at
+// creation, no line yields the order's own product and the order declares at most
+// MaxCoProducts lines. A line that was reported or that a journal names keeps its
+// item and type and is never removed, and its planned quantity never drops below
+// what was reported. The input is not modified.
+func ApplyCoProductEdits(cos []CoProduct, orderQty decimal.Decimal, productID string, edits []CoProductEdit, journaled map[string]bool) ([]CoProduct, []EditAudit, error) {
+	out := append([]CoProduct(nil), cos...)
+	audit := make([]EditAudit, 0, len(edits))
+	for _, e := range edits {
+		a := EditAudit{Target: TargetCoProduct, Op: e.Op, Key: e.LineNo}
+		if e.LineNo == "" {
+			return nil, nil, invalidEdit("co-product lineNo is required")
+		}
+		at := indexOfCoProduct(out, e.LineNo)
+		switch e.Op {
+		case EditAdd:
+			if at >= 0 {
+				return nil, nil, &Error{Code: CodeEditTargetExists, Detail: fmt.Sprintf("co-product line %s is already on the order", e.LineNo)}
+			}
+			if e.ItemID == nil || *e.ItemID == "" || e.QtyPer == nil {
+				return nil, nil, invalidEdit(fmt.Sprintf("co-product line %s: itemId and qtyPer are required to add a line", e.LineNo))
+			}
+			if *e.ItemID == productID {
+				return nil, nil, ownProduct(e.LineNo)
+			}
+			c := CoProduct{LineNo: e.LineNo, Type: CoProductTypeCo, ItemID: *e.ItemID, QtyPer: *e.QtyPer}
+			if e.Type != nil {
+				c.Type = *e.Type
+			}
+			planned, err := PlanCoProducts([]CoProduct{c}, orderQty)
+			if err != nil {
+				return nil, nil, err
+			}
+			out = append(out, planned[0])
+			a.CoAfter = &planned[0]
+		case EditRemove:
+			if at < 0 {
+				return nil, nil, missingCoProduct(e.LineNo)
+			}
+			before := out[at]
+			if coProductInUse(before, journaled) {
+				return nil, nil, &Error{Code: CodeEditTargetInUse, Detail: fmt.Sprintf("co-product line %s has receipts or journals and cannot be removed", e.LineNo)}
+			}
+			out = append(out[:at:at], out[at+1:]...)
+			a.CoBefore = &before
+		case EditChange:
+			if at < 0 {
+				return nil, nil, missingCoProduct(e.LineNo)
+			}
+			if e.Type == nil && e.ItemID == nil && e.QtyPer == nil {
+				return nil, nil, invalidEdit(fmt.Sprintf("co-product line %s: a change sets at least one field", e.LineNo))
+			}
+			before := out[at]
+			c := before
+			if e.Type != nil {
+				c.Type = *e.Type
+			}
+			if e.ItemID != nil {
+				if *e.ItemID == productID {
+					return nil, nil, ownProduct(e.LineNo)
+				}
+				c.ItemID = *e.ItemID
+			}
+			if e.QtyPer != nil {
+				c.QtyPer = *e.QtyPer
+			}
+			if (c.Type != before.Type || c.ItemID != before.ItemID) && coProductInUse(before, journaled) {
+				return nil, nil, &Error{Code: CodeEditTargetInUse, Detail: fmt.Sprintf("co-product line %s has receipts or journals; add a new line for another item or type", e.LineNo)}
+			}
+			planned, err := PlanCoProducts([]CoProduct{c}, orderQty)
+			if err != nil {
+				return nil, nil, err
+			}
+			c = planned[0]
+			c.QtyReported = before.QtyReported
+			if c.QtyPlanned.LessThan(c.QtyReported) {
+				return nil, nil, &Error{Code: CodeEditTargetInUse, Detail: fmt.Sprintf("co-product line %s: the planned quantity %s would be below the reported %s", e.LineNo, c.QtyPlanned, c.QtyReported)}
+			}
+			out[at] = c
+			a.CoBefore, a.CoAfter = &before, &c
+		default:
+			return nil, nil, invalidEdit(fmt.Sprintf("co-product line %s: op must be add, remove or change", e.LineNo))
+		}
+		audit = append(audit, a)
+	}
+	if len(out) > MaxCoProducts {
+		return nil, nil, invalidEdit(fmt.Sprintf("an order declares at most %d co-products and by-products", MaxCoProducts))
+	}
+	return out, audit, nil
+}
+
+func ownProduct(lineNo string) error {
+	return invalidEdit(fmt.Sprintf("co-product line %s: the item must not be the order's own product", lineNo))
+}
+
+func coProductInUse(c CoProduct, journaled map[string]bool) bool {
+	return !c.QtyReported.IsZero() || journaled[c.LineNo]
+}
+
+func indexOfCoProduct(cos []CoProduct, lineNo string) int {
+	for i, c := range cos {
+		if c.LineNo == lineNo {
+			return i
+		}
+	}
+	return -1
+}
+
+func missingCoProduct(lineNo string) error {
+	return &Error{Code: CodeEditTargetMissing, Detail: fmt.Sprintf("co-product line %s is not on the order", lineNo)}
 }

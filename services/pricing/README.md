@@ -68,17 +68,28 @@ Built in slice 5:
   targeted campaign, only when the request's `customerGroupId` is the target group. `:kill` and
   `:restore` (versioned, `Idempotency-Key`) take effect on the next resolve
   (`campaign_kill_switch_effect` NEXT_RESOLVE) and write `campaign.killed` / `campaign.restored`.
+  `:revise` (versioned, `Idempotency-Key`) changes the name, validity, target group or budget of a
+  live or killed campaign (the currency never changes) and writes `campaign.revised`; it never
+  changes how a day before today priced (a started campaign keeps its start and target group).
   The budget is recorded, not enforced (see NOT-IMPLEMENTED.md).
 - **Pricing procedures** (FR-26.1): versioned procedures per legal entity and name (AX_STANDARD,
   SAP_RVAA01, ...). Each version holds steps 10–990 in increasing order with exactly one PRICE
   step, the condition type (the five the engine prices plus FREIGHT, REBATE_ACCRUAL, ROUNDING and
-  FREE_GOODS), an optional CEL requirement (≤ 512 characters), an exclusion group with its mode
+  FREE_GOODS; each type at most once, since records are keyed by type), an optional CEL requirement (≤ 512 characters), an exclusion group with its mode
   (BEST or FIRST, one mode per group), the statistical flag and the account key. Create numbers
   the next version under an advisory lock; `:revise` replaces a DRAFT's steps at its `revision`;
   `:activate` supersedes the ACTIVE version of the same name in one transaction and writes
   `procedure.activated`. ACTIVE and SUPERSEDED versions are immutable (409 PRC-0008). Writes need
-  `pricing.admin` (PricingAdmin). The engine still runs the reference step order; resolution by
-  the stored procedure is listed in NOT-IMPLEMENTED.md.
+  `pricing.admin` (PricingAdmin). Slice 14 makes the
+  engine run the ACTIVE procedure: `pricing_procedure_assignment` (migration `0014`) names the
+  procedure per legal entity and sales channel (an empty channel is the default), `resolve` and
+  `simulate` accept `salesChannel` and `procedure`, and the result names the procedure version
+  (part of the explain reference). Steps run in step order; one member of each exclusion group
+  survives per line (BEST lowest net, FIRST lowest step; losers stay in the trace with the
+  reason); a statistical step is reported with its amount and account key and leaves the net
+  alone. Every applied condition, PRICE included, carries its step number and account key.
+  Without an assignment the reference order runs. Step CEL requirements are stored but
+  not evaluated (NOT-IMPLEMENTED.md). Web: Procedure determination.
 - Migration `0005_procedures_campaigns.sql` (campaign, pricing_procedure, condition_record.campaign_id
   with a tenant-scoped foreign key; RLS and legal-entity scope on both new tables).
 - **Web**: campaign list, create and detail (kill and restore); procedure designer with the version
@@ -193,7 +204,7 @@ internal/domain/        pure engine: types, resolve, calc, journal validation an
 internal/store/         Postgres repository (pgx, tenant-scoped transactions, outbox)
 internal/api/           HTTP handlers and validation
 internal/events/        event type constants and payloads
-migrations/             0001_init.sql (condition_record, outbox, idempotency_keys), 0002 (journals, rebates), 0003 (commission, retro flag), 0004 (funds, promotions), 0005 (procedures, campaigns), 0006 (vendor rebates and claims); all with RLS
+migrations/             0001_init.sql (condition_record, outbox, idempotency_keys), 0002 (journals, rebates), 0003 (commission, retro flag), 0004 (funds, promotions), 0005 (procedures, campaigns), 0006 (vendor rebates and claims), 0014 (procedure determination); all with RLS
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml    AsyncAPI 3 for every published event
 charts/pricing/         Helm chart
@@ -205,17 +216,22 @@ testdata/               fixtures
 | Method | Path | Duty | Notes |
 |---|---|---|---|
 | POST | `/v1/pricing/resolve?explain=true` | pricing.view | up to `PRICING_MAX_LINES` (500) lines; the PRD's PricingResolve duty maps here until w27 |
-| POST | `/v1/pricing/simulate?explain=true` | pricing.view | inline records, nothing stored |
+| POST | `/v1/pricing/simulate?explain=true` | pricing.view | inline records (at most 1000), nothing stored |
+| POST | `/v1/pricing/compare?explain=true` | pricing.view | one request under two procedure versions of the request's legal entity (DRAFT included), with the differences; inline records at most 1000 |
+| GET | `/v1/pricing/price-list` | pricing.view | active records that apply to a customer on a date; at most 1000 items, `truncated` when more apply |
+| GET | `/v1/pricing/price-list/net-prices` | pricing.view | the same price list resolved as one-line sales at each quantity break (batch resolve); filters `productId`, `productGroupId`, `salesChannel`, `procedure`; at most 20 breaks a row, 500 rows and 2,000 breaks a response, `truncated` when more apply |
 | GET | `/v1/pricing/condition-records?legalEntityId=&status=&type=&customer=&product=&campaignId=&asOf=&validToFrom=&validToTo=&limit=` | pricing.view | at most 100 rows, ordered by id; with a `validToFrom` / `validToTo` range (last valid day, inclusive) ordered by valid to, then id |
 | POST | `/v1/pricing/condition-records` | pricing.maintain | `Idempotency-Key` honoured; creates DRAFT |
 | GET | `/v1/pricing/condition-records/{id}` | pricing.view | |
 | POST | `/v1/pricing/condition-records/{id}:activate` | pricing.maintain | body `{version}`; overlap check; `Idempotency-Key` honoured |
 | POST | `/v1/pricing/condition-records/{id}:withdraw` | pricing.maintain | body `{version, reason}`; `Idempotency-Key` honoured |
+| GET | `/v1/pricing/condition-records:export?legalEntityId=&status=&type=&customer=&product=&campaignId=&asOf=&validToFrom=&validToTo=` | pricing.view | streamed CSV of the matching records, at most 50000 rows; `X-Passage-Truncated: true` when more matched; formula-like text cells get a leading apostrophe |
 | POST | `/v1/pricing/condition-records:expire` | pricing.maintain | record expiry job for the scheduler: body `{legalEntityId, asOf}`; ACTIVE records with valid_to before asOf become EXPIRED and write `conditionrecord.withdrawn` with reason EXPIRED; a rerun expires nothing; asOf at most tomorrow (UTC) |
 | GET | `/v1/pricing/workspace?legalEntityId=&asOf=` | pricing.view | workspace tiles: exact record, journal, campaign and open-claim counts, and the month's rebate accruals per party role and currency; all entities in scope without legalEntityId |
 | GET | `/v1/pricing/journals?legalEntityId=&status=&limit=` | pricing.view | price journal log, newest first, no lines |
 | POST | `/v1/pricing/journals` | pricing.journal.post | up to 100,000 CREATE / UPDATE / DELETE lines; creates OPEN; `Idempotency-Key` honoured |
 | GET | `/v1/pricing/journals/{id}` | pricing.view | with up to 1,000 lines (before / after) and every line error |
+| GET | `/v1/pricing/journals/{id}/audit-extract?format=` | pricing.view | audit extract of a POSTED or REVERSED journal (PRC-0064 otherwise): CSV (default, every line streamed, before and after values as stored at post; the connection is aborted if the read fails mid-file) or JSON (at most 5,000 lines); read only |
 | POST | `/v1/pricing/journals:import-csv?legalEntityId=&name=&smartRound=` | pricing.journal.post | `text/csv` body (≤ 32 MB, ≤ 100,000 rows, header row with op); same checks as `POST /journals`; row faults keyed `rows[n].column`; `Idempotency-Key` honoured |
 | POST | `/v1/pricing/journals/{id}:validate` | pricing.journal.post | VALIDATED when clean, else OPEN with line errors |
 | POST | `/v1/pricing/journals/{id}:post` | pricing.journal.post | all lines or none (PRC-0005); not by a commodity run's runner (PRC-0056); with `journalFourEyes` on, not by the journal's creator nor without a user (PRC-0057); records `postedBy`; `Idempotency-Key` honoured |
@@ -223,6 +239,8 @@ testdata/               fixtures
 | GET | `/v1/pricing/rebates/agreements?legalEntityId=&partyRole=` | pricing.rebate.view | |
 | POST | `/v1/pricing/rebates/agreements` | pricing.rebate.maintain | `Idempotency-Key` honoured; `partyRole` CUSTOMER (default) or VENDOR with `vendorId` |
 | GET | `/v1/pricing/rebates/agreements/{id}` | pricing.rebate.view | |
+| GET | `/v1/pricing/rebates/agreements/{id}/statement?period=&format=` | pricing.rebate.view | rebate statement of one accrual period (2027-03, 2027-Q1 or 2027 as the agreement accrues): header, lines (source INVOICE, REPLAYED or RETRO_DELTA), accrued / settled / open, tier in force and `reconciled` (the tier's amount on the whole period, the period total and the sum of every accrual row agree, and the rows' basis adds up); `format=csv` downloads it; at most 5,000 lines; read only |
+| POST | `/v1/pricing/rebates/agreements/{id}:reopen` | pricing.rebate.maintain | body `{version, validTo}`; CLOSED only (409 PRC-0031); `validTo` after the close date; booked accruals stay; `Idempotency-Key` honoured |
 | GET | `/v1/pricing/rebates/accruals?agreementId=&period=` | pricing.rebate.view | period such as 2027-03, 2027-Q1 or 2027 |
 | POST | `/v1/pricing/rebates/accruals` | pricing.rebate.maintain | one posted invoice line; 201 new, 200 already accrued (stand-in for the invoice.posted consumer) |
 | POST | `/v1/pricing/rebates/vendor-accruals` | pricing.rebate.maintain | one posted vendor invoice line on a VENDOR agreement (Dr 2160 / Cr 5100); 201 new, 200 already accrued; PRC-0045 for a CUSTOMER agreement |
@@ -276,13 +294,19 @@ testdata/               fixtures
 | GET | `/v1/pricing/campaigns/{id}` | pricing.view | |
 | POST | `/v1/pricing/campaigns/{id}:kill` | pricing.maintain | body `{version}`; next resolve drops the campaign's records; `Idempotency-Key` honoured |
 | POST | `/v1/pricing/campaigns/{id}:restore` | pricing.maintain | body `{version}`; `Idempotency-Key` honoured |
+| POST | `/v1/pricing/campaigns/{id}:revise` | pricing.maintain | body `{version, name?, validFrom?, validTo?, targetCustomerGroup?, budget?}`; days before today keep their pricing (422); `Idempotency-Key` honoured |
 | GET | `/v1/pricing/procedures?legalEntityId=` | pricing.view | by name, newest version first |
 | POST | `/v1/pricing/procedures` | pricing.admin | DRAFT with the next version number; `Idempotency-Key` honoured |
 | GET | `/v1/pricing/procedures/{id}` | pricing.view | |
 | POST | `/v1/pricing/procedures/{id}:revise` | pricing.admin | body `{revision, steps}`; DRAFT only (PRC-0008); `Idempotency-Key` honoured |
 | POST | `/v1/pricing/procedures/{id}:activate` | pricing.admin | supersedes the ACTIVE version; `Idempotency-Key` honoured |
+| GET | `/v1/pricing/procedure-assignments?legalEntityId=` | pricing.view | the default (empty channel) first, then channels |
+| PUT | `/v1/pricing/procedure-assignments` | pricing.admin | body `{legalEntityId, salesChannel, procedureName, version}`; the procedure needs an ACTIVE version (PRC-0063); 412 on a stale version |
+| DELETE | `/v1/pricing/procedure-assignments?legalEntityId=&salesChannel=&version=` | pricing.admin | 204; the channel falls back to the default or the reference order |
 | GET | `/v1/pricing/parameters?legalEntityId=` | pricing.view | stored parameters or the defaults at version 0; 403 AUTH-0003 outside the caller's legal-entity scope |
-| PUT | `/v1/pricing/parameters` | pricing.admin | body `{legalEntityId, journalFourEyes, version}` (all required); 412 conflict_version; `parameters.changed`; `Idempotency-Key` honoured |
+| PUT | `/v1/pricing/parameters` | pricing.admin | body `{legalEntityId, journalFourEyes, pricingDateBasis, totalDiscountBasis, smartRoundingBands, priceSearchMode, smallOrderThresholds, version}` (all required); 412 conflict_version; `parameters.changed`; `Idempotency-Key` honoured |
+| GET | `/v1/pricing/tenant-parameters` | pricing.view | the tenant's `cacheTtlSeconds` and `campaignKillSwitchEffect`, or the defaults at version 0 |
+| PUT | `/v1/pricing/tenant-parameters` | pricing.admin | body `{cacheTtlSeconds (0 or 10-600), campaignKillSwitchEffect, version}` (all required); 412 conflict_version; `tenantparameter.changed`; `Idempotency-Key` honoured |
 | GET | `/healthz`, `/readyz`, `/metrics` | none | `/metrics` on the admin port |
 
 ## Error codes
@@ -323,6 +347,8 @@ testdata/               fixtures
 | PRC-0060 | 409 | The royalty period is closed and takes no more accruals |
 | PRC-0061 | 409 | The broker contract or royalty agreement is closed and takes no new invoice lines |
 | PRC-0062 | 409 | A royalty period is claimed before it is closed |
+| PRC-0063 | 422 | The named or assigned procedure has no ACTIVE version |
+| PRC-0064 | 409 | The audit extract of a price journal that is neither POSTED nor REVERSED |
 | conflict_version | 412 | Body version does not match the stored version |
 | idempotency_key_reuse | 422 | Same `Idempotency-Key` with a different body, or an invoice line accrued again with a different date, value or quantity |
 | COM-0001 | 422 | Validation failure; `errors` maps each field to its message (percentages outside 0–100, a product-keyed TOTAL_DISC, bad dates, ...) |
@@ -343,7 +369,9 @@ Written to `outbox` in the same transaction as the change (see `events/asyncapi.
 - `dev.passage.pricing.fundusage.recorded.v1` (one per attribution, with the period usage and budget after it)
 - `dev.passage.pricing.campaign.killed.v1`, `dev.passage.pricing.campaign.restored.v1` (kill switch)
 - `dev.passage.pricing.procedure.activated.v1` (names the superseded version)
+- `dev.passage.pricing.procedureassignment.changed.v1` (a procedure was assigned to a sales channel, changed or cleared)
 - `dev.passage.pricing.parameters.changed.v1` (a legal entity's parameters after a change, with the version and the user: the audit record)
+- `dev.passage.pricing.tenantparameter.changed.v1` (the tenant's parameters after a change; replicas drop their cached copies on it)
 - `dev.passage.pricing.brokercontract.created.v1` and `.closed.v1`; `dev.passage.pricing.royaltyagreement.created.v1` and `.closed.v1`
 - `dev.passage.pricing.contractaccrual.posted.v1` (one per broker or royalty accrual, credit or minimum royalty shortfall, with `posting_date`; Dr 6210 / Cr 2175 broker, Dr 6220 / Cr 2176 royalty by default)
 - `dev.passage.pricing.contractclaim.created.v1` and `.approved.v1` (broker and royalty claims BC-n / RY-n for w19 AP)
@@ -356,7 +384,10 @@ writes `condition-record` and `rebate-accrual`. Naming is a handoff to the kerne
 12-factor env vars, validated at startup: `PASSAGE_ENV`, `SERVICE_NAME`, `HTTP_ADDR`,
 `ADMIN_ADDR`, `DATABASE_URL`, `PRICING_MAX_LINES` (500), `PRICING_EXPLAIN_MAX_BYTES` (65536).
 `PRICING_CACHE_TTL` (60s; a duration or whole seconds, 10s to 600s, 0 turns the record snapshot
-cache off).
+cache off). Optional replica cache consumer (chart `cacheConsumer`): `KAFKA_BROKERS` starts it
+when the service principal `pricing-cache` holds `pricing.cache.invalidate`; `KAFKA_USERNAME`,
+`KAFKA_PASSWORD` (or `KAFKA_PASSWORD_FILE`) and `KAFKA_TLS_CA_FILE` as for every consumer. Each
+replica reads under the group `pricing-cache-<HOSTNAME>`; `KAFKA_GROUP` is ignored.
 
 ## Run and test
 

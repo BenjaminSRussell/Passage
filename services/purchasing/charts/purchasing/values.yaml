@@ -36,3 +36,22 @@ resources:
 serviceMonitor:
   enabled: false
   interval: 30s
+
+# The inbound consumer (slice 18): follows fulfillment's dropship.closed.v1 and
+# dropship.cancelled.v1 (slice 19) and planning's message.applied.v1 and changes the purchase orders they name. It exits at start until
+# service:purchasing-inbound is seeded in the service principal table.
+consumer:
+  enabled: false
+  replicaCount: 1
+  kafka:
+    brokers: ""
+    group: purchasing-inbound
+    username: purchasing-consumer
+    secret: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi

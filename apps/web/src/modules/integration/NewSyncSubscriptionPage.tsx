@@ -28,6 +28,11 @@ export interface SyncValues {
   method: SyncMethod;
   url: string;
   responseKeyPath: string;
+  /** Path with one [*] to each line's key in the response, such as $.data.lines[*].id. */
+  lineKeyPath: string;
+  /** Optional: the field of each pushed line (Lines[*].LineNum) and of each response line that carry the same value. */
+  lineBodyPath: string;
+  lineResponsePath: string;
   onClientError: ClientErrorPolicy;
   authType: AuthType;
   username: string;
@@ -50,6 +55,9 @@ export const EMPTY_SYNC: SyncValues = {
   method: "POST",
   url: "",
   responseKeyPath: "",
+  lineKeyPath: "",
+  lineBodyPath: "",
+  lineResponsePath: "",
   onClientError: "dead_letter",
   authType: "basic",
   username: "",
@@ -63,6 +71,8 @@ export const EMPTY_SYNC: SyncValues = {
   scope: "",
 };
 
+// A path with exactly one [*]: lines[*].id, $.data.lines[*].id, $[*].
+const ELEMENT_PATH = /^(\$|\$?\.?[A-Za-z_][A-Za-z0-9_-]*(?:(?:\.[A-Za-z_][A-Za-z0-9_-]*|\[\d+\]))*)\[\*\]((?:\.[A-Za-z_][A-Za-z0-9_-]*|\[\d+\])*)$/;
 const PATH = /^(\$)?(\.?[A-Za-z_][A-Za-z0-9_-]*|\[\d+\])(\.[A-Za-z_][A-Za-z0-9_-]*|\[\d+\])*$/;
 
 /** Checks that mirror the hub (src/restPush.ts parseRestInput), and the request the form sends. */
@@ -80,6 +90,18 @@ export function validateSync(v: SyncValues): { errors: Errors; input?: NewRestSu
   else if (url.includes("#")) errors.url = "The address must not contain a fragment (#).";
   const path = v.responseKeyPath.trim();
   if (path !== "" && !PATH.test(path)) errors.responseKeyPath = "Use a path such as $.data.id or orders[0].id.";
+  const lineKeyPath = v.lineKeyPath.trim();
+  const lineBodyPath = v.lineBodyPath.trim();
+  const lineResponsePath = v.lineResponsePath.trim();
+  if (lineKeyPath !== "") {
+    if (path === "") errors.lineKeyPath = "Line keys are recorded with the header's key: fill in the legacy key in the response first.";
+    else if (!ELEMENT_PATH.test(lineKeyPath)) errors.lineKeyPath = "Use a path with one [*], such as $.data.lines[*].id.";
+  }
+  if (lineBodyPath !== "" || lineResponsePath !== "") {
+    if (lineKeyPath === "") errors.lineKeyPath = errors.lineKeyPath ?? "Matching lines by a field needs the line key path.";
+    if (!ELEMENT_PATH.test(lineBodyPath)) errors.lineBodyPath = "Use a path with one [*], such as Lines[*].LineNum, or clear both fields to match by position.";
+    if (!ELEMENT_PATH.test(lineResponsePath)) errors.lineResponsePath = "Use a path with one [*], such as $.data.lines[*].lineNo, or clear both fields to match by position.";
+  }
   const need = (field: keyof SyncValues, message: string) => {
     if (v[field].trim() === "") errors[field] = message;
   };
@@ -123,6 +145,8 @@ export function validateSync(v: SyncValues): { errors: Errors; input?: NewRestSu
     auth,
   };
   if (path !== "") input.responseKeyPath = path;
+  if (lineKeyPath !== "") input.lineKeyPath = lineKeyPath;
+  if (lineKeyPath !== "" && lineBodyPath !== "") input.lineCorrelation = { bodyPath: lineBodyPath, responsePath: lineResponsePath };
   return { errors, input };
 }
 
@@ -207,6 +231,9 @@ export function NewSyncSubscriptionPage() {
             {text("url", "Endpoint", "Placeholders from the rendered body go in the path or query, for example /api/customers/{CustAccount}/orders. Values are escaped.", false, { spellCheck: false })}
           </div>
           {text("responseKeyPath", "Legacy key in the response", "Where the ERP returns the new record's key, such as $.data.id. Leave empty if it returns none.", true, { spellCheck: false })}
+          {text("lineKeyPath", "Line keys in the response", "When one push creates a header and its lines, where the ERP returns each line's key, such as $.data.lines[*].id. Leave empty to record the header's key only.", true, { spellCheck: false })}
+          {text("lineBodyPath", "Line field sent (optional)", "To match lines by a field instead of by position, the field each pushed line carries, such as Lines[*].LineNum. Needed when the mapping sends more than one list.", true, { spellCheck: false })}
+          {text("lineResponsePath", "Same field in the response (optional)", "Where the ERP echoes that field for each line, such as $.data.lines[*].lineNo.", true, { spellCheck: false })}
           <FormField id="sync-onClientError" label="When the ERP refuses (4xx)" hint="Refusals other than 410 and 429 normally need a fix, so they go to dead letters at once.">
             {(control) => (
               <Select {...control} value={values.onClientError} onChange={(event) => update({ onClientError: event.target.value as ClientErrorPolicy })}>

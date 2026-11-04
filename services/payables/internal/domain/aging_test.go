@@ -188,34 +188,50 @@ func TestReconcile_LedgerOnlyBalanceIsADifference(t *testing.T) {
 	}
 }
 
-func TestGroupBreakdown_PerCurrencyAndGroupUnassignedLast(t *testing.T) {
-	g1, g2 := "00000000-0000-0000-0000-0000000000b1", "00000000-0000-0000-0000-0000000000b2"
+func TestReconcileGroups_PerGroupAgainstTheLedgerSplit(t *testing.T) {
 	due := time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC)
 	rows := []domain.AgingRow{
-		{VendorID: "v1", VendorGroupID: g2, Currency: "USD", DueDate: due, OpenAmount: amount("100.10")},
-		{VendorID: "v2", VendorGroupID: g2, Currency: "USD", DueDate: due, OpenAmount: amount("200.20")},
-		{VendorID: "v3", VendorGroupID: g1, Currency: "USD", DueDate: due, OpenAmount: amount("0.07")},
+		{VendorID: "v1", VendorGroupCode: "DOM", Currency: "USD", DueDate: due, OpenAmount: amount("100.10")},
+		{VendorID: "v2", VendorGroupCode: "DOM", Currency: "USD", DueDate: due, OpenAmount: amount("200.20")},
+		{VendorID: "v3", VendorGroupCode: "IMP", Currency: "USD", DueDate: due, OpenAmount: amount("0.07")},
 		{VendorID: "v4", Currency: "USD", DueDate: due, OpenAmount: amount("50.00")},
-		{VendorID: "v5", VendorGroupID: g1, Currency: "EUR", DueDate: due, OpenAmount: amount("10.00")},
-		{VendorID: "v6", VendorGroupID: g1, Currency: "USD", DueDate: due, OpenAmount: amount("0")},
+		{VendorID: "v6", VendorGroupCode: "IMP", Currency: "USD", DueDate: due, OpenAmount: amount("0")},
 	}
-	want := []struct{ currency, group, total string }{
-		{"EUR", g1, "10"}, {"USD", g1, "0.07"}, {"USD", g2, "300.3"}, {"USD", domain.UnassignedGroup, "50"},
+	ledger := map[string]decimal.Decimal{"DOM": amount("300.30"), "IMP": amount("0.10"), "": amount("50.00"), "OLD": amount("12.00")}
+	got := domain.ReconcileGroups(rows, "USD", ledger, "")
+	type line struct {
+		code, sub, ledger, diff string
+		ok                      bool
 	}
-	got := domain.GroupBreakdown(rows)
+	want := []line{{"DOM", "300.3", "300.3", "0", true}, {"IMP", "0.07", "0.1", "-0.03", false}, {"OLD", "0", "12", "-12", false}, {domain.UnassignedGroup, "50", "50", "0", true}}
 	if len(got) != len(want) {
 		t.Fatalf("got %d lines, want %d: %+v", len(got), len(want), got)
 	}
-	grand := decimal.Zero
 	for i, w := range want {
-		if got[i].Currency != w.currency || got[i].VendorGroupID != w.group || got[i].SubledgerTotal.String() != w.total || got[i].Comparable || got[i].Reason != domain.ReasonSingleControlAccount {
-			t.Errorf("line %d = %+v, want %+v", i, got[i], w)
-		}
-		if w.currency == "USD" {
-			grand = grand.Add(got[i].SubledgerTotal)
+		g := got[i]
+		if g.VendorGroupCode != w.code || g.SubledgerTotal.String() != w.sub || g.LedgerBalance == nil || g.LedgerBalance.String() != w.ledger || g.Difference.String() != w.diff || !g.Comparable || g.Reconciled != w.ok {
+			t.Errorf("line %d = %+v, want %+v", i, g, w)
 		}
 	}
-	if !grand.Equal(amount("350.37")) {
-		t.Fatalf("USD groups sum to %s, want 350.37", grand)
+}
+
+func TestReconcileGroups_ForeignCurrencyAndUnavailableLedgerAreNotComparable(t *testing.T) {
+	due := time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC)
+	rows := []domain.AgingRow{
+		{VendorGroupCode: "DOM", Currency: "USD", DueDate: due, OpenAmount: amount("10.00")},
+		{VendorGroupCode: "DOM", Currency: "EUR", DueDate: due, OpenAmount: amount("5.00")},
+	}
+	for _, g := range domain.ReconcileGroups(rows, "USD", map[string]decimal.Decimal{"DOM": amount("10.00")}, "") {
+		if g.Comparable || g.Reconciled || g.Reason != domain.ReasonForeignCurrency {
+			t.Errorf("foreign-currency mix: %+v must not compare", g)
+		}
+	}
+	for _, g := range domain.ReconcileGroups(rows[:1], "USD", nil, domain.ReasonLedgerNoGroupDimension) {
+		if g.Comparable || g.LedgerBalance != nil || g.Reason != domain.ReasonLedgerNoGroupDimension {
+			t.Errorf("unavailable ledger: %+v", g)
+		}
+	}
+	if got := domain.ReconcileGroups(nil, "USD", nil, ""); len(got) != 0 {
+		t.Errorf("no items and no ledger lines give %+v, want none", got)
 	}
 }

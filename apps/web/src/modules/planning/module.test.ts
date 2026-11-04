@@ -21,6 +21,7 @@ const order: PlannedOrder = {
 };
 
 const message: Message = {
+  id: "00000000-0000-0000-0000-00000000f101", status: "open", version: 1,
   action: "delay",
   itemId: order.itemId,
   supplyRef: "PLN-000005",
@@ -38,12 +39,16 @@ describe("planning module", () => {
       "/planning/planned-orders",
       "/planning/planned-orders/:id",
       "/planning/messages",
+      "/planning/messages/:id",
       "/planning/net-requirements",
       "/planning/supply-schedule",
       "/planning/runs",
       "/planning/runs/compare",
       "/planning/runs/new",
       "/planning/forecast",
+      "/planning/allocation-keys",
+      "/planning/allocation-keys/new",
+      "/planning/allocation-keys/:code",
       "/planning/calculators",
       "/planning/coverage-groups",
       "/planning/coverage-groups/new",
@@ -77,6 +82,7 @@ describe("planning module", () => {
     expect(duties["/planning/runs/new"]).toBe("planning.run");
     expect(duties["/planning/forecast"]).toBe("planning.read");
     expect(duties["/planning/calculators"]).toBe("planning.read");
+    expect(duties["/planning/allocation-keys"]).toBe("planning.read");
     expect(duties["/planning/net-requirements"]).toBe("planning.read");
     expect(duties["/planning/supply-schedule"]).toBe("planning.read");
     expect(duties["/planning/coverage-groups"]).toBe("planning.read");

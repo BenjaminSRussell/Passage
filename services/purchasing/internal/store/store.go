@@ -28,10 +28,12 @@ const (
 	CodeRequisitionState        = "PRC-REQ-STATE"
 	CodeRequisitionLineNotFound = "PRC-REQ-LINE-NOT-FOUND"
 	CodeRequisitionLegalEntity  = "PRC-REQ-005"
-	CodeAgreementNotFound       = "PRC-AGR-NOT-FOUND"
-	CodeVersionConflict         = "PRC-VERSION-CONFLICT"
-	CodeIdempotencyReuse        = "idempotency_key_reuse"
-	eventSource                 = "/passage/procurement/purchasing"
+	// CodeRequisitionOnRFQ is the 409 for a requisition line a running RFQ is sourcing (FR-17.3).
+	CodeRequisitionOnRFQ  = "PRC-REQ-006"
+	CodeAgreementNotFound = "PRC-AGR-NOT-FOUND"
+	CodeVersionConflict   = "PRC-VERSION-CONFLICT"
+	CodeIdempotencyReuse  = "idempotency_key_reuse"
+	eventSource           = "/passage/procurement/purchasing"
 )
 
 // Page sizes for the list endpoints.
@@ -66,7 +68,11 @@ type Store interface {
 	ChangeAgreementStatus(ctx context.Context, id string, version int, action string, idem Idem) (AgreementDetail, error)
 	ListOpenRequisitionLines(ctx context.Context, f SourcingFilter, after string, limit int) (Page[SourcingLine], error)
 	RequisitionLinesByID(ctx context.Context, lineIDs []string) ([]SourcingLine, error)
+	SplitRequisitionLine(ctx context.Context, lineID string, version int, quantities []decimal.Decimal, minor int32, splitBy string, idem Idem) (Requisition, error)
 	ListOpenOrderLines(ctx context.Context, f OpenLineFilter, after string, limit int) (Page[OpenOrderLine], error)
+	ListOpenOrdersByVendor(ctx context.Context, f InquiryFilter, after string, limit int) (Page[VendorOpenOrders], error)
+	ListOverdueLines(ctx context.Context, f InquiryFilter, after string, limit int) (Page[OverdueLine], error)
+	ListPriceHistory(ctx context.Context, f InquiryFilter, after string, limit int) (Page[PriceHistoryEntry], error)
 	ConsolidateRequisitionLines(ctx context.Context, orders []PurchaseOrder, lineIDs []string, idem Idem) ([]PurchaseOrder, error)
 	CreateRFQ(ctx context.Context, in domain.RFQ, idem Idem) (domain.RFQ, error)
 	GetRFQ(ctx context.Context, id string) (domain.RFQ, error)
@@ -85,6 +91,15 @@ type Store interface {
 	GetDeliverySchedule(ctx context.Context, poID string, lineNo int) (ScheduleResult, error)
 	ListDeliverySchedules(ctx context.Context, poID string) ([]domain.DeliverySchedule, error)
 	DeleteDeliverySchedule(ctx context.Context, poID string, lineNo, ifMatch int) (int, error)
+	PutServiceSpec(ctx context.Context, poID string, lineNo, ifMatch int, in ServiceInput) (ServiceResult, error)
+	GetServiceSpec(ctx context.Context, poID string, lineNo int) (ServiceResult, error)
+	ListServiceSpecs(ctx context.Context, poID string) ([]domain.ServiceSpec, error)
+	DeleteServiceSpec(ctx context.Context, poID string, lineNo, ifMatch int) (int, error)
+	CheckServiceLimit(ctx context.Context, poID string, lineNo int, unplanned, entry decimal.Decimal) (domain.LimitCheck, error)
+	CreateModelServiceSpec(ctx context.Context, in domain.ModelService, nodes []domain.OutlineNode, idem Idem) (domain.ModelService, error)
+	UpdateModelServiceSpec(ctx context.Context, id string, ifMatch int, in domain.ModelService, nodes []domain.OutlineNode) (domain.ModelService, error)
+	GetModelServiceSpec(ctx context.Context, id string) (domain.ModelService, error)
+	ListModelServiceSpecs(ctx context.Context, f ModelServiceFilter, after string, limit int) (Page[domain.ModelService], error)
 	ConfirmDeliveryDate(ctx context.Context, poID string, lineNo, seq, ifMatch int, date domain.Day) (ScheduleResult, error)
 	MarkPlanRowInvoiced(ctx context.Context, poID string, lineNo, seq int, ref string, amount decimal.Decimal) (PlanRowSettlement, error)
 	CreateSchedulingAgreement(ctx context.Context, in domain.SchedulingAgreement, idem Idem) (SchedulingAgreementDetail, error)
@@ -137,6 +152,10 @@ type Store interface {
 	ListSigningLimits(ctx context.Context, f SigningLimitFilter, after string, limit int) (Page[domain.SigningLimit], error)
 	SigningLimitsFor(ctx context.Context, legalEntityID, workerID, documentType string) ([]domain.SigningLimit, error)
 	RecertifySigningLimit(ctx context.Context, id string, ifMatch int, today domain.Day, idem Idem) (domain.SigningLimit, error)
+	GetInboundChange(ctx context.Context, id string) (InboundChange, error)
+	ListInboundChanges(ctx context.Context, f InboundFilter, after string, limit int) (Page[InboundChange], error)
+	AcknowledgeInboundChange(ctx context.Context, id, note string, idem Idem) (InboundChange, error)
+	RetryInboundChange(ctx context.Context, id, note string, idem Idem) (InboundChange, error)
 	Ping(ctx context.Context) error
 }
 

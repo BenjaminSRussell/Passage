@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 	"time"
 
@@ -135,6 +134,24 @@ func (c *Client) AccountBalance(ctx context.Context, legalEntityID, ledgerID, ac
 	return parse(ctx, raw, account)
 }
 
+// GroupBalance is the balance of one account split by the values of one dimension attribute.
+type GroupBalance struct {
+	Currency string
+	// ByValue maps a dimension value ("" for lines that set none) to credits minus debits.
+	ByValue map[string]decimal.Decimal
+}
+
+// AccountBalanceByDimension reads the balance of account split by the values of attr (the ledger's
+// group_by). A ledger that does not define attr answers 400, returned as a *StatusError.
+func (c *Client) AccountBalanceByDimension(ctx context.Context, legalEntityID, ledgerID, account, periodTo, attr string) (GroupBalance, error) {
+	q := url.Values{"ledger": {ledgerID}, "period_to": {periodTo}, "account_from": {account}, "account_to": {account}, "group_by": {attr}}
+	raw, err := c.get(ctx, legalEntityID, balancesPath, q, account, dutyBalanceRead)
+	if err != nil {
+		return GroupBalance{}, err
+	}
+	return parseGrouped(ctx, raw, account, attr)
+}
+
 func (c *Client) LegalEntity(ctx context.Context, legalEntityID, ledgerID string) (string, error) {
 	raw, err := c.get(ctx, legalEntityID, ledgersPath+url.PathEscape(ledgerID), nil, ledgerID, dutyLedgerLookup)
 	if err != nil {
@@ -199,29 +216,37 @@ func (c *Client) EntryForDocument(ctx context.Context, e Entry) (string, error) 
 	return "", nil
 }
 
+// sameLines reports whether got are the lines of e: the totals per account, side and currency match. Lines are
+// compared as totals so a control debit split by vendor group code (#421) still matches the entry an earlier
+// attempt posted when the split differs.
 func sameLines(e Entry, got []lookedUpLine) bool {
-	if len(got) != len(e.Lines) {
-		return false
-	}
-	want := make([]string, 0, len(e.Lines))
+	want := map[string]decimal.Decimal{}
 	for _, l := range e.Lines {
-		want = append(want, lineKey(l.Account, l.Credit, l.Amount, e.Currency))
+		k := lineKey(l.Account, l.Credit, e.Currency)
+		want[k] = want[k].Add(l.Amount)
 	}
-	have := make([]string, 0, len(got))
+	have := map[string]decimal.Decimal{}
 	for _, l := range got {
 		amount, err := decimal.NewFromString(l.Amount)
 		if err != nil || l.SourceType != e.SourceType || l.SourceID != e.DocumentID {
 			return false
 		}
-		have = append(have, lineKey(l.Account, l.DebitCredit == "C", amount, l.Currency))
+		k := lineKey(l.Account, l.DebitCredit == "C", l.Currency)
+		have[k] = have[k].Add(amount)
 	}
-	slices.Sort(want)
-	slices.Sort(have)
-	return slices.Equal(want, have)
+	if len(got) == 0 || len(want) != len(have) {
+		return false
+	}
+	for k, v := range want {
+		if h, ok := have[k]; !ok || !h.Equal(v) {
+			return false
+		}
+	}
+	return true
 }
 
-func lineKey(account string, credit bool, amount decimal.Decimal, currency string) string {
-	return fmt.Sprintf("%s|%t|%s|%s", account, credit, amount.String(), currency)
+func lineKey(account string, credit bool, currency string) string {
+	return fmt.Sprintf("%s|%t|%s", account, credit, currency)
 }
 
 func parse(ctx context.Context, raw []byte, account string) (Balance, error) {
@@ -246,6 +271,37 @@ func parse(ctx context.Context, raw []byte, account string) (Balance, error) {
 	return out, nil
 }
 
+func parseGrouped(ctx context.Context, raw []byte, account, attr string) (GroupBalance, error) {
+	var body struct {
+		Currency string `json:"currency"`
+		Rows     []struct {
+			Account    string            `json:"account"`
+			Debit      string            `json:"debit"`
+			Credit     string            `json:"credit"`
+			Dimensions map[string]string `json:"dimensions"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil || body.Currency == "" {
+		slog.ErrorContext(ctx, "ledger grouped balance response unusable", "err", err, "account", account, "correlationId", middleware.GetReqID(ctx))
+		return GroupBalance{}, errors.New("ledger balance: response has no currency")
+	}
+	out := GroupBalance{Currency: body.Currency, ByValue: map[string]decimal.Decimal{}}
+	for _, r := range body.Rows {
+		if r.Account != account {
+			continue
+		}
+		d, derr := decimal.NewFromString(r.Debit)
+		c, cerr := decimal.NewFromString(r.Credit)
+		if err := errors.Join(derr, cerr); err != nil {
+			slog.ErrorContext(ctx, "ledger grouped balance amount unusable", "err", err, "account", account, "correlationId", middleware.GetReqID(ctx))
+			return GroupBalance{}, fmt.Errorf("ledger balance: %w", err)
+		}
+		value := r.Dimensions[attr]
+		out.ByValue[value] = out.ByValue[value].Add(c.Sub(d))
+	}
+	return out, nil
+}
+
 type Entry struct {
 	LegalEntityID  string
 	LedgerID       string
@@ -255,6 +311,9 @@ type Entry struct {
 	IdempotencyKey string
 	SourceType     string
 	Lines          []domain.RunJournalLine
+	// OptionalDimensions name dimension attributes the ledger drops from the lines instead of refusing the entry
+	// when it does not define them (the vendor group dimension, #421).
+	OptionalDimensions []string
 }
 
 type entryBody struct {
@@ -263,6 +322,8 @@ type entryBody struct {
 	PostingDate string     `json:"postingDate"`
 	Source      sourceBody `json:"source"`
 	Lines       []lineBody `json:"lines"`
+	// OptionalDimensions is omitted when empty so entries without one keep their idempotency payload.
+	OptionalDimensions []string `json:"optionalDimensions,omitempty"`
 }
 
 type sourceBody struct {
@@ -272,10 +333,11 @@ type sourceBody struct {
 }
 
 type lineBody struct {
-	Account     string     `json:"account"`
-	DebitCredit string     `json:"debitCredit"`
-	Amount      amountBody `json:"amount"`
-	Text        string     `json:"text,omitempty"`
+	Account     string            `json:"account"`
+	DebitCredit string            `json:"debitCredit"`
+	Amount      amountBody        `json:"amount"`
+	Text        string            `json:"text,omitempty"`
+	Dimensions  map[string]string `json:"dimensions,omitempty"`
 }
 
 type amountBody struct {
@@ -299,13 +361,14 @@ func (c *Client) Post(ctx context.Context, e Entry) (string, error) {
 	if !ok {
 		return "", errors.New("ledger: no principal in context")
 	}
-	body := entryBody{LedgerID: e.LedgerID, DocumentID: e.DocumentID, PostingDate: e.PostingDate, Source: sourceBody{System: sourceSystem, Type: e.SourceType, ID: e.DocumentID}}
+	body := entryBody{LedgerID: e.LedgerID, DocumentID: e.DocumentID, PostingDate: e.PostingDate, Source: sourceBody{System: sourceSystem, Type: e.SourceType, ID: e.DocumentID},
+		OptionalDimensions: e.OptionalDimensions}
 	for _, l := range e.Lines {
 		side := "D"
 		if l.Credit {
 			side = "C"
 		}
-		body.Lines = append(body.Lines, lineBody{Account: l.Account, DebitCredit: side, Text: l.Text, Amount: amountBody{Currency: e.Currency, Value: l.Amount.StringFixed(money.MinorUnits(e.Currency))}})
+		body.Lines = append(body.Lines, lineBody{Account: l.Account, DebitCredit: side, Text: l.Text, Dimensions: l.Dimensions, Amount: amountBody{Currency: e.Currency, Value: l.Amount.StringFixed(money.MinorUnits(e.Currency))}})
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {

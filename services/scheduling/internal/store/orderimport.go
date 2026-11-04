@@ -327,8 +327,10 @@ func importOrder(ctx context.Context, tx pgx.Tx, req OrderImportRequest, out *Or
 			}
 			change = "updated"
 			res.Updated++
-			if _, err := tx.Exec(ctx, `update scheduling_operation set minutes = $2, setup_minutes = $3, candidate_resource_ids = $4::uuid[], due_at = $5, ready_at = $6
-					where id = $1::uuid`, opID, op.Minutes, op.SetupMinutes, candidates, op.DueAt, op.ReadyAt); err != nil {
+			// The version moves so a planner's change based on the previous
+			// values is refused as stale (If-Match) instead of overwriting these.
+			if _, err := tx.Exec(ctx, `update scheduling_operation set minutes = $2, setup_minutes = $3, candidate_resource_ids = $4::uuid[], due_at = $5, ready_at = $6,
+					version = version + 1, updated_at = now() where id = $1::uuid`, opID, op.Minutes, op.SetupMinutes, candidates, op.DueAt, op.ReadyAt); err != nil {
 				return err
 			}
 			dropped, err := dropJobs(ctx, tx, opID)

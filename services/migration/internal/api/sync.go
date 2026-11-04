@@ -134,7 +134,13 @@ func (a *API) updateSync(w http.ResponseWriter, r *http.Request) {
 		bad["keyCheckHours"] = fmt.Sprintf("must be between 0 (off) and %d", domain.MaxKeyCheckHours)
 	}
 	if req.ScheduleCron != nil {
-		if msg := domain.ScheduleCronProblem(*req.ScheduleCron); msg != "" {
+		msg, err := a.scheduleProblem(r, *req.ScheduleCron)
+		if err != nil {
+			a.logFailure(r, "read tenant settings for schedule failed", err)
+			fail(w, r, err)
+			return
+		}
+		if msg != "" {
 			bad["scheduleCron"] = msg
 		} else if req.RunNow {
 			bad["runNow"] = "cannot be sent with scheduleCron: change the schedule first, then ask for a run"

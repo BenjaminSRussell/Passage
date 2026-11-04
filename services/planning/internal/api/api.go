@@ -94,6 +94,9 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyFirmOrders)).Post("/v1/planning/planned-orders:firm", a.firmPlannedOrders)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/planned-orders/{id}/pegging", a.pegging)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/messages", a.listMessages)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/messages/{id}", a.getMessage)
+	r.With(authz.RequireDuty(dutyMaintainOrders)).Post("/v1/planning/messages/{id}:apply", a.applyMessage)
+	r.With(authz.RequireDuty(dutyMaintainOrders)).Post("/v1/planning/messages/{id}:dismiss", a.dismissMessage)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/net-requirements", a.listNetRequirements)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/forecasts/{modelCode}/lines", a.getForecastLines)
 	r.With(authz.RequireDuty(dutyMaintainForecast)).Put("/v1/planning/forecasts/{modelCode}/lines", a.putForecastLines)
@@ -109,6 +112,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyMaintainSetup)).Post("/v1/planning/item-coverages", a.createItemCoverage)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/item-coverages/{id}", a.getItemCoverage)
 	r.With(authz.RequireDuty(dutyMaintainSetup)).Put("/v1/planning/item-coverages/{id}", a.updateItemCoverage)
+	a.registerAllocation(r)
 	a.registerScenarios(r)
 	a.registerBuffers(r)
 	a.registerStrategies(r)
@@ -489,7 +493,18 @@ func (a *API) buildSnapshot(w http.ResponseWriter, r *http.Request, code string,
 		httpx.Fail(w, r, err)
 		return time.Time{}, nil, nil, false
 	}
-	if fields := withStoredCoverage(req.Items, stored); len(fields) > 0 {
+	var def *store.RunCoverage
+	if needsDefaultCoverage(req.Items, stored) {
+		d := builtinDefaultCoverage()
+		if g, err := a.store.GetCoverageGroup(r.Context(), defaultCoverageCode); err == nil {
+			d = defaultCoverageOf(g)
+		} else if !isCoverageNotFound(err) {
+			httpx.Fail(w, r, err)
+			return time.Time{}, nil, nil, false
+		}
+		def = &d
+	}
+	if fields := withStoredCoverage(req.Items, stored, def); len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return time.Time{}, nil, nil, false
 	}
@@ -765,8 +780,6 @@ func addFirmedSupply(items []domain.Item, asOf time.Time, firmed []store.FirmedS
 
 func runProblem(err error) error {
 	switch {
-	case errors.Is(err, domain.ErrBOMCycle):
-		return httpx.NewProblem(http.StatusUnprocessableEntity, "PLAN-0004", "BOM cycle detected; low-level codes not updated")
 	case errors.Is(err, domain.ErrTooManySplits):
 		return httpx.NewProblem(http.StatusUnprocessableEntity, "PLAN-0005", "a requirement splits into more orders than the limit of 1000")
 	case errors.Is(err, domain.ErrInvalidItem), errors.Is(err, domain.ErrInvalidCalendar), errors.Is(err, domain.ErrInvalidStrategy):
@@ -968,9 +981,9 @@ func (a *API) listMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch action {
-	case "", domain.ActionDelay, domain.ActionPostpone, domain.ActionAdvance, domain.ActionShortage, domain.ActionCancel, domain.ActionDecrease, domain.ActionIncrease, domain.ActionRedZone, domain.ActionSalesOnTop, domain.ActionNoVendor:
+	case "", domain.ActionDelay, domain.ActionPostpone, domain.ActionAdvance, domain.ActionShortage, domain.ActionCancel, domain.ActionDecrease, domain.ActionIncrease, domain.ActionRedZone, domain.ActionSalesOnTop, domain.ActionNoVendor, domain.ActionLotSplit, domain.ActionBOMCycle, domain.ActionNoQuotaSource:
 	default:
-		validationFailed(w, r, map[string]string{"action": "must be delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top or no-vendor"})
+		validationFailed(w, r, map[string]string{"action": "must be delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor, no-quota-source, lot-split or bom-cycle"})
 		return
 	}
 	limit, ok := limitParam(w, r)
@@ -982,7 +995,14 @@ func (a *API) listMessages(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, map[string]string{"sort": "must be priority"})
 		return
 	}
-	msgs, err := a.store.ListMessages(r.Context(), code, action, sort, limit)
+	status := q.Get("status")
+	switch status {
+	case "", domain.MessageOpen, domain.MessageApplied, domain.MessageDismissed, store.StatusAll:
+	default:
+		validationFailed(w, r, map[string]string{"status": "must be open, applied, dismissed or all"})
+		return
+	}
+	msgs, err := a.store.ListMessages(r.Context(), code, action, status, sort, limit)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return

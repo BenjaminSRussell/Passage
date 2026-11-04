@@ -39,6 +39,8 @@ type recurringLineDTO struct {
 	AmountKind  string            `json:"amountKind"`
 	Amount      amountDTO         `json:"amount"`
 	Text        string            `json:"text"`
+	Quantity    string            `json:"quantity"`
+	Unit        string            `json:"unit"`
 }
 
 type recurringRequest struct {
@@ -90,12 +92,23 @@ func (a *API) listRecurring(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, map[string]string{"status": "must be active or paused"})
 		return
 	}
-	items, err := a.store.ListRecurring(r.Context(), status)
+	page, ok := pageParams(w, r, cursorDateOrInfinity, cursorText, cursorUUID)
+	if !ok {
+		return
+	}
+	items, err := a.store.ListRecurring(r.Context(), status, page)
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+	items, next := trimPage(items, page.Limit, func(rj store.RecurringJournal) []string {
+		due := "infinity"
+		if rj.NextRunDate != nil {
+			due = *rj.NextRunDate
+		}
+		return []string{due, rj.Name, rj.ID}
+	})
+	httpx.JSON(w, http.StatusOK, pageBody(items, next))
 }
 
 func (a *API) getRecurring(w http.ResponseWriter, r *http.Request) {
@@ -159,8 +172,9 @@ func checkRecurringLines(lines []recurringLineDTO, fields map[string]string) []s
 		if utf8.RuneCountInString(l.Text) > maxTextLength {
 			fields[prefix+"text"] = fmt.Sprintf("must be at most %d characters", maxTextLength)
 		}
+		quantity := checkLineQuantity(fields, prefix, l.Quantity, l.Unit)
 		out = append(out, store.RecurringLine{Account: l.Account, Dimensions: l.Dimensions, DebitCredit: l.DebitCredit,
-			AmountKind: l.AmountKind, Amount: amount.String(), Currency: l.Amount.Currency, Text: l.Text})
+			AmountKind: l.AmountKind, Amount: amount.String(), Currency: l.Amount.Currency, Text: l.Text, Quantity: quantity, Unit: l.Unit})
 	}
 	return out
 }

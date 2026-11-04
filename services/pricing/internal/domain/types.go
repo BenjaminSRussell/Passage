@@ -116,8 +116,13 @@ type Input struct {
 	// many resolves (NewRecordSet).
 	Set   *RecordSet
 	Steps []ConditionType
+	// Procedure, when it has steps, drives the resolution instead of Steps (FR-26.1).
+	Procedure *Procedure
 	// SmallOrderThreshold is the subtotal below which SURCHARGE applies. Zero disables it.
 	SmallOrderThreshold decimal.Decimal
+	// TotalDiscountBasis is the legal entity's total_discount_basis: AFTER_LINE_DISC (the
+	// default, also when empty) or GROSS (PRD 5.26.13).
+	TotalDiscountBasis string
 }
 
 // DefaultSteps is the reference pricing procedure (AX_STANDARD subset).

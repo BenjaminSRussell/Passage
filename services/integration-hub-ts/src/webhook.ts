@@ -11,9 +11,14 @@ export const SIGNATURE_TOLERANCE_SECONDS = 300;
 
 export type DeliveryDecision = { kind: "delivered" } | { kind: "pause" } | { kind: "retry" };
 
-/** Signs `t.body` with HMAC-SHA256 and returns the Passage-Signature header value. */
-export function sign(secret: string, unixSeconds: number, body: string): string {
-  return `t=${unixSeconds},v1=${digest(secret, unixSeconds, body).toString("hex")}`;
+/**
+ * Signs `t.body` with HMAC-SHA256 and returns the Passage-Signature header value. During a secret
+ * rotation's grace period pass the previous secret too: the header then carries one v1 per secret
+ * (`t=..,v1=<new>,v1=<old>`) and a receiver holding either secret verifies it.
+ */
+export function sign(secret: string, unixSeconds: number, body: string, previousSecret?: string): string {
+  const secrets = previousSecret === undefined ? [secret] : [secret, previousSecret];
+  return `t=${unixSeconds},${secrets.map((s) => `v1=${digest(s, unixSeconds, body).toString("hex")}`).join(",")}`;
 }
 
 /** Verifies a Passage-Signature header at `nowSeconds`. Stale or malformed headers fail. */
@@ -26,8 +31,15 @@ export function verify(header: string, secret: string, body: string, nowSeconds:
     return false;
   }
   const expected = digest(secret, parsed.t, body);
-  const given = Buffer.from(parsed.v1, "hex");
-  return given.length === expected.length && timingSafeEqual(given, expected);
+  // Any v1 may match (a rotation's grace period signs with both secrets); every one is compared, none short-circuits.
+  let ok = false;
+  for (const v1 of parsed.v1) {
+    const given = Buffer.from(v1, "hex");
+    if (given.length === expected.length && timingSafeEqual(given, expected)) {
+      ok = true;
+    }
+  }
+  return ok;
 }
 
 /**
@@ -78,9 +90,9 @@ function digest(secret: string, unixSeconds: number, body: string): Buffer {
   return createHmac("sha256", secret).update(`${unixSeconds}.${body}`).digest();
 }
 
-function parseHeader(header: string): { t: number; v1: string } | null {
+function parseHeader(header: string): { t: number; v1: string[] } | null {
   let t: number | null = null;
-  let v1: string | null = null;
+  const v1: string[] = [];
   for (const part of header.split(",")) {
     const eq = part.indexOf("=");
     if (eq < 0) {
@@ -91,8 +103,8 @@ function parseHeader(header: string): { t: number; v1: string } | null {
     if (key === "t" && /^\d+$/.test(value)) {
       t = Number(value);
     } else if (key === "v1") {
-      v1 = value;
+      v1.push(value);
     }
   }
-  return t === null || v1 === null ? null : { t, v1 };
+  return t === null || v1.length === 0 ? null : { t, v1 };
 }

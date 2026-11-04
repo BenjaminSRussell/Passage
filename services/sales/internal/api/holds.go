@@ -3,8 +3,12 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/sales/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/sales/internal/store"
@@ -53,6 +57,51 @@ func (a *API) applyHold(w http.ResponseWriter, r *http.Request) {
 		a.applied.Add(1)
 		setETag(w, order.Version)
 		httpx.JSON(w, http.StatusCreated, order)
+	})(w, r)
+}
+
+const maxRejectComment = 500
+
+// rejectHoldRequest is the body of POST .../holds/{holdId}:reject.
+type rejectHoldRequest struct {
+	Comment string `json:"comment"`
+}
+
+// rejectHold rejects an ACTIVE CREDIT hold of an unconfirmed order with a
+// required comment and cancels the order (PRD §5.27.6, duty CreditRelease).
+// If-Match carries the order ETag; a retry therefore gets 412 and never rejects
+// twice.
+func (a *API) rejectHold(w http.ResponseWriter, r *http.Request) {
+	orderRoute(func(w http.ResponseWriter, r *http.Request, id string) {
+		holdID := chi.URLParam(r, "holdId")
+		if !ids.Valid(holdID) {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeHoldNotFound, "hold not found"))
+			return
+		}
+		var req rejectHoldRequest
+		if err := httpx.Decode(r, &req); err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		req.Comment = strings.TrimSpace(req.Comment)
+		if n := len([]rune(req.Comment)); n == 0 || n > maxRejectComment {
+			validationFailed(w, r, map[string]string{"comment": "must be 1 to 500 characters"})
+			return
+		}
+		version, ok := ifMatch(w, r)
+		if !ok {
+			return
+		}
+		p, _ := tenant.FromContext(r.Context())
+		order, err := a.store.RejectHold(r.Context(), id, holdID, version, req.Comment, p.UserID, a.now())
+		if err != nil {
+			a.fail(w, r, "reject hold", err)
+			return
+		}
+		a.rejected.Add(1)
+		a.canceled.Add(1)
+		setETag(w, order.Version)
+		httpx.JSON(w, http.StatusOK, order)
 	})(w, r)
 }
 

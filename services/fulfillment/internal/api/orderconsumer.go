@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/eventing"
 	"github.com/BenjaminSRussell/passage/platform/events"
@@ -27,6 +28,8 @@ const (
 	OrderHoldAppliedType  = "dev.passage.sales.orderhold.applied.v1"
 	OrderHoldReleasedType = "dev.passage.sales.orderhold.released.v1"
 	OrderHoldTopic        = "passage.sales.orderhold"
+	// OrderRemainderCancelledType is sales' order.remaindercancelled.v1 (w27 slice 23), on the order topic.
+	OrderRemainderCancelledType = "dev.passage.sales.order.remaindercancelled.v1"
 	// OrderConfirmedSource is the CloudEvents source sales writes on its events. Who may write
 	// to the topic at all is the broker's ACL (only sales' outbox relay); the check keeps an
 	// event another service mislabels or misroutes from deciding what ships.
@@ -51,10 +54,21 @@ type orderHoldData struct {
 	Version  int    `json:"version"`
 }
 
+type orderRemainderData struct {
+	OrderID       string `json:"order_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	Version       int    `json:"version"`
+	Lines         []struct {
+		LineID  string `json:"line_id"`
+		KeptQty string `json:"kept_qty"`
+	} `json:"lines"`
+}
+
 // OrderConsumerStore is the persistence the sales order consumer needs.
 type OrderConsumerStore interface {
 	ApplyOrderConfirmed(ctx context.Context, tx pgx.Tx, in store.OrderConfirmedIn) (bool, error)
 	ApplyOrderHold(ctx context.Context, tx pgx.Tx, in store.OrderHoldIn) (bool, error)
+	ApplyOrderRemainderCancelled(ctx context.Context, tx pgx.Tx, in store.RemainderCancelledIn) (store.RemainderCancelledResult, error)
 }
 
 // OrderConsumerHandlers handles sales' order.confirmed.v1: it stores the order type per sales
@@ -62,7 +76,10 @@ type OrderConsumerStore interface {
 // Register it with a consumer named OrderConsumerName, which runs with the DutyOrderSync duty.
 // The event's per-line atp_qty (sales slice 22) is optional and not stored.
 //
-// It also handles orderhold.applied.v1 and released.v1, which set a hold active or inactive.
+// It also handles orderhold.applied.v1 and released.v1, which set a hold active or inactive, and
+// order.remaindercancelled.v1, which cuts the unpacked quantity of the cancelled remainder, makes a
+// post of more than the kept quantity fail with FUL-0066 and raises an exception for a slip that
+// was posted first.
 func OrderConsumerHandlers(s OrderConsumerStore) map[string]eventing.Handler {
 	hold := func(active bool) eventing.Handler {
 		return eventing.HandlerFunc(func(ctx context.Context, tx pgx.Tx, evt events.Event) error {
@@ -89,7 +106,38 @@ func OrderConsumerHandlers(s OrderConsumerStore) map[string]eventing.Handler {
 			return nil
 		})
 	}
-	return map[string]eventing.Handler{OrderHoldAppliedType: hold(true), OrderHoldReleasedType: hold(false), OrderConfirmedType: eventing.HandlerFunc(func(ctx context.Context, tx pgx.Tx, evt events.Event) error {
+	remainder := eventing.HandlerFunc(func(ctx context.Context, tx pgx.Tx, evt events.Event) error {
+		actor, ok := platformtenant.FromContext(ctx)
+		if !ok || !actor.HasDuty("fulfillment.order.sync") {
+			return eventing.Permanent(errors.New("order consumer has no principal"))
+		}
+		if evt.Source != OrderConfirmedSource {
+			return eventing.Permanent(fmt.Errorf("%s from source %q, want %q", evt.Type, evt.Source, OrderConfirmedSource))
+		}
+		var d orderRemainderData
+		if err := json.Unmarshal(evt.Data, &d); err != nil {
+			return eventing.Permanent(fmt.Errorf("%s data: %w", evt.Type, err))
+		}
+		if !ids.Valid(d.OrderID) || !ids.Valid(d.LegalEntityID) || d.Version < 1 || len(d.Lines) == 0 {
+			return eventing.Permanent(errors.New("order.remaindercancelled needs order_id, legal_entity_id, version and lines"))
+		}
+		in := store.RemainderCancelledIn{OrderID: strings.ToLower(d.OrderID), LegalEntityID: strings.ToLower(d.LegalEntityID), Version: d.Version, EventID: evt.ID}
+		for _, l := range d.Lines {
+			kept, err := decimal.NewFromString(l.KeptQty)
+			if !ids.Valid(l.LineID) || err != nil || kept.IsNegative() {
+				return eventing.Permanent(errors.New("order.remaindercancelled lines need line_id and a kept_qty of 0 or more"))
+			}
+			in.Lines = append(in.Lines, store.RemainderLineIn{OrderLineID: strings.ToLower(l.LineID), KeptQty: kept})
+		}
+		res, err := s.ApplyOrderRemainderCancelled(ctx, tx, in)
+		if err != nil {
+			return err
+		}
+		slog.InfoContext(ctx, "sales order remainder cancelled followed", "orderId", d.OrderID, "lines", res.LinesApplied, "shipmentsCut", res.ShipmentsCut,
+			"shipmentsCancelled", res.ShipmentsCancelled, "exceptions", res.Exceptions, "tenantId", evt.TenantID, "eventId", evt.ID)
+		return nil
+	})
+	return map[string]eventing.Handler{OrderRemainderCancelledType: remainder, OrderHoldAppliedType: hold(true), OrderHoldReleasedType: hold(false), OrderConfirmedType: eventing.HandlerFunc(func(ctx context.Context, tx pgx.Tx, evt events.Event) error {
 		actor, ok := platformtenant.FromContext(ctx)
 		if !ok || !actor.HasDuty("fulfillment.order.sync") {
 			return eventing.Permanent(errors.New("order consumer has no principal"))

@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -64,6 +65,10 @@ type putJournalNameRequest struct {
 	AllowReconAccounts     bool   `json:"allowReconAccounts"`
 	LinesLimit             *int   `json:"linesLimit"`
 	Active                 *bool  `json:"active"`
+	// PostingRestriction is "none" (default) or "own_journals_only"; DescriptionLanguage is
+	// "legal_entity" (default) or "user" (PRD 2.11).
+	PostingRestriction  string `json:"postingRestriction"`
+	DescriptionLanguage string `json:"descriptionLanguage"`
 }
 
 func (a *API) listJournalNames(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +97,7 @@ func (a *API) getJournalName(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, n)
+	writeTagged(w, http.StatusOK, n.LockVersion, n)
 }
 
 // putJournalName creates or replaces a journal name: 201 when created, 200 when replaced.
@@ -101,6 +106,10 @@ func (a *API) putJournalName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	code := chi.URLParam(r, "code")
+	tag, tagOK := replaceTag(w, r)
+	if !tagOK {
+		return
+	}
 	var req putJournalNameRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -121,6 +130,19 @@ func (a *API) putJournalName(w http.ResponseWriter, r *http.Request) {
 			fields["linesLimit"] = fmt.Sprintf("must be 1 to %d (one batch posts one entry)", domain.MaxLinesPerEntry)
 		}
 	}
+	restriction, language := req.PostingRestriction, req.DescriptionLanguage
+	if restriction == "" {
+		restriction = domain.PostingNone
+	}
+	if restriction != domain.PostingNone && restriction != domain.PostingOwnJournalsOnly {
+		fields["postingRestriction"] = "must be none or own_journals_only"
+	}
+	if language == "" {
+		language = domain.DescriptionLanguageLE
+	}
+	if language != domain.DescriptionLanguageLE && language != domain.DescriptionLanguageUser {
+		fields["descriptionLanguage"] = "must be legal_entity or user"
+	}
 	if req.SelfApprovalAllowed && !req.RequiresApproval {
 		fields["selfApprovalAllowed"] = "applies only to journal names that require approval"
 	}
@@ -132,9 +154,10 @@ func (a *API) putJournalName(w http.ResponseWriter, r *http.Request) {
 	if req.Active != nil {
 		active = *req.Active
 	}
-	n, created, err := a.store.PutJournalName(r.Context(), code, store.JournalName{Name: name, RequiresApproval: req.RequiresApproval,
+	n, created, err := a.store.PutJournalName(r.Context(), code, tag, store.JournalName{Name: name, RequiresApproval: req.RequiresApproval,
 		SelfApprovalAllowed: req.SelfApprovalAllowed, ReversalReasonRequired: req.ReversalReasonRequired,
-		AllowReconAccounts: req.AllowReconAccounts, LinesLimit: limit, Active: active})
+		AllowReconAccounts: req.AllowReconAccounts, LinesLimit: limit, Active: active,
+		PostingRestriction: restriction, DescriptionLanguage: language})
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -143,7 +166,7 @@ func (a *API) putJournalName(w http.ResponseWriter, r *http.Request) {
 	if created {
 		status = http.StatusCreated
 	}
-	httpx.JSON(w, status, n)
+	writeTagged(w, status, n.LockVersion, n)
 }
 
 // --- journal batches ---------------------------------------------------------
@@ -223,23 +246,7 @@ func checkBatchLines(lines []batchLineDTO, fields map[string]string) []store.Bat
 		if utf8.RuneCountInString(l.SourceLineRef) > maxSourceRefLength {
 			fields[prefix+"sourceLineRef"] = fmt.Sprintf("must be at most %d characters", maxSourceRefLength)
 		}
-		qty, qtyOK := parseQuantity(l.Quantity)
-		switch {
-		case !qtyOK || qty.IsNegative():
-			fields[prefix+"quantity"] = "must be a non-negative decimal string"
-		case !qty.Round(domain.QuantityScale).Equal(qty):
-			fields[prefix+"quantity"] = fmt.Sprintf("has more than %d decimals", domain.QuantityScale)
-		case qty.GreaterThanOrEqual(domain.MaxQuantity):
-			fields[prefix+"quantity"] = "is too large"
-		case (qty.IsZero()) != (l.Unit == ""):
-			fields[prefix+"unit"] = "quantity and unit are set together"
-		case l.Unit != "" && !domain.ValidUnit(l.Unit):
-			fields[prefix+"unit"] = "must be 1 to 10 characters of A-Z or 0-9"
-		}
-		quantity := ""
-		if qtyOK && !qty.IsZero() {
-			quantity = qty.StringFixed(domain.QuantityScale)
-		}
+		quantity := checkLineQuantity(fields, prefix, l.Quantity, l.Unit)
 		out = append(out, store.BatchLine{Account: l.Account, Dimensions: l.Dimensions, DebitCredit: l.DebitCredit,
 			Amount: amount.String(), Currency: l.Amount.Currency, Text: l.Text, SourceLineRef: l.SourceLineRef, Quantity: quantity, Unit: l.Unit})
 	}
@@ -268,13 +275,20 @@ func (a *API) listBatches(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
+	page, ok := pageParams(w, r, cursorTimestamp, cursorUUID)
+	if !ok {
+		return
+	}
 	batches, err := a.store.ListBatches(r.Context(), store.BatchFilter{LedgerID: q.Get("ledger"), Status: q.Get("status"),
-		JournalName: q.Get("journalName")})
+		JournalName: q.Get("journalName"), Page: page})
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": batches})
+	batches, next := trimPage(batches, page.Limit, func(b store.Batch) []string {
+		return []string{b.CreatedAt.UTC().Format(time.RFC3339Nano), b.ID}
+	})
+	httpx.JSON(w, http.StatusOK, pageBody(batches, next))
 }
 
 func (a *API) createBatch(w http.ResponseWriter, r *http.Request) {
@@ -358,6 +372,22 @@ func parseIfMatch(raw string) (int, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// replaceTag reads If-Match on a PUT that may replace a configuration row. An absent header is 0 (fine
+// for a create; the store answers 428 for a replace). A malformed one is a 400 problem.
+func replaceTag(w http.ResponseWriter, r *http.Request) (int, bool) {
+	tag, ok := parseIfMatch(r.Header.Get("If-Match"))
+	if !ok {
+		validationFailed(w, r, map[string]string{"If-Match": `must be the entity tag (lockVersion) of the row as read, for example "3"`})
+	}
+	return tag, ok
+}
+
+// writeTagged renders a configuration row with its lockVersion as the ETag.
+func writeTagged(w http.ResponseWriter, status int, lockVersion int, body any) {
+	w.Header().Set("ETag", strconv.Quote(strconv.Itoa(lockVersion)))
+	httpx.JSON(w, status, body)
 }
 
 func (a *API) getBatch(w http.ResponseWriter, r *http.Request) {
@@ -481,7 +511,8 @@ func (a *API) postBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	p, _ := principal(w, r)
 	res, err := a.store.PostBatch(r.Context(), store.PostBatchInput{ID: id, Version: version, Key: key, Today: a.today(),
-		TraceID: traceID(r), CanPostDirect: p.HasDuty(store.DutyPostDirect), CanPostLedgerSpecific: p.HasDuty(store.DutyPostLedgerSpecific)})
+		TraceID: traceID(r), CanPostDirect: p.HasDuty(store.DutyPostDirect), CanPostLedgerSpecific: p.HasDuty(store.DutyPostLedgerSpecific),
+		Language: acceptLanguage(r)})
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -493,4 +524,23 @@ func (a *API) postBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	a.posted.Add(1)
 	httpx.JSON(w, http.StatusCreated, res)
+}
+
+// acceptLanguage returns the first language tag of Accept-Language in the form
+// templates are stored in ("de", "de-DE"): the language is lower-cased, a
+// two-letter region upper-cased, and other subtags (a script such as Hant) are
+// dropped, so "de-de" gives "de-DE" and "zh-Hant-TW" gives "zh". Anything else
+// gives "" (the default language applies).
+func acceptLanguage(r *http.Request) string {
+	first, _, _ := strings.Cut(r.Header.Get("Accept-Language"), ",")
+	tag, _, _ := strings.Cut(strings.TrimSpace(first), ";")
+	parts := strings.Split(strings.TrimSpace(tag), "-")
+	tag = strings.ToLower(parts[0])
+	if len(parts) > 1 && len(parts[1]) == 2 {
+		tag += "-" + strings.ToUpper(parts[1])
+	}
+	if domain.ValidLanguage(tag) {
+		return tag
+	}
+	return ""
 }

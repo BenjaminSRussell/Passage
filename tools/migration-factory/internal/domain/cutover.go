@@ -32,8 +32,11 @@ type Step struct {
 	Status             string
 	GoNoGo             bool
 	Pack               string
-	CompletedBy        string
-	CompletedAt        *time.Time
+	// Entity is the legal entity of a per-entity step (a plan generated with ExpandByEntity); empty
+	// for the steps that cover the whole cutover.
+	Entity      string
+	CompletedBy string
+	CompletedAt *time.Time
 	// StartedAt is set when the step is started; the runbook timer runs from it (FR-49.6).
 	StartedAt *time.Time
 	StartedBy string
@@ -128,6 +131,10 @@ type PlanInput struct {
 	Rehearsal    DurationOverrides
 	// RehearsalPlanID names the plan the Rehearsal durations were carried from, for the record.
 	RehearsalPlanID string
+	// ExpandByEntity turns each pack load into one load and one reconcile step per legal entity and
+	// adds the per-entity freeze, extract, reconcile, sign-off and hypercare steps (D5a, the
+	// `fx-cutover-plan` runbook: 3 entities and 9 packs give 84 steps).
+	ExpandByEntity bool
 }
 
 // Name constants used by the timeline and by the open-access rule.
@@ -195,6 +202,9 @@ func GeneratePlan(in PlanInput) (Plan, error) {
 		}
 		seenPack[p] = true
 	}
+	if in.ExpandByEntity && len(in.Entities) > MaxExpandedEntities {
+		return Plan{}, fmt.Errorf("%w: a per-entity runbook covers at most %d legal entities", ErrInvalid, MaxExpandedEntities)
+	}
 	seenEntity := map[string]bool{}
 	for _, e := range in.Entities {
 		if strings.TrimSpace(e) == "" || seenEntity[e] {
@@ -228,10 +238,14 @@ func GeneratePlan(in PlanInput) (Plan, error) {
 		}
 		steps = append(steps, Step{OffsetMin: t.offset, Name: t.name, Owner: t.owner, PlannedDurationMin: dur(t.name, t.dur), Status: StepPending, GoNoGo: t.goNoGo})
 	}
-	for _, p := range in.Packs {
-		off, prefix := packLoadOffset(p)
-		name := fmt.Sprintf("%s %s", prefix, p)
-		steps = append(steps, Step{OffsetMin: off, Name: name, Owner: "Migration engineer", PlannedDurationMin: dur(name, 60), Status: StepPending, Pack: string(p)})
+	if in.ExpandByEntity {
+		steps = append(steps, entitySteps(in.Packs, in.Entities, dur)...)
+	} else {
+		for _, p := range in.Packs {
+			off, prefix := packLoadOffset(p)
+			name := fmt.Sprintf("%s %s", prefix, p)
+			steps = append(steps, Step{OffsetMin: off, Name: name, Owner: "Migration engineer", PlannedDurationMin: dur(name, 60), Status: StepPending, Pack: string(p)})
+		}
 	}
 	sort.SliceStable(steps, func(i, j int) bool { return steps[i].OffsetMin < steps[j].OffsetMin })
 	for i := range steps {
@@ -245,6 +259,94 @@ func GeneratePlan(in PlanInput) (Plan, error) {
 	}
 	return Plan{PlanID: in.PlanID, T0: in.T0, Packs: in.Packs, Entities: in.Entities, AbortOffsetMin: abortH * MinutesPerHour, Steps: steps, Version: 1,
 		RehearsalPlanID: in.RehearsalPlanID, RehearsalCarried: carried}, nil
+}
+
+// MaxExpandedEntities caps the legal entities of a per-entity runbook: each entity adds 5 steps
+// plus 2 per pack, and the plan is written and gated as one document.
+const MaxExpandedEntities = 50
+
+// Names of the per-entity steps. The generator writes them and the gate reads them back, so a
+// stored plan keeps its dependencies without a separate column.
+func entityFreezeName(e string) string  { return "Freeze legacy company " + e }
+func entityExtractName(e string) string { return "Extract entity " + e }
+func entityLoadName(p, e string) string { return fmt.Sprintf("Load pack %s for %s", p, e) }
+func entityPackReconcileName(p, e string) string {
+	return fmt.Sprintf("Reconcile pack %s for %s", p, e)
+}
+func entityReconcileName(e string) string { return "Reconcile entity " + e }
+func entitySignOffName(e string) string   { return "Controller sign-off " + e }
+func entityHypercareName(e string) string { return "Hypercare check " + e }
+
+// entitySteps is the per-entity part of an expanded plan: for each legal entity the legacy freeze
+// and the extract, then for each pack its load and its reconcile, then the entity's reconciliation,
+// the controller sign-off and the hypercare check. None of them is a go/no-go step; the gate
+// (prerequisites) orders them within the entity and holds the plan-wide go/no-go steps until every
+// entity is signed off.
+func entitySteps(packs []Pack, entities []string, dur func(string, int) int) []Step {
+	var out []Step
+	add := func(off int, name, owner string, def int, pack, entity string) {
+		out = append(out, Step{OffsetMin: off, Name: name, Owner: owner, PlannedDurationMin: dur(name, def), Status: StepPending, Pack: pack, Entity: entity})
+	}
+	for _, e := range entities {
+		add(-6*MinutesPerHour, entityFreezeName(e), "Legacy operations lead", 15, "", e)
+		add(0, entityExtractName(e), "Migration engineer", 60, "", e)
+		for _, p := range packs {
+			off, _ := packLoadOffset(p)
+			add(off, entityLoadName(string(p), e), "Migration engineer", 60, string(p), e)
+			add(off+8*MinutesPerHour, entityPackReconcileName(string(p), e), "Controller", 30, string(p), e)
+		}
+		add(22*MinutesPerHour, entityReconcileName(e), "Controller", 60, "", e)
+		add(23*MinutesPerHour, entitySignOffName(e), "Controller", 30, "", e)
+		add(2*MinutesPerDay, entityHypercareName(e), "Controller", 60, "", e)
+	}
+	return out
+}
+
+// expanded reports whether the plan was generated with ExpandByEntity (it has per-entity steps).
+func (p *Plan) expanded() bool {
+	for _, s := range p.Steps {
+		if s.Entity != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// prerequisites names the steps that must be DONE before s can start or complete in a per-entity
+// runbook (D5a): an entity's extract waits for its freeze; each pack load waits for the entity's
+// freeze and extract; a pack reconcile waits for that pack's load; the entity reconciliation waits
+// for every pack reconcile of the entity; the sign-off waits for the entity reconciliation; the
+// hypercare check waits for the sign-off; and every plan-wide go/no-go step waits for the sign-off
+// of every entity. A plan-wide runbook has none.
+func (p *Plan) prerequisites(s Step) []string {
+	e := s.Entity
+	switch {
+	case s.GoNoGo && e == "" && p.expanded():
+		out := make([]string, 0, len(p.Entities))
+		for _, ent := range p.Entities {
+			out = append(out, entitySignOffName(ent))
+		}
+		return out
+	case e == "":
+		return nil
+	case s.Name == entityExtractName(e):
+		return []string{entityFreezeName(e)}
+	case s.Pack != "" && s.Name == entityLoadName(s.Pack, e):
+		return []string{entityFreezeName(e), entityExtractName(e)}
+	case s.Pack != "" && s.Name == entityPackReconcileName(s.Pack, e):
+		return []string{entityLoadName(s.Pack, e)}
+	case s.Name == entityReconcileName(e):
+		out := make([]string, 0, len(p.Packs))
+		for _, pk := range p.Packs {
+			out = append(out, entityPackReconcileName(string(pk), e))
+		}
+		return out
+	case s.Name == entitySignOffName(e):
+		return []string{entityReconcileName(e)}
+	case s.Name == entityHypercareName(e):
+		return []string{entitySignOffName(e)}
+	}
+	return nil
 }
 
 // StepByName returns the step with the given name.
@@ -280,7 +382,8 @@ func (p *Plan) indexOf(seq int) (int, error) {
 
 // gate applies the go/no-go sequencing of 9.49.4 to the step at idx, for both starting and
 // completing it: a go/no-go step waits for the earlier go/no-go steps, and the open-access step
-// waits for every go/no-go item (CUT-1601).
+// waits for every go/no-go item (CUT-1601). In a per-entity runbook a step also waits for its
+// prerequisites (CUT-1609).
 func (p *Plan) gate(idx int) error {
 	s := p.Steps[idx]
 	if s.GoNoGo {
@@ -294,6 +397,15 @@ func (p *Plan) gate(idx int) error {
 		if open := p.OpenGoNoGo(); len(open) > 0 {
 			return fmt.Errorf("%w: CUT-1601 step %q cannot start: go/no-go items %v are open", ErrInvalid, s.Name, open)
 		}
+	}
+	var waiting []string
+	for _, name := range p.prerequisites(s) {
+		if pre, ok := p.StepByName(name); ok && pre.Status != StepDone {
+			waiting = append(waiting, name)
+		}
+	}
+	if len(waiting) > 0 {
+		return fmt.Errorf("%w: CUT-1609 step %q cannot start: it waits for %q", ErrInvalid, s.Name, waiting)
 	}
 	return nil
 }

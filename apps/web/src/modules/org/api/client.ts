@@ -50,6 +50,7 @@ export interface OperatingUnit {
 
 export interface Site {
   id: string;
+  addressId?: string;
   legalEntityId: string;
   code: string;
   name: string;
@@ -61,6 +62,7 @@ export interface Site {
 
 export interface Warehouse {
   id: string;
+  addressId?: string;
   legalEntityId: string;
   siteId: string;
   code: string;
@@ -68,6 +70,18 @@ export interface Warehouse {
   type: "standard" | "transit" | "quarantine" | "subcontractor";
   timeZone: string;
   status: string;
+  version: number;
+}
+
+export interface Location {
+  id: string;
+  legalEntityId: string;
+  warehouseId: string;
+  code: string;
+  name: string;
+  type: "storage" | "receiving" | "shipping" | "quarantine";
+  status: string;
+  addressId?: string;
   version: number;
 }
 
@@ -162,3 +176,6 @@ export const listSites = (scope: Scope, options?: ListOptions) =>
 
 export const listWarehouses = (scope: Scope, options?: ListOptions) =>
   listAll<Warehouse>("/warehouses", scope, entityFilter(scope), options);
+
+export const listLocations = (scope: Scope, options?: ListOptions) =>
+  listAll<Location>("/locations", scope, entityFilter(scope), options);

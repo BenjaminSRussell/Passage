@@ -7,7 +7,9 @@ import { AutoChargeCreatePage, AutoChargeDetailPage, AutoChargesPage, ChargeCode
 import { CategoryManagersPage, CategoryVendorCreatePage, CategoryVendorDetailPage, CategoryVendorsPage } from "./CategoryPages";
 import { ConsolidationPage } from "./ConsolidationPage";
 import { DeliverySchedulePage } from "./DeliverySchedulePage";
+import { InboundChangeDetailPage, InboundChangesPage } from "./InboundPages";
 import { InvoicingPlanPage } from "./InvoicingPlanPage";
+import { OpenOrdersByVendorPage, OverdueLinesPage, PriceHistoryPage } from "./InquiryPages";
 import { OpenSupplyPage } from "./OpenSupplyPage";
 import { PolicyDetailPage, PolicyListPage } from "./PolicyPages";
 import { PriceLookupPage } from "./PricingPage";
@@ -29,13 +31,14 @@ import {
   SigningLimitsPage,
 } from "./SigningPages";
 import { TradeAgreementCreatePage, TradeAgreementDetailPage, TradeAgreementsPage } from "./TradeAgreementPages";
+import { ModelServiceSpecCreatePage, ModelServiceSpecDetailPage, ModelServiceSpecsPage, ServiceSpecPage } from "./ServicePages";
 import { WorkspacePage } from "./WorkspacePage";
 
 const purchasing: PassageModule = {
   id: "purchasing",
   title: "Purchasing",
   description:
-    "Requisitions, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, delivery warehouse per line and the open supply list, invoicing plans, delivery schedules and subsequent price changes, purchase, scheduling and trade agreements with releases, price lookup, procurement catalogs that requesters pick from, category vendor assignments and managers, charge codes and auto charges for freight, handling and fees, signing limits with their requests and recertification, and the purchasing policy per legal entity.",
+    "Requisitions, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, delivery warehouse per line and the open supply list, invoicing plans, delivery schedules and subsequent price changes, purchase, scheduling and trade agreements with releases, price lookup, procurement catalogs that requesters pick from, category vendor assignments and managers, charge codes and auto charges for freight, handling and fees, service lines with outlines, unplanned limits and model service specifications, the changes planning messages and closed drop-ships made to purchase orders, signing limits with their requests and recertification, and the purchasing policy per legal entity.",
   routes: [
     { path: "/purchasing", element: createElement(WorkspacePage) },
     { path: "/purchasing/requisitions", element: createElement(RequisitionsPage) },
@@ -43,6 +46,11 @@ const purchasing: PassageModule = {
     { path: "/purchasing/requisitions/:id", element: createElement(RequisitionDetailPage), handle: { title: "Requisition" } },
     { path: "/purchasing/consolidation", element: createElement(ConsolidationPage) },
     { path: "/purchasing/open-supply", element: createElement(OpenSupplyPage), handle: { title: "Open supply" } },
+    { path: "/purchasing/inquiries", element: createElement(OpenOrdersByVendorPage), handle: { title: "Open orders by vendor" } },
+    { path: "/purchasing/inquiries/overdue", element: createElement(OverdueLinesPage), handle: { title: "Overdue lines" } },
+    { path: "/purchasing/inquiries/price-history", element: createElement(PriceHistoryPage), handle: { title: "Order price history" } },
+    { path: "/purchasing/inbound-changes", element: createElement(InboundChangesPage) },
+    { path: "/purchasing/inbound-changes/:id", element: createElement(InboundChangeDetailPage), handle: { title: "Change from another service" } },
     { path: "/purchasing/rfqs", element: createElement(RFQsPage) },
     { path: "/purchasing/rfqs/new", element: createElement(RFQCreatePage), handle: { title: "New request for quotation" } },
     { path: "/purchasing/rfqs/:id", element: createElement(RFQDetailPage), handle: { title: "Request for quotation" } },
@@ -61,7 +69,15 @@ const purchasing: PassageModule = {
       handle: { title: "Delivery schedule" },
     },
     { path: "/purchasing/purchase-orders/:id/reprice", element: createElement(RepricePage), handle: { title: "Price change" } },
+    {
+      path: "/purchasing/purchase-orders/:id/lines/:lineNo/service",
+      element: createElement(ServiceSpecPage),
+      handle: { title: "Service line" },
+    },
     { path: "/purchasing/reprice", element: createElement(RepriceRunPage), handle: { title: "Price changes" } },
+    { path: "/purchasing/model-service-specs", element: createElement(ModelServiceSpecsPage) },
+    { path: "/purchasing/model-service-specs/new", element: createElement(ModelServiceSpecCreatePage), handle: { title: "New model service specification" } },
+    { path: "/purchasing/model-service-specs/:id", element: createElement(ModelServiceSpecDetailPage), handle: { title: "Model service specification" } },
     { path: "/purchasing/agreements", element: createElement(PurchaseAgreementsPage) },
     { path: "/purchasing/agreements/new", element: createElement(PurchaseAgreementCreatePage), handle: { title: "New purchase agreement" } },
     { path: "/purchasing/agreements/:id", element: createElement(PurchaseAgreementDetailPage), handle: { title: "Purchase agreement" } },
@@ -112,6 +128,8 @@ const purchasing: PassageModule = {
     { label: "Requests for quotation", to: "/purchasing/rfqs", duty: "RFQMaintain" },
     { label: "Purchase orders", to: "/purchasing/purchase-orders", duty: "PurchaseOrderInquire" },
     { label: "Open supply", to: "/purchasing/open-supply", duty: "PurchaseOrderInquire" },
+    { label: "Inquiries", to: "/purchasing/inquiries", duty: "PurchaseOrderInquire" },
+    { label: "Changes from other services", to: "/purchasing/inbound-changes", duty: "PurchaseOrderInquire" },
     { label: "Price changes", to: "/purchasing/reprice", duty: "PurchaseOrderInquire" },
     { label: "Purchase agreements", to: "/purchasing/agreements", duty: "AgreementMaintain" },
     { label: "Scheduling agreements", to: "/purchasing/scheduling-agreements", duty: "AgreementMaintain" },
@@ -120,6 +138,7 @@ const purchasing: PassageModule = {
     { label: "Catalogs", to: "/purchasing/catalogs", duty: "PurchaseOrderInquire" },
     { label: "Category vendors", to: "/purchasing/category-vendors", duty: "PurchaseOrderInquire" },
     { label: "Charge codes", to: "/purchasing/charge-codes", duty: "PurchaseOrderInquire" },
+    { label: "Service models", to: "/purchasing/model-service-specs", duty: "PurchaseOrderInquire" },
     { label: "Signing limits", to: "/purchasing/signing-limits", duty: "PurchaseOrderInquire" },
     { label: "Policies", to: "/purchasing/policies", duty: "PurchaseOrderInquire" },
   ],

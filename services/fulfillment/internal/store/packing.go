@@ -38,6 +38,8 @@ type PackingStore interface {
 	AutoPack(ctx context.Context, id string, version int, unitWeights map[string]decimal.Decimal, idem Idem) (AutoPackResult, error)
 	ListReturnableBalances(ctx context.Context, customerID string, limit int) ([]ReturnableBalance, error)
 	ReturnPackaging(ctx context.Context, in ReturnInput, idem Idem) (ReturnableBalance, error)
+	AdjustReturnable(ctx context.Context, in AdjustInput, idem Idem) (ReturnableMovement, error)
+	ListReturnableMovements(ctx context.Context, f MovementFilter) ([]ReturnableMovement, error)
 	ReturnableAging(ctx context.Context, customerID string) ([]ReturnableAgingRow, error)
 }
 
@@ -311,7 +313,7 @@ func (s *Postgres) AutoPack(ctx context.Context, id string, version int, unitWei
 			if err := checkVersion(sh, version); err != nil {
 				return AutoPackResult{}, err
 			}
-			if err := checkShippable(sh); err != nil {
+			if err := checkWorkable(ctx, tx, sh); err != nil {
 				return AutoPackResult{}, err
 			}
 			if sh.Status != domain.StatusPicked && sh.Status != domain.StatusPacked {
@@ -689,21 +691,35 @@ func countReturnables(ctx context.Context, tx pgx.Tx, shipmentID, status string)
 }
 
 // moveBalances adds (sign 1, packing slip post) or removes (sign -1, slip
-// cancel) the returnable containers on the customer's balances (BR-28.13).
-func moveBalances(ctx context.Context, tx pgx.Tx, tenantID, customerID string, counts []returnableCount, sign int64) error {
+// cancel) the returnable containers on the customer's balances (BR-28.13) and
+// writes one movement per container type that names the packing slip.
+func moveBalances(ctx context.Context, tx pgx.Tx, tenantID, customerID string, counts []returnableCount, sign int64, slipID string) error {
+	kind := MovementShipped
+	if sign < 0 {
+		kind = MovementShipmentCancelled
+	}
 	for _, c := range counts {
 		qty := decimal.NewFromInt(sign * c.Qty)
+		var after decimal.Decimal
 		if sign > 0 {
-			if _, err := tx.Exec(ctx, `insert into returnable_packaging_balance (tenant_id, customer_id, container_type, balance, last_shipped_at)
+			var bal string
+			if err := tx.QueryRow(ctx, `insert into returnable_packaging_balance (tenant_id, customer_id, container_type, balance, last_shipped_at)
 				values ($1, $2, $3, $4, now())
 				on conflict (tenant_id, customer_id, container_type) do update
-				set balance = returnable_packaging_balance.balance + excluded.balance, last_shipped_at = now()`,
-				tenantID, customerID, c.ContainerType, qty); err != nil {
+				set balance = returnable_packaging_balance.balance + excluded.balance, last_shipped_at = now()
+				returning balance::text`,
+				tenantID, customerID, c.ContainerType, qty).Scan(&bal); err != nil {
 				return err
 			}
-			continue
+			after = dec(bal)
+		} else {
+			b, err := applyReturn(ctx, tx, customerID, c.ContainerType, qty, false)
+			if err != nil {
+				return err
+			}
+			after = b.Balance
 		}
-		if _, err := applyReturn(ctx, tx, customerID, c.ContainerType, qty, false); err != nil {
+		if _, err := recordMovement(ctx, tx, tenantID, customerID, c.ContainerType, kind, qty, after, slipID, "", actorOf(ctx)); err != nil {
 			return err
 		}
 	}
@@ -770,7 +786,15 @@ func (s *Postgres) ReturnPackaging(ctx context.Context, in ReturnInput, idem Ide
 	var out ReturnableBalance
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		res, err := runIdempotent(ctx, tx, p.TenantID, idem, func() (ReturnableBalance, error) {
-			return applyReturn(ctx, tx, in.CustomerID, in.ContainerType, in.Qty.Neg(), true)
+			b, err := applyReturn(ctx, tx, in.CustomerID, in.ContainerType, in.Qty.Neg(), true)
+			if err != nil {
+				return b, err
+			}
+			m, err := recordMovement(ctx, tx, p.TenantID, in.CustomerID, in.ContainerType, MovementReturned, in.Qty.Neg(), b.Balance, "", "", actorOf(ctx))
+			if err != nil {
+				return b, err
+			}
+			return b, enqueueFor(ctx, tx, "returnable_packaging", in.CustomerID, fulevents.ReturnableReturned, p.TenantID, movementData(in.CustomerID, m))
 		})
 		out = res
 		return err

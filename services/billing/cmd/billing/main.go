@@ -11,8 +11,10 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/api"
+	"github.com/BenjaminSRussell/passage/services/billing/internal/revrec"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/store"
 	"github.com/BenjaminSRussell/passage/services/billing/migrations"
 )
@@ -77,6 +79,24 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	st := store.New(pool)
 	a := api.New(st, tax, maxLines).WithSubscriptions(st)
+	ledger, err := ledgerclient.FromEnv(getenv, "billing")
+	if err != nil {
+		return fmt.Errorf("ledger client: %w", err)
+	}
+	if ledger != nil {
+		profiles, err := api.ParseGLProfiles(getenv("BILLING_GL_PROFILES"))
+		if err != nil {
+			return err
+		}
+		a.WithLedger(ledger, st, profiles)
+	}
+	allocations, err := revrec.FromEnv(getenv)
+	if err != nil {
+		return fmt.Errorf("revrec client: %w", err)
+	}
+	if allocations != nil {
+		a.WithAllocations(allocations)
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

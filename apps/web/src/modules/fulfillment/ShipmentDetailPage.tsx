@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
 import { getShipment, listPackingSlips, type AutoPackResult, type Container, type PackingSlipSummary, type Problem, type Shipment, type ShipmentLine } from "./api/client";
 import { ShipmentStatusBadge, SlipStatusBadge } from "./badges";
-import { dash, formatDate, formatDateTime, formatMoney, shortId, SHORT_PICK_REASONS, subtractDecimal } from "./format";
+import { compareDecimal, dash, formatDate, formatDateTime, formatMoney, shortId, SHORT_PICK_REASONS, subtractDecimal } from "./format";
 import styles from "./pages.module.css";
 import { AutoPackForm, PackForm, PickForm, PostForm } from "./ShipmentActions";
 import { canUnnest, NestForm, UnnestButton } from "./PalletForm";
@@ -23,10 +23,10 @@ const lineColumns: DataTableColumn<ShipmentLine>[] = [
   { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
   { key: "unit", header: "Unit" },
   { key: "qtyPlanned", header: "Planned", align: "end" },
-  { key: "qtyPicked", header: "Picked", align: "end", render: (row) => (row.pickConfirmed ? row.qtyPicked : "Not confirmed") },
+  { key: "qtyPicked", header: "Picked", align: "end", render: (row) => (row.pickConfirmed ? (compareDecimal(row.qtyPicked, row.qtyPlanned) > 0 ? `${row.qtyPicked} (+${subtractDecimal(row.qtyPicked, row.qtyPlanned)} over plan)` : row.qtyPicked) : "Not confirmed") },
   { key: "qtyPacked", header: "Packed", align: "end" },
   { key: "qtyShipped", header: "Shipped", align: "end" },
-  { key: "remaining", header: "To ship", align: "end", render: (row) => subtractDecimal(row.qtyPlanned, row.qtyShipped) },
+  { key: "remaining", header: "To ship", align: "end", render: (row) => (compareDecimal(row.qtyShipped, row.qtyPlanned) >= 0 ? "0" : subtractDecimal(row.qtyPlanned, row.qtyShipped)) },
   { key: "qtyClosed", header: "Closed", align: "end", render: (row) => row.qtyClosed ?? "0" },
   { key: "zone", header: "Zone", render: (row) => row.zone ?? dash },
   { key: "partial", header: "Release", render: (row) => (row.partial ? "Partial (ATP)" : "Full") },

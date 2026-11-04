@@ -3,7 +3,7 @@ info:
   title: Passage Field Service events
   version: 0.1.0
   description: |
-    Events published by the fieldservice service (wave 45, slices 1 to 5). Every event is
+    Events published by the fieldservice service (wave 45, slices 1 to 7). Every event is
     written to the service outbox in the same transaction as the state change and
     relayed by Debezium to Kafka. Envelope: CloudEvents 1.0 (source /passage/service/fieldservice).
 defaultContentType: application/json
@@ -18,6 +18,11 @@ channels:
     messages:
       workOrderPosted:
         $ref: "#/components/messages/WorkOrderPosted"
+  workOrderCompleted:
+    address: passage.service.workorder.completed
+    messages:
+      workOrderCompleted:
+        $ref: "#/components/messages/WorkOrderCompleted"
   slaAlerts:
     address: passage.service.sla
     messages:
@@ -40,6 +45,26 @@ channels:
     messages:
       supplierClaimSettled:
         $ref: "#/components/messages/SupplierClaimSettled"
+  agreementChanged:
+    address: passage.service.agreement
+    messages:
+      agreementChanged:
+        $ref: "#/components/messages/AgreementChanged"
+  agreementVisitRecorded:
+    address: passage.service.agreementvisit
+    messages:
+      agreementVisitRecorded:
+        $ref: "#/components/messages/AgreementVisitRecorded"
+  assignmentChanged:
+    address: passage.service.assignment
+    messages:
+      assignmentChanged:
+        $ref: "#/components/messages/AssignmentChanged"
+  dispatchPublished:
+    address: passage.service.dispatch
+    messages:
+      dispatchPublished:
+        $ref: "#/components/messages/DispatchPublished"
 operations:
   publishCaseOpened:
     action: send
@@ -53,6 +78,12 @@ operations:
     summary: A completed service work order was posted to billing and warranty cost.
     messages:
       - $ref: "#/channels/workOrderPosted/messages/workOrderPosted"
+  publishWorkOrderCompleted:
+    action: send
+    channel: { $ref: "#/channels/workOrderCompleted" }
+    summary: A work order was completed by the technician's complete action or by hand; inventory issues the consumed parts from the truck (BR-45.6).
+    messages:
+      - $ref: "#/channels/workOrderCompleted/messages/workOrderCompleted"
   publishSLAWarning:
     action: send
     channel: { $ref: "#/channels/slaAlerts" }
@@ -83,11 +114,36 @@ operations:
     summary: A vendor credit note was matched to an accepted supplier warranty claim, which is now SETTLED (FR-45.15, BR-45.12); analytics and the GL warranty recovery consume it.
     messages:
       - $ref: "#/channels/supplierClaimSettled/messages/supplierClaimSettled"
+  publishAgreementChanged:
+    action: send
+    channel: { $ref: "#/channels/agreementChanged" }
+    summary: A service agreement was activated, suspended, resumed, canceled or expired (FR-45.3); wave 29 starts or stops the subscription from it.
+    messages:
+      - $ref: "#/channels/agreementChanged/messages/agreementChanged"
+  publishAgreementVisitRecorded:
+    action: send
+    channel: { $ref: "#/channels/agreementVisitRecorded" }
+    summary: An included visit of an agreement line was consumed (FR-45.3); wave 29 bills PER_VISIT agreements from it.
+    messages:
+      - $ref: "#/channels/agreementVisitRecorded/messages/agreementVisitRecorded"
+  publishAssignmentChanged:
+    action: send
+    channel: { $ref: "#/channels/assignmentChanged" }
+    summary: A work order was assigned to a technician at a time, moved, or taken off the schedule (FR-45.7).
+    messages:
+      - $ref: "#/channels/assignmentChanged/messages/assignmentChanged"
+  publishDispatchPublished:
+    action: send
+    channel: { $ref: "#/channels/dispatchPublished" }
+    summary: The SCHEDULED work orders of a territory-day were dispatched to their technicians (FR-45.7).
+    messages:
+      - $ref: "#/channels/dispatchPublished/messages/dispatchPublished"
 components:
   messages:
     CaseOpened:
       name: dev.passage.service.case.opened.v1
       contentType: application/cloudevents+json
+      summary: A service case was opened with its entitlement resolved and its SLA clocks started.
       payload:
         type: object
         required: [caseId, number, customerId, priority, agreementId, responseDue, resolutionDue]
@@ -100,6 +156,40 @@ components:
           agreementId: { type: [string, "null"], format: uuid }
           responseDue: { type: string, format: date-time }
           resolutionDue: { type: string, format: date-time }
+    WorkOrderCompleted:
+      name: dev.passage.service.workorder.completed.v1
+      contentType: application/cloudevents+json
+      summary: A work order reached COMPLETED.
+      description: |
+        Written in the transaction that completes the work order: the merge of a COMPLETE action, or a manual
+        transition. `consumedQty` is the sum of the technician's applied PART_USED actions per line; inventory
+        issues it from the truck once per work order. `durationMinutes` is the time IN_PROGRESS by device time
+        (0 for a manual completion without an action log).
+      payload:
+        type: object
+        required: [workOrderId, number, customerId, legalEntityId, caseId, technicianId, firstTimeFix, durationMinutes, completedAt, lines]
+        additionalProperties: false
+        properties:
+          workOrderId: { type: string, format: uuid }
+          number: { type: string, example: SWO-000001 }
+          customerId: { type: string, format: uuid }
+          legalEntityId: { type: string, format: uuid }
+          caseId: { type: [string, "null"], format: uuid }
+          technicianId: { type: [string, "null"], format: uuid }
+          firstTimeFix: { type: boolean }
+          durationMinutes: { type: integer, minimum: 0 }
+          completedAt: { type: string, format: date-time }
+          lines:
+            type: array
+            items:
+              type: object
+              required: [lineId, kind, qty, consumedQty]
+              additionalProperties: false
+              properties:
+                lineId: { type: string, format: uuid }
+                kind: { type: string, enum: [LABOR, PART, TRAVEL, FEE] }
+                qty: { type: string, description: Planned quantity as a decimal string. }
+                consumedQty: { type: string, description: Reported consumption as a decimal string; "0" when none. }
     WorkOrderPosted:
       name: dev.passage.service.workorder.posted.v1
       contentType: application/cloudevents+json
@@ -145,6 +235,7 @@ components:
     SLAWarning:
       name: dev.passage.service.sla.warning.v1
       contentType: application/cloudevents+json
+      summary: A case SLA clock reached the warning threshold; emitted once per case and clock.
       payload:
         type: object
         required: [caseId, number, slaType, priority, dueAt, warnedAt, thresholdPercent]
@@ -238,3 +329,106 @@ components:
           creditNoteId: { type: string, description: The vendor credit note (wave 18) that settled the claim. }
           vendorReference: { type: string, description: The vendor's reference of the claim, quoted on the credit note. }
           settledAt: { type: string, format: date-time }
+    AgreementChanged:
+      name: dev.passage.service.agreement.changed.v1
+      contentType: application/cloudevents+json
+      summary: A service agreement changed status.
+      description: |
+        Written in the transaction of the change (the activate, suspend, resume or cancel action, or the
+        expiry pass). Only ACTIVE agreements entitle cases and cover work orders, so wave 29 starts the
+        subscription on ACTIVE and stops it on SUSPENDED, CANCELED or EXPIRED.
+      payload:
+        type: object
+        required: [agreementId, number, customerId, legalEntityId, billingModel, from, to, reason, validTo, at, actor]
+        additionalProperties: false
+        properties:
+          agreementId: { type: string, format: uuid }
+          number: { type: string, example: SA-000001 }
+          customerId: { type: string, format: uuid }
+          legalEntityId: { type: string, format: uuid }
+          billingModel: { type: string, enum: [PREPAID, PER_VISIT, SUBSCRIPTION], description: Tells wave 29 whether a subscription starts or stops. }
+          from: { type: string, enum: [DRAFT, ACTIVE, SUSPENDED, EXPIRED, CANCELED] }
+          to: { type: string, enum: [DRAFT, ACTIVE, SUSPENDED, EXPIRED, CANCELED] }
+          reason: { type: string, description: The caller's reason; empty for an activation, and "validTo passed" from the expiry pass. }
+          validTo: { type: [string, "null"], format: date }
+          at: { type: string, format: date-time }
+          actor: { type: string, description: User id of the caller who made the change or ran the expiry pass; empty when the caller has no user. }
+    AgreementVisitRecorded:
+      name: dev.passage.service.agreementvisit.recorded.v1
+      contentType: application/cloudevents+json
+      summary: An included visit of an agreement line was consumed.
+      description: Written in the transaction that records the visit. visitsLeft is what remains of the line's includedVisits.
+      payload:
+        type: object
+        required: [visitId, agreementId, number, customerId, legalEntityId, billingModel, lineIndex, kind, visitDate, workOrderId, visitsLeft]
+        additionalProperties: false
+        properties:
+          visitId: { type: string, format: uuid }
+          agreementId: { type: string, format: uuid }
+          number: { type: string, example: SA-000001 }
+          customerId: { type: string, format: uuid, description: The customer party wave 29 bills. }
+          legalEntityId: { type: string, format: uuid }
+          billingModel: { type: string, enum: [PREPAID, PER_VISIT, SUBSCRIPTION], description: Wave 29 bills the visit when PER_VISIT. }
+          lineIndex: { type: integer, minimum: 0 }
+          kind: { type: string, enum: [PREVENTIVE, CORRECTIVE] }
+          visitDate: { type: string, format: date }
+          workOrderId: { type: [string, "null"], format: uuid }
+          visitsLeft: { type: integer, minimum: 0 }
+    AssignmentChanged:
+      name: dev.passage.service.assignment.changed.v1
+      contentType: application/cloudevents+json
+      summary: A work order was assigned to a technician, moved or unassigned.
+      description: |
+        Written in the transaction of the assign or unassign call. ASSIGNED also covers a move to another
+        technician or time, with previousTechnicianId set when the technician changed. For UNASSIGNED the
+        technician and times are the ones the order lost.
+      payload:
+        type: object
+        required: [workOrderId, number, legalEntityId, territoryId, action, technicianId, previousTechnicianId, start, end, pinned, at, actor]
+        additionalProperties: false
+        properties:
+          workOrderId: { type: string, format: uuid }
+          number: { type: string, example: SWO-000001 }
+          legalEntityId: { type: string, format: uuid }
+          territoryId: { type: string, format: uuid }
+          action: { type: string, enum: [ASSIGNED, UNASSIGNED] }
+          technicianId: { type: [string, "null"], format: uuid }
+          previousTechnicianId: { type: [string, "null"], format: uuid }
+          start: { type: [string, "null"], format: date-time }
+          end: { type: [string, "null"], format: date-time }
+          pinned: { type: boolean, description: A pinned assignment survives re-optimization (BR-45.3). }
+          at: { type: string, format: date-time }
+          actor: { type: string, description: User id of the dispatcher; empty when the caller has no user. }
+    DispatchPublished:
+      name: dev.passage.service.dispatch.published.v1
+      contentType: application/cloudevents+json
+      summary: The SCHEDULED work orders of a territory-day were dispatched.
+      description: |
+        Written in the transaction that moves the work orders from SCHEDULED to DISPATCHED. Assignments are
+        listed per technician in route order (sequence from 1). The technician apps and customer
+        notifications consume it.
+      payload:
+        type: object
+        required: [runId, legalEntityId, territoryId, date, timeZone, publishedAt, actor, assignments]
+        additionalProperties: false
+        properties:
+          runId: { type: string, format: uuid }
+          legalEntityId: { type: string, format: uuid }
+          territoryId: { type: string, format: uuid }
+          date: { type: string, format: date, description: The local calendar day in timeZone. }
+          timeZone: { type: string, example: America/Chicago }
+          publishedAt: { type: string, format: date-time }
+          actor: { type: string }
+          assignments:
+            type: array
+            items:
+              type: object
+              required: [workOrderId, number, technicianId, sequence, start, end]
+              additionalProperties: false
+              properties:
+                workOrderId: { type: string, format: uuid }
+                number: { type: string, example: SWO-000001 }
+                technicianId: { type: string, format: uuid }
+                sequence: { type: integer, minimum: 1 }
+                start: { type: string, format: date-time }
+                end: { type: string, format: date-time }

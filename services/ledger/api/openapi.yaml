@@ -41,6 +41,18 @@ components:
       required: false
       description: W3C traceparent; its trace id is copied to the entry. A 32-character id is minted when absent.
       schema: { type: string }
+    ExportFormat:
+      name: format
+      in: query
+      required: false
+      description: >-
+        json (default) returns the JSON page. csv returns one UTF-8 CSV file (with a byte order mark) of the whole
+        result instead of a page, up to 50,000 rows, under the same duty, filters, validation and legal-entity scope
+        as the JSON read; limit is ignored. Cells that start with = + - @, a tab or a carriage return are prefixed
+        with an apostrophe so a spreadsheet does not run them; plain numbers (a negative amount) are written as is.
+        A longer result is cut at the 50,000th row and flagged in X-Passage-Export-Truncated before the first byte.
+        The file is streamed: a failure after the first byte cuts the connection rather than ending a short file.
+      schema: { type: string, enum: [json, csv], default: json }
     ChartCode:
       name: chart
       in: path
@@ -82,6 +94,29 @@ components:
       in: header
       required: false
       description: The batch version the caller last read, as an entity tag ("3"). When sent and stale, 412 LEDGER_VERSION_CONFLICT and nothing changes; when absent, no check is made.
+      schema: { type: string }
+    ReplaceIfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: |
+        The lockVersion of the row as last read, as an entity tag ("3"; the ETag of the GET or of the previous PUT).
+        Required when the PUT changes an existing row: absent is 428 LEDGER_PRECONDITION_REQUIRED, stale (or sent
+        for a row that does not exist) is 412 LEDGER_VERSION_CONFLICT, and nothing changes. Not needed to create a
+        row, nor to repeat the stored content (a retried create or a re-run load is a 200 that keeps the tag). The
+        tag increases only when the content changes. A malformed value is 400.
+      schema: { type: string, example: '"3"' }
+    ListLimit:
+      name: limit
+      in: query
+      required: false
+      description: Page size, 1 to 200 (default 100).
+      schema: { type: integer, minimum: 1, maximum: 200, default: 100 }
+    ListCursor:
+      name: cursor
+      in: query
+      required: false
+      description: The nextCursor of the previous page, with the same filters. An unknown or altered cursor is 400.
       schema: { type: string }
   schemas:
     Problem:
@@ -168,6 +203,16 @@ components:
         ledgerLines:
           type: array
           items: { $ref: "#/components/schemas/LedgerLines" }
+        optionalDimensions:
+          type: array
+          maxItems: 20
+          items: { type: string, pattern: '^[A-Z][A-Z0-9_]{0,19}$' }
+          description: >-
+            Dimension attributes the poster tags lines with only where the ledger defines them. A ledger that does not
+            define one drops it from the lines (the rest of the line posts unchanged) instead of refusing the entry with
+            422 LEDGER_DIMENSION_INVALID; on a ledger set this is decided per member ledger. Receiving and payables send
+            VENDGRP (the vendor group code, #421), so their postings keep working on ledgers that have not added it
+            with addDimensionAttributes. The idempotency payload hash leaves out this list and the values of these attributes on the lines (they are best-effort tags), so a retry that tags a line differently replays the first entry instead of 409 LEDGER_IDEMPOTENCY_CONFLICT; a request without optionalDimensions hashes as before.
     SetEntryRequest:
       type: object
       required: [documentId, postingDate, source]
@@ -203,6 +248,16 @@ components:
           type: array
           description: At most one group per ledger of the set; a ledger outside the set is rejected with 422 LEDGER_LINES_LEDGER_NOT_IN_SET.
           items: { $ref: "#/components/schemas/LedgerLines" }
+        optionalDimensions:
+          type: array
+          maxItems: 20
+          items: { type: string, pattern: '^[A-Z][A-Z0-9_]{0,19}$' }
+          description: >-
+            Dimension attributes the poster tags lines with only where the ledger defines them. A ledger that does not
+            define one drops it from the lines (the rest of the line posts unchanged) instead of refusing the entry with
+            422 LEDGER_DIMENSION_INVALID; on a ledger set this is decided per member ledger. Receiving and payables send
+            VENDGRP (the vendor group code, #421), so their postings keep working on ledgers that have not added it
+            with addDimensionAttributes. The idempotency payload hash leaves out this list and the values of these attributes on the lines (they are best-effort tags), so a retry that tags a line differently replays the first entry instead of 409 LEDGER_IDEMPOTENCY_CONFLICT; a request without optionalDimensions hashes as before.
     LedgerLines:
       type: object
       required: [ledgerId, lines]
@@ -343,6 +398,7 @@ components:
         futurePostingDays: { type: integer, minimum: 0, maximum: 730 }
         reversalReasonRequired: { type: boolean }
         negativePostingEnabled: { type: boolean }
+        allowReinstate: { type: boolean, description: "FR-11.8: when false, reversing a reversing entry (which would re-instate the original) is refused with 422 LEDGER_REINSTATEMENT_NOT_ALLOWED. Default true." }
         calendarCode: { type: string, pattern: '^[A-Z0-9_-]{1,20}$', description: Fiscal calendar the ledger follows (FR-12.7); stored, not consumed by posting yet }
         accountingPrinciple: { type: string, enum: [IFRS, US_GAAP, LOCAL_GAAP, TAX, MANAGEMENT] }
         reportingCurrency: { type: string, pattern: '^[A-Z]{3}$' }
@@ -355,6 +411,12 @@ components:
         calendarCode: { type: string, pattern: '^[A-Z0-9_-]{1,20}$|^$', description: An empty string clears the value }
         accountingPrinciple: { type: string, enum: ["", IFRS, US_GAAP, LOCAL_GAAP, TAX, MANAGEMENT] }
         reportingCurrency: { type: string, pattern: '^[A-Z]{3}$|^$' }
+        allowReinstate: { type: boolean, description: "Turns reinstatement by reversing a reversal on or off (FR-11.8). Applies to later reversals only." }
+        addDimensionAttributes:
+          type: array
+          maxItems: 20
+          items: { type: string, pattern: '^[A-Z][A-Z0-9_]{0,19}$' }
+          description: Dimension attributes to append to the ledger (for example VENDGRP, the vendor group code that receiving posts on the vendor-control credit). Attributes already on the ledger are ignored; none is removed. The ledger holds at most 20 (400 beyond that).
     LedgerSetRequest:
       type: object
       required: [code, name, leadingLedgerId, parallelLedgerIds]
@@ -424,6 +486,7 @@ components:
         reconciliationAccountType:
           type: string
           enum: [none, customer, vendor, bank, inventory, fixed_asset]
+        lockVersion: { type: integer, minimum: 1, description: Optimistic-concurrency counter, also the ETag; send it as If-Match to replace the account }
     ValidateResponse:
       type: object
       properties:
@@ -504,6 +567,9 @@ components:
           type: array
           description: The dimension attributes the rows are split by.
           items: { type: string }
+        excludesYearEndClosing:
+          type: boolean
+          description: True when exclude_year_end_closing was applied. Absent when false.
     QuantityTotal:
       type: object
       description: Statistical quantity turnover of one unit of measure (BR-11.2), decimal strings with six decimals.
@@ -648,6 +714,7 @@ components:
           properties:
             id: { type: string, format: uuid }
             ledgerId: { type: string, format: uuid }
+            lockVersion: { type: integer, minimum: 1, description: Optimistic-concurrency counter, also the ETag; send it as If-Match to replace the version }
     DescriptionTemplateBody:
       type: object
       required: [scope, sourceType, template]
@@ -678,6 +745,7 @@ components:
           type: object
           additionalProperties: { type: string }
         updatedAt: { type: string, format: date-time }
+        lockVersion: { type: integer, minimum: 1, description: Optimistic-concurrency counter, also the ETag; send it as If-Match to replace the template }
     DimensionValueBody:
       type: object
       required: [name, suspended]
@@ -694,6 +762,7 @@ components:
           properties:
             attribute: { type: string, pattern: '^[A-Z][A-Z0-9_]{0,19}$' }
             value: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$' }
+            lockVersion: { type: integer, minimum: 1, description: Optimistic-concurrency counter; send it as If-Match to replace the value }
     JournalNameBody:
       type: object
       required: [name]
@@ -705,15 +774,18 @@ components:
         reversalReasonRequired: { type: boolean, default: false, description: Reversing an entry posted from a batch of this name needs a reason code (FR-11.15). }
         allowReconAccounts: { type: boolean, default: false, description: Lines may hit reconciliation accounts (BR-11.8; migration and correction use). }
         linesLimit: { type: integer, minimum: 1, maximum: 10000, default: 5000 }
+        postingRestriction: { type: string, enum: [none, own_journals_only], default: none, description: "Who may post the batches of this name (FR-11.9): any holder of the posting duty, or only the user who created the batch (403 LEDGER_POSTING_RESTRICTED otherwise). The PRD value by_user_group needs authorization groups and is not built." }
+        descriptionLanguage: { type: string, enum: [legal_entity, user], default: legal_entity, description: "Language of default descriptions (FR-11.17): legal_entity uses English until legal entities carry a language (wave 6); user uses the poster's Accept-Language, falling back to the base language and then English." }
         active: { type: boolean, default: true, description: Inactive names keep their batches but take no new or submitted batches. }
     JournalName:
       allOf:
         - $ref: "#/components/schemas/JournalNameBody"
         - type: object
-          required: [code, name, requiresApproval, selfApprovalAllowed, reversalReasonRequired, allowReconAccounts, linesLimit, active, updatedAt]
+          required: [code, name, requiresApproval, selfApprovalAllowed, reversalReasonRequired, allowReconAccounts, linesLimit, postingRestriction, descriptionLanguage, active, updatedAt]
           properties:
             code: { type: string, pattern: '^[A-Za-z0-9_-]{1,20}$' }
             updatedAt: { type: string, format: date-time }
+            lockVersion: { type: integer, minimum: 1, description: Optimistic-concurrency counter, also the ETag; send it as If-Match to replace the journal name }
     BatchStatus:
       type: string
       description: BR-11.10 state machine. `posting` is held as the batch row lock inside the posting transaction and is never returned.
@@ -789,6 +861,8 @@ components:
         amount: { type: string, description: "A decimal string at the currency's minor-unit scale for fixed lines; a percentage of the base amount (0 to 1000) for percent lines" }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         text: { type: string }
+        quantity: { type: string, description: Fixed statistical quantity at scale 6, copied unchanged to every generated line; absent when the line has none (BR-11.2) }
+        unit: { type: string, description: Unit of measure of quantity }
     RecurringLineBody:
       type: object
       required: [account, debitCredit, amountKind, amount]
@@ -806,6 +880,8 @@ components:
             currency: { type: string, pattern: '^[A-Z]{3}$' }
             value: { type: string, description: Decimal string; a percentage when amountKind is percent }
         text: { type: string, maxLength: 255 }
+        quantity: { type: string, description: Statistical quantity (BR-11.2), a non-negative decimal with at most 6 decimals; set together with unit and copied unchanged, not scaled by the base amount }
+        unit: { type: string, pattern: '^[A-Z0-9]{1,10}$', description: Unit of measure; set together with quantity }
     RecurringJournalBody:
       type: object
       required: [ledgerId, journalName, name, frequency, dayOfMonth, startDate, lines]
@@ -1314,6 +1390,18 @@ components:
         oldCombination: { type: string, description: Display name of the combination the balance moves from }
         newCombination: { type: string, description: Display name of the combination the balance moves to }
         net: { type: string, description: Debit minus credit of the period balance being moved, decimal string in the ledger currency }
+        quantities:
+          type: array
+          description: |
+            Statistical quantities (BR-11.2) of the old combination that move with it, one per unit of measure with a
+            non-zero net. Each makes a zero-amount debit and credit pair in the reclassification entry, so the quantity
+            totals follow the amounts. A combination with quantities and a zero net is part of the run.
+          items:
+            type: object
+            required: [unit, net]
+            properties:
+              unit: { type: string, description: Unit of measure }
+              net: { type: string, description: Debit minus credit quantity of the period, decimal string }
         lineCount: { type: integer, format: int64, description: Posted lines behind the balance }
     RealignmentRun:
       type: object
@@ -1430,6 +1518,11 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
+    Problem428:
+      description: LEDGER_PRECONDITION_REQUIRED, the PUT changes an existing row (also one created by a concurrent request) and sent no If-Match; read the row and send its ETag
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
     RecurringProblem409:
       description: LEDGER_RECURRING_PAUSED (the template is paused and the date has no run yet)
       content:
@@ -1476,6 +1569,15 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/ViolationProblem" }
   headers:
+    ExportTruncated:
+      description: "true when the CSV export stopped at the 50,000 row cap; absent when the file is complete"
+      schema: { type: string, enum: ["true"] }
+    ExportNextCursor:
+      description: Where to continue a truncated export, as the cursor (lines) or after (accounts) of the next request
+      schema: { type: string }
+    ConfigETag:
+      description: The row's lockVersion as an entity tag, for If-Match on the next replacement
+      schema: { type: string, example: '"2"' }
     RecurringETag:
       description: The recurring journal version as an entity tag, for If-Match on the next change
       schema: { type: string, example: '"2"' }
@@ -1535,6 +1637,8 @@ paths:
       responses:
         "200":
           description: Journal name
+          headers:
+            ETag: { $ref: "#/components/headers/ConfigETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/JournalName" }
@@ -1544,12 +1648,15 @@ paths:
     put:
       tags: [journal]
       operationId: putJournalName
+      summary: Create or replace a journal name
       x-passage-duty: ledger.setup.write
       description: |
         Creates (201) or replaces (200) a journal name; naturally idempotent. Names are deactivated,
         never deleted. A change applies to the next action on each batch: submit reads requiresApproval,
-        approve reads selfApprovalAllowed, post reads allowReconAccounts, reversal reads reversalReasonRequired.
+        approve reads selfApprovalAllowed, post reads allowReconAccounts, postingRestriction and descriptionLanguage,
+        reversal reads reversalReasonRequired.
       parameters:
+        - $ref: "#/components/parameters/ReplaceIfMatch"
         - $ref: "#/components/parameters/JournalNameCode"
       requestBody:
         required: true
@@ -1559,15 +1666,21 @@ paths:
       responses:
         "200":
           description: Journal name replaced
+          headers:
+            ETag: { $ref: "#/components/headers/ConfigETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/JournalName" }
         "201":
           description: Journal name created
+          headers:
+            ETag: { $ref: "#/components/headers/ConfigETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/JournalName" }
         "400": { $ref: "#/components/responses/Problem400" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "428": { $ref: "#/components/responses/Problem428" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
   /v1/ledger/journal-batches:
@@ -1580,9 +1693,11 @@ paths:
         - { name: ledger, in: query, schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { $ref: "#/components/schemas/BatchStatus" } }
         - { name: journalName, in: query, schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,20}$' } }
+        - $ref: "#/components/parameters/ListLimit"
+        - $ref: "#/components/parameters/ListCursor"
       responses:
         "200":
-          description: Newest 200 batches (headers and side totals, no lines)
+          description: One page of batches, newest first (headers and side totals, no lines); nextCursor is present when another page follows
           content:
             application/json:
               schema:
@@ -1592,6 +1707,7 @@ paths:
                   items:
                     type: array
                     items: { $ref: "#/components/schemas/JournalBatch" }
+                  nextCursor: { type: string, description: Pass as cursor for the next page; absent on the last page }
         "400": { $ref: "#/components/responses/Problem400" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
@@ -1806,7 +1922,9 @@ paths:
         non-leading ledger of a ledger set also needs ledger.journal.postledger (FB50L, 403 AUTH-0003). On a rule rejection (422) or
         other failure nothing is posted, the batch stays approved or validated and lastError records the
         cause. The same key on the posted batch replays the stored response (200); another key is 409
-        LEDGER_BATCH_STATE.
+        LEDGER_BATCH_STATE. A journal name with postingRestriction own_journals_only lets only the batch's
+        creator post (403 LEDGER_POSTING_RESTRICTED). A journal name with descriptionLanguage user takes
+        the language of default descriptions from Accept-Language.
       parameters:
         - name: id
           in: path
@@ -1814,6 +1932,11 @@ paths:
           schema: { type: string, format: uuid }
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/IfMatch"
+        - name: Accept-Language
+          in: header
+          required: false
+          description: Language tag of the poster (de, de-DE); read only for journal names with descriptionLanguage user.
+          schema: { type: string }
       responses:
         "201":
           description: Entry posted
@@ -1876,6 +1999,8 @@ paths:
       responses:
         "200":
           description: One structure version
+          headers:
+            ETag: { $ref: "#/components/headers/ConfigETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Structure" }
@@ -1893,6 +2018,8 @@ paths:
         A duplicate (name, version) on the ledger is 409 LEDGER_STRUCTURE_VERSION_EXISTS.
         Segments are checked against the ledger's dimension attributes; every violation is
         returned together (422 LEDGER_STRUCTURE_INVALID).
+      parameters:
+        - $ref: "#/components/parameters/ReplaceIfMatch"
       requestBody:
         required: true
         content:
@@ -1901,15 +2028,21 @@ paths:
       responses:
         "200":
           description: Replaced
+          headers:
+            ETag: { $ref: "#/components/headers/ConfigETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Structure" }
         "201":
           description: Created
+          headers:
+            ETag: { $ref: "#/components/headers/ConfigETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Structure" }
         "400": { $ref: "#/components/responses/Problem400" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "428": { $ref: "#/components/responses/Problem428" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
@@ -1963,7 +2096,11 @@ paths:
       tags: [structures]
       operationId: putDimensionValue
       x-passage-duty: ledger.dimension.write
-      description: Creates (201) or replaces (200) a registered value. Suspended or out-of-date values are refused by posting (LEDGER_DIMENSION_INACTIVE).
+      description: |
+        Creates (201) or replaces (200) a registered value. Replacing needs If-Match with the value's lockVersion
+        (428 without, 412 when stale). Suspended or out-of-date values are refused by posting (LEDGER_DIMENSION_INACTIVE).
+      parameters:
+        - $ref: "#/components/parameters/ReplaceIfMatch"
       requestBody:
         required: true
         content:
@@ -1972,15 +2109,21 @@ paths:
       responses:
         "200":
           description: Replaced
+          headers:
+            ETag: { $ref: "#/components/headers/ConfigETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/DimensionValue" }
         "201":
           description: Created
+          headers:
+            ETag: { $ref: "#/components/headers/ConfigETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/DimensionValue" }
         "400": { $ref: "#/components/responses/Problem400" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "428": { $ref: "#/components/responses/Problem428" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
@@ -2009,6 +2152,7 @@ paths:
                 futurePostingDays: { type: integer, minimum: 0, maximum: 730, default: 366 }
                 reversalReasonRequired: { type: boolean, default: true, description: FR-11.15 }
                 negativePostingEnabled: { type: boolean, default: false, description: BR-11.16 }
+                allowReinstate: { type: boolean, default: true, description: "FR-11.8: whether a reversing entry can itself be reversed" }
       responses:
         "201":
           description: Ledger created
@@ -2043,9 +2187,11 @@ paths:
     patch:
       tags: [ledgers]
       operationId: updateLedgerSettings
-      summary: Change the calendar, accounting principle or reporting currency of a ledger
+      summary: Change the calendar, accounting principle, reporting currency or dimension attributes of a ledger
       description: |
-        Fields that are omitted keep their value; an empty string clears one. If-Match carries the ledger version
+        Fields that are omitted keep their value; an empty string clears one. addDimensionAttributes only appends
+        (a line combination id hashes the attributes in ledger order, so a later append gives lines that hold no value
+        for it a new combination id: balances stay correct and sum per account, but those rows split). If-Match carries the ledger version
         (412 LEDGER_VERSION_CONFLICT when it changed). Each change announces dev.passage.ledger.rules.changed.v1
         with kind ledger_settings.
       x-passage-duty: ledger.ledger.write
@@ -2077,8 +2223,13 @@ paths:
       operationId: listAccounts
       summary: List the accounts of a chart
       x-passage-duty: ledger.journal.read
+      description: >-
+        One keyset page of accounts as JSON. With format=csv it is the chart of accounts export: every account from
+        the after cursor as one CSV file (chart, account_number, name, account_type, is_postable, suspended_from,
+        reconciliation_account_type).
       parameters:
         - $ref: "#/components/parameters/ChartCode"
+        - $ref: "#/components/parameters/ExportFormat"
         - name: after
           in: query
           required: false
@@ -2103,16 +2254,44 @@ paths:
                   nextAfter:
                     type: string
                     description: Cursor for the next page (pass as `after`); empty when this page is the last
+            text/csv:
+              schema: { type: string }
+          headers:
+            X-Passage-Export-Truncated: { $ref: "#/components/headers/ExportTruncated" }
+            X-Passage-Export-Next-Cursor: { $ref: "#/components/headers/ExportNextCursor" }
         "400": { $ref: "#/components/responses/Problem400" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
   /v1/ledger/charts/{chart}/accounts/{number}:
+    get:
+      tags: [charts]
+      operationId: getAccount
+      summary: Read one account of a chart
+      x-passage-duty: ledger.journal.read
+      description: Returns the account with its lockVersion as ETag, to send as If-Match when replacing it.
+      parameters:
+        - $ref: "#/components/parameters/ChartCode"
+        - $ref: "#/components/parameters/AccountNumber"
+      responses:
+        "200":
+          description: The account
+          headers:
+            ETag: { $ref: "#/components/headers/ConfigETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
     put:
       tags: [charts]
       operationId: putAccount
       x-passage-duty: ledger.account.write
-      description: Creates (201) or replaces (200) a main account. Naturally idempotent.
+      description: |
+        Creates (201) or replaces (200) a main account. Naturally idempotent. Replacing needs If-Match with the account's
+        lockVersion (428 without, 412 when stale); the response carries the new ETag.
       parameters:
+        - $ref: "#/components/parameters/ReplaceIfMatch"
         - $ref: "#/components/parameters/ChartCode"
         - $ref: "#/components/parameters/AccountNumber"
       requestBody:
@@ -2135,15 +2314,21 @@ paths:
       responses:
         "200":
           description: Account replaced
+          headers:
+            ETag: { $ref: "#/components/headers/ConfigETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Account" }
         "201":
           description: Account created
+          headers:
+            ETag: { $ref: "#/components/headers/ConfigETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Account" }
         "400": { $ref: "#/components/responses/Problem400" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "428": { $ref: "#/components/responses/Problem428" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
   /v1/ledger/journal-entries:
@@ -2161,8 +2346,10 @@ paths:
         assignment, insert, balance upsert, outbox. Fiscal periods and FX are not yet applied
         (NOT-IMPLEMENTED.md). The database re-checks the balance at commit.
         Retries with the same Idempotency-Key and payload replay the stored response (200 with
-        idempotency.replayed = true). Idempotency records are kept 400 days; replays after expiry
-        are new requests.
+        idempotency.replayed = true). Idempotency records are kept LEDGER_IDEMPOTENCY_TTL_DAYS (default 400); after expiry the
+        journal entry's own key still answers: the same key and payload return the original entry
+        as a replay (without the original notices), another payload is 409
+        LEDGER_IDEMPOTENCY_CONFLICT. This holds for a post, a ledger-set post and a reversal.
 
         Period control: with CLOSE_URL configured, every posting path (this one, validate, reversal,
         batch submit and post, ledger-set post) asks the close service for the posting date's period status
@@ -2393,7 +2580,8 @@ paths:
       description: |
         Creates an exact negating entry linked to the original (reversalOfEntryId; lines carry
         reversalOfLineId). An entry can be reversed once (LEDGER_REVERSAL_ALREADY_REVERSED); a
-        reversal can itself be reversed to re-instate the original. The reversal date defaults to
+        reversal can itself be reversed to re-instate the original unless the ledger's allowReinstate is
+        false (422 LEDGER_REINSTATEMENT_NOT_ALLOWED). The reversal date defaults to
         the original posting date and may not precede it (LEDGER_DATE_INVALID).
         Reversing an entry of a non-leading ledger of a ledger set also needs ledger.journal.postledger
         (FB50L, 403 AUTH-0003). An entry with an open item in an active clearing document (including a
@@ -2462,8 +2650,13 @@ paths:
     get:
       tags: [journal]
       operationId: listJournalLines
+      summary: Query the posted lines of a ledger
       x-passage-duty: ledger.journal.read
       description: |
+        With format=csv the same filters export every matching line in posting order as one CSV file (one column per
+        dimension attribute of the ledger, sorted, named dim.{ATTRIBUTE}), up to 50,000 lines; a longer result is cut
+        and X-Passage-Export-Next-Cursor is the cursor to continue from.
+
         Ledger transactions inquiry (FR-11.14): posted lines of one ledger in posting order
         (posting sequence, line number). account_from/account_to compare account numbers as text
         (inclusive); date_from/date_to bound the posting date (inclusive); voucher and source_system
@@ -2481,12 +2674,14 @@ paths:
         - { name: date_to, in: query, required: false, schema: { type: string, format: date } }
         - { name: voucher, in: query, required: false, schema: { type: string, maxLength: 30 } }
         - { name: source_system, in: query, required: false, schema: { type: string, maxLength: 64 } }
+        - { name: source_type, in: query, required: false, description: Only the lines of entries with this source type, for example year_end_closing, schema: { type: string, maxLength: 64 } }
         - { name: documentId, in: query, required: false, description: Only the lines of the entry posted for this source document, schema: { type: string, format: uuid } }
         - { name: cursor, in: query, required: false, description: The nextCursor of the previous page, schema: { type: string, pattern: '^[0-9]{1,18}\.[0-9]{1,5}$' } }
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 1000, default: 100 } }
+        - $ref: "#/components/parameters/ExportFormat"
       responses:
         "200":
-          description: One page of lines
+          description: One page of lines (JSON), or the whole export (CSV)
           content:
             application/json:
               schema:
@@ -2497,6 +2692,11 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/LedgerLine" }
                   nextCursor: { type: string, description: Present only when more lines follow }
+            text/csv:
+              schema: { type: string }
+          headers:
+            X-Passage-Export-Truncated: { $ref: "#/components/headers/ExportTruncated" }
+            X-Passage-Export-Next-Cursor: { $ref: "#/components/headers/ExportNextCursor" }
         "400": { $ref: "#/components/responses/Problem400" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
@@ -2537,6 +2737,16 @@ paths:
           in: query
           required: false
           schema: { type: string }
+        - name: exclude_year_end_closing
+          in: query
+          required: false
+          description: >-
+            When true, leaves out the year-end closing entries that the close service posted (recorded from the
+            verified service token, not from the request body: an entry another caller tags year_end_closing stays in)
+            and the entries that reverse them, so a re-run of a year-end close nets to nothing. The response echoes
+            excludesYearEndClosing: true; an older ledger ignores the parameter and does not echo it. Cannot be combined
+            with dim.* filters or group_by (400). Entries posted before the ledger recorded the service stay in.
+          schema: { type: boolean }
         - name: group_by
           in: query
           required: false
@@ -2546,12 +2756,18 @@ paths:
             This is the account by dimension inquiry (FR-11.14). A grouping of more than 10,000 rows is refused
             with 422 LEDGER_BALANCE_TOO_MANY_ROWS; narrow it with an account, period or dimension filter.
           schema: { type: string, pattern: '^[A-Z][A-Z0-9_]{0,19}(,[A-Z][A-Z0-9_]{0,19}){0,4}$' }
+        - $ref: "#/components/parameters/ExportFormat"
       responses:
         "200":
-          description: Trial balance
+          description: >-
+            Trial balance (JSON), or with format=csv one row per account (and group) with account, name, a dim.{ATTRIBUTE}
+            column per group_by attribute, debit, credit, net, line_count and quantity_net_by_unit (UNIT=net joined by
+            semicolons), closed by a TOTAL row
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TrialBalance" }
+            text/csv:
+              schema: { type: string }
         "400": { $ref: "#/components/responses/Problem400" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
@@ -2701,6 +2917,8 @@ paths:
       responses:
         "200":
           description: Template
+          headers:
+            ETag: { $ref: "#/components/headers/ConfigETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/DescriptionTemplate" }
@@ -2720,6 +2938,7 @@ paths:
         legal entity may write only that entity's templates (403 AUTH-0003 otherwise). Posting applies
         the template when the request omits its description or a line omits its text.
       parameters:
+        - $ref: "#/components/parameters/ReplaceIfMatch"
         - name: id
           in: path
           required: true
@@ -2732,15 +2951,21 @@ paths:
       responses:
         "200":
           description: Template replaced
+          headers:
+            ETag: { $ref: "#/components/headers/ConfigETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/DescriptionTemplate" }
         "201":
           description: Template created
+          headers:
+            ETag: { $ref: "#/components/headers/ConfigETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/DescriptionTemplate" }
         "400": { $ref: "#/components/responses/Problem400" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "428": { $ref: "#/components/responses/Problem428" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "409": { $ref: "#/components/responses/Problem409" }
@@ -2756,9 +2981,11 @@ paths:
           in: query
           required: false
           schema: { type: string, enum: [active, paused] }
+        - $ref: "#/components/parameters/ListLimit"
+        - $ref: "#/components/parameters/ListCursor"
       responses:
         "200":
-          description: Recurring journals without their lines
+          description: One page of recurring journals without their lines; nextCursor is present when another page follows
           content:
             application/json:
               schema:
@@ -2767,6 +2994,7 @@ paths:
                   items:
                     type: array
                     items: { $ref: "#/components/schemas/RecurringJournal" }
+                  nextCursor: { type: string, description: Pass as cursor for the next page; absent on the last page }
         "400": { $ref: "#/components/responses/Problem400" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
@@ -3300,10 +3528,12 @@ paths:
       operationId: listClearings
       summary: List clearing documents of a ledger
       x-passage-duty: ledger.journal.read
-      description: Newest first, at most 200.
+      description: Newest first, one keyset page (limit, default 100, at most 200; cursor from nextCursor).
       parameters:
         - { name: ledger, in: query, required: true, schema: { type: string, format: uuid } }
         - { name: status, in: query, required: false, schema: { type: string, enum: [cleared, reset] } }
+        - $ref: "#/components/parameters/ListLimit"
+        - $ref: "#/components/parameters/ListCursor"
       responses:
         "200":
           description: The clearing documents
@@ -3314,6 +3544,7 @@ paths:
                 required: [items]
                 properties:
                   items: { type: array, items: { $ref: "#/components/schemas/ClearingDocument" } }
+                  nextCursor: { type: string, description: Pass as cursor for the next page; absent on the last page }
         "400": { $ref: "#/components/responses/Problem400" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }

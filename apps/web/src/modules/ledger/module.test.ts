@@ -34,6 +34,7 @@ describe("ledger module", () => {
       "/ledger/journal-names",
       "/ledger/journal-names/new",
       "/ledger/journal-names/:code",
+      "/ledger/ledger-settings",
       "/ledger/recurring-journals",
       "/ledger/recurring-journals/new",
       "/ledger/recurring-journals/:id",
@@ -69,6 +70,9 @@ describe("ledger module", () => {
       "/ledger/trial-balance",
       "/ledger/transactions",
       "/ledger/entries/:id",
+      "/ledger/accounts",
+      "/ledger/accounts/new",
+      "/ledger/accounts/:chart/:number",
       "/ledger/reason-codes",
       "/ledger/reason-codes/new",
       "/ledger/reason-codes/:code",
@@ -109,6 +113,8 @@ describe("ledger module", () => {
     for (const to of ["/ledger/lookup-tables", "/ledger/derivation-strategies", "/ledger/validation-rules", "/ledger/splitting-rules", "/ledger/realignments"]) {
       expect(ledger.nav.find((n) => n.to === to)?.duty).toBe("ledger.journal.read");
     }
+    // GET /api/v1/ledger/charts/{chart}/accounts requires ledger.journal.read (the writes ledger.account.write).
+    expect(ledger.nav.find((n) => n.to === "/ledger/accounts")?.duty).toBe("ledger.journal.read");
     // GET /api/v1/ledger/description-templates requires ledger.journal.read.
     expect(ledger.nav.find((n) => n.to === "/ledger/description-templates")?.duty).toBe("ledger.journal.read");
   });

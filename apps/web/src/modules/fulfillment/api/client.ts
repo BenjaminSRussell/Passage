@@ -31,6 +31,8 @@ export interface ShipmentLine {
   trackingRequired?: boolean;
   /** Released for less than the order line quantity because ATP was short; a later run releases the rest. */
   partial?: boolean;
+  /** Over-delivery tolerance in percent of the planned quantity in force when the pick was last confirmed (BR-28.7); absent or 0 when none. */
+  overTolerancePct?: string;
   /** Batch, serial and location entries captured at pick. */
   tracking?: TrackingEntry[];
 }
@@ -133,6 +135,19 @@ export interface ReleaseRule {
 }
 
 export type ReleaseRuleInput = Pick<ReleaseRule, "horizonDays" | "requireFullAtp" | "waveMaxLines" | "waveMaxOrders"> & { legalEntityId: string };
+
+/** The over-delivery tolerance of one scope (BR-28.7): the percentage of the planned quantity a pick may exceed. */
+export interface DeliveryTolerance {
+  id: string;
+  /** Null: every product. */
+  productId: string | null;
+  /** Null: every customer. */
+  customerId: string | null;
+  /** Decimal string, 0 to 100, at most 4 decimals. */
+  overdeliveryPct: string;
+  version: number;
+  updatedAt: string;
+}
 
 /** Packing slip posting defaults of a legal entity (section 5.28.13). */
 export interface LegalEntitySetting {
@@ -292,6 +307,22 @@ export interface ReturnableBalance {
   lastReturnedAt: string | null;
 }
 
+export type ReturnableMovementKind = "SHIPPED" | "SHIPMENT_CANCELLED" | "RETURNED" | "ADJUSTED";
+
+/** One change of a customer's returnable balance (FR-28.16); qty is signed. */
+export interface ReturnableMovement {
+  id: string;
+  customerId: string;
+  containerType: string;
+  kind: ReturnableMovementKind;
+  qty: string;
+  balanceAfter: string;
+  reference: string | null;
+  reason: string | null;
+  actor: string | null;
+  createdAt: string;
+}
+
 /** One short-picked shipment line of the short picks and backorders report (FR-28.2). */
 export interface BackorderRow {
   shipmentLineId: string;
@@ -392,7 +423,7 @@ export interface ReleaseInput {
 
 export interface ReleaseSkip {
   orderLineId: string;
-  reason: "held" | "beyond_horizon" | "atp_short" | "non_positive_qty" | "already_released" | "drop_ship" | "journal_order";
+  reason: "held" | "beyond_horizon" | "atp_short" | "non_positive_qty" | "already_released" | "drop_ship" | "journal_order" | "order_remainder_cancelled";
 }
 
 export interface ReleaseResult {
@@ -714,6 +745,20 @@ export function saveReleaseRule(warehouseId: string, version: number, input: Rel
   return send<ReleaseRule>(`/release-rules/${encodeURIComponent(warehouseId)}`, { method: "PUT", headers, body: JSON.stringify(input) });
 }
 
+export function listDeliveryTolerances(signal?: AbortSignal): Promise<DeliveryTolerance[]> {
+  return items<DeliveryTolerance>(`/delivery-tolerances${query({ limit: 500 })}`, signal);
+}
+
+/** Sets the tolerance of a product and customer scope; version is the one read (0 when the scope has none). */
+export function saveDeliveryTolerance(
+  input: { productId: string | null; customerId: string | null; overdeliveryPct: string },
+  version: number,
+  key: string,
+): Promise<DeliveryTolerance> {
+  const headers = { "Idempotency-Key": key, "If-Match": `"${version}"` };
+  return send<DeliveryTolerance>("/delivery-tolerances", { method: "PUT", headers, body: JSON.stringify(input) });
+}
+
 /** The ledger setup duty that changing cogs_at_shipment needs (the service enforces it). */
 export const DUTY_COGS_POLICY = "ledger.setup.write";
 
@@ -851,6 +896,19 @@ export function returnPackaging(input: { customerId: string; containerType: stri
   return command<ReturnableBalance>("/returnable-packaging:return", input, key);
 }
 
+/** The movements behind the returnable balances, newest first (FR-28.16). */
+export function listReturnableMovements(filter: { customerId?: string; containerType?: string; kind?: string; limit?: number } = {}, signal?: AbortSignal): Promise<ReturnableMovement[]> {
+  return items<ReturnableMovement>(`/returnable-packaging/movements${query(filter)}`, signal);
+}
+
+/** Corrects a returnable balance by a signed whole number of containers, with a reason (ReturnablePackagingMaintain). */
+export function adjustReturnable(
+  input: { customerId: string; containerType: string; delta: string; reason: string; reference?: string },
+  key: string,
+): Promise<ReturnableMovement> {
+  return command<ReturnableMovement>("/returnable-packaging:adjust", input, key);
+}
+
 /** Delivered-not-invoiced balance (GL 1405) of a legal entity as of a date, with its slips (FR-28.12). */
 export async function deliveredNotInvoiced(
   filter: { legalEntityId: string; customerId?: string; asOf?: string; limit?: number },
@@ -980,4 +1038,42 @@ export function closeDropShipRemainder(id: string, version: number, key: string)
 
 export function cancelDropShip(id: string, version: number, key: string): Promise<DropShip> {
   return command<DropShip>(`/drop-ships/${encodeURIComponent(id)}:cancel`, undefined, key, version);
+}
+
+export type ExceptionKind = "SLIP_POSTED_BEYOND_KEPT" | "PACKED_BEYOND_KEPT" | "DROPSHIP_CONFIRMED_BEYOND_KEPT";
+export type ExceptionStatus = "OPEN" | "RESOLVED";
+
+/** A case on the warehouse supervisor's list (sales cancelled the remainder of an order). */
+export interface WarehouseException {
+  id: string;
+  legalEntityId: string;
+  kind: ExceptionKind;
+  status: ExceptionStatus;
+  orderId: string;
+  orderLineId: string;
+  shipmentId: string | null;
+  packingSlipId: string | null;
+  /** The quantity beyond what the order line keeps. */
+  qty: string;
+  /** The quantity the order line keeps. */
+  keptQty: string;
+  detail: string;
+  version: number;
+  createdAt: string;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+  resolutionNote: string | null;
+}
+
+export function listExceptions(filter: { status?: ExceptionStatus | ""; limit?: number } = {}, signal?: AbortSignal): Promise<WarehouseException[]> {
+  return items<WarehouseException>(`/exceptions${query(filter)}`, signal);
+}
+
+export function getException(id: string, signal?: AbortSignal): Promise<WarehouseException> {
+  return send<WarehouseException>(`/exceptions/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Closes an exception with the supervisor's note (WarehouseRelease); version is the one read. */
+export function resolveException(id: string, version: number, note: string, key: string): Promise<WarehouseException> {
+  return command<WarehouseException>(`/exceptions/${encodeURIComponent(id)}:resolve`, { note }, key, version);
 }

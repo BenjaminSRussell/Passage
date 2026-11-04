@@ -269,7 +269,7 @@ func prepareActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ac
 	if err == nil {
 		if expired {
 			return out, &domain.CodedError{Code: domain.CodeLedgerReplayExpired, Detail: "the pending journal for version " + cur.Code + " is older than the ledger idempotency retention less " + strconv.Itoa(domain.LedgerReplaySafetyMarginDays) +
-				" days; the ledger may no longer recognise its idempotency key, so resending could post it twice. Check the ledger for the entry and resolve it by hand"}
+				" days; the ledger may no longer recognise its idempotency key, so resending could post it twice. Check the ledger for the entry and record the outcome with POST /v1/product-costing/versions/" + cur.ID + "/activation-attempt/resolve"}
 		}
 		out.post = true
 		if err := json.Unmarshal(raw, &out.pending); err != nil {

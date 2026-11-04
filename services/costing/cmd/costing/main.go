@@ -11,6 +11,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/costing/internal/api"
 	"github.com/BenjaminSRussell/passage/services/costing/internal/store"
 	"github.com/BenjaminSRussell/passage/services/costing/migrations"
@@ -56,6 +57,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 		}
 	}
 	a := api.New(store.New(pool))
+	ledger, err := ledgerclient.FromEnv(getenv, "costing")
+	if err != nil {
+		return fmt.Errorf("ledger client: %w", err)
+	}
+	if ledger != nil {
+		a.WithLedger(ledger)
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

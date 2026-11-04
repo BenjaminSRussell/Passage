@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Skeleton } from "../../shell/ui";
+import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select, Skeleton } from "../../shell/ui";
 import { fetchJournalName, JOURNAL_NAME_CODE, LedgerApiError, putJournalName, type JournalName, type JournalNameInput } from "./api/client";
 import styles from "./pages.module.css";
 
@@ -16,6 +16,8 @@ export interface JournalNameDraft {
   reversalReasonRequired: boolean;
   allowReconAccounts: boolean;
   linesLimit: string;
+  postingRestriction: JournalName["postingRestriction"];
+  descriptionLanguage: JournalName["descriptionLanguage"];
   active: boolean;
 }
 
@@ -29,6 +31,8 @@ export const emptyJournalName: JournalNameDraft = {
   reversalReasonRequired: false,
   allowReconAccounts: false,
   linesLimit: "5000",
+  postingRestriction: "none",
+  descriptionLanguage: "legal_entity",
   active: true,
 };
 
@@ -51,6 +55,8 @@ export function toJournalNameInput(v: JournalNameDraft): JournalNameInput {
     reversalReasonRequired: v.reversalReasonRequired,
     allowReconAccounts: v.allowReconAccounts,
     linesLimit: Number(v.linesLimit),
+    postingRestriction: v.postingRestriction,
+    descriptionLanguage: v.descriptionLanguage,
     active: v.active,
   };
 }
@@ -65,7 +71,7 @@ const flags: { key: Flag; label: string; note: string }[] = [
   { key: "active", label: "Active", note: "Inactive names keep their batches but can't be used for new or submitted batches." },
 ];
 
-function JournalNameForm({ initial, existing }: { initial: JournalNameDraft; existing: boolean }) {
+function JournalNameForm({ initial, existing, lockVersion }: { initial: JournalNameDraft; existing: boolean; lockVersion?: number }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [values, setValues] = useState<JournalNameDraft>(initial);
@@ -83,7 +89,7 @@ function JournalNameForm({ initial, existing }: { initial: JournalNameDraft; exi
     if (Object.keys(found).length > 0) return;
     setBusy(true);
     try {
-      await putJournalName(values.code, toJournalNameInput(values));
+      await putJournalName(values.code, toJournalNameInput(values), lockVersion);
       await queryClient.invalidateQueries({ queryKey: ["ledger", "journal-names"] });
       navigate("/ledger/journal-names");
     } catch (error) {
@@ -106,6 +112,22 @@ function JournalNameForm({ initial, existing }: { initial: JournalNameDraft; exi
         </FormField>
         <FormField id="jn-lines" label="Lines limit" hint="Most lines one batch may have." error={errors.linesLimit}>
           {(c) => <Input {...c} inputMode="numeric" value={values.linesLimit} onChange={(e) => update({ linesLimit: e.target.value })} invalid={Boolean(errors.linesLimit)} />}
+        </FormField>
+        <FormField id="jn-posting" label="Who may post" hint="With own journals only, a batch can be posted only by the user who created it.">
+          {(c) => (
+            <Select {...c} value={values.postingRestriction} onChange={(e) => update({ postingRestriction: e.target.value as JournalNameDraft["postingRestriction"] })}>
+              <option value="none">Anyone who may post journals</option>
+              <option value="own_journals_only">Own journals only</option>
+            </Select>
+          )}
+        </FormField>
+        <FormField id="jn-language" label="Description language" hint="Default descriptions are looked up in the language of the poster, or in the legal entity's language.">
+          {(c) => (
+            <Select {...c} value={values.descriptionLanguage} onChange={(e) => update({ descriptionLanguage: e.target.value as JournalNameDraft["descriptionLanguage"] })}>
+              <option value="legal_entity">Legal entity language</option>
+              <option value="user">Language of the user who posts</option>
+            </Select>
+          )}
         </FormField>
         {flags.map((f) => (
           <div key={f.key} className={styles.formActions}>
@@ -161,6 +183,8 @@ function toDraft(n: JournalName): JournalNameDraft {
     reversalReasonRequired: n.reversalReasonRequired,
     allowReconAccounts: n.allowReconAccounts,
     linesLimit: String(n.linesLimit),
+    postingRestriction: n.postingRestriction,
+    descriptionLanguage: n.descriptionLanguage,
     active: n.active,
   };
 }
@@ -186,7 +210,7 @@ export function EditJournalNamePage() {
           </div>
         </Card>
       ) : (
-        <JournalNameForm initial={toDraft(result.data)} existing />
+        <JournalNameForm initial={toDraft(result.data)} existing lockVersion={result.data.lockVersion} />
       )}
     </div>
   );

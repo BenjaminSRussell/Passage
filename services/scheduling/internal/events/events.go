@@ -27,11 +27,17 @@ var (
 	NetworkUpdated       = events.Type(Context, "network", "updated", 1)
 
 	OrderImportRecorded = events.Type(Context, "orderimport", "recorded", 1)
+
+	OperationUpdated = events.Type(Context, "operation", "updated", 1)
+	OperationDeleted = events.Type(Context, "operation", "deleted", 1)
+	OrderUnscheduled = events.Type(Context, "order", "unscheduled", 1)
+
+	ParametersUpdated = events.Type(Context, "parameters", "updated", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CampaignCompleted, CampaignCancelled, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated, CapacityBlockUpdated, NetworkUpdated, OrderImportRecorded}
+	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CampaignCompleted, CampaignCancelled, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated, CapacityBlockUpdated, NetworkUpdated, OrderImportRecorded, OperationUpdated, OperationDeleted, OrderUnscheduled, ParametersUpdated}
 }
 
 type RunCompletedData struct {
@@ -41,6 +47,8 @@ type RunCompletedData struct {
 	MakespanMinutes      int     `json:"makespanMinutes"`
 	TotalLatenessMinutes int     `json:"totalLatenessMinutes"`
 	SolverStatus         *string `json:"solverStatus"`
+	// RolledBackToRunID is the run a rollback restored (scope rollback only).
+	RolledBackToRunID string `json:"rolledBackToRunId,omitempty"`
 }
 
 // JobScheduledData is one placed operation. ChangeoverMinutes is the
@@ -224,4 +232,60 @@ type OrderImportRecordedData struct {
 	// WithdrawnTo is the status production moved the order to when status is
 	// withdrawn (reason withdraw); empty otherwise.
 	WithdrawnTo string `json:"withdrawnTo,omitempty"`
+}
+
+// OperationUpdatedData announces a changed operation. JobsRemoved is true when
+// the change took the operation's non-firmed jobs off the schedule: the
+// operation is open again and the next run places it (consumers holding its
+// dates from job.scheduled drop them).
+type OperationUpdatedData struct {
+	OperationID string   `json:"operationId"`
+	OrderID     string   `json:"orderId"`
+	OperNumber  int      `json:"operNumber"`
+	Minutes     int      `json:"minutes"`
+	DueAt       *string  `json:"dueAt"`
+	ReadyAt     *string  `json:"readyAt"`
+	Priority    int      `json:"priority"`
+	ResourceIDs []string `json:"resourceIds"`
+	Version     int      `json:"version"`
+	JobsRemoved bool     `json:"jobsRemoved"`
+	// QueueBeforeMinutes and QueueAfterMinutes are the elapsed waits around
+	// the operation (FR-23.3).
+	QueueBeforeMinutes int `json:"queueBeforeMinutes"`
+	QueueAfterMinutes  int `json:"queueAfterMinutes"`
+	// Quantity and OverlapQuantity are the decimal strings of the overlap rule
+	// (BR-23.5): the next operation may start once OverlapQuantity of Quantity
+	// is through; null when the operation has none.
+	Quantity        *string `json:"quantity"`
+	OverlapQuantity *string `json:"overlapQuantity"`
+}
+
+// OperationDeletedData announces a removed operation and whether its jobs left
+// the schedule with it.
+type OperationDeletedData struct {
+	OperationID string `json:"operationId"`
+	OrderID     string `json:"orderId"`
+	OperNumber  int    `json:"operNumber"`
+	JobsRemoved bool   `json:"jobsRemoved"`
+}
+
+// OrderUnscheduledData announces an order taken off the schedule: the listed
+// operations lost their non-firmed jobs and are open again; KeptFirmed are the
+// operation numbers a firmed job holds, which stay where they are.
+type OrderUnscheduledData struct {
+	OrderID    string `json:"orderId"`
+	Operations []int  `json:"operations"`
+	KeptFirmed []int  `json:"keptFirmed"`
+}
+
+// ParametersUpdatedData announces changed scheduling parameters: runs and
+// moves after the event take the new defaults and propagation limits.
+type ParametersUpdatedData struct {
+	DefaultMode       string `json:"defaultMode"`
+	DefaultDirection  string `json:"defaultDirection"`
+	DefaultFinite     bool   `json:"defaultFinite"`
+	DragSnapMinutes   int    `json:"dragSnapMinutes"`
+	PropagationOrders int    `json:"propagationOrders"`
+	PropagationLevels int    `json:"propagationLevels"`
+	Version           int    `json:"version"`
 }

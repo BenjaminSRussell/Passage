@@ -48,6 +48,14 @@ func (f *fakeStore) OpenAndon(context.Context, string) ([]store.Andon, error) {
 	return []store.Andon{}, nil
 }
 
+func (f *fakeStore) SweepAndon(context.Context, time.Time) (store.AndonSweepResult, error) {
+	return store.AndonSweepResult{}, nil
+}
+
+func (f *fakeStore) ClearAndon(_ context.Context, id, _, _ string, _ time.Time, _ store.Idem) (store.Andon, error) {
+	return store.Andon{ID: id}, nil
+}
+
 func (f *fakeStore) LoadOEEStreams(context.Context, []string, time.Time, time.Time) (map[string]domain.OEEStream, error) {
 	return nil, nil
 }

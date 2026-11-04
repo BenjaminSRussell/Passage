@@ -9,7 +9,7 @@ describe("pricing module", () => {
     expect(pricing.nav.every((n) => n.to.startsWith("/pricing"))).toBe(true);
   });
 
-  it("has a list, a create form and a detail page for trade agreements, campaigns, free goods rules, commodity cost basis types and price calculations, procedures, price journals, rebates and vendor rebate claims, broker contracts and royalty agreements with their claims, sales groups, trade funds and promotions, plus the commission inquiry and settlement export, the journal CSV import, the workspace and simulation", () => {
+  it("has a list, a create form and a detail page for trade agreements, campaigns, free goods rules, commodity cost basis types and price calculations, procedures and their determination per sales channel, price journals, rebates and vendor rebate claims, broker contracts and royalty agreements with their claims, sales groups, trade funds and promotions, plus the commission inquiry and settlement export, the journal CSV import, the workspace and simulation", () => {
     expect(pricing.routes.map((r) => r.path)).toEqual([
       "/pricing",
       "/pricing/agreements",
@@ -30,6 +30,7 @@ describe("pricing module", () => {
       "/pricing/procedures",
       "/pricing/procedures/new",
       "/pricing/procedures/:id",
+      "/pricing/procedure-determination",
       "/pricing/journals",
       "/pricing/journals/new",
       "/pricing/journals/import",
@@ -59,7 +60,10 @@ describe("pricing module", () => {
       "/pricing/promotions/new",
       "/pricing/promotions/:id",
       "/pricing/parameters",
+      "/pricing/tenant-parameters",
       "/pricing/simulate",
+      "/pricing/compare",
+      "/pricing/price-list",
     ]);
   });
 
@@ -72,8 +76,10 @@ describe("pricing module", () => {
       "/pricing/commodity/calculations": "pricing.view",
       "/pricing/free-goods": "pricing.view",
       "/pricing/procedures": "pricing.view",
+      "/pricing/procedure-determination": "pricing.view",
       "/pricing/journals": "pricing.view",
       "/pricing/parameters": "pricing.view",
+      "/pricing/tenant-parameters": "pricing.view",
       "/pricing/rebates": "pricing.rebate.view",
       "/pricing/rebates/claims": "pricing.rebate.view",
       "/pricing/brokers": "pricing.rebate.view",
@@ -85,6 +91,8 @@ describe("pricing module", () => {
       "/pricing/funds": "pricing.view",
       "/pricing/promotions": "pricing.view",
       "/pricing/simulate": "pricing.view",
+      "/pricing/compare": "pricing.view",
+      "/pricing/price-list": "pricing.view",
     });
   });
 

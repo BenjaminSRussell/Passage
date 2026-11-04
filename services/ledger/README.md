@@ -18,7 +18,10 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 - Posting: `POST /v1/ledger/journal-entries` posts a balanced entry atomically
   or rejects it entirely with every violation in one 422 response. Idempotency
   keys replay identical requests (200, `idempotency.replayed = true`) and reject
-  reused keys with different payloads (409 `LEDGER_IDEMPOTENCY_CONFLICT`).
+  reused keys with different payloads (409 `LEDGER_IDEMPOTENCY_CONFLICT`). The
+  entry keeps its key for good (unique per legal entity), so a verbatim resend
+  after the key record expired (`LEDGER_IDEMPOTENCY_TTL_DAYS`, default 400) returns the original entry as a replay
+  rather than booking a second one, and a changed body is the same 409.
 - Validation dry run: `POST /v1/ledger/validate` returns the same violations
   and the resolved dimension combinations without writing.
 - Reversal: `POST /v1/ledger/journal-entries/{id}/reverse` writes an exact
@@ -39,7 +42,9 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   `POST /v1/ledger/balances:rebuild` runs once for it. That first rebuild
   reports `quantityBackfill: true` and does not count the backfilled quantity
   rows in `rowsDiffering`, so it raises no drift alert; later rebuilds count
-  quantity drift as usual.
+  quantity drift as usual. A dimension realignment run on a flagged ledger reads
+  the quantities to move from the journal instead of the projection, so it still
+  empties the old combinations.
 - Ledger transactions (FR-11.14): `GET /v1/ledger/journal-lines?ledger=` lists
   posted lines in posting order (posting sequence, line number) with the entry's
   voucher, date, description, source and trace id. Filters: `account_from`/`account_to`
@@ -47,6 +52,12 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   `source_system` and `dim.{ATTRIBUTE}=value` (all pairs must match). Keyset pages of
   up to 1,000 lines (default 100): pass `nextCursor` back as `cursor`. Migration 0010
   indexes the date and account access paths.
+- CSV exports (slice 23): `format=csv` on `GET /charts/{chart}/accounts`, `GET /balances`
+  and `GET /journal-lines` returns one streamed UTF-8 CSV file (byte order mark) of the whole
+  result under the same duty, filters and legal-entity scope, up to 50,000 rows
+  (`X-Passage-Export-Truncated`, `X-Passage-Export-Next-Cursor` when cut). Cells starting with
+  `=`, `+`, `-`, `@`, tab or carriage return get an apostrophe unless they are plain numbers.
+  `GET /charts/{chart}/accounts/{number}` reads one account with its `ETag`.
 - Events through the outbox (same transaction): `dev.passage.ledger.journal.posted.v1`,
   `dev.passage.ledger.journal.reversed.v1`, `dev.passage.ledger.balance.rebuilt.v1`.
 - Database guarantees (FR-11.6, BR-11.1): every table has `tenant_id` with ENABLE and
@@ -66,6 +77,14 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   deleted, because reversing entries reference them.
 - Ledger parameters `reversalReasonRequired` (default true) and
   `negativePostingEnabled` (default false), set when the ledger is created.
+  `allowReinstate` (default true, migration 0030) is set at creation or by
+  `PATCH /v1/ledger/ledgers/{id}` (with `If-Match`): when false, reversing a
+  reversing entry is refused with 422 `LEDGER_REINSTATEMENT_NOT_ALLOWED`.
+- Journal names also carry `postingRestriction` (`none` or `own_journals_only`:
+  403 `LEDGER_POSTING_RESTRICTED` when another user posts the batch) and
+  `descriptionLanguage` (`legal_entity` or `user`: with `user` the batch post
+  reads `Accept-Language` for the default description template, falling back to
+  the base language and then `en`).
 - Reversal reasons: the reverse request takes `reasonCode` and `reasonComment`
   (at most 255 characters). The code must exist, be active and apply to `ledger`;
   a comment is needed when the code requires one; a code that forbids an
@@ -220,7 +239,7 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 |---|---|
 | `ledger.ledger.write` | `POST /ledgers` |
 | `ledger.account.write` | `PUT /charts/{chart}/accounts/{number}`, `PUT /ledgers/{ledger}/open-item-accounts/{account}` |
-| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts` (also `ledger.account.lookup`, the service duty close signs to read the chart), `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]`, `GET /journal-names[/{code}]`, `GET /journal-batches[/{id}]`, `GET /journal-lines`, `GET /recurring-journals[/{id}[/runs]]`, `GET /ledgers/{ledger}/open-item-accounts`, `GET /ledgers/{ledger}/open-item-activations`, `GET /ledgers/{ledger}/tolerance-groups[/{code}]`, `GET /open-items`, `GET /clearings[/{id}]`, `GET /ledgers/{ledger}/auto-clearing-rules[/{id}]`, `GET /auto-clearing-runs[/{id}]` |
+| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts[/{number}]` (also `ledger.account.lookup`, the service duty close signs to read the chart), `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]`, `GET /journal-names[/{code}]`, `GET /journal-batches[/{id}]`, `GET /journal-lines`, `GET /recurring-journals[/{id}[/runs]]`, `GET /ledgers/{ledger}/open-item-accounts`, `GET /ledgers/{ledger}/open-item-activations`, `GET /ledgers/{ledger}/tolerance-groups[/{code}]`, `GET /open-items`, `GET /clearings[/{id}]`, `GET /ledgers/{ledger}/auto-clearing-rules[/{id}]`, `GET /auto-clearing-runs[/{id}]` |
 | `ledger.journal.post` | Umbrella: `POST /journal-entries`, `POST /validate`, `POST /journal-batches/{id}/post`, `POST /ledger-sets/{setId}/journal-entries` (PRD "Post ledger journals"). Each route also accepts its own narrow duty: `ledger.entry.post` (service only), `ledger.entry.validate`, `ledger.batch.post`, `ledger.set.post` |
 | `ledger.entry.lookup`, `ledger.ledger.lookup` | Service-only narrow reads, accepted beside `ledger.journal.read` on `GET /journal-lines` (which filters by `documentId`, the posting document's UUID) and `GET /ledgers/{id}` |
 | `ledger.journal.postledger` | Flag duty checked with `ledger.journal.post` on `POST /journal-entries` and `POST /journal-batches/{id}/post` when the entry's ledger is a non-leading member of a ledger set (FB50L, PRD "Post to ledger-specific ledger"); without it the post is refused 403 `AUTH-0003` |
@@ -257,6 +276,9 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
   (runs skipped by a resume stay skipped); a changed schedule recomputes it from the last run.
 - The web batch screen has "Save as recurring journal", which opens the new recurring journal form
   filled from the batch (fixed amounts, its ledger, journal name, description and posting date).
+- A template line may carry a fixed statistical `quantity` and `unit` (BR-11.2, migration 0029),
+  set together like on batch lines; generation copies them unscaled onto the draft batch line, so a
+  zero-amount template line is a recurring statistical posting (for example a monthly headcount).
 
 ## Open items and manual clearing (slice 8, FR-11.19, BR-11.12, BR-11.13, BR-11.18)
 
@@ -296,7 +318,7 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
   code (`LEDGER_REASON_REQUIRED` otherwise): items become `reset_open`, the
   difference entry is reversed with the given reason code (the ledger's reversal rules apply) and its
   two items are voided, an open residual item is voided (`LEDGER_CLEARING_RESIDUAL_USED` if it was
-  cleared since). `GET /clearings[/{id}]` reads documents (the list returns the newest 200).
+  cleared since). `GET /clearings[/{id}]` reads documents (the list pages by keyset cursor, newest first).
 - `POST /journal-entries/{id}/reverse` refuses an entry with an item in an active clearing, including a
   clearing's own difference entry (409 `LEDGER_OPEN_ITEM_ALREADY_CLEARED`): reset the clearing first.
 - `PUT/GET /ledgers/{ledger}/tolerance-groups[/{code}]` maintain the groups (`ETag`, optional `If-Match`).
@@ -383,6 +405,8 @@ today:
 | `LEDGER_DATE_INVALID` | Posting date more than `futurePostingDays` ahead (BR-11.4), a reversal dated before the original (FR-11.8), or a reversal on another date with a reason code that forbids it (FR-11.15) |
 | `LEDGER_PERIOD_CLOSED` | Posting date before the ledger's `firstOpenDate` (BR-11.4; full period status is wave 14) |
 | `LEDGER_REVERSAL_ALREADY_REVERSED` | Entry already has a reversing entry (FR-11.8) |
+| `LEDGER_REINSTATEMENT_NOT_ALLOWED` | 422: reversing a reversing entry on a ledger with `allowReinstate` false (FR-11.8) |
+| `LEDGER_POSTING_RESTRICTED` | 403: a user other than the creator posts a batch of a journal name with `postingRestriction` `own_journals_only` (FR-11.9) |
 | `LEDGER_REASON_REQUIRED` | Reversal without a reason code on a ledger that requires one, an unknown or inactive code, or a missing comment the code requires (FR-11.15) |
 | `LEDGER_REASON_INVALID_MODULE` | Reason code does not apply to `ledger` (FR-11.15) |
 | `LEDGER_NEGATIVE_POSTING_DISABLED` | Reason code allows negative posting but the ledger does not (BR-11.16) |
@@ -404,6 +428,7 @@ today:
 | `LEDGER_BATCH_APPROVAL_REQUIRED` | 409: posting a validated batch whose journal name now requires approval; submit it for approval |
 | `LEDGER_SELF_APPROVAL` | 403: the submitter approves a batch of a journal name that does not allow self-approval |
 | `LEDGER_VERSION_CONFLICT` | 412: `If-Match` names an older batch version |
+| `LEDGER_PRECONDITION_REQUIRED` | 428: a PUT changes an existing account, account structure version, dimension value, description template or journal name without `If-Match` (send the row's `lockVersion` as the entity tag); repeating the stored content needs none |
 | `LEDGER_OI_ACCOUNT_INVALID` | 422: account cannot be open-item managed (BR-11.18) |
 | `LEDGER_OI_ACTIVATION_BALANCE` | 422: account has a balance; an activation run is needed (FR-11.19, LEDGER-0023) |
 | `LEDGER_OI_OPEN_ITEMS_EXIST` | 409: switching off an account that still has open items |
@@ -433,3 +458,19 @@ are not raised yet and are tracked in NOT-IMPLEMENTED.md.
 
 Only the platform module and its existing dependencies (chi, pgx/v5,
 shopspring/decimal, google/uuid) are used.
+
+## Concurrency and paging (slice 22)
+
+- Accounts, account structure versions, dimension values, description templates and journal names carry
+  `lockVersion` (migration 0031), returned in the body and as `ETag`. Changing an existing row with `PUT`
+  needs `If-Match: "<lockVersion>"` (428 `LEDGER_PRECONDITION_REQUIRED` without, 412 `LEDGER_VERSION_CONFLICT`
+  when stale or sent for a row that does not exist); creating needs none, and a `PUT` that repeats the stored
+  content is an idempotent 200 without a tag (a retried create, a re-run seed or migration load). The tag
+  increases only when the content changes. Two concurrent creates of one row: one wins, the other gets 428.
+- Keyset cursors are base64url JSON arrays of the sort keys (no secret: a cursor only positions a read the
+  caller may make anyway); each key is type-checked and normalized before it reaches SQL, and an altered
+  cursor is 400. Orders are total: batches and clearings by `created_at` then `id` (both descending),
+  recurring journals by next run date (none last), name, then `id`.
+- `GET /journal-batches`, `/recurring-journals` and `/clearings` page by keyset: `limit` (1 to 200, default 100)
+  and the opaque `cursor` from `nextCursor`, which is absent on the last page.
+- `dev.passage.ledger.journal.posted.v1` carries `legalEntityId` (also the CloudEvent `legalentityid` extension).

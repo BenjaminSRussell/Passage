@@ -637,6 +637,48 @@ paths:
         "422": { $ref: "#/components/responses/Problem", description: "CST-0709 the version is not Open or the site is outside its scope, CST-0702 a purchased component has no price or an operation no rate, CST-0739 an engineering BOM or route the roll cannot cost (alternative groups, constant scrap, malformed numbers, non-UUID components, too many items); the Idempotency-Key was used with a different request" }
         "502": { $ref: "#/components/responses/Problem", description: "CST-0737 engineering could not be read" }
         "503": { $ref: "#/components/responses/Problem", description: "CST-0737 no engineering service configured, or the store is unavailable" }
+  /v1/product-costing/activation-attempts:
+    get:
+      operationId: listActivationAttempts
+      summary: The pending activation attempts (journals sent, or about to be, to the ledger and not yet recorded), oldest first, with needsOperator set on those past the ledger replay window (the ledger Idempotency-Key retention the attempt was created under, at most PRODUCTCOST_LEDGER_IDEMPOTENCY_TTL_DAYS, less 30 days). Such an attempt is never resent or cleared automatically (CST-0730)
+      x-passage-duty: productcost.activation-attempt.resolve
+      responses:
+        "200":
+          description: The attempts in the caller's legal-entity scope (at most 500)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActivationAttemptList" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/product-costing/versions/{id}/activation-attempt/resolve:
+    post:
+      operationId: resolveActivationAttempt
+      summary: Record an operator's decision on an activation attempt past the ledger replay window (CST-0730). The operator has checked the ledger. posted (with the ledger entry id) records the activation around that entry without posting again; not-posted discards the attempt so the version can be activated afresh. Raises dev.passage.costing.activationattempt.resolved.v1
+      x-passage-duty: productcost.activation-attempt.resolve
+      parameters:
+        - $ref: "#/components/parameters/VersionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResolveActivationAttemptRequest" }
+      responses:
+        "200":
+          description: The decision; with the version, and for posted the recorded activation
+          headers:
+            Idempotent-Replayed: { $ref: "#/components/headers/IdempotentReplayed" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResolveActivationAttemptResult" }
+        "400": { $ref: "#/components/responses/Problem", description: Validation failure, including a missing Idempotency-Key, an outcome other than posted or not-posted, a posted decision without a journalEntryId and a missing reason }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem", description: "CST-0717 version not found, CST-0742 the version has no pending attempt" }
+        "409": { $ref: "#/components/responses/Problem", description: "CST-0714 the version changed since it was read, CST-0743 the attempt is inside the ledger replay window; retry the activation instead" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-0738 the roller of the calculations cannot confirm their activation as posted, or the Idempotency-Key was already used with a different request" }
+        "503": { $ref: "#/components/responses/Problem" }
   /v1/product-costing/posting-accounts/{legalEntityId}:
     get:
       operationId: getPostingAccounts
@@ -732,7 +774,7 @@ components:
         postingDate: { type: string, format: date, description: Defaults to today (UTC); before today the on-hand is read as of that date }
         currency: { type: string, pattern: "^[A-Z]{3}$", description: Required unless a reversal }
         newStandardForOpenOrders: { type: boolean }
-        lines: { description: Refused (400): the positions are the version's stored calculations and cannot be listed in the request }
+        lines: { description: "Refused (400): the positions are the version's stored calculations and cannot be listed in the request" }
     StoredActivationDryRun:
       type: object
       required: [dryRun, version, preview]
@@ -740,6 +782,44 @@ components:
         dryRun: { type: boolean, enum: [true] }
         version: { $ref: "#/components/schemas/StoredCostingVersion" }
         preview: { $ref: "#/components/schemas/ActivationPreview" }
+    ActivationAttemptList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [costingVersionId, legalEntityId, activationId, total, currency, ambiguous, needsOperator, createdAt]
+            properties:
+              costingVersionId: { type: string, format: uuid }
+              legalEntityId: { type: string, format: uuid }
+              activationId: { type: string, format: uuid }
+              reversesActivationId: { type: string, format: uuid }
+              total: { type: string }
+              currency: { type: string }
+              ambiguous: { type: boolean, description: A send may have reached the ledger }
+              needsOperator: { type: boolean, description: Past the ledger replay window; neither resent nor cleared automatically }
+              createdAt: { type: string, format: date-time }
+    ResolveActivationAttemptRequest:
+      type: object
+      additionalProperties: false
+      required: [version, outcome, reason]
+      properties:
+        version: { type: integer, minimum: 1, description: The version counter as read }
+        reversesActivationId: { type: string, format: uuid, description: Set to resolve the attempt of a reversal instead of the activation }
+        outcome: { type: string, enum: [posted, not-posted] }
+        journalEntryId: { type: string, format: uuid, description: The ledger entry the operator found; required for posted, empty for not-posted }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+    ResolveActivationAttemptResult:
+      type: object
+      required: [outcome, version]
+      properties:
+        outcome: { type: string, enum: [posted, not-posted] }
+        version: { $ref: "#/components/schemas/StoredCostingVersion" }
+        activation:
+          type: object
+          description: The recorded activation (posted only), same shape as the activation in StoredActivationResult
     StoredActivationResult:
       type: object
       required: [version, activation]

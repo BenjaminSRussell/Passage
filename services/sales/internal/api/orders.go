@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -188,6 +189,38 @@ func buildLine(i int, l orderLineRequest, f map[string]string, path func(string)
 		DeliveryDateControl: l.DeliveryDateControl}, true
 }
 
+// submitOrder validates and stores one intake order for the caller. Every
+// refusal is returned as an error (a *httpx.Problem for the 4xx ones) and the
+// channel refusals are logged by the caller. It is shared by POST /orders and
+// by the replay of a refused intake order.
+func (a *API) submitOrder(ctx context.Context, p tenant.Principal, req createOrderRequest, key string) (store.Order, bool, error) {
+	in, fields := buildOrder(req)
+	if key == "" {
+		fields[idempotencyKey] = "is required"
+	}
+	if len(fields) > 0 {
+		pb := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)
+		pb.Errors = fields
+		return store.Order{}, false, pb
+	}
+	if !tenant.InLegalEntityScope(p, in.LegalEntityID) {
+		return store.Order{}, false, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the order's legal entity is outside the caller's scope")
+	}
+	if err := a.checkConfigurations(ctx, in.LegalEntityID, in.Lines); err != nil {
+		return store.Order{}, false, err
+	}
+	hash, err := domain.RequestHash(req)
+	if err != nil {
+		return store.Order{}, false, err
+	}
+	in.RequestHash = hash
+	in.IdempotencyKey = &key
+	in.Actor = p.UserID
+	in.CanOverrideListing = p.HasDuty(dutyOrderApprove)
+	in.OrderDate = a.now()
+	return a.store.CreateOrder(ctx, in)
+}
+
 // createOrder stores an intake order. A repeat of Idempotency-Key or of
 // (channel, externalRef) with the same body returns 200 and the original order.
 func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
@@ -201,39 +234,9 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	in, fields := buildOrder(req)
-	if key == "" {
-		fields[idempotencyKey] = "is required"
-	}
-	if len(fields) > 0 {
-		pb := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)
-		pb.Errors = fields
-		a.logIntakeFailure(r, req, pb)
-		validationFailed(w, r, fields)
-		return
-	}
-	if !tenant.InLegalEntityScope(p, in.LegalEntityID) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the order's legal entity is outside the caller's scope"))
-		return
-	}
-	if err := a.checkConfigurations(r.Context(), in.LegalEntityID, in.Lines); err != nil {
-		a.logIntakeFailure(r, req, err)
-		a.fail(w, r, "check configurations", err)
-		return
-	}
-	hash, err := domain.RequestHash(req)
+	order, created, err := a.submitOrder(r.Context(), p, req, key)
 	if err != nil {
-		a.fail(w, r, "hash request", err)
-		return
-	}
-	in.RequestHash = hash
-	in.IdempotencyKey = &key
-	in.Actor = p.UserID
-	in.CanOverrideListing = p.HasDuty(dutyOrderApprove)
-	in.OrderDate = a.now()
-	order, created, err := a.store.CreateOrder(r.Context(), in)
-	if err != nil {
-		a.logIntakeFailure(r, req, err)
+		a.logIntakeFailure(r.Context(), req, key, err)
 		a.fail(w, r, "create order", err)
 		return
 	}

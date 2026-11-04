@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
@@ -42,6 +43,8 @@ func (a *API) routesPacking(r chi.Router) {
 	r.With(authz.RequireDuty("PackagingFeeMaintain")).Get("/v1/fulfillment/packaging-report", a.packagingReport)
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/returnable-packaging", a.listReturnableBalances)
 	r.With(authz.RequireDuty("WarehouseReceive")).Post("/v1/fulfillment/returnable-packaging:return", a.returnPackaging)
+	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/returnable-packaging/movements", a.listReturnableMovements)
+	r.With(authz.RequireDuty("ReturnablePackagingMaintain")).Post("/v1/fulfillment/returnable-packaging:adjust", a.adjustReturnable)
 }
 
 // ---- DTOs -------------------------------------------------------------------
@@ -91,6 +94,14 @@ type returnRequest struct {
 	CustomerID    string `json:"customerId"`
 	ContainerType string `json:"containerType"`
 	Qty           string `json:"qty"`
+}
+
+type adjustRequest struct {
+	CustomerID    string `json:"customerId"`
+	ContainerType string `json:"containerType"`
+	Delta         string `json:"delta"`
+	Reason        string `json:"reason"`
+	Reference     string `json:"reference"`
 }
 
 // ---- handlers ---------------------------------------------------------------
@@ -405,6 +416,84 @@ func (a *API) returnPackaging(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, bal)
+}
+
+// signedWholeRE is a non-zero whole number with an optional minus sign.
+var signedWholeRE = regexp.MustCompile(`^-?[1-9][0-9]{0,8}$`)
+
+// movementKinds are the kinds a movement list can be filtered by.
+var movementKinds = map[string]bool{store.MovementShipped: true, store.MovementShipmentCancelled: true, store.MovementReturned: true, store.MovementAdjusted: true}
+
+// listReturnableMovements answers GET /v1/fulfillment/returnable-packaging/movements:
+// the history behind the balances, newest first.
+func (a *API) listReturnableMovements(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := store.MovementFilter{CustomerID: q.Get("customerId"), ContainerType: q.Get("containerType"), Kind: q.Get("kind")}
+	if f.CustomerID != "" && !ids.Valid(f.CustomerID) {
+		fail(w, r, "customerId", "must be a UUID")
+		return
+	}
+	if f.ContainerType != "" && !typeCodeRE.MatchString(f.ContainerType) {
+		fail(w, r, "containerType", "must be the code of a container type")
+		return
+	}
+	if f.Kind != "" && !movementKinds[f.Kind] {
+		fail(w, r, "kind", "must be SHIPPED, SHIPMENT_CANCELLED, RETURNED or ADJUSTED")
+		return
+	}
+	limit, ok := limitParam(w, r)
+	if !ok {
+		return
+	}
+	f.Limit = limit
+	items, err := a.store.ListReturnableMovements(r.Context(), f)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, listResponse[store.ReturnableMovement]{Items: items})
+}
+
+// adjustReturnable answers POST /v1/fulfillment/returnable-packaging:adjust, a manual
+// correction of a balance (ReturnablePackagingMaintain). Section 5.28.17 lists
+// WarehouseReceive as its segregation-of-duties conflict, not as a second duty the
+// caller needs: the conflict is a role-level rule of the compliance service.
+func (a *API) adjustReturnable(w http.ResponseWriter, r *http.Request) {
+	var req adjustRequest
+	_, idem, err := command(r, &req)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if !ids.Valid(req.CustomerID) {
+		fail(w, r, "customerId", "must be a UUID")
+		return
+	}
+	if !typeCodeRE.MatchString(req.ContainerType) {
+		fail(w, r, "containerType", "must be the code of a container type")
+		return
+	}
+	if !signedWholeRE.MatchString(req.Delta) {
+		fail(w, r, "delta", "must be a non-zero whole number of containers, negative to take containers off the balance")
+		return
+	}
+	delta, _ := decimal.NewFromString(req.Delta)
+	reason := strings.TrimSpace(req.Reason)
+	if n := utf8.RuneCountInString(reason); n < 3 || n > 200 {
+		fail(w, r, "reason", "is required, 3 to 200 characters")
+		return
+	}
+	reference := strings.TrimSpace(req.Reference)
+	if utf8.RuneCountInString(reference) > 100 {
+		fail(w, r, "reference", "must be at most 100 characters")
+		return
+	}
+	m, err := a.store.AdjustReturnable(r.Context(), store.AdjustInput{CustomerID: req.CustomerID, ContainerType: req.ContainerType, Delta: delta, Reason: reason, Reference: reference}, idem)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, m)
 }
 
 // optionalMaterial trims an optional packaging material code; an empty or

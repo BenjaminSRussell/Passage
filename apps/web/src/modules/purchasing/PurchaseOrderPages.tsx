@@ -25,6 +25,7 @@ import {
   listInvoicingPlans,
   listPurchaseOrderVersions,
   listPurchaseOrders,
+  listServiceSpecs,
   newIdempotencyKey,
   type ApprovalStatus,
   type ChargeCalc,
@@ -37,6 +38,7 @@ import {
   type PurchaseOrderLine,
   type PurchaseOrderSummary,
   type PurchaseOrderVersion,
+  type ServiceSpec,
   type Warning,
 } from "./api/client";
 import {
@@ -810,9 +812,27 @@ function ScheduleCell({ poId, line, schedule }: { poId: string; line: PurchaseOr
   );
 }
 
+/** The service cell of a line: its planned and unplanned figures, or a link to make it a service line (FR-17.23). */
+function ServiceCell({ poId, line, spec, currency }: { poId: string; line: PurchaseOrderLine; spec?: ServiceSpec; currency: string }) {
+  const to = `/purchasing/purchase-orders/${poId}/lines/${line.lineNo}/service`;
+  if (spec) {
+    return (
+      <Link className={styles.link} to={to} aria-label={`Service specification of line ${line.lineNo}`}>
+        Planned {spec.plannedTotal}, limit {spec.valueLimit} {currency}
+      </Link>
+    );
+  }
+  if (line.status === "CANCELLED") return <>—</>;
+  return (
+    <Link className={styles.link} to={to} aria-label={`Make line ${line.lineNo} a service line`}>
+      Make service
+    </Link>
+  );
+}
+
 const lineColumns = (
   currency: string,
-  plan?: { poId: string; byLine: Map<number, InvoicingPlan>; schedules: Map<number, DeliverySchedule>; closed: boolean },
+  plan?: { poId: string; byLine: Map<number, InvoicingPlan>; schedules: Map<number, DeliverySchedule>; services: Map<number, ServiceSpec>; closed: boolean },
 ): DataTableColumn<PurchaseOrderLine>[] => [
   { key: "lineNo", header: "Line", align: "end" },
   { key: "item", header: "Item", render: (l) => l.description || <ShortId id={l.productId} /> },
@@ -838,6 +858,11 @@ const lineColumns = (
           key: "deliverySchedule",
           header: "Deliveries",
           render: (l: PurchaseOrderLine) => <ScheduleCell poId={plan.poId} line={l} schedule={plan.schedules.get(l.lineNo)} />,
+        },
+        {
+          key: "service",
+          header: "Service",
+          render: (l: PurchaseOrderLine) => <ServiceCell poId={plan.poId} line={l} spec={plan.services.get(l.lineNo)} currency={currency} />,
         },
       ]
     : []),
@@ -965,6 +990,7 @@ export function PurchaseOrderDetailPage() {
   const versions = useResource((signal) => listPurchaseOrderVersions(id, signal), [id, po?.rowVersion]);
   const plans = useResource((signal) => listInvoicingPlans(id, signal), [id, po?.rowVersion]);
   const schedules = useResource((signal) => listDeliverySchedules(id, signal), [id, po?.rowVersion]);
+  const services = useResource((signal) => listServiceSpecs(id, signal), [id, po?.rowVersion]);
 
   async function run(action: PurchaseOrderAction) {
     if (!po) return;
@@ -1035,6 +1061,11 @@ export function PurchaseOrderDetailPage() {
               {po.approvalStatus === "CONFIRMED" ? (
                 <Link className={buttonClassName("secondary")} to={`/purchasing/purchase-orders/${po.id}/reprice`}>
                   Update prices
+                </Link>
+              ) : null}
+              {po.versionNo > 0 ? (
+                <Link className={buttonClassName("secondary")} to={`/purchasing/inbound-changes?purchaseOrderId=${po.id}`}>
+                  Changes from planning and fulfillment
                 </Link>
               ) : null}
               {actions.map((a) => (
@@ -1119,12 +1150,14 @@ export function PurchaseOrderDetailPage() {
       </Card>
       {plans.error ? <LoadError what="the invoicing plans" error={plans.error} onRetry={plans.reload} /> : null}
       {schedules.error ? <LoadError what="the delivery schedules" error={schedules.error} onRetry={schedules.reload} /> : null}
+      {services.error ? <LoadError what="the service specifications" error={services.error} onRetry={services.reload} /> : null}
       <DataTable
         label="Purchase order lines"
         columns={lineColumns(po.currency, {
           poId: po.id,
           byLine: new Map((plans.data ?? []).map((p) => [p.lineNo, p])),
           schedules: new Map((schedules.data ?? []).map((d) => [d.lineNo, d])),
+          services: new Map((services.data ?? []).map((d) => [d.lineNo, d])),
           closed: po.approvalStatus === "CANCELLED" || po.approvalStatus === "FINALIZED",
         })}
         rows={po.lines}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -34,6 +35,8 @@ func (a *API) registerLookup(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRun)).Get(lookupPath+"/{id}", a.getLookup)
 	r.With(authz.RequireDuty(dutyRun)).Get(lookupPath+"/{id}/versions", a.listLookupVersions)
 	r.With(authz.RequireDuty(dutyProjectWrite)).Patch(lookupPath+"/{id}", a.updateLookup)
+	r.With(authz.RequireDuty(dutyProjectWrite)).Post(lookupPath+"/{id}:import", a.importLookup)
+	r.With(authz.RequireDuty(dutyRun)).Get(lookupPath+"/{id}/entries.csv", a.exportLookup)
 }
 
 func parseLookupDefinition(raw json.RawMessage) (domain.LookupDefinition, []byte, error) {
@@ -227,4 +230,127 @@ func (a *API) updateLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, saved)
+}
+
+type importLookupRequest struct {
+	Version   *int   `json:"version"`
+	Mode      string `json:"mode"`
+	HasHeader bool   `json:"hasHeader"`
+	CSV       string `json:"csv"`
+}
+
+type importLookupResponse struct {
+	Table   store.LookupTable          `json:"table"`
+	Summary domain.LookupImportSummary `json:"summary"`
+	// Written is false when the file changed nothing: no version was saved and Table is the current one.
+	Written bool `json:"written"`
+}
+
+var errLookupImportNoChange = errors.New("lookup import changes nothing")
+
+// importLookup merges (or replaces with) the entries of a CSV file into the table as its next version, under the same
+// optimistic version as PATCH. A file that changes nothing writes no version.
+func (a *API) importLookup(w http.ResponseWriter, r *http.Request) {
+	if !tenantWide(w, r) {
+		return
+	}
+	var req importLookupRequest
+	if err := httpx.DecodeLimit(r, &req, 3<<20); err != nil {
+		fail(w, r, err)
+		return
+	}
+	bad := map[string]string{}
+	if req.Version == nil || *req.Version < 1 {
+		bad["version"] = "is required and must be at least 1"
+	}
+	if req.Mode != "merge" && req.Mode != "replace" {
+		bad["mode"] = "must be merge (keep the entries the file does not mention) or replace"
+	}
+	if strings.TrimSpace(req.CSV) == "" {
+		bad["csv"] = "is required"
+	}
+	if len(bad) > 0 {
+		fail(w, r, validation(bad))
+		return
+	}
+	var sum domain.LookupImportSummary
+	saved, err := a.store.UpdateLookupTable(r.Context(), chi.URLParam(r, "id"), *req.Version, func(t *store.LookupTable) error {
+		if t.Status == store.OutboundArchivedStatus {
+			return httpx.NewProblem(http.StatusConflict, store.CodeLookupArchived, "an archived lookup table can only be reactivated")
+		}
+		cur, err := domain.ParseLookupDefinition(t.Definition)
+		if err != nil {
+			return definitionProblem(err)
+		}
+		file, err := domain.ParseLookupCSV(cur.Kind, []byte(req.CSV), req.HasHeader)
+		if err != nil {
+			return definitionProblem(err)
+		}
+		var merged map[string]string
+		merged, sum = domain.ApplyLookupImport(cur.Entries, file.Entries, req.Mode == "replace")
+		if sum.Added == 0 && sum.Changed == 0 && sum.Removed == 0 {
+			return errLookupImportNoChange
+		}
+		cur.Entries = merged
+		_, canonical, err := parseLookupDefinition(mustJSON(cur))
+		if err != nil {
+			return err
+		}
+		t.Definition = canonical
+		return nil
+	})
+	written := true
+	if errors.Is(err, errLookupImportNoChange) {
+		written = false
+		saved, err = a.store.GetLookupTable(r.Context(), chi.URLParam(r, "id"), 0)
+		if err == nil && saved.Version != *req.Version {
+			err = httpx.NewProblem(http.StatusConflict, store.CodeVersionConflict, "current version is "+strconv.Itoa(saved.Version))
+		}
+	}
+	if err != nil {
+		var p *httpx.Problem
+		if !errors.As(err, &p) {
+			a.logFailure(r, "import lookup entries failed", err)
+		}
+		fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, importLookupResponse{Table: saved, Summary: sum, Written: written})
+}
+
+func mustJSON(v any) []byte {
+	b, _ := json.Marshal(v)
+	return b
+}
+
+// exportLookup answers the entries of a version (the current one by default) as CSV for a spreadsheet.
+func (a *API) exportLookup(w http.ResponseWriter, r *http.Request) {
+	if !tenantWide(w, r) {
+		return
+	}
+	version := 0
+	if v := r.URL.Query().Get("version"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			fail(w, r, validation(map[string]string{"version": "must be a positive integer"}))
+			return
+		}
+		version = n
+	}
+	t, err := a.store.GetLookupTable(r.Context(), chi.URLParam(r, "id"), version)
+	if err != nil {
+		a.logFailure(r, "export lookup table failed", err)
+		fail(w, r, err)
+		return
+	}
+	def, err := domain.ParseLookupDefinition(t.Definition)
+	if err != nil {
+		fail(w, r, definitionProblem(err))
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+t.Name+`-v`+strconv.Itoa(t.Version)+`.csv"`)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(domain.LookupCSV(def.Entries))
 }

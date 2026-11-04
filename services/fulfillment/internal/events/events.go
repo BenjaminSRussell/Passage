@@ -29,19 +29,26 @@ var (
 	WarehouseSettingChanged     = events.Type(Context, "warehousesetting", "changed", 1)
 	LegalEntitySettingChanged   = events.Type(Context, "legalentitysetting", "changed", 1)
 	WarehouseReleaseRuleChanged = events.Type(Context, "warehousereleaserule", "changed", 1)
+	DeliveryToleranceChanged    = events.Type(Context, "deliverytolerance", "changed", 1)
 
 	DropShipCreated   = events.Type(Context, "dropship", "created", 1)
 	DropShipConfirmed = events.Type(Context, "dropship", "confirmed", 1)
 	DropShipCancelled = events.Type(Context, "dropship", "cancelled", 1)
 	DropShipClosed    = events.Type(Context, "dropship", "closed", 1)
+
+	ReturnableReturned = events.Type(Context, "returnablepackaging", "returned", 1)
+	ReturnableAdjusted = events.Type(Context, "returnablepackaging", "adjusted", 1)
+
+	ExceptionRaised   = events.Type(Context, "exception", "raised", 1)
+	ExceptionResolved = events.Type(Context, "exception", "resolved", 1)
 )
 
 // All lists every event type this service publishes, for the registry check.
 func All() []string {
 	return []string{
 		ShipmentReleased, PickConfirmed, PackingSlipPosted, PackingSlipCancelled,
-		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, ContainerNested, ContainerUnnested, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked, WarehouseSettingChanged, LegalEntitySettingChanged, WarehouseReleaseRuleChanged,
-		DropShipCreated, DropShipConfirmed, DropShipCancelled, DropShipClosed,
+		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, ContainerNested, ContainerUnnested, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked, WarehouseSettingChanged, LegalEntitySettingChanged, WarehouseReleaseRuleChanged, DeliveryToleranceChanged,
+		DropShipCreated, DropShipConfirmed, DropShipCancelled, DropShipClosed, ExceptionRaised, ExceptionResolved, ReturnableReturned, ReturnableAdjusted,
 	}
 }
 
@@ -100,6 +107,39 @@ type ShipmentClosedData struct {
 	// BackorderShipmentID is set when the remainder moved to a new shipment
 	// (short pick action REMAINDER_BACKORDER): sales keeps the order lines open.
 	BackorderShipmentID string `json:"backorder_shipment_id,omitempty"`
+	// Reason is set when the remainder was closed by something other than the
+	// warehouse: ReasonOrderRemainderCancelled when sales cancelled the remainder
+	// of the order. Sales already knows, so it must not cancel again.
+	Reason string `json:"reason,omitempty"`
+}
+
+// ReasonOrderRemainderCancelled is ShipmentClosedData.Reason for a shipment cut
+// back (or cancelled, in shipment.cancelled's case no reason is needed) by
+// sales' order.remaindercancelled.v1.
+const ReasonOrderRemainderCancelled = "order_remainder_cancelled"
+
+// ExceptionRaisedData is published when fulfillment records a case the
+// warehouse supervisor must handle (an exception).
+type ExceptionRaisedData struct {
+	ExceptionID   string  `json:"exception_id"`
+	Kind          string  `json:"kind"`
+	OrderID       string  `json:"order_id"`
+	OrderLineID   string  `json:"order_line_id"`
+	ShipmentID    *string `json:"shipment_id,omitempty"`
+	PackingSlipID *string `json:"packing_slip_id,omitempty"`
+	Qty           string  `json:"qty"`
+	KeptQty       string  `json:"kept_qty"`
+	Detail        string  `json:"detail"`
+}
+
+// ExceptionResolvedData is published when a supervisor closes an exception.
+type ExceptionResolvedData struct {
+	ExceptionID string `json:"exception_id"`
+	Kind        string `json:"kind"`
+	OrderID     string `json:"order_id"`
+	OrderLineID string `json:"order_line_id"`
+	Note        string `json:"note"`
+	ResolvedBy  string `json:"resolved_by"`
 }
 
 // WarehouseSettingChangedData is published when a warehouse's short pick action
@@ -138,6 +178,19 @@ type WarehouseReleaseRuleChangedData struct {
 	PreviousWaveMaxLines   int    `json:"previous_wave_max_lines"`
 	PreviousWaveMaxOrders  int    `json:"previous_wave_max_orders"`
 	Version                int    `json:"version"`
+}
+
+// DeliveryToleranceChangedData is published when an over-delivery tolerance is
+// saved for a product and customer scope (BR-28.7), with the value it replaces
+// (absent for a new scope). Sales (wave 27) may read it for its own
+// over-delivery check on agreements.
+type DeliveryToleranceChangedData struct {
+	ToleranceID     string  `json:"tolerance_id"`
+	ProductID       string  `json:"product_id,omitempty"`
+	CustomerID      string  `json:"customer_id,omitempty"`
+	OverdeliveryPct string  `json:"overdelivery_pct"`
+	PreviousPct     *string `json:"previous_overdelivery_pct,omitempty"`
+	Version         int     `json:"version"`
 }
 
 // WaveCreatedData is published for each wave the picking workbench creates
@@ -241,6 +294,9 @@ type PickLine struct {
 	OrderLineID string `json:"order_line_id"`
 	Qty         string `json:"qty"`
 	Backordered string `json:"backordered"`
+	// OverPicked is the quantity picked above the planned one, allowed by the
+	// over-delivery tolerance (BR-28.7); absent for a pick within the plan.
+	OverPicked string `json:"over_picked,omitempty"`
 	// ShortReason is the short pick reason code, when one was given.
 	ShortReason string `json:"short_reason,omitempty"`
 }
@@ -314,6 +370,21 @@ type ReturnableMove struct {
 	Qty           string `json:"qty"`
 }
 
+// ReturnableMovementData is published when a customer's returnable packaging balance
+// changes outside a packing slip: a return receipt (returnablepackaging.returned, qty
+// negative) or a manual correction (returnablepackaging.adjusted, qty signed, reason
+// required). Wave 30 reads them to credit packaging a customer sent back.
+type ReturnableMovementData struct {
+	MovementID    string `json:"movement_id"`
+	CustomerID    string `json:"customer_id"`
+	ContainerType string `json:"container_type"`
+	Kind          string `json:"kind"`
+	Qty           string `json:"qty"`
+	BalanceAfter  string `json:"balance_after"`
+	Reference     string `json:"reference,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+}
+
 // PackingSlipPostedData carries the shipped lines at cost and the journal
 // (Dr 1405 / Cr 1400, or Dr 5000 / Cr 1400 when COGS posts at shipment).
 // Inventory consumes the lines to issue stock; the ledger posts the journal
@@ -379,4 +450,7 @@ type DropShipData struct {
 	ConfirmationSeq   int            `json:"confirmation_seq,omitempty"`
 	ConfirmedQty      string         `json:"confirmed_qty,omitempty"`
 	Journal           []JournalEntry `json:"journal"`
+	// Reason is set when the drop-ship was closed or cancelled because sales cancelled the
+	// remainder of the order (ReasonOrderRemainderCancelled): sales already knows.
+	Reason string `json:"reason,omitempty"`
 }

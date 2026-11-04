@@ -11,6 +11,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/costacct/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/costacct/internal/store"
@@ -21,7 +23,8 @@ type fakeStore struct {
 	calls   int
 	run     store.RunRequest
 	filter  string
-	recon   store.ReconcileRequest
+	recon   store.GLReconcileRequest
+	reconGL store.GLBalances
 	topDown store.TopDownRequest
 	settle  store.SettlementRequest
 
@@ -88,9 +91,9 @@ func (f *fakeStore) GetRun(context.Context, string) (store.Run, error) {
 	return store.Run{}, nil
 }
 
-func (f *fakeStore) Reconcile(_ context.Context, in store.ReconcileRequest) (domain.Reconciliation, error) {
+func (f *fakeStore) ReconcileToGL(_ context.Context, gl store.GLBalances, in store.GLReconcileRequest) (domain.Reconciliation, error) {
 	f.calls++
-	f.recon = in
+	f.recon, f.reconGL = in, gl
 	return domain.Reconciliation{Reconciled: true}, nil
 }
 
@@ -107,15 +110,28 @@ const (
 
 func serve(t *testing.T, st Store, method, path, body, duties, key string) *httptest.ResponseRecorder {
 	t.Helper()
+	return serveAPI(t, New(st), method, path, body, duties, key)
+}
+
+func serveAPI(t *testing.T, a *API, method, path, body, duties, key string) *httptest.ResponseRecorder {
+	t.Helper()
+	return serveScoped(t, a, entityID, method, path, body, duties, key)
+}
+
+func serveScoped(t *testing.T, a *API, scope, method, path, body, duties, key string) *httptest.ResponseRecorder {
+	t.Helper()
 	r := chi.NewRouter()
-	New(st).Register(r)
+	a.Register(r)
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	if key != "" {
 		req.Header.Set(idempotencyKey, key)
 	}
 	// httpx.NewRouter's tenant middleware is skipped here; the principal is attached directly.
-	req = req.WithContext(testkit.Ctx(tenantID, strings.Split(duties, ",")...))
+	ctx := testkit.Ctx(tenantID, strings.Split(duties, ",")...)
+	p, _ := tenant.FromContext(ctx)
+	p.LegalEntityID = scope
+	req = req.WithContext(tenant.With(ctx, p))
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	return rec
@@ -274,15 +290,48 @@ func TestReads_FiltersAndDuty(t *testing.T) {
 	}
 }
 
-func TestReconcile_ValidatesAndPassesBalances(t *testing.T) {
+func TestReconcile_ReadsTheLedgerAndRejectsSuppliedBalances(t *testing.T) {
+	const path = "/v1/controlling/reconciliations"
+	const ledgerID = "0196a6a4-0000-7000-8000-000000000020"
+	gl := ledgerclient.NewFake()
 	st := &fakeStore{}
-	bad := `{"legalEntityId":"` + entityID + `","period":"2026-9","currency":"USD","journalBalances":[]}`
-	if rec := serve(t, st, http.MethodPost, "/v1/controlling/reconciliations", bad, DutyView, ""); rec.Code != http.StatusBadRequest || st.calls != 0 {
+	a := New(st).WithLedger(gl, map[string]string{entityID: ledgerID})
+	bad := `{"legalEntityId":"` + entityID + `","period":"2026-9","currency":"USD"}`
+	if rec := serveAPI(t, a, http.MethodPost, path, bad, DutyView, ""); rec.Code != http.StatusBadRequest || st.calls != 0 {
 		t.Fatalf("bad period: %d", rec.Code)
 	}
-	good := `{"legalEntityId":"` + entityID + `","period":"2026-09","currency":"USD","journalBalances":[{"mainAccount":"600100","amount":"150.25"}]}`
-	rec := serve(t, st, http.MethodPost, "/v1/controlling/reconciliations", good, DutyView, "")
-	if rec.Code != http.StatusOK || len(st.recon.Journal) != 1 || st.recon.Journal[0].Amount.String() != "150.25" {
-		t.Fatalf("status %d recon %+v", rec.Code, st.recon)
+	spoofed := `{"legalEntityId":"` + entityID + `","period":"2026-09","currency":"USD","journalBalances":[{"mainAccount":"600100","amount":"150.25"}]}`
+	if rec := serveAPI(t, a, http.MethodPost, path, spoofed, DutyView, ""); rec.Code != http.StatusBadRequest || st.calls != 0 {
+		t.Fatalf("supplied balances: %d, %d store calls; want a rejection before the store", rec.Code, st.calls)
+	}
+	good := `{"legalEntityId":"` + entityID + `","period":"2026-09","currency":"USD"}`
+	rec := serveAPI(t, a, http.MethodPost, path, good, DutyView, "")
+	want := store.GLReconcileRequest{LegalEntityID: entityID, LedgerID: ledgerID, Period: "2026-09", Currency: "USD"}
+	if rec.Code != http.StatusOK || st.recon != want || st.reconGL != store.GLBalances(gl) {
+		t.Fatalf("status %d recon %+v gl %v", rec.Code, st.recon, st.reconGL)
+	}
+}
+
+func TestReconcile_OtherLegalEntityScopeIsForbidden(t *testing.T) {
+	const otherEntity = "0196a6a4-0000-7000-8000-0000000000ff"
+	st := &fakeStore{}
+	a := New(st).WithLedger(ledgerclient.NewFake(), map[string]string{entityID: "0196a6a4-0000-7000-8000-000000000020"})
+	body := `{"legalEntityId":"` + strings.ToUpper(entityID) + `","period":"2026-09","currency":"USD"}`
+	rec := serveScoped(t, a, otherEntity, http.MethodPost, "/v1/controlling/reconciliations", body, DutyView, "")
+	if rec.Code != http.StatusForbidden || problemCode(t, rec) != "AUTH-0003" || st.calls != 0 {
+		t.Fatalf("status %d code %s, %d store calls; want 403 AUTH-0003 before the ledger is read", rec.Code, problemCode(t, rec), st.calls)
+	}
+}
+
+func TestReconcile_FailsClosedWithoutALedger(t *testing.T) {
+	const path = "/v1/controlling/reconciliations"
+	body := `{"legalEntityId":"` + entityID + `","period":"2026-09","currency":"USD"}`
+	st := &fakeStore{}
+	if rec := serve(t, st, http.MethodPost, path, body, DutyView, ""); rec.Code != http.StatusServiceUnavailable || problemCode(t, rec) != store.CodeLedgerUnavailable || st.calls != 0 {
+		t.Fatalf("unconfigured: %d", rec.Code)
+	}
+	a := New(st).WithLedger(ledgerclient.NewFake(), map[string]string{})
+	if rec := serveAPI(t, a, http.MethodPost, path, body, DutyView, ""); rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != store.CodeLedgerNotMapped || st.calls != 0 {
+		t.Fatalf("unmapped entity: %d", rec.Code)
 	}
 }

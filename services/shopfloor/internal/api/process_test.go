@@ -232,7 +232,7 @@ func TestProcessMessage_ReplayReturnsStoredMessage(t *testing.T) {
 }
 
 func TestProcessMessage_ValidationNamesFields(t *testing.T) {
-	bad := `{"source":"fax","sourceMessageId":"","categoryCode":"nope","orderId":"x","occurredAt":"2026-10-20T09:00:00Z",
+	bad := `{"source":"fax","sourceMessageId":"","categoryCode":"Nope!","orderId":"x","occurredAt":"2026-10-20T09:00:00Z",
 		"values":[{"name":"a","type":"numeric","value":"1"},{"name":"a","type":"color","value":"1"}]}`
 	rec := call(t, newRouter(&processFake{}), http.MethodPost, "/v1/shopfloor/process-messages", bad, processDuty)
 	if rec.Code != http.StatusBadRequest {
@@ -277,7 +277,7 @@ func TestProcessMessage_ListFiltersAndValidates(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list status %d: %s", rec.Code, rec.Body.String())
 	}
-	for _, q := range []string{"status=done", "category=nope", "limit=0", "limit=999"} {
+	for _, q := range []string{"status=done", "category=Nope!", "limit=0", "limit=999"} {
 		if rec := call(t, h, http.MethodGet, "/v1/shopfloor/process-messages?"+q, "", processDuty); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d", q, rec.Code)
 		}

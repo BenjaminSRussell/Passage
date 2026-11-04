@@ -134,6 +134,14 @@
   stroke-width: 3;
 }
 
+/* BR-23.15: in open capacity but in time the blocks keep from the job; dotted so it differs from a constraint violation and from firmed. */
+.breach {
+  stroke: var(--color-danger);
+  stroke-width: 3;
+  stroke-dasharray: 1 3;
+  stroke-linecap: round;
+}
+
 /* The changeover at the start of a job (FR-23.15): a hatch over the bar. */
 .changeover {
   fill: var(--color-text);

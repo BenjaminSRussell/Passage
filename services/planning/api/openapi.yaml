@@ -409,7 +409,11 @@ paths:
           schema: {type: string}
         - name: action
           in: query
-          schema: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor]}
+          schema: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor, no-quota-source, lot-split, bom-cycle]}
+        - name: status
+          in: query
+          description: 'Messages of this status; open when left out, all for every status (FR-22.7)'
+          schema: {type: string, enum: [open, applied, dismissed, all], default: open}
         - name: sort
           in: query
           description: 'priority: messages about planned orders that replenish a DDMRP buffer first, lowest planning priority (net-flow position over top of green) first, then the rest in action, supply, demand order (FR-22.16). Without sort only the messages about buffer orders of items whose site-scope item coverage is priorityBased lead by priority; the rest are in action, supply, demand order'
@@ -428,6 +432,109 @@ paths:
                     type: array
                     items: {$ref: '#/components/schemas/Message'}
         '400': {$ref: '#/components/responses/Problem'}
+  /v1/planning/messages/{id}:
+    get:
+      operationId: getMessage
+      summary: One action message of any version with its status
+      x-passage-duty: planning.read
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+      responses:
+        '200':
+          description: The message; the ETag header carries its version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Message'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /v1/planning/messages/{id}:apply:
+    post:
+      operationId: applyMessage
+      summary: Apply an open action message about existing supply (FR-22.7)
+      description: Marks the message applied and publishes message.applied.v1 in the same transaction; the context that owns the source order (supplyRef) makes the change, planning changes no order. A later run that raises the same message again carries the decision onto it (carriedFrom) without a new event. Only postpone, advance, cancel, decrease and increase messages can be applied; the others are 422 PLAN-MESSAGE-NOT-ACTIONABLE and can be dismissed. An optional Idempotency-Key makes a retry of the same decision return the stored message (Idempotent-Replayed true).
+      x-passage-duty: planning.order.maintain
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MessageDecision'}
+      responses:
+        '200':
+          description: The applied message with its new ETag
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Message'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409':
+          description: PLAN-MESSAGE-DECIDED (applied or dismissed before) or PLAN-MESSAGE-STALE (its plan version is no longer current)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '412':
+          description: conflict_version (If-Match is not the current version of the message)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '422':
+          description: PLAN-MESSAGE-NOT-ACTIONABLE (the message changes no source order)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '428':
+          description: precondition_required (If-Match missing)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /v1/planning/messages/{id}:dismiss:
+    post:
+      operationId: dismissMessage
+      summary: Dismiss an open action message (FR-22.7)
+      description: Marks the message dismissed and publishes message.dismissed.v1 in the same transaction. Every action can be dismissed. A later run that raises the same message again carries the dismissal onto it (carriedFrom), so it does not come back as open. An optional Idempotency-Key makes a retry of the same decision return the stored message (Idempotent-Replayed true).
+      x-passage-duty: planning.order.maintain
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MessageDecision'}
+      responses:
+        '200':
+          description: The dismissed message with its new ETag
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Message'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409':
+          description: PLAN-MESSAGE-DECIDED (applied or dismissed before) or PLAN-MESSAGE-STALE (its plan version is no longer current)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '412':
+          description: conflict_version (If-Match is not the current version of the message)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '428':
+          description: precondition_required (If-Match missing)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
   /v1/planning/net-requirements:
     get:
       operationId: listNetRequirements
@@ -594,6 +701,49 @@ paths:
         '422': {description: 'PLAN-FORECAST-RANGE: a forecast value exceeds the largest storable quantity (999,999,999,999.999999); nothing is written', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
         '428': {$ref: '#/components/responses/Problem'}
         '502': {description: 'PLAN-FORECAST-UNAVAILABLE: the forecast service did not answer', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+  /v1/planning/forecasts/{modelCode}:allocate:
+    post:
+      operationId: allocateForecast
+      summary: Split aggregate forecast quantities across items by an allocation key into a model (FR-22.8, BR-22.10)
+      description: |
+        Each period carries an aggregate quantity in the key's forecast unit. The
+        quantity is split across the key's items by percentage share (each part cut
+        down to 6 decimals, the remainder going to the largest share, ties to the
+        lowest item id, so the parts add up exactly) and each part is converted to the
+        item's inventory unit with the item's factor by the same rule per factor: the
+        converted parts of the items sharing a factor add up to the sum of their parts
+        times the factor rounded half away from zero to 6 decimals (a factor of 1 keeps
+        the part as it is). The result is written as one manual cell
+        per item and period at the site. A cell replaces the stored cell of the same
+        item, site and period start and keeps its sales quantity. The reduced
+        quantities of the touched series are recomputed, the model version increases
+        and dev.passage.planning.forecast.allocated.v1 is written in the same
+        transaction. Creates the model on first use (send If-Match "0"); an unknown key
+        creates nothing. A submitted or published model is locked.
+      x-passage-duty: planning.forecast.maintain
+      parameters:
+        - $ref: '#/components/parameters/ModelCode'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AllocateForecastRequest'}
+      responses:
+        '200':
+          description: Allocated; the ETag header carries the new model version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AllocateForecastResult'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {description: 'PLAN-ALLOCATION-KEY-NOT-FOUND: no allocation key has that code', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '409': {description: 'PLAN-FORECAST-LOCKED: the model is submitted or published', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '412': {$ref: '#/components/responses/Problem'}
+        '422': {description: 'PLAN-ALLOCATION-RANGE: a converted quantity exceeds the largest storable quantity (999,999,999,999.999999); nothing is written', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '428': {$ref: '#/components/responses/Problem'}
   /v1/planning/forecasts/{modelCode}:publish:
     post:
       operationId: publishForecastConsensus
@@ -1094,6 +1244,111 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/CoverageGroup'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
+  /v1/planning/forecast-allocation-keys:
+    get:
+      operationId: listForecastAllocationKeys
+      summary: Allocation keys of the tenant, ordered by code, without their lines (FR-22.8)
+      x-passage-duty: planning.read
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Allocation keys; each says how many items it holds (lineCount) and leaves lines empty
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/AllocationKey'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createForecastAllocationKey
+      summary: Create an allocation key that splits an aggregate forecast across items (FR-22.8)
+      description: |
+        The shares of the lines must add up to exactly 100. A line without uomFactor
+        has the factor 1. A code already in use is 409 PLAN-ALLOCATION-KEY-EXISTS. With
+        an Idempotency-Key, a retry of the same body returns the created key with 200
+        and Idempotent-Replayed: true; another body under the key is 422.
+      x-passage-duty: planning.setup.maintain
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - type: object
+                  required: [code]
+                  properties:
+                    code: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
+                - $ref: '#/components/schemas/AllocationKeySettings'
+      responses:
+        '201':
+          description: The created key; the ETag header carries its version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AllocationKey'}
+        '200':
+          description: Idempotent replay of an earlier create
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AllocationKey'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /v1/planning/forecast-allocation-keys/{code}:
+    get:
+      operationId: getForecastAllocationKey
+      summary: One allocation key by code, with its lines
+      x-passage-duty: planning.read
+      parameters:
+        - $ref: '#/components/parameters/CoverageCode'
+      responses:
+        '200':
+          description: The key with its lines ordered by item; the ETag header carries its version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AllocationKey'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: updateForecastAllocationKey
+      summary: Replace the name, unit and lines of an allocation key under If-Match
+      description: Earlier allocations keep the cells they wrote; the new shares apply to the next allocation.
+      x-passage-duty: planning.setup.maintain
+      parameters:
+        - $ref: '#/components/parameters/CoverageCode'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AllocationKeySettings'}
+      responses:
+        '200':
+          description: The changed key with its new ETag
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AllocationKey'}
         '400': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
         '404': {$ref: '#/components/responses/Problem'}
@@ -1848,6 +2103,12 @@ components:
       in: header
       required: true
       schema: {type: string, maxLength: 255}
+    OptionalIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Makes a retry of the same request return the first result
+      schema: {type: string, maxLength: 255}
     Limit:
       name: limit
       in: query
@@ -2190,7 +2451,7 @@ components:
           type: object
           description: Omit it, or send it without a code, to use the stored item coverage of the item at the site; a block without a code is replaced whole.
           properties:
-            code: {type: string, enum: [requirement, period, minmax, manual], description: Required unless the item has a stored site-scope item coverage}
+            code: {type: string, enum: [requirement, period, minmax, manual], description: 'Required unless the item has a stored site-scope item coverage; an item with neither takes the coverage group REQ (the stored group of that code, else requirement coverage with the FR-22.2 defaults)'}
             periodDays: {type: integer, minimum: 0}
             marginDays: {type: integer, minimum: 0, maximum: 365, description: Receipt margin in working days (FR-22.5)}
             issueMarginDays: {type: integer, minimum: 0, maximum: 365, description: Working days each demand of the item is moved earlier (FR-22.5)}
@@ -2258,7 +2519,7 @@ components:
       type: object
       required: [ref, refType, date, qty]
       properties:
-        ref: {type: string}
+        ref: {type: string, description: 'Reference of the demand or receipt. A purchase-line receipt carries the purchase order number: messages and pegging repeat it as supplyRef and procurement matches it to the order'}
         refType: {type: string, enum: [sales-line, forecast, safety-stock, bom-line, transfer-issue, on-hand, purchase-line, production-order, transfer-receipt, planned-order]}
         date: {type: string, format: date}
         qty: {type: string, description: Positive decimal string}
@@ -2449,6 +2710,73 @@ components:
               mape: {type: [number, 'null'], description: Holdout backtest error}
               wmape: {type: [number, 'null']}
               warnings: {type: array, items: {type: string}}
+    AllocationKeySettings:
+      type: object
+      required: [name, forecastUom, lines]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        forecastUom: {type: string, pattern: '^[A-Za-z0-9._/-]{1,10}$', description: Unit of measure of the aggregate quantities this key splits (for example CASE)}
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          description: One line per item; the shares add up to exactly 100
+          items: {$ref: '#/components/schemas/AllocationKeyLine'}
+    AllocationKeyLine:
+      type: object
+      required: [itemId, share]
+      properties:
+        itemId: {type: string, format: uuid}
+        share: {type: string, description: 'Percentage of the aggregate, above 0 and at most 100, at most 6 decimals (decimal string)'}
+        uomFactor: {type: string, description: 'Inventory units per forecast unit, above 0, at most 9 decimals (decimal string); 1 when omitted'}
+    AllocationKey:
+      type: object
+      required: [id, version, code, name, forecastUom, lineCount, lines]
+      properties:
+        id: {type: string, format: uuid}
+        version: {type: integer, minimum: 1, description: Same as the ETag}
+        code: {type: string}
+        name: {type: string}
+        forecastUom: {type: string}
+        lineCount: {type: integer, description: Items of the key}
+        lines:
+          type: array
+          description: Empty in a list
+          items:
+            type: object
+            required: [itemId, share, uomFactor]
+            properties:
+              itemId: {type: string, format: uuid}
+              share: {type: string}
+              uomFactor: {type: string}
+    AllocateForecastRequest:
+      type: object
+      required: [keyCode, siteId, periods]
+      properties:
+        legalEntityId: {type: string, format: uuid, description: Owner of the model when this call creates it; an assertion for an existing model}
+        keyCode: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
+        siteId: {type: string, format: uuid}
+        periods:
+          type: array
+          minItems: 1
+          maxItems: 60
+          items:
+            type: object
+            required: [periodStart, periodEnd, qty]
+            properties:
+              periodStart: {type: string, format: date}
+              periodEnd: {type: string, format: date}
+              qty: {type: string, description: 'Aggregate quantity in the key''s forecast unit, 0 or more, at most 6 decimals (decimal string)'}
+    AllocateForecastResult:
+      type: object
+      required: [model, keyCode, keyVersion, items, periods, cellsWritten]
+      properties:
+        model: {$ref: '#/components/schemas/ForecastModel'}
+        keyCode: {type: string}
+        keyVersion: {type: integer, description: Version of the key the shares were read from}
+        items: {type: integer}
+        periods: {type: integer}
+        cellsWritten: {type: integer, description: Manual cells written (items x periods)}
     ForecastModel:
       type: object
       required: [code, version, reductionPrinciple, reductionPercent, status, submittedBy, decidedBy, publishedAt]
@@ -2595,18 +2923,30 @@ components:
         shortage: {type: boolean, description: True when the balance is below zero}
         value: {type: string, nullable: true, description: Balance at the unit cost, rounded to the currency's minor unit; null without a unit cost}
         daysOfSupply: {type: string, nullable: true, description: Balance over the average daily demand of the next 30 days; null without demand}
-    Message:
+    MessageDecision:
       type: object
       properties:
-        action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor]}
+        note: {type: string, maxLength: 500, description: The planner's reason; carried on the message and its event}
+    Message:
+      type: object
+      required: [id, action, itemId, status, version]
+      properties:
+        id: {type: string, format: uuid}
+        status: {type: string, enum: [open, applied, dismissed], description: 'open until a planner applies or dismisses the message (FR-22.7)'}
+        version: {type: integer, minimum: 1, description: The ETag to send as If-Match when deciding}
+        decidedBy: {type: string, nullable: true, description: User who applied or dismissed the message}
+        decidedAt: {type: string, format: date-time, nullable: true}
+        decisionNote: {type: string, description: The planner's reason; empty when none}
+        carriedFrom: {type: string, format: uuid, nullable: true, description: 'The message of an earlier version the planner decided, when a later run raised the same message again (same item, scope, action, supply, demand, suggested date, quantity and delay) and carried the decision onto this one; null for a decision made on this message or an open message'}
+        action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor, no-quota-source, lot-split, bom-cycle]}
         itemId: {type: string, format: uuid}
         warehouseId: {type: string, format: uuid, nullable: true, description: The warehouse planning scope the message is about (FR-22.18); null for the site scope}
-        supplyRef: {type: string, description: Planned order number or receipt ref; empty for a shortage}
-        demandRef: {type: string, description: Demand the message is about; empty when none}
-        suggestedDate: {type: string, format: date, description: 'delay: expected date; postpone/advance: suggested receipt date; shortage: demand date; cancel/decrease/increase: receipt date; red-zone: delivery date of the buffer replenishment order; sales-on-top: date of the sales line (PLAN-0015, qty is the excess over the forecast it could consume, demandRef the sales line); no-vendor: order date of the item''s earliest purchase without a vendor (PLAN-0008, supplyRef that order)'}
-        delayDays: {type: integer}
-        qty: {type: string, description: 'Decimal string in the inventory unit; no-vendor: the item''s purchase quantity left without a vendor'}
-        code: {type: string, example: PLAN-0007, description: 'Message catalog code (PRD 4.22.18): PLAN-0006 postpone, PLAN-0007 delay, PLAN-0008 no-vendor, PLAN-0010 red-zone, PLAN-0015 sales-on-top; absent for the other actions'}
+        supplyRef: {type: string, description: 'Planned order number or the ref the run was sent on the receipt; for an open purchase order that ref is the PO number, unchanged, so procurement matches it to the order. A carried-forward firmed order is FP:<planned order id>. Empty for a shortage'}
+        demandRef: {type: string, description: 'Demand the message is about; empty when none. bom-cycle: the component of the skipped line (PLAN-0004); no-quota-source: the quota arrangement id (PLAN-0009)'}
+        suggestedDate: {type: string, format: date, description: 'delay: expected date; postpone/advance: suggested receipt date; shortage: demand date; cancel/decrease/increase: receipt date; red-zone: delivery date of the buffer replenishment order; sales-on-top: date of the sales line (PLAN-0015, qty is the excess over the forecast it could consume, demandRef the sales line); no-vendor: order date of the item''s earliest purchase without a vendor (PLAN-0008, supplyRef that order); lot-split: the requirement''s date (PLAN-0005, supplyRef the first of the split orders); bom-cycle: the plan date (PLAN-0004, itemId the parent and demandRef the component of the skipped line); no-quota-source: the delivery date of the order no source of its quota arrangement could take (PLAN-0009, supplyRef that order, demandRef the arrangement id)'}
+        delayDays: {type: integer, description: 'Days of delay; lot-split: the number of planned orders the requirement was split into (PLAN-0005), not a delay; bom-cycle: 0 (PLAN-0004)'}
+        qty: {type: string, description: 'Decimal string in the inventory unit; no-vendor: the item''s purchase quantity left without a vendor; lot-split: the item''s maximum order quantity; bom-cycle: the quantity per unit of the skipped component line; no-quota-source: the quantity of the order left without a source'}
+        code: {type: string, example: PLAN-0007, description: 'Message catalog code (PRD 4.22.18): PLAN-0006 postpone, PLAN-0007 delay, PLAN-0008 no-vendor, PLAN-0009 no-quota-source, PLAN-0005 lot-split, PLAN-0004 bom-cycle, PLAN-0010 red-zone, PLAN-0015 sales-on-top; absent for the other actions'}
         text: {type: string, description: 'The catalog user text with the message''s values filled in (the item is named by its id); absent when code is'}
         planningPriority: {type: string, nullable: true, description: 'Planning priority of the planned order the message is about when it replenishes a DDMRP buffer (FR-22.16); null otherwise'}
         bufferZone: {type: string, nullable: true, enum: [red, yellow, green, null], description: Zone of that buffer}

@@ -286,7 +286,7 @@ func TestPlanningConsumer_StoresAFirmedProductionOrderWithItsWarehouse(t *testin
 }
 
 // The planned order's legal entity is stored when the event names it (payload legal_entity_id or the
-// CloudEvents legalentityid extension); planning's current event names none and the row has none.
+// CloudEvents legalentityid extension); an event of before wave 22 slice 29 names none and the row has none.
 func TestPlanningConsumer_KeepsThePlannedOrdersLegalEntity(t *testing.T) {
 	f := &fakeStore{}
 	h := PlanningConsumerHandlers(f)[PlannedOrderFirmedType]

@@ -383,7 +383,7 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
             <FormField
               id="run-items"
               label="Items"
-              hint="JSON array of items with coverage, on-hand, lot sizes, demand, receipts and BOM components (RunItem in the planning OpenAPI). Leave out coverage, orderType or leadTimeDays to use the item's coverage stored for the site."
+              hint="JSON array of items with coverage, on-hand, lot sizes, demand, receipts and BOM components (RunItem in the planning OpenAPI). Leave out coverage, orderType or leadTimeDays to use the item's coverage stored for the site; an item with no stored coverage takes the coverage group REQ."
               error={errors.items}
             >
               {(a11y) => (

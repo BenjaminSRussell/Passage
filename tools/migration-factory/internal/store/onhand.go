@@ -114,6 +114,9 @@ func runOnhand(ctx context.Context, tx pgx.Tx, in OnhandRun) (domain.PackRun, er
 	for _, o := range toLoad {
 		held[o.LegacyID] = o
 	}
+	if run.Tolerances, err = loadTolerances(ctx, tx); err != nil {
+		return domain.PackRun{}, err
+	}
 	if err := domain.ReconcileOnhand(&run, in.Lines, in.Accepted, len(toLoad), held, in.Account, glTotals); err != nil {
 		return domain.PackRun{}, err
 	}
@@ -144,7 +147,7 @@ func runOnhand(ctx context.Context, tx pgx.Tx, in OnhandRun) (domain.PackRun, er
 	for i := range run.Quarantined {
 		q := &run.Quarantined[i]
 		q.Seq, q.Status = i+1, domain.QuarantineOpen
-		if err := insertQuarantine(ctx, tx, run.RunID, q.Seq, q.Record.LegacyID, q.Rule, q.Reason, recordJSON(q.Record)); err != nil {
+		if err := insertQuarantineLine(ctx, tx, run.RunID, q.Seq, q.Record.LegacyID, q.Rule, q.Reason, recordJSON(q.Record), q.Line); err != nil {
 			return domain.PackRun{}, err
 		}
 	}

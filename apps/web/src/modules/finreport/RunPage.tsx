@@ -5,6 +5,7 @@ import {
   drillBalances,
   getDefinition,
   getRun,
+  getRunDefinition,
   listCells,
   runOutputUrl,
   DOWNLOAD_FORMATS,
@@ -28,12 +29,15 @@ interface Statement {
 
 async function loadStatement(runId: string, signal: AbortSignal): Promise<Statement> {
   const [run, cells] = await Promise.all([getRun(runId, signal), listCells(runId, signal)]);
-  const { definition } = await getDefinition(run.definitionCode, run.definitionVersion, signal);
+  const definition = run.hierarchy ? await getRunDefinition(runId, signal) : (await getDefinition(run.definitionCode, run.definitionVersion, signal)).definition;
   return { run, definition, cells: new Map(cells.map((c) => [`${c.row}/${c.column}`, c])) };
 }
 
 const CHECK_TITLES: Record<string, string> = {
+  "REPORT-0004": "This statement is stale",
   "REPORT-0015": "Some expense lines have no functional area",
+  "REPORT-0034": "Some members are not in the hierarchy",
+  "REPORT-0041": "Some balances are outside the tree",
 };
 
 const indentClass = [undefined, styles.indent1, styles.indent2, styles.indent3];
@@ -111,7 +115,7 @@ export function RunPage() {
     <div className={styles.stack}>
       <PageHeader
         title={definition.name}
-        description={`${run.definitionCode} version ${run.definitionVersion}, period ${periodLabel(run.periodYear, run.periodNo)}, ${CURRENCY_TYPE_LABELS[run.currencyType as keyof typeof CURRENCY_TYPE_LABELS] ?? run.currencyType} currency.`}
+        description={`${run.definitionCode} version ${run.definitionVersion}${run.hierarchy ? `, rows from hierarchy ${run.hierarchy.code} version ${run.hierarchy.version}` : ""}${run.tree ? `, ${run.tree.unit ? `unit ${run.tree.unit} of` : "all units of"} tree ${run.tree.code} revision ${run.tree.revision}` : ""}, period ${periodLabel(run.periodYear, run.periodNo)}, ${CURRENCY_TYPE_LABELS[run.currencyType as keyof typeof CURRENCY_TYPE_LABELS] ?? run.currencyType} currency.`}
         meta={<StatusPill status={run.status} />}
         actions={DOWNLOAD_FORMATS.map((format) => (
           <a key={format} className={buttonClassName("secondary")} href={runOutputUrl(run.id, format)} download>

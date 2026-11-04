@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, DataTable, FormField, Input, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
-import { CONDITION_TYPES, listConditionRecords, RECORD_STATUSES, type ConditionRecord, type ConditionType, type RecordStatus } from "./api/client";
+import { CONDITION_TYPES, describeProblem, exportConditionRecords, listConditionRecords, RECORD_STATUSES, type ConditionRecord, type ConditionType, type Problem, type RecordStatus, type RecordsExport } from "./api/client";
 import { describeCustomer, describePercent, describeProduct, TYPE_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -18,6 +18,17 @@ const columns: DataTableColumn<ConditionRecord>[] = [
   { key: "status", header: "Status", render: (row) => <StatusPill status={row.status.toLowerCase()} /> },
 ];
 
+function download(file: RecordsExport) {
+  const url = URL.createObjectURL(new Blob([file.csv], { type: "text/csv" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = file.filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 /** Trade agreements grid (PRD §5.26.6, §5.26.14): condition records with filters. */
 export function AgreementsPage() {
   const navigate = useNavigate();
@@ -30,6 +41,25 @@ export function AgreementsPage() {
   const [validToTo, setValidToTo] = useState("");
   const filter = { status, type, customer: customer.trim(), product: product.trim(), asOf, validToFrom, validToTo };
   const state = useLoad((signal) => listConditionRecords(filter, signal), JSON.stringify(filter));
+  const [exporting, setExporting] = useState(false);
+  const [exported, setExported] = useState<RecordsExport | null>(null);
+  const [exportFailure, setExportFailure] = useState<Problem | null>(null);
+
+  /** Downloads every record that matches the filters, not only the page on screen. */
+  async function exportCsv() {
+    setExporting(true);
+    setExported(null);
+    setExportFailure(null);
+    try {
+      const file = await exportConditionRecords(filter);
+      download(file);
+      setExported(file);
+    } catch (error) {
+      setExportFailure(describeProblem(error));
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     <div className={styles.stack}>
@@ -37,9 +67,14 @@ export function AgreementsPage() {
         title="Trade agreements"
         description="Price, line discount and total discount records with their validity and quantity breaks."
         actions={
-          <Link className={buttonClassName("primary")} to="/pricing/agreements/new">
-            New agreement
-          </Link>
+          <div className={styles.actions}>
+            <Button variant="secondary" loading={exporting} onClick={() => void exportCsv()}>
+              Export CSV
+            </Button>
+            <Link className={buttonClassName("primary")} to="/pricing/agreements/new">
+              New agreement
+            </Link>
+          </div>
         }
       />
       <div className={styles.toolbar}>
@@ -83,6 +118,14 @@ export function AgreementsPage() {
           {(c) => <Input {...c} type="date" value={validToTo} onChange={(e) => setValidToTo(e.target.value)} />}
         </FormField>
       </div>
+      <Alert tone="success" live="status">
+        {exported ? `Exported ${exported.count} trade agreements to ${exported.filename}.${exported.truncated ? " More records matched than the file holds; narrow the filters." : ""}` : ""}
+      </Alert>
+      {exportFailure ? (
+        <Alert tone="danger" title="Could not export the trade agreements" live="alert">
+          {exportFailure.message} ({exportFailure.code})
+        </Alert>
+      ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load the trade agreements" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
           {state.error.message} ({state.error.code})

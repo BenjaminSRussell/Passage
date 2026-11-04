@@ -5,6 +5,9 @@ import {
   editOrderBOM,
   listOrderEdits,
   type Flushing,
+  type CoProduct,
+  type CoProductEdit,
+  type CoProductType,
   type LineEdit,
   type Operation,
   type OperationEdit,
@@ -18,7 +21,16 @@ import { dash, editOpLabel, flushingLabel } from "./labels";
 import styles from "./pages.module.css";
 
 /** What one submission of the editor changes. */
-export type EditKind = "add-line" | "change-line" | "remove-line" | "add-operation" | "change-operation" | "remove-operation";
+export type EditKind =
+  | "add-line"
+  | "change-line"
+  | "remove-line"
+  | "add-operation"
+  | "change-operation"
+  | "remove-operation"
+  | "add-coproduct"
+  | "change-coproduct"
+  | "remove-coproduct";
 
 export const editKindLabel: Record<EditKind, string> = {
   "add-line": "Add a component line",
@@ -27,6 +39,9 @@ export const editKindLabel: Record<EditKind, string> = {
   "add-operation": "Add an operation",
   "change-operation": "Change an operation",
   "remove-operation": "Remove an operation",
+  "add-coproduct": "Add a co-product or by-product",
+  "change-coproduct": "Change a co-product or by-product",
+  "remove-coproduct": "Remove a co-product or by-product",
 };
 
 export interface EditValues {
@@ -44,6 +59,7 @@ export interface EditValues {
   runTimeHPer: string;
   laborRate: string;
   overheadRate: string;
+  coType: CoProductType | "";
 }
 
 export type EditErrors = Partial<Record<keyof EditValues | "form", string>>;
@@ -63,6 +79,7 @@ export const emptyEdit: EditValues = {
   runTimeHPer: "",
   laborRate: "",
   overheadRate: "",
+  coType: "",
 };
 
 const decimalPattern = /^[0-9]{1,12}(\.[0-9]{1,6})?$/;
@@ -79,6 +96,9 @@ export function toEdits(kind: EditKind, values: EditValues): { edits?: OrderEdit
   const errors: EditErrors = {};
   const isLine = kind.endsWith("-line");
   const op = kind.startsWith("add") ? "add" : kind.startsWith("remove") ? "remove" : "change";
+  if (kind.endsWith("-coproduct")) {
+    return toCoProductEdits(op, values);
+  }
   // A removal sends only the line or operation number, so the other fields are not checked.
   const decimals = op === "remove" ? [] : isLine ? lineDecimals : operationDecimals;
   for (const name of decimals) {
@@ -143,14 +163,67 @@ export function toEdits(kind: EditKind, values: EditValues): { edits?: OrderEdit
   return Object.keys(errors).length > 0 ? { errors } : { edits: { operations: [edit] }, errors };
 }
 
+function toCoProductEdits(op: "add" | "remove" | "change", values: EditValues): { edits?: OrderEdits; errors: EditErrors } {
+  const errors: EditErrors = {};
+  if (values.lineNo.trim() === "" || values.lineNo.length > 20) {
+    errors.lineNo = "Enter a line number of up to 20 characters.";
+  }
+  if (op !== "remove") {
+    if (values.itemId !== "" && !uuidPattern.test(values.itemId)) {
+      errors.itemId = "Enter the item's id (a UUID).";
+    }
+    if (values.qtyPer !== "" && !decimalPattern.test(values.qtyPer)) {
+      errors.qtyPer = "Enter a number with up to 6 decimals.";
+    } else if (values.qtyPer !== "" && !/[1-9]/.test(values.qtyPer)) {
+      errors.qtyPer = "The quantity per unit must be positive.";
+    }
+    if (op === "add") {
+      if (values.itemId === "") errors.itemId = "Enter the item the order yields.";
+      if (values.qtyPer === "") errors.qtyPer = "Enter the quantity per unit.";
+    }
+  }
+  const edit: CoProductEdit = { op, lineNo: values.lineNo.trim() };
+  if (op !== "remove") {
+    if (values.itemId !== "") edit.itemId = values.itemId;
+    if (values.qtyPer !== "") edit.qtyPer = values.qtyPer;
+    if (values.coType !== "") edit.type = values.coType;
+    if (op === "change" && Object.keys(edit).length === 2) {
+      errors.form = "Fill in at least one value to change.";
+    }
+  }
+  return Object.keys(errors).length > 0 ? { errors } : { edits: { coProducts: [edit] }, errors };
+}
+
+/**
+ * Whether the editor offers a kind of edit on this order: a rework order yields no
+ * co-products (FR-21.20), and a co-product can only be changed or removed when the
+ * order declares one.
+ */
+export function offersKind(order: Pick<ProductionOrder, "originType" | "coProducts">, kind: EditKind): boolean {
+  if (kind === "add-coproduct") {
+    return order.originType !== "Rework";
+  }
+  if (kind.endsWith("-coproduct")) {
+    return (order.coProducts ?? []).length > 0;
+  }
+  return true;
+}
+
+function isCoProduct(image: OrderLine | Operation | CoProduct): image is CoProduct {
+  return (image as CoProduct).qtyPlanned !== undefined;
+}
+
 function isLine(image: OrderLine | Operation): image is OrderLine {
   return (image as OrderLine).lineNo !== undefined;
 }
 
-/** A short description of a line or operation image of the audit trail. */
-export function describeImage(image: OrderLine | Operation | null): string {
+/** A short description of a line, operation or co-product image of the audit trail. */
+export function describeImage(image: OrderLine | Operation | CoProduct | null): string {
   if (!image) {
     return dash;
+  }
+  if (isCoProduct(image)) {
+    return `${image.type === "by-product" ? "By-product" : "Co-product"} ${image.itemId} · ${image.qtyPer} per unit · plans ${image.qtyPlanned}`;
   }
   if (isLine(image)) {
     return `${image.itemId} · ${image.qtyPer} per unit · requires ${image.qtyRequired}`;
@@ -163,7 +236,8 @@ const trailColumns: DataTableColumn<OrderEditEntry>[] = [
   {
     key: "op",
     header: "Edit",
-    render: (row) => `${editOpLabel[row.op] ?? row.op} ${row.target === "line" ? "line" : "operation"} ${row.key}`,
+    render: (row) =>
+      `${editOpLabel[row.op] ?? row.op} ${row.target === "line" ? "line" : row.target === "coproduct" ? "co-product" : "operation"} ${row.key}`,
   },
   { key: "before", header: "Before", render: (row) => describeImage(row.before) },
   { key: "after", header: "After", render: (row) => describeImage(row.after) },
@@ -213,6 +287,7 @@ export function OrderEditPanel({ order, onEdited }: OrderEditPanelProps) {
   }, [loadTrail]);
 
   const lineKind = kind.endsWith("-line");
+  const coKind = kind.endsWith("-coproduct");
   const adding = kind.startsWith("add");
   const removing = kind.startsWith("remove");
 
@@ -265,10 +340,10 @@ export function OrderEditPanel({ order, onEdited }: OrderEditPanelProps) {
   const keep = adding ? undefined : "Keep the current value";
 
   return (
-    <Card title="BOM and route of this order">
+    <Card title="BOM, route and co-products of this order">
       <div className={styles.stack}>
         <p className={styles.hint}>
-          Edits apply to this order only, until it is started. Required quantities, the route's process quantities and, once
+          Edits apply to this order only, until it is started. Required quantities, the route's process quantities, the planned co-product quantities and, once
           estimated, the planned cost are recalculated, and every edit is kept below.
           {order.status === "Released" ? " A released order also needs the Maintain order BOM after release duty." : ""}
         </p>
@@ -285,7 +360,7 @@ export function OrderEditPanel({ order, onEdited }: OrderEditPanelProps) {
             <FormField id="edit-kind" label="Change">
               {(control) => (
                 <Select {...control} value={kind} onChange={(event) => choose(event.target.value as EditKind)}>
-                  {(Object.keys(editKindLabel) as EditKind[]).map((k) => (
+                  {(Object.keys(editKindLabel) as EditKind[]).filter((k) => offersKind(order, k)).map((k) => (
                     <option key={k} value={k}>
                       {editKindLabel[k]}
                     </option>
@@ -293,15 +368,15 @@ export function OrderEditPanel({ order, onEdited }: OrderEditPanelProps) {
                 </Select>
               )}
             </FormField>
-            {lineKind ? (
+            {lineKind || coKind ? (
               adding ? (
                 text("lineNo", "Line number", false, false)
               ) : (
-                <FormField id="edit-lineNo" label="Line" error={errors.lineNo}>
+                <FormField id="edit-lineNo" label={coKind ? "Co-product line" : "Line"} error={errors.lineNo}>
                   {(control) => (
                     <Select {...control} value={values.lineNo} onChange={(event) => setValues({ ...values, lineNo: event.target.value })}>
                       <option value="">Choose a line</option>
-                      {order.lines.map((l) => (
+                      {(coKind ? (order.coProducts ?? []) : order.lines).map((l) => (
                         <option key={l.lineNo} value={l.lineNo}>
                           {`${l.lineNo} · ${l.itemId}`}
                         </option>
@@ -361,7 +436,22 @@ export function OrderEditPanel({ order, onEdited }: OrderEditPanelProps) {
               </FormField>
             </div>
           ) : null}
-          {!removing && !lineKind ? (
+          {!removing && coKind ? (
+            <div className={styles.fields}>
+              {text("itemId", "Item", !adding, false)}
+              {text("qtyPer", "Quantity per unit", !adding)}
+              <FormField id="edit-coType" label="Type" optional>
+                {(control) => (
+                  <Select {...control} value={values.coType} onChange={(event) => setValues({ ...values, coType: event.target.value as CoProductType | "" })}>
+                    <option value="">{keep ?? "Co-product"}</option>
+                    <option value="co-product">Co-product (takes a share of the cost)</option>
+                    <option value="by-product">By-product (received at zero cost)</option>
+                  </Select>
+                )}
+              </FormField>
+            </div>
+          ) : null}
+          {!removing && !lineKind && !coKind ? (
             <div className={styles.fields}>
               {text("resourceId", "Resource", !adding, false)}
               {text("setupTimeH", "Setup hours")}
@@ -378,7 +468,7 @@ export function OrderEditPanel({ order, onEdited }: OrderEditPanelProps) {
           ) : null}
           <div className={styles.formActions}>
             <Button type="submit" variant={removing ? "danger" : "primary"} loading={busy}>
-              {removing ? (lineKind ? "Remove the line" : "Remove the operation") : "Save the edit"}
+              {removing ? (coKind ? "Remove the co-product" : lineKind ? "Remove the line" : "Remove the operation") : "Save the edit"}
             </Button>
           </div>
         </form>

@@ -5,7 +5,10 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/passage/platform/dbx"
 
 	"github.com/BenjaminSRussell/passage/services/pricing/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/pricing/internal/store"
@@ -191,5 +194,59 @@ func TestPostgres_FourEyesComposesWithCommodityRun(t *testing.T) {
 	}
 	if got, err := s.GetRecord(poster, created.ID); err != nil || !got.Amount.Equal(decimal.RequireFromString("12.012")) {
 		t.Fatalf("record after post = %+v, %v", got, err)
+	}
+}
+
+// The pricing date basis, the total discount basis and the smart rounding table are stored per
+// legal entity, announced with their values, and the journal rounds with the entity's table.
+func TestPostgres_ParameterBasesAndSmartRoundingBands(t *testing.T) {
+	pool := appPool(t)
+	ctx := principal(1, "")
+	s := store.New(pool)
+	def, err := s.GetParameters(ctx, legalEntity)
+	if err != nil || def.PricingDateBasis != domain.DateBasisShip || def.TotalDiscountBasis != domain.TotalBasisAfterLineDisc || len(def.SmartRoundingBands) != 3 {
+		t.Fatalf("defaults = %+v, %v", def, err)
+	}
+	bands := []domain.BandSpec{{UpTo: "20", Ending: "0.5"}, {Ending: "0"}}
+	set, err := s.SetParameters(ctx, store.Parameters{LegalEntityID: legalEntity, PricingDateBasis: domain.DateBasisDelivery,
+		TotalDiscountBasis: domain.TotalBasisGross, SmartRoundingBands: bands}, 0, "")
+	if err != nil || set.PricingDateBasis != domain.DateBasisDelivery || set.TotalDiscountBasis != domain.TotalBasisGross || len(set.SmartRoundingBands) != 2 || set.SmartRoundingBands[0].UpTo != "20" {
+		t.Fatalf("set = %+v, %v", set, err)
+	}
+	if _, err := s.SetParameters(ctx, store.Parameters{LegalEntityID: legalEntity, PricingDateBasis: "TODAY"}, 1, ""); problemStatus(err) != http.StatusUnprocessableEntity {
+		t.Fatalf("bad basis = %v; want 422", err)
+	}
+	if _, err := s.SetParameters(ctx, store.Parameters{LegalEntityID: legalEntity, SmartRoundingBands: []domain.BandSpec{{UpTo: "5", Ending: "0.5"}}}, 1, ""); problemStatus(err) != http.StatusUnprocessableEntity {
+		t.Fatalf("bad bands = %v; want 422", err)
+	}
+	ev := outboxRows(t, ctx, pool)
+	last := ev[len(ev)-1]
+	if last.Type != "dev.passage.pricing.parameters.changed.v1" || last.Data["pricing_date_basis"] != "DELIVERY_DATE" || last.Data["total_discount_basis"] != "GROSS" || len(last.Data["smart_rounding_bands"].([]any)) != 2 {
+		t.Fatalf("event = %+v", last)
+	}
+
+	// 7.41 + 5% = 7.7805 rounds up to 8.5 under the entity's table (7.99 under the default).
+	rec := activePrice(t, ctx, s, "C1", "7.41")
+	j, err := s.CreateJournal(ctx, store.JournalInput{LegalEntityID: legalEntity, Name: "Own bands", SmartRound: true,
+		Lines: []domain.JournalLine{adjust(rec.ID, rec.Version, "5")}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := s.ValidateJournal(ctx, j.ID)
+	if err != nil || v.ErrorCount != 0 || !v.Lines[0].After.Amount.Equal(decimal.RequireFromString("8.5")) {
+		t.Fatalf("validate = %+v, %v; want 8.5 under the entity's bands", v, err)
+	}
+	// Saving the default table stores NULL: the entity follows the default again.
+	// The table is stored in its canonical form, so the default written another way is the default.
+	back, err := s.SetParameters(ctx, store.Parameters{LegalEntityID: legalEntity, SmartRoundingBands: []domain.BandSpec{
+		{UpTo: "10.00", Ending: "0.990"}, {UpTo: "100", Ending: "0.95"}, {Ending: "0.0"}}}, 1, "")
+	if err != nil || len(back.SmartRoundingBands) != 3 || back.SmartRoundingBands[0] != domain.DefaultBandSpecs()[0] {
+		t.Fatalf("default table = %+v, %v", back, err)
+	}
+	var isNull bool
+	if err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select smart_rounding_bands is null from pricing_parameter where legal_entity_id = $1`, legalEntity).Scan(&isNull)
+	}); err != nil || !isNull {
+		t.Fatalf("default table stored as NULL = %v, %v", isNull, err)
 	}
 }

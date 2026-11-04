@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
-import { describeProblem, getOrderImport, ORDER_IMPORT_SKIP_LABELS, reimportOrder, type OrderImport, type OrderImportSkipped, type Problem } from "./api/client";
+import { describeProblem, getOrderImport, ORDER_IMPORT_SKIP_LABELS, reimportOrder, scheduleOrder, type OrderImport, type Run, type OrderImportSkipped, type Problem } from "./api/client";
 import { dash, formatDateTime, shortId } from "./format";
 import { ImportStatusBadge } from "./OrderImportsPage";
 import styles from "./pages.module.css";
@@ -13,6 +13,14 @@ const skippedColumns: DataTableColumn<OrderImportSkipped>[] = [
   { key: "detail", header: "Detail" },
 ];
 
+/** What a per-order run did, in words: firmed jobs are not part of the count. */
+export function runSummary(run: Run): string {
+  if (run.operationsCount === 0) return "Every operation is held by a firmed job, so nothing was moved.";
+  const unplaced = run.messages.length;
+  const placed = run.operationsCount - unplaced;
+  return unplaced === 0 ? `${placed} of ${placed} operations placed.` : `${placed} of ${run.operationsCount} operations placed; ${unplaced} could not be placed (see the run).`;
+}
+
 /** One received production order: what happened to each of its operations (FR-23.10). */
 export function OrderImportDetailPage() {
   const { orderId = "" } = useParams();
@@ -21,6 +29,21 @@ export function OrderImportDetailPage() {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<Problem | null>(null);
   const o = again ?? state.data;
+  const [scheduling, setScheduling] = useState(false);
+  const [scheduleFailure, setScheduleFailure] = useState<Problem | null>(null);
+  const [run, setRun] = useState<Run | null>(null);
+
+  async function scheduleNow() {
+    setScheduling(true);
+    setScheduleFailure(null);
+    try {
+      setRun(await scheduleOrder(orderId));
+    } catch (error) {
+      setScheduleFailure(describeProblem(error));
+    } finally {
+      setScheduling(false);
+    }
+  }
 
   async function importAgain() {
     setBusy(true);
@@ -84,6 +107,11 @@ export function OrderImportDetailPage() {
             <Link className={buttonClassName("secondary")} to="/scheduling/operations">
               Operations
             </Link>
+            {o.status !== "withdrawn" && (
+              <Button variant="secondary" loading={scheduling} onClick={scheduleNow}>
+                Schedule this order
+              </Button>
+            )}
             {o.replanRequired && (
               <Link className={buttonClassName("primary")} to="/scheduling/runs/new">
                 Start run
@@ -100,7 +128,7 @@ export function OrderImportDetailPage() {
       )}
       {o.replanRequired && (
         <Alert tone="warning" title="Schedule this order again">
-          An operation changed after it was placed, so its jobs were removed and it is open again. Start a run to place it.
+          An operation changed after it was placed, so its jobs were removed and it is open again. Schedule this order, or start a run, to place it.
         </Alert>
       )}
       <Card>
@@ -128,6 +156,16 @@ export function OrderImportDetailPage() {
           Map the engineering resource to a scheduling resource (Edit calendar, Engineering resource id), then import the order again.{" "}
           {o.reimportable ? "" : "This order was received before scheduling kept events; it is imported again on its next event."}{" "}
           <Link to="/scheduling/resources">Resources</Link>
+        </Alert>
+      )}
+      {scheduleFailure && (
+        <Alert tone="danger" title="Could not schedule the order" live="alert">
+          {scheduleFailure.message} ({scheduleFailure.code})
+        </Alert>
+      )}
+      {run && (
+        <Alert tone="success" title="The order was scheduled" live="status">
+          {runSummary(run)} <Link to={`/scheduling/runs/${run.id}`}>Open the run</Link>
         </Alert>
       )}
       {failure && (

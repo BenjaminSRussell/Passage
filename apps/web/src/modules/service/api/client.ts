@@ -44,8 +44,8 @@ export type Decimal = string;
  * posting, never by hand.
  */
 export const NEXT_STATUSES: Record<WorkOrderStatus, WorkOrderStatus[]> = {
-  UNSCHEDULED: ["SCHEDULED", "CANCELED"],
-  SCHEDULED: ["DISPATCHED", "CANCELED"],
+  UNSCHEDULED: ["CANCELED"],
+  SCHEDULED: ["CANCELED"],
   DISPATCHED: ["TRAVELING", "CANCELED"],
   TRAVELING: ["IN_PROGRESS", "CANCELED"],
   IN_PROGRESS: ["ON_HOLD", "COMPLETED", "CANCELED"],
@@ -126,6 +126,56 @@ export interface Agreement extends Omit<AgreementInput, "status"> {
   number: string;
   status: AgreementStatus;
   hoursConsumed: Decimal;
+  /** Visits recorded over all lines (FR-45.3). */
+  visitsConsumed: number;
+  /** Reason of the last suspension or cancellation. */
+  statusReason?: string | null;
+  /** If-Match / ETag version. */
+  version: number;
+}
+
+/** Statuses a caller may request for an agreement, mirrored from internal/domain: EXPIRED is set by the expiry pass only. */
+export type AgreementTarget = "ACTIVE" | "SUSPENDED" | "CANCELED";
+
+export const AGREEMENT_NEXT: Record<AgreementStatus, AgreementTarget[]> = {
+  DRAFT: ["ACTIVE", "CANCELED"],
+  ACTIVE: ["SUSPENDED", "CANCELED"],
+  SUSPENDED: ["ACTIVE", "CANCELED"],
+  EXPIRED: [],
+  CANCELED: [],
+};
+
+export const VISIT_KINDS = ["PREVENTIVE", "CORRECTIVE"] as const;
+export type VisitKind = (typeof VISIT_KINDS)[number];
+
+export interface AgreementVisit {
+  id: string;
+  agreementId: string;
+  lineIndex: number;
+  kind: VisitKind;
+  visitDate: string;
+  workOrderId: string | null;
+  note: string;
+  recordedBy: string;
+  createdAt: string;
+  /** Visits left on the line once this visit was recorded. */
+  visitsLeft: number;
+}
+
+export interface AgreementVisitInput {
+  lineIndex: number;
+  kind: VisitKind;
+  visitDate: string;
+  workOrderId?: string;
+  note?: string;
+}
+
+export interface AgreementChange {
+  from: AgreementStatus;
+  to: AgreementStatus;
+  reason: string;
+  actor: string;
+  at: string;
 }
 
 export interface OpenCaseInput {
@@ -226,6 +276,24 @@ export interface WorkOrder {
   completedAt?: string | null;
   /** Set at completion; false once a follow-up was opened. */
   firstTimeFix?: boolean | null;
+  /** Scheduling data (FR-45.6). */
+  requiredSkills?: string[];
+  windowStart?: string | null;
+  windowEnd?: string | null;
+  address?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  /** The one active assignment (FR-45.7). */
+  technicianId?: string | null;
+  assignedStart?: string | null;
+  assignedEnd?: string | null;
+  assignmentPinned?: boolean;
+  /** Completion data (BR-45.6, SVC-WO-001). */
+  signatureExempt?: boolean;
+  signedBy?: string | null;
+  signedAt?: string | null;
+  signatureRef?: string | null;
+  technicianNote?: string;
   version: number;
 }
 
@@ -378,6 +446,37 @@ export function createAgreement(input: AgreementInput, key: string = newKey()): 
   return json<Agreement>("/agreements", post(input, key));
 }
 
+/** Reads an agreement with the ETag that a status change must echo as If-Match. */
+export function readAgreement(agreementId: string, signal?: AbortSignal): Promise<Versioned<Agreement>> {
+  return versioned<Agreement>(`/agreements/${id(agreementId)}`, {}, signal);
+}
+
+/** Activates, suspends, resumes or cancels an agreement (FR-45.3); suspending and canceling need a reason. */
+export function transitionAgreement(agreementId: string, etag: string, to: AgreementTarget, reason: string, key: string = newKey()): Promise<Versioned<Agreement>> {
+  return versioned<Agreement>(`/agreements/${id(agreementId)}:transition`, {
+    method: "POST",
+    body: JSON.stringify(reason ? { to, reason } : { to }),
+    headers: { "If-Match": etag, "Idempotency-Key": key },
+  });
+}
+
+/** One expiry pass: ACTIVE and SUSPENDED agreements past their last day become EXPIRED. */
+export function expireAgreements(): Promise<{ scanned: number; expired: number }> {
+  return json<{ scanned: number; expired: number }>("/agreements:expire", { method: "POST" });
+}
+
+export async function listAgreementVisits(agreementId: string, signal?: AbortSignal): Promise<AgreementVisit[]> {
+  return (await json<{ items: AgreementVisit[] }>(`/agreements/${id(agreementId)}/visits`, {}, signal)).items;
+}
+
+export function recordAgreementVisit(agreementId: string, input: AgreementVisitInput, key: string = newKey()): Promise<AgreementVisit> {
+  return json<AgreementVisit>(`/agreements/${id(agreementId)}/visits`, post(input, key));
+}
+
+export async function listAgreementHistory(agreementId: string, signal?: AbortSignal): Promise<AgreementChange[]> {
+  return (await json<{ items: AgreementChange[] }>(`/agreements/${id(agreementId)}/history`, {}, signal)).items;
+}
+
 // --- Cases ---
 
 export interface CaseFilter {
@@ -444,6 +543,58 @@ export function transitionWorkOrder(workOrderId: string, etag: string, to: WorkO
     body: JSON.stringify({ to }),
     headers: { "If-Match": etag },
   });
+}
+
+// --- Technician action log (BR-45.6, FR-45.8) ---
+
+export const ACTION_KINDS = ["TRAVEL_START", "WORK_START", "HOLD", "RESUME", "PART_USED", "SIGNATURE", "NOTE", "COMPLETE"] as const;
+export type ActionKind = (typeof ACTION_KINDS)[number];
+
+export type ActionOutcome = "APPLIED" | "SUPERSEDED" | "REJECTED";
+
+export interface WorkOrderAction {
+  id: string;
+  workOrderId: string;
+  technicianId: string;
+  kind: ActionKind;
+  deviceTime: string;
+  receivedAt: string;
+  payload: { lineId?: string; qty?: Decimal; signedBy?: string; signatureRef?: string; text?: string };
+  outcome: ActionOutcome;
+  reasonCode?: string;
+  reason?: string;
+}
+
+export interface ActionInput {
+  id: string;
+  kind: ActionKind;
+  deviceTime: string;
+  lineId?: string;
+  qty?: Decimal;
+  signedBy?: string;
+  signatureRef?: string;
+  text?: string;
+}
+
+export interface ActionSyncResult {
+  results: { id: string; kind: ActionKind; outcome: ActionOutcome; code?: string; reason?: string; duplicate: boolean }[];
+  applied: number;
+  duplicates: number;
+  superseded: number;
+  rejected: number;
+  /** SVC-SYNC-001 when status conflicts were resolved. */
+  message?: string;
+  workOrder: WorkOrder;
+}
+
+/** The action log of a work order in merge order (device time, then receipt). */
+export function listWorkOrderActions(workOrderId: string, signal?: AbortSignal): Promise<{ items: WorkOrderAction[] }> {
+  return json<{ items: WorkOrderAction[] }>(`/work-orders/${id(workOrderId)}/actions`, {}, signal);
+}
+
+/** Merges a batch of a technician's actions; every action id is idempotent. */
+export function recordWorkOrderActions(workOrderId: string, technicianId: string, actions: ActionInput[]): Promise<ActionSyncResult> {
+  return json<ActionSyncResult>(`/work-orders/${id(workOrderId)}/actions`, { method: "POST", body: JSON.stringify({ technicianId, actions }) });
 }
 
 /** Posts a COMPLETED work order to billing and warranty cost (FR-45.10, BR-45.4). */
@@ -1160,4 +1311,150 @@ export function saveCaseMailbox(input: CaseMailboxInput): Promise<CaseMailbox> {
 /** Inbound email newest first, without the messages of cases the caller may not read. */
 export function listInboundMessages(f: InboundFilter = {}, signal?: AbortSignal): Promise<Page<InboundMessage>> {
   return json<Page<InboundMessage>>(`/inbound-messages${query({ mailbox: f.mailbox, caseId: f.caseId, route: f.route, cursor: f.cursor })}`, {}, signal, caseBase);
+}
+
+// --- Technicians and dispatch (FR-45.7) ---
+
+export interface TechnicianInput {
+  /** Only on create; the code does not change. */
+  code?: string;
+  name: string;
+  workerId?: string | null;
+  legalEntityId: string;
+  territoryIds: string[];
+  skills: string[];
+  timeZone: string;
+  /** ISO weekdays, Monday = 1. */
+  shiftDays: number[];
+  shiftStartMinute: number;
+  shiftEndMinute: number;
+  homeLatitude?: number | null;
+  homeLongitude?: number | null;
+  truckLocationId?: string | null;
+  maxDailyMinutes: number;
+  overtimeAllowed: boolean;
+  active: boolean;
+}
+
+export interface Technician extends Omit<TechnicianInput, "code"> {
+  id: string;
+  code: string;
+  version: number;
+}
+
+export interface TechnicianFilter {
+  territoryId?: string;
+  active?: "true" | "false" | "";
+  cursor?: string;
+}
+
+export function listTechnicians(f: TechnicianFilter = {}, signal?: AbortSignal): Promise<Page<Technician>> {
+  return json<Page<Technician>>(`/technicians${query({ territoryId: f.territoryId, active: f.active, cursor: f.cursor })}`, {}, signal);
+}
+
+export function getTechnician(technicianId: string, signal?: AbortSignal): Promise<Versioned<Technician>> {
+  return versioned<Technician>(`/technicians/${id(technicianId)}`, {}, signal);
+}
+
+export function createTechnician(input: TechnicianInput, key: string = newKey()): Promise<Versioned<Technician>> {
+  return versioned<Technician>("/technicians", post(input, key));
+}
+
+/** Replaces a technician's editable fields at the ETag the caller read. */
+export function updateTechnician(technicianId: string, etag: string, input: Omit<TechnicianInput, "code">): Promise<Versioned<Technician>> {
+  return versioned<Technician>(`/technicians/${id(technicianId)}`, { method: "PUT", body: JSON.stringify(input), headers: { "If-Match": etag } });
+}
+
+export interface SchedulingInput {
+  requiredSkills: string[];
+  windowStart: string | null;
+  windowEnd: string | null;
+  address: string;
+  latitude: number | null;
+  longitude: number | null;
+  estDurationMinutes: number;
+}
+
+/** Sets the scheduling data of an UNSCHEDULED work order. */
+export function updateScheduling(workOrderId: string, etag: string, input: SchedulingInput): Promise<Versioned<WorkOrder>> {
+  return versioned<WorkOrder>(`/work-orders/${id(workOrderId)}/scheduling`, { method: "PUT", body: JSON.stringify(input), headers: { "If-Match": etag } });
+}
+
+export interface AssignInput {
+  technicianId: string;
+  /** RFC 3339 instant; the visit ends after the work order's estimate. */
+  start: string;
+  pinned: boolean;
+}
+
+/** Gives a work order to a technician at a start time (BR-45.3); a broken constraint is 422 with every code in the problem's fields. */
+export function assignWorkOrder(workOrderId: string, etag: string, input: AssignInput): Promise<Versioned<WorkOrder>> {
+  return versioned<WorkOrder>(`/work-orders/${id(workOrderId)}:assign`, { method: "POST", body: JSON.stringify(input), headers: { "If-Match": etag } });
+}
+
+export function unassignWorkOrder(workOrderId: string, etag: string): Promise<Versioned<WorkOrder>> {
+  return versioned<WorkOrder>(`/work-orders/${id(workOrderId)}:unassign`, { method: "POST", headers: { "If-Match": etag } });
+}
+
+export interface BoardRow {
+  technician: Technician;
+  assignments: WorkOrder[];
+  bookedMinutes: number;
+}
+
+export interface DispatchBoard {
+  territoryId: string;
+  date: string;
+  timeZone: string;
+  technicians: BoardRow[];
+  unscheduled: WorkOrder[];
+}
+
+export interface BoardQuery {
+  territoryId: string;
+  /** The local calendar day, YYYY-MM-DD. */
+  date: string;
+  timeZone: string;
+}
+
+export function getDispatchBoard(q: BoardQuery, signal?: AbortSignal): Promise<DispatchBoard> {
+  return json<DispatchBoard>(`/dispatch/board${query({ territoryId: q.territoryId, date: q.date, timeZone: q.timeZone })}`, {}, signal);
+}
+
+export interface PublishInput {
+  legalEntityId: string;
+  territoryId: string;
+  date: string;
+  timeZone: string;
+}
+
+export interface DispatchedOrder {
+  workOrderId: string;
+  number: string;
+  technicianId: string;
+  sequence: number;
+  start: string;
+  end: string;
+}
+
+export interface DispatchRun {
+  id: string;
+  legalEntityId: string;
+  territoryId: string;
+  date: string;
+  timeZone: string;
+  status: "PUBLISHED";
+  assignments: DispatchedOrder[];
+  dispatchedCount: number;
+  publishedBy: string;
+  publishedAt: string;
+}
+
+/** Dispatches the SCHEDULED work orders of a territory-day (FR-45.7). */
+export function publishDispatch(input: PublishInput, key: string = newKey()): Promise<DispatchRun> {
+  return json<DispatchRun>("/dispatch/publish", post(input, key));
+}
+
+export function listDispatchRuns(f: { territoryId?: string; cursor?: string } = {}, signal?: AbortSignal): Promise<Page<DispatchRun>> {
+  return json<Page<DispatchRun>>(`/dispatch/runs${query({ territoryId: f.territoryId, cursor: f.cursor })}`, {}, signal);
 }

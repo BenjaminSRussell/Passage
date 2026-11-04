@@ -25,6 +25,8 @@ import styles from "./pages.module.css";
 const ACCOUNT = /^[A-Za-z0-9._-]{1,20}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DECIMAL = /^\d{1,14}(\.\d{1,6})?$/;
+const QUANTITY = /^\d{1,12}(\.\d{1,6})?$/;
+const UNIT = /^[A-Z0-9]{1,10}$/;
 
 export interface RecurringLineDraft {
   key: string;
@@ -34,6 +36,9 @@ export interface RecurringLineDraft {
   kind: "fixed" | "percent";
   amount: string;
   text: string;
+  /** Statistical quantity (BR-11.2) and unit; both empty for an ordinary line. */
+  quantity: string;
+  unit: string;
 }
 
 export interface RecurringDraft {
@@ -53,7 +58,7 @@ export interface RecurringDraft {
 let nextKey = 0;
 export function emptyRecurringLine(side: "D" | "C" = "D"): RecurringLineDraft {
   nextKey += 1;
-  return { key: `rl-${nextKey}`, account: "", dimensions: "", side, kind: "fixed", amount: "", text: "" };
+  return { key: `rl-${nextKey}`, account: "", dimensions: "", side, kind: "fixed", amount: "", text: "", quantity: "", unit: "" };
 }
 
 export function emptyRecurring(): RecurringDraft {
@@ -94,6 +99,13 @@ export function validateRecurring(v: RecurringDraft): Errors {
     if (!DECIMAL.test(l.amount.trim())) e[`lines.${i}.amount`] = `Line ${n}: enter a non-negative amount.`;
     else if (l.kind === "percent" && Number(l.amount) > 1000) e[`lines.${i}.amount`] = `Line ${n}: a percentage is at most 1000.`;
     if (parseDimensions(l.dimensions) === null) e[`lines.${i}.dimensions`] = `Line ${n}: write dimensions as DEPT=D100, CC=C200.`;
+    const quantity = l.quantity.trim();
+    const unit = l.unit.trim();
+    const hasQuantity = quantity !== "" && !/^0+(\.0+)?$/.test(quantity);
+    if (quantity !== "" && !QUANTITY.test(quantity)) e[`lines.${i}.quantity`] = `Line ${n}: enter a quantity such as 12.5 with at most 6 decimals.`;
+    else if (hasQuantity && unit === "") e[`lines.${i}.unit`] = `Line ${n}: a quantity needs a unit.`;
+    else if (!hasQuantity && unit !== "") e[`lines.${i}.unit`] = `Line ${n}: a unit needs a quantity above zero.`;
+    else if (unit !== "" && !UNIT.test(unit)) e[`lines.${i}.unit`] = `Line ${n}: a unit is 1 to 10 capital letters or digits.`;
   });
   return e;
 }
@@ -116,6 +128,7 @@ export function toRecurringInput(v: RecurringDraft): RecurringJournalInput {
         amountKind: l.kind,
         amount: { currency: v.currency, value: l.amount.trim() },
         ...(l.text.trim() ? { text: l.text.trim() } : {}),
+        ...(l.quantity.trim() !== "" && l.unit.trim() !== "" ? { quantity: l.quantity.trim(), unit: l.unit.trim() } : {}),
       };
     }),
   };
@@ -145,6 +158,8 @@ function toDraft(r: RecurringJournal): RecurringDraft {
       kind: l.amountKind,
       amount: l.amount,
       text: l.text ?? "",
+      quantity: l.quantity ?? "",
+      unit: l.unit ?? "",
     })),
   };
 }
@@ -167,6 +182,8 @@ export function draftFromBatch(b: JournalBatch): RecurringDraft {
         .join(", "),
       amount: l.amount,
       text: l.text ?? "",
+      quantity: l.quantity ?? "",
+      unit: l.unit ?? "",
     })),
   };
 }
@@ -245,6 +262,20 @@ function RecurringForm({ initial, existing }: { initial: RecurringDraft; existin
       key: "amount",
       header: "Amount or %",
       render: (l) => <Input aria-label={`Line ${values.lines.indexOf(l) + 1} amount`} className={styles.amount} inputMode="decimal" value={l.amount} onChange={(e) => updateLine(l.key, { amount: e.target.value })} />,
+    },
+    {
+      key: "quantity",
+      header: "Quantity",
+      render: (l) => (
+        <Input aria-label={`Line ${values.lines.indexOf(l) + 1} quantity`} className={styles.amount} inputMode="decimal" value={l.quantity} onChange={(e) => updateLine(l.key, { quantity: e.target.value })} />
+      ),
+    },
+    {
+      key: "unit",
+      header: "Unit",
+      render: (l) => (
+        <Input aria-label={`Line ${values.lines.indexOf(l) + 1} unit`} className={styles.mono} maxLength={10} value={l.unit} onChange={(e) => updateLine(l.key, { unit: e.target.value.toUpperCase() })} />
+      ),
     },
     {
       key: "text",

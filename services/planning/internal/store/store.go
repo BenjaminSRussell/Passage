@@ -59,7 +59,9 @@ type Store interface {
 	ListPlannedOrders(ctx context.Context, planCode string, f OrderFilter, limit int) ([]PlannedOrder, error)
 	GetPlannedOrder(ctx context.Context, id string) (PlannedOrder, error)
 	PegsOf(ctx context.Context, versionID, supplyRef string) ([]domain.PegLine, error)
-	ListMessages(ctx context.Context, planCode, action, sort string, limit int) ([]Message, error)
+	ListMessages(ctx context.Context, planCode, action, status, sort string, limit int) ([]Message, error)
+	GetMessage(ctx context.Context, id string) (Message, error)
+	DecideMessage(ctx context.Context, id string, expectedVersion int, d MessageDecision) (Message, bool, error)
 	UpdatePlannedOrder(ctx context.Context, id string, expectedVersion int, patch OrderPatch) (PlannedOrder, error)
 	DeletePlannedOrder(ctx context.Context, id string, expectedVersion int) error
 	FirmPlannedOrders(ctx context.Context, req FirmRequest) (FirmBatch, bool, error)
@@ -86,6 +88,11 @@ type Store interface {
 	GetCoverageGroup(ctx context.Context, code string) (CoverageGroup, error)
 	CreateCoverageGroup(ctx context.Context, req CoverageCreate) (CoverageGroup, bool, error)
 	UpdateCoverageGroup(ctx context.Context, expectedVersion int, spec domain.CoverageGroupSpec) (CoverageGroup, error)
+	ListAllocationKeys(ctx context.Context, limit int) ([]AllocationKey, error)
+	GetAllocationKey(ctx context.Context, code string) (AllocationKey, error)
+	CreateAllocationKey(ctx context.Context, req AllocationKeyCreate) (AllocationKey, bool, error)
+	UpdateAllocationKey(ctx context.Context, expectedVersion int, spec domain.AllocationKeySpec) (AllocationKey, error)
+	AllocateForecast(ctx context.Context, req AllocateRequest) (AllocateOutcome, error)
 	ListItemCoverages(ctx context.Context, itemID string, limit int) ([]ItemCoverage, error)
 	GetItemCoverage(ctx context.Context, id string) (ItemCoverage, error)
 	CreateItemCoverage(ctx context.Context, req ItemCoverageCreate) (ItemCoverage, bool, error)
@@ -221,6 +228,7 @@ func priorityText(p *decimal.Decimal) *string {
 
 // Message is one action or delay message of the current version.
 type Message struct {
+	ID     string `json:"id"`
 	Action string `json:"action"`
 	// Code and Text are the message catalog entry of the action (PRD 4.22.18); empty for an
 	// action without one.
@@ -238,6 +246,15 @@ type Message struct {
 	// order replenishes a DDMRP buffer (FR-22.16); null otherwise.
 	PlanningPriority *string `json:"planningPriority"`
 	BufferZone       *string `json:"bufferZone"`
+	// Status is open until a planner applies or dismisses the message (FR-22.7); Version is its ETag.
+	Status       string  `json:"status"`
+	Version      int     `json:"version"`
+	DecidedBy    *string `json:"decidedBy"`
+	DecidedAt    *string `json:"decidedAt"`
+	DecisionNote string  `json:"decisionNote"`
+	// CarriedFrom is the message of an earlier version the planner decided, when a run raised the same
+	// message again and carried the decision onto it; null for a decision made on this message.
+	CarriedFrom *string `json:"carriedFrom"`
 }
 
 // SortPriority orders a read by planning priority (FR-22.16): the most urgent buffer first.
@@ -328,7 +345,11 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `update plan_version set status = 'complete' where tenant_id = $1 and plan_id = $2 and status = 'current'`, p.TenantID, planID); err != nil {
+		// The version this run replaces; its decided messages carry over (FR-22.7).
+		var previousID string
+		err = tx.QueryRow(ctx, `update plan_version set status = 'complete' where tenant_id = $1 and plan_id = $2 and status = 'current' returning id::text`,
+			p.TenantID, planID).Scan(&previousID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
 		var key *string
@@ -420,9 +441,18 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 		if err := tx.SendBatch(ctx, batch).Close(); err != nil {
 			return err
 		}
+		carried, err := carryDecisions(ctx, tx, p.TenantID, previousID, versionID)
+		if err != nil {
+			return err
+		}
 		// FR-22.7: one message.raised.v1 per action or delay message, so
-		// purchasing, sales and notifications learn of it with the version.
+		// purchasing, sales and notifications learn of it with the version. A
+		// message that carries a planner's decision from the previous version is
+		// not raised again: its applied or dismissed event was already published.
 		for i, m := range r.Messages {
+			if carried[messageIDs[i]] {
+				continue
+			}
 			if err := enqueue(ctx, tx, planevents.MessageRaised, planID, p.TenantID, messageIDs[i], planevents.MessageRaisedData{
 				MessageID: messageIDs[i], PlanID: planID, PlanCode: req.PlanCode, VersionID: versionID, SiteID: req.SiteID,
 				Action: m.Action, ItemID: m.ItemID, WarehouseID: optional(m.WarehouseID), SupplyRef: m.SupplyRef, DemandRef: m.DemandRef,
@@ -715,41 +745,72 @@ func (s *Postgres) PegsOf(ctx context.Context, versionID, supplyRef string) ([]d
 	return out, err
 }
 
-// ListMessages reads the current version's messages, optionally of one action.
+// messageSelect reads messages with the planning priority and zone of the planned order they are about.
+const messageSelect = `select m.id::text, m.action, m.item_id::text, m.warehouse_id::text, m.supply_ref, m.demand_ref, to_char(m.suggested_date, 'YYYY-MM-DD'),
+		m.delay_days, m.qty::text, o.planning_priority::text, o.buffer_zone, m.status, m.version, m.decided_by,
+		to_char(m.decided_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), m.decision_note, m.carried_from::text
+	from action_message m join plan_version v on v.tenant_id = m.tenant_id and v.id = m.plan_version_id
+	join plan p on p.tenant_id = v.tenant_id and p.id = v.plan_id
+	left join planned_order o on o.tenant_id = m.tenant_id and o.plan_version_id = m.plan_version_id and o.number = m.supply_ref`
+
+func scanMessages(rows pgx.Rows) ([]Message, error) {
+	out := []Message{}
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(&m.ID, &m.Action, &m.ItemID, &m.WarehouseID, &m.SupplyRef, &m.DemandRef, &m.SuggestedDate, &m.DelayDays, &m.Qty,
+			&m.PlanningPriority, &m.BufferZone, &m.Status, &m.Version, &m.DecidedBy, &m.DecidedAt, &m.DecisionNote, &m.CarriedFrom); err != nil {
+			return nil, err
+		}
+		m.Code = domain.CatalogCode(m.Action)
+		prio := ""
+		if m.PlanningPriority != nil {
+			prio = *m.PlanningPriority
+		}
+		m.Text = domain.CatalogText(domain.MessageView{Action: m.Action, ItemID: m.ItemID, SupplyRef: m.SupplyRef, DemandRef: m.DemandRef,
+			Date: m.SuggestedDate, Days: m.DelayDays, Qty: m.Qty, Priority: prio})
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// StatusAll lists messages of every status; StatusOpen is the default of ListMessages.
+const StatusAll = "all"
+
+// ListMessages reads the current version's messages, optionally of one action and status (open
+// by default; StatusAll for every status).
 //
 // Messages about buffer-replenishing orders come first, the lowest planning priority (net-flow position
 // over top of green) first: with sort = SortPriority all of them, by default those of priority-based
 // items (see priorityOrder); the rest follow in action, supply, demand order.
-func (s *Postgres) ListMessages(ctx context.Context, planCode, action, sort string, limit int) ([]Message, error) {
+func (s *Postgres) ListMessages(ctx context.Context, planCode, action, status, sort string, limit int) ([]Message, error) {
 	p, _ := tenant.FromContext(ctx)
-	out := []Message{}
+	if status == "" {
+		status = domain.MessageOpen
+	}
+	var out []Message
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select m.action, m.item_id::text, m.warehouse_id::text, m.supply_ref, m.demand_ref, to_char(m.suggested_date, 'YYYY-MM-DD'), m.delay_days, m.qty::text,
-				o.planning_priority::text, o.buffer_zone
-			from action_message m join plan_version v on v.tenant_id = m.tenant_id and v.id = m.plan_version_id
-			join plan p on p.tenant_id = v.tenant_id and p.id = v.plan_id
-			left join planned_order o on o.tenant_id = m.tenant_id and o.plan_version_id = m.plan_version_id and o.number = m.supply_ref
+		rows, err := tx.Query(ctx, messageSelect+`
 			where m.tenant_id = $1 and p.code = $2 and v.status = 'current' and ($3::text = '' or m.action = $3)
-			order by `+priorityOrder("$5")+`, m.action, m.supply_ref, m.demand_ref, m.id limit $4`, p.TenantID, planCode, action, limit, sort)
+			and ($6::text = 'all' or m.status = $6)
+			order by `+priorityOrder("$5")+`, m.action, m.supply_ref, m.demand_ref, m.id limit $4`, p.TenantID, planCode, action, limit, sort, status)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
-		for rows.Next() {
-			var m Message
-			if err := rows.Scan(&m.Action, &m.ItemID, &m.WarehouseID, &m.SupplyRef, &m.DemandRef, &m.SuggestedDate, &m.DelayDays, &m.Qty, &m.PlanningPriority, &m.BufferZone); err != nil {
-				return err
-			}
-			m.Code = domain.CatalogCode(m.Action)
-			prio := ""
-			if m.PlanningPriority != nil {
-				prio = *m.PlanningPriority
-			}
-			m.Text = domain.CatalogText(domain.MessageView{Action: m.Action, ItemID: m.ItemID, SupplyRef: m.SupplyRef, DemandRef: m.DemandRef,
-				Date: m.SuggestedDate, Days: m.DelayDays, Qty: m.Qty, Priority: prio})
-			out = append(out, m)
-		}
-		return rows.Err()
+		out, err = scanMessages(rows)
+		return err
+	})
+	return out, err
+}
+
+// GetMessage reads one message of any version by id.
+func (s *Postgres) GetMessage(ctx context.Context, id string) (Message, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out Message
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		out, err = readMessage(ctx, tx, p.TenantID, id)
+		return err
 	})
 	return out, err
 }

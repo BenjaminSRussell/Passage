@@ -26,6 +26,7 @@ import {
   listPlannedOrders,
   listVersions,
   type Message,
+  type MessageStatus,
   type PegNode,
   type PlannedOrder,
   type PlanVersion,
@@ -41,13 +42,14 @@ export { DEFAULT_PLAN_CODE } from "./hooks";
 /** Rows the list endpoints return at most (MaxPageSize in the service). */
 export const PAGE_LIMIT = 500;
 
-const dash = "—";
+export const dash = "—";
 
 /** Planning scope of an order or message: the site, or the warehouse that is planned and netted on its own (FR-22.18). */
-const scopeLabel = (x: { warehouseId?: string | null }) => (x.warehouseId ? `Warehouse ${x.warehouseId}` : "Site");
+export const scopeLabel = (x: { warehouseId?: string | null }) => (x.warehouseId ? `Warehouse ${x.warehouseId}` : "Site");
 
 const ORDER_STATUSES = ["unprocessed", "approved", "firmed"] as const;
-const MESSAGE_ACTIONS = ["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone", "sales-on-top", "no-vendor"] as const;
+const MESSAGE_STATUS_FILTERS = ["open", "applied", "dismissed", "all"] as const;
+export const MESSAGE_ACTIONS = ["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone", "sales-on-top", "no-vendor", "no-quota-source", "lot-split", "bom-cycle"] as const;
 
 const orderTypeLabel: Record<PlannedOrder["orderType"], string> = {
   purchase: "Purchase",
@@ -55,7 +57,7 @@ const orderTypeLabel: Record<PlannedOrder["orderType"], string> = {
   transfer: "Transfer",
 };
 
-const actionTone: Record<Message["action"], BadgeTone> = {
+export const actionTone: Record<Message["action"], BadgeTone> = {
   delay: "danger",
   shortage: "warning",
   advance: "info",
@@ -66,7 +68,16 @@ const actionTone: Record<Message["action"], BadgeTone> = {
   "red-zone": "danger",
   "sales-on-top": "info",
   "no-vendor": "warning",
+  "no-quota-source": "danger",
+  "lot-split": "warning",
+  "bom-cycle": "warning",
 };
+
+/**
+ * The delay of a message in days, 0 when it has none. A lot-split warning (PLAN-0005) carries the
+ * number of split orders in delayDays, not a delay, so it never shows as one.
+ */
+export const messageDelay = (m: Pick<Message, "action" | "delayDays">) => (m.action === "lot-split" ? 0 : m.delayDays);
 
 /** The DDMRP buffer priority and zone of an order that replenishes a buffer (FR-22.16). */
 function bufferPriority(o: PlannedOrder) {
@@ -81,7 +92,7 @@ const targetLabel: Record<NonNullable<PlannedOrder["firmedTargetType"]>, string>
   "transfer-order": "Transfer order",
 };
 
-const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).replace(/-/g, " ");
+export const sentence = (s: string) => s === "bom-cycle" ? "BOM cycle" : s.charAt(0).toUpperCase() + s.slice(1).replace(/-/g, " ");
 
 /** Counts planned orders per type and how many are delayed (the workspace tiles). */
 export function summarize(orders: PlannedOrder[], messages: Message[]) {
@@ -94,7 +105,7 @@ export function summarize(orders: PlannedOrder[], messages: Message[]) {
   return { byType, delayed, messages: messages.length };
 }
 
-function LoadAlert({ what, error }: { what: string; error: LoadError | null }) {
+export function LoadAlert({ what, error }: { what: string; error: LoadError | null }) {
   return (
     <Alert tone="danger" title={error ? `Could not load ${what}` : undefined} live="alert">
       {error ? `${error.message} (${error.code})` : null}
@@ -131,7 +142,7 @@ export function PlanPicker({ children }: { children?: ReactNode }) {
   );
 }
 
-function Details({ entries }: { entries: [string, ReactNode, boolean?][] }) {
+export function Details({ entries }: { entries: [string, ReactNode, boolean?][] }) {
   return (
     <dl className={styles.details}>
       {entries.map(([term, value, mono]) => (
@@ -556,16 +567,19 @@ export function MessagesPage() {
   const raw = params.get("action") ?? "";
   const action = (MESSAGE_ACTIONS as readonly string[]).includes(raw) ? (raw as Message["action"]) : undefined;
   const sort = params.get("sort") === "priority" ? ("priority" as const) : undefined;
-  const state = useLoad((signal) => listMessages(plan, action, { signal }, sort), [plan, action, sort]);
+  const rawStatus = params.get("status") ?? "";
+  const status = (MESSAGE_STATUS_FILTERS as readonly string[]).includes(rawStatus) ? (rawStatus as MessageStatus | "all") : undefined;
+  const state = useLoad((signal) => listMessages(plan, action, { signal }, sort, status), [plan, action, sort, status]);
   const columns: DataTableColumn<Message>[] = [
     { key: "action", header: "Action", render: (m) => <Badge tone={actionTone[m.action]}>{sentence(m.action)}</Badge> },
+    { key: "status", header: "Status", render: (m) => <StatusPill status={m.status} /> },
     { key: "text", header: "Message", render: (m) => (m.text ? `${m.code ? `${m.code} ` : ""}${m.text}` : dash) },
     { key: "itemId", header: "Item", mono: true },
     { key: "warehouseId", header: "Scope", mono: true, render: scopeLabel },
     { key: "supplyRef", header: "Supply", mono: true, render: (m) => m.supplyRef || dash },
     { key: "demandRef", header: "Demand", mono: true, render: (m) => m.demandRef || dash },
     { key: "suggestedDate", header: "Suggested date", render: (m) => m.suggestedDate || dash },
-    { key: "delayDays", header: "Delay (days)", align: "end", render: (m) => (m.delayDays > 0 ? m.delayDays : dash) },
+    { key: "delayDays", header: "Delay (days)", align: "end", render: (m) => (messageDelay(m) > 0 ? messageDelay(m) : dash) },
     { key: "qty", header: "Quantity", align: "end" },
     {
       key: "planningPriority",
@@ -573,7 +587,25 @@ export function MessagesPage() {
       align: "end",
       render: (m) => (m.planningPriority ? `${priorityPercent(m.planningPriority)}${m.bufferZone ? ` ${zoneLabel[m.bufferZone]}` : ""}` : dash),
     },
+    {
+      key: "id",
+      header: "Decide",
+      render: (m) =>
+        m.id ? (
+          <Link to={withPlan(`/planning/messages/${m.id}`, plan)} aria-label={`Review ${sentence(m.action)} message of item ${m.itemId}`}>
+            Review
+          </Link>
+        ) : (
+          dash
+        ),
+    },
   ];
+  const setStatus = (value: string) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set("status", value);
+    else next.delete("status");
+    setParams(next);
+  };
   const setAction = (value: string) => {
     const next = new URLSearchParams(params);
     if (value) next.set("action", value);
@@ -605,6 +637,18 @@ export function MessagesPage() {
           </FormField>
         </div>
         <div className={styles.toolbarField}>
+          <FormField id="planning-msg-status" label="Status">
+            {(a11y) => (
+              <Select {...a11y} value={status ?? ""} onChange={(e) => setStatus(e.target.value)}>
+                <option value="">Open</option>
+                <option value="applied">Applied</option>
+                <option value="dismissed">Dismissed</option>
+                <option value="all">All statuses</option>
+              </Select>
+            )}
+          </FormField>
+        </div>
+        <div className={styles.toolbarField}>
           <FormField id="planning-msg-sort" label="Sort by">
             {(a11y) => (
               <Select {...a11y} value={sort ?? ""} onChange={(e) => setSort(e.target.value)}>
@@ -621,9 +665,9 @@ export function MessagesPage() {
           label="Messages"
           columns={columns}
           rows={state.data ?? []}
-          getRowKey={(m, i) => `${m.action}-${m.itemId}-${m.supplyRef ?? ""}-${m.demandRef ?? ""}-${i}`}
+          getRowKey={(m, i) => `${m.id ?? m.action}-${m.itemId}-${m.supplyRef ?? ""}-${m.demandRef ?? ""}-${i}`}
           loading={state.loading}
-          empty={{ title: "No messages", description: "The current plan version needs no action." }}
+          empty={{ title: "No messages", description: status && status !== "open" ? "No message of this status in the current plan version." : "The current plan version has no open messages." }}
         />
       )}
     </div>

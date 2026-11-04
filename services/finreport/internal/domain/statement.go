@@ -134,6 +134,17 @@ type evaluator struct {
 	colIdx map[string]int
 	memo   map[[2]int]cellVal
 	busy   map[[2]int]bool
+	// accounts holds the sorted, distinct explicit account list of each row
+	// that has one, so its balances are found by binary search.
+	accounts map[string][]string
+	// byValue indexes a slot's balances by the value of one dimension
+	// attribute (positions in the sorted slot list), built on first use.
+	byValue map[dimSlot]map[string][]int
+}
+
+type dimSlot struct {
+	slot
+	attr string
 }
 
 // Evaluate computes every cell of a definition for one ledger and run period.
@@ -158,12 +169,16 @@ func Evaluate(in Input) (Result, error) {
 		def: def, cal: in.Calendar, plans: plans,
 		index: map[slot][]Balance{}, rowIdx: map[string]int{}, colIdx: map[string]int{},
 		memo: map[[2]int]cellVal{}, busy: map[[2]int]bool{},
+		accounts: map[string][]string{}, byValue: map[dimSlot]map[string][]int{},
 	}
 	for j, c := range def.Columns {
 		e.colIdx[c.Code] = j
 	}
 	for i, r := range def.Rows {
 		e.rowIdx[r.Code] = i
+		if len(r.Accounts) > 0 {
+			e.accounts[r.Code] = distinctSorted(r.Accounts)
+		}
 	}
 	for _, b := range in.Balances {
 		if b.LedgerID != in.LedgerID || b.Period < 0 || b.Period >= len(periods) {
@@ -336,6 +351,99 @@ func (e *evaluator) calcColumn(ri, ci int) (cellVal, error) {
 	return cellVal{v: val.V, blank: val.Blank, computed: true}, nil
 }
 
+// matching returns the positions in list (the sorted balances of slot k) of
+// the balances row picks up, in list order. A contiguous account range is cut by
+// binary search; an explicit account list looks each account up; a filter on
+// one dimension attribute without wildcards reads the slot's value index. Rows
+// written by hierarchy runs use the last two, so a 2,000-node hierarchy stays
+// within the FR-15.6 budget instead of scanning every balance per row.
+func (e *evaluator) matching(row Row, k slot, list []Balance) []int {
+	lo, hi := 0, len(list)
+	if row.AccountFrom != "" {
+		lo = sort.Search(len(list), func(j int) bool { return list[j].Account >= row.AccountFrom })
+		hi = sort.Search(len(list), func(j int) bool { return list[j].Account > row.AccountTo })
+	}
+	var out []int
+	keep := func(j int) {
+		if dimsMatch(row.DimensionFilter, list[j].Dims) {
+			out = append(out, j)
+		}
+	}
+	if accts, ok := e.accounts[row.Code]; ok {
+		for _, a := range accts {
+			j := lo + sort.Search(hi-lo, func(n int) bool { return list[lo+n].Account >= a })
+			for ; j < hi && list[j].Account == a; j++ {
+				keep(j)
+			}
+		}
+		return out
+	}
+	if attr, ok := singleExactAttribute(row.DimensionFilter); ok {
+		idx := e.valueIndex(k, attr, list)
+		var pos []int
+		for _, v := range distinctSorted(row.DimensionFilter[attr]) {
+			pos = append(pos, idx[v]...)
+		}
+		sort.Ints(pos)
+		for _, j := range pos {
+			if j >= lo && j < hi {
+				out = append(out, j)
+			}
+		}
+		return out
+	}
+	for j := lo; j < hi; j++ {
+		keep(j)
+	}
+	return out
+}
+
+// valueIndex maps each value of attr (empty when a balance has none) to the
+// positions of the balances of slot k that carry it, in list order.
+func (e *evaluator) valueIndex(k slot, attr string, list []Balance) map[string][]int {
+	key := dimSlot{k, attr}
+	if idx, ok := e.byValue[key]; ok {
+		return idx
+	}
+	idx := map[string][]int{}
+	for j, b := range list {
+		v := b.Dims[attr]
+		idx[v] = append(idx[v], j)
+	}
+	e.byValue[key] = idx
+	return idx
+}
+
+// singleExactAttribute reports the attribute of a filter on exactly one
+// attribute whose values are all literal (no "*" wildcard).
+func singleExactAttribute(filter map[string][]string) (string, bool) {
+	if len(filter) != 1 {
+		return "", false
+	}
+	for attr, values := range filter {
+		for _, v := range values {
+			if v == "*" {
+				return "", false
+			}
+		}
+		return attr, true
+	}
+	return "", false
+}
+
+func distinctSorted(in []string) []string {
+	out := append([]string(nil), in...)
+	sort.Strings(out)
+	n := 0
+	for i, v := range out {
+		if i == 0 || v != out[n-1] {
+			out[n] = v
+			n++
+		}
+	}
+	return out[:n]
+}
+
 // sumBalances sums the displayed amounts of matching balances over the
 // column's periods. Keys are produced in (period, account, combination) order.
 func (e *evaluator) sumBalances(row Row, ci int) cellVal {
@@ -351,16 +459,10 @@ func (e *evaluator) sumBalances(row Row, ci int) cellVal {
 		if !plan.include[i] {
 			continue
 		}
-		list := e.index[slot{plan.currency, i}]
-		lo, hi := 0, len(list)
-		if row.AccountFrom != "" {
-			lo = sort.Search(len(list), func(j int) bool { return list[j].Account >= row.AccountFrom })
-			hi = sort.Search(len(list), func(j int) bool { return list[j].Account > row.AccountTo })
-		}
-		for _, b := range list[lo:hi] {
-			if !dimsMatch(row.DimensionFilter, b.Dims) {
-				continue
-			}
+		k := slot{plan.currency, i}
+		list := e.index[k]
+		for _, j := range e.matching(row, k, list) {
+			b := list[j]
 			net := b.Net
 			if excludeClosing {
 				net = net.Sub(b.ClosingNet)

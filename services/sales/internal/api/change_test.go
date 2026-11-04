@@ -161,6 +161,7 @@ func TestListOrderVersions(t *testing.T) {
 type remainderStore struct {
 	fakeStore
 	version int
+	lineNo  int
 	reason  *string
 	actor   string
 }
@@ -168,6 +169,34 @@ type remainderStore struct {
 func (c *remainderStore) CancelRemainder(_ context.Context, _ string, version int, reason, actor string, _ time.Time) (store.Order, error) {
 	c.version, c.reason, c.actor = version, &reason, actor
 	return store.Order{Version: version + 1, Status: "SHIPPED", Lines: []store.Line{}, Holds: []store.Hold{}}, nil
+}
+
+func (c *remainderStore) CancelLineRemainder(_ context.Context, _ string, lineNo, version int, reason, actor string, _ time.Time) (store.Order, error) {
+	c.lineNo, c.version, c.reason, c.actor = lineNo, version, &reason, actor
+	return store.Order{Version: version + 1, Status: "PARTIALLY_SHIPPED", Lines: []store.Line{}, Holds: []store.Hold{}}, nil
+}
+
+// TestCancelLineRemainder_DutyAndBody checks the per-line close: the line number
+// reaches the store, the duty is sales.order.write, If-Match is required and a
+// line number that is not positive is a 400.
+func TestCancelLineRemainder_DutyAndBody(t *testing.T) {
+	c := &remainderStore{}
+	id := ids.New()
+	path := orders + "/" + id + "/lines/2:cancel-remainder"
+	rec := serveBody(t, c, http.MethodPost, path, `{"reason":"short"}`, principal(dutyWrite), map[string]string{"If-Match": `"5"`})
+	if rec.Code != http.StatusOK || c.lineNo != 2 || c.version != 5 || c.reason == nil || *c.reason != "short" || rec.Header().Get("ETag") != `"6"` {
+		t.Fatalf("status %d line %d version %d: %s", rec.Code, c.lineNo, c.version, rec.Body.String())
+	}
+	c.reason = nil
+	if rec := serveBody(t, c, http.MethodPost, path, "", principal(dutyConfirm), map[string]string{"If-Match": `"5"`}); rec.Code != http.StatusForbidden || c.reason != nil {
+		t.Fatalf("with only the confirm duty: %d", rec.Code)
+	}
+	if rec := serveBody(t, c, http.MethodPost, path, "", principal(dutyWrite), nil); rec.Code != http.StatusPreconditionRequired || c.reason != nil {
+		t.Fatalf("without If-Match: %d", rec.Code)
+	}
+	if rec := serveBody(t, c, http.MethodPost, orders+"/"+id+"/lines/0:cancel-remainder", "", principal(dutyWrite), map[string]string{"If-Match": `"5"`}); rec.Code != http.StatusBadRequest || c.reason != nil {
+		t.Fatalf("line 0: %d", rec.Code)
+	}
 }
 
 // TestCancelRemainder_DutyAndBody checks that :cancel-remainder needs
@@ -196,5 +225,37 @@ func TestCancelRemainder_DutyAndBody(t *testing.T) {
 	long := `{"reason":"` + strings.Repeat("x", 501) + `"}`
 	if rec := serveBody(t, c, http.MethodPost, path, long, principal(dutyWrite), map[string]string{"If-Match": `"5"`}); rec.Code != http.StatusBadRequest || c.reason != nil {
 		t.Fatalf("a 501 character reason: %d", rec.Code)
+	}
+}
+
+// TestPatchOrder_AddsAndRemovesLines: addLines arrive as store lines (same
+// field rules as an order line), removeLines as numbers, and the override
+// reason with the approve duty; a bad added line is a 400 with field paths and
+// a line cannot carry a configuration through a change.
+func TestPatchOrder_AddsAndRemovesLines(t *testing.T) {
+	c := &changeStore{}
+	product, site, wh := ids.New(), ids.New(), ids.New()
+	body := `{"reason":"add","addLines":[{"productId":"` + product + `","quantity":"3","unit":"EA","siteId":"` + site + `","warehouseId":"` + wh +
+		`","unitPrice":"4.50","requestedShipDate":"2027-03-09"}],"removeLines":[2],"listingOverrideReason":"key account"}`
+	rec := serveBody(t, c, http.MethodPatch, orders+"/"+ids.New(), body, principal(dutyWrite, dutyOrderApprove), map[string]string{"If-Match": `"3"`})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(c.change.AddLines) != 1 || c.change.AddLines[0].ProductID != product || !c.change.AddLines[0].Quantity.Equal(decimal.NewFromInt(3)) ||
+		!c.change.AddLines[0].UnitPrice.Equal(decimal.RequireFromString("4.5")) || !c.change.AddLines[0].DiscPct.IsZero() ||
+		len(c.change.RemoveLines) != 1 || c.change.RemoveLines[0] != 2 || c.change.ListingOverrideReason != "key account" || !c.change.Approver {
+		t.Fatalf("change = %+v", c.change)
+	}
+
+	bad := `{"addLines":[{"productId":"x","quantity":"0","unit":"","siteId":"` + site + `","warehouseId":"` + wh +
+		`","unitPrice":"1","requestedShipDate":"soon","configurationId":"` + ids.New() + `"}],"removeLines":[0]}`
+	rec = serveBody(t, &changeStore{}, http.MethodPatch, orders+"/"+ids.New(), bad, principal(dutyWrite), map[string]string{"If-Match": `"3"`})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{"addLines[0].productId", "addLines[0].unit", "addLines[0].requestedShipDate", "addLines[0].configurationId", "removeLines[0]"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("missing field error %q in %s", want, rec.Body.String())
+		}
 	}
 }

@@ -194,7 +194,7 @@ func TestPostgres_AC1_RandomConcurrentEntriesBalanceAndProjectionEqualsJournal(t
 		"1200": {Name: "Prepayments", Type: "asset", Postable: true},
 		"4000": {Name: "Revenue", Type: "revenue", Postable: true},
 	} {
-		if _, _, err := e.store.PutAccount(e.ctx, "STD", num, a); err != nil {
+		if _, _, err := e.store.PutAccount(e.ctx, "STD", num, 0, a); err != nil {
 			t.Fatalf("put account %s: %v", num, err)
 		}
 	}
@@ -531,14 +531,14 @@ func TestPostgres_AC2_PostingRejectsUnbalancedClosedPeriodAndInvalidDimension(t 
 			mutate: func(in *PostInput) { in.Lines[0].Dimensions = map[string]string{"DEPT": "bad value!"} }},
 		{name: "suspended dimension value", want: domain.CodeDimensionInactive,
 			prepare: func(t *testing.T, e env) {
-				if _, _, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, domain.DimensionValue{Attribute: "DEPT", Value: "D100", Name: "Sales", Suspended: true}); err != nil {
+				if _, _, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, 0, domain.DimensionValue{Attribute: "DEPT", Value: "D100", Name: "Sales", Suspended: true}); err != nil {
 					t.Fatal(err)
 				}
 			}},
 		{name: "dimension value not yet active", want: domain.CodeDimensionInactive,
 			prepare: func(t *testing.T, e env) {
 				from := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-				if _, _, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, domain.DimensionValue{Attribute: "DEPT", Value: "D100", Name: "Sales", ActiveFrom: &from}); err != nil {
+				if _, _, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, 0, domain.DimensionValue{Attribute: "DEPT", Value: "D100", Name: "Sales", ActiveFrom: &from}); err != nil {
 					t.Fatal(err)
 				}
 			}},

@@ -22,7 +22,7 @@ const nightly = "0 3 * * *"
 func seedCron(t *testing.T, s store.Store, ctx context.Context, bindingID string, due time.Time) string {
 	t.Helper()
 	got := ""
-	if err := s.SeedSync(ctx, bindingID, func(c string) (time.Time, bool) { got = c; return due, true }); err != nil {
+	if err := s.SeedSync(ctx, bindingID, func(c, _ string) (time.Time, bool) { got = c; return due, true }); err != nil {
 		t.Fatal(err)
 	}
 	return got
@@ -185,4 +185,76 @@ func TestPostgres_ScheduleOverrideUnderRLS(t *testing.T) {
 		t.Fatal(err)
 	}
 	exerciseScheduleOverride(t, store.New(pool), principalContext(1))
+}
+
+// exerciseScheduleTimezone runs against Postgres (under the app role) and Mem: the project's zone is the zone its
+// binding's cron is read in, it defaults to UTC, and changing it re-seeds the binding.
+func exerciseScheduleTimezone(t *testing.T, s store.Store, ctx context.Context) {
+	r := newSyncRig(t, s, ctx, nightly)
+	if r.project.ScheduleTimezone != "UTC" {
+		t.Fatalf("default zone = %q", r.project.ScheduleTimezone)
+	}
+	zoneAsked := func() string {
+		got := ""
+		if err := s.SeedSync(ctx, r.binding.ID, func(_, z string) (time.Time, bool) { got = z; return time.Now().Add(time.Hour), true }); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := zoneAsked(); got != "UTC" {
+		t.Fatalf("seed zone = %q", got)
+	}
+	if v, _ := s.GetSync(ctx, r.binding.ID); v.ScheduleTimezone != "UTC" {
+		t.Fatalf("view zone = %q", v.ScheduleTimezone)
+	}
+	// A zone change alone, the cron untouched, makes the binding a candidate and is read by the next seed.
+	if _, err := s.UpdateProject(ctx, r.project.ID, r.project.Version, func(p *store.Project) error { p.ScheduleTimezone = "America/Chicago"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if !candidateIDs(t, s)[r.binding.ID] {
+		t.Fatal("a changed zone must make the binding a candidate so it is re-seeded")
+	}
+	if _, ok, _ := s.ClaimSync(ctx, r.binding.ID, ids.New()); ok {
+		t.Fatal("an unseeded zone change must not be claimed")
+	}
+	due := time.Now().Add(5 * time.Hour).Truncate(time.Second)
+	if err := s.SeedSync(ctx, r.binding.ID, func(c, z string) (time.Time, bool) {
+		if c != nightly || z != "America/Chicago" {
+			t.Errorf("seed asked for %q in %q", c, z)
+		}
+		return due, true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	v, _ := s.GetSync(ctx, r.binding.ID)
+	if v.ScheduleTimezone != "America/Chicago" || v.NextDueAt == nil || v.NextDueAt.Sub(due).Abs() > time.Second {
+		t.Fatalf("after the zone change = %+v", v)
+	}
+	if candidateIDs(t, s)[r.binding.ID] {
+		t.Fatal("re-seeded: not a candidate again")
+	}
+	// An emptied zone is UTC again.
+	if _, err := s.UpdateProject(ctx, r.project.ID, r.project.Version+1, func(p *store.Project) error { p.ScheduleTimezone = ""; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	pr, _ := s.GetProject(ctx, r.project.ID)
+	if pr.ScheduleTimezone != "UTC" {
+		t.Fatalf("an emptied zone is UTC, got %q", pr.ScheduleTimezone)
+	}
+	if got := zoneAsked(); got != "UTC" {
+		t.Fatalf("seed zone after reset = %q", got)
+	}
+}
+
+func TestMem_ScheduleTimezone(t *testing.T) {
+	exerciseScheduleTimezone(t, store.NewMem(), principalContext(1))
+}
+
+func TestPostgres_ScheduleTimezoneUnderRLS(t *testing.T) {
+	admin, pool := testkit.DBWithApp(t)
+	testdb.Fresh(t, admin)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	exerciseScheduleTimezone(t, store.New(pool), principalContext(1))
 }

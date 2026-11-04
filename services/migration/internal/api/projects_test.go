@@ -437,3 +437,41 @@ func TestProjectRuns_ClaimReleasedWhenTheRunFailsOrPanics(t *testing.T) {
 		}
 	}
 }
+
+// scheduleTimezone is the IANA zone the cron is read in: UTC unless set, refused when it is not a zone name.
+func TestProjects_ScheduleTimezone(t *testing.T) {
+	r, _ := newProjectRouter()
+	zone := func(rec *httptest.ResponseRecorder) string {
+		var v struct {
+			Zone string `json:"scheduleTimezone"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &v)
+		return v.Zone
+	}
+	create := func(name, extra string) *httptest.ResponseRecorder {
+		return do(r, http.MethodPost, projectsPath, `{"name":"`+name+`","projectType":"migrate","sourceSystem":"ax2012","scheduleCron":"30 2 * * *"`+extra+`}`, writeDuties, true)
+	}
+	if rec := create("Default", ``); rec.Code != http.StatusCreated || zone(rec) != "UTC" {
+		t.Fatalf("default = %d %s", rec.Code, rec.Body)
+	}
+	rec := create("Berlin", `,"scheduleTimezone":"Europe/Berlin"`)
+	if rec.Code != http.StatusCreated || zone(rec) != "Europe/Berlin" {
+		t.Fatalf("berlin = %d %s", rec.Code, rec.Body)
+	}
+	for _, bad := range []string{"Mars/Base", "Local", "CET5"} {
+		if rec := create("Bad "+bad, `,"scheduleTimezone":"`+bad+`"`); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "scheduleTimezone") {
+			t.Errorf("zone %q = %d %s", bad, rec.Code, rec.Body)
+		}
+	}
+	p := decodeProject(t, rec)
+	patched := do(r, http.MethodPatch, projectsPath+"/"+p.ID, `{"version":1,"scheduleTimezone":"America/Chicago"}`, writeDuties, true)
+	if patched.Code != http.StatusOK || zone(patched) != "America/Chicago" {
+		t.Fatalf("patch = %d %s", patched.Code, patched.Body)
+	}
+	if rec := do(r, http.MethodPatch, projectsPath+"/"+p.ID, `{"version":2,"scheduleTimezone":"Nowhere/City"}`, writeDuties, true); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad patch = %d %s", rec.Code, rec.Body)
+	}
+	if reset := do(r, http.MethodPatch, projectsPath+"/"+p.ID, `{"version":2,"scheduleTimezone":""}`, writeDuties, true); reset.Code != http.StatusOK || zone(reset) != "UTC" {
+		t.Fatalf("reset = %d %s", reset.Code, reset.Body)
+	}
+}

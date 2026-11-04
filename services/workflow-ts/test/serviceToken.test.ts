@@ -9,6 +9,8 @@ import {
   QUALITY_GRANT,
   SERVICE_NAME,
   serviceTokenSignerFromEnv,
+  PARTY_GRANT,
+  TRANSPORT_GRANT,
 } from "../src/serviceToken.js";
 
 const vector = JSON.parse(
@@ -35,6 +37,8 @@ describe("service token", () => {
       payables: [...PAYABLES_GRANT],
       engineering: [...ENGINEERING_GRANT],
       quality: [...QUALITY_GRANT],
+      transport: [...TRANSPORT_GRANT],
+      party: [...PARTY_GRANT],
     });
   });
 
@@ -44,17 +48,22 @@ describe("service token", () => {
     const claims = (token: string) => JSON.parse(Buffer.from(token.split(".")[0]!, "base64url").toString()) as { aud: string; duties: string[]; iss: string };
     expect(claims(signer.mintForEngineering(subject))).toMatchObject({ iss: SERVICE_NAME, aud: "engineering", duties: ["engineering.eco.workflow"] });
     expect(claims(signer.mintForQuality(subject))).toMatchObject({ iss: SERVICE_NAME, aud: "quality", duties: ["quality.capa.execute"] });
+    expect(claims(signer.mintForTransport(subject))).toMatchObject({ iss: SERVICE_NAME, aud: "transport", duties: ["transport.tender.execute"] });
+    expect(claims(signer.mintForParty(subject))).toMatchObject({ iss: SERVICE_NAME, aud: "party", duties: ["party.approve"] });
     expect(claims(signer.mintForPayables(subject))).toMatchObject({ aud: "payables", duties: ["payment-run.execute"] });
   });
 
-  it("refuses to mint for engineering or quality outside the acting user's legal-entity scope", () => {
+  it("refuses to mint for engineering, quality or transport outside the acting user's legal-entity scope", () => {
     const signer = createServiceTokenSigner({ seedBase64: Buffer.alloc(32, 1).toString("base64") });
     const subject = { tenantId: "t", legalEntityId: "le-1", actor: "a" };
     for (const scope of [undefined, [], ["le-2"], ["le-2", ""]]) {
       expect(() => signer.mintForEngineering({ ...subject, scope })).toThrow(/scope/);
       expect(() => signer.mintForQuality({ ...subject, scope })).toThrow(/scope/);
+      expect(() => signer.mintForTransport({ ...subject, scope })).toThrow(/scope/);
+      expect(() => signer.mintForParty({ ...subject, scope })).toThrow(/scope/);
     }
     expect(() => signer.mintForEngineering({ ...subject, scope: ["le-2", " LE-1 "] })).not.toThrow();
+    expect(() => signer.mintForTransport({ ...subject, scope: ["le-2", " LE-1 "] })).not.toThrow();
     expect(() => signer.mintForPayables(subject)).not.toThrow();
   });
 

@@ -28,25 +28,39 @@ const (
 // fakeStore records the inputs the handlers pass down and answers with the
 // configured result or error.
 type fakeStore struct {
-	rec      recurringFake
-	oi       openItemFake
-	auto     autoFake
-	deriv    derivationFake
-	vrules   validationFake
-	arules   advancedFake
-	split    splittingFake
-	realign  realignFake
-	attach   attachFake
-	posted   []store.PostInput
-	reversed []store.ReverseInput
-	err      error
-	replay   bool
-	accounts []store.Account
-	validate domain.Result
-	reasons  []store.ReasonCode
-	created  bool
+	rec     recurringFake
+	oi      openItemFake
+	auto    autoFake
+	deriv   derivationFake
+	vrules  validationFake
+	arules  advancedFake
+	split   splittingFake
+	realign realignFake
+	attach  attachFake
+	// putTags are the If-Match tags the configuration PUT handlers passed to the store; listPage the
+	// keyset page of the last paged list; batchPage and clearingPage canned look-ahead pages.
+	putTags      []int
+	listPage     store.Page
+	batchPage    []store.Batch
+	clearingPage []store.ClearingDocument
+	posted       []store.PostInput
+	reversed     []store.ReverseInput
+	err          error
+	replay       bool
+	accounts     []store.Account
+	validate     domain.Result
+	reasons      []store.ReasonCode
+	created      bool
 	// balanceFilter is the last trial balance filter the handler passed down.
 	balanceFilter store.BalanceFilter
+	// trial is what TrialBalance returns.
+	trial store.TrialBalance
+	// linePages, when set, are served one per ListLines call (the last repeats) instead of linePage.
+	linePages []store.LinePage
+	// linePlan and planErr answer PlanLineExport (planErr only, so err can fail the pages that follow).
+	linePlan   store.LineExportPlan
+	planErr    error
+	planFilter *store.LineFilter
 	// putReasons records the reason codes the handlers wrote.
 	putReasons []store.ReasonCode
 	// structures and dimValues answer the structure reads; putStructures and
@@ -107,13 +121,28 @@ type putStructureCall struct {
 	in           domain.Structure
 }
 
-func (f *fakeStore) PutAccount(_ context.Context, chart, number string, in store.Account) (store.Account, bool, error) {
+func (f *fakeStore) PutAccount(_ context.Context, chart, number string, tag int, in store.Account) (store.Account, bool, error) {
+	f.putTags = append(f.putTags, tag)
+	in.LockVersion = tag + 1
 	in.ChartCode, in.Number = chart, number
 	return in, true, f.err
 }
 
 func (f *fakeStore) ListAccounts(context.Context, string, string, int) ([]store.Account, error) {
 	return f.accounts, f.err
+}
+
+func (f *fakeStore) GetAccount(_ context.Context, chart, number string) (store.Account, error) {
+	for _, a := range f.accounts {
+		if a.Number == number {
+			a.ChartCode = chart
+			return a, f.err
+		}
+	}
+	if f.err != nil {
+		return store.Account{}, f.err
+	}
+	return store.Account{}, httpx.NewProblem(http.StatusNotFound, "LEDGER_ACCOUNT_NOT_FOUND", "account not found")
 }
 
 func (f *fakeStore) CreateLedger(_ context.Context, in store.Ledger) (store.Ledger, error) {
@@ -152,7 +181,7 @@ func (f *fakeStore) ValidateEntry(_ context.Context, in store.PostInput) (domain
 
 func (f *fakeStore) TrialBalance(_ context.Context, bf store.BalanceFilter) (store.TrialBalance, error) {
 	f.balanceFilter = bf
-	return store.TrialBalance{}, f.err
+	return f.trial, f.err
 }
 
 func (f *fakeStore) RebuildBalances(context.Context, string) (store.RebuildResult, error) {
@@ -191,7 +220,9 @@ func (f *fakeStore) GetStructure(_ context.Context, _, id string) (domain.Struct
 	return domain.Structure{}, httpx.NewProblem(http.StatusNotFound, domain.CodeStructureNotFound, "account structure not found")
 }
 
-func (f *fakeStore) PutStructure(_ context.Context, ledgerID, id string, in domain.Structure) (domain.Structure, bool, error) {
+func (f *fakeStore) PutStructure(_ context.Context, ledgerID, id string, tag int, in domain.Structure) (domain.Structure, bool, error) {
+	f.putTags = append(f.putTags, tag)
+	in.LockVersion = tag + 1
 	f.putStructures = append(f.putStructures, putStructureCall{ledgerID: ledgerID, id: id, in: in})
 	in.ID = id
 	return in, f.created, f.err
@@ -201,7 +232,9 @@ func (f *fakeStore) ListDimensionValues(context.Context, string) ([]domain.Dimen
 	return f.dimValues, f.err
 }
 
-func (f *fakeStore) PutDimensionValue(_ context.Context, _ string, in domain.DimensionValue) (domain.DimensionValue, bool, error) {
+func (f *fakeStore) PutDimensionValue(_ context.Context, _ string, tag int, in domain.DimensionValue) (domain.DimensionValue, bool, error) {
+	f.putTags = append(f.putTags, tag)
+	in.LockVersion = tag + 1
 	f.putValues = append(f.putValues, in)
 	return in, f.created, f.err
 }
@@ -219,7 +252,9 @@ func (f *fakeStore) GetDescriptionTemplate(_ context.Context, id string) (store.
 	return store.DescriptionTemplate{}, templateNotFound()
 }
 
-func (f *fakeStore) PutDescriptionTemplate(_ context.Context, id string, in store.DescriptionTemplate) (store.DescriptionTemplate, bool, error) {
+func (f *fakeStore) PutDescriptionTemplate(_ context.Context, id string, tag int, in store.DescriptionTemplate) (store.DescriptionTemplate, bool, error) {
+	f.putTags = append(f.putTags, tag)
+	in.LockVersion = tag + 1
 	in.ID = id
 	f.putTemplates = append(f.putTemplates, in)
 	return in, f.created, f.err
@@ -238,7 +273,9 @@ func (f *fakeStore) GetJournalName(_ context.Context, code string) (store.Journa
 	return store.JournalName{}, httpx.NewProblem(http.StatusNotFound, "LEDGER_JOURNAL_NAME_NOT_FOUND", "journal name not found")
 }
 
-func (f *fakeStore) PutJournalName(_ context.Context, code string, in store.JournalName) (store.JournalName, bool, error) {
+func (f *fakeStore) PutJournalName(_ context.Context, code string, tag int, in store.JournalName) (store.JournalName, bool, error) {
+	f.putTags = append(f.putTags, tag)
+	in.LockVersion = tag + 1
 	in.Code = code
 	f.putNames = append(f.putNames, in)
 	return in, f.created, f.err
@@ -259,6 +296,9 @@ func (f *fakeStore) GetBatch(_ context.Context, id string) (store.Batch, error) 
 
 func (f *fakeStore) ListBatches(_ context.Context, filter store.BatchFilter) ([]store.Batch, error) {
 	b, err := f.batchResult(batchCall{op: "list", filter: filter})
+	if f.batchPage != nil {
+		return f.batchPage, err
+	}
 	return []store.Batch{b}, err
 }
 
@@ -657,6 +697,23 @@ func TestTrialBalance_DimensionFilterAndGroupBy(t *testing.T) {
 		t.Fatalf("filter not passed to the store: %+v", fs.balanceFilter)
 	}
 	for _, q := range []string{"&dim.dept=D1", "&dim.DEPT=" + strings.Repeat("D", 21), "&dim.DEPT=D1&dim.DEPT=D2", "&group_by=CC,CC", "&group_by=cc", "&group_by=CC,", "&group_by=A,B,C,D,E,F"} {
+		if rec := call(h, http.MethodGet, base+q, "", dutyBalanceRead, nil); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s must be refused, got %d", q, rec.Code)
+		}
+	}
+}
+
+func TestTrialBalance_ExcludeYearEndClosingOption(t *testing.T) {
+	fs := &fakeStore{}
+	h := server(fs)
+	base := "/v1/ledger/balances?ledger=" + testLedger
+	if rec := call(h, http.MethodGet, base+"&exclude_year_end_closing=true", "", dutyBalanceRead, nil); rec.Code != http.StatusOK || !fs.balanceFilter.ExcludeYearEndClosing {
+		t.Fatalf("option not passed to the store: %d %+v", rec.Code, fs.balanceFilter)
+	}
+	if rec := call(h, http.MethodGet, base, "", dutyBalanceRead, nil); rec.Code != http.StatusOK || fs.balanceFilter.ExcludeYearEndClosing {
+		t.Fatalf("the option is off by default: %d %+v", rec.Code, fs.balanceFilter)
+	}
+	for _, q := range []string{"&exclude_year_end_closing=false", "&exclude_year_end_closing=1", "&exclude_year_end_closing=true&group_by=CC", "&exclude_year_end_closing=true&dim.DEPT=D1"} {
 		if rec := call(h, http.MethodGet, base+q, "", dutyBalanceRead, nil); rec.Code != http.StatusBadRequest {
 			t.Fatalf("%s must be refused, got %d", q, rec.Code)
 		}

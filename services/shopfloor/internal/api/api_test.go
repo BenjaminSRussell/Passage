@@ -55,6 +55,7 @@ type fakeStore struct {
 	absenceIn     *store.AbsenceCodeInput
 	absences      []domain.Absence
 	reasonIn      *store.DowntimeReasonInput
+	categoryIn    *domain.CategoryInput
 }
 
 func (f *fakeStore) Ping(context.Context) error { return nil }
@@ -76,6 +77,30 @@ func (f *fakeStore) GetWorker(_ context.Context, id string) (store.Worker, error
 		}
 	}
 	return store.Worker{}, httpx.NewProblem(http.StatusNotFound, store.CodeWorkerNotFound, "worker not found")
+}
+
+func (f *fakeStore) UpdateWorker(context.Context, string, int, store.WorkerInput, string, store.Idem) (store.Worker, error) {
+	return store.Worker{}, nil
+}
+
+func (f *fakeStore) DeactivateWorker(context.Context, string, int, string, string, store.Idem) (store.Worker, error) {
+	return store.Worker{}, nil
+}
+
+func (f *fakeStore) AddCostRate(context.Context, string, store.CostRateInput, string, store.Idem) (store.CostRate, error) {
+	return store.CostRate{}, nil
+}
+
+func (f *fakeStore) ListCostRates(context.Context, string) ([]store.CostRate, error) {
+	return []store.CostRate{}, nil
+}
+
+func (f *fakeStore) LoadRateSteps(context.Context, string) ([]domain.RateStep, error) {
+	return nil, nil
+}
+
+func (f *fakeStore) ReactivateWorker(context.Context, string, int, string, store.Idem) (store.Worker, error) {
+	return store.Worker{}, nil
 }
 
 func (f *fakeStore) ListWorkers(context.Context, bool, int) ([]store.Worker, error) {

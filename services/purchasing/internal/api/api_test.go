@@ -40,10 +40,15 @@ type fakeStore struct {
 	purchaseAgreements map[string]store.AgreementDetail
 	sourcing           []store.SourcingLine
 	openLines          []store.OpenOrderLine
+	vendorOpen         []store.VendorOpenOrders
+	overdue            []store.OverdueLine
+	priceHist          []store.PriceHistoryEntry
+	lastInquiry        store.InquiryFilter
 	lastOpenLines      store.OpenLineFilter
 	lastAgrFilter      store.AgreementFilter
 	lastSourcing       store.SourcingFilter
 	lastConsolidated   []string
+	lastSplit          splitCall
 	lastIdem           store.Idem
 
 	// PO lifecycle: stored orders by id, and what edits and actions received.
@@ -83,8 +88,14 @@ type fakeStore struct {
 	// Charge codes and auto charges (FR-17.9).
 	charges chargeLog
 
+	// Service lines and model service specifications (FR-17.23).
+	svc svcLog
+
 	// Signing limits and their requests (FR-17.17).
 	signing signingLog
+
+	// Changes other services asked of purchase orders (slice 18).
+	inbound inboundLog
 
 	// Procurement catalogs: what the catalog methods received and answer.
 	cat catalogLog
@@ -236,6 +247,21 @@ func (f *fakeStore) ListOpenOrderLines(_ context.Context, of store.OpenLineFilte
 	return store.Page[store.OpenOrderLine]{Items: f.openLines}, nil
 }
 
+func (f *fakeStore) ListOpenOrdersByVendor(_ context.Context, qf store.InquiryFilter, after string, limit int) (store.Page[store.VendorOpenOrders], error) {
+	f.lastInquiry, f.lastAfter, f.lastLimit = qf, after, limit
+	return store.Page[store.VendorOpenOrders]{Items: f.vendorOpen}, nil
+}
+
+func (f *fakeStore) ListOverdueLines(_ context.Context, qf store.InquiryFilter, after string, limit int) (store.Page[store.OverdueLine], error) {
+	f.lastInquiry, f.lastAfter, f.lastLimit = qf, after, limit
+	return store.Page[store.OverdueLine]{Items: f.overdue}, nil
+}
+
+func (f *fakeStore) ListPriceHistory(_ context.Context, qf store.InquiryFilter, after string, limit int) (store.Page[store.PriceHistoryEntry], error) {
+	f.lastInquiry, f.lastAfter, f.lastLimit = qf, after, limit
+	return store.Page[store.PriceHistoryEntry]{Items: f.priceHist}, nil
+}
+
 func (f *fakeStore) RequisitionLinesByID(_ context.Context, lineIDs []string) ([]store.SourcingLine, error) {
 	want := map[string]bool{}
 	for _, id := range lineIDs {
@@ -248,6 +274,21 @@ func (f *fakeStore) RequisitionLinesByID(_ context.Context, lineIDs []string) ([
 		}
 	}
 	return out, nil
+}
+
+// splitCall records what SplitRequisitionLine received.
+type splitCall struct {
+	lineID     string
+	version    int
+	quantities []decimal.Decimal
+	minor      int32
+	by         string
+	idem       store.Idem
+}
+
+func (f *fakeStore) SplitRequisitionLine(_ context.Context, lineID string, version int, quantities []decimal.Decimal, minor int32, by string, idem store.Idem) (store.Requisition, error) {
+	f.lastSplit = splitCall{lineID, version, quantities, minor, by, idem}
+	return store.Requisition{ID: ids.New(), Version: version + 1, Lines: []store.RequisitionLine{}}, nil
 }
 
 func (f *fakeStore) ConsolidateRequisitionLines(_ context.Context, orders []store.PurchaseOrder, lineIDs []string, idem store.Idem) ([]store.PurchaseOrder, error) {

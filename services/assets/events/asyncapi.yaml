@@ -38,6 +38,16 @@ channels:
     messages:
       leaseRemeasured:
         $ref: "#/components/messages/LeaseRemeasured"
+  leaseTerminated:
+    address: passage.assets.lease
+    messages:
+      leaseTerminated:
+        $ref: "#/components/messages/LeaseTerminated"
+  leasePosted:
+    address: passage.assets.lease
+    messages:
+      leasePosted:
+        $ref: "#/components/messages/LeasePosted"
   capexApproved:
     address: passage.assets.capexrequest
     messages:
@@ -56,75 +66,113 @@ channels:
 operations:
   publishAssetAcquired:
     action: send
+    summary: Publishes the asset acquired event through the outbox.
     channel: { $ref: "#/channels/assetAcquired" }
   publishAssetDisposed:
     action: send
+    summary: Publishes the asset disposed event through the outbox.
     channel: { $ref: "#/channels/assetDisposed" }
   publishLeaseRecognized:
     action: send
+    summary: Publishes the lease recognized event through the outbox.
     channel: { $ref: "#/channels/leaseRecognized" }
   publishAssetAdjusted:
     action: send
+    summary: Publishes the asset adjusted event through the outbox.
     channel: { $ref: "#/channels/assetAdjusted" }
   publishDepreciationPosted:
     action: send
+    summary: Publishes the depreciation posted event through the outbox.
     channel: { $ref: "#/channels/depreciationPosted" }
   publishLeaseRemeasured:
     action: send
+    summary: Publishes the lease remeasured event through the outbox.
     channel: { $ref: "#/channels/leaseRemeasured" }
+  publishLeaseTerminated:
+    action: send
+    summary: Publishes the lease terminated event through the outbox.
+    channel: { $ref: "#/channels/leaseTerminated" }
+  publishLeasePosted:
+    action: send
+    summary: Publishes the lease posted event through the outbox.
+    channel: { $ref: "#/channels/leasePosted" }
   publishCapexApproved:
     action: send
+    summary: Publishes the capex approved event through the outbox.
     channel: { $ref: "#/channels/capexApproved" }
   publishAssetTransferred:
     action: send
+    summary: Publishes the asset transferred event through the outbox.
     channel: { $ref: "#/channels/assetTransferred" }
   publishAssetSplit:
     action: send
+    summary: Publishes the asset split event through the outbox.
     channel: { $ref: "#/channels/assetSplit" }
 components:
   messages:
     AssetAdjusted:
       name: dev.passage.assets.asset.adjusted.v1
+      summary: A book's balances changed by an acquisition adjustment, depreciation adjustment, revaluation or impairment.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/AssetAdjustedData"
     DepreciationPosted:
       name: dev.passage.assets.depreciation.posted.v1
+      summary: A depreciation run was posted for one book code and period.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/DepreciationPostedData"
     AssetAcquired:
       name: dev.passage.assets.asset.acquired.v1
+      summary: "An asset book was acquired: cost recognized on one or more books of the asset."
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/AssetAcquiredData"
     AssetDisposed:
       name: dev.passage.assets.asset.disposed.v1
+      summary: A book was sold or scrapped, in full or in part, with its gain or loss.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/AssetDisposedData"
     LeaseRecognized:
       name: dev.passage.assets.lease.recognized.v1
+      summary: An IFRS 16 lease was recognized with its liability, ROU asset and schedule.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/LeaseRecognizedData"
     LeaseRemeasured:
       name: dev.passage.assets.lease.remeasured.v1
+      summary: A lease was remeasured on modification; the liability and ROU asset moved.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/LeaseRemeasuredData"
+    LeaseTerminated:
+      name: dev.passage.assets.lease.terminated.v1
+      summary: A lease was terminated early; its liability and ROU asset are derecognized with the gain or loss.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/LeaseTerminatedData"
+    LeasePosted:
+      name: dev.passage.assets.lease.posted.v1
+      summary: A lease journal (recognition, schedule period or termination) was accepted by the general ledger.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/LeasePostedData"
     CapexApproved:
       name: dev.passage.assets.capexrequest.approved.v1
+      summary: A capex appropriation request was approved with its selected variant's amounts per year.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/CapexApprovedData"
     AssetTransferred:
       name: dev.passage.assets.asset.transferred.v1
+      summary: An asset was transferred to a new asset, possibly in another legal entity of the tenant.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/AssetTransferredData"
     AssetSplit:
       name: dev.passage.assets.asset.split.v1
+      summary: An asset was split into several new assets; cost and accumulated depreciation moved to the targets.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/AssetTransferredData"
@@ -219,7 +267,7 @@ components:
         currency: { type: string, pattern: "^[A-Z]{3}$" }
     LeaseRecognizedData:
       type: object
-      required: [leaseId, liability, rouAsset, currency, termMonths, rate]
+      required: [leaseId, liability, rouAsset, currency, termMonths, rate, election]
       properties:
         leaseId: { type: string, format: uuid }
         liability: { type: string }
@@ -227,6 +275,7 @@ components:
         currency: { type: string, pattern: "^[A-Z]{3}$" }
         termMonths: { type: integer }
         rate: { type: string }
+        election: { type: string, enum: [None, ShortTerm, LowValue], description: "Recognition exemption; liability and rouAsset are 0 under an election" }
     AssetAdjustedData:
       type: object
       description: |
@@ -263,6 +312,53 @@ components:
         totalAmount: { type: string, description: "Decimal string" }
         currency: { type: [string, "null"], pattern: "^[A-Z]{3}$", description: "Null when the run had no book" }
         journalEntryId: { type: [string, "null"], format: uuid, description: "Null until the journal integration links the run." }
+    LeasePostedData:
+      type: object
+      description: |
+        One event per lease journal the ledger accepted (POST /v1/leases/gl-postings, D4d).
+        Not in the PRD event table; added so the ledger's consumers and analytics know which entry
+        carries which period of the liability and ROU asset. kind Recognition (period 0) sets
+        liability and rouAsset; kind Period sets interest, payment, rouDepreciation and remeasurement.
+        Aggregate key is the lease id.
+      required: [leaseId, legalEntityId, kind, period, postingDate, journalEntryId, ledgerId, currency]
+      properties:
+        leaseId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        kind: { type: string, enum: [Recognition, Period, Termination] }
+        period: { type: integer, description: "0 for the recognition journal, the last period in force for a Termination, otherwise the schedule period" }
+        postingDate: { type: string, format: date }
+        journalEntryId: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        liability: { type: string, description: "Recognition only" }
+        rouAsset: { type: string, description: "Recognition only" }
+        interest: { type: string, description: "Period only" }
+        payment: { type: string, description: "Period only" }
+        rouDepreciation: { type: string, description: "Period only" }
+        remeasurement: { type: string, description: "Period only; signed, zero unless a modification takes effect in the period" }
+        terminationPayment: { type: string, description: "Termination only" }
+        gainLoss: { type: string, description: "Termination only; positive for a gain" }
+    LeaseTerminatedData:
+      type: object
+      description: |
+        One event per early lease termination (POST /v1/leases/{id}/terminate, D4c). Not in the PRD
+        event table; added so the ledger and analytics see the derecognition of the lease liability and
+        ROU asset. gainLoss = liabilityDerecognized - rouCarrying - terminationPayment (positive for a gain);
+        rouGross = rouAccumulated + rouCarrying. Aggregate key is the lease id.
+      required: [leaseId, terminationId, legalEntityId, afterPeriod, terminationDate, liabilityDerecognized, rouGross, rouAccumulated, rouCarrying, terminationPayment, gainLoss, currency]
+      properties:
+        leaseId: { type: string, format: uuid }
+        terminationId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        afterPeriod: { type: integer, description: "The last payment period in force" }
+        terminationDate: { type: string, format: date, description: "The last day of that period" }
+        liabilityDerecognized: { type: string }
+        rouGross: { type: string }
+        rouAccumulated: { type: string }
+        rouCarrying: { type: string }
+        terminationPayment: { type: string }
+        gainLoss: { type: string }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
     LeaseRemeasuredData:
       type: object
       description: |

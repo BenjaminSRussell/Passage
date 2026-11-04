@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Passage integration hub
-  version: 0.2.0
+  version: 0.5.0
   description: |
     Webhook and rest-push subscriptions, the delivery log, the dead-letter list, resume after a
     410 pause and replay (FR-35.9, FR-35.10). Callers reach these routes through the
@@ -24,12 +24,32 @@ info:
     cross-reference. Credentials are sealed at rest and write-only: no response ever
     contains them. A 4xx from the receiver other than 410 and 429 dead-letters at once
     (HUB-0117, with the response body kept, truncated); 5xx and silence follow the
-    8-step schedule; 429 honours Retry-After; 410 pauses. An event without a
+    8-step schedule; 429 honours Retry-After; 410 pauses. A push that carries a collection
+    (an order's lines, rendered as a body array by the mapping's `collections`) records the
+    legacy key the ERP assigned to each element: `lineKeyPath` ("lines[*].id") reads one key
+    per element of the response, matched to the pushed elements by position or by
+    `lineCorrelation` (a field both sides carry); the keys are kept on the delivery
+    (`lineKeys`) and, once the migration service renders a ref per element, recorded with the
+    header's in one xref:record call. Keys that cannot be matched dead-letter the accepted push
+    (HUB-0117) without recording any. Each delivery also keeps the lookup table versions its
+    render read (`lookups`) for audit. An event without a
     `legalentityid` extension is dead-lettered (HUB-0117) before the render: service
     tokens to the migration service name exactly one legal entity. Events whose actor is
     `service:migration-loader` are not pushed back (echo suppression). Receivers on
     private addresses are reachable only when the operator lists them in
     INTEGRATION_HUB_EGRESS_ALLOW.
+
+    API clients (FR-35.8, BR-35.8) are the hub's registry of Keycloak clients: the secret
+    stays in Keycloak, the hub keeps the client id, the scopes (duty keys the client may
+    use), the quota (requests per minute and burst, default 600 and 100, ranges 10..100000
+    and 1..100000), an optional sandbox tenant and the owner contact. The edge gateway asks
+    `consumeClientQuota` once per request (GraphQL: one unit per started 100 complexity
+    points) and answers the caller 429 with the returned `Retry-After` on HUB-0113. The token
+    bucket is held in Postgres under a row lock, so concurrent requests of one client never
+    overspend; usage per minute feeds the portal chart. Clients are revoked, never deleted.
+
+    The hub writes its own CloudEvents (`dev.passage.hub.*`, see events/asyncapi.yaml)
+    to the outbox in the same transaction as the change.
 servers:
   - url: https://api.passage.dev
 paths:
@@ -52,7 +72,14 @@ paths:
         supplied, is sealed at rest, and is returned only in this response. A
         repeated Idempotency-Key returns the subscription created first, without the
         secret. Without field encryption keys the hub cannot store secrets and
-        answers 501 HUB-0501.
+        answers 501 HUB-0501. An optional `filter` (webhook and rest-push) is a CloudEvents
+        SQL (CESQL) expression over the event: the subscription takes an event only when
+        its type matches a pattern and the expression holds. An expression that does not
+        parse, or that is not a true-or-false condition, is 400 HUB-0400 with the position.
+        At delivery time an expression that cannot be evaluated for an event (a missing
+        attribute, a value that cannot be read as the other side's type, a division by
+        zero, or LIKE patterns that would take more than 1,000,000 character steps over
+        the event's values) does not match it.
       x-passage-duty: hub.subscription.write
       parameters:
         - {$ref: "#/components/parameters/IdempotencyKey"}
@@ -164,6 +191,41 @@ paths:
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
+  /v1/hub/subscriptions/{subscriptionId}:rotate:
+    parameters:
+      - {$ref: "#/components/parameters/SubscriptionId"}
+    post:
+      operationId: rotateSubscriptionSecret
+      summary: Rotate a webhook subscription's signing secret, keeping the old one for a grace period
+      description: |
+        Replaces the signing secret with a generated one (or `secret`, 16 to 256 characters) and
+        returns it once in this response. The previous secret keeps signing for `graceSeconds`
+        (default 86,400, at most 604,800; 0 ends it at once): while it does, every delivery's
+        `Passage-Signature` carries one `v1=` per secret (`t=..,v1=<new>,v1=<previous>`), and a
+        receiver that accepts either secret switches over without losing events. Only the secret
+        before this rotation is kept; a second rotation inside the grace period drops the first
+        old secret. Optimistic: `version` must be the version last read, otherwise 409 HUB-0409.
+        Only webhook subscriptions have a signing secret (a rest-push subscription answers 409).
+        Writes `dev.passage.hub.subscription.secretrotated.v1` (no secret in it). Without field
+        encryption keys the hub answers 501 HUB-0501.
+      x-passage-duty: hub.subscription.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RotateSecret"}
+      responses:
+        "200":
+          description: The subscription at its new version; the body carries the new signing secret once.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreatedSubscription"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "501": {$ref: "#/components/responses/Problem"}
   /v1/hub/subscriptions/{subscriptionId}:test:
     parameters:
       - {$ref: "#/components/parameters/SubscriptionId"}
@@ -310,14 +372,408 @@ paths:
         "400": {$ref: "#/components/responses/Problem"}
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
+  /v1/hub/clients:
+    post:
+      operationId: registerClient
+      summary: Register an API client with its scopes and quota
+      description: |
+        Registers the hub's record of a Keycloak client (client credentials). `clientId` is the
+        Keycloak client id the edge sees in the verified token; provisioning the Keycloak client
+        itself is done by the platform. `scopes` are duty keys. `quotaPerMin` (default 600) and
+        `burst` (default 100) set the token bucket. `sandboxTenantId` names the tenant the
+        developer portal's test console may use and must not be the caller's own tenant.
+        A repeated Idempotency-Key returns the client created first; a client id already
+        registered in the tenant is 409 HUB-0409. A caller may grant only duties they hold
+        themselves: a scope the caller's token does not carry is 403 HUB-0403 naming it.
+      x-passage-duty: hub.client.write
+      parameters:
+        - {$ref: "#/components/parameters/ClientIdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/NewClient"}
+      responses:
+        "201":
+          description: The client was registered.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Client"}
+        "200":
+          description: The Idempotency-Key was already used; the first client is returned.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Client"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "413": {$ref: "#/components/responses/Problem"}
+    get:
+      operationId: listClients
+      summary: List the tenant's API clients, newest first
+      description: Keyset-paged; pass `nextCursor` as `cursor` for the next page. Revoked clients stay in the list.
+      x-passage-duty: hub.delivery.read
+      parameters:
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+      responses:
+        "200":
+          description: One page of API clients.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ClientPage"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/hub/clients/{clientRowId}:
+    parameters:
+      - {$ref: "#/components/parameters/ClientRowId"}
+    get:
+      operationId: getClient
+      summary: Read one API client
+      description: Another tenant's client is reported as not found.
+      x-passage-duty: hub.delivery.read
+      responses:
+        "200":
+          description: The API client.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Client"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+    patch:
+      operationId: updateClient
+      summary: Change an API client's name, scopes, quota, sandbox tenant or owner
+      description: |
+        Optimistic: `version` must be the version last read, otherwise 409 HUB-0409. A revoked
+        client cannot be changed (409). A lower burst takes effect at once: tokens above it are
+        dropped on the next request. Scopes the client already has stay whoever changes the
+        client; a scope the change adds must be a duty the caller holds (403 HUB-0403 names it).
+      x-passage-duty: hub.client.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ClientPatch"}
+      responses:
+        "200":
+          description: The updated client with its new version.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Client"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+  /v1/hub/clients/{clientRowId}:revoke:
+    parameters:
+      - {$ref: "#/components/parameters/ClientRowId"}
+    post:
+      operationId: revokeClient
+      summary: Revoke an API client
+      description: Idempotent; a revoked client is refused by the quota check (403) and writes no second event. The Keycloak client is disabled by the platform.
+      x-passage-duty: hub.client.write
+      responses:
+        "200":
+          description: The client, revoked.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Client"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/hub/clients/{clientRowId}/usage:
+    parameters:
+      - {$ref: "#/components/parameters/ClientRowId"}
+    get:
+      operationId: getClientUsage
+      summary: Read a client's requests per minute (admitted and throttled)
+      description: Minutes with no requests are absent. `minutes` is the look-back window, 1 to 1440 (default 60).
+      x-passage-duty: hub.delivery.read
+      parameters:
+        - name: minutes
+          in: query
+          required: false
+          description: Look-back window in minutes, 1 to 1440 (default 60).
+          schema: {type: integer, minimum: 1, maximum: 1440, default: 60}
+      responses:
+        "200":
+          description: The per-minute usage, oldest first.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ClientUsage"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/hub/clients:consume:
+    post:
+      operationId: consumeClientQuota
+      summary: Spend a client's request quota (called by the edge gateway)
+      description: |
+        Takes `cost` units (default 1; GraphQL: one per started 100 complexity points) from the
+        client's token bucket of the caller's tenant. Allowed: 200 with the remaining units and
+        `RateLimit-*` headers. Empty bucket: 429 HUB-0113 with `Retry-After` in seconds. A cost
+        above the client's burst can never succeed: 422 HUB-0422. A revoked client is 403, an
+        unknown client id 404. `hub.client.consume` is service-only: no person or role may hold
+        it, because spending another client's quota throttles that client. No caller holds it
+        yet; the edge component that will call this route is a deployment handoff.
+      x-passage-duty: hub.client.consume
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ConsumeRequest"}
+      responses:
+        "200":
+          description: The units were taken.
+          headers:
+            RateLimit-Limit: {description: The client's requests per minute., schema: {type: integer}}
+            RateLimit-Remaining: {description: Whole units left in the bucket., schema: {type: integer}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ConsumeAllowed"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "429":
+          description: HUB-0113 quota exceeded; wait `Retry-After` seconds.
+          headers:
+            Retry-After: {description: Seconds until the bucket holds enough units., schema: {type: integer, minimum: 1}}
+            RateLimit-Limit: {description: The client's requests per minute., schema: {type: integer}}
+            RateLimit-Remaining: {description: Always 0., schema: {type: integer}}
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+  /v1/hub/catalog:
+    post:
+      operationId: publishCatalogEntry
+      summary: Publish an API or event contract version to the catalog
+      description: |
+        Registers one version of an OpenAPI 3.x document (`kind` api) or an AsyncAPI 3.x document
+        (`kind` event) for the developer portal. The document is a JSON object of at most 2 MiB
+        nested at most 64 levels deep; the request body limit for this route is 2 MiB plus
+        16 KiB, not the 64 KiB of the other routes. The hub derives the operations (method,
+        path, operationId, summary, x-passage-duty) or messages and counts them.
+        `specVersion` is MAJOR.MINOR.PATCH, must equal the document's `info.version`, and must
+        be higher than the newest published version of the same major line (kind and name);
+        the first version of a new major line must be higher than every published major, so
+        version 1 can take additive versions while version 2 runs beside it. A published
+        version never changes. A version added to a major line whose newest version is
+        deprecated is published deprecated with the same sunset date and replacement; a major
+        line whose newest version is retired takes no new versions. A repeated Idempotency-Key
+        with the same kind, name, version and document returns the entry created first (200);
+        with anything different it is 422 HUB-0422. A version already published, lower than
+        its line's newest, or in a retired line is 409 HUB-0409.
+      x-passage-duty: hub.catalog.write
+      parameters:
+        - {$ref: "#/components/parameters/CatalogIdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/NewCatalogEntry"}
+      responses:
+        "201":
+          description: The version was published.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CatalogEntry"}
+        "200":
+          description: The Idempotency-Key was already used; the first entry is returned.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CatalogEntry"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "413": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    get:
+      operationId: listCatalog
+      summary: Browse the API and event catalog, newest first
+      description: |
+        Keyset-paged; pass `nextCursor` as `cursor` for the next page. The list leaves out the
+        documents; read one with `getCatalogSpec`. `q` matches the name, title, owner and
+        summary, ignoring case, as plain text.
+      x-passage-duty: hub.delivery.read
+      parameters:
+        - name: kind
+          in: query
+          required: false
+          description: Only APIs or only event contracts.
+          schema: {type: string, enum: [api, event]}
+        - name: lifecycle
+          in: query
+          required: false
+          description: Only entries in this lifecycle state.
+          schema: {type: string, enum: [active, deprecated, retired]}
+        - name: name
+          in: query
+          required: false
+          description: Only the versions of this contract name.
+          schema: {type: string}
+        - name: q
+          in: query
+          required: false
+          description: Search text, at most 100 characters.
+          schema: {type: string, maxLength: 100}
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+      responses:
+        "200":
+          description: One page of catalog entries.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CatalogPage"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/hub/catalog/{catalogEntryId}:
+    parameters:
+      - {$ref: "#/components/parameters/CatalogEntryId"}
+    get:
+      operationId: getCatalogEntry
+      summary: Read one catalog entry with its operations and documentation gaps
+      description: Another tenant's entry is reported as not found. `issues` lists operations without operationId, summary or x-passage-duty.
+      x-passage-duty: hub.delivery.read
+      responses:
+        "200":
+          description: The catalog entry.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CatalogDetail"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+    patch:
+      operationId: updateCatalogEntry
+      summary: Change an entry's title, summary or owner service
+      description: Optimistic - `version` must be the version last read, otherwise 409 HUB-0409. The published document and version never change. Writes `dev.passage.hub.catalogentry.updated.v1`.
+      x-passage-duty: hub.catalog.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CatalogPatch"}
+      responses:
+        "200":
+          description: The updated entry with its new version.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CatalogEntry"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+  /v1/hub/catalog/{catalogEntryId}/spec:
+    parameters:
+      - {$ref: "#/components/parameters/CatalogEntryId"}
+    get:
+      operationId: getCatalogSpec
+      summary: Read the published OpenAPI or AsyncAPI document of an entry
+      description: Returns the document exactly as published, as JSON, with its keys in the published order.
+      x-passage-duty: hub.delivery.read
+      responses:
+        "200":
+          description: The published document.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/hub/catalog/{catalogEntryId}:deprecate:
+    parameters:
+      - {$ref: "#/components/parameters/CatalogEntryId"}
+    post:
+      operationId: deprecateCatalogEntry
+      summary: Announce the end of an active entry with a sunset date
+      description: |
+        `sunsetAt` must be at least `api_deprecation_months` months (default 12, never below 12;
+        HUB_API_DEPRECATION_MONTHS) after now, otherwise 400. `replacedBy` names another active
+        entry of the same kind. Only an active entry can be deprecated (409), and `version` must
+        be current (409).
+      x-passage-duty: hub.catalog.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/DeprecateRequest"}
+      responses:
+        "200":
+          description: The entry, deprecated.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CatalogEntry"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+  /v1/hub/catalog/{catalogEntryId}:retire:
+    parameters:
+      - {$ref: "#/components/parameters/CatalogEntryId"}
+    post:
+      operationId: retireCatalogEntry
+      summary: Retire a deprecated entry once its sunset date has passed
+      description: Only a deprecated entry past its sunset date can be retired (409 otherwise). The entry and its document stay readable.
+      x-passage-duty: hub.catalog.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RetireRequest"}
+      responses:
+        "200":
+          description: The entry, retired.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CatalogEntry"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
 components:
   parameters:
+    CatalogEntryId:
+      name: catalogEntryId
+      in: path
+      required: true
+      description: The catalog entry's id.
+      schema: {type: string, format: uuid}
+    CatalogIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: A caller-chosen key; a repeat returns the entry published first.
+      schema: {type: string, maxLength: 200}
     SubscriptionId:
       name: subscriptionId
       in: path
       required: true
       description: The subscription's id.
       schema: {type: string, format: uuid}
+    ClientRowId:
+      name: clientRowId
+      in: path
+      required: true
+      description: The API client's id in the hub (not the Keycloak client id).
+      schema: {type: string, format: uuid}
+    ClientIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: A caller-chosen key; a repeat returns the client registered first.
+      schema: {type: string, maxLength: 200}
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -338,7 +794,7 @@ components:
       schema: {type: string}
   responses:
     Problem:
-      description: An RFC 9457 problem with a stable `code` (HUB-0400 malformed, 0401 no identity, 0403 missing duty, 0404 not found, 0405 method, 0409 stale version, 0413 body too large, 0422 unsafe URL, 0500 unexpected, 0501 field encryption keys not configured, 0502 rest-push not configured).
+      description: An RFC 9457 problem with a stable `code` (HUB-0400 malformed, 0401 no identity, 0403 missing duty, 0404 not found, 0405 method, 0113 quota exceeded (429), 0409 stale version, a taken API client id, a revoked client, a catalog version already published or not higher, or a lifecycle change that is not allowed, 0413 body too large (64 KiB; 2 MiB for a catalog publish), 0422 unsafe URL, a quota cost above the burst, or a catalog Idempotency-Key reused for a different publish, 0500 unexpected, 0501 field encryption keys not configured, 0502 rest-push not configured).
       content:
         application/problem+json:
           schema: {$ref: "#/components/schemas/Problem"}
@@ -376,6 +832,8 @@ components:
         outboundMappingId: {type: string, format: uuid, description: "The migration service's outbound mapping that renders the event."}
         method: {type: string, enum: [POST, PUT, PATCH]}
         responseKeyPath: {type: string, description: "JSONPath-lite ($.data.id, orders[0].id) to the legacy key in the response; empty when the receiver returns none."}
+        lineKeyPath: {type: string, description: "Path with one [*] ($.data.lines[*].id) to the legacy key of each element of a pushed collection; empty when the push has none. Needs responseKeyPath."}
+        lineCorrelation: {$ref: "#/components/schemas/LineCorrelation"}
         onClientError: {type: string, enum: [dead_letter, retry], description: "What a 4xx other than 410 and 429 does."}
         auth:
           type: object
@@ -406,6 +864,29 @@ components:
         status: {type: [integer, "null"], description: "The receiver's (or the render service's) status; null when nothing answered."}
         excerpt: {type: string, description: "The answer, truncated, credentials removed."}
         legacyKey: {type: string}
+        lineKeys: {type: array, description: "sent with a lineKeyPath: the key per pushed element.", items: {$ref: "#/components/schemas/LineKey"}}
+        lineKeyError: {type: string, description: "sent with a lineKeyPath: why the keys could not be matched."}
+        lookups: {type: array, description: "The lookup table versions the render read.", items: {$ref: "#/components/schemas/LookupUse"}}
+    LineKey:
+      type: object
+      required: [index, legacyKey]
+      properties:
+        index: {type: integer, minimum: 0, description: "Position of the element in the pushed collection, from 0."}
+        legacyKey: {type: string, description: "The key the legacy ERP assigned to the element."}
+    LookupUse:
+      type: object
+      required: [name, table, version]
+      properties:
+        name: {type: string, description: "The lookup name in the mapping definition."}
+        table: {type: string, description: "The lookup table."}
+        version: {type: integer, minimum: 1, description: "The immutable table version the render read."}
+    LineCorrelation:
+      type: object
+      additionalProperties: false
+      required: [bodyPath, responsePath]
+      properties:
+        bodyPath: {type: string, maxLength: 200, description: "Path with one [*] to the correlating field of each pushed element (Lines[*].LineNum); its values must be unique. Its array names the collection whose element refs get the keys (Lines, Header.Lines), which a mapping with several collections needs."}
+        responsePath: {type: string, maxLength: 200, description: "Path with one [*] to the field of each response element that echoes it; iterates the same array as lineKeyPath. Every pushed element must be matched by exactly one response element."}
     NewSubscription:
       type: object
       additionalProperties: false
@@ -417,6 +898,8 @@ components:
         outboundMappingId: {type: string, format: uuid, description: "rest-push, required."}
         method: {type: string, enum: [POST, PUT, PATCH], default: POST, description: "rest-push."}
         responseKeyPath: {type: string, maxLength: 200, description: "rest-push."}
+        lineKeyPath: {type: string, maxLength: 200, description: "rest-push: per-element key path of a pushed collection (lines[*].id); needs responseKeyPath."}
+        lineCorrelation: {$ref: "#/components/schemas/LineCorrelation"}
         onClientError: {type: string, enum: [dead_letter, retry], default: dead_letter, description: "rest-push."}
         auth: {$ref: "#/components/schemas/RestAuth"}
         patterns:
@@ -425,6 +908,21 @@ components:
           maxItems: 50
           items: {type: string, examples: ["dev.passage.sales.**"]}
         secret: {type: string, minLength: 16, maxLength: 256, description: "Signing secret; generated when omitted."}
+        filter: {$ref: "#/components/schemas/EventFilter"}
+    EventFilter:
+      type: string
+      minLength: 1
+      maxLength: 1024
+      description: "A CESQL condition over the event: context attributes (id, type, source, subject, time, tenantid, actor, legalentityid, passagesequence) and `data.<path>` for the JSON payload. Operators = != <> < <= > >= AND OR XOR NOT LIKE IN EXISTS + - * / %; functions LENGTH CONCAT CONCAT_WS LOWER UPPER TRIM LEFT RIGHT SUBSTRING ABS INT STRING BOOL. Integers are 32-bit; decimal amounts in Passage events are strings, so compare them as text or with INT."
+      examples: ["data.currency = 'USD' AND EXISTS actor"]
+    RotateSecret:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: {type: integer, minimum: 1}
+        secret: {type: string, minLength: 16, maxLength: 256, description: "The new signing secret; generated when omitted."}
+        graceSeconds: {type: integer, minimum: 0, maximum: 604800, default: 86400, description: "How long the previous secret keeps signing next to the new one; 0 ends it at once."}
     SubscriptionPatch:
       type: object
       additionalProperties: false
@@ -438,14 +936,25 @@ components:
           minItems: 1
           maxItems: 50
           items: {type: string}
+        filter:
+          description: "A CESQL condition; null removes the filter."
+          anyOf:
+            - {$ref: "#/components/schemas/EventFilter"}
+            - {type: "null"}
         outboundMappingId: {type: string, format: uuid, description: "rest-push."}
         method: {type: string, enum: [POST, PUT, PATCH], description: "rest-push."}
         responseKeyPath: {type: string, maxLength: 200, description: "rest-push."}
+        lineKeyPath: {type: string, maxLength: 200, description: "rest-push: per-element key path of a pushed collection (lines[*].id); needs responseKeyPath. An empty string stops reading line keys (clear lineCorrelation with it)."}
+        lineCorrelation:
+          description: "rest-push: null matches the lines by position again."
+          anyOf:
+            - {$ref: "#/components/schemas/LineCorrelation"}
+            - {type: "null"}
         onClientError: {type: string, enum: [dead_letter, retry], description: "rest-push."}
         auth: {$ref: "#/components/schemas/RestAuth"}
     Subscription:
       type: object
-      required: [id, kind, rest, name, url, patterns, status, pausedReason, version, createdAt, updatedAt]
+      required: [id, kind, rest, name, url, patterns, filter, status, pausedReason, version, secretRotatedAt, previousSecretExpiresAt, createdAt, updatedAt]
       properties:
         id: {type: string, format: uuid}
         kind: {type: string, enum: [webhook, rest-push]}
@@ -456,9 +965,12 @@ components:
         name: {type: string}
         url: {type: string}
         patterns: {type: array, items: {type: string}}
+        filter: {type: [string, "null"], description: "The CESQL filter, or null."}
         status: {type: string, enum: [active, paused]}
         pausedReason: {type: [string, "null"], description: "HUB-0114 after a 410 Gone."}
         version: {type: integer}
+        secretRotatedAt: {type: [string, "null"], format: date-time, description: "Webhook: when the signing secret was last rotated."}
+        previousSecretExpiresAt: {type: [string, "null"], format: date-time, description: "Webhook: until when the secret before the last rotation still signs deliveries (a past time or null: none does)."}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
     CreatedSubscription:
@@ -489,7 +1001,7 @@ components:
         truncated: {type: boolean, description: "More matching events remain after the cap."}
     Delivery:
       type: object
-      required: [id, subscriptionId, eventId, eventType, aggregateId, sequence, status, attempts, lastStatus, nextRetryAt, replay, deadLetterCode, responseExcerpt, legacyKey, createdAt]
+      required: [id, subscriptionId, eventId, eventType, aggregateId, sequence, status, attempts, lastStatus, nextRetryAt, replay, deadLetterCode, responseExcerpt, legacyKey, lineKeys, lookups, createdAt]
       properties:
         id: {type: string, format: uuid}
         subscriptionId: {type: string, format: uuid}
@@ -505,6 +1017,8 @@ components:
         deadLetterCode: {type: [string, "null"], description: "HUB-0115 retries exhausted, HUB-0117 refused for good (rest-push 4xx or render refusal), HUB-0118 pushed but its legacy key conflicts with the one recorded for the event (not replayable)."}
         responseExcerpt: {type: [string, "null"], description: "rest-push: the receiver's last answer, truncated to 2000 characters, credentials removed."}
         legacyKey: {type: [string, "null"], description: "rest-push: the legacy key the receiver answered with."}
+        lineKeys: {type: array, description: "rest-push with lineKeyPath: the legacy key the receiver assigned to each element of the pushed collection.", items: {$ref: "#/components/schemas/LineKey"}}
+        lookups: {type: array, description: "rest-push: the lookup table versions the last render read, so the pushed body can be traced to the entries behind it.", items: {$ref: "#/components/schemas/LookupUse"}}
         createdAt: {type: string, format: date-time}
     DeliveryPage:
       type: object
@@ -512,3 +1026,164 @@ components:
       properties:
         items: {type: array, items: {$ref: "#/components/schemas/Delivery"}}
         nextCursor: {type: [string, "null"]}
+    Scope:
+      type: string
+      maxLength: 100
+      pattern: "^[A-Za-z](?:[A-Za-z0-9 ._-]{0,98}[A-Za-z0-9._-])?$"
+      description: A duty name; no commas, because the gateway joins duties with commas.
+      examples: [sales.order.read]
+    NewClient:
+      type: object
+      additionalProperties: false
+      required: [clientId, name, scopes, ownerContact]
+      properties:
+        clientId: {type: string, pattern: "^[a-z0-9][a-z0-9._-]{2,63}$", description: "The Keycloak client id."}
+        name: {type: string, minLength: 1, maxLength: 200}
+        scopes: {type: array, minItems: 1, maxItems: 50, items: {$ref: "#/components/schemas/Scope"}, description: "Duty names the client may use, in any catalogue style (sales.order.read, VendorInvoicePost, Maintain users)."}
+        quotaPerMin: {type: integer, minimum: 10, maximum: 100000, default: 600}
+        burst: {type: integer, minimum: 1, maximum: 100000, default: 100}
+        sandboxTenantId: {type: [string, "null"], format: uuid, description: "The tenant the portal's test console runs against; not the caller's own."}
+        ownerContact: {type: string, description: "E-mail address of the client's owner."}
+    ClientPatch:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: {type: integer, minimum: 1}
+        name: {type: string, minLength: 1, maxLength: 200}
+        scopes: {type: array, minItems: 1, maxItems: 50, items: {$ref: "#/components/schemas/Scope"}}
+        quotaPerMin: {type: integer, minimum: 10, maximum: 100000}
+        burst: {type: integer, minimum: 1, maximum: 100000}
+        sandboxTenantId: {type: [string, "null"], format: uuid}
+        ownerContact: {type: string}
+    Client:
+      type: object
+      required: [id, clientId, name, scopes, quotaPerMin, burst, sandboxTenantId, ownerContact, status, revokedAt, version, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        clientId: {type: string}
+        name: {type: string}
+        scopes: {type: array, items: {type: string}}
+        quotaPerMin: {type: integer}
+        burst: {type: integer}
+        sandboxTenantId: {type: [string, "null"], format: uuid}
+        ownerContact: {type: string}
+        status: {type: string, enum: [active, revoked]}
+        revokedAt: {type: [string, "null"], format: date-time}
+        version: {type: integer}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    ClientPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/Client"}}
+        nextCursor: {type: [string, "null"]}
+    ClientUsage:
+      type: object
+      required: [minutes]
+      properties:
+        minutes:
+          type: array
+          items:
+            type: object
+            required: [minute, allowed, throttled]
+            properties:
+              minute: {type: string, format: date-time}
+              allowed: {type: integer, minimum: 0, description: "Units admitted in the minute."}
+              throttled: {type: integer, minimum: 0, description: "Units refused with 429 in the minute."}
+    CatalogOperation:
+      type: object
+      required: [id, method, path, summary, duty]
+      properties:
+        id: {type: [string, "null"], description: "operationId, or the message key of an event contract."}
+        method: {type: string, description: "HTTP method, or `event` for a message."}
+        path: {type: string, description: "The path, or the CloudEvents type of a message."}
+        summary: {type: [string, "null"]}
+        duty: {type: [string, "null"], description: "x-passage-duty; messages have none."}
+    NewCatalogEntry:
+      type: object
+      additionalProperties: false
+      required: [kind, name, specVersion, title, ownerService, spec]
+      properties:
+        kind: {type: string, enum: [api, event]}
+        name: {type: string, pattern: "^[a-z0-9][a-z0-9._-]{1,99}$"}
+        specVersion: {type: string, pattern: "^[0-9]{1,6}\\.[0-9]{1,6}\\.[0-9]{1,6}$", description: "MAJOR.MINOR.PATCH, equal to the document's info.version and higher than the newest published version of its major line."}
+        title: {type: string, minLength: 1, maxLength: 200}
+        summary: {type: string, maxLength: 2000}
+        ownerService: {type: string, pattern: "^[a-z0-9][a-z0-9._-]{1,63}$", description: "The service that owns the contract, such as sales."}
+        spec: {type: object, additionalProperties: true, description: "An OpenAPI 3.x (kind api) or AsyncAPI 3.x (kind event) document as JSON, at most 2 MiB and 64 levels deep; `info.version` equals `specVersion`."}
+    CatalogPatch:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: {type: integer, minimum: 1}
+        title: {type: string, minLength: 1, maxLength: 200}
+        summary: {type: string, maxLength: 2000}
+        ownerService: {type: string, pattern: "^[a-z0-9][a-z0-9._-]{1,63}$"}
+    DeprecateRequest:
+      type: object
+      additionalProperties: false
+      required: [version, sunsetAt]
+      properties:
+        version: {type: integer, minimum: 1}
+        sunsetAt: {type: string, format: date-time, description: "At least api_deprecation_months months from now."}
+        replacedBy: {type: [string, "null"], format: uuid, description: "Another active entry of the same kind."}
+    RetireRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: {type: integer, minimum: 1}
+    CatalogEntry:
+      type: object
+      required: [id, kind, name, specVersion, title, summary, ownerService, specFormat, specBytes, operationCount, lifecycle, deprecatedAt, sunsetAt, replacedBy, retiredAt, version, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [api, event]}
+        name: {type: string}
+        specVersion: {type: string}
+        title: {type: string}
+        summary: {type: string}
+        ownerService: {type: string}
+        specFormat: {type: string, enum: [openapi, asyncapi]}
+        specBytes: {type: integer}
+        operationCount: {type: integer, minimum: 0}
+        lifecycle: {type: string, enum: [active, deprecated, retired]}
+        deprecatedAt: {type: [string, "null"], format: date-time}
+        sunsetAt: {type: [string, "null"], format: date-time}
+        replacedBy: {type: [string, "null"], format: uuid}
+        retiredAt: {type: [string, "null"], format: date-time}
+        version: {type: integer}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    CatalogDetail:
+      allOf:
+        - {$ref: "#/components/schemas/CatalogEntry"}
+        - type: object
+          required: [operations, issues]
+          properties:
+            operations: {type: array, items: {$ref: "#/components/schemas/CatalogOperation"}}
+            issues: {type: array, items: {type: string}, description: "Operations without operationId, summary or x-passage-duty; empty when clean."}
+    CatalogPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/CatalogEntry"}}
+        nextCursor: {type: [string, "null"]}
+    ConsumeRequest:
+      type: object
+      additionalProperties: false
+      required: [clientId]
+      properties:
+        clientId: {type: string, description: "The Keycloak client id from the verified token."}
+        cost: {type: integer, minimum: 1, maximum: 100000, default: 1}
+    ConsumeAllowed:
+      type: object
+      required: [allowed, remaining, limitPerMin, burst]
+      properties:
+        allowed: {type: boolean, const: true}
+        remaining: {type: integer, minimum: 0}
+        limitPerMin: {type: integer}
+        burst: {type: integer}

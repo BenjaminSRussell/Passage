@@ -20,7 +20,31 @@ channels:
     messages:
       hierarchyUnassigned:
         $ref: '#/components/messages/HierarchyUnassigned'
+  balanceVerified:
+    address: passage.reporting.balance
+    messages:
+      balanceVerified:
+        $ref: '#/components/messages/BalanceVerified'
+  lagExceeded:
+    address: passage.reporting.lag
+    messages:
+      lagExceeded:
+        $ref: '#/components/messages/LagExceeded'
 operations:
+  publishBalanceVerified:
+    action: send
+    channel:
+      $ref: '#/channels/balanceVerified'
+    summary: The read model of a ledger was compared with the ledger trial balance (FR-15.1); written to the outbox in the transaction that stores the check
+    messages:
+      - $ref: '#/channels/balanceVerified/messages/balanceVerified'
+  publishLagExceeded:
+    action: send
+    channel:
+      $ref: '#/channels/lagExceeded'
+    summary: The read model of a ledger stayed behind the lag gate for the alert window (FR-15.1); one event per episode, written to the outbox by the lag-check job
+    messages:
+      - $ref: '#/channels/lagExceeded/messages/lagExceeded'
   publishHierarchyUnassigned:
     action: send
     channel:
@@ -46,6 +70,8 @@ components:
   messages:
     StatementGenerated:
       name: dev.passage.reporting.statement.generated.v1
+      title: Statement generated
+      summary: A statement run completed and its cells and result hash were stored.
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -71,9 +97,12 @@ components:
                 size: {type: integer}
           parameters:
             type: object
+            description: Run parameters; always period, hierarchy as CODE@version when the rows of the run are the nodes of a hierarchy, and tree as CODE@revision with treeUnit when the run is limited to a unit of a reporting tree
             additionalProperties: {type: string}
     DefinitionPublished:
       name: dev.passage.reporting.definition.published.v1
+      title: Definition published
+      summary: A report definition version was published.
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -85,6 +114,8 @@ components:
           diff_summary: {type: string}
     HierarchyUnassigned:
       name: dev.passage.reporting.hierarchy.unassigned.v1
+      title: Hierarchy member unassigned
+      summary: A published non-strict hierarchy left a member without a node.
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -96,3 +127,36 @@ components:
           member_kind: {type: string, enum: [main_account_category, main_account, dimension_value]}
           owner_user_id: {type: string, description: Hierarchy owner to notify}
           actor: {type: string, description: User id of the publisher}
+    BalanceVerified:
+      name: dev.passage.reporting.balance.verified.v1
+      title: Balance verified
+      summary: A balance verification stored its result; subscribers alert on status differs. Account amounts are not in the event.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [verification_id, ledger_id, status, hwm_before, hwm_after, entries_pending, accounts_compared, diff_count, actor]
+        properties:
+          verification_id: {type: string, format: uuid}
+          ledger_id: {type: string, format: uuid}
+          legal_entity_id: {type: string, format: uuid, description: Legal entity that owns the ledger's reporting data (also the legalentityid extension); absent for a legacy ledger}
+          status: {type: string, enum: [matched, differs, inconclusive], description: inconclusive when the read model's mark moved during the check or entries waited ahead of it}
+          hwm_before: {type: integer, format: int64}
+          hwm_after: {type: integer, format: int64}
+          entries_pending: {type: integer, description: Most entries seen waiting ahead of the mark}
+          accounts_compared: {type: integer}
+          diff_count: {type: integer, description: Accounts whose net differs between the read model and the ledger}
+          actor: {type: string, description: User id that ran the check}
+    LagExceeded:
+      name: dev.passage.reporting.lag.exceeded.v1
+      title: Read-model lag exceeded
+      summary: The reporting read model of a ledger has been behind the journal by more than the lag gate for the alert window.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [ledger_id, lag_seconds, hwm_ledger, hwm_reporting]
+        properties:
+          ledger_id: {type: string, format: uuid}
+          legal_entity_id: {type: string, format: uuid, description: Legal entity that owns the ledger's reporting data (also the legalentityid extension); absent for a legacy ledger}
+          lag_seconds: {type: integer, description: 'Age in seconds of the oldest journal entry waiting for an earlier one (a lower bound: entries the consumer has not received do not count)'}
+          hwm_ledger: {type: integer, description: Highest posting sequence the reporting service has seen for the ledger}
+          hwm_reporting: {type: integer, description: Highest posting sequence the read model has applied}

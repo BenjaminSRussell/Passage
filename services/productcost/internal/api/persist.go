@@ -49,6 +49,8 @@ type Store interface {
 	StoreRoll(ctx context.Context, in store.RollInput) (store.RollResult, bool, error)
 	GetPostingAccounts(ctx context.Context, legalEntityID string) (store.PostingAccounts, error)
 	SetPostingAccounts(ctx context.Context, in store.PostingAccounts) (store.PostingAccounts, error)
+	ListActivationAttempts(ctx context.Context) ([]store.Attempt, error)
+	ResolveActivationAttempt(ctx context.Context, in store.ResolveInput) (store.ResolveResult, bool, error)
 }
 
 // WithStore attaches the repository. Without one the stored routes answer 503.

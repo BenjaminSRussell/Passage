@@ -1,5 +1,7 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { AccountsPage } from "./AccountsPage";
+import { EditAccountPage, NewAccountPage } from "./AccountFormPage";
 import { EntryScreen, TrialBalanceScreen } from "./pages";
 import { EditReasonCodePage, NewReasonCodePage } from "./ReasonCodeFormPage";
 import { ReasonCodesPage } from "./ReasonCodesPage";
@@ -12,6 +14,7 @@ import { JournalBatchesPage } from "./JournalBatchesPage";
 import { JournalBatchPage, NewJournalBatchPage } from "./JournalBatchPage";
 import { EditJournalNamePage, NewJournalNamePage } from "./JournalNameFormPage";
 import { JournalNamesPage } from "./JournalNamesPage";
+import { LedgerSettingsPage } from "./LedgerSettingsPage";
 import { LedgerLinesPage } from "./LedgerLinesPage";
 import { NewRecurringJournalPage, RecurringJournalPage } from "./RecurringJournalPage";
 import { RecurringJournalsPage } from "./RecurringJournalsPage";
@@ -42,7 +45,7 @@ import { AutoClearingRunDetailPage, AutoClearingRunPage } from "./AutoClearingRu
 const ledger: PassageModule = {
   id: "ledger",
   title: "General ledger",
-  description: "Universal journal: manual journal batches with approval, recurring journals, open items with manual and automatic clearing, clearing rules, tolerance groups, trial balance, ledger transactions inquiry, posted journal entries and their reversal, journal names, shared reason codes, account structures, advanced rule structures, dimension values, dimension derivation strategies with lookup tables, user-defined validation rules, document splitting rules, dimension realignment runs and default description templates.",
+  description: "Universal journal: manual journal batches with approval, recurring journals, open items with manual and automatic clearing, clearing rules, tolerance groups, chart of accounts, trial balance, ledger transactions inquiry with CSV exports, posted journal entries and their reversal, journal names, shared reason codes, account structures, advanced rule structures, dimension values, dimension derivation strategies with lookup tables, user-defined validation rules, document splitting rules, dimension realignment runs and default description templates.",
   routes: [
     { path: "/ledger/journal-batches", element: createElement(JournalBatchesPage), handle: { title: "Journal batches" } },
     { path: "/ledger/journal-batches/new", element: createElement(NewJournalBatchPage), handle: { title: "New journal batch" } },
@@ -50,6 +53,7 @@ const ledger: PassageModule = {
     { path: "/ledger/journal-names", element: createElement(JournalNamesPage), handle: { title: "Journal names" } },
     { path: "/ledger/journal-names/new", element: createElement(NewJournalNamePage), handle: { title: "New journal name" } },
     { path: "/ledger/journal-names/:code", element: createElement(EditJournalNamePage), handle: { title: "Journal name" } },
+    { path: "/ledger/ledger-settings", element: createElement(LedgerSettingsPage), handle: { title: "Ledger settings" } },
     { path: "/ledger/recurring-journals", element: createElement(RecurringJournalsPage), handle: { title: "Recurring journals" } },
     { path: "/ledger/recurring-journals/new", element: createElement(NewRecurringJournalPage), handle: { title: "New recurring journal" } },
     { path: "/ledger/recurring-journals/:id", element: createElement(RecurringJournalPage), handle: { title: "Recurring journal" } },
@@ -85,6 +89,9 @@ const ledger: PassageModule = {
     { path: "/ledger/trial-balance", element: createElement(TrialBalanceScreen), handle: { title: "Trial balance" } },
     { path: "/ledger/transactions", element: createElement(LedgerLinesPage), handle: { title: "Ledger transactions" } },
     { path: "/ledger/entries/:id", element: createElement(EntryScreen), handle: { title: "Journal entry", duty: "ledger.journal.read" } },
+    { path: "/ledger/accounts", element: createElement(AccountsPage), handle: { title: "Chart of accounts" } },
+    { path: "/ledger/accounts/new", element: createElement(NewAccountPage), handle: { title: "New account" } },
+    { path: "/ledger/accounts/:chart/:number", element: createElement(EditAccountPage), handle: { title: "Account" } },
     { path: "/ledger/reason-codes", element: createElement(ReasonCodesPage), handle: { title: "Reason codes" } },
     { path: "/ledger/reason-codes/new", element: createElement(NewReasonCodePage), handle: { title: "New reason code" } },
     { path: "/ledger/reason-codes/:code", element: createElement(EditReasonCodePage), handle: { title: "Reason code" } },
@@ -112,6 +119,8 @@ const ledger: PassageModule = {
     { label: "Trial balance", to: "/ledger/trial-balance", duty: "ledger.balance.read" },
     { label: "Ledger transactions", to: "/ledger/transactions", duty: "ledger.journal.read" },
     { label: "Journal names", to: "/ledger/journal-names", duty: "ledger.journal.read" },
+    { label: "Ledger settings", to: "/ledger/ledger-settings", duty: "ledger.journal.read" },
+    { label: "Chart of accounts", to: "/ledger/accounts", duty: "ledger.journal.read" },
     { label: "Reason codes", to: "/ledger/reason-codes", duty: "ledger.journal.read" },
     { label: "Account structures", to: "/ledger/structures", duty: "ledger.journal.read" },
     { label: "Advanced rules", to: "/ledger/advanced-rules", duty: "ledger.journal.read" },

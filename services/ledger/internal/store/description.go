@@ -30,6 +30,8 @@ type DescriptionTemplate struct {
 	Template      string            `json:"template"`
 	FieldBindings map[string]string `json:"fieldBindings"`
 	UpdatedAt     time.Time         `json:"updatedAt"`
+	// LockVersion is the entity tag: PUT of an existing template sends it in If-Match.
+	LockVersion int `json:"lockVersion"`
 }
 
 // Description template scopes.
@@ -38,13 +40,13 @@ const (
 	ScopeLegalEntity = "legal_entity"
 )
 
-const descriptionColumns = `id::text, scope, legal_entity_id::text, source_type, language, template, field_bindings, updated_at`
+const descriptionColumns = `id::text, scope, legal_entity_id::text, source_type, language, template, field_bindings, updated_at, lock_version`
 
 func scanDescription(row pgx.Row, extra ...any) (DescriptionTemplate, error) {
 	var d DescriptionTemplate
 	var bindings []byte
 	err := row.Scan(append([]any{&d.ID, &d.Scope, &d.LegalEntityID, &d.SourceType, &d.Language, &d.Template, &bindings,
-		&d.UpdatedAt}, extra...)...)
+		&d.UpdatedAt, &d.LockVersion}, extra...)...)
 	if err != nil {
 		return d, err
 	}
@@ -125,7 +127,7 @@ func mayWriteDescription(p tenant.Principal, in DescriptionTemplate) bool {
 // LEDGER_DESCRIPTION_TEMPLATE_DUPLICATE. A caller scoped to one legal entity
 // may write only that entity's templates: tenant templates apply to every
 // legal entity, so changing or taking over one is 403 AUTH-0003.
-func (s *Postgres) PutDescriptionTemplate(ctx context.Context, id string, in DescriptionTemplate) (DescriptionTemplate, bool, error) {
+func (s *Postgres) PutDescriptionTemplate(ctx context.Context, id string, ifMatch int, in DescriptionTemplate) (DescriptionTemplate, bool, error) {
 	p, err := principalOf(ctx)
 	if err != nil {
 		return DescriptionTemplate{}, false, err
@@ -143,25 +145,29 @@ func (s *Postgres) PutDescriptionTemplate(ctx context.Context, id string, in Des
 	var out DescriptionTemplate
 	var created bool
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		if p.LegalEntityID != "" {
-			var existingScope string
-			err := tx.QueryRow(ctx, `select scope from description_template where tenant_id = $1 and id = $2 for update`,
-				p.TenantID, id).Scan(&existingScope)
-			if err == nil && existingScope == ScopeTenant {
-				return outOfScope()
-			}
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return err
-			}
+		var existingScope string
+		var current int
+		err := tx.QueryRow(ctx, `select scope, lock_version from description_template where tenant_id = $1 and id = $2 for update`,
+			p.TenantID, id).Scan(&existingScope, &current)
+		found := err == nil
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if found && p.LegalEntityID != "" && existingScope == ScopeTenant {
+			return outOfScope()
+		}
+		if err := checkLock(found, current, ifMatch, "description template"); err != nil {
+			return err
 		}
 		row := tx.QueryRow(ctx, `insert into description_template (tenant_id, id, scope, legal_entity_id, source_type, language,
 			template, field_bindings)
 			values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
 			on conflict (tenant_id, id) do update set scope = excluded.scope, legal_entity_id = excluded.legal_entity_id,
 				source_type = excluded.source_type, language = excluded.language, template = excluded.template,
-				field_bindings = excluded.field_bindings, updated_at = now()
+				field_bindings = excluded.field_bindings,
+				`+lockedUpdate("description_template", 9, "scope", "legal_entity_id", "source_type", "language", "template", "field_bindings")+`
 			returning `+descriptionColumns+`, (xmax = 0)`, p.TenantID, id, in.Scope, in.LegalEntityID, in.SourceType,
-			in.Language, in.Template, string(bindings))
+			in.Language, in.Template, string(bindings), ifMatch)
 		var scanErr error
 		out, scanErr = scanDescription(row, &created)
 		var pgErr *pgconn.PgError
@@ -174,7 +180,19 @@ func (s *Postgres) PutDescriptionTemplate(ctx context.Context, id string, in Des
 				return outOfScope()
 			}
 		}
-		return scanErr
+		if errors.Is(scanErr, pgx.ErrNoRows) && !found {
+			// The upsert met a row the read above did not see: one created since, or another legal entity's
+			// template, which row-level security hides from this caller (taking it over is out of scope).
+			var visible bool
+			if err := tx.QueryRow(ctx, `select exists (select 1 from description_template where tenant_id = $1 and id = $2)`,
+				p.TenantID, id).Scan(&visible); err != nil {
+				return err
+			}
+			if !visible {
+				return outOfScope()
+			}
+		}
+		return lockLost(scanErr, ifMatch, "description template")
 	})
 	if err != nil {
 		return DescriptionTemplate{}, false, err
@@ -213,7 +231,13 @@ func applyDefaultDescriptions(ctx context.Context, tx pgx.Tx, tenantID string, l
 	if !needed {
 		return in.Description, nil, nil
 	}
-	tpl, err := loadDescriptionTemplate(ctx, tx, tenantID, ledger.LegalEntityID, in.Source.Type, domain.DefaultDescriptionLanguage)
+	var tpl *DescriptionTemplate
+	var err error
+	for _, language := range domain.DescriptionLanguages(in.DescriptionLanguage) {
+		if tpl, err = loadDescriptionTemplate(ctx, tx, tenantID, ledger.LegalEntityID, in.Source.Type, language); err != nil || tpl != nil {
+			break
+		}
+	}
 	if err != nil || tpl == nil {
 		return in.Description, nil, err
 	}

@@ -77,7 +77,13 @@ type Store interface {
 	LookupReplay(ctx context.Context, idem store.Idem) (*store.Replay, error)
 	CreateWorker(ctx context.Context, in store.Worker, idem store.Idem) (store.Worker, error)
 	GetWorker(ctx context.Context, id string) (store.Worker, error)
+	UpdateWorker(ctx context.Context, workerID string, version int, in store.WorkerInput, savedBy string, idem store.Idem) (store.Worker, error)
+	DeactivateWorker(ctx context.Context, workerID string, version int, reason, savedBy string, idem store.Idem) (store.Worker, error)
+	ReactivateWorker(ctx context.Context, workerID string, version int, savedBy string, idem store.Idem) (store.Worker, error)
 	ListWorkers(ctx context.Context, activeOnly bool, limit int) ([]store.Worker, error)
+	AddCostRate(ctx context.Context, workerID string, in store.CostRateInput, savedBy string, idem store.Idem) (store.CostRate, error)
+	ListCostRates(ctx context.Context, workerID string) ([]store.CostRate, error)
+	LoadRateSteps(ctx context.Context, workerID string) ([]domain.RateStep, error)
 	CreateRegistrations(ctx context.Context, items []store.Registration) ([]store.RegistrationResult, error)
 	ListRegistrations(ctx context.Context, workerID string, start, end time.Time, limit int) ([]store.RegistrationView, error)
 	ListBundleRegistrations(ctx context.Context, bundleID string, limit int) ([]store.RegistrationView, error)
@@ -119,11 +125,14 @@ type Store interface {
 	ListDowntimes(ctx context.Context, f store.DowntimeFilter) ([]store.Downtime, error)
 	CodeDowntime(ctx context.Context, id, reason, category string, idem store.Idem) (store.Downtime, error)
 	OpenAndon(ctx context.Context, siteID string) ([]store.Andon, error)
+	SweepAndon(ctx context.Context, now time.Time) (store.AndonSweepResult, error)
+	ClearAndon(ctx context.Context, id, reason, clearedBy string, now time.Time, idem store.Idem) (store.Andon, error)
 	LoadOEEStreams(ctx context.Context, resourceIDs []string, from, to time.Time) (map[string]domain.OEEStream, error)
 	ExportPay(ctx context.Context, fromDate, toDate, createdBy string, idem store.Idem) (store.PayExport, error)
 	ListPayExports(ctx context.Context, limit int) ([]store.PayExport, error)
 	GetPayExport(ctx context.Context, id string) (store.PayExport, error)
 	IngestProcessMessage(ctx context.Context, in domain.NewMessage, cat domain.Category, now time.Time) (store.ProcessIngest, error)
+	StoredProcessMessage(ctx context.Context, source, sourceMessageID string) (store.ProcessMessage, bool, error)
 	ListProcessMessages(ctx context.Context, f store.ProcessFilter) ([]store.ProcessMessage, error)
 	GetProcessMessage(ctx context.Context, id string) (store.ProcessMessage, error)
 	ReportDelivery(ctx context.Context, messageID, destination, outcome string, errText *string, now time.Time, idem store.Idem) (store.ProcessMessage, error)
@@ -143,6 +152,11 @@ type Store interface {
 	UpdateDowntimeReason(ctx context.Context, id string, version int, in store.DowntimeReasonInput, updatedBy string) (store.DowntimeReason, error)
 	GetDowntimeReason(ctx context.Context, id string) (store.DowntimeReason, error)
 	ListDowntimeReasons(ctx context.Context, activeOnly bool, limit int) ([]store.DowntimeReason, error)
+	CreateProcessCategory(ctx context.Context, in domain.CategoryInput, createdBy string, idem store.Idem) (store.ProcessCategory, error)
+	UpdateProcessCategory(ctx context.Context, id string, version int, in domain.CategoryInput, updatedBy string) (store.ProcessCategory, error)
+	GetProcessCategory(ctx context.Context, id string) (store.ProcessCategory, error)
+	ListProcessCategories(ctx context.Context, activeOnly bool, limit int) ([]store.ProcessCategory, error)
+	ResolveProcessCategory(ctx context.Context, code string) (domain.Category, error)
 }
 
 // API holds the handlers and the counters served on the admin port.
@@ -270,7 +284,10 @@ type itemsResponse[T any] struct {
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	a.registerAbsence(r)
+	a.registerWorkerMaintenance(r)
+	a.registerCostRates(r)
 	a.registerDowntimeReasons(r)
+	a.registerProcessCategories(r)
 	a.registerEdge(r)
 	r.With(authz.RequireDuty(DutySetup)).Post("/v1/shopfloor/workers", a.createWorker)
 	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/workers", a.listWorkers)
@@ -303,7 +320,7 @@ func (a *API) Metrics() http.Handler {
 		counter("shopfloor_machine_events_accepted_total", "Machine events stored from edge batches.", a.eventsAccepted.Load())
 		counter("shopfloor_machine_events_dropped_total", "Machine events dropped as duplicate, regressed or older than 7 days (BR-25.4).", a.eventsDropped.Load())
 		counter("shopfloor_machine_seq_gaps_total", "Missing machine sequence runs reported to the edge (SF-0008).", a.seqGaps.Load())
-		counter("shopfloor_andons_raised_total", "Andon alerts raised from downtimes.", a.andonsRaised.Load())
+		counter("shopfloor_andons_raised_total", "Andon alerts raised from downtimes and scrap rates (machine ingest and the andon sweep).", a.andonsRaised.Load())
 		counter("shopfloor_pay_export_lines_total", "Approved pay lines written to payroll export batches.", a.exportedLines.Load())
 		counter("shopfloor_process_messages_stored_total", "Process messages stored (FR-25.17).", a.processStored.Load())
 		counter("shopfloor_process_message_replays_total", "Process messages replayed by (source, sourceMessageId) and not stored again.", a.processReplays.Load())
@@ -912,8 +929,12 @@ func (a *API) recalculate(ctx context.Context, win rangeWindow) ([]domain.DayPay
 	if err != nil {
 		return nil, "", err
 	}
+	steps, err := a.store.LoadRateSteps(ctx, win.workerID)
+	if err != nil {
+		return nil, "", err
+	}
 	profileFor := func(t time.Time) domain.Profile { return setup.Profiles.For(t, win.loc) }
-	calc := domain.Calculation{ProfileFor: profileFor, Location: win.loc, Rules: rules, Rate: in.Rate, Currency: in.Currency}
+	calc := domain.Calculation{ProfileFor: profileFor, Location: win.loc, Rules: rules, Rate: in.Rate, RateSteps: steps, Currency: in.Currency}
 	all, err := calc.Run(domain.AddAbsences(domain.BuildDaysFor(in.Punches, win.loc, profileFor), in.Absences, win.loc))
 	if err != nil {
 		var de *domain.Error

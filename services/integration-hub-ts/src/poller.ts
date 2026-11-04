@@ -69,6 +69,8 @@ function recordingRest(store: PgDeliveryStore, pusher: RestPusher, target: RestT
     store.recordAttempt(delivery.event.eventId, outcome.status, {
       ...(outcome.excerpt === undefined ? {} : { excerpt: outcome.excerpt }),
       ...(outcome.legacyKey === undefined ? {} : { legacyKey: outcome.legacyKey }),
+      ...(outcome.lineKeys === undefined ? {} : { lineKeys: outcome.lineKeys }),
+      ...(outcome.lookups === undefined ? {} : { lookups: outcome.lookups }),
     });
     return outcome;
   };
@@ -119,6 +121,7 @@ export class Poller {
       const { store: deliveries, target } = loaded;
       let sender: { transport: Transport } | { deliver: Deliver };
       let secret = "";
+      let previousSecret: string | null = null;
       if (target.kind === "rest-push") {
         if (this.#o.rest === undefined) {
           throw new Error(`subscription ${target.id} is rest-push but the hub has no migration client configured`);
@@ -126,10 +129,11 @@ export class Poller {
         sender = { deliver: recordingRest(deliveries, this.#o.rest, store.openRest(tenantId, target), () => this.#now(), leaseUntil) };
       } else {
         secret = store.openSecret(tenantId, target);
+        previousSecret = store.openPreviousSecret(tenantId, target, this.#now());
         sender = { transport: recording(deliveries, this.#o.transport, () => this.#now(), leaseUntil) };
       }
       const dispatcher = new Dispatcher({
-        subscription: { id: target.id, url: target.url, secret },
+        subscription: { id: target.id, url: target.url, secret, ...(previousSecret === null ? {} : { previousSecret }) },
         store: deliveries,
         ...sender,
         clock: () => this.#now(),

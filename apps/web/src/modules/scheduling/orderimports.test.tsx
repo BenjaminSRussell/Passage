@@ -3,7 +3,8 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
-import type { OrderImport } from "./api/client";
+import type { OrderImport, Run } from "./api/client";
+import { runSummary } from "./OrderImportDetailPage";
 import scheduling from "./module";
 
 const ORDER = "0d000000-0000-4000-8000-000000000001";
@@ -156,5 +157,32 @@ describe("Production orders received", () => {
     expect(screen.getAllByText("Estimated").length).toBeGreaterThan(0);
     expect(screen.getByText(/held by a firmed job were kept and still hold their capacity/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Import again" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Schedule this order" })).not.toBeInTheDocument();
+  });
+
+  it("schedules one order from its page and links to the run, or shows the failure", async () => {
+    const run = { id: "77777777-7777-4777-8777-777777777777", scope: "order", operationsCount: 3, messages: [], warnings: [] };
+    handler = (url) => (url.pathname.endsWith(":schedule") ? { status: 201, body: run } : { status: 200, body: partial });
+    const first = renderAt(`/scheduling/order-imports/${ORDER}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Schedule this order" }));
+    expect(await screen.findByText("The order was scheduled")).toBeInTheDocument();
+    expect(screen.getByText(/3 of 3 operations placed\./)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open the run" })).toHaveAttribute("href", `/scheduling/runs/${run.id}`);
+    expect(calls.some((c) => c.pathname.endsWith(`/orders/${ORDER}:schedule`))).toBe(true);
+    first.unmount();
+
+    handler = (url) =>
+      url.pathname.endsWith(":schedule") ? { status: 404, body: { code: "SCHED-0135", detail: "no operations are known for that order" } } : { status: 200, body: partial };
+    renderAt(`/scheduling/order-imports/${ORDER}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Schedule this order" }));
+    expect(await findAlert()).toHaveTextContent("SCHED-0135");
+  });
+
+  it("says how many operations a per-order run could not place, and when firmed jobs held them all", () => {
+    const base = { id: "r", scope: "order" as const, mode: "jobs", direction: "forward", finite: true, warnings: [] };
+    expect(runSummary({ ...base, operationsCount: 4, messages: ["op: no open interval"] } as unknown as Run)).toBe(
+      "3 of 4 operations placed; 1 could not be placed (see the run).",
+    );
+    expect(runSummary({ ...base, operationsCount: 0, messages: [] } as unknown as Run)).toMatch(/held by a firmed job/);
   });
 });

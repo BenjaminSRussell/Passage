@@ -41,6 +41,9 @@ type RecurringLine struct {
 	Amount      string            `json:"amount"`
 	Currency    string            `json:"currency"`
 	Text        string            `json:"text,omitempty"`
+	// Quantity and Unit are a fixed statistical quantity (BR-11.2) copied to every generated line.
+	Quantity string `json:"quantity,omitempty"`
+	Unit     string `json:"unit,omitempty"`
 }
 
 // RecurringJournal is a journal template with its schedule. Lines are set on
@@ -132,7 +135,7 @@ func getRecurringTx(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bo
 		return r, err
 	}
 	rows, err := tx.Query(ctx, `select line_number, account, dimensions, debit_credit::text, amount_kind, amount::text,
-			currency::text, coalesce(line_text, '')
+			currency::text, coalesce(line_text, ''), coalesce(quantity::text, ''), coalesce(unit, '')
 		from recurring_journal_line where tenant_id = $1 and recurring_id = $2 order by line_number`, tenantID, id)
 	if err != nil {
 		return r, err
@@ -140,7 +143,7 @@ func getRecurringTx(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bo
 	defer rows.Close()
 	for rows.Next() {
 		var l RecurringLine
-		if err := rows.Scan(&l.LineNumber, &l.Account, &l.Dimensions, &l.DebitCredit, &l.AmountKind, &l.Amount, &l.Currency, &l.Text); err != nil {
+		if err := rows.Scan(&l.LineNumber, &l.Account, &l.Dimensions, &l.DebitCredit, &l.AmountKind, &l.Amount, &l.Currency, &l.Text, &l.Quantity, &l.Unit); err != nil {
 			return r, err
 		}
 		if len(l.Dimensions) == 0 {
@@ -165,7 +168,10 @@ func checkRecurringVersion(r RecurringJournal, want int) error {
 
 // ListRecurring returns the recurring journals of the caller's scope, ordered
 // by next run date then name; status filters when set.
-func (s *Postgres) ListRecurring(ctx context.Context, status string) ([]RecurringJournal, error) {
+// recurringListLimit is the page size of the recurring journal list when none is asked.
+const recurringListLimit = 200
+
+func (s *Postgres) ListRecurring(ctx context.Context, status string, page Page) ([]RecurringJournal, error) {
 	p, err := principalOf(ctx)
 	if err != nil {
 		return nil, err
@@ -173,7 +179,8 @@ func (s *Postgres) ListRecurring(ctx context.Context, status string) ([]Recurrin
 	out := []RecurringJournal{}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, recurringSelect+` where r.tenant_id = $1 and ($2 = '' or r.status = $2)
-			order by r.next_run_date nulls last, r.name, r.id`, p.TenantID, status)
+			and (cardinality($4::text[]) = 0 or (coalesce(r.next_run_date, 'infinity'::date), r.name, r.id) > ($4[1]::date, $4[2], $4[3]::uuid))
+			order by coalesce(r.next_run_date, 'infinity'::date), r.name, r.id limit $3`, p.TenantID, status, page.pageLimit(recurringListLimit), page.keys())
 		if err != nil {
 			return err
 		}
@@ -317,9 +324,10 @@ func (s *Postgres) PutRecurring(ctx context.Context, id string, version int, in 
 				dims = map[string]string{}
 			}
 			batch.Queue(`insert into recurring_journal_line (tenant_id, recurring_id, line_number, legal_entity_id, account, dimensions,
-					debit_credit, amount_kind, amount, currency, line_text)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10, nullif($11, ''))`,
-				p.TenantID, id, i+1, ledger.LegalEntityID, l.Account, dims, l.DebitCredit, l.AmountKind, l.Amount, l.Currency, l.Text)
+					debit_credit, amount_kind, amount, currency, line_text, quantity, unit)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10, nullif($11, ''), nullif($12, '')::numeric, nullif($13, ''))`,
+				p.TenantID, id, i+1, ledger.LegalEntityID, l.Account, dims, l.DebitCredit, l.AmountKind, l.Amount, l.Currency, l.Text,
+				l.Quantity, l.Unit)
 		}
 		if err := execBatch(ctx, tx, batch); err != nil {
 			return err
@@ -512,7 +520,7 @@ func recurringBatch(cur RecurringJournal, date time.Time, baseOverride *string) 
 	tpl := make([]domain.RecurringLine, len(cur.Lines))
 	for i, l := range cur.Lines {
 		tpl[i] = domain.RecurringLine{Account: l.Account, Dimensions: l.Dimensions, DebitCredit: l.DebitCredit, Kind: l.AmountKind,
-			Amount: l.Amount, Currency: l.Currency, Text: l.Text}
+			Amount: l.Amount, Currency: l.Currency, Text: l.Text, Quantity: l.Quantity, Unit: l.Unit}
 	}
 	resolved, err := domain.ResolveAmounts(tpl, base)
 	if errors.Is(err, domain.ErrNoBase) {
@@ -525,7 +533,7 @@ func recurringBatch(cur RecurringJournal, date time.Time, baseOverride *string) 
 	lines := make([]BatchLine, len(resolved))
 	for i, r := range resolved {
 		lines[i] = BatchLine{Account: r.Account, Dimensions: r.Dimensions, DebitCredit: r.DebitCredit, Amount: r.Resolved,
-			Currency: r.Currency, Text: r.Text}
+			Currency: r.Currency, Text: r.Text, Quantity: r.Quantity, Unit: r.Unit}
 	}
 	return BatchInput{LedgerID: cur.LedgerID, JournalName: cur.JournalName, Description: cur.Description, PostingDate: date, Lines: lines}, nil
 }

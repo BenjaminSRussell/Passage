@@ -9,6 +9,7 @@ import {
   getLookupTable,
   listLookupTables,
   listLookupVersions,
+  lookupCsvUrl,
   newKey,
   updateLookupTable,
   type LookupTable,
@@ -17,6 +18,7 @@ import {
 } from "./api/client";
 import { formatDateTime } from "./domain";
 import { LoadMore } from "./LoadMore";
+import { LookupImportCard } from "./LookupImport";
 import { EMPTY_LOOKUP_FORM, filterEntries, kindLabel, LOOKUP_KINDS, parseEntriesText, parseLookupForm, starterEntriesText, type LookupForm } from "./lookupDomain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -329,7 +331,14 @@ export function LookupDetailPage() {
       ) : (
         <Card
           title={viewingOld ? `Entries, version ${table.version}` : "Entries"}
-          actions={canWrite && !viewingOld && table.definition ? <Button size="sm" onClick={() => { setDraft(JSON.stringify(table.definition?.entries ?? {}, null, 2)); setDraftError(undefined); }}>Edit entries</Button> : undefined}
+          actions={
+            <>
+              <a className={buttonClassName("secondary", "sm")} href={lookupCsvUrl(table.id, viewingOld ? table.version : undefined)} download>
+                Download as CSV
+              </a>
+              {canWrite && !viewingOld && table.definition ? <Button size="sm" onClick={() => { setDraft(JSON.stringify(table.definition?.entries ?? {}, null, 2)); setDraftError(undefined); }}>Edit entries</Button> : null}
+            </>
+          }
         >
           <dl className={styles.details}>
             <Entry term="Holds">{kindLabel(table.kind)}</Entry>
@@ -348,6 +357,7 @@ export function LookupDetailPage() {
           {shown.total > shown.rows.length ? <p className={styles.note}>Showing the first {shown.rows.length} of {shown.total} matching entries. Search to narrow the list.</p> : null}
         </Card>
       )}
+      {canWrite && table.status === "active" && !viewingOld && draft === null ? <LookupImportCard table={table} current={current} onImported={(next) => state.set(next)} onReload={() => { state.reload(); versions.reload(); }} /> : null}
       {versions.error ? (
         <Alert tone="danger" title="Could not load the version history" live="alert" action={<Button size="sm" onClick={versions.reload}>Try again</Button>}>
           {versions.error.message} ({versions.error.code})

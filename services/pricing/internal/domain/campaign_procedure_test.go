@@ -101,6 +101,8 @@ func TestValidateSteps(t *testing.T) {
 		{"unknown type", []ProcedureStep{procStep(10, TypePrice), procStep(20, "BOGUS")}, []string{"steps[1].conditionType"}},
 		{"no PRICE step", []ProcedureStep{procStep(10, TypeLineDisc)}, []string{"steps"}},
 		{"two PRICE steps", []ProcedureStep{procStep(10, TypePrice), procStep(20, TypePrice)}, []string{"steps"}},
+		{"repeated discount type", []ProcedureStep{procStep(10, TypePrice), procStep(20, TypeLineDisc), procStep(30, TypeMultiline),
+			grouped(40, TypeLineDisc, "EG1", ExclusionBest)}, []string{"steps[3].conditionType"}},
 		{"requirement over 512 characters", []ProcedureStep{{StepNo: 10, ConditionType: TypePrice, RequirementCEL: strings.Repeat("x", 513)}},
 			[]string{"steps[0].requirementCel"}},
 		{"requirement of 512 characters", []ProcedureStep{{StepNo: 10, ConditionType: TypePrice, RequirementCEL: strings.Repeat("x", 512)}}, nil},

@@ -229,10 +229,10 @@ func TestPostgres_RealignmentRefusesBadRequestsAndClosedPeriods(t *testing.T) {
 // that is not registered or is suspended is refused like any posting.
 func TestPostgres_RealignmentValidatesTheNewValue(t *testing.T) {
 	e := realignSetup(t)
-	if _, _, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, domain.DimensionValue{Attribute: "DEPT", Value: "D150", Name: "Merged"}); err != nil {
+	if _, _, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, 0, domain.DimensionValue{Attribute: "DEPT", Value: "D150", Name: "Merged"}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if _, _, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, domain.DimensionValue{Attribute: "DEPT", Value: "D100", Name: "Old", Suspended: true}); err != nil {
+	if _, _, err := e.store.PutDimensionValue(e.ctx, e.ledger.ID, 0, domain.DimensionValue{Attribute: "DEPT", Value: "D100", Name: "Old", Suspended: true}); err != nil {
 		t.Fatalf("suspend old: %v", err)
 	}
 	run, _, err := e.store.CreateRealignment(e.ctx, realignRequest(e, "VAL-1"))
@@ -244,7 +244,7 @@ func TestPostgres_RealignmentValidatesTheNewValue(t *testing.T) {
 	}
 
 	e2 := realignSetup(t)
-	if _, _, err := e2.store.PutDimensionValue(e2.ctx, e2.ledger.ID, domain.DimensionValue{Attribute: "DEPT", Value: "D150", Name: "Merged", Suspended: true}); err != nil {
+	if _, _, err := e2.store.PutDimensionValue(e2.ctx, e2.ledger.ID, 0, domain.DimensionValue{Attribute: "DEPT", Value: "D150", Name: "Merged", Suspended: true}); err != nil {
 		t.Fatalf("register inactive: %v", err)
 	}
 	run2, _, err := e2.store.CreateRealignment(e2.ctx, realignRequest(e2, "VAL-2"))
@@ -533,5 +533,143 @@ func TestPostgres_TrialBalanceByDimensionAfterRealignment(t *testing.T) {
 	got := netOf()
 	if !strings.HasSuffix(got["D100"], "|750.00") || !strings.HasSuffix(got["D150"], "|0.00") {
 		t.Fatalf("after the reversal: %v", got)
+	}
+}
+
+// qtyByDept is the account 6010 net statistical quantity per period, DEPT value and unit from the
+// quantity projection; zero rows are left out.
+func qtyByDept(t *testing.T, e env) map[string]string {
+	t.Helper()
+	rows, err := e.admin.Query(e.ctx, `select b.period_key || '/' || coalesce(nullif(c.dimensions ->> 'DEPT', ''), '-') || '/' || b.unit, b.net_quantity::text
+		from balance_quantity b join dimension_combination c on c.tenant_id = b.tenant_id and c.id = b.dimension_combination_id
+		join main_account a on a.tenant_id = b.tenant_id and a.id = b.main_account_id
+		where b.ledger_id = $1 and a.account_number = '6010' and b.net_quantity <> 0`, e.ledger.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			t.Fatal(err)
+		}
+		out[k] = decimal.RequireFromString(v).StringFixed(3)
+	}
+	return out
+}
+
+// BR-11.2 with FR-11.24: a run moves the statistical quantities of a combination with its amounts,
+// including a combination that holds quantities and no amount, and the reversal puts them back.
+func TestPostgres_RealignmentMovesStatisticalQuantities(t *testing.T) {
+	e := realignSetup(t)
+	in := vendorInvoice(e.ledger.ID, "RQ-1", "10.00")
+	in.PostingDate = time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC)
+	in.Lines = append(in.Lines,
+		statLine(domain.SideDebit, "D100", "12.5", "KG"), statLine(domain.SideCredit, "D100", "2.5", "KG"),
+		statLine(domain.SideCredit, "D100", "4", "PCS"),
+		statLine(domain.SideDebit, "D300", "8", "HC"), statLine(domain.SideCredit, "D300", "3", "HC"))
+	if _, err := e.store.PostEntry(e.ctx, in); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	beforeQty, beforeNet := qtyByDept(t, e), netByDept(t, e)
+	want := map[string]string{"2026-02/D100/KG": "10.000", "2026-02/D100/PCS": "-4.000", "2026-02/D300/HC": "5.000"}
+	if fmt.Sprint(beforeQty) != fmt.Sprint(want) {
+		t.Fatalf("setup quantities %v, want %v", beforeQty, want)
+	}
+
+	req := realignRequest(e, "RQ-RUN")
+	req.Mapping = domain.RealignmentMapping{"DEPT": {"D100": "D150", "D300": "D350"}}
+	req.Hash, _ = domain.HashPayload(req.Mapping)
+	run, _, err := e.store.CreateRealignment(e.ctx, req)
+	if err != nil {
+		t.Fatalf("simulate: %v", err)
+	}
+	var sawStatOnly bool
+	for _, p := range run.Preview {
+		if p.OldName == "6010-D300" {
+			sawStatOnly = decimal.RequireFromString(p.Net).IsZero() && len(p.Quantities) == 1 && p.Quantities[0].Unit == "HC" && p.Quantities[0].Net == "5"
+		}
+		if p.OldName == "6010-D100" && p.Period == "2026-02" && len(p.Quantities) != 2 {
+			t.Fatalf("the D100 row of February carries two units: %+v", p)
+		}
+	}
+	if !sawStatOnly || run.CombinationsAffected != 4 {
+		t.Fatalf("the quantity-only combination must be in the plan: %+v", run)
+	}
+
+	posted, err := e.store.PostRealignment(e.ctx, realignAction(e, run, "REORG"))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	got := qtyByDept(t, e)
+	want = map[string]string{"2026-02/D150/KG": "10.000", "2026-02/D150/PCS": "-4.000", "2026-02/D350/HC": "5.000"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("quantities after the run %v, want %v", got, want)
+	}
+	if n := netByDept(t, e); n["2026-02/D150"] != "210.00" {
+		t.Fatalf("amounts must move with the quantities: %v", n)
+	}
+	// The quantity lines are statistical: they add no amount to the entry.
+	var stat int
+	if err := e.admin.QueryRow(e.ctx, `select count(*) from journal_line l join journal_entry j on j.tenant_id = l.tenant_id and j.id = l.entry_id
+		where j.realignment_run_id = $1 and l.quantity is not null and l.amount_acct = 0`, run.ID).Scan(&stat); err != nil || stat != 6 {
+		t.Fatalf("statistical reclassification lines = %d err=%v", stat, err)
+	}
+
+	if _, err := e.store.ReverseRealignment(e.ctx, realignAction(e, posted, "REORG")); err != nil {
+		t.Fatalf("reverse: %v", err)
+	}
+	if got := qtyByDept(t, e); fmt.Sprint(got) != fmt.Sprint(beforeQty) {
+		t.Fatalf("quantities after the reversal %v, want %v", got, beforeQty)
+	}
+	if got := netByDept(t, e); fmt.Sprint(got) != fmt.Sprint(beforeNet) {
+		t.Fatalf("amounts after the reversal %v, want %v", got, beforeNet)
+	}
+}
+
+// A ledger whose quantity projection still misses lines posted before migration 0027
+// (quantity_rebuild_pending) reads the quantities to move from the journal, so the run still
+// empties the old combination; the rebuild then shows them all on the new one.
+func TestPostgres_RealignmentReadsQuantitiesFromTheJournalUntilTheBackfill(t *testing.T) {
+	e := realignSetup(t)
+	in := vendorInvoice(e.ledger.ID, "RQP-1", "10.00")
+	in.PostingDate = time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC)
+	in.Lines = append(in.Lines, statLine(domain.SideDebit, "D100", "7", "KG"), statLine(domain.SideDebit, "D300", "2", "HC"))
+	if _, err := e.store.PostEntry(e.ctx, in); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	// As before migration 0027: the lines are in the journal, not in the projection.
+	if _, err := e.admin.Exec(e.ctx, `delete from balance_quantity where ledger_id = $1`, e.ledger.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.admin.Exec(e.ctx, `update ledger set quantity_rebuild_pending = true where id = $1`, e.ledger.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	req := realignRequest(e, "RQP-RUN")
+	req.Mapping = domain.RealignmentMapping{"DEPT": {"D100": "D150", "D300": "D350"}}
+	req.Hash, _ = domain.HashPayload(req.Mapping)
+	run, _, err := e.store.CreateRealignment(e.ctx, req)
+	if err != nil {
+		t.Fatalf("simulate: %v", err)
+	}
+	moved := map[string]string{}
+	for _, p := range run.Preview {
+		for _, q := range p.Quantities {
+			moved[p.Period+"/"+p.OldName+"/"+q.Unit] = q.Net
+		}
+	}
+	if want := map[string]string{"2026-02/6010-D100/KG": "7", "2026-02/6010-D300/HC": "2"}; fmt.Sprint(moved) != fmt.Sprint(want) {
+		t.Fatalf("quantities planned %v, want %v", moved, want)
+	}
+	if _, err := e.store.PostRealignment(e.ctx, realignAction(e, run, "REORG")); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	if _, err := e.store.RebuildBalances(e.ctx, e.ledger.ID); err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+	if got, want := qtyByDept(t, e), map[string]string{"2026-02/D150/KG": "7.000", "2026-02/D350/HC": "2.000"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("quantities after the run and the backfill %v, want %v", got, want)
 	}
 }

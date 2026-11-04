@@ -110,7 +110,7 @@ func ValidateOpenOrders(in []OpenOrderLine, m OrderMasters) (accepted []OpenOrde
 	seenID := make(map[string]struct{}, len(in))
 	seenKey := make(map[string]struct{}, len(in))
 	hold := func(o OpenOrderLine, rule, reason string) {
-		quarantined = append(quarantined, Quarantined{Record: o.Record(), Rule: rule, Reason: reason})
+		quarantined = append(quarantined, Quarantined{Record: o.Record(), Rule: rule, Reason: reason, Line: o})
 	}
 	for _, o := range in {
 		if strings.TrimSpace(o.LegacyID) == "" {
@@ -281,6 +281,9 @@ func ReconcileOpenOrders(r *PackRun, source, accepted []OpenOrderLine, loaded in
 		}
 	}
 	r.Totals = totals
+	if err := r.applyTolerances(); err != nil {
+		return err
+	}
 	if !r.HasMismatch() {
 		return r.Advance(StatusReconciled)
 	}

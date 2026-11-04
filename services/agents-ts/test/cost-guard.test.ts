@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { addUsage, budgetStatus, type TokenBudget } from "../src/domain/budget.js";
+import { budgetStatus, type TokenBudget } from "../src/domain/budget.js";
 import { budgetThresholdEvent, type BudgetThresholdData } from "../src/domain/events.js";
 import { runAgent } from "../src/runtime/engine.js";
-import { APPROVER, FakeApprovals, FakeTools, makeDeps, makeRequest, postDescriptor, proposal, ScriptedProvider } from "./fakes.js";
+import { APPROVER, FakeApprovals, FakeTools, makeDeps, makeRequest, memoryBudgets, postDescriptor, proposal, ScriptedProvider } from "./fakes.js";
 
 // Wave 47 proof: "Cost guard: per-tenant token budget enforced and alerted"
 // (FR-47.11, AC-47.4, AC-47.7). A per-tenant ledger drives the engine run
@@ -27,10 +27,14 @@ class Ledger {
   async run(tenantId: string): Promise<Outcome> {
     const before = this.budgets.get(tenantId)!;
     const provider = new ScriptedProvider([proposal(0.8)]);
-    const deps = makeDeps({ provider, tools: new FakeTools({ "passage.ap.invoice.post": postDescriptor }), approvals: new FakeApprovals({ decision: "APPROVED", approverUserId: APPROVER }) });
+    const budgets = memoryBudgets(before);
+    const deps = {
+      ...makeDeps({ provider, tools: new FakeTools({ "passage.ap.invoice.post": postDescriptor }), approvals: new FakeApprovals({ decision: "APPROVED", approverUserId: APPROVER }) }),
+      budgets,
+    };
     try {
-      const res = await runAgent(deps, makeRequest({ tenantId, budget: before }));
-      const after = addUsage(before, { tokensIn: res.tokensIn, tokensOut: res.tokensOut, estimated: res.estimated });
+      const res = await runAgent(deps, makeRequest({ tenantId }));
+      const after = budgets.current();
       this.budgets.set(tenantId, after);
       // The engine's own view of the budget after the run matches the ledger's.
       expect(res.budgetState).toBe(budgetStatus(after).state);
@@ -87,13 +91,15 @@ describe("per-tenant cost guard (AC4)", () => {
     const before: TokenBudget = { limitIn: 1_000_000, limitOut: 1_000_000, usedIn: 500_000, usedOut: 0, softPct: 80 };
     const big = { ...proposal(0.8), usage: { tokensIn: 300_000, tokensOut: 150_000 } };
     const t = new FakeTools({ "passage.ap.invoice.post": postDescriptor });
+    const budgets = memoryBudgets(before);
     const res = await runAgent(
-      makeDeps({ provider: new ScriptedProvider([big]), tools: t, approvals: new FakeApprovals({ decision: "APPROVED", approverUserId: APPROVER }) }),
-      makeRequest({ tenantId: A, budget: before }),
+      { ...makeDeps({ provider: new ScriptedProvider([big]), tools: t, approvals: new FakeApprovals({ decision: "APPROVED", approverUserId: APPROVER }) }), budgets },
+      makeRequest({ tenantId: A }),
     );
     expect(res).toMatchObject({ status: "FAILED", code: "AGT-0202", tokensIn: 300_000, tokensOut: 150_000 });
     expect(t.calls).toHaveLength(0);
-    const after = addUsage(before, { tokensIn: res.tokensIn, tokensOut: res.tokensOut, estimated: false });
+    const after = budgets.current();
+    expect(after).toMatchObject({ usedIn: 800_000, usedOut: 150_000 });
     // 800,000 / 1,000,000 = 80% -> SOFT.
     expect(budgetThresholdEvent({ tenantId: A, month: "2026-10", previous: "OK", current: budgetStatus(after) })?.data).toEqual({
       tenant_id: A,

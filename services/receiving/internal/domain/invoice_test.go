@@ -256,3 +256,41 @@ func TestPostHeldInvoice_ClosedPeriodIsCheckedOnRelease(t *testing.T) {
 		t.Fatalf("release into a closed period err %v entries %d", err, len(ledger.Entries))
 	}
 }
+
+// The vendor group code rides on the vendor-control line only when both the
+// dimension and the code are known, and is then marked optional for the ledger
+// so a ledger that has not added the attribute drops it instead of refusing.
+func TestPostInvoice_VendorGroupDimensionIsOptionalAndOnlyOnTheControlLine(t *testing.T) {
+	tagged := testProfile
+	tagged.VendorGroupDimension = domain.DefaultVendorGroupDimension
+	tests := []struct {
+		name     string
+		profile  domain.PostingProfile
+		code     string
+		wantDims bool
+	}{
+		{"dimension and code", tagged, "DOM", true},
+		{"no code", tagged, "", false},
+		{"dimension switched off", testProfile, "DOM", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ledger := &domain.FakeLedger{}
+			in := invoiceFor(grirItem("10", "5"), "10", "5", august15)
+			in.VendorGroupCode = tc.code
+			entry, err := domain.PostInvoice(context.Background(), in, domain.FakePeriods{Status: domain.PeriodOpen}, ledger, tc.profile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, l := range entry.Lines {
+				want := tc.wantDims && l.Account == testProfile.VendorControl
+				if got := l.Dimensions["VENDGRP"] == "DOM"; got != want || (!want && len(l.Dimensions) != 0) {
+					t.Fatalf("line %s dimensions %v, want tagged %v", l.Account, l.Dimensions, want)
+				}
+			}
+			if tc.wantDims != (len(entry.OptionalDimensions) == 1 && entry.OptionalDimensions[0] == "VENDGRP") || (!tc.wantDims && len(entry.OptionalDimensions) != 0) {
+				t.Fatalf("optional dimensions %v, want them only with a tag", entry.OptionalDimensions)
+			}
+		})
+	}
+}

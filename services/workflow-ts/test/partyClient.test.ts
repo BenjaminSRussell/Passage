@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { ApplicationFailure } from "@temporalio/activity";
 import { createPartyHttpClient, STALE_REJECT_REASON, type PartyDecision } from "../src/activities.js";
+import { createServiceTokenSigner } from "../src/serviceToken.js";
+import { decodeClaims } from "./fakePayables.js";
 
 const approval: PartyDecision = {
   changeId: "chg-1",
@@ -8,7 +10,13 @@ const approval: PartyDecision = {
   legalEntityId: "le1",
   decision: "approved",
   decidedBy: "alice",
+  scope: ["le0", "le1"],
 };
+const signer = createServiceTokenSigner({ seedBase64: Buffer.alloc(32, 9).toString("base64") });
+
+function claimsOf(init: RequestInit | undefined) {
+  return decodeClaims(new Headers(init?.headers).get("X-Passage-Service-Token"));
+}
 
 function problem(status: number, code: string): Response {
   return new Response(JSON.stringify({ status, code }), { status, headers: { "Content-Type": "application/problem+json" } });
@@ -18,21 +26,35 @@ function clientWith(...responses: Response[]) {
   const fetchImpl = vi.fn<typeof fetch>();
   for (const response of responses) fetchImpl.mockResolvedValueOnce(response);
   const log = vi.fn();
-  return { fetchImpl, log, client: createPartyHttpClient("http://party", fetchImpl, log) };
+  return { fetchImpl, log, client: createPartyHttpClient("http://party", signer, fetchImpl, log) };
 }
 
 describe("party http client", () => {
-  it("posts the approval with identity and duty headers", async () => {
+  it("posts the approval under a workflow-ts service token acting for the approver, and no user headers", async () => {
     const { fetchImpl, client } = clientWith(new Response(null, { status: 200 }));
     await client.decide(approval);
     const [url, init] = fetchImpl.mock.calls[0]!;
     expect(url).toBe("http://party/v1/party/pending-changes/chg-1:approve");
-    expect(init?.headers).toMatchObject({
-      "X-Passage-Tenant": "t1",
-      "X-Passage-Legal-Entity": "le1",
-      "X-Passage-User": "alice",
-      "X-Passage-Duties": "party.approve",
-    });
+    expect(claimsOf(init)).toMatchObject({ iss: "workflow-ts", aud: "party", tid: "t1", le: "le1", act: "alice", duties: ["party.approve"] });
+    const headers = new Headers(init?.headers);
+    for (const name of ["X-Passage-Tenant", "X-Passage-Legal-Entity", "X-Passage-User", "X-Passage-Duties"]) expect(headers.has(name)).toBe(false);
+  });
+
+  it("refuses, without calling party, a decision whose approver's scope lacks the change's legal entity", async () => {
+    const { fetchImpl, client } = clientWith(new Response(null, { status: 200 }));
+    const error = await client.decide({ ...approval, scope: ["le0"] }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApplicationFailure);
+    expect((error as ApplicationFailure).nonRetryable).toBe(true);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("keeps a refused service token retryable", async () => {
+    for (const response of [problem(401, "AUTH-0001"), problem(403, "AUTH-0003")]) {
+      const { client } = clientWith(response);
+      const error = await client.decide(approval).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(ApplicationFailure);
+    }
   });
 
   it("rejects with the stale reason as the same decider when approval is stale", async () => {
@@ -41,7 +63,7 @@ describe("party http client", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     const [url, init] = fetchImpl.mock.calls[1]!;
     expect(url).toBe("http://party/v1/party/pending-changes/chg-1:reject");
-    expect(init?.headers).toMatchObject({ "X-Passage-User": "alice", "X-Passage-Duties": "party.approve" });
+    expect(claimsOf(init)).toMatchObject({ act: "alice", le: "le1", duties: ["party.approve"] });
     expect(JSON.parse(init?.body as string)).toEqual({ reason: STALE_REJECT_REASON });
   });
 
@@ -58,7 +80,7 @@ describe("party http client", () => {
   });
 
   it("fails non-retryably on other 4xx", async () => {
-    const { client } = clientWith(problem(403, "PTY-FORBIDDEN"));
+    const { client } = clientWith(problem(403, "PTY-PENDING-SELF-APPROVAL"));
     const error = await client.decide(approval).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ApplicationFailure);
     expect((error as ApplicationFailure).nonRetryable).toBe(true);

@@ -194,7 +194,7 @@ export function SyncDetailPage() {
     <div className={styles.stack}>
       <PageHeader
         title={`${sync.entity} sync`}
-        description={`From ${sync.connectionProfileName}. ${scheduled ? `Runs on the schedule ${sync.scheduleCron} (UTC).` : "Not scheduled: the binding has no schedule of its own and no active migration project on this connection has one."}`}
+        description={`From ${sync.connectionProfileName}. ${scheduled ? `Runs on the schedule ${sync.scheduleCron} (${sync.scheduleTimezone || "UTC"}).` : "Not scheduled: the binding has no schedule of its own and no active migration project on this connection has one."}`}
         actions={
           <>
             <Badge tone={health.tone}>{health.label}</Badge>
@@ -264,6 +264,7 @@ export function cronProblem(value: string): string {
 function ScheduleCard({ sync, canEdit, busy, onChange }: { sync: SyncStatus; canEdit: boolean; busy: boolean; onChange(cron: string): void }) {
   const own = sync.scheduleOverride ?? "";
   const fallback = sync.projectScheduleCron ?? "";
+  const zone = sync.scheduleTimezone || "UTC";
   const [draft, setDraft] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const clear = () => {
@@ -279,13 +280,13 @@ function ScheduleCard({ sync, canEdit, busy, onChange }: { sync: SyncStatus; can
       <div className={styles.stack}>
         <p className={styles.note}>
           {own
-            ? `This binding runs on its own schedule, ${own} (UTC); ${fallback ? `the project's is ${fallback}.` : "its migration project has none."}`
+            ? `This binding runs on its own schedule, ${own} (${zone}); ${fallback ? `the project's is ${fallback}.` : "its migration project has none."}`
             : sync.scheduleCron
-              ? `This binding follows the schedule of its migration project, ${sync.scheduleCron} (UTC).`
+              ? `This binding follows the schedule of its migration project, ${sync.scheduleCron} (${zone}).`
               : "This binding has no schedule: its migration project has none either."}{" "}
-          Give it its own five-field cron (for example 0 3 * * * for every night at 03:00 UTC, at least 15 minutes apart) when this table needs a different rhythm than the project. Changing it does not reset the watermark.
+          Give it its own five-field cron (for example 0 3 * * * for every night at 03:00 in that zone, at least 15 minutes apart) when this table needs a different rhythm than the project. Changing it does not reset the watermark.
         </p>
-        <FormField id="sync-cron" label="Own schedule (cron, UTC)" error={error || undefined} hint="Leave empty to follow the project.">
+        <FormField id="sync-cron" label={`Own schedule (cron, ${zone})`} error={error || undefined} hint="Leave empty to follow the project.">
           {(control) => <Input {...control} value={value} invalid={Boolean(error)} disabled={!canEdit || busy} onChange={(event) => setDraft(event.target.value)} />}
         </FormField>
         {canEdit ? (

@@ -29,6 +29,10 @@ export interface Worker {
   payAgreementId: string | null;
   /** Resource whose jobs make up the worker's own dispatch list ("my jobs"); null means every job. */
   defaultResourceId: string | null;
+  /** When the worker was last deactivated; null or absent while active. */
+  deactivatedAt?: string | null;
+  deactivatedBy?: string | null;
+  deactivationReason?: string | null;
 }
 
 export interface NewWorker {
@@ -471,6 +475,8 @@ export interface Downtime {
   endedAt: string | null;
   reasonCode: string | null;
   category: DowntimeCategory;
+  /** "down" for a reported downtime, "idle" for idle time the andon sweep found (BR-25.6). */
+  cause: "down" | "idle";
   andonRaised: boolean;
 }
 
@@ -478,11 +484,25 @@ export interface Andon {
   id: string;
   resourceId: string;
   siteId: string | null;
-  kind: "downtime";
+  kind: AndonKind;
   severity: "info" | "warning" | "error";
   downtimeId: string | null;
+  /** The job whose failed check raised a quality-fail alert. */
+  jobId: string | null;
+  /** One line on what raised a scrap-rate or quality-fail alert. */
+  detail: string | null;
   startedAt: string;
 }
+
+/** One open alert per resource and kind (BR-25.10). */
+export type AndonKind = "downtime" | "scrap-rate" | "quality-fail";
+
+/**
+ * Clears a quality-fail alert with a reason: the shop floor supervisor's authority to override a
+ * failed check (FR-25.5). Enforced by the service; the andon sweep is the scheduler's job and has
+ * no page action.
+ */
+export const DUTY_CHECK_OVERRIDE = "shopfloor.check.override";
 
 export type OeeBucketSize = "5m" | "15m" | "60m";
 
@@ -531,6 +551,11 @@ export function codeDowntime(id: string, input: { reasonCode: string; category?:
   return post<Downtime>(`/downtimes/${encodeURIComponent(id)}:code`, input, key);
 }
 
+/** Clears a quality-fail alert (SF-0162 unknown or cleared, SF-0163 another kind). Reuse one key per form. */
+export function clearAndon(id: string, reason: string, key: string = newKey()): Promise<Andon> {
+  return post<Andon>(`/andon/${encodeURIComponent(id)}:clear`, { reason }, key);
+}
+
 export function listAndon(filter: { siteId?: string } = {}, signal?: AbortSignal): Promise<Andon[]> {
   return items<Andon>(`/andon${query(filter)}`, signal);
 }
@@ -562,16 +587,8 @@ export function getPayExport(id: string, signal?: AbortSignal): Promise<PayExpor
 
 export type ProcessSource = "kiosk" | "edge" | "manual";
 
-export type ProcessCategory =
-  | "phase-start"
-  | "phase-end"
-  | "consumption"
-  | "yield"
-  | "process-data"
-  | "quality-result"
-  | "deviation"
-  | "order-status"
-  | "custom";
+/** A category code: a built-in one (phase-start, quality-result, ...) or one the tenant defined (slice 21). */
+export type ProcessCategory = string;
 
 export type ProcessDestination = "ebr" | "journal" | "quality" | "kafka" | "webhook";
 
@@ -719,7 +736,7 @@ export interface CurrentJob {
   jobId: string;
   bundleId: string | null;
   startedAt: string;
-  /** When production finished the job's operation while this start stays open (a bundled start); absent on a start the kiosk just made. */
+  /** When production finished the job's operation while this start stays open (a start dated before the finish but stored after it); absent on a start the kiosk just made. */
   productionFinishedAt?: string | null;
 }
 
@@ -1010,6 +1027,77 @@ export function updateDowntimeReason(reason: DowntimeReason, changes: { name?: s
   });
 }
 
+/** A characteristic a process category defines: its type, unit and limits (FR-25.17, BR-25.13). */
+export interface CharacteristicDefinition {
+  name: string;
+  type: CharacteristicType;
+  unit?: string | null;
+  /** Decimal string limits, numeric only. */
+  min?: string | null;
+  max?: string | null;
+  /** A message of the category without a value of this name is SF-0115. */
+  required: boolean;
+}
+
+/** One process message category: a row of the tenant's master, or a built-in default (builtIn, no id or version). */
+export interface ProcessCategoryDef {
+  id?: string;
+  code: string;
+  name: string;
+  destinations: ProcessDestination[];
+  rejectOutOfLimit: boolean;
+  characteristics: CharacteristicDefinition[];
+  active: boolean;
+  builtIn: boolean;
+  version?: number;
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface NewProcessCategory {
+  code: string;
+  name: string;
+  destinations: ProcessDestination[];
+  rejectOutOfLimit: boolean;
+  characteristics: CharacteristicDefinition[];
+  active?: boolean;
+}
+
+export type ProcessCategoryChanges = Partial<Omit<NewProcessCategory, "code">>;
+
+export function listProcessCategories(filter: { active?: boolean } = {}, signal?: AbortSignal): Promise<ProcessCategoryDef[]> {
+  return items<ProcessCategoryDef>(`/process-categories${query({ active: filter.active })}`, signal);
+}
+
+export function getProcessCategory(id: string, signal?: AbortSignal): Promise<ProcessCategoryDef> {
+  return send<ProcessCategoryDef>(`/process-categories/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Creates a category; a row for a built-in code replaces that default. A used code is SF-0142. */
+export function createProcessCategory(input: NewProcessCategory, key: string = newKey()): Promise<ProcessCategoryDef> {
+  return post<ProcessCategoryDef>("/process-categories", input, key);
+}
+
+/**
+ * Replaces a category's name, destinations, reject flag, definitions and status (the code never
+ * changes). The version is the If-Match entity tag; another change in between is SF-0143 (412).
+ */
+export function updateProcessCategory(category: ProcessCategoryDef, changes: ProcessCategoryChanges): Promise<ProcessCategoryDef> {
+  return send<ProcessCategoryDef>(`/process-categories/${encodeURIComponent(category.id ?? "")}`, {
+    method: "PUT",
+    headers: { "If-Match": `"${category.version ?? 0}"` },
+    body: JSON.stringify({
+      name: category.name,
+      destinations: category.destinations,
+      rejectOutOfLimit: category.rejectOutOfLimit,
+      characteristics: category.characteristics,
+      active: category.active,
+      ...changes,
+    }),
+  });
+}
+
 /** An absence code: whether absence time is paid and at what share of the worker's rate (FR-25.2). */
 export interface AbsenceCode {
   id: string;
@@ -1070,6 +1158,67 @@ export function assignWorkerResource(workerId: string, version: number, resource
     headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
     body: JSON.stringify({ resourceId }),
   });
+}
+
+/** The editable fields of a worker; the party link never changes. */
+export type WorkerEdit = Omit<NewWorker, "partyId">;
+
+/**
+ * Replaces a worker's name, badge, sign-in user, cost rate and currency. The worker version is the
+ * If-Match entity tag (SF-0143, 412); a badge held by another worker is SF-0105 (409).
+ */
+export function updateWorker(workerId: string, version: number, input: WorkerEdit, key: string = newKey()): Promise<Worker> {
+  return send<Worker>(`/workers/${encodeURIComponent(workerId)}`, {
+    method: "PUT",
+    headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
+    body: JSON.stringify({ ...input, badgeId: input.badgeId ?? null, userId: input.userId ?? null }),
+  });
+}
+
+/**
+ * Deactivates a worker with a reason. A worker who is clocked in or has an open job is SF-0166 (409);
+ * an inactive worker is SF-0167 (409).
+ */
+export function deactivateWorker(workerId: string, version: number, reason: string, key: string = newKey()): Promise<Worker> {
+  return send<Worker>(`/workers/${encodeURIComponent(workerId)}:deactivate`, {
+    method: "POST",
+    headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
+    body: JSON.stringify({ reason }),
+  });
+}
+
+/** Reactivates a deactivated worker; an active worker is SF-0168 (409). */
+export function reactivateWorker(workerId: string, version: number, key: string = newKey()): Promise<Worker> {
+  return send<Worker>(`/workers/${encodeURIComponent(workerId)}:reactivate`, {
+    method: "POST",
+    headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
+  });
+}
+
+/** One dated cost rate of a worker: per hour, in the worker's currency, from effectiveFrom until the next one. */
+export interface CostRate {
+  id: string;
+  workerId: string;
+  /** Calendar date, YYYY-MM-DD. */
+  effectiveFrom: string;
+  /** Decimal string. */
+  costRate: string;
+  note: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** The worker's dated cost rates, newest effective date first; empty when the worker has none. */
+export function listWorkerCostRates(workerId: string, signal?: AbortSignal): Promise<CostRate[]> {
+  return items<CostRate>(`/workers/${encodeURIComponent(workerId)}/cost-rates`, signal);
+}
+
+/**
+ * Sets the worker's cost rate from a date. One rate per date (SF-0170, 409): a change takes effect
+ * on a later date. The worker's own user cannot set it (SF-0106, 403).
+ */
+export function addWorkerCostRate(workerId: string, input: { effectiveFrom: string; costRate: string; note: string | null }, key: string = newKey()): Promise<CostRate> {
+  return post<CostRate>(`/workers/${encodeURIComponent(workerId)}/cost-rates`, input, key);
 }
 
 /** Registers and changes edge nodes and publishes their configuration (with the write allowlist). */

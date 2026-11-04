@@ -13,8 +13,10 @@ import { randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import pg from "pg";
 
-import type { FieldKeys } from "./crypt.ts";
+import { envelopeKeyId, OpenError, type FieldKeys } from "./crypt.ts";
 import type { DeadLetter, DeliveryStore, HubEvent, PendingDelivery } from "./dispatcher.ts";
+import { enqueue } from "./events.ts";
+import { CesqlSyntaxError, filterFor, type FilterEvent } from "./cesql.ts";
 import { matchesAny } from "./filter.ts";
 import type { RestConfig, RestCredentials, RestTarget } from "./restPush.ts";
 
@@ -48,9 +50,15 @@ export interface SubscriptionRecord {
   /** rest-push only: the settings without credentials. `auth.hasCredentials` is always true; the secrets are never returned. */
   rest: (Omit<RestConfig, "auth"> & { auth: RestConfig["auth"] & { hasCredentials: true } }) | null;
   patterns: string[];
+  /** A CESQL expression over the event (src/cesql.ts); null delivers every event the patterns match. */
+  filter: string | null;
   status: "active" | "paused";
   pausedReason: string | null;
   version: number;
+  /** Webhook only: when the signing secret was last rotated. */
+  secretRotatedAt: string | null;
+  /** Webhook only: until when the secret before the last rotation still signs deliveries (null: none does). */
+  previousSecretExpiresAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -61,6 +69,9 @@ export interface SubscriptionTarget {
   kind: SubscriptionKind;
   url: string;
   sealedSecret: Buffer | null;
+  /** The secret before the last rotation and when it stops signing (unix seconds), while its grace period runs. */
+  sealedPreviousSecret: Buffer | null;
+  previousSecretExpiresAt: number | null;
   restConfig: RestConfig | null;
   sealedCredentials: Buffer | null;
 }
@@ -82,6 +93,10 @@ export interface DeliveryRecord {
   responseExcerpt: string | null;
   /** The legacy key the receiver answered with (rest-push). */
   legacyKey: string | null;
+  /** The legacy keys of the elements of the pushed collection, by position (rest-push with lineKeyPath). */
+  lineKeys: { index: number; legacyKey: string }[];
+  /** The lookup table versions the last render read (rest-push, migration slice 20), for audit. */
+  lookups: { name: string; table: string; version: number }[];
   createdAt: string;
 }
 
@@ -139,7 +154,8 @@ export async function migrate(pool: pg.Pool, dir: URL | string): Promise<void> {
 
 export const MIGRATIONS_DIR = new URL("../migrations/", import.meta.url);
 
-const COLUMNS_SUB = "id, kind, rest_config, name, url, patterns, status, paused_reason, version, created_at, updated_at, created_at::text as cursor_ts";
+const COLUMNS_SUB =
+  "id, kind, rest_config, name, url, patterns, event_filter, status, paused_reason, version, secret_rotated_at, previous_secret_expires_at, created_at, updated_at, created_at::text as cursor_ts";
 
 interface SubRow {
   id: string;
@@ -148,9 +164,12 @@ interface SubRow {
   name: string;
   url: string;
   patterns: string[];
+  event_filter: string | null;
   status: "active" | "paused";
   paused_reason: string | null;
   version: number;
+  secret_rotated_at: Date | null;
+  previous_secret_expires_at: Date | null;
   created_at: Date;
   updated_at: Date;
   cursor_ts: string;
@@ -164,9 +183,12 @@ function toSubscription(r: SubRow): SubscriptionRecord {
     name: r.name,
     url: r.url,
     patterns: r.patterns,
+    filter: r.event_filter,
     status: r.status,
     pausedReason: r.paused_reason,
     version: r.version,
+    secretRotatedAt: r.secret_rotated_at === null ? null : r.secret_rotated_at.toISOString(),
+    previousSecretExpiresAt: r.previous_secret_expires_at === null ? null : r.previous_secret_expires_at.toISOString(),
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),
   };
@@ -187,6 +209,8 @@ interface DeliveryRow {
   dead_letter_code: string | null;
   response_excerpt: string | null;
   legacy_key: string | null;
+  line_keys: { index: number; legacyKey: string }[] | null;
+  render_lookups: { name: string; table: string; version: number }[] | null;
   created_at: Date;
   cursor_ts: string;
 }
@@ -207,21 +231,66 @@ function toDelivery(r: DeliveryRow): DeliveryRecord {
     deadLetterCode: r.dead_letter_code,
     responseExcerpt: r.response_excerpt,
     legacyKey: r.legacy_key,
+    lineKeys: r.line_keys ?? [],
+    lookups: r.render_lookups ?? [],
     createdAt: r.created_at.toISOString(),
   };
 }
 
 // created_at has microsecond precision, which a JS Date cannot hold: the cursor carries Postgres's own text.
-function encodeCursor(createdAt: string, id: string): string {
+export function encodeCursor(createdAt: string, id: string): string {
   return Buffer.from(`${createdAt}|${id}`).toString("base64url");
 }
 
-function decodeCursor(cursor: string): { createdAt: string; id: string } {
+export function decodeCursor(cursor: string): { createdAt: string; id: string } {
   const [createdAt, id] = Buffer.from(cursor, "base64url").toString("utf8").split("|");
   if (createdAt === undefined || id === undefined || !/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(\.\d{1,6})?[+-]\d\d(:\d\d)?$/.test(createdAt) || !/^[0-9a-f-]{36}$/.test(id)) {
     throw new BadCursorError();
   }
   return { createdAt, id };
+}
+
+/**
+ * Delivering one of the hub's own outcome events (webhook.delivered or webhook.deadlettered,
+ * when the hub consumes passage.hub.webhook and a subscription matches it) writes no outcome
+ * event of its own: otherwise every delivery would feed the next one without end.
+ */
+function isOutcomeEvent(type: string): boolean {
+  return type.startsWith("dev.passage.hub.webhook.");
+}
+
+/** The subscription event payload: identity and shape only; the URL, secret and credentials never leave the store. */
+function subscriptionData(s: SubscriptionRecord): Record<string, unknown> {
+  return { subscription_id: s.id, kind: s.kind, name: s.name, patterns: s.patterns, filter: s.filter, status: s.status, paused_reason: s.pausedReason, version: s.version };
+}
+
+/** What a subscription's CESQL filter sees of an event: its context attributes and its data. */
+export function filterEventOf(tenantId: string, e: HubEvent): FilterEvent {
+  return {
+    attributes: {
+      id: e.eventId, type: e.type, subject: e.aggregateId, time: new Date(e.occurredAt * 1000).toISOString(), tenantid: tenantId,
+      source: e.source, actor: e.actor, legalentityid: e.legalEntityId, passagesequence: e.sequence,
+    },
+    data: e.data,
+  };
+}
+
+/**
+ * Whether a stored filter holds for the event. A stored filter that no longer compiles (validated on write, so only
+ * after the grammar narrows) matches nothing for that one subscription rather than failing the event for every
+ * subscription of the tenant.
+ */
+function filterHolds(source: string, tenantId: string, event: HubEvent): boolean {
+  let compiled;
+  try {
+    compiled = filterFor(source);
+  } catch (err) {
+    if (err instanceof CesqlSyntaxError) {
+      return false;
+    }
+    throw err;
+  }
+  return compiled.matches(filterEventOf(tenantId, event));
 }
 
 export interface NewSubscription {
@@ -232,6 +301,8 @@ export interface NewSubscription {
   /** Set for a rest-push subscription. */
   rest?: { config: RestConfig; credentials: RestCredentials };
   patterns: string[];
+  /** A CESQL expression, already validated by the caller (validateFilter). */
+  filter?: string | null;
   createdBy: string | null;
   idempotencyKey: string | null;
 }
@@ -241,6 +312,8 @@ export interface SubscriptionPatch {
   name?: string;
   url?: string;
   patterns?: string[];
+  /** A CESQL expression, already validated; null removes the filter. */
+  filter?: string | null;
   /** rest-push only: replaces the whole configuration (and with it the credentials). */
   rest?: { config: RestConfig; credentials?: RestCredentials };
 }
@@ -253,20 +326,26 @@ export class WrongKindError extends Error {
   }
 }
 
-const TARGET_COLUMNS = "id, kind, url, secret_sealed, rest_config, credentials_sealed, status";
+const TARGET_COLUMNS =
+  "id, kind, url, secret_sealed, previous_secret_sealed, extract(epoch from previous_secret_expires_at)::float8 as previous_expires, rest_config, credentials_sealed, status";
 
 interface TargetRow {
   id: string;
   kind: SubscriptionKind;
   url: string;
   secret_sealed: Buffer | null;
+  previous_secret_sealed: Buffer | null;
+  previous_expires: number | null;
   rest_config: RestConfig | null;
   credentials_sealed: Buffer | null;
   status: string;
 }
 
 function toTarget(r: TargetRow): SubscriptionTarget {
-  return { id: r.id, kind: r.kind, url: r.url, sealedSecret: r.secret_sealed, restConfig: r.rest_config, sealedCredentials: r.credentials_sealed };
+  return {
+    id: r.id, kind: r.kind, url: r.url, sealedSecret: r.secret_sealed, sealedPreviousSecret: r.previous_secret_sealed, previousSecretExpiresAt: r.previous_expires,
+    restConfig: r.rest_config, sealedCredentials: r.credentials_sealed,
+  };
 }
 
 export class HubStore {
@@ -292,6 +371,21 @@ export class HubStore {
       throw new WrongKindError("a rest-push subscription has no signing secret");
     }
     return this.#keys.open(tenantId, SECRET_FIELD, target.sealedSecret).toString("utf8");
+  }
+
+  /**
+   * The secret before the last rotation while its grace period runs at `nowSeconds`, else null. A previous
+   * secret that does not open (its key was removed) is skipped: the current secret still signs.
+   */
+  openPreviousSecret(tenantId: string, target: SubscriptionTarget, nowSeconds: number): string | null {
+    if (this.#keys === null || target.sealedPreviousSecret === null || target.previousSecretExpiresAt === null || target.previousSecretExpiresAt <= nowSeconds) {
+      return null;
+    }
+    try {
+      return this.#keys.open(tenantId, SECRET_FIELD, target.sealedPreviousSecret).toString("utf8");
+    } catch {
+      return null;
+    }
   }
 
   /** Opens a rest-push subscription's credentials for one send; never log or return the result. */
@@ -341,15 +435,20 @@ export class HubStore {
       input.rest === undefined ? null : this.#keys.seal(tenantId, CREDENTIALS_FIELD, Buffer.from(JSON.stringify(input.rest.credentials), "utf8"));
     return this.withTenant(tenantId, async (c) => {
       const res = await c.query<SubRow>(
-        `insert into hub_subscription (tenant_id, id, kind, name, url, secret_sealed, rest_config, credentials_sealed, patterns, created_by, idempotency_key)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        `insert into hub_subscription (tenant_id, id, kind, name, url, secret_sealed, rest_config, credentials_sealed, patterns, created_by, idempotency_key, event_filter)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          on conflict (tenant_id, idempotency_key) do nothing
          returning ${COLUMNS_SUB}`,
         [tenantId, randomUUID(), input.rest === undefined ? "webhook" : "rest-push", input.name, input.url, sealed,
-         input.rest === undefined ? null : JSON.stringify(input.rest.config), credentials, input.patterns, input.createdBy, input.idempotencyKey],
+         input.rest === undefined ? null : JSON.stringify(input.rest.config), credentials, input.patterns, input.createdBy, input.idempotencyKey, input.filter ?? null],
       );
       if (res.rows[0] !== undefined) {
-        return { subscription: toSubscription(res.rows[0]), created: true };
+        const subscription = toSubscription(res.rows[0]);
+        await enqueue(c, tenantId, {
+          type: "dev.passage.hub.subscription.created.v1", aggregateId: subscription.id,
+          actor: input.createdBy, data: subscriptionData(subscription),
+        });
+        return { subscription, created: true };
       }
       const existing = await c.query<SubRow>(`select ${COLUMNS_SUB} from hub_subscription where idempotency_key = $1`, [input.idempotencyKey]);
       return { subscription: toSubscription(existing.rows[0] as SubRow), created: false };
@@ -382,7 +481,7 @@ export class HubStore {
   }
 
   /** Optimistic update: VersionConflictError when `version` is stale, null when the subscription does not exist. */
-  async patchSubscription(tenantId: string, id: string, patch: SubscriptionPatch): Promise<SubscriptionRecord | null> {
+  async patchSubscription(tenantId: string, id: string, patch: SubscriptionPatch, actor: string | null = null): Promise<SubscriptionRecord | null> {
     if (patch.rest?.credentials !== undefined && this.#keys === null) {
       throw new FieldKeysMissingError();
     }
@@ -400,23 +499,137 @@ export class HubStore {
         `update hub_subscription
             set name = coalesce($3, name), url = coalesce($4, url), patterns = coalesce($5, patterns),
                 rest_config = coalesce($6::jsonb, rest_config), credentials_sealed = coalesce($7, credentials_sealed),
+                event_filter = case when $8::boolean then $9::text else event_filter end,
                 version = version + 1, updated_at = now()
           where id = $1 and version = $2
           returning ${COLUMNS_SUB}`,
         [id, patch.version, patch.name ?? null, patch.url ?? null, patch.patterns ?? null,
-         patch.rest === undefined ? null : JSON.stringify(patch.rest.config), credentials],
+         patch.rest === undefined ? null : JSON.stringify(patch.rest.config), credentials,
+         patch.filter !== undefined, patch.filter ?? null],
       );
       if (res.rows[0] !== undefined) {
-        return toSubscription(res.rows[0]);
+        const subscription = toSubscription(res.rows[0]);
+        await enqueue(c, tenantId, { type: "dev.passage.hub.subscription.updated.v1", aggregateId: id, actor, data: subscriptionData(subscription) });
+        return subscription;
       }
       throw new VersionConflictError();
     });
   }
 
-  async deleteSubscription(tenantId: string, id: string): Promise<boolean> {
+  /**
+   * Replaces a webhook subscription's signing secret. The old secret keeps signing (next to the new one) for
+   * `graceSeconds` (0 ends it at once), so the receiver can switch without dropping events. Optimistic on
+   * `version`: VersionConflictError when stale, null when the subscription does not exist, WrongKindError for
+   * rest-push. The caller shows the new secret once; the store never returns it.
+   */
+  async rotateSecret(
+    tenantId: string, id: string, input: { version: number; secret: string; graceSeconds: number }, actor: string | null = null,
+  ): Promise<SubscriptionRecord | null> {
+    if (this.#keys === null) {
+      throw new FieldKeysMissingError();
+    }
+    const sealed = this.#keys.seal(tenantId, SECRET_FIELD, Buffer.from(input.secret, "utf8"));
     return this.withTenant(tenantId, async (c) => {
-      const res = await c.query("delete from hub_subscription where id = $1", [id]);
-      return (res.rowCount ?? 0) > 0;
+      const kind = await c.query<{ kind: SubscriptionKind }>("select kind from hub_subscription where id = $1", [id]);
+      if (kind.rows[0] === undefined) {
+        return null;
+      }
+      if (kind.rows[0].kind !== "webhook") {
+        throw new WrongKindError("only a webhook subscription has a signing secret");
+      }
+      const res = await c.query<SubRow>(
+        `update hub_subscription
+            set previous_secret_sealed = case when $4::integer > 0 then secret_sealed else null end,
+                previous_secret_expires_at = case when $4::integer > 0 then now() + make_interval(secs => $4::integer) else null end,
+                secret_sealed = $3, secret_rotated_at = now(), version = version + 1, updated_at = now()
+          where id = $1 and version = $2
+          returning ${COLUMNS_SUB}`,
+        [id, input.version, sealed, input.graceSeconds],
+      );
+      if (res.rows[0] === undefined) {
+        throw new VersionConflictError();
+      }
+      const subscription = toSubscription(res.rows[0]);
+      await enqueue(c, tenantId, {
+        type: "dev.passage.hub.subscription.secretrotated.v1", aggregateId: id, actor,
+        data: { ...subscriptionData(subscription), secret_rotated_at: subscription.secretRotatedAt, previous_secret_expires_at: subscription.previousSecretExpiresAt },
+      });
+      return subscription;
+    });
+  }
+
+  /**
+   * One re-seal pass (FR-35.9, master key rotation): every sealed value (signing secret, previous secret,
+   * rest-push credentials) of up to `limit` subscriptions that is sealed under a key other than the current one is
+   * opened with its own key and sealed again under the current key, and a previous secret past its grace period is
+   * removed. Each subscription is its own tenant transaction holding the row lock, so a concurrent edit or rotation
+   * waits and no value is lost; the version does not change (nothing a client can see changed). A value that
+   * cannot be opened (its key was dropped too early) is counted as failed and left as it is.
+   */
+  async resealDue(limit: number, now: Date = new Date()): Promise<{ resealed: number; expired: number; failed: number }> {
+    if (this.#keys === null) {
+      throw new FieldKeysMissingError();
+    }
+    const keys = this.#keys;
+    const due = await this.pool.query<{ tenant_id: string; subscription_id: string }>(
+      "select tenant_id, subscription_id from hub_reseal_due($1, $2, $3)",
+      [keys.currentId, now, limit],
+    );
+    const out = { resealed: 0, expired: 0, failed: 0 };
+    for (const d of due.rows) {
+      await this.withTenant(d.tenant_id, async (c) => {
+        const res = await c.query<{ secret_sealed: Buffer | null; previous_secret_sealed: Buffer | null; previous_secret_expires_at: Date | null; credentials_sealed: Buffer | null }>(
+          "select secret_sealed, previous_secret_sealed, previous_secret_expires_at, credentials_sealed from hub_subscription where id = $1 for update",
+          [d.subscription_id],
+        );
+        const row = res.rows[0];
+        if (row === undefined) {
+          return;
+        }
+        const again = (field: string, value: Buffer | null): Buffer | null => {
+          if (value === null || envelopeKeyId(value) === keys.currentId) {
+            return value;
+          }
+          return keys.seal(d.tenant_id, field, keys.open(d.tenant_id, field, value));
+        };
+        try {
+          const expired = row.previous_secret_sealed !== null && row.previous_secret_expires_at !== null && row.previous_secret_expires_at <= now;
+          const previous = expired ? null : again(SECRET_FIELD, row.previous_secret_sealed);
+          const secret = again(SECRET_FIELD, row.secret_sealed);
+          const credentials = again(CREDENTIALS_FIELD, row.credentials_sealed);
+          await c.query(
+            `update hub_subscription set secret_sealed = $2, previous_secret_sealed = $3, credentials_sealed = $4,
+                    previous_secret_expires_at = case when $3::bytea is null then null else previous_secret_expires_at end
+              where id = $1`,
+            [d.subscription_id, secret, previous, credentials],
+          );
+          if (expired) out.expired += 1;
+          else out.resealed += 1;
+        } catch (err) {
+          if (!(err instanceof OpenError)) {
+            throw err;
+          }
+          out.failed += 1;
+        }
+      });
+    }
+    return out;
+  }
+
+  /** Deletes up to `limit` per-minute usage rows older than `before`, across tenants (hub_purge_client_usage); returns how many. */
+  async purgeClientUsage(before: Date, limit: number): Promise<number> {
+    const res = await this.pool.query<{ n: string }>("select hub_purge_client_usage($1, $2) as n", [before, limit]);
+    return Number(res.rows[0]?.n ?? 0);
+  }
+
+  async deleteSubscription(tenantId: string, id: string, actor: string | null = null): Promise<boolean> {
+    return this.withTenant(tenantId, async (c) => {
+      const res = await c.query<SubRow>(`delete from hub_subscription where id = $1 returning ${COLUMNS_SUB}`, [id]);
+      if (res.rows[0] === undefined) {
+        return false;
+      }
+      await enqueue(c, tenantId, { type: "dev.passage.hub.subscription.deleted.v1", aggregateId: id, actor, data: subscriptionData(toSubscription(res.rows[0])) });
+      return true;
     });
   }
 
@@ -430,7 +643,7 @@ export class HubStore {
     return this.withTenant(tenantId, async (c) => {
       const res = await c.query<DeliveryRow>(
         `select id, subscription_id, event_id, event_type, aggregate_id, sequence, status, attempts, last_status,
-                next_retry_at, replay, dead_letter_code, response_excerpt, legacy_key, created_at, created_at::text as cursor_ts
+                next_retry_at, replay, dead_letter_code, response_excerpt, legacy_key, line_keys, render_lookups, created_at, created_at::text as cursor_ts
            from hub_delivery
           where ($1::text is null or status = $1) and ($2::uuid is null or subscription_id = $2)
             and ($3::timestamptz is null or (created_at, id) < ($3::timestamptz, $4::uuid))
@@ -447,8 +660,10 @@ export class HubStore {
   }
 
   /** The tenant's subscriptions, paused ones included: a paused subscription keeps collecting events until it is resumed. */
-  async targets(client: pg.PoolClient): Promise<{ id: string; kind: SubscriptionKind; patterns: string[] }[]> {
-    const res = await client.query<{ id: string; kind: SubscriptionKind; patterns: string[] }>("select id, kind, patterns from hub_subscription");
+  async targets(client: pg.PoolClient): Promise<{ id: string; kind: SubscriptionKind; patterns: string[]; filter: string | null }[]> {
+    const res = await client.query<{ id: string; kind: SubscriptionKind; patterns: string[]; filter: string | null }>(
+      "select id, kind, patterns, event_filter as filter from hub_subscription",
+    );
     return res.rows;
   }
 
@@ -468,6 +683,9 @@ export class HubStore {
       let count = 0;
       for (const sub of await this.targets(c)) {
         if (!matches(sub.patterns, event.type)) {
+          continue;
+        }
+        if (sub.filter !== null && !filterHolds(sub.filter, tenantId, event)) {
           continue;
         }
         // Echo suppression: a rest-push subscription never sends the legacy system what the legacy system's own
@@ -586,13 +804,18 @@ export class HubStore {
   }
 
   /** Clears a 410 pause (HUB-0114); null when the subscription does not exist. Resuming an active subscription changes nothing. */
-  async resumeSubscription(tenantId: string, id: string): Promise<SubscriptionRecord | null> {
+  async resumeSubscription(tenantId: string, id: string, actor: string | null = null): Promise<SubscriptionRecord | null> {
     return this.withTenant(tenantId, async (c) => {
-      await c.query(
+      const resumed = await c.query<SubRow>(
         `update hub_subscription set status = 'active', paused_reason = null, paused_at = null, version = version + 1, updated_at = now()
-          where id = $1 and status = 'paused'`,
+          where id = $1 and status = 'paused' returning ${COLUMNS_SUB}`,
         [id],
       );
+      if (resumed.rows[0] !== undefined) {
+        const subscription = toSubscription(resumed.rows[0]);
+        await enqueue(c, tenantId, { type: "dev.passage.hub.subscription.resumed.v1", aggregateId: id, actor, data: subscriptionData(subscription) });
+        return subscription;
+      }
       const res = await c.query<SubRow>(`select ${COLUMNS_SUB} from hub_subscription where id = $1`, [id]);
       return res.rows[0] === undefined ? null : toSubscription(res.rows[0]);
     });
@@ -662,7 +885,7 @@ type Op =
   | { kind: "remove"; eventId: string }
   | { kind: "dead"; letter: DeadLetter }
   | { kind: "paused"; paused: boolean }
-  | { kind: "attempt"; eventId: string; status: number | null; excerpt: string | null; legacyKey: string | null };
+  | { kind: "attempt"; eventId: string; status: number | null; excerpt: string | null; legacyKey: string | null; lineKeys: string | null; lookups: string | null };
 
 export class PgDeliveryStore implements DeliveryStore {
   readonly #db: HubStore;
@@ -724,8 +947,12 @@ export class PgDeliveryStore implements DeliveryStore {
   }
 
   /** Queues the record of one send (its HTTP status, or null for no response). */
-  recordAttempt(eventId: string, status: number | null, detail: { excerpt?: string; legacyKey?: string } = {}): void {
-    this.#ops.push({ kind: "attempt", eventId, status, excerpt: detail.excerpt ?? null, legacyKey: detail.legacyKey ?? null });
+  recordAttempt(eventId: string, status: number | null, detail: { excerpt?: string; legacyKey?: string; lineKeys?: { index: number; legacyKey: string }[]; lookups?: { name: string; table: string; version: number }[] } = {}): void {
+    this.#ops.push({
+      kind: "attempt", eventId, status, excerpt: detail.excerpt ?? null, legacyKey: detail.legacyKey ?? null,
+      lineKeys: detail.lineKeys === undefined ? null : JSON.stringify(detail.lineKeys),
+      lookups: detail.lookups === undefined ? null : JSON.stringify(detail.lookups),
+    });
   }
 
   /** Writes the queued changes in order, in one tenant transaction. */
@@ -767,36 +994,60 @@ export class PgDeliveryStore implements DeliveryStore {
         );
         return;
       }
-      case "remove":
-        await c.query(
-          "update hub_delivery set status = 'delivered', updated_at = now() where subscription_id = $1 and event_id = $2 and status = 'pending'",
+      case "remove": {
+        const done = await c.query<{ attempts: number; event_type: string }>(
+          "update hub_delivery set status = 'delivered', updated_at = now() where subscription_id = $1 and event_id = $2 and status = 'pending' returning attempts, event_type",
           [sub, op.eventId],
         );
+        const row = done.rows[0];
+        if (row !== undefined && !isOutcomeEvent(row.event_type)) {
+          await enqueue(c, this.#tenantId, {
+            type: "dev.passage.hub.webhook.delivered.v1", aggregateId: sub, actor: null,
+            data: { subscription_id: sub, event_id: op.eventId, attempts: row.attempts },
+          });
+        }
         return;
-      case "dead":
-        await c.query(
+      }
+      case "dead": {
+        const dead = await c.query<{ event_type: string }>(
           `update hub_delivery set status = 'dead_letter', dead_letter_code = $3, attempts = $4, last_status = $5, updated_at = now()
-            where subscription_id = $1 and event_id = $2 and status = 'pending'`,
+            where subscription_id = $1 and event_id = $2 and status = 'pending' returning event_type`,
           [sub, op.letter.event.eventId, op.letter.code, op.letter.attempts, op.letter.lastStatus],
         );
+        const row = dead.rows[0];
+        if (row !== undefined && !isOutcomeEvent(row.event_type)) {
+          await enqueue(c, this.#tenantId, {
+            type: "dev.passage.hub.webhook.deadlettered.v1", aggregateId: sub, actor: null,
+            data: { subscription_id: sub, event_id: op.letter.event.eventId, attempts: op.letter.attempts, code: op.letter.code, last_status: op.letter.lastStatus },
+          });
+        }
         return;
-      case "paused":
-        await c.query(
+      }
+      case "paused": {
+        const moved = await c.query<SubRow>(
           `update hub_subscription
               set status = $2, paused_reason = $3, paused_at = $4, version = version + 1, updated_at = now()
-            where id = $1 and status <> $2`,
+            where id = $1 and status <> $2 returning ${COLUMNS_SUB}`,
           [sub, op.paused ? "paused" : "active", op.paused ? "HUB-0114" : null, op.paused ? new Date() : null],
         );
+        if (moved.rows[0] !== undefined) {
+          await enqueue(c, this.#tenantId, {
+            type: op.paused ? "dev.passage.hub.subscription.paused.v1" : "dev.passage.hub.subscription.resumed.v1",
+            aggregateId: sub, actor: null, data: subscriptionData(toSubscription(moved.rows[0])),
+          });
+        }
         return;
+      }
       case "attempt":
         await c.query(
           `with d as (
              update hub_delivery set attempts = attempts + 1, last_status = $3, response_excerpt = $6,
-                    legacy_key = coalesce($7, legacy_key), updated_at = now()
+                    legacy_key = coalesce($7, legacy_key), line_keys = coalesce($8::jsonb, line_keys),
+                    render_lookups = coalesce($9::jsonb, render_lookups), updated_at = now()
               where subscription_id = $1 and event_id = $2 returning id, attempts)
            insert into hub_attempt (tenant_id, id, delivery_id, attempt_no, http_status)
            select $4, $5, d.id, d.attempts, $3 from d`,
-          [sub, op.eventId, op.status, this.#tenantId, randomUUID(), op.excerpt, op.legacyKey],
+          [sub, op.eventId, op.status, this.#tenantId, randomUUID(), op.excerpt, op.legacyKey, op.lineKeys, op.lookups],
         );
         return;
     }

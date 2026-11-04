@@ -83,7 +83,11 @@ func (f *fakeStore) ClearItems(_ context.Context, in store.ClearingInput) (store
 	return f.oi.doc, f.oi.docNew, f.err
 }
 
-func (f *fakeStore) ListClearings(context.Context, string, string) ([]store.ClearingDocument, error) {
+func (f *fakeStore) ListClearings(_ context.Context, _, _ string, page store.Page) ([]store.ClearingDocument, error) {
+	f.listPage = page
+	if f.clearingPage != nil {
+		return f.clearingPage, f.err
+	}
 	return []store.ClearingDocument{f.oi.doc}, f.err
 }
 

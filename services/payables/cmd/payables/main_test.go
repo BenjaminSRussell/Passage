@@ -120,3 +120,15 @@ func TestVendorBanksAndWithholdingNeedASignedServiceClient(t *testing.T) {
 		t.Fatalf("a signed tax client calculates withholding: %v %v", wt, err)
 	}
 }
+
+func TestVendorGroupDimension(t *testing.T) {
+	for in, want := range map[string]string{"": "VENDGRP", "-": "", "GROUP_X": "GROUP_X"} {
+		got, err := vendorGroupDimension(func(string) string { return in })
+		if err != nil || got != want {
+			t.Fatalf("AP_VENDOR_GROUP_DIMENSION=%q gave %q, %v; want %q", in, got, err, want)
+		}
+	}
+	if _, err := vendorGroupDimension(func(string) string { return "vend grp" }); err == nil {
+		t.Fatal("a malformed attribute must stop the service")
+	}
+}

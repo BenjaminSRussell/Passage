@@ -15,7 +15,6 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/domain"
-	sfevents "github.com/BenjaminSRussell/passage/services/shopfloor/internal/events"
 )
 
 // Catalog codes for machines and downtime (see README).
@@ -69,14 +68,17 @@ type IngestResult struct {
 
 // Downtime is one machine stop (FR-25.11).
 type Downtime struct {
-	ID          string     `json:"id"`
-	MachineID   string     `json:"machineId"`
-	ResourceID  string     `json:"resourceId"`
-	StartedAt   time.Time  `json:"startedAt"`
-	EndedAt     *time.Time `json:"endedAt"`
-	ReasonCode  *string    `json:"reasonCode"`
-	Category    string     `json:"category"`
-	AndonRaised bool       `json:"andonRaised"`
+	ID         string     `json:"id"`
+	MachineID  string     `json:"machineId"`
+	ResourceID string     `json:"resourceId"`
+	StartedAt  time.Time  `json:"startedAt"`
+	EndedAt    *time.Time `json:"endedAt"`
+	ReasonCode *string    `json:"reasonCode"`
+	Category   string     `json:"category"`
+	// Cause is "down" for a downtime the machine reported and "idle" for idle time found by the
+	// andon sweep (BR-25.6).
+	Cause       string `json:"cause"`
+	AndonRaised bool   `json:"andonRaised"`
 }
 
 // DowntimeFilter selects downtimes for the supervisor list.
@@ -94,6 +96,8 @@ type Andon struct {
 	Kind       string    `json:"kind"`
 	Severity   string    `json:"severity"`
 	DowntimeID *string   `json:"downtimeId"`
+	JobID      *string   `json:"jobId"`
+	Detail     *string   `json:"detail"`
 	StartedAt  time.Time `json:"startedAt"`
 }
 
@@ -208,6 +212,7 @@ type machineRow struct {
 type openDown struct {
 	id    string
 	start time.Time
+	cause string
 }
 
 func ingestMachine(ctx context.Context, tx pgx.Tx, tenantID string, now time.Time, code string, group []MachineEventIn) (IngestResult, error) {
@@ -259,8 +264,8 @@ func ingestMachine(ctx context.Context, tx pgx.Tx, tenantID string, now time.Tim
 
 	var open *openDown
 	var d openDown
-	err = tx.QueryRow(ctx, `select id::text, started_at from downtime_record
-		where tenant_id = $1 and machine_id = $2 and ended_at is null`, tenantID, m.id).Scan(&d.id, &d.start)
+	err = tx.QueryRow(ctx, `select id::text, started_at, cause from downtime_record
+		where tenant_id = $1 and machine_id = $2 and ended_at is null`, tenantID, m.id).Scan(&d.id, &d.start, &d.cause)
 	switch {
 	case err == nil:
 		open = &d
@@ -278,9 +283,26 @@ func ingestMachine(ctx context.Context, tx pgx.Tx, tenantID string, now time.Tim
 			return IngestResult{}, err
 		}
 		res.Accepted++
+		if open != nil && open.cause == domain.DowntimeCauseIdle {
+			// Idle time ends with the next count or a state that leaves RUNNING; a repeated
+			// RUNNING or an IDLE report leaves it open. A DOWN report then opens its own
+			// downtime below.
+			if !domain.EndsIdle(e) {
+				continue
+			}
+			end := e.At
+			if end.Before(open.start) {
+				end = open.start
+			}
+			if _, err := tx.Exec(ctx, `update downtime_record set ended_at = $3 where tenant_id = $1 and id = $2`,
+				tenantID, open.id, end); err != nil {
+				return IngestResult{}, err
+			}
+			open = nil
+		}
 		switch domain.DowntimeStepFor(open != nil, e.State) {
 		case domain.DowntimeStart:
-			nd := openDown{id: ids.New(), start: e.At}
+			nd := openDown{id: ids.New(), start: e.At, cause: domain.DowntimeCauseDown}
 			if _, err := tx.Exec(ctx, `insert into downtime_record (tenant_id, id, machine_id, resource_id, started_at, reason_code)
 				values ($1, $2, $3, $4, $5, $6)`, tenantID, nd.id, m.id, m.resourceID, e.At, it.ReasonCode); err != nil {
 				return IngestResult{}, err
@@ -318,59 +340,46 @@ func ingestMachine(ctx context.Context, tx pgx.Tx, tenantID string, now time.Tim
 			res.AndonsRaised += raised
 		}
 	}
-	if err := clearAndon(ctx, tx, tenantID, m.resourceID, now); err != nil {
+	if _, err := clearAndon(ctx, tx, tenantID, m.resourceID, now); err != nil {
 		return IngestResult{}, err
 	}
 	return res, nil
 }
 
-// raiseAndon opens one alert per (resource, kind) (BR-25.10) and emits
-// dev.passage.shopfloor.andon.raised.v1 in the same transaction. While an alert
-// for the resource is open a second raise is a no-op and returns 0.
+// raiseAndon opens the downtime alert of a machine (BR-25.10) and marks the downtime. While an
+// alert for the resource is open a second raise is a no-op and returns 0.
 func raiseAndon(ctx context.Context, tx pgx.Tx, tenantID string, m machineRow, d *openDown) (int, error) {
-	alertID := ids.New()
-	var got string
-	err := tx.QueryRow(ctx, `insert into andon_alert (tenant_id, id, site_id, resource_id, kind, severity, downtime_id, started_at)
-		values ($1, $2, $3, $4, 'downtime', 'warning', $5, $6)
-		on conflict (tenant_id, resource_id, kind) where cleared_at is null do nothing
-		returning id::text`, tenantID, alertID, m.siteID, m.resourceID, d.id, d.start).Scan(&got)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
+	n, err := openAndon(ctx, tx, tenantID, andonOpen{
+		ResourceID: m.resourceID, SiteID: m.siteID, Kind: domain.AndonDowntime, DowntimeID: &d.id, StartedAt: d.start,
+	})
+	if err != nil || n == 0 {
+		return n, err
 	}
 	if _, err := tx.Exec(ctx, `update downtime_record set andon_raised = true where tenant_id = $1 and id = $2`,
 		tenantID, d.id); err != nil {
 		return 0, err
 	}
-	if err := enqueue(ctx, tx, "andon", alertID, sfevents.AndonRaised, tenantID, sfevents.AndonRaisedData{
-		AlertID: alertID, ResourceID: m.resourceID, Kind: "downtime", Severity: "warning",
-		StartedAt: d.start.UTC().Format(time.RFC3339Nano),
-	}); err != nil {
-		return 0, err
-	}
-	return 1, nil
+	return n, nil
 }
 
 // clearAndon closes a resource's open downtime andon once its downtime ended at
 // least AndonClearAfter before now and no downtime is open on the resource
-// (BR-25.10). Clearing happens on the next ingest for the machine after the
-// hold has elapsed; a scheduled sweep is a later slice.
-func clearAndon(ctx context.Context, tx pgx.Tx, tenantID, resourceID string, now time.Time) error {
-	_, err := tx.Exec(ctx, `update andon_alert a set cleared_at = greatest($3, a.started_at)
-		where a.tenant_id = $1 and a.resource_id = $2 and a.kind = 'downtime' and a.cleared_at is null
-		and not exists (select 1 from downtime_record o where o.tenant_id = $1 and o.resource_id = $2 and o.ended_at is null)
+// (BR-25.10). It runs on the next ingest for the machine and in the andon sweep.
+// An empty resourceID covers every resource. It returns how many alerts it closed.
+func clearAndon(ctx context.Context, tx pgx.Tx, tenantID, resourceID string, now time.Time) (int, error) {
+	tag, err := tx.Exec(ctx, `update andon_alert a set cleared_at = greatest($3, a.started_at)
+		where a.tenant_id = $1 and ($2 = '' or a.resource_id::text = $2) and a.kind = 'downtime' and a.cleared_at is null
+		and not exists (select 1 from downtime_record o where o.tenant_id = $1 and o.resource_id = a.resource_id and o.ended_at is null)
 		and exists (select 1 from downtime_record d where d.tenant_id = $1 and d.id = a.downtime_id and d.ended_at <= $4)`,
 		tenantID, resourceID, now, now.Add(-domain.AndonClearAfter))
-	return err
+	return int(tag.RowsAffected()), err
 }
 
-const downtimeColumns = `id::text, machine_id::text, resource_id::text, started_at, ended_at, reason_code, category, andon_raised`
+const downtimeColumns = `id::text, machine_id::text, resource_id::text, started_at, ended_at, reason_code, category, cause, andon_raised`
 
 func scanDowntime(row pgx.Row) (Downtime, error) {
 	var d Downtime
-	err := row.Scan(&d.ID, &d.MachineID, &d.ResourceID, &d.StartedAt, &d.EndedAt, &d.ReasonCode, &d.Category, &d.AndonRaised)
+	err := row.Scan(&d.ID, &d.MachineID, &d.ResourceID, &d.StartedAt, &d.EndedAt, &d.ReasonCode, &d.Category, &d.Cause, &d.AndonRaised)
 	return d, err
 }
 
@@ -429,7 +438,7 @@ func (s *Postgres) ListDowntimes(ctx context.Context, f DowntimeFilter) ([]Downt
 func (s *Postgres) OpenAndon(ctx context.Context, siteID string) ([]Andon, error) {
 	out := []Andon{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select id::text, resource_id::text, site_id::text, kind, severity, downtime_id::text, started_at
+		rows, err := tx.Query(ctx, `select id::text, resource_id::text, site_id::text, kind, severity, downtime_id::text, job_id::text, detail, started_at
 			from andon_alert where cleared_at is null and ($1 = '' or site_id::text = $1)
 			order by started_at, id`, siteID)
 		if err != nil {
@@ -438,7 +447,7 @@ func (s *Postgres) OpenAndon(ctx context.Context, siteID string) ([]Andon, error
 		defer rows.Close()
 		for rows.Next() {
 			var a Andon
-			if err := rows.Scan(&a.ID, &a.ResourceID, &a.SiteID, &a.Kind, &a.Severity, &a.DowntimeID, &a.StartedAt); err != nil {
+			if err := rows.Scan(&a.ID, &a.ResourceID, &a.SiteID, &a.Kind, &a.Severity, &a.DowntimeID, &a.JobID, &a.Detail, &a.StartedAt); err != nil {
 				return err
 			}
 			out = append(out, a)

@@ -288,7 +288,7 @@ describe("on-hand run detail", () => {
     expect(within(quarantine).getByText("5.000000")).toBeInTheDocument();
     expect(quarantine).not.toHaveTextContent("5.00 USD");
     expect(screen.getByText("Staged, not posted to the inventory ledger")).toBeInTheDocument();
-    expect(within(quarantine).queryByRole("button", { name: /Release/ })).not.toBeInTheDocument();
+    expect(within(quarantine).getByRole("button", { name: /^Release record/ })).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
   });
 

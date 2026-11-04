@@ -5,7 +5,7 @@ export const PLANNING_API = "/api/v1/planning";
 
 export const OrderType = z.enum(["purchase", "production", "transfer"]);
 export const OrderStatus = z.enum(["unprocessed", "approved", "firmed", "deleted"]);
-export const MessageAction = z.enum(["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone", "sales-on-top", "no-vendor"]);
+export const MessageAction = z.enum(["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone", "sales-on-top", "no-vendor", "no-quota-source", "lot-split", "bom-cycle"]);
 export const TargetType = z.enum(["purchase-order", "production-order", "transfer-order"]);
 export const BufferZone = z.enum(["red", "yellow", "green"]);
 export type BufferZone = z.infer<typeof BufferZone>;
@@ -43,7 +43,23 @@ export type PlannedOrder = z.infer<typeof PlannedOrder>;
 /** Only unprocessed and approved orders of the current version can be changed (FR-22.11). */
 export const isOpen = (o: Pick<PlannedOrder, "status">) => o.status === "unprocessed" || o.status === "approved";
 
+/** open until a planner applies or dismisses the message (FR-22.7). */
+export const MessageStatus = z.enum(["open", "applied", "dismissed"]);
+export type MessageStatus = z.infer<typeof MessageStatus>;
+
+/** Only messages about existing supply change a source order when applied; the others can only be dismissed. */
+export const APPLICABLE_ACTIONS: readonly z.infer<typeof MessageAction>[] = ["postpone", "advance", "cancel", "decrease", "increase"];
+
 export const Message = z.object({
+  id: z.string(),
+  status: MessageStatus,
+  /** The ETag to send as If-Match when deciding. */
+  version: z.number().int(),
+  decidedBy: z.string().nullish(),
+  decidedAt: z.string().nullish(),
+  decisionNote: z.string().nullish(),
+  /** The earlier version's message the planner decided, when a later run raised it again unchanged and carried the decision. */
+  carriedFrom: z.string().nullish(),
   action: MessageAction,
   itemId: z.string(),
   /** The warehouse planning scope the message is about (FR-22.18); null for the site scope. */
@@ -271,12 +287,31 @@ export async function listMessages(
   action?: z.infer<typeof MessageAction>,
   init?: RequestInit,
   sort?: ListSort,
+  /** Left out, the service lists open messages; `all` lists every status. */
+  status?: MessageStatus | "all",
 ): Promise<Message[]> {
   const params = new URLSearchParams({ planCode });
   if (action) params.set("action", action);
   if (sort) params.set("sort", sort);
+  if (status) params.set("status", status);
   const body = await request(`/messages?${params.toString()}`, z.object({ items: z.array(Message) }), init);
   return body.items;
+}
+
+export async function getMessage(id: string, init?: RequestInit): Promise<Message> {
+  return request(`/messages/${encodeURIComponent(id)}`, Message, init);
+}
+
+/**
+ * Applies or dismisses an open message under If-Match (FR-22.7). The Idempotency-Key makes a retry
+ * of the same decision return the stored message instead of a 409.
+ */
+export async function decideMessage(id: string, version: number, decision: "apply" | "dismiss", note: string, idempotencyKey: string): Promise<Message> {
+  return request(`/messages/${encodeURIComponent(id)}:${decision}`, Message, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "If-Match": ifMatch(version), "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(note.trim() ? { note: note.trim() } : {}),
+  });
 }
 
 /**
@@ -588,6 +623,107 @@ export async function generateStatisticalForecast(modelCode: string, version: nu
     headers: { "Content-Type": "application/json", "If-Match": ifMatch(version) },
     body: JSON.stringify(body),
   });
+}
+
+/** One item of an allocation key: its percentage share and inventory units per forecast unit (FR-22.8, BR-22.10). */
+export const AllocationLine = z.object({
+  itemId: z.string(),
+  share: z.string(),
+  uomFactor: z.string(),
+});
+export type AllocationLine = z.infer<typeof AllocationLine>;
+
+/** An allocation key; `lines` is empty in a list and `lineCount` always says how many items it holds. */
+export const AllocationKey = z.object({
+  id: z.string(),
+  version: z.number().int().min(1),
+  code: z.string(),
+  name: z.string(),
+  forecastUom: z.string(),
+  lineCount: z.number().int(),
+  lines: z.array(AllocationLine),
+});
+export type AllocationKey = z.infer<typeof AllocationKey>;
+
+/** What a create or update sends: the lines' shares must add up to exactly 100. */
+export interface AllocationKeyWrite {
+  name: string;
+  forecastUom: string;
+  lines: AllocationLine[];
+}
+
+export async function listAllocationKeys(init?: RequestInit): Promise<AllocationKey[]> {
+  const out = await request(`/forecast-allocation-keys?limit=500`, z.object({ items: z.array(AllocationKey) }), init);
+  return out.items;
+}
+
+export async function getAllocationKey(code: string, init?: RequestInit): Promise<AllocationKey> {
+  return request(`/forecast-allocation-keys/${encodeURIComponent(code)}`, AllocationKey, init);
+}
+
+/** Creates an allocation key (Maintain planning setup); 409 `PLAN-ALLOCATION-KEY-EXISTS` means the code is taken. */
+export async function createAllocationKey(code: string, body: AllocationKeyWrite, idempotencyKey: string): Promise<AllocationKey> {
+  return request(`/forecast-allocation-keys`, AllocationKey, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ code, ...body }),
+  });
+}
+
+/** Replaces the name, unit and lines of a key under If-Match; 412 means someone else changed it. */
+export async function updateAllocationKey(code: string, version: number, body: AllocationKeyWrite): Promise<AllocationKey> {
+  return request(`/forecast-allocation-keys/${encodeURIComponent(code)}`, AllocationKey, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "If-Match": ifMatch(version) },
+    body: JSON.stringify(body),
+  });
+}
+
+export interface AllocatePeriodWrite {
+  periodStart: string;
+  periodEnd: string;
+  /** The aggregate quantity of the period in the key's forecast unit. */
+  qty: string;
+}
+
+export interface AllocateForecastWrite {
+  keyCode: string;
+  siteId: string;
+  periods: AllocatePeriodWrite[];
+}
+
+const AllocateForecastResult = z.object({
+  model: ForecastModel,
+  keyCode: z.string(),
+  keyVersion: z.number().int(),
+  items: z.number().int(),
+  periods: z.number().int(),
+  cellsWritten: z.number().int(),
+});
+export type AllocateForecastResult = z.infer<typeof AllocateForecastResult>;
+
+/**
+ * Splits aggregate forecast quantities across the items of an allocation key into
+ * manual cells of a model (FR-22.8), under If-Match on the model (version 0 creates
+ * it). 404 `PLAN-ALLOCATION-KEY-NOT-FOUND`, 409 `PLAN-FORECAST-LOCKED` for a
+ * submitted or published model, 422 `PLAN-ALLOCATION-RANGE` for an overflow.
+ */
+export async function allocateForecast(modelCode: string, version: number, body: AllocateForecastWrite): Promise<AllocateForecastResult> {
+  return request(`/forecasts/${encodeURIComponent(modelCode)}:allocate`, AllocateForecastResult, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "If-Match": ifMatch(version) },
+    body: JSON.stringify(body),
+  });
+}
+
+/** The version to send as If-Match for a forecast model: 0 when it does not exist yet. */
+export async function forecastModelVersion(modelCode: string): Promise<number> {
+  try {
+    return (await getForecastLines(modelCode, { limit: 1 })).model.version;
+  } catch (err) {
+    if (err instanceof PlanningApiError && err.status === 404) return 0;
+    throw err;
+  }
 }
 
 export const ForecastPublication = z.object({

@@ -50,7 +50,7 @@ func (a *API) getDescriptionTemplate(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, d)
+	writeTagged(w, http.StatusOK, d.LockVersion, d)
 }
 
 // putDescriptionTemplate creates (201) or replaces (200) a default description
@@ -60,6 +60,10 @@ func (a *API) putDescriptionTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
+	tag, tagOK := replaceTag(w, r)
+	if !tagOK {
+		return
+	}
 	var req descriptionTemplateRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -97,7 +101,7 @@ func (a *API) putDescriptionTemplate(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	d, created, err := a.store.PutDescriptionTemplate(r.Context(), id, store.DescriptionTemplate{Scope: req.Scope,
+	d, created, err := a.store.PutDescriptionTemplate(r.Context(), id, tag, store.DescriptionTemplate{Scope: req.Scope,
 		LegalEntityID: req.LegalEntityID, SourceType: req.SourceType, Language: req.Language, Template: req.Template,
 		FieldBindings: req.FieldBindings})
 	if err != nil {
@@ -108,5 +112,5 @@ func (a *API) putDescriptionTemplate(w http.ResponseWriter, r *http.Request) {
 	if created {
 		status = http.StatusCreated
 	}
-	httpx.JSON(w, status, d)
+	writeTagged(w, status, d.LockVersion, d)
 }

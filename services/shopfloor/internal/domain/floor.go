@@ -23,6 +23,22 @@ const (
 	AndonAfter = 10 * time.Minute
 	// AndonClearAfter is how long the condition must stay clear before an alert closes.
 	AndonClearAfter = 5 * time.Minute
+	// ScrapRatePercent is the scrap share of a bucket's pieces above which an andon is raised
+	// (FR-25.11 "scrap rate > 5% in a bucket").
+	ScrapRatePercent = 5
+	// ScrapMinCount is the fewest pieces a bucket must hold before its scrap rate counts: one
+	// reject in the first ten pieces is not a trend. The PRD names no minimum (requirements question).
+	ScrapMinCount = 10
+
+	// Andon kinds (BR-25.10: one open alert per resource and kind).
+	AndonDowntime    = "downtime"
+	AndonScrapRate   = "scrap-rate"
+	AndonQualityFail = "quality-fail"
+
+	// Downtime causes: a downtime the machine reported (DOWN) or idle time the sweep found (BR-25.6).
+	DowntimeCauseDown = "down"
+	DowntimeCauseIdle = "idle"
+
 	// MaxEventAge bounds how old an edge event may be and still be accepted (BR-25.4).
 	MaxEventAge = 7 * 24 * time.Hour
 )
@@ -135,4 +151,41 @@ func AndonDue(start, now time.Time) bool {
 // since the downtime ended (BR-25.10).
 func AndonCleared(ended, now time.Time) bool {
 	return now.Sub(ended) >= AndonClearAfter
+}
+
+// ScrapRateExceeded reports whether a bucket of total pieces with good of them good has a scrap
+// share above ScrapRatePercent (FR-25.11). Integer arithmetic, so 5.00 % exactly does not raise.
+// Buckets under ScrapMinCount pieces never do.
+func ScrapRateExceeded(total, good int64) bool {
+	if total < ScrapMinCount || good < 0 || good > total {
+		return false
+	}
+	return (total-good)*100 > total*ScrapRatePercent
+}
+
+// IdleSince returns the start of idle time for a machine whose last state is RUNNING: the last
+// count, or the start of RUNNING when it has counted nothing since (BR-25.6). ok is false while
+// the gap since then is not longer than the threshold, or when idle detection is off (threshold 0).
+func IdleSince(runningSince, lastCount *time.Time, threshold time.Duration, now time.Time) (since time.Time, ok bool) {
+	if runningSince == nil || threshold <= 0 {
+		return time.Time{}, false
+	}
+	ref := *runningSince
+	if lastCount != nil && lastCount.After(ref) {
+		ref = *lastCount
+	}
+	if now.Sub(ref) <= threshold {
+		return time.Time{}, false
+	}
+	return ref, true
+}
+
+// EndsIdle reports whether an accepted event ends an open idle downtime: any count (the machine
+// produces again, BR-25.6) or a state report that leaves RUNNING (DOWN, SETUP, OFF). A repeated
+// RUNNING report does not: the machine is still running without counting, and ending the record
+// there would let the next sweep open a second idle record over the same gap (it starts at the
+// last count). An IDLE report keeps it open too. A DOWN report ends the idle record and then opens
+// a downtime of its own.
+func EndsIdle(e MachineEvent) bool {
+	return e.Kind == EventCount || (e.State != "" && e.State != MachineRunning && e.State != MachineIdle)
 }

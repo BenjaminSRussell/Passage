@@ -262,11 +262,27 @@ export interface OpenOrdersRunRequest {
   records: OpenOrderRecord[];
 }
 
-/** A correction to a quarantined open item (FR-49.11). Blank fields keep the extracted value. */
+/**
+ * A correction to a quarantined open item, bank balance or on-hand line (FR-49.11). Blank fields keep
+ * the extracted value; each pack takes its own fields (open_items: party, account; bank_balances:
+ * bankAccount; onhand: item, site, warehouse, location, batch, unit).
+ */
 export interface ReleaseRequest {
   party?: string;
   account?: string;
-  /** Party ids added to master data since the run. */
+  bankAccount?: string;
+  item?: string;
+  site?: string;
+  warehouse?: string;
+  location?: string;
+  batch?: string;
+  unit?: string;
+  /** Corrected delivery date (ISO) of an open_orders line; party, item and unit also correct one. */
+  deliveryDate?: string;
+  /** Customer and vendor ids added since an open_orders run. */
+  customers?: string[];
+  vendors?: string[];
+  /** Master-data ids added since the run: parties, bank accounts or items (also of open_orders), by pack. */
   parties?: string[];
   version?: number;
 }
@@ -406,6 +422,8 @@ export interface RunbookStep {
   status: "PENDING" | "DONE";
   goNoGo: boolean;
   pack?: string;
+  /** The legal entity of a per-entity step (a plan generated with expandByEntity); absent for plan-wide steps. */
+  entity?: string;
   completedBy?: string;
   completedAt?: string;
   /** Set once the step is started; the runbook timer runs from it (FR-49.6). */
@@ -587,6 +605,28 @@ export interface GenerateCutoverRequest {
   rehearsalDurationsMin?: Record<string, number>;
   /** Carry the durations measured on that earlier plan into this one (FR-49.6). */
   rehearsalPlanId?: string;
+  /** One load, reconcile and sign-off set per legal entity (D5a); 3 entities and 9 packs give 84 steps. */
+  expandByEntity?: boolean;
+}
+
+/** A configured control-total tolerance (FR-49.2, migration.tolerance.<pack>). `total` is `*` for the pack default. */
+export interface Tolerance {
+  pack: Pack;
+  total: string;
+  amount: string;
+  reason: string;
+  version: number;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+export interface ToleranceRequest {
+  pack: Pack;
+  total: string;
+  amount: string;
+  reason?: string;
+  /** The stored version when changing an existing tolerance. */
+  version?: number;
 }
 
 export function newKey(): string {
@@ -791,4 +831,14 @@ export function exportFileUrl(planId: string, file: ExportFile): string {
 /** POST /migration/packs/open_orders/runs: open sales and purchase order lines (FR-49.1). */
 export function startOpenOrdersRun(body: OpenOrdersRunRequest, key: string = newKey()): Promise<PackRunDetail> {
   return post("/migration/packs/open_orders/runs", body, key);
+}
+
+/** GET /migration/tolerances: the configured tolerances; a total without one compares at 0.00. */
+export function listTolerances(signal?: AbortSignal): Promise<Tolerance[]> {
+  return items("/migration/tolerances", signal);
+}
+
+/** PUT /migration/tolerances: sets the tolerance of a pack's control total. */
+export function putTolerance(body: ToleranceRequest, key: string = newKey()): Promise<Tolerance> {
+  return send("/migration/tolerances", { method: "PUT", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) });
 }

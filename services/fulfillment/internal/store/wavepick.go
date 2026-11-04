@@ -123,6 +123,12 @@ func confirmWavePickTx(ctx context.Context, tx pgx.Tx, tenantID, waveID string, 
 		if err := checkShippable(sh); err != nil {
 			return result, err
 		}
+		if err := checkNotHeld(ctx, tx, sh.OrderID); err != nil {
+			if len(listed[sid]) == 0 {
+				continue // a held order is left out of "pick the rest" instead of failing the wave
+			}
+			return result, err
+		}
 		todo := append([]PickInput(nil), listed[sid]...)
 		if pickRest {
 			if len(todo) == 0 && !pickable(sh.Status) {

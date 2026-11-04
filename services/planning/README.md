@@ -39,7 +39,7 @@ internal/domain/       pure engine: low-level codes, lot sizing, netting, peggin
                        calculators: ddmrp.go, quota.go, strategy.go, shelflife.go, projection.go
 internal/store/        Postgres repository (pgx); a plan run is one transaction with its outbox events
 internal/api/          HTTP handlers under /v1/planning, RFC 9457 problems, /readyz with a database ping
-internal/events/       plan.started.v1, plan.completed.v1, message.raised.v1, plannedorder.firmed.v1 and forecast.published.v1 types and payloads
+internal/events/       plan.started.v1, plan.completed.v1, message.raised.v1, message.applied.v1, message.dismissed.v1, plannedorder.firmed.v1 and forecast.published.v1 types and payloads
 internal/forecastclient/ HTTP client of forecast-py for POST /forecasts/{modelCode}:generate (slice 28, FORECAST_URL, flag planning.statistical-forecast); forecast.generated.v1
 migrations/            0001_init.sql (plan, plan_version, planned_order, pegging, action_message, outbox; RLS on all)
                        0002_forecast_and_maintenance.sql (planned_order version/vendor/deleted, forecast_model, forecast_line; RLS)
@@ -58,7 +58,7 @@ Dockerfile             distroless static image, built from the repository root
 
 ## Engine rules implemented (BR-22.1)
 
-- Low-level codes from the BOM graph; a cyclic BOM is rejected (`PLAN-0004`).
+- Low-level codes from the BOM graph; a cyclic BOM is planned without the lines that close a cycle, each raising a `bom-cycle` warning (`PLAN-0004`, slice 33).
 - Netting per item in LLC order, requirements sorted by date, then priority, then ref.
 - Coverage codes: requirement (lot-for-lot), period (one order per `periodDays`
   window for the window's demand less the supply already scheduled in it),
@@ -342,6 +342,9 @@ NOT-IMPLEMENTED.md):
   `mts-gross` forecast is not netted against on-hand.
 - Default vendor (FR-22.3): a run item's `vendorId`, else the default vendor of its stored item coverage, is
   stamped on planned purchases after quota allocation; a purchase with none raises `no-vendor` (PLAN-0008).
+  An item with no coverage code and no stored item coverage takes the coverage group `REQ` (stored, else built-in requirement coverage). A requirement
+  that splits over the item's maximum order quantity raises `lot-split` (PLAN-0005), and a planned order no source of its
+  quota arrangement can take raises `no-quota-source` (PLAN-0009) and stays without a source.
   `GET /messages` returns the catalog `code` and `text` of the actions that have one.
 - Supply schedule and inventory forecast (FR-22.21, FR-22.22): day, week or
   30-day month buckets; value is closing on-hand × unit cost as platform
@@ -363,7 +366,10 @@ NOT-IMPLEMENTED.md):
 | DELETE | `/v1/planning/planned-orders/{id}` | `planning.order.maintain` (If-Match required) |
 | POST | `/v1/planning/planned-orders:firm` | `planning.order.firm` (Idempotency-Key required) |
 | GET | `/v1/planning/planned-orders/{id}/pegging?depth=` | `planning.read` |
-| GET | `/v1/planning/messages?planCode=&action=&limit=` | `planning.read` |
+| GET | `/v1/planning/messages?planCode=&action=&status=&sort=&limit=` | `planning.read` (open messages unless `status` is applied, dismissed or all) |
+| GET | `/v1/planning/messages/{id}` | `planning.read` |
+| POST | `/v1/planning/messages/{id}:apply` | `planning.order.maintain` (If-Match required, Idempotency-Key optional) |
+| POST | `/v1/planning/messages/{id}:dismiss` | `planning.order.maintain` (If-Match required, Idempotency-Key optional) |
 | GET | `/v1/planning/forecasts/{modelCode}/lines?itemId=&siteId=&limit=` | `planning.read` |
 | PUT | `/v1/planning/forecasts/{modelCode}/lines` | `planning.forecast.maintain` (If-Match required) |
 | POST | `/v1/planning/forecasts/{modelCode}:submit` | `planning.forecast.maintain` (If-Match required) |
@@ -427,7 +433,6 @@ swaps the current pointer.
 | 412 | `conflict_version` | If-Match is not the current version of the order, forecast model, coverage group, item coverage, buffer profile or quota arrangement |
 | 422 | `PLAN-ORDER-INVALID` | Order date after delivery date, or a vendor on a non-purchase order |
 | 428 | `precondition_required` | If-Match missing on a maintenance write |
-| 422 | `PLAN-0004` | BOM cycle; low-level codes cannot be assigned |
 | 422 | `PLAN-0005` | A requirement would split into more than 1,000 orders |
 | 422 | `PLAN-0009` | Quota arrangement has no usable source (all blocked, or quota 0 with others blocked) |
 | 422 | `PLAN-INPUT-INVALID` | Snapshot rejected by the engine (unknown coverage or order type, duplicate or unknown item), or calculator input the domain rejects (empty ADU window); `detail` names it |
@@ -494,3 +499,5 @@ auto-firms, publishes only `scenario.simulated.v1` (no `plan.completed.v1`, `mes
 or `plannedorder.firmed.v1`), and its planned orders are 409 `PLAN-0003` on firm, change and
 delete. Read its orders with `GET /planned-orders?planCode=&version=N` and compare it with the
 operational version through `GET /plans/{planCode}/diff`. Duty `planning.simulate`.
+
+A BOM cycle no longer fails a run (PLAN-0004): the cycle-closing component lines are skipped and each raises a `bom-cycle` warning message (item the parent, `demandRef` the component). Which lines are cut does not depend on the order of the snapshot: the walk starts from the top-level items in id order, then any cycle no top-level item reaches from its smallest id, and follows components in id order, so the line leading back up is cut and the plan hash is stable.

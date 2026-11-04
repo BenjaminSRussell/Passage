@@ -151,10 +151,12 @@ describe("Order pegs", () => {
     secondaryResourceIds: [],
     setupGroup: null,
     setupMinutes: 0,
+    queueBeforeMinutes: 0,
+    queueAfterMinutes: 0,
     attributes: {},
     networkId: null,
     status: "scheduled",
-    createdAt: "2026-10-26T06:00:00Z",
+    version: 1, createdAt: "2026-10-26T06:00:00Z",
   });
   const operations = [operation(PARENT, 10), operation(PARENT, 20), operation(DEPENDENT, 10)];
 

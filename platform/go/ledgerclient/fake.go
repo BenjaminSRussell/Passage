@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/shopspring/decimal"
@@ -28,11 +29,13 @@ type Fake struct {
 	lostErr  error
 	ledgers  map[string]string
 	closedTo string
+	service  string
 }
 
 type Stored struct {
 	ID         string
 	ReversalOf string
+	PostedBy   string
 	Entry
 }
 
@@ -45,6 +48,14 @@ func (f *Fake) FailPosts(err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.postErr = err
+}
+
+// PostAs sets the service identity that the entries stored from now on are recorded with, as the ledger records the verified
+// issuer of the service token.
+func (f *Fake) PostAs(service string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.service = service
 }
 
 // LoseAnswers makes every Post that the ledger accepts return err instead of the entry id until it is called with nil.
@@ -102,7 +113,7 @@ func (f *Fake) store(op string, e Entry, reversalOf string) (string, error) {
 	}
 	id := ids.New()
 	f.byKey[key] = len(f.entries)
-	f.entries = append(f.entries, Stored{ID: id, ReversalOf: reversalOf, Entry: e})
+	f.entries = append(f.entries, Stored{ID: id, ReversalOf: reversalOf, PostedBy: f.service, Entry: e})
 	return id, nil
 }
 
@@ -129,6 +140,7 @@ func (f *Fake) Reverse(_ context.Context, r Reversal) (string, error) {
 	orig := f.entries[i].Entry
 	flipped := orig
 	flipped.PostClosed = r.PostClosed
+	flipped.SourceType = "reversal"
 	flipped.IdempotencyKey = r.IdempotencyKey
 	if r.PostingDate != "" {
 		flipped.PostingDate = r.PostingDate
@@ -189,5 +201,56 @@ func (f *Fake) Balance(_ context.Context, q BalanceQuery) (Balance, error) {
 		out.Currency = "USD"
 		out.Debit, out.Credit = decimal.Zero, decimal.Zero
 	}
+	return out, nil
+}
+
+// Balances sums the posted lines of each account from q.Account to q.AccountTo (string order, as the ledger compares) per period range.
+func (f *Fake) Balances(_ context.Context, q BalanceQuery) (AccountBalances, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	to := q.AccountTo
+	if to == "" {
+		to = q.Account
+	}
+	sums := map[string]*AccountBalance{}
+	out := AccountBalances{ExcludedYearEndClosing: q.ExcludeYearEndClosing}
+	closing := map[string]bool{}
+	for _, s := range f.entries {
+		if s.PostedBy == CloseService && s.SourceType == YearEndClosingSourceType {
+			closing[s.ID] = true
+		}
+	}
+	for _, s := range f.entries {
+		if q.ExcludeYearEndClosing && (closing[s.ID] || closing[s.ReversalOf]) {
+			continue
+		}
+		period := s.PostingDate[:min(len(s.PostingDate), len("2006-01"))]
+		if s.LedgerID != q.LedgerID || (q.PeriodTo != "" && period > q.PeriodTo) || (q.PeriodFrom != "" && period < q.PeriodFrom) {
+			continue
+		}
+		out.Currency = s.Currency
+		for _, l := range s.Lines {
+			if l.Account < q.Account || l.Account > to {
+				continue
+			}
+			b := sums[l.Account]
+			if b == nil {
+				b = &AccountBalance{Account: l.Account}
+				sums[l.Account] = b
+			}
+			if l.Credit {
+				b.Credit = b.Credit.Add(l.Amount)
+			} else {
+				b.Debit = b.Debit.Add(l.Amount)
+			}
+		}
+	}
+	if out.Currency == "" {
+		out.Currency = "USD"
+	}
+	for _, b := range sums {
+		out.Rows = append(out.Rows, *b)
+	}
+	slices.SortFunc(out.Rows, func(a, b AccountBalance) int { return strings.Compare(a.Account, b.Account) })
 	return out, nil
 }

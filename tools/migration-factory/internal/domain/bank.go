@@ -52,7 +52,7 @@ func ValidateBankBalances(in []BankBalanceLine, accounts map[string]struct{}) (a
 	seenID := make(map[string]struct{}, len(in))
 	seenAccount := make(map[string]struct{}, len(in))
 	hold := func(b BankBalanceLine, rule, reason string) {
-		quarantined = append(quarantined, Quarantined{Record: b.Record(), Rule: rule, Reason: reason})
+		quarantined = append(quarantined, Quarantined{Record: b.Record(), Rule: rule, Reason: reason, Line: b})
 	}
 	for _, b := range in {
 		if strings.TrimSpace(b.LegacyID) == "" {
@@ -164,6 +164,9 @@ func ReconcileBankBalances(r *PackRun, source, accepted []BankBalanceLine, loade
 		return err
 	}
 	r.Totals = totals
+	if err := r.applyTolerances(); err != nil {
+		return err
+	}
 	if !r.HasMismatch() {
 		return r.Advance(StatusReconciled)
 	}

@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Button, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
-import { createRun, CURRENCY_TYPES, describeProblem, listDefinitions, newKey, type CurrencyType, type Problem, type RunRequest } from "./api/client";
+import { createRun, CURRENCY_TYPES, describeProblem, listDefinitions, listHierarchies, listTrees, newKey, type CurrencyType, type Problem, type RunRequest } from "./api/client";
 import { CURRENCY_TYPE_LABELS, fiscalCalendar, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -16,6 +16,18 @@ export interface RunValues {
   periodsPerYear: string;
   firstYear: string;
   includeAdjustmentPeriods: boolean;
+  /** Accept a read model behind the lag gate (REPORT-0004); the run then carries a stale warning. */
+  allowStale?: boolean;
+  /** Code of a published hierarchy whose nodes become the rows; empty runs the definition's own rows. */
+  hierarchy: string;
+  hierarchyVersion: string;
+  normalBalance: "debit" | "credit";
+  accountFrom: string;
+  accountTo: string;
+  /** Code of a reporting tree the run is limited to; empty runs the whole ledger. */
+  tree?: string;
+  /** Unit of the tree; empty is the whole tree (the roll-up of every unit). */
+  treeUnit?: string;
 }
 
 type Errors = Partial<Record<keyof RunValues, string>>;
@@ -33,6 +45,11 @@ export function validateRun(v: RunValues): Errors {
   else if (!INTEGER.test(v.period) || Number(v.period) > Number(v.periodsPerYear)) errors.period = `Enter a period from 0 to ${v.periodsPerYear}.`;
   if (!INTEGER.test(v.firstYear) || (INTEGER.test(v.year) && Number(v.firstYear) > Number(v.year))) errors.firstYear = "Enter a year on or before the fiscal year.";
   else if (INTEGER.test(v.year) && Number(v.year) - Number(v.firstYear) > 40) errors.firstYear = "The calendar may span at most 40 years.";
+  if (v.hierarchy !== "") {
+    if (v.hierarchyVersion !== "" && (!INTEGER.test(v.hierarchyVersion) || Number(v.hierarchyVersion) < 1)) errors.hierarchyVersion = "Enter a published version number, or leave it empty for the latest.";
+    if ((v.accountFrom.trim() === "") !== (v.accountTo.trim() === "")) errors.accountTo = "Enter both ends of the account range, or neither.";
+    else if (v.accountFrom.trim() > v.accountTo.trim()) errors.accountTo = "The first account must not come after the last.";
+  }
   return errors;
 }
 
@@ -50,6 +67,18 @@ export function toRunRequest(v: RunValues): RunRequest {
     period,
     calendar,
     ...(v.includeAdjustmentPeriods ? { includeAdjustmentPeriods: true } : {}),
+    ...(v.allowStale ? { allowStale: true } : {}),
+    ...(v.hierarchy !== ""
+      ? {
+          hierarchy: {
+            code: v.hierarchy,
+            ...(v.hierarchyVersion !== "" ? { version: Number(v.hierarchyVersion) } : {}),
+            ...(v.normalBalance === "credit" ? { normalBalance: "credit" as const } : {}),
+            ...(v.accountFrom.trim() !== "" ? { accountFrom: v.accountFrom.trim(), accountTo: v.accountTo.trim() } : {}),
+          },
+        }
+      : {}),
+    ...(v.tree ? { tree: { code: v.tree, ...(v.treeUnit ? { unit: v.treeUnit } : {}) } } : {}),
   };
 }
 
@@ -68,6 +97,14 @@ export function NewRunPage() {
     periodsPerYear: "12",
     firstYear: String(thisYear - 1),
     includeAdjustmentPeriods: false,
+    allowStale: false,
+    hierarchy: "",
+    hierarchyVersion: "",
+    normalBalance: "debit",
+    accountFrom: "",
+    accountTo: "",
+    tree: "",
+    treeUnit: "",
   });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -75,21 +112,31 @@ export function NewRunPage() {
   const key = useRef(newKey());
   const definitions = useLoad((signal) => listDefinitions(signal), "definitions");
   const published = (definitions.data ?? []).filter((d) => d.latestVersion > 0);
+  const hierarchies = useLoad((signal) => listHierarchies(signal), "hierarchies");
+  // Categories need master data this service does not have yet, so only account and dimension hierarchies can drive a run.
+  const usable = (hierarchies.data ?? []).filter((h) => h.latestVersion > 0 && h.subject !== "main_account_category");
+  const chosen = usable.find((h) => h.code === values.hierarchy);
+  const trees = useLoad((signal) => listTrees(signal), "trees");
+  const chosenTree = (trees.data ?? []).find((t) => t.code === values.tree);
 
   function update(patch: Partial<RunValues>) {
     setValues((prev) => ({ ...prev, ...patch }));
     key.current = newKey();
   }
 
-  async function submit(event: FormEvent) {
+  function submit(event: FormEvent) {
     event.preventDefault();
-    const found = validateRun(values);
+    return start(values);
+  }
+
+  async function start(sent: RunValues) {
+    const found = validateRun(sent);
     setErrors(found);
     setFailure(null);
     if (Object.keys(found).length > 0) return;
     setBusy(true);
     try {
-      const run = await createRun(toRunRequest(values), key.current);
+      const run = await createRun(toRunRequest(sent), key.current);
       navigate(`/finreport/runs/${run.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -154,6 +201,82 @@ export function NewRunPage() {
               </Select>
             )}
           </FormField>
+          <FormField
+            id="fr-run-hierarchy"
+            label="Rows from hierarchy"
+            optional
+            hint={
+              hierarchies.error
+                ? `The hierarchies could not be loaded (${hierarchies.error.code}). The run uses the definition's own rows.`
+                : "One row per node of a published hierarchy, with the definition's columns. Empty uses the definition's own rows."
+            }
+            error={errors.hierarchy}
+          >
+            {(control) => (
+              <Select {...control} value={values.hierarchy} onChange={(e) => update({ hierarchy: e.target.value, hierarchyVersion: "", accountFrom: "", accountTo: "" })} disabled={usable.length === 0}>
+                <option value="">{hierarchies.loading ? "Loading hierarchies…" : usable.length === 0 ? "No published hierarchies" : "Definition rows"}</option>
+                {usable.map((h) => (
+                  <option key={h.code} value={h.code}>
+                    {h.code} {h.name} (v{h.latestVersion})
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+          {chosen ? (
+            <>
+              {text("fr-run-hierarchy-version", "hierarchyVersion", "Hierarchy version", { optional: true, hint: "Empty uses the latest published version.", inputMode: "numeric" })}
+              <FormField id="fr-run-normal" label="Amounts shown as" hint="Credit shows credit balances as positive amounts.">
+                {(control) => (
+                  <Select {...control} value={values.normalBalance} onChange={(e) => update({ normalBalance: e.target.value as "debit" | "credit" })}>
+                    <option value="debit">Debit balances</option>
+                    <option value="credit">Credit balances</option>
+                  </Select>
+                )}
+              </FormField>
+              {chosen.subject === "dimension_value" ? (
+                <>
+                  {text("fr-run-account-from", "accountFrom", "First account", { optional: true, mono: true, hint: "Limits the rows to a range of accounts, such as 6000 to 6999." })}
+                  {text("fr-run-account-to", "accountTo", "Last account", { optional: true, mono: true })}
+                </>
+              ) : null}
+            </>
+          ) : null}
+          <FormField
+            id="fr-run-tree"
+            label="Limit to reporting tree"
+            optional
+            hint={
+              trees.error
+                ? `The trees could not be loaded (${trees.error.code}). The run covers the whole ledger.`
+                : "Run the statement for one unit of a tree, rolled up over the units below it. Empty covers the whole ledger."
+            }
+          >
+            {(control) => (
+              <Select {...control} value={values.tree ?? ""} onChange={(e) => update({ tree: e.target.value, treeUnit: "" })} disabled={(trees.data ?? []).length === 0}>
+                <option value="">{trees.loading ? "Loading trees…" : (trees.data ?? []).length === 0 ? "No reporting trees" : "Whole ledger"}</option>
+                {(trees.data ?? []).map((t) => (
+                  <option key={t.code} value={t.code}>
+                    {t.code} {t.name}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+          {chosenTree ? (
+            <FormField id="fr-run-tree-unit" label="Tree unit" optional hint="A parent unit gives the roll-up of its children. Empty is the whole tree.">
+              {(control) => (
+                <Select {...control} value={values.treeUnit ?? ""} onChange={(e) => update({ treeUnit: e.target.value })}>
+                  <option value="">Whole tree</option>
+                  {chosenTree.units.map((u) => (
+                    <option key={u.code} value={u.code}>
+                      {u.code} {u.name}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </FormField>
+          ) : null}
           {text("fr-run-year", "year", "Fiscal year", { inputMode: "numeric" })}
           {text("fr-run-period", "period", "Period", { hint: "0 is the opening period.", inputMode: "numeric" })}
           {text("fr-run-periods", "periodsPerYear", "Periods per year", { inputMode: "numeric" })}
@@ -167,6 +290,10 @@ export function NewRunPage() {
             />
             <label htmlFor="fr-run-adjustment">Include adjustment periods</label>
           </span>
+          <span className={styles.check}>
+            <Input id="fr-run-stale" type="checkbox" checked={values.allowStale} onChange={(e) => update({ allowStale: e.target.checked })} />
+            <label htmlFor="fr-run-stale">Accept stale results</label>
+          </span>
           <div className={styles.formActions}>
             <Button type="submit" variant="primary" loading={busy}>
               Run statement
@@ -177,7 +304,27 @@ export function NewRunPage() {
           </div>
         </form>
       </Card>
-      {failure ? (
+      {failure?.code === "REPORT-0004" ? (
+        <Alert
+          tone="warning"
+          title="The read model is behind the ledger"
+          live="alert"
+          action={
+            <Button
+              size="sm"
+              onClick={() => {
+                const next = { ...values, allowStale: true };
+                update({ allowStale: true });
+                void start(next);
+              }}
+            >
+              Run anyway
+            </Button>
+          }
+        >
+          {failure.message} ({failure.code})
+        </Alert>
+      ) : failure ? (
         <Alert tone="danger" title="The statement did not run" live="alert">
           {failure.message} ({failure.code})
         </Alert>

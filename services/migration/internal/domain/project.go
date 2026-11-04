@@ -1,9 +1,11 @@
 package domain
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
+	_ "time/tzdata" // zone names resolve in a container without a zoneinfo database
 	"unicode/utf8"
 )
 
@@ -33,6 +35,8 @@ type Project struct {
 	Status              string
 	CutoverAt           *time.Time
 	ScheduleCron        string
+	// ScheduleTimezone is the IANA time zone the cron is read in; "" is UTC.
+	ScheduleTimezone string
 }
 
 // ValidateProject returns a message per invalid field; an empty map means the project is valid. isID tells whether
@@ -86,6 +90,9 @@ func ValidateProject(p Project, isID func(string) bool) map[string]string {
 	if p.Status != ProjectActive && p.Status != ProjectArchived {
 		bad["status"] = "must be active or archived"
 	}
+	if msg := ScheduleTimezoneProblem(p.ScheduleTimezone); msg != "" {
+		bad["scheduleTimezone"] = msg
+	}
 	if msg := ScheduleCronProblem(p.ScheduleCron); msg != "" {
 		bad["scheduleCron"] = msg
 	}
@@ -94,13 +101,55 @@ func ValidateProject(p Project, isID func(string) bool) map[string]string {
 
 // ScheduleCronProblem says why expr cannot schedule runs ("" when it can, or when it is empty: no schedule).
 func ScheduleCronProblem(expr string) string {
+	return ScheduleCronProblemMin(expr, MinScheduleMinutes)
+}
+
+// ScheduleCronProblemMin is ScheduleCronProblem for a tenant whose `mig.recurring.min_interval_min` is minMinutes
+// (at least MinScheduleMinutes; a smaller value is read as the floor).
+func ScheduleCronProblemMin(expr string, minMinutes int) string {
 	if expr == "" {
 		return ""
 	}
+	minMinutes = max(minMinutes, MinScheduleMinutes)
 	if gap, ok := CronMinInterval(expr); !ok {
 		return "must be a five-field cron expression (minute hour day month weekday) of at most 100 characters"
-	} else if gap < MinScheduleMinutes {
-		return "must leave at least 15 minutes between runs"
+	} else if gap < minMinutes {
+		return fmt.Sprintf("must leave at least %d minutes between runs", minMinutes)
+	}
+	return ""
+}
+
+// MaxRecurringMinIntervalMin is the longest minimum gap a tenant can set (one day).
+const MaxRecurringMinIntervalMin = 1440
+
+// RecurringMinIntervalProblem says why n cannot be a tenant's `mig.recurring.min_interval_min` ("" when it can).
+func RecurringMinIntervalProblem(n int) string {
+	if n < MinScheduleMinutes || n > MaxRecurringMinIntervalMin {
+		return fmt.Sprintf("must be between %d and %d minutes", MinScheduleMinutes, MaxRecurringMinIntervalMin)
+	}
+	return ""
+}
+
+// DefaultScheduleTimezone is the zone a schedule is read in unless the project names one.
+const DefaultScheduleTimezone = "UTC"
+
+// ScheduleLocation resolves a schedule's time zone name ("" is UTC). Only IANA names are accepted: "Local" would make
+// the same cron mean different times on different hosts.
+func ScheduleLocation(name string) (*time.Location, bool) {
+	if name == "" {
+		return time.UTC, true
+	}
+	if len(name) > 64 || strings.EqualFold(name, "local") {
+		return nil, false
+	}
+	loc, err := time.LoadLocation(name)
+	return loc, err == nil
+}
+
+// ScheduleTimezoneProblem says why name cannot be a schedule's time zone ("" when it can, or is empty: UTC).
+func ScheduleTimezoneProblem(name string) string {
+	if _, ok := ScheduleLocation(name); !ok {
+		return "must be an IANA time zone name such as Europe/Berlin or America/Chicago, or UTC"
 	}
 	return ""
 }
@@ -108,7 +157,7 @@ func ScheduleCronProblem(expr string) string {
 var cronBounds = [5][2]int{{0, 59}, {0, 23}, {1, 31}, {1, 12}, {0, 7}}
 
 // MinScheduleMinutes is the shortest gap FR-10.16 allows between two scheduled runs (`mig.recurring.min_interval_min`
-// defaults to 15; the per-tenant setting is not read yet).
+// defaults to 15 and is the floor of the per-tenant setting, see ScheduleCronProblemMin).
 const MinScheduleMinutes = 15
 
 const maxCronLength = 100
@@ -226,10 +275,20 @@ func ValidateRewriteRules(rules []KeyRewrite) map[string]string {
 	return bad
 }
 
-// CronNext returns the first firing of a five-field cron expression strictly after the given instant, in UTC (the
-// tenant time zone is not read yet). Day of month and day of week follow the usual rule: when both are restricted a
-// day matches if either does. False means the expression is invalid or never fires within five years.
+// CronNext is CronNextIn in UTC.
 func CronNext(expr string, after time.Time) (time.Time, bool) {
+	return CronNextIn(expr, after, time.UTC)
+}
+
+// CronNextIn returns the first firing of a five-field cron expression strictly after the given instant, reading the
+// fields as wall-clock time in loc. Day of month and day of week follow the usual rule: when both are restricted a day
+// matches if either does. False means the expression is invalid or never fires within five years.
+//
+// Daylight saving time: a wall time that does not exist (02:30 on a spring-forward day) fires once, at the instant
+// the clock would have shown it had the change not happened (03:30), and never twice even when the expression also
+// names the hour it lands in; a wall time that occurs twice (01:30 on a fall-back day) fires once, at its first
+// occurrence.
+func CronNextIn(expr string, after time.Time, loc *time.Location) (time.Time, bool) {
 	sets, ok := cronFields(expr)
 	if !ok {
 		return time.Time{}, false
@@ -258,12 +317,16 @@ func CronNext(expr string, after time.Time) (time.Time, bool) {
 		return true
 	}
 	start := after.UTC().Truncate(time.Minute).Add(time.Minute)
-	day := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+	local := start.In(loc)
+	day := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC) // the calendar date, as a plain date
 	for d := 0; d < 366*5; d++ {
 		t := day.AddDate(0, 0, d)
 		if !sets[3][int(t.Month())] || !dayOK(t) {
 			continue
 		}
+		// The earliest instant of the day's wall times that is not before start. Wall times are not instants in
+		// order (a skipped hour maps past the following ones), so every candidate is compared, not the first.
+		var best time.Time
 		for h := 0; h < 24; h++ {
 			if !sets[1][h] {
 				continue
@@ -272,11 +335,21 @@ func CronNext(expr string, after time.Time) (time.Time, bool) {
 				if !sets[0][m] {
 					continue
 				}
-				at := t.Add(time.Duration(h)*time.Hour + time.Duration(m)*time.Minute)
-				if !at.Before(start) {
-					return at, true
+				at := time.Date(t.Year(), t.Month(), t.Day(), h, m, 0, 0, loc)
+				if l := at.In(loc); l.Hour() != h || l.Minute() != m {
+					// The wall time falls in the hour a spring-forward change skips; time.Date resolves it with the
+					// offset after the change, which is before the change. Move it ahead by the length of the gap.
+					want := time.Date(t.Year(), t.Month(), t.Day(), h, m, 0, 0, time.UTC)
+					got := time.Date(l.Year(), l.Month(), l.Day(), l.Hour(), l.Minute(), 0, 0, time.UTC)
+					at = at.Add(want.Sub(got))
+				}
+				if !at.Before(start) && (best.IsZero() || at.Before(best)) {
+					best = at
 				}
 			}
+		}
+		if !best.IsZero() {
+			return best.UTC(), true
 		}
 	}
 	return time.Time{}, false

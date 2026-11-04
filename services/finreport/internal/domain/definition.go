@@ -62,11 +62,14 @@ type Format struct {
 // Row is one line of a statement. Code is the identifier other rows use in
 // totals and calculations.
 type Row struct {
-	Code            string              `json:"code"`
-	Kind            RowKind             `json:"kind"`
-	Label           string              `json:"label"`
-	AccountFrom     string              `json:"accountFrom,omitempty"`
-	AccountTo       string              `json:"accountTo,omitempty"`
+	Code        string  `json:"code"`
+	Kind        RowKind `json:"kind"`
+	Label       string  `json:"label"`
+	AccountFrom string  `json:"accountFrom,omitempty"`
+	AccountTo   string  `json:"accountTo,omitempty"`
+	// Accounts is an explicit account list for account_range rows, used instead
+	// of (or together with) a contiguous range. Hierarchy runs write it.
+	Accounts        []string            `json:"accounts,omitempty"`
 	DimensionFilter map[string][]string `json:"dimensionFilter,omitempty"`
 	References      []string            `json:"references,omitempty"`
 	Expression      string              `json:"expression,omitempty"`
@@ -156,8 +159,18 @@ func (d Definition) Validate() []Issue {
 		}
 		switch r.Kind {
 		case RowAccountRange:
-			if r.AccountFrom == "" || r.AccountTo == "" || r.AccountFrom > r.AccountTo {
-				add(field, ShapeCode, "account_range needs accountFrom <= accountTo")
+			hasRange := r.AccountFrom != "" || r.AccountTo != ""
+			if (hasRange || len(r.Accounts) == 0) && (r.AccountFrom == "" || r.AccountTo == "" || r.AccountFrom > r.AccountTo) {
+				add(field, ShapeCode, "account_range needs accountFrom <= accountTo, or a list of accounts")
+			}
+			if len(r.Accounts) > MaxHierarchyNodes {
+				add(field+".accounts", CodeTooLarge, "accounts may list at most 20000 accounts")
+			}
+			for _, a := range r.Accounts {
+				if a == "" {
+					add(field+".accounts", ShapeCode, "accounts must not contain an empty account")
+					break
+				}
 			}
 		case RowDimensionFilter:
 			if len(r.DimensionFilter) == 0 {

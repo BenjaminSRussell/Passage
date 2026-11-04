@@ -221,10 +221,22 @@ paths:
       description: |
         Inventory transactions with their origin. status matches the issue or the receipt status;
         from and to bound the physical date (inclusive). journalId is set for journal lines,
-        reference (the blocking id) for blocking legs.
+        reference (the blocking id) for blocking legs. site, warehouse, location, batch, serial,
+        inventoryStatus, owner and segment keep the transactions whose dimension set holds every
+        named value (the drill-down from an on-hand row); a value over 100 characters is a 400.
+        legalEntity only narrows: a caller sees no rows outside its legal-entity scope.
       x-passage-duty: inventory.read
       parameters:
         - { name: product, in: query, schema: { type: string, format: uuid } }
+        - { name: legalEntity, in: query, description: Only transactions of this legal entity, schema: { type: string, format: uuid } }
+        - { name: site, in: query, description: Only transactions whose dimension set has this site, schema: { type: string, maxLength: 100 } }
+        - { name: warehouse, in: query, description: Only transactions whose dimension set has this warehouse, schema: { type: string, maxLength: 100 } }
+        - { name: location, in: query, description: Only transactions whose dimension set has this location, schema: { type: string, maxLength: 100 } }
+        - { name: batch, in: query, description: Only transactions whose dimension set has this batch, schema: { type: string, maxLength: 100 } }
+        - { name: serial, in: query, description: Only transactions whose dimension set has this serial number, schema: { type: string, maxLength: 100 } }
+        - { name: inventoryStatus, in: query, description: Only transactions whose dimension set has this inventory status, schema: { type: string, maxLength: 100 } }
+        - { name: owner, in: query, description: Only transactions of stock owned by this vendor id, schema: { type: string, maxLength: 100 } }
+        - { name: segment, in: query, description: 'Only transactions of this segment (SALES_ORDER:<ref> or PROJECT:<ref>)', schema: { type: string, maxLength: 100 } }
         - { name: status, in: query, schema: { $ref: '#/components/schemas/TransactionStatus' } }
         - { name: sourceType, in: query, schema: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE, TRANSFER_IN, PURCH_LINE, RECEIPT_LINE, SALES_LINE, PROD_LINE] } }
         - { name: from, in: query, schema: { type: string, format: date } }
@@ -261,7 +273,12 @@ paths:
         INV-BLK-002. One reservation row is written per allocation. A repeated Idempotency-Key returns
         the stored allocations (200, Idempotent-Replayed: true). With against ORDERED a MANUAL request reserves part
         of the expected receipt (ordered plus arrived, less already reserved) of the one dimension set instead of
-        physical stock; kind on each reservation says which.
+        physical stock; kind on each reservation says which. When the receipt arrives (a transfer
+        order received, or a purchase receipt stepped from ordered or arrived to a physical status) the
+        ORDERED reservations of that dimension set convert to PHYSICAL, oldest first, up to the quantity
+        that arrived: one that arrived whole changes kind and gets convertedAt, one that arrived in part
+        is split (the arrived part becomes a new allocation of the same request, the rest stays ORDERED).
+        Each conversion publishes reservation.converted.
       x-passage-duty: inventory.reservation.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1005,6 +1022,9 @@ paths:
         inventory.count.approve; otherwise 403 INV-CNT-001 and nothing is written. Uncounted lines are
         skipped; a sheet with no counted line is INV-CNT-005. The COUNT journal posts like an
         ADJUSTMENT (inventory against the adjustment account) with the negative policy applied.
+        A vendor-owned line (plan includeVendorOwned) posts quantity only: RECEIVED for a gain,
+        DEDUCTED for a loss, value 0, no GL amount and no ownership.changed (BR-16.14); its tolerance
+        is the percent one.
         Requires If-Match. Posting a POSTED sheet returns it unchanged. A sheet with an outstanding
         recount is refused (409 INV-CNT-006); a plan with fourEyes needs the sheet APPROVED first
         (409 INV-CNT-008); an APPROVED sheet posts its above-tolerance variances without the
@@ -1257,6 +1277,9 @@ paths:
         ship date. Warehouses, transit and the legal entity never change: cancel and create
         another. Only a DRAFT or CREATED order can be edited (INV-TRF-006); nothing is posted.
         Publishes transfer.changed for a CREATED order (none for a DRAFT).
+        A change that leaves more reserved against the receiving dimension set's expected receipt than
+        it still expects (a shorter or removed line) is INV-RES-004 (422) and changes nothing; release
+        the reservations first.
       x-passage-duty: inventory.transfer.write
       parameters:
         - $ref: '#/components/parameters/TransferId'
@@ -1288,7 +1311,9 @@ paths:
         Removes the order and its lines at the version in If-Match. The order has posted nothing
         and nothing refers to it. Deleting a CREATED order publishes transfer.changed with status
         DELETED so consumers drop it; a DRAFT was never announced and publishes nothing. Any order
-        past CREATED (shipped, received or cancelled) is INV-TRF-006. Reservations with demand type
+        past CREATED (shipped, received or cancelled) is INV-TRF-006. An order whose expected receipt
+        reservations (against ORDERED) still rely on is INV-RES-004 (422) until they are released.
+        Reservations with demand type
         TRANSFER_ORDER are left alone, as by a cancel. The order's Idempotency-Key stays taken: a
         create retried with it is idempotency_key_reuse (409). A concurrent ship or edit of the
         same order is serialised with the delete; the loser gets 412 or 404.
@@ -1351,7 +1376,10 @@ paths:
         its first (earliest) shipment, so a later partial shipment does not restart the late-receipt
         clock of quantity already in transit. Emits
         dev.passage.inventory.transfer.shipped.v1. Requires If-Match (428 when absent, 412 on
-        mismatch); an order CANCELLED or RECEIVED is INV-TRF-006.
+        mismatch); an order CANCELLED or RECEIVED is INV-TRF-006. A one-step shipment is the receipt,
+        so reservations made against the receiving dimension set's expected receipt (against ORDERED)
+        convert to PHYSICAL for the quantity shipped, oldest first, in the same transaction
+        (reservation.converted).
         A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
         On a plan without freezeStock it flags the counted lines of such a sheet for recount instead and reopens the sheet (BR-16.8, countsheet.changed RECOUNT_REQUESTED); 409 INV-CNT-009 when that sheet is locked by another action at the moment (retry).
       x-passage-duty: inventory.transfer.post
@@ -1406,7 +1434,11 @@ paths:
         stays in transit for investigation. Receiving more than shipped plus overdeliveryPct is
         INV-TRF-002; an allowed over-delivery moves straight from the shipping warehouse and raises
         the line's shipped quantity. A closed line is INV-TRF-006, an unknown line INV-TRF-004.
-        Emits dev.passage.inventory.transfer.received.v1. Requires If-Match.
+        Emits dev.passage.inventory.transfer.received.v1. Requires If-Match. Reservations made against
+        the receiving dimension set's expected receipt (against ORDERED) convert to PHYSICAL for the
+        quantity received, oldest first, in the same transaction (reservation.converted). A closeShort
+        that gives up expected receipt those reservations still rely on once the received quantity
+        converted is INV-RES-004 (422) and changes nothing; release the reservations first.
         A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
         On a plan without freezeStock it flags the counted lines of such a sheet for recount instead and reopens the sheet (BR-16.8, countsheet.changed RECOUNT_REQUESTED); 409 INV-CNT-009 when that sheet is locked by another action at the moment (retry).
       x-passage-duty: inventory.transfer.post
@@ -1440,7 +1472,9 @@ paths:
       summary: Cancel a CREATED order (BR-16.13)
       description: |
         Nothing has moved, so nothing is reversed. A shipped order with quantity in transit is
-        INV-TRF-003; a received or cancelled order is INV-TRF-006. Requires If-Match.
+        INV-TRF-003; a received or cancelled order is INV-TRF-006. An order whose expected receipt
+        reservations (against ORDERED) still rely on is INV-RES-004 (422) until they are released.
+        Requires If-Match.
       x-passage-duty: inventory.transfer.write
       parameters:
         - $ref: '#/components/parameters/TransferId'
@@ -1859,6 +1893,57 @@ paths:
               schema: { $ref: '#/components/schemas/Journal' }
         '200':
           description: The journal's existing reversal
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/journals/{id}:copy:
+    post:
+      operationId: copyInventoryJournal
+      summary: Copy a journal into a new DRAFT journal (AX copy journal)
+      description: |
+        Creates a DRAFT journal with the legal entity, type, offset account, journal name and
+        currency of the source and one line per source line (quantities, unit, cost price and
+        dimensions; no client keys, no reversal links). The source can have any status and is never
+        changed, so a posted journal is a template for the next one. The body is a JSON object
+        (send {}); postingDate defaults to the source's posting date. The copy passes the same checks as a new journal: an active journal
+        name that still allows the type (INV-JNL-007) and the line rules and limit. A COUNT journal
+        belongs to its sheet and a reversal to the journal it reverses: both answer 409 INV-JNL-003.
+        Copying an OWNERSHIP_CHANGE journal also needs inventory.consignment.write, as creating one
+        does (403 AUTH-0003 otherwise).
+        Idempotency-Key is required: repeating the request returns the first copy (200,
+        Idempotent-Replayed); the same key with another posting date is 422 idempotency_key_reuse.
+      x-passage-duty: inventory.journal.write
+      parameters:
+        - $ref: '#/components/parameters/JournalId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                postingDate: { type: string, format: date, description: Posting date of the copy; the source's date when absent }
+      responses:
+        '201':
+          description: Copy created (DRAFT)
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '200':
+          description: The copy made by the first request with this key
           headers:
             ETag: { $ref: '#/components/headers/ETag' }
             Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
@@ -2300,6 +2385,9 @@ paths:
         in physical stock is INV-SER-001. A line cannot receive beyond its ordered quantity
         (INV-CNS-002); an unknown line is INV-CNS-001, a fully received order INV-CNS-003. The order
         becomes PARTIALLY_RECEIVED or RECEIVED. receiptDate defaults to today. Requires If-Match.
+        A row held by an unfinished sheet of a freezeStock plan that includes vendor-owned stock is
+        refused (409 INV-CNT-002); on a plan without the freeze the receipt flags the counted line
+        for recount (BR-16.8).
       x-passage-duty: inventory.consignment.write
       parameters:
         - $ref: '#/components/parameters/ConsignmentId'
@@ -2321,6 +2409,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
@@ -2667,7 +2756,9 @@ paths:
         never reaches a financial status (INV-OWN-001). The move applies to the whole quantity
         (splitting, BR-16.2, is not built). The projection, the audit row and the events are
         written in one database transaction. No GL entry is produced here: the calling document
-        posts its own ledger entry. Internal path: not exposed by the web BFF.
+        posts its own ledger entry. A receipt moved from ORDERED or ARRIVED to a physical or financial
+        status converts the reservations made against its expected receipt (against ORDERED) to PHYSICAL,
+        oldest first, up to the quantity that arrived. Internal path: not exposed by the web BFF.
         A move that changes the physical quantity of a row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
         On a plan without freezeStock it flags the counted lines of such a sheet for recount instead and reopens the sheet (BR-16.8, countsheet.changed RECOUNT_REQUESTED); 409 INV-CNT-009 when that sheet is locked by another action at the moment (retry).
       x-passage-duty: inventory.transaction.apply
@@ -3064,6 +3155,7 @@ components:
         createdAt: { type: string, format: date-time }
         releasedAt: { type: string, format: date-time }
         expiresAt: { type: string, format: date-time, description: When an ACTIVE reservation lapses; absent when it holds until released }
+        convertedAt: { type: string, format: date-time, description: 'When a reservation against an expected receipt became a PHYSICAL one because the receipt arrived (kind is PHYSICAL then); absent otherwise' }
     ReservationCandidate:
       type: object
       required: [dimensions, available, status, eligible]
@@ -3174,6 +3266,7 @@ components:
         toleranceValue: { $ref: '#/components/schemas/Decimal' }
         blind: { type: boolean, default: false }
         minDaysSinceCount: { type: integer, minimum: 1, maximum: 3650, description: 'Select only rows whose last posted count is at least this many days old, or that were never counted; absent counts every selected row' }
+        includeVendorOwned: { type: boolean, description: 'Count vendor-owned (consignment) stock too; its variance posts quantity only, with no value and no GL entry. Default false' }
         freezeStock: { type: boolean, default: false, description: 'While a sheet of the plan is OPEN, COUNTED or APPROVED, refuse movements of its rows (409 INV-CNT-002): journal postings (including other COUNT journals), transfer ship / receive, blocking and release, and status steps that change physical stock. Reservations are not refused.' }
         fourEyes: { type: boolean, default: false, description: 'The sheet needs :submit and a separate :approve by someone who did not count before it posts (INV-CNT-007)' }
         locationFrom: { type: string, maxLength: 60, description: 'Inclusive lower bound of the location dimension, compared byte-wise (C collation)' }
@@ -3196,6 +3289,7 @@ components:
         freezeStock: { type: boolean, description: 'Without it, a movement of a counted row after counting flags the line for recount (recountSource MOVEMENT, BR-16.8)' }
         fourEyes: { type: boolean }
         minDaysSinceCount: { type: integer, description: Age filter in days; absent when the plan has none }
+        includeVendorOwned: { type: boolean, description: Whether the plan counts vendor-owned stock too }
         locationFrom: { type: string }
         locationTo: { type: string }
         abcClass: { type: string, enum: [A, B, C] }

@@ -344,6 +344,20 @@ describe("Credit profiles", () => {
     expect(screen.getByText(/4000 EUR/)).toBeInTheDocument();
   });
 
+  it("shows delivered, not invoiced goods computed by the service read-only and names those it cannot count", async () => {
+    handler = () => ({
+      status: 200,
+      body: { ...profile, limitType: "BALANCE_PACKING_SLIP", exposure: { ...profile.exposure, deliveredNotInvoiced: "700", deliveredNotInvoicedOtherCurrencies: [{ currency: "EUR", amount: "250" }] } },
+      etag: '"4"',
+    });
+    renderAt(`/sales/credit-profiles/${LE}/${CUSTOMER}`);
+    const field = await screen.findByLabelText("Delivered, not invoiced");
+    expect(field).toHaveValue("700");
+    expect(field).toHaveAttribute("readonly");
+    expect(screen.getByText("Delivered goods not counted")).toBeInTheDocument();
+    expect(screen.getByText(/250 EUR/)).toBeInTheDocument();
+  });
+
   it("creates a profile with If-Match 0", async () => {
     handler = (_url, init) => (init.method === "PUT" ? { status: 200, body: { ...profile, version: 1 }, etag: '"1"' } : { status: 200, body: { ...profile, version: 1 }, etag: '"1"' });
     renderAt("/sales/credit-profiles/new");

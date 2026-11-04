@@ -20,7 +20,7 @@ async function openHierarchyThroughShell(duties: string[]) {
 
 describe("hierarchy designer behind the shell", () => {
   it("offers editing when the shell principal holds org.hierarchy.write", async () => {
-    await openHierarchyThroughShell(["org.read", "org.hierarchy.write"]);
+    await openHierarchyThroughShell(["org.read", "org.hierarchy.write", "tenant.administer"]);
     expect(await screen.findByRole("button", { name: "Create draft" })).toBeInTheDocument();
   });
 

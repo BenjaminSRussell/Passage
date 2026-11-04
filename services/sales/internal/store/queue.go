@@ -40,6 +40,9 @@ type HoldQueueItem struct {
 	// when one exists.
 	CreditLimit   *decimal.Decimal `json:"creditLimit,omitempty"`
 	LimitCurrency *string          `json:"limitCurrency,omitempty"`
+	// OrderStatus tells the queue which decisions apply: only a CREDIT hold
+	// of a DRAFT or OPEN order can be rejected (slice 26).
+	OrderStatus string `json:"orderStatus"`
 }
 
 // HoldQueueFilter narrows the queue. Empty fields match everything; an empty
@@ -56,7 +59,7 @@ func (s *Postgres) ListHolds(ctx context.Context, f HoldQueueFilter) ([]HoldQueu
 	p, _ := tenant.FromContext(ctx)
 	out := []HoldQueueItem{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select h.id::text, h.legal_entity_id::text, h.order_id::text, o.order_number, o.version, o.customer_id::text,
+		rows, err := tx.Query(ctx, `select h.id::text, h.legal_entity_id::text, h.order_id::text, o.order_number, o.version, o.status, o.customer_id::text,
 				h.hold_type, h.reason_code, h.order_amount::text, o.currency::text, h.applied_by, h.applied_at,
 				o.credit_check_result::text, c.credit_limit::text, c.currency::text
 			from order_hold h
@@ -73,7 +76,7 @@ func (s *Postgres) ListHolds(ctx context.Context, f HoldQueueFilter) ([]HoldQueu
 			var it HoldQueueItem
 			var amount string
 			var check, limit *string
-			if err := rows.Scan(&it.HoldID, &it.LegalEntityID, &it.OrderID, &it.OrderNumber, &it.OrderVersion, &it.CustomerID, &it.HoldType,
+			if err := rows.Scan(&it.HoldID, &it.LegalEntityID, &it.OrderID, &it.OrderNumber, &it.OrderVersion, &it.OrderStatus, &it.CustomerID, &it.HoldType,
 				&it.ReasonCode, &amount, &it.Currency, &it.AppliedBy, &it.AppliedAt, &check, &limit, &it.LimitCurrency); err != nil {
 				return err
 			}

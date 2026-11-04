@@ -1,9 +1,14 @@
 import { ApplicationFailure, Context } from "@temporalio/activity";
+import { mintOrReject } from "./serviceCall.js";
+import type { ServiceTokenSigner } from "./serviceToken.js";
 import type { PartyChangeRef } from "./workflows.js";
 
 export interface PartyDecision extends PartyChangeRef {
   decision: "approved" | "rejected";
+  /** The approver the decision route authenticated; party records it as the decider and refuses the requester. */
   decidedBy: string;
+  /** That approver's legal-entity scope; the service token names the change's legal entity only when it is inside it. */
+  scope: string[];
 }
 
 export interface PartyClient {
@@ -30,18 +35,18 @@ export function createActivities(party: PartyClient): PartyDecisionActivities {
 
 export function createPartyHttpClient(
   baseUrl: string,
+  signer: ServiceTokenSigner,
   fetchImpl: typeof fetch = fetch,
   log: Log = stdoutLog,
 ): PartyClient {
-  // TODO: #226 the hardcoded party.approve duty and the unauthenticated signal actor are interim until service identity lands.
   async function post(decision: PartyDecision, action: "approve" | "reject", signal?: AbortSignal): Promise<Response> {
+    const token = mintOrReject(() =>
+      signer.mintForParty({ tenantId: decision.tenantId, legalEntityId: decision.legalEntityId, actor: decision.decidedBy, scope: decision.scope }),
+    );
     return fetchImpl(`${baseUrl}/v1/party/pending-changes/${encodeURIComponent(decision.changeId)}:${action}`, {
       method: "POST",
       headers: {
-        "X-Passage-Tenant": decision.tenantId,
-        "X-Passage-Legal-Entity": decision.legalEntityId,
-        "X-Passage-User": decision.decidedBy,
-        "X-Passage-Duties": "party.approve",
+        "X-Passage-Service-Token": token,
         ...(action === "reject" ? { "Content-Type": "application/json" } : {}),
       },
       ...(action === "reject" ? { body: JSON.stringify({ reason: STALE_REJECT_REASON }) } : {}),
@@ -57,9 +62,12 @@ export function createPartyHttpClient(
     }
   }
 
-  function failure(action: string, decision: PartyDecision, status: number): Error {
-    const message = `party ${action} of change ${decision.changeId} failed with ${status}`;
-    if (status >= 400 && status < 500 && status !== 429) {
+  // A refused service token (401, or 403 with an AUTH- code: a key or grant not deployed yet) is retried like the other
+  // signed calls; any other 4xx, such as the requester deciding their own change, is final.
+  function failure(action: string, decision: PartyDecision, status: number, code?: string): Error {
+    const message = `party ${action} of change ${decision.changeId} failed with ${status}${code ? ` ${code}` : ""}`;
+    const authFault = (status === 401 || status === 403) && (!code || code.startsWith("AUTH-"));
+    if (status >= 400 && status < 500 && status !== 429 && !authFault) {
       return ApplicationFailure.nonRetryable(message, "PartyDecisionRejected");
     }
     return new Error(message);
@@ -70,7 +78,7 @@ export function createPartyHttpClient(
       const action = decision.decision === "approved" ? "approve" : "reject";
       const response = await post(decision, action, signal);
       if (response.ok) return;
-      const code = response.status === 409 ? await problemCode(response) : undefined;
+      const code = response.status >= 400 && response.status < 500 ? await problemCode(response) : undefined;
       if (code === CODE_CHANGE_DECIDED) {
         log("party change already decided", { changeId: decision.changeId, action });
         return;
@@ -87,7 +95,7 @@ export function createPartyHttpClient(
         }
         throw failure("reject", decision, rejected.status);
       }
-      throw failure(action, decision, response.status);
+      throw failure(action, decision, response.status, code);
     },
   };
 }

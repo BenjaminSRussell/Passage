@@ -37,6 +37,11 @@ channels:
     messages:
       decisionRecorded:
         $ref: "#/components/messages/CutoverDecisionRecorded"
+  migrationTolerance:
+    address: passage.migration.tolerance
+    messages:
+      toleranceConfigured:
+        $ref: "#/components/messages/ToleranceConfigured"
 operations:
   publishPackReconciled:
     action: send
@@ -74,6 +79,12 @@ operations:
       $ref: "#/channels/cutoverDecision"
     messages:
       - $ref: "#/channels/cutoverDecision/messages/decisionRecorded"
+  publishToleranceConfigured:
+    action: send
+    channel:
+      $ref: "#/channels/migrationTolerance"
+    messages:
+      - $ref: "#/channels/migrationTolerance/messages/toleranceConfigured"
 components:
   messages:
     PackReconciled:
@@ -112,6 +123,12 @@ components:
       summary: A GO or NO_GO decision was recorded on a cutover plan with its approvers and the checklist items that were not met (none for a GO). Audit and platform-ops consume it.
       payload:
         $ref: "#/components/schemas/CutoverDecisionRecordedEnvelope"
+    ToleranceConfigured:
+      name: dev.passage.migration.tolerance.configured.v1
+      title: Control-total tolerance configured
+      summary: A tolerance for a control total of a pack was set or changed (FR-49.2). Audit consumes it, because a tolerance lets a run reconcile with a non-zero delta.
+      payload:
+        $ref: "#/components/schemas/ToleranceConfiguredEnvelope"
   schemas:
     Envelope:
       type: object
@@ -350,3 +367,36 @@ components:
                 timestamp:
                   type: string
                   format: date-time
+    ToleranceConfiguredEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            type:
+              const: dev.passage.migration.tolerance.configured.v1
+            data:
+              type: object
+              required: [pack, total, amount, previous_amount, reason, version, configured_by]
+              properties:
+                pack:
+                  type: string
+                  description: Pack code, for example open_items.
+                total:
+                  type: string
+                  description: The money total name, for example open_items.amount, or * for every money total of the pack without a tolerance of its own.
+                amount:
+                  type: string
+                  description: The new tolerance as a decimal string, the absolute delta allowed on each total in its own currency; 0 means an exact comparison.
+                previous_amount:
+                  type: string
+                  description: The tolerance before the change as a decimal string; 0 for a first configuration.
+                reason:
+                  type: string
+                  description: Why the tolerance is allowed; required when the amount is above 0.
+                version:
+                  type: integer
+                  minimum: 1
+                  description: The tolerance's version after the change.
+                configured_by:
+                  type: string
+                  description: The user who made the change.

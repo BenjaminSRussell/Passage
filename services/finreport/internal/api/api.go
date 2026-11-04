@@ -69,10 +69,20 @@ type Store interface {
 	GetHierarchy(ctx context.Context, code string, version int) (domain.Hierarchy, int, error)
 	PublishHierarchy(ctx context.Context, code, actor string, members []domain.Member) (domain.Hierarchy, domain.Membership, error)
 	HierarchyMembership(ctx context.Context, code string, version int) (domain.Membership, int, error)
+	RunDefinition(ctx context.Context, runID string) (domain.Definition, error)
 	RunOutput(ctx context.Context, runID string) (store.Run, domain.Definition, []domain.Cell, error)
 	ListSchedules(ctx context.Context) ([]domain.Schedule, error)
 	GetSchedule(ctx context.Context, code string) (domain.Schedule, int, error)
 	SaveSchedule(ctx context.Context, sc domain.Schedule, ifMatch *int) (domain.Schedule, int, error)
+	ListRowSets(ctx context.Context) ([]domain.RowSet, error)
+	GetRowSet(ctx context.Context, code string) (domain.RowSet, int, error)
+	SaveRowSet(ctx context.Context, rs domain.RowSet, ifMatch *int) (domain.RowSet, int, error)
+	ListColumnSets(ctx context.Context) ([]domain.ColumnSet, error)
+	GetColumnSet(ctx context.Context, code string) (domain.ColumnSet, int, error)
+	SaveColumnSet(ctx context.Context, cs domain.ColumnSet, ifMatch *int) (domain.ColumnSet, int, error)
+	ListTrees(ctx context.Context) ([]domain.Tree, error)
+	GetTree(ctx context.Context, code string) (domain.Tree, int, error)
+	SaveTree(ctx context.Context, t domain.Tree, ifMatch *int) (domain.Tree, int, error)
 	AuditTrail(ctx context.Context, f domain.AuditFilter, after *domain.AuditCursor, limit int) (store.AuditPage, error)
 	ExportAuditTrail(ctx context.Context, f domain.AuditFilter) (store.AuditExport, error)
 }
@@ -82,11 +92,13 @@ type API struct {
 	store     Store
 	linePage  int                    // drill level 2 default page size (REPORTING_PAGE_SIZE)
 	traceLink func(id string) string // trace viewer link of a line (REPORTING_TRACE_URL)
+	maxLag    int                    // lag gate in seconds (REPORTING_MAX_LAG_S)
+	verifier  Verifier               // balance verification against the ledger; nil when LEDGER_URL is not set
 }
 
 // New returns the API over st with the default reporting tunables.
 func New(st Store) *API {
-	return &API{store: st, linePage: domain.DefaultLinePage, traceLink: config.Reporting{}.TraceLink}
+	return &API{store: st, linePage: domain.DefaultLinePage, traceLink: config.Reporting{}.TraceLink, maxLag: 30}
 }
 
 // WithConfig applies the reporting tunables the handlers use.
@@ -95,6 +107,7 @@ func (a *API) WithConfig(cfg config.Reporting) *API {
 		a.linePage = cfg.PageSize
 	}
 	a.traceLink = cfg.TraceLink
+	a.maxLag = cfg.MaxLagSeconds
 	return a
 }
 
@@ -106,10 +119,23 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyMaintain)).Put("/definitions/{code}", a.putDefinition)
 		r.With(authz.RequireDuty(DutyMaintain)).Get("/definitions/{code}/export", a.exportDefinition)
 		r.With(authz.RequireDuty(DutyMaintain)).Post("/definitions/import", a.importDefinition)
+		r.With(authz.RequireDuty(DutyMaintain)).Post("/definitions:compose", a.composeDefinition)
+		r.With(authz.RequireDuty(DutyMaintain)).Get("/row-sets", a.listRowSets)
+		r.With(authz.RequireDuty(DutyMaintain)).Get("/row-sets/{code}", a.getRowSet)
+		r.With(authz.RequireDuty(DutyMaintain)).Put("/row-sets/{code}", a.putRowSet)
+		r.With(authz.RequireDuty(DutyMaintain)).Get("/column-sets", a.listColumnSets)
+		r.With(authz.RequireDuty(DutyMaintain)).Get("/column-sets/{code}", a.getColumnSet)
+		r.With(authz.RequireDuty(DutyMaintain)).Put("/column-sets/{code}", a.putColumnSet)
+		// Statement runners list the trees (with their units) to pick one on the run form.
+		r.With(authz.RequireAnyDuty(DutyMaintain, DutyRun)).Get("/trees", a.listTrees)
+		r.With(authz.RequireDuty(DutyMaintain)).Get("/trees/{code}", a.getTree)
+		r.With(authz.RequireDuty(DutyMaintain)).Put("/trees/{code}", a.putTree)
+		r.With(authz.RequireDuty(DutyMaintain)).Get("/column-set-templates", a.listColumnTemplates)
 		r.With(authz.RequireDuty(DutyMaintain)).Post("/definitions/*", a.definitionAction)
 		r.With(authz.RequireDuty(DutyRun)).Post("/runs", a.createRun)
 		r.With(authz.RequireDuty(DutyView)).Get("/runs", a.listRuns)
 		r.With(authz.RequireDuty(DutyView)).Get("/runs/{id}", a.getRun)
+		r.With(authz.RequireDuty(DutyView)).Get("/runs/{id}/definition", a.runDefinition)
 		r.With(authz.RequireDuty(DutyView)).Get("/runs/{id}/cells", a.listCells)
 		r.With(authz.RequireDuty(DutyView)).Get("/runs/{id}/cells/{row}/{column}/balances", a.drillBalances)
 		r.With(authz.RequireDuty(DutyLines)).Get("/runs/{id}/cells/{row}/{column}/lines", a.drillLines)
@@ -117,7 +143,8 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyView)).Get("/lag", a.lag)
 		r.With(authz.RequireDuty(DutyMaintain)).Get("/standard-definitions", a.listStandard)
 		r.With(authz.RequireDuty(DutyMaintain)).Post("/standard-definitions:install", a.installStandard)
-		r.With(authz.RequireDuty(DutyMaintain)).Get("/hierarchies", a.listHierarchies)
+		// Statement runners read the published hierarchies to pick one on the run form.
+		r.With(authz.RequireAnyDuty(DutyMaintain, DutyRun)).Get("/hierarchies", a.listHierarchies)
 		r.With(authz.RequireDuty(DutyMaintain)).Get("/hierarchies/{code}", a.getHierarchy)
 		r.With(authz.RequireDuty(DutyMaintain)).Put("/hierarchies/{code}", a.putHierarchy)
 		r.With(authz.RequireDuty(DutyMaintain)).Get("/hierarchies/{code}/members", a.hierarchyMembers)
@@ -125,6 +152,9 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutySchedule)).Get("/schedules", a.listSchedules)
 		r.With(authz.RequireDuty(DutySchedule)).Get("/schedules/{code}", a.getSchedule)
 		r.With(authz.RequireDuty(DutySchedule)).Put("/schedules/{code}", a.putSchedule)
+		r.With(authz.RequireDuty(DutyVerify)).Post("/balance-verifications", a.createVerification)
+		r.With(authz.RequireDuty(DutyAudit)).Get("/balance-verifications", a.listVerifications)
+		r.With(authz.RequireDuty(DutyAudit)).Get("/balance-verifications/{id}", a.getVerification)
 		r.With(authz.RequireDuty(DutyAudit)).Get("/audit-trail", a.auditTrail)
 		r.With(authz.RequireDuty(DutyAudit)).Get("/audit-trail:export", a.exportAuditTrail)
 	})
@@ -315,14 +345,36 @@ type periodDTO struct {
 }
 
 type runRequest struct {
-	Definition        string      `json:"definition"`
-	DefinitionVersion int         `json:"definitionVersion"`
-	LedgerID          string      `json:"ledgerId"`
-	LegalEntityID     string      `json:"legalEntityId"`
-	CurrencyType      string      `json:"currencyType"`
-	Period            periodDTO   `json:"period"`
-	Calendar          []periodDTO `json:"calendar"`
-	IncludeAdjustment bool        `json:"includeAdjustmentPeriods"`
+	Definition        string           `json:"definition"`
+	DefinitionVersion int              `json:"definitionVersion"`
+	LedgerID          string           `json:"ledgerId"`
+	LegalEntityID     string           `json:"legalEntityId"`
+	CurrencyType      string           `json:"currencyType"`
+	Period            periodDTO        `json:"period"`
+	Calendar          []periodDTO      `json:"calendar"`
+	IncludeAdjustment bool             `json:"includeAdjustmentPeriods"`
+	Hierarchy         *hierarchyRunDTO `json:"hierarchy"`
+	Tree              *treeRunDTO      `json:"tree"`
+	// AllowStale accepts a read model behind the lag gate: the run completes
+	// with the REPORT-0004 warning instead of being refused (FR-15.1).
+	AllowStale bool `json:"allowStale"`
+}
+
+// hierarchyRunDTO asks for the rows of the run to be the nodes of a published
+// hierarchy (FR-15.4); the definition keeps supplying the columns.
+type hierarchyRunDTO struct {
+	Code          string `json:"code"`
+	Version       int    `json:"version"`
+	NormalBalance string `json:"normalBalance"`
+	AccountFrom   string `json:"accountFrom"`
+	AccountTo     string `json:"accountTo"`
+}
+
+// treeRunDTO limits the run to the balances of one reporting unit, rolled up
+// over the units below it (FR-15.4); no unit means the whole tree.
+type treeRunDTO struct {
+	Code string `json:"code"`
+	Unit string `json:"unit"`
 }
 
 func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
@@ -355,10 +407,19 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 		cal = append(cal, domain.Period{Year: c.Year, No: c.No, Quarter: c.Quarter, Adjustment: c.Adjustment})
 	}
 	sum := sha256.Sum256(raw)
-	run, err := a.store.CreateRun(r.Context(), store.RunSpec{
+	var hier *store.HierarchyRun
+	if h := req.Hierarchy; h != nil {
+		hier = &store.HierarchyRun{Code: h.Code, Version: h.Version, NormalBalance: h.NormalBalance, AccountFrom: h.AccountFrom, AccountTo: h.AccountTo}
+	}
+	var tree *store.TreeRun
+	if t := req.Tree; t != nil {
+		tree = &store.TreeRun{Code: t.Code, Unit: t.Unit}
+	}
+	run, err := a.store.CreateRun(r.Context(), store.RunSpec{Hierarchy: hier, Tree: tree,
 		Code: req.Definition, Version: req.DefinitionVersion, LedgerID: req.LedgerID, LegalEntityID: req.LegalEntityID, CurrencyType: req.CurrencyType,
 		PeriodYear: req.Period.Year, PeriodNo: req.Period.No, IncludeAdjustment: req.IncludeAdjustment, Calendar: cal,
 		RequestedBy: p.UserID, IdempotencyKey: key, RequestHash: hex.EncodeToString(sum[:]),
+		MaxLagSeconds: a.maxLag, AllowStale: req.AllowStale,
 	})
 	if err != nil {
 		fail(w, r, err)
@@ -424,6 +485,19 @@ func validateRun(req runRequest) error {
 	default:
 		return bad("currencyType must be txn, acct or rpt")
 	}
+	if h := req.Hierarchy; h != nil {
+		switch {
+		case !domain.ValidReportCode(h.Code):
+			return bad("hierarchy.code is required")
+		case h.Version < 0:
+			return bad("hierarchy.version must be 0 (latest published) or a published version")
+		case h.NormalBalance != "" && h.NormalBalance != "debit" && h.NormalBalance != "credit":
+			return bad("hierarchy.normalBalance must be debit or credit")
+		}
+	}
+	if t := req.Tree; t != nil && !domain.ValidReportCode(t.Code) {
+		return bad("tree.code is required")
+	}
 	return nil
 }
 
@@ -438,6 +512,21 @@ func (a *API) getRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, run)
+}
+
+// runDefinition returns the definition a run was evaluated with. For a run over
+// a hierarchy this is the expanded definition, one row per hierarchy node.
+func (a *API) runDefinition(w http.ResponseWriter, r *http.Request) {
+	id, ok := runID(w, r)
+	if !ok {
+		return
+	}
+	def, err := a.store.RunDefinition(r.Context(), id)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, def)
 }
 
 type cellDTO struct {
@@ -602,7 +691,7 @@ func (a *API) lag(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": rows})
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": rows, "maxLagSeconds": a.maxLag})
 }
 
 // --- helpers ---------------------------------------------------------------

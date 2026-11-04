@@ -122,7 +122,17 @@ func editLocked(ctx context.Context, tx pgx.Tx, cur PurchaseOrder, ifMatch int, 
 			return PurchaseOrder{}, editResult{}, err
 		}
 		out, err := loadPurchaseOrder(ctx, tx, id)
-		return out, res, err
+		if err != nil {
+			return PurchaseOrder{}, editResult{}, err
+		}
+		// A change of a confirmed PO cannot take a line below its planned services: the
+		// specification is frozen outside DRAFT and REJECTED, so it could not be fixed later.
+		if cur.VersionNo > 0 {
+			if err := checkServiceSpecsWithinLines(ctx, tx, out); err != nil {
+				return PurchaseOrder{}, editResult{}, err
+			}
+		}
+		return out, res, nil
 	}
 
 	if cur.VersionNo == 0 {
@@ -228,6 +238,13 @@ func (s *Postgres) ActOnPurchaseOrder(ctx context.Context, id string, ifMatch in
 			if head.ApprovalStatus, err = domain.NextApproval(cur.ApprovalStatus, action); err != nil {
 				return err
 			}
+			// A planned outline worth more than its line is refused at submit, while the
+			// specification can still be fixed (it is frozen once the PO leaves DRAFT).
+			if action == domain.POActionSubmit {
+				if err := checkServiceSpecsWithinLines(ctx, tx, cur); err != nil {
+					return err
+				}
+			}
 		}
 		if err := updateHeader(ctx, tx, head); err != nil {
 			return err
@@ -321,6 +338,9 @@ func confirmPending(ctx context.Context, tx pgx.Tx, cur PurchaseOrder) error {
 	if err := checkSchedulesBalanced(ctx, tx, cur); err != nil {
 		return err
 	}
+	if err := checkServiceSpecsWithinLines(ctx, tx, cur); err != nil {
+		return err
+	}
 	no := cur.VersionNo + 1
 	if cur.VersionNo == 0 {
 		if err := writeVersion(ctx, tx, cur.ID, no, snapshotOf(cur, cur.Lines), nil, false); err != nil {
@@ -380,6 +400,20 @@ func cancelOrder(ctx context.Context, tx pgx.Tx, cur PurchaseOrder) error {
 // sourced again (FR-17.3).
 func releaseLines(ctx context.Context, tx pgx.Tx, poID string, lines []PurchaseOrderLine) error {
 	p, _ := tenant.FromContext(ctx)
+	// The requisitions first, in id order, before any requisition or agreement line: the order every writer of
+	// requisition lines uses (see loadSourcingLines). Reopening a line and then its CLOSED requisition would
+	// deadlock with a split or a consolidation that holds the requisition and waits for the line.
+	var reqLineIDs []string
+	for _, l := range lines {
+		if l.RequisitionLineID != "" {
+			reqLineIDs = append(reqLineIDs, l.RequisitionLineID)
+		}
+	}
+	if len(reqLineIDs) > 0 {
+		if err := lockRequisitionsOf(ctx, tx, reqLineIDs); err != nil {
+			return err
+		}
+	}
 	for _, l := range lines {
 		if l.AgreementLineID != "" {
 			if _, err := tx.Exec(ctx, `update purchase_agreement_line

@@ -68,6 +68,9 @@ describe("shopfloor module", () => {
       "/shopfloor/downtimes",
       "/shopfloor/downtime-reasons",
       "/shopfloor/downtime-reasons/new",
+      "/shopfloor/process-categories",
+      "/shopfloor/process-categories/new",
+      "/shopfloor/process-categories/:id",
       "/shopfloor/andon",
       "/shopfloor/oee",
       "/shopfloor/edge-nodes",
@@ -99,6 +102,7 @@ describe("shopfloor module", () => {
       { label: "OEE", to: "/shopfloor/oee", duty: "shopfloor.view" },
       { label: "Edge fleet", to: "/shopfloor/edge-nodes", duty: "shopfloor.view" },
       { label: "Process messages", to: "/shopfloor/process-messages", duty: "shopfloor.view" },
+      { label: "Process categories", to: "/shopfloor/process-categories", duty: "shopfloor.view" },
     ]);
   });
 

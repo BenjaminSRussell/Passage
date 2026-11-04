@@ -147,7 +147,24 @@ func coveredByTag(def Definition, b Balance) bool {
 		if r.Kind != RowAccountRange || r.CashFlowTag == "" {
 			continue
 		}
-		if (r.AccountFrom == "" || (b.Account >= r.AccountFrom && b.Account <= r.AccountTo)) && dimsMatch(r.DimensionFilter, b.Dims) {
+		if r.coversAccount(b.Account) && dimsMatch(r.DimensionFilter, b.Dims) {
+			return true
+		}
+	}
+	return false
+}
+
+// coversAccount reports whether an account_range row picks up account: inside
+// its range when it has one, and on its explicit account list when it has one.
+func (r Row) coversAccount(account string) bool {
+	if r.AccountFrom != "" && (account < r.AccountFrom || account > r.AccountTo) {
+		return false
+	}
+	if len(r.Accounts) == 0 {
+		return true
+	}
+	for _, a := range r.Accounts {
+		if a == account {
 			return true
 		}
 	}

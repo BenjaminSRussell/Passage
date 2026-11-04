@@ -68,6 +68,10 @@ export interface MappingSpec {
   checksum: string;
   fieldCount: number;
   testCount: number;
+  /** The migration project the spec belongs to; absent for a tenant-wide spec. */
+  projectId?: string;
+  /** The mapped columns that identify a record. */
+  naturalKey: string[];
   createdAt: string;
   mapping?: unknown;
 }
@@ -174,6 +178,8 @@ export const PICKER_LIMIT = 200;
 
 export interface ListFilter {
   entity?: string;
+  /** A project id, or "none" for the tenant-wide specs. */
+  projectId?: string;
   cursor?: string;
   limit?: number;
 }
@@ -184,8 +190,22 @@ export const listSpecsPage = (filter: ListFilter, signal?: AbortSignal) => page<
 
 export const getSpec = (id: string, signal?: AbortSignal) => send<MappingSpec>(`/mapping-specs/${encodeURIComponent(id)}`, {}, signal);
 
-export const publishSpec = (mapping: unknown, key: string = newKey()) =>
-  send<MappingSpec>("/mapping-specs", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify({ mapping }) });
+export const publishSpec = (mapping: unknown, key: string = newKey(), projectId?: string) =>
+  send<MappingSpec>("/mapping-specs", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(projectId ? { mapping, projectId } : { mapping }) });
+
+/** The tenant's migration settings; version 0 and the defaults until a tenant saves them. */
+export interface MigrationSettings {
+  /** mig.recurring.min_interval_min: the shortest gap, in minutes, between two scheduled runs. */
+  recurringMinIntervalMin: number;
+  version: number;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export const getSettings = (signal?: AbortSignal) => send<MigrationSettings>("/migration-settings", {}, signal);
+
+export const putSettings = (version: number, recurringMinIntervalMin: number) =>
+  send<MigrationSettings>("/migration-settings", { method: "PUT", body: JSON.stringify({ version, recurringMinIntervalMin }) });
 
 export const listTemplatesPage = (filter: ListFilter, signal?: AbortSignal) => page<DataTemplate>(`/data-templates${listQuery(filter)}`, signal);
 
@@ -304,6 +324,8 @@ export interface MigrationProject {
   status: ProjectStatus;
   cutoverAt?: string;
   scheduleCron?: string;
+  /** IANA time zone the cron is read in (UTC unless set). */
+  scheduleTimezone?: string;
   version: number;
   createdBy: string;
   createdAt: string;
@@ -319,6 +341,7 @@ export interface CreateProjectInput {
   connectionProfileId?: string;
   cutoverAt?: string;
   scheduleCron?: string;
+  scheduleTimezone?: string;
 }
 
 export interface KeyRewrite {
@@ -362,6 +385,8 @@ export interface ProjectEdit {
   status?: ProjectStatus;
   cutoverAt?: string;
   scheduleCron?: string;
+  /** The zone the cron is read in; empty resets it to UTC. */
+  scheduleTimezone?: string;
 }
 
 export const updateProject = (id: string, version: number, edit: ProjectEdit) =>
@@ -549,8 +574,10 @@ export interface SyncStatus {
   connectionProfileName: string;
   bindingStatus: "active" | "disabled";
   projectId?: string;
-  /** The cron the binding runs on (UTC): its own override, else the migrate project's; empty when neither exists. */
+  /** The cron the binding runs on (read in scheduleTimezone): its own override, else the migrate project's; empty when neither exists. */
   scheduleCron?: string;
+  /** The time zone the cron is read in (the project's; UTC by default). */
+  scheduleTimezone?: string;
   /** The binding's own cron; empty when it follows the project's schedule. */
   scheduleOverride?: string;
   /** The project's cron the binding falls back to without an override; empty when no project on the profile has one. */
@@ -815,3 +842,28 @@ export const createLookupTable = (input: { name: string; definition: LookupDefin
 
 export const updateLookupTable = (id: string, version: number, edit: LookupEdit) =>
   send<LookupTable>(`/lookup-tables/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ version, ...edit }) });
+
+export type LookupImportMode = "merge" | "replace";
+
+export interface LookupImportSummary {
+  rows: number;
+  added: number;
+  changed: number;
+  unchanged: number;
+  removed: number;
+}
+
+export interface LookupImportResult {
+  table: LookupTable;
+  summary: LookupImportSummary;
+  /** False when the file changed nothing: no version was saved. */
+  written: boolean;
+}
+
+/** Merge or replace the entries of a table from CSV text (key parts in the leading cells, the value last). */
+export const importLookupEntries = (id: string, input: { version: number; mode: LookupImportMode; hasHeader: boolean; csv: string }) =>
+  send<LookupImportResult>(`/lookup-tables/${encodeURIComponent(id)}:import`, { method: "POST", body: JSON.stringify(input) });
+
+/** The CSV download of a version (the current one when omitted); a plain link, the browser sends the session cookie. */
+export const lookupCsvUrl = (id: string, version?: number) =>
+  `/api/v1/integration/lookup-tables/${encodeURIComponent(id)}/entries.csv${query({ version: version ? String(version) : undefined })}`;

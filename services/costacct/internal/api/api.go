@@ -37,7 +37,6 @@ const (
 	maxMirrorLines = 5000
 	maxObjects     = 500
 	maxAccount     = 40
-	maxJournal     = 20000
 	codeValidation = "COM-0001"
 )
 
@@ -53,7 +52,7 @@ type Store interface {
 	ListCostElements(ctx context.Context, legalEntityID string) ([]store.CostElement, error)
 	ListRuns(ctx context.Context, legalEntityID string) ([]store.Run, error)
 	GetRun(ctx context.Context, id string) (store.Run, error)
-	Reconcile(ctx context.Context, in store.ReconcileRequest) (domain.Reconciliation, error)
+	ReconcileToGL(ctx context.Context, gl store.GLBalances, in store.GLReconcileRequest) (domain.Reconciliation, error)
 	RunTopDown(ctx context.Context, key, hash string, in store.TopDownRequest) (int, []byte, error)
 	ListTopDownRuns(ctx context.Context, legalEntityID string) ([]store.TopDownRun, error)
 	GetTopDownRun(ctx context.Context, id string) (store.TopDownRun, error)
@@ -85,10 +84,20 @@ type Store interface {
 }
 
 // API serves the controlling endpoints.
-type API struct{ st Store }
+type API struct {
+	st        Store
+	gl        store.GLBalances
+	ledgerIDs map[string]string
+}
 
 // New returns the handler set over st.
 func New(st Store) *API { return &API{st: st} }
+
+// WithLedger gives the reconciliation its general ledger and the ledger of each legal entity.
+func (a *API) WithLedger(gl store.GLBalances, ledgerIDs map[string]string) *API {
+	a.gl, a.ledgerIDs = gl, ledgerIDs
+	return a
+}
 
 // Register mounts the routes on r.
 func (a *API) Register(r chi.Router) {
@@ -453,12 +462,12 @@ func (a *API) getRun(w http.ResponseWriter, r *http.Request) {
 	one(w, r, run, err)
 }
 
-// reconcileBody is the wire form of a reconciliation request.
+// reconcileBody is the wire form of a reconciliation request. The journal side is read from the
+// general ledger; a body that names balances is rejected as an unknown field.
 type reconcileBody struct {
-	LegalEntityID   string                  `json:"legalEntityId"`
-	Period          string                  `json:"period"`
-	Currency        string                  `json:"currency"`
-	JournalBalances []domain.JournalBalance `json:"journalBalances"`
+	LegalEntityID string `json:"legalEntityId"`
+	Period        string `json:"period"`
+	Currency      string `json:"currency"`
 }
 
 // reconcile is a read: it compares and reports, and changes nothing.
@@ -480,16 +489,20 @@ func (a *API) reconcile(w http.ResponseWriter, r *http.Request) {
 	case !validCurrency(b.Currency):
 		invalid(w, r, "currency must be a 3-letter ISO code")
 		return
-	case len(b.JournalBalances) > maxJournal:
-		invalid(w, r, "journalBalances holds at most 20000 accounts")
+	case a.gl == nil:
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, store.CodeLedgerUnavailable, "the general ledger is not configured for this service"))
 		return
 	}
-	for i, j := range b.JournalBalances {
-		if j.MainAccount == "" || len(j.MainAccount) > maxAccount {
-			invalid(w, r, lineErr(i, "mainAccount is required"))
-			return
-		}
+	le, _ := ids.Canonical(b.LegalEntityID)
+	if p, _ := tenant.FromContext(r.Context()); !tenant.InLegalEntityScope(p, le) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the legal entity is outside the caller's scope"))
+		return
 	}
-	res, err := a.st.Reconcile(r.Context(), store.ReconcileRequest{LegalEntityID: b.LegalEntityID, Period: b.Period, Currency: b.Currency, Journal: b.JournalBalances})
+	ledgerID, ok := a.ledgerIDs[le]
+	if !ok {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeLedgerNotMapped, "no ledger is configured for this legal entity"))
+		return
+	}
+	res, err := a.st.ReconcileToGL(r.Context(), a.gl, store.GLReconcileRequest{LegalEntityID: le, LedgerID: ledgerID, Period: b.Period, Currency: b.Currency})
 	one(w, r, res, err)
 }

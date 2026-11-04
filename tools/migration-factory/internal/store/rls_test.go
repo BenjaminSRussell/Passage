@@ -92,6 +92,13 @@ func TestAppRole_CrossTenantRLS(t *testing.T) {
 			Args: func(tenantID, _ string) []any { return []any{tenantID, ids.New()} },
 		},
 		{
+			Table:    "pack_run_order",
+			Before:   insertRun,
+			Insert:   `insert into pack_run_order (tenant_id, run_id, order_type, order_number) values ($1, $2, 'SALES', 'SO-1')`,
+			Args:     func(tenantID, _ string) []any { return []any{tenantID, ids.New()} },
+			NoUpdate: true,
+		},
+		{
 			Table:  "legacy_xref",
 			Before: insertRunWithHash,
 			Insert: `insert into legacy_xref (tenant_id, run_id, xref_id, source_system, source_company, source_table, source_id, passage_entity, passage_id, amount, currency)

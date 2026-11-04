@@ -36,6 +36,14 @@ func (u unreachableStore) RunOpenItems(context.Context, store.Idem, store.OpenIt
 	u.fail()
 	return domain.PackRun{}, false, nil
 }
+func (u unreachableStore) ListTolerances(context.Context) ([]domain.ToleranceRule, error) {
+	u.fail()
+	return nil, nil
+}
+func (u unreachableStore) PutTolerance(context.Context, store.Idem, store.ToleranceChange) (domain.ToleranceRule, bool, error) {
+	u.fail()
+	return domain.ToleranceRule{}, false, nil
+}
 func (u unreachableStore) GetRun(context.Context, string) (domain.PackRun, error) {
 	u.fail()
 	return domain.PackRun{}, nil
@@ -191,6 +199,7 @@ func TestRequestsRejectedBeforeTheStore(t *testing.T) {
 	planPath := "/api/v1/cutover/plans/00000000-0000-7000-8000-000000000001"
 	runPath := "/api/v1/migration/runs/00000000-0000-7000-8000-000000000002"
 	parallelPath := "/api/v1/migration/parallel-runs"
+	tolPath := "/api/v1/migration/tolerances"
 	cases := []struct {
 		name   string
 		rq     request
@@ -224,6 +233,17 @@ func TestRequestsRejectedBeforeTheStore(t *testing.T) {
 		{"complete bad seq", request{method: "POST", path: planPath + "/steps/0/complete", tenant: tenantA, duties: allDuties, body: `{}`}, 422, CodeInvalid, "positive"},
 		{"rollback needs CutoverManager", request{method: "POST", path: planPath + "/rollback", tenant: tenantA, duties: "CutoverStepOwner", body: `{}`}, 403, "AUTH-0003", ""},
 		{"long idempotency key", request{method: "POST", path: planPath + "/rollback", tenant: tenantA, duties: allDuties, body: `{}`, key: strings.Repeat("k", 201)}, 422, CodeInvalid, "Idempotency-Key"},
+		// Slice 15: configured tolerances.
+		{"tolerance put needs MigrationReview", request{method: "PUT", path: tolPath, tenant: tenantA, duties: "MigrationRun,MigrationView", body: `{"pack":"open_items","total":"*","amount":"0"}`}, 403, "AUTH-0003", ""},
+		{"tolerance list needs MigrationView", request{method: "GET", path: tolPath, tenant: tenantA, duties: "MigrationReview"}, 403, "AUTH-0003", ""},
+		{"tolerance unknown pack", request{method: "PUT", path: tolPath, tenant: tenantA, duties: allDuties, body: `{"pack":"nope","total":"*","amount":"0"}`}, 422, CodeUnsupported, ""},
+		{"tolerance bad amount", request{method: "PUT", path: tolPath, tenant: tenantA, duties: allDuties, body: `{"pack":"open_items","total":"*","amount":"a lot","reason":"x"}`}, 422, CodeInvalid, "decimal"},
+		{"tolerance needs a reason", request{method: "PUT", path: tolPath, tenant: tenantA, duties: allDuties, body: `{"pack":"open_items","total":"open_items.amount","amount":"0.05"}`}, 422, CodeInvalid, "reason"},
+		{"tolerance negative", request{method: "PUT", path: tolPath, tenant: tenantA, duties: allDuties, body: `{"pack":"open_items","total":"*","amount":"-1","reason":"x"}`}, 422, CodeInvalid, "tolerance must be"},
+		{"tolerance total of another pack", request{method: "PUT", path: tolPath, tenant: tenantA, duties: allDuties, body: `{"pack":"open_items","total":"onhand.value","amount":"1","reason":"x"}`}, 422, CodeInvalid, "not a money total"},
+		{"tolerance on a count", request{method: "PUT", path: tolPath, tenant: tenantA, duties: allDuties, body: `{"pack":"open_items","total":"open_items.count","amount":"1","reason":"x"}`}, 422, CodeInvalid, "not a money total"},
+		{"tolerance on project_wip", request{method: "PUT", path: tolPath, tenant: tenantA, duties: allDuties, body: `{"pack":"project_wip","total":"*","amount":"1","reason":"x"}`}, 422, CodeInvalid, "no money totals"},
+		{"tolerance negative version", request{method: "PUT", path: tolPath, tenant: tenantA, duties: allDuties, body: `{"pack":"open_items","total":"*","amount":"1","reason":"x","version":-1}`}, 422, CodeInvalid, "version"},
 		// Slice 2: quarantine release, xref, parallel runs, project beginning balances.
 		{"release needs MigrationRun", request{method: "POST", path: runPath + "/quarantine/1/release", tenant: tenantA, duties: "MigrationView", body: `{}`}, 403, "AUTH-0003", ""},
 		{"release bad record seq", request{method: "POST", path: runPath + "/quarantine/x/release", tenant: tenantA, duties: allDuties, body: `{}`}, 422, CodeInvalid, "rec"},

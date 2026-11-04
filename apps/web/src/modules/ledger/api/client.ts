@@ -173,8 +173,7 @@ async function getJSON<T>(url: string, schema: z.ZodType<T>, fetchImpl: FetchLik
   return schema.parse(await res.json());
 }
 
-/** GET /api/v1/ledger/balances (trial balance over a period and account range). */
-export function fetchTrialBalance(q: TrialBalanceQuery, fetchImpl: FetchLike = defaultFetch): Promise<TrialBalance> {
+function trialBalanceParams(q: TrialBalanceQuery): URLSearchParams {
   const params = new URLSearchParams({ ledger: q.ledgerId });
   if (q.periodFrom) params.set("period_from", q.periodFrom);
   if (q.periodTo) params.set("period_to", q.periodTo);
@@ -182,7 +181,35 @@ export function fetchTrialBalance(q: TrialBalanceQuery, fetchImpl: FetchLike = d
   if (q.accountTo) params.set("account_to", q.accountTo);
   for (const [attr, value] of Object.entries(q.dimensions ?? {})) params.set(`dim.${attr}`, value);
   if (q.groupBy && q.groupBy.length > 0) params.set("group_by", q.groupBy.join(","));
-  return getJSON(`/api/v1/ledger/balances?${params.toString()}`, trialBalanceSchema, fetchImpl);
+  return params;
+}
+
+/** GET /api/v1/ledger/balances (trial balance over a period and account range). */
+export function fetchTrialBalance(q: TrialBalanceQuery, fetchImpl: FetchLike = defaultFetch): Promise<TrialBalance> {
+  return getJSON(`/api/v1/ledger/balances?${trialBalanceParams(q).toString()}`, trialBalanceSchema, fetchImpl);
+}
+
+/** A CSV export the service built: the file, the name it suggests and whether it stopped at the row cap. */
+export interface CsvExport {
+  blob: Blob;
+  filename: string;
+  /** True when the result was longer than the export cap; the file holds the first rows only. */
+  truncated: boolean;
+}
+
+/** GET url with format=csv (the exports of the chart of accounts, the trial balance and the ledger lines). */
+async function fetchCsv(url: string, fetchImpl: FetchLike): Promise<CsvExport> {
+  const res = await fetchImpl(url, { headers: { Accept: "text/csv" } });
+  if (!res.ok) throw await readProblem(res);
+  const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1];
+  return { blob: await res.blob(), filename: name ?? "ledger-export.csv", truncated: res.headers.get("X-Passage-Export-Truncated") === "true" };
+}
+
+/** GET /api/v1/ledger/balances?format=csv: the trial balance as one CSV file. */
+export function exportTrialBalanceCsv(q: TrialBalanceQuery, fetchImpl: FetchLike = defaultFetch): Promise<CsvExport> {
+  const params = trialBalanceParams(q);
+  params.set("format", "csv");
+  return fetchCsv(`/api/v1/ledger/balances?${params.toString()}`, fetchImpl);
 }
 
 /** GET /api/v1/ledger/journal-entries/{id} (entry with lines). */
@@ -246,12 +273,21 @@ export const ledgerSchema = z.object({
   chartCode: z.string(),
   currency: z.string(),
   dimensionAttributes: z.array(z.string()),
+  /** FR-11.8: whether a reversing entry can itself be reversed. Absent on services older than migration 0030. */
+  allowReinstate: z.boolean().optional(),
+  /** Settings version, sent back as If-Match on PATCH. */
+  version: z.number().int().optional(),
 });
 export type Ledger = z.infer<typeof ledgerSchema>;
 
 /** GET /api/v1/ledger/ledgers/{id}; 404 LEDGER_NOT_FOUND when missing or out of scope. */
 export function fetchLedger(id: string, fetchImpl: FetchLike = defaultFetch): Promise<Ledger> {
   return getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(id)}`, ledgerSchema, fetchImpl);
+}
+
+/** PATCH /api/v1/ledger/ledgers/{id}: turns reinstatement on or off; 412 LEDGER_VERSION_CONFLICT when the ledger changed. */
+export function patchLedgerReinstatement(id: string, allowReinstate: boolean, version: number | undefined, fetchImpl: FetchLike = defaultFetch): Promise<Ledger> {
+  return sendJSON("PATCH", `/api/v1/ledger/ledgers/${encodeURIComponent(id)}`, ledgerSchema, fetchImpl, { allowReinstate }, version ? { "If-Match": `"${version}"` } : {});
 }
 
 /** The implicit first segment of every account structure; constraint rows may be conditioned on it. */
@@ -280,6 +316,8 @@ export const structureSchema = z.object({
   segments: z.array(z.string()),
   accountFilter: z.array(z.string()),
   constraints: z.array(constraintSchema),
+  /** Entity tag of the row: sent as If-Match to replace it. */
+  lockVersion: z.number().int().optional(),
 });
 export type Structure = z.infer<typeof structureSchema>;
 
@@ -303,6 +341,8 @@ export const dimensionValueSchema = z.object({
   activeFrom: z.string().optional(),
   activeTo: z.string().optional(),
   suspended: z.boolean(),
+  /** Entity tag of the row: sent as If-Match to replace it. */
+  lockVersion: z.number().int().optional(),
 });
 export type DimensionValue = z.infer<typeof dimensionValueSchema>;
 
@@ -336,18 +376,24 @@ export function fetchStructure(ledgerId: string, id: string, fetchImpl: FetchLik
   );
 }
 
-/** PUT /api/v1/ledger/ledgers/{ledger}/account-structures/{id}: creates or replaces a version (status active activates it). */
+/** If-Match for replacing a configuration row at `lockVersion` (a replace without it is 428); none when creating. */
+function tagHeader(lockVersion: number | undefined): Record<string, string> {
+  return lockVersion ? { "If-Match": `"${lockVersion}"` } : {};
+}
+
+/** PUT /api/v1/ledger/ledgers/{ledger}/account-structures/{id}: creates, or replaces a version at `lockVersion` (If-Match; status active activates it). */
 export async function putStructure(
   ledgerId: string,
   id: string,
   input: StructureInput,
+  lockVersion?: number,
   fetchImpl: FetchLike = defaultFetch,
 ): Promise<Structure> {
   const res = await fetchImpl(
     `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/account-structures/${encodeURIComponent(id)}`,
     {
       method: "PUT",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      headers: { Accept: "application/json", "Content-Type": "application/json", ...tagHeader(lockVersion) },
       body: JSON.stringify(input),
     },
   );
@@ -368,18 +414,19 @@ export async function fetchDimensionValues(
   return body.items;
 }
 
-/** PUT /api/v1/ledger/ledgers/{ledger}/dimension-values/{attribute}/{value}. */
+/** PUT /api/v1/ledger/ledgers/{ledger}/dimension-values/{attribute}/{value}: creates, or replaces at `lockVersion` (If-Match). */
 export async function putDimensionValue(
   ledgerId: string,
   attribute: string,
   value: string,
   input: DimensionValueInput,
+  lockVersion?: number,
   fetchImpl: FetchLike = defaultFetch,
 ): Promise<DimensionValue> {
   const path = [attribute, value].map(encodeURIComponent).join("/");
   const res = await fetchImpl(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/dimension-values/${path}`, {
     method: "PUT",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    headers: { Accept: "application/json", "Content-Type": "application/json", ...tagHeader(lockVersion) },
     body: JSON.stringify(input),
   });
   if (!res.ok) throw await readProblem(res);
@@ -429,6 +476,8 @@ export const descriptionTemplateSchema = z.object({
   template: z.string(),
   fieldBindings: z.record(z.string(), z.string()),
   updatedAt: z.string(),
+  /** Entity tag of the row: sent as If-Match to replace it. */
+  lockVersion: z.number().int().optional(),
 });
 export type DescriptionTemplate = z.infer<typeof descriptionTemplateSchema>;
 
@@ -454,8 +503,14 @@ export const journalNameSchema = z.object({
   reversalReasonRequired: z.boolean(),
   allowReconAccounts: z.boolean(),
   linesLimit: z.number().int(),
+  /** Who may post the name's batches (FR-11.9). Absent on services older than migration 0030. */
+  postingRestriction: z.enum(["none", "own_journals_only"]).default("none"),
+  /** Where default descriptions take their language from (FR-11.17). */
+  descriptionLanguage: z.enum(["legal_entity", "user"]).default("legal_entity"),
   active: z.boolean(),
   updatedAt: z.string(),
+  /** Entity tag of the row: sent as If-Match to replace it. */
+  lockVersion: z.number().int().optional(),
 });
 export type JournalName = z.infer<typeof journalNameSchema>;
 
@@ -467,6 +522,8 @@ export interface JournalNameInput {
   reversalReasonRequired: boolean;
   allowReconAccounts: boolean;
   linesLimit: number;
+  postingRestriction: JournalName["postingRestriction"];
+  descriptionLanguage: JournalName["descriptionLanguage"];
   active: boolean;
 }
 
@@ -500,9 +557,9 @@ async function sendJSON<T>(
   return schema.parse(await res.json());
 }
 
-/** PUT /api/v1/ledger/journal-names/{code}: creates or replaces a journal name. */
-export function putJournalName(code: string, input: JournalNameInput, fetchImpl: FetchLike = defaultFetch): Promise<JournalName> {
-  return sendJSON("PUT", `/api/v1/ledger/journal-names/${encodeURIComponent(code)}`, journalNameSchema, fetchImpl, input);
+/** PUT /api/v1/ledger/journal-names/{code}: creates, or replaces a journal name at `lockVersion` (If-Match). */
+export function putJournalName(code: string, input: JournalNameInput, lockVersion?: number, fetchImpl: FetchLike = defaultFetch): Promise<JournalName> {
+  return sendJSON("PUT", `/api/v1/ledger/journal-names/${encodeURIComponent(code)}`, journalNameSchema, fetchImpl, input, tagHeader(lockVersion));
 }
 
 /** One line of a manual journal batch as the service returns it. Amounts are decimal strings. */
@@ -584,7 +641,7 @@ export interface JournalBatchPatch {
   lines?: BatchLineInput[];
 }
 
-const journalBatchListSchema = z.object({ items: z.array(journalBatchSchema) });
+const journalBatchPageSchema = z.object({ items: z.array(journalBatchSchema), nextCursor: z.string().optional() });
 const postBatchResultSchema = z.object({
   entries: z.array(z.object({ id: z.string(), voucher: z.string() })),
   idempotency: z.object({ key: z.string(), replayed: z.boolean() }),
@@ -597,17 +654,28 @@ function ifMatch(version: number): Record<string, string> {
   return { "If-Match": `"${version}"` };
 }
 
-/** GET /api/v1/ledger/journal-batches: the newest 200, optionally by status or journal name. */
-export async function fetchJournalBatches(
+/** One keyset page of a list: `nextCursor` is present when another page follows. */
+export interface Page<T> {
+  items: T[];
+  nextCursor?: string;
+}
+
+function pageQuery(params: URLSearchParams, cursor: string | undefined): string {
+  if (cursor) params.set("cursor", cursor);
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+/** GET /api/v1/ledger/journal-batches: one page (newest first) with the cursor of the next. */
+export function fetchJournalBatchPage(
   filter: { status?: string; journalName?: string } = {},
+  cursor?: string,
   fetchImpl: FetchLike = defaultFetch,
-): Promise<JournalBatch[]> {
+): Promise<Page<JournalBatch>> {
   const params = new URLSearchParams();
   if (filter.status) params.set("status", filter.status);
   if (filter.journalName) params.set("journalName", filter.journalName);
-  const query = params.toString();
-  const body = await getJSON(`/api/v1/ledger/journal-batches${query ? `?${query}` : ""}`, journalBatchListSchema, fetchImpl);
-  return body.items;
+  return getJSON(`/api/v1/ledger/journal-batches${pageQuery(params, cursor)}`, journalBatchPageSchema, fetchImpl);
 }
 
 /** GET /api/v1/ledger/journal-batches/{id}: header, totals and lines. */
@@ -667,15 +735,16 @@ export function fetchDescriptionTemplate(id: string, fetchImpl: FetchLike = defa
   return getJSON(`/api/v1/ledger/description-templates/${encodeURIComponent(id)}`, descriptionTemplateSchema, fetchImpl);
 }
 
-/** PUT /api/v1/ledger/description-templates/{id}: creates or replaces a template. */
+/** PUT /api/v1/ledger/description-templates/{id}: creates, or replaces a template at `lockVersion` (If-Match). */
 export async function putDescriptionTemplate(
   id: string,
   input: DescriptionTemplateInput,
+  lockVersion?: number,
   fetchImpl: FetchLike = defaultFetch,
 ): Promise<DescriptionTemplate> {
   const res = await fetchImpl(`/api/v1/ledger/description-templates/${encodeURIComponent(id)}`, {
     method: "PUT",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    headers: { Accept: "application/json", "Content-Type": "application/json", ...tagHeader(lockVersion) },
     body: JSON.stringify(input),
   });
   if (!res.ok) throw await readProblem(res);
@@ -732,8 +801,8 @@ const journalLinePageSchema = z.object({
 });
 export type JournalLinePage = z.infer<typeof journalLinePageSchema>;
 
-/** GET /api/v1/ledger/journal-lines: one keyset page in posting order. */
-export function fetchJournalLines(q: JournalLineQuery, fetchImpl: FetchLike = defaultFetch): Promise<JournalLinePage> {
+/** One keyset page in posting order. */
+function journalLineParams(q: JournalLineQuery): URLSearchParams {
   const params = new URLSearchParams({ ledger: q.ledgerId });
   if (q.accountFrom) params.set("account_from", q.accountFrom);
   if (q.accountTo) params.set("account_to", q.accountTo);
@@ -744,7 +813,18 @@ export function fetchJournalLines(q: JournalLineQuery, fetchImpl: FetchLike = de
   for (const [attr, value] of Object.entries(q.dimensions ?? {})) params.set(`dim.${attr}`, value);
   if (q.cursor) params.set("cursor", q.cursor);
   if (q.limit) params.set("limit", String(q.limit));
-  return getJSON(`/api/v1/ledger/journal-lines?${params.toString()}`, journalLinePageSchema, fetchImpl);
+  return params;
+}
+
+export function fetchJournalLines(q: JournalLineQuery, fetchImpl: FetchLike = defaultFetch): Promise<JournalLinePage> {
+  return getJSON(`/api/v1/ledger/journal-lines?${journalLineParams(q).toString()}`, journalLinePageSchema, fetchImpl);
+}
+
+/** GET /api/v1/ledger/journal-lines?format=csv: every line matching the filter (not one page) as one CSV file. */
+export function exportJournalLinesCsv(q: JournalLineQuery, fetchImpl: FetchLike = defaultFetch): Promise<CsvExport> {
+  const params = journalLineParams({ ...q, cursor: undefined, limit: undefined });
+  params.set("format", "csv");
+  return fetchCsv(`/api/v1/ledger/journal-lines?${params.toString()}`, fetchImpl);
 }
 
 /** Recurring journal frequencies (FR-11.10). */
@@ -761,6 +841,9 @@ export const recurringLineSchema = z.object({
   amount: z.string(),
   currency: z.string(),
   text: z.string().optional(),
+  /** Fixed statistical quantity (BR-11.2) copied to every generated line, with its unit. */
+  quantity: z.string().optional(),
+  unit: z.string().optional(),
 });
 export type RecurringLine = z.infer<typeof recurringLineSchema>;
 
@@ -817,16 +900,19 @@ export interface RecurringJournalInput {
     amountKind: "fixed" | "percent";
     amount: { currency: string; value: string };
     text?: string;
+    quantity?: string;
+    unit?: string;
   }[];
 }
 
-const recurringListSchema = z.object({ items: z.array(recurringJournalSchema) });
+const recurringPageSchema = z.object({ items: z.array(recurringJournalSchema), nextCursor: z.string().optional() });
 const recurringRunListSchema = z.object({ items: z.array(recurringRunSchema) });
 
-/** GET /api/v1/ledger/recurring-journals, optionally only active or paused ones. */
-export async function fetchRecurringJournals(status = "", fetchImpl: FetchLike = defaultFetch): Promise<RecurringJournal[]> {
-  const body = await getJSON(`/api/v1/ledger/recurring-journals${status ? `?status=${encodeURIComponent(status)}` : ""}`, recurringListSchema, fetchImpl);
-  return body.items;
+/** GET /api/v1/ledger/recurring-journals: one page (by next run date, then name) with the cursor of the next. */
+export function fetchRecurringJournalPage(status = "", cursor?: string, fetchImpl: FetchLike = defaultFetch): Promise<Page<RecurringJournal>> {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  return getJSON(`/api/v1/ledger/recurring-journals${pageQuery(params, cursor)}`, recurringPageSchema, fetchImpl);
 }
 
 /** GET /api/v1/ledger/recurring-journals/{id} with its lines. */
@@ -971,13 +1057,13 @@ export function createClearing(input: ClearingInput, idempotencyKey: string, fet
   return sendJSON("POST", "/api/v1/ledger/clearings", clearingDocumentSchema, fetchImpl, input, { "Idempotency-Key": idempotencyKey });
 }
 
-const clearingListSchema = z.object({ items: z.array(clearingDocumentSchema) });
+const clearingPageSchema = z.object({ items: z.array(clearingDocumentSchema), nextCursor: z.string().optional() });
 
-/** GET /api/v1/ledger/clearings, newest first, optionally only cleared or reset ones. */
-export async function fetchClearings(ledgerId: string, status = "", fetchImpl: FetchLike = defaultFetch): Promise<ClearingDocument[]> {
+/** GET /api/v1/ledger/clearings: one page, newest first, with the cursor of the next. */
+export function fetchClearingPage(ledgerId: string, status = "", cursor?: string, fetchImpl: FetchLike = defaultFetch): Promise<Page<ClearingDocument>> {
   const params = new URLSearchParams({ ledger: ledgerId });
   if (status) params.set("status", status);
-  return (await getJSON(`/api/v1/ledger/clearings?${params.toString()}`, clearingListSchema, fetchImpl)).items;
+  return getJSON(`/api/v1/ledger/clearings${pageQuery(params, cursor)}`, clearingPageSchema, fetchImpl);
 }
 
 /** GET /api/v1/ledger/clearings/{id} with its items. */
@@ -1533,6 +1619,8 @@ export const realignmentRowSchema = z.object({
   oldCombination: z.string(),
   newCombination: z.string(),
   net: z.string(),
+  /** Statistical quantities (BR-11.2) that move with the balance, one per unit of measure. */
+  quantities: z.array(z.object({ unit: z.string(), net: z.string() })).optional(),
   lineCount: z.number(),
 });
 export type RealignmentRow = z.infer<typeof realignmentRowSchema>;
@@ -1665,4 +1753,56 @@ export async function deleteBatchAttachment(batchId: string, id: string, fetchIm
     headers: { Accept: "application/json" },
   });
   if (!res.ok) throw await readProblem(res);
+}
+
+export const ACCOUNT_TYPES = ["asset", "liability", "equity", "revenue", "expense", "profit_and_loss_total", "balance_sheet_total", "reporting"] as const;
+export type AccountType = (typeof ACCOUNT_TYPES)[number];
+export const RECON_TYPES = ["none", "customer", "vendor", "bank", "inventory", "fixed_asset"] as const;
+export type ReconType = (typeof RECON_TYPES)[number];
+
+/** A main account of a chart; lockVersion is its entity tag (If-Match on the next replacement). */
+export const accountSchema = z.object({
+  id: z.string(),
+  chartCode: z.string(),
+  accountNumber: z.string(),
+  name: z.string(),
+  accountType: z.string(),
+  isPostable: z.boolean(),
+  suspendedFrom: z.string().optional(),
+  reconciliationAccountType: z.string(),
+  lockVersion: z.number().int(),
+});
+export type Account = z.infer<typeof accountSchema>;
+
+const accountPageSchema = z.object({ items: z.array(accountSchema), nextAfter: z.string() });
+export type AccountPage = z.infer<typeof accountPageSchema>;
+
+export interface AccountInput {
+  name: string;
+  accountType: AccountType;
+  isPostable: boolean;
+  suspendedFrom?: string;
+  reconciliationAccountType: ReconType;
+}
+
+/** GET /api/v1/ledger/charts/{chart}/accounts: one keyset page by account number (`after` is the last number of the page before). */
+export function fetchAccounts(chart: string, after?: string, fetchImpl: FetchLike = defaultFetch): Promise<AccountPage> {
+  const params = new URLSearchParams({ limit: "200" });
+  if (after) params.set("after", after);
+  return getJSON(`/api/v1/ledger/charts/${encodeURIComponent(chart)}/accounts?${params.toString()}`, accountPageSchema, fetchImpl);
+}
+
+/** GET /api/v1/ledger/charts/{chart}/accounts/{number}; 404 LEDGER_ACCOUNT_NOT_FOUND when missing. */
+export function fetchAccount(chart: string, number: string, fetchImpl: FetchLike = defaultFetch): Promise<Account> {
+  return getJSON(`/api/v1/ledger/charts/${encodeURIComponent(chart)}/accounts/${encodeURIComponent(number)}`, accountSchema, fetchImpl);
+}
+
+/** PUT /api/v1/ledger/charts/{chart}/accounts/{number}: creates, or replaces an account at `lockVersion` (If-Match). */
+export function putAccount(chart: string, number: string, input: AccountInput, lockVersion?: number, fetchImpl: FetchLike = defaultFetch): Promise<Account> {
+  return sendJSON("PUT", `/api/v1/ledger/charts/${encodeURIComponent(chart)}/accounts/${encodeURIComponent(number)}`, accountSchema, fetchImpl, input, tagHeader(lockVersion));
+}
+
+/** GET /api/v1/ledger/charts/{chart}/accounts?format=csv: the chart of accounts export. */
+export function exportAccountsCsv(chart: string, fetchImpl: FetchLike = defaultFetch): Promise<CsvExport> {
+  return fetchCsv(`/api/v1/ledger/charts/${encodeURIComponent(chart)}/accounts?format=csv`, fetchImpl);
 }

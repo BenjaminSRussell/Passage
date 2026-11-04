@@ -18,6 +18,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/costing/internal/domain"
 )
@@ -86,6 +87,7 @@ type Store interface {
 	// Cost transactions and the value report (FR-20.4). RecordCostTransactions
 	// returns the number of rows inserted; replays of a source key are skipped.
 	RecordCostTransactions(ctx context.Context, in []CostTransaction) (int, error)
+	CostTransactionRecorded(ctx context.Context, sourceKey string) (bool, error)
 	ValueBalances(ctx context.Context, q BalanceQuery) ([]domain.Balance, error)
 	ListCostTransactions(ctx context.Context, f CostTxnFilter, after string, limit int) (CostTxnPage, error)
 	// Manual cost adjustments (FR-20.6). CreateAdjustment reports created=false
@@ -99,6 +101,13 @@ type Store interface {
 	CreateReconciliationRun(ctx context.Context, in ReconciliationRun, idempotencyKey, requestHash string) (run ReconciliationRun, created bool, err error)
 	GetReconciliationRun(ctx context.Context, id string) (ReconciliationRun, error)
 	ListReconciliationRuns(ctx context.Context, legalEntityID, after string, limit int) (ReconciliationPage, error)
+	// GL vouchers and the inventory close (FR-20.2, FR-20.7).
+	GetPostingProfile(ctx context.Context, legalEntityID string) (PostingProfile, error)
+	SavePostingProfile(ctx context.Context, in PostingProfile, actor string) (PostingProfile, error)
+	PostCostVouchers(ctx context.Context, ledger ledgerclient.Ledger, in GLPostRequest) (GLPostResult, error)
+	RunClose(ctx context.Context, ledger ledgerclient.Ledger, in CloseRequest, actor string) (Close, error)
+	ListCloses(ctx context.Context, legalEntityID string) ([]Close, error)
+	ReconcileInventory(ctx context.Context, ledger ledgerclient.Ledger, legalEntityID, asOf string) (InventoryReconciliation, error)
 	Ping(ctx context.Context) error
 }
 

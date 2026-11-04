@@ -173,13 +173,17 @@ func (s *Postgres) CreateRegistrations(ctx context.Context, items []Registration
 	sort.SliceStable(order, func(a, b int) bool { return items[order[a]].StartedAt.Before(items[order[b]].StartedAt) })
 	results := make([]RegistrationResult, len(items))
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		if err := guardBundles(ctx, tx, p.TenantID, items); err != nil {
+		bundles, err := lockBatchBundles(ctx, tx, p.TenantID, items)
+		if err != nil {
 			return err
 		}
 		if err := lockRegistrationJobs(ctx, tx, p.TenantID, items); err != nil {
 			return err
 		}
 		if err := lockJobWorkers(ctx, tx, p.TenantID, items); err != nil {
+			return err
+		}
+		if err := guardBundles(ctx, tx, p.TenantID, bundles); err != nil {
 			return err
 		}
 		if err := checkAbsenceCodes(ctx, tx, p.TenantID, items); err != nil {
@@ -258,54 +262,88 @@ func newResult(id, status string, flags []string) RegistrationResult {
 	return RegistrationResult{ID: id, Status: status, Flags: flags, AutoStopped: []AutoStop{}, Warnings: []Warning{}}
 }
 
-// guardBundles refuses closed bundle jobs when the bundle already holds closed
-// jobs stored by another batch. The BR-25.1 split covers the jobs of one batch,
-// so a second batch would count the bundle's time again (SF-0113). A resend whose
-// items are all stored already is a replay and passes. Concurrent batches of one
-// bundle serialize on a transaction advisory lock.
-func guardBundles(ctx context.Context, tx pgx.Tx, tenantID string, items []Registration) error {
+// batchBundle is a bundle the batch closes jobs of, with the ids of those items.
+type batchBundle struct {
+	id     string // lower case
+	regIDs []string
+}
+
+// lockBatchBundles takes the transaction advisory lock of every bundle the batch closes jobs of,
+// in bundle id order and before the job and worker locks (production's finish takes the bundle
+// locks before its job locks too), and returns those bundles in that order.
+func lockBatchBundles(ctx context.Context, tx pgx.Tx, tenantID string, items []Registration) ([]batchBundle, error) {
 	byBundle := map[string][]string{}
 	for _, in := range items {
 		if in.BundleID != nil && in.StoppedAt != nil {
-			byBundle[*in.BundleID] = append(byBundle[*in.BundleID], in.ID)
+			b := strings.ToLower(*in.BundleID)
+			byBundle[b] = append(byBundle[b], in.ID)
 		}
 	}
-	bundles := make([]string, 0, len(byBundle))
-	for b := range byBundle {
-		bundles = append(bundles, b)
+	out := make([]batchBundle, 0, len(byBundle))
+	for b, regIDs := range byBundle {
+		out = append(out, batchBundle{id: b, regIDs: regIDs})
 	}
-	sort.Strings(bundles) // one lock order, so two batches cannot deadlock
+	sort.Slice(out, func(i, j int) bool { return out[i].id < out[j].id }) // one lock order, so two batches cannot deadlock
+	for _, b := range out {
+		if err := lockBundle(ctx, tx, tenantID, b.id); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// guardBundles refuses closed bundle jobs when the bundle already holds closed
+// jobs stored by another batch. The BR-25.1 split covers the jobs of one batch,
+// so a second batch would count the bundle's time again (SF-0113). A resend whose
+// items are all stored already is a replay and passes. The stops production's
+// finish wrote for the bundle (production-finished, not corrected by a supervisor)
+// are not another batch: the worker's own stop of the bundle, sent after the finish
+// (an offline replay, or a kiosk that had not refreshed), supersedes them like a
+// single job's (supersedeProductionBundleStops), so the bundle's hours count once.
+// It runs under the bundle locks (lockBatchBundles) and the job locks, so a
+// concurrent batch of the bundle or production's finish of one of its jobs has
+// either committed before these reads or waits for this batch.
+func guardBundles(ctx context.Context, tx pgx.Tx, tenantID string, bundles []batchBundle) error {
 	for _, b := range bundles {
-		regIDs := byBundle[b]
-		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended('shopfloor.bundle:' || $1 || ':' || $2, 0))`, tenantID, b); err != nil {
-			return err
-		}
 		var others bool
-		if err := tx.QueryRow(ctx, `select exists (select 1 from time_registration where tenant_id = $1 and bundle_id = $2
-			and stopped_at is not null and not (id = any($3::uuid[])))`, tenantID, b, regIDs).Scan(&others); err != nil {
+		if err := tx.QueryRow(ctx, `select exists (select 1 from time_registration r where r.tenant_id = $1 and r.bundle_id = $2
+			and r.stopped_at is not null and not (r.id = any($3::uuid[]))
+			and not (r.kind = 'job-stop' and $4 = any(r.flags)
+			         and not exists (select 1 from registration_correction c where c.tenant_id = r.tenant_id and c.registration_id = r.id)))`,
+			tenantID, b.id, b.regIDs, domain.FlagProductionFinished).Scan(&others); err != nil {
 			return err
-		}
-		if !others {
-			continue
 		}
 		var stored int
 		if err := tx.QueryRow(ctx, `select count(*) from time_registration where tenant_id = $1 and id = any($2::uuid[])`,
-			tenantID, regIDs).Scan(&stored); err != nil {
+			tenantID, b.regIDs).Scan(&stored); err != nil {
 			return err
 		}
-		if stored < len(regIDs) {
+		if stored == len(b.regIDs) {
+			continue
+		}
+		if others {
 			return httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeBundleInvalid,
-				fmt.Sprintf("bundle %s already has closed jobs from another batch; send every job of a bundle in one batch", b))
+				fmt.Sprintf("bundle %s already has closed jobs from another batch; send every job of a bundle in one batch", b.id))
+		}
+		if err := supersedeProductionBundleStops(ctx, tx, tenantID, b.id, b.regIDs[0]); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
+// lockBundle takes the transaction advisory lock of one bundle (bundleID in lower case).
+func lockBundle(ctx context.Context, tx pgx.Tx, tenantID, bundleID string) error {
+	_, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended('shopfloor.bundle:' || $1 || ':' || $2, 0))`, tenantID, bundleID)
+	return err
+}
+
 // lockWorker takes a row lock on the worker so calculation and approval for one
-// worker serialize, and reports SF-0101 when the worker is unknown or inactive.
+// worker serialize, and reports SF-0101 when the worker is unknown. A deactivated worker is
+// still locked: the days worked before leaving are calculated, approved and revised as usual.
 // It returns the worker's sign-in user id ("" when none is linked).
 func lockWorker(ctx context.Context, tx pgx.Tx, tenantID, workerID string) (userID string, err error) {
-	err = tx.QueryRow(ctx, `select coalesce(user_id, '') from worker where tenant_id = $1 and id = $2 and active for update`,
+	err = tx.QueryRow(ctx, `select coalesce(user_id, '') from worker where tenant_id = $1 and id = $2 for update`,
 		tenantID, workerID).Scan(&userID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", workerNotFound()
@@ -321,7 +359,7 @@ func (s *Postgres) LoadPunches(ctx context.Context, workerID string, start, end 
 	var in PunchInput
 	var rate string
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `select cost_rate::text, currency from worker where tenant_id = $1 and id = $2 and active`,
+		err := tx.QueryRow(ctx, `select cost_rate::text, currency from worker where tenant_id = $1 and id = $2`,
 			p.TenantID, workerID).Scan(&rate, &in.Currency)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return workerNotFound()
@@ -438,8 +476,10 @@ type ApproveResult struct {
 // then emits dev.passage.shopfloor.payday.approved.v1 per newly approved day.
 // Days already approved are returned unchanged, so a replay is a no-op. The
 // whole approval fails when any day has an open flag (SF-0006), when clock
-// registrations for a calculated day arrived after its calculation (SF-0104,
-// recalculate first) or when the approver is the worker (SF-0106).
+// registrations for a calculated day arrived after its calculation or the dated
+// cost rate that prices the day was added after it (SF-0104, recalculate first),
+// or when the approver is the worker (SF-0106). Approved days are never stale:
+// a rate added later reprices them only through an explicit pay:revise.
 func (s *Postgres) ApprovePay(ctx context.Context, workerID, fromDate, toDate, approvedBy string, idem Idem) (ApproveResult, error) {
 	p, _ := tenant.FromContext(ctx)
 	out := ApproveResult{WorkerID: workerID, From: fromDate, To: toDate, Days: []ApprovedDay{}}
@@ -470,6 +510,10 @@ func (s *Postgres) ApprovePay(ctx context.Context, workerID, fromDate, toDate, a
 					where c.tenant_id = d.tenant_id and c.worker_id = d.worker_id and r.kind in ('clock-in', 'clock-out', 'absence') and c.corrected_at > d.calculated_at
 					  and ((c.old_started_at >= (d.work_date::timestamp at time zone d.time_zone) and c.old_started_at < ((d.work_date + 1)::timestamp at time zone d.time_zone))
 					    or (c.new_started_at >= (d.work_date::timestamp at time zone d.time_zone) and c.new_started_at < ((d.work_date + 1)::timestamp at time zone d.time_zone)))))
+					or (d.status = 'calculated' and coalesce((
+					select cr.created_at > d.calculated_at from worker_cost_rate cr
+					where cr.tenant_id = d.tenant_id and cr.worker_id = d.worker_id and cr.effective_from <= d.work_date
+					order by cr.effective_from desc limit 1), false))
 			from worker_day d
 			where d.tenant_id = $1 and d.worker_id = $2 and d.work_date between $3::date and $4::date
 			order by d.work_date for update of d`,
@@ -505,7 +549,7 @@ func (s *Postgres) ApprovePay(ctx context.Context, workerID, fromDate, toDate, a
 		}
 		if len(stale) > 0 {
 			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeDayStale,
-				fmt.Sprintf("registrations arrived after calculation on %s; recalculate before approving", strings.Join(stale, ", ")))
+				fmt.Sprintf("registrations or the dated cost rate changed after calculation on %s; recalculate before approving", strings.Join(stale, ", ")))
 		}
 		for _, r := range rowsIn {
 			day := ApprovedDay{WorkDate: r.date, Status: r.status, PayLines: []PayLine{}}

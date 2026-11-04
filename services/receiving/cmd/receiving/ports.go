@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log/slog"
+	"regexp"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -108,6 +109,8 @@ func buildPorts(getenv func(string) string) (api.Ports, error) {
 	return ports, nil
 }
 
+var dimensionRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,19}$`)
+
 var profileEnv = []struct {
 	key, fake string
 	field     func(*domain.PostingProfile) *string
@@ -135,6 +138,19 @@ func buildProfile(getenv func(string) string, allowFakes bool) (domain.PostingPr
 	}
 	if !ids.Valid(profile.LedgerID) {
 		return domain.PostingProfile{}, fmt.Errorf("POSTING_LEDGER_ID must be a UUID")
+	}
+	// The dimension that carries the vendor group code on the vendor-control
+	// line. The ledger must define it (PATCH /v1/ledger/ledgers/{id} with
+	// addDimensionAttributes) before this service posts it; "-" posts none.
+	switch dim := getenv("POSTING_VENDOR_GROUP_DIMENSION"); dim {
+	case "":
+		profile.VendorGroupDimension = domain.DefaultVendorGroupDimension
+	case "-":
+	default:
+		if !dimensionRe.MatchString(dim) {
+			return domain.PostingProfile{}, fmt.Errorf("POSTING_VENDOR_GROUP_DIMENSION must be a ledger dimension attribute (A-Z, digits, underscore) or -")
+		}
+		profile.VendorGroupDimension = dim
 	}
 	return profile, nil
 }

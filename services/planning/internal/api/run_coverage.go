@@ -1,8 +1,10 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/planning/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/planning/internal/store"
 )
@@ -13,15 +15,47 @@ import (
 // group's settings with the item coverage's min, max and receipt margin; an
 // empty orderType takes the stored planned order type; an absent leadTimeDays
 // takes the stored lead-time override when there is one; an absent vendorId takes the stored default vendor. Inline values always
-// win. It returns one message per item that still has no coverage code or
-// order type, keyed like the request validation.
-func withStoredCoverage(items []itemDTO, stored map[string]store.RunCoverage) map[string]string {
-	return withStoredCoverageAt(items, stored, func(i int) string { return fmt.Sprintf("items[%d]", i) }, "site")
+// win. An item with neither a coverage code nor a stored coverage takes def,
+// the default coverage group REQ (FR-22.2, 4.22.13), when def is not nil. It
+// returns one message per item that still has no coverage code or order type,
+// keyed like the request validation.
+func withStoredCoverage(items []itemDTO, stored map[string]store.RunCoverage, def *store.RunCoverage) map[string]string {
+	return withStoredCoverageAt(items, stored, def, func(i int) string { return fmt.Sprintf("items[%d]", i) }, "site")
+}
+
+// defaultCoverageCode is the code of the default coverage group (PRD 4.22.13).
+const defaultCoverageCode = "REQ"
+
+// needsDefaultCoverage reports whether any run item would be left without a
+// coverage code: it sends none and has no stored site-scope coverage.
+func needsDefaultCoverage(items []itemDTO, stored map[string]store.RunCoverage) bool {
+	for _, it := range items {
+		if _, ok := stored[it.ItemID]; !ok && it.Coverage.Code == "" {
+			return true
+		}
+	}
+	return false
+}
+
+// defaultCoverageOf maps the stored default group to the coverage an item without
+// one takes. The group's settings apply without the min, max and margins of an item coverage.
+func defaultCoverageOf(g store.CoverageGroup) store.RunCoverage {
+	s := g.Spec
+	return store.RunCoverage{GroupCode: s.Code, CoverageCode: s.CoverageCode, CoverageFenceDays: s.CoverageTimeFenceDays,
+		NegativeDays: s.NegativeDays, PositiveDays: s.PositiveDays, PeriodDays: s.PeriodDays, FreezeFenceDays: s.FreezeFenceDays,
+		ActionFenceDays: s.ActionFenceDays, FuturesFenceDays: s.FuturesFenceDays, FirmingFenceDays: s.FirmingFenceDays,
+		AutoFirm: s.AutoFirm, SafetyStockPolicy: s.SafetyStockPolicy}
+}
+
+// builtinDefaultCoverage is the group REQ a tenant that never stored one gets:
+// requirement coverage with the FR-22.2 defaults.
+func builtinDefaultCoverage() store.RunCoverage {
+	return defaultCoverageOf(store.CoverageGroup{Spec: domain.DefaultCoverageGroup(defaultCoverageCode, domain.CoverageRequirement)})
 }
 
 // withStoredCoverageAt is withStoredCoverage for any list of scopes: label names item i in
 // the field errors and scope ("site" or "warehouse") the planning scope of the stored coverage.
-func withStoredCoverageAt(items []itemDTO, stored map[string]store.RunCoverage, label func(int) string, scope string) map[string]string {
+func withStoredCoverageAt(items []itemDTO, stored map[string]store.RunCoverage, def *store.RunCoverage, label func(int) string, scope string) map[string]string {
 	fields := map[string]string{}
 	for i := range items {
 		it := &items[i]
@@ -41,6 +75,11 @@ func withStoredCoverageAt(items []itemDTO, stored map[string]store.RunCoverage, 
 				lead := *c.LeadTimeDays
 				it.LeadTimeDays = &lead
 			}
+		}
+		if _, ok := stored[it.ItemID]; !ok && it.Coverage.Code == "" && def != nil {
+			strategy := it.Coverage.Strategy
+			it.Coverage = storedCoverageDTO(*def)
+			it.Coverage.Strategy = strategy
 		}
 		prefix := label(i)
 		if it.Coverage.Code == "" {
@@ -107,4 +146,10 @@ func defaultVendors(items []itemDTO) map[string]string {
 		}
 	}
 	return out
+}
+
+// isCoverageNotFound reports whether err is the store's unknown coverage group problem.
+func isCoverageNotFound(err error) bool {
+	var p *httpx.Problem
+	return errors.As(err, &p) && p.Code == store.CodeCoverageNotFound
 }

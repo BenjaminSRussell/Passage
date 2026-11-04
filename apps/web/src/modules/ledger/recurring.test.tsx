@@ -74,6 +74,52 @@ describe("recurring journal checks", () => {
   });
 });
 
+describe("recurring journal statistical quantity", () => {
+  it("checks quantity and unit together and sends them with the line", () => {
+    const v = {
+      ...emptyRecurring(),
+      ledgerId: LEDGER,
+      journalName: "GJ",
+      name: "Headcount",
+      startDate: "2026-04-01",
+      lines: [
+        { ...emptyRecurringLine("D"), account: "6100", amount: "0", quantity: "12.5", unit: "KG" },
+        { ...emptyRecurringLine("C"), account: "6100", amount: "0", quantity: "12.5", unit: "KG" },
+      ],
+    };
+    expect(validateRecurring(v)).toEqual({});
+    expect(toRecurringInput(v).lines[0]).toMatchObject({ quantity: "12.5", unit: "KG", amount: { currency: "USD", value: "0" } });
+    expect(toRecurringInput({ ...v, lines: [{ ...v.lines[0], quantity: "", unit: "" }] }).lines[0]).not.toHaveProperty("quantity");
+    const withLine = (patch: Partial<(typeof v.lines)[number]>) => validateRecurring({ ...v, lines: [{ ...v.lines[0], ...patch }] });
+    expect(withLine({ unit: "" })["lines.0.unit"]).toContain("needs a unit");
+    expect(withLine({ quantity: "", unit: "KG" })["lines.0.unit"]).toContain("needs a quantity");
+    expect(withLine({ quantity: "1.1234567" })["lines.0.quantity"]).toContain("6 decimals");
+    expect(withLine({ unit: "kg" })["lines.0.unit"]).toContain("capital letters");
+  });
+
+  it("shows the stored quantity on the template and saves it back", async () => {
+    server.handler = (url, init) => {
+      if (url.pathname === `${base}/${RJ}/runs`) return json(200, { items: [] });
+      if (url.pathname === `${base}/${RJ}` && init.method === "PUT") return json(200, recurring());
+      if (url.pathname === `${base}/${RJ}`) {
+        return json(200, recurring({ lines: [{ lineNumber: 1, account: "6010", debitCredit: "D", amountKind: "fixed", amount: "0.00", currency: "USD", quantity: "12.500000", unit: "KG" }] }));
+      }
+      return undefined;
+    };
+    renderAt(`/ledger/recurring-journals/${RJ}`);
+    expect(await screen.findByLabelText("Line 1 quantity")).toHaveValue("12.500000");
+    expect(screen.getByLabelText("Line 1 unit")).toHaveValue("KG");
+    fireEvent.change(screen.getByLabelText("Line 1 unit"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save recurring journal" }));
+    expect(await screen.findByText("Line 1: a quantity needs a unit.")).toBeInTheDocument();
+    expect(server.calls.some((c) => c.method === "PUT")).toBe(false);
+    fireEvent.change(screen.getByLabelText("Line 1 unit"), { target: { value: "pcs" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save recurring journal" }));
+    await waitFor(() => expect(server.calls.some((c) => c.method === "PUT")).toBe(true));
+    expect(server.calls.find((c) => c.method === "PUT")?.body).toMatchObject({ lines: [{ quantity: "12.500000", unit: "PCS" }] });
+  });
+});
+
 describe("recurring journal list", () => {
   it("lists schedules, filters by status and opens one", async () => {
     server.handler = (url) => {

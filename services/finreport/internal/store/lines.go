@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -63,13 +62,8 @@ func (s *Postgres) DrillLines(ctx context.Context, runID, row, column string, q 
 		if err != nil {
 			return err
 		}
-		var body []byte
-		if err := tx.QueryRow(ctx, `select body from report_definition where code=$1 and version=$2`,
-			run.DefinitionCode, run.DefinitionVersion).Scan(&body); err != nil {
-			return fmt.Errorf("definition %s v%d of run %s: %w", run.DefinitionCode, run.DefinitionVersion, runID, err)
-		}
-		var def domain.Definition
-		if err := json.Unmarshal(body, &def); err != nil {
+		def, err := runDefinitionTx(ctx, tx, run)
+		if err != nil {
 			return err
 		}
 		cell, err := scanCell(tx.QueryRow(ctx, `select row_code, column_code, value::text, blank, computed, note, balance_keys::text
@@ -214,8 +208,8 @@ func drillPageTx(ctx context.Context, tx pgx.Tx, ledgerID string, scope domain.L
 // PutJournalLines writes ledger lines to the read model in one transaction.
 // The journal is append-only, so a line already stored under the same (ledger,
 // posting sequence, line number) is a replay and is left as it is. The ledger
-// consumer that will call this is a later slice (NOT-IMPLEMENTED.md); until
-// then tests and fixtures load lines through it.
+// consumer (ApplyEntry) writes lines together with balances and the high-water
+// mark; this call loads lines alone, for tests and fixtures.
 func (s *Postgres) PutJournalLines(ctx context.Context, lines []domain.JournalLine) error {
 	for _, l := range lines {
 		if err := l.Validate(); err != nil {
@@ -234,16 +228,23 @@ func (s *Postgres) PutJournalLines(ctx context.Context, lines []domain.JournalLi
 				}
 				owners[key] = entity
 			}
-			if _, err := tx.Exec(ctx, `insert into reporting_journal_line(tenant_id, ledger_id, posting_sequence, line_number, posting_date,
-				period_year, period_no, account, combination, currency_type, voucher, debit, credit, closing_entry, source_uri, trace_id, legal_entity_id)
-				values($1,$2::uuid,$3,$4,$5::date,$6,$7,$8,$9,$10,$11,$12::numeric,$13::numeric,$14,$15,$16,nullif($17,'')::uuid)
-				on conflict (tenant_id, ledger_id, posting_sequence, line_number) do nothing`,
-				tenantID(ctx), l.LedgerID, l.PostingSequence, l.LineNumber, l.PostingDate, l.PeriodYear, l.PeriodNo,
-				l.Account, l.Combination, l.CurrencyType, l.Voucher, l.Debit.StringFixed(6), l.Credit.StringFixed(6),
-				l.ClosingEntry, l.SourceURI, l.TraceID, entity); err != nil {
+			if err := insertLineTx(ctx, tx, l, entity); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// insertLineTx stores one line; a line already stored under the same key is a
+// replay and is left as it is.
+func insertLineTx(ctx context.Context, tx pgx.Tx, l domain.JournalLine, entity string) error {
+	_, err := tx.Exec(ctx, `insert into reporting_journal_line(tenant_id, ledger_id, posting_sequence, line_number, posting_date,
+		period_year, period_no, account, combination, currency_type, voucher, debit, credit, closing_entry, source_uri, trace_id, legal_entity_id)
+		values($1,$2::uuid,$3,$4,$5::date,$6,$7,$8,$9,$10,$11,$12::numeric,$13::numeric,$14,$15,$16,nullif($17,'')::uuid)
+		on conflict (tenant_id, ledger_id, posting_sequence, line_number) do nothing`,
+		tenantID(ctx), l.LedgerID, l.PostingSequence, l.LineNumber, l.PostingDate, l.PeriodYear, l.PeriodNo,
+		l.Account, l.Combination, l.CurrencyType, l.Voucher, l.Debit.StringFixed(6), l.Credit.StringFixed(6),
+		l.ClosingEntry, l.SourceURI, l.TraceID, entity)
+	return err
 }

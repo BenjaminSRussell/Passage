@@ -42,6 +42,7 @@ type fakeStore struct {
 	reimported  string
 	lastOps     store.OperationFilter
 	lastOp      store.Operation
+	resourceTZ  string // time zone GetResource answers; empty is UTC
 
 	// slice 2
 	campaign     store.Campaign
@@ -74,6 +75,13 @@ type fakeStore struct {
 	// slice 15
 	lastBlockPatch store.BlockPatch
 	lastNetPatch   store.NetworkPatch
+	// slice 22
+	lastRun store.RunRequest
+	// slice 26
+	overridden []store.Violation
+	// slice 29
+	lastCompare  [2]string
+	lastRollback string
 }
 
 func (f *fakeStore) CreateResource(_ context.Context, in store.Resource, _ store.Idem) (store.Resource, bool, error) {
@@ -89,7 +97,7 @@ func (f *fakeStore) ListResources(context.Context) ([]store.Resource, error) {
 }
 
 func (f *fakeStore) GetResource(_ context.Context, id string) (store.Resource, error) {
-	return store.Resource{ID: id, Code: "MIX-1"}, f.err
+	return store.Resource{ID: id, Code: "MIX-1", TimeZone: f.resourceTZ}, f.err
 }
 
 func (f *fakeStore) ResourceCapacity(_ context.Context, _ string, from, _ time.Time) ([]domain.Interval, error) {
@@ -110,7 +118,8 @@ func (f *fakeStore) ListOperations(_ context.Context, filter store.OperationFilt
 	return []store.Operation{}, f.err
 }
 
-func (f *fakeStore) RunSchedule(_ context.Context, req store.RunRequest, _ store.Idem) (store.Run, bool, error) {
+func (f *fakeStore) RunSchedule(_ context.Context, req store.RunRequest, idem store.Idem) (store.Run, bool, error) {
+	f.lastRun, f.lastIdem = req, idem
 	if f.err != nil {
 		return store.Run{}, false, f.err
 	}
@@ -118,7 +127,7 @@ func (f *fakeStore) RunSchedule(_ context.Context, req store.RunRequest, _ store
 	if req.Backward {
 		dir = "backward"
 	}
-	return store.Run{ID: ids.New(), Scope: req.Scope, Mode: req.Mode, Direction: dir, Finite: req.Finite, Status: "completed", Messages: []string{}}, true, nil
+	return store.Run{ID: ids.New(), Scope: req.Scope, Mode: req.Mode, Direction: dir, Finite: req.Finite, Status: "completed", Messages: []string{}}, !f.replay, nil
 }
 
 func (f *fakeStore) GetRun(_ context.Context, id string) (store.Run, error) {
@@ -142,7 +151,7 @@ func (f *fakeStore) MoveJob(_ context.Context, req store.MoveRequest, idem store
 		return store.MoveOutcome{Conflict: f.conflict}, false, nil
 	}
 	return store.MoveOutcome{OrderID: ids.New(), Changes: []store.Change{{OperationID: req.JobID, ResourceID: req.ResourceID,
-		NewStart: req.Start, NewEnd: req.Start.Add(time.Hour)}}}, f.replay, nil
+		NewStart: req.Start, NewEnd: req.Start.Add(time.Hour)}}, Overridden: f.overridden}, f.replay, nil
 }
 
 func (f *fakeStore) FirmJob(_ context.Context, id string, firmed bool, idem store.Idem) (store.Firm, bool, error) {

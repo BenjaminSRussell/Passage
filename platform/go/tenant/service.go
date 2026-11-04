@@ -55,8 +55,11 @@ var (
 // Each grant holds only the narrow duties its caller signs (#333, #341).
 // policies/authz/data.json "service_grants" mirrors it and a test keeps them equal.
 var serviceGrants = map[string]map[string][]string{
+	"finreport": {"ledger": {"ledger.entry.lookup", "ledger.balance.read"}},
 	"billing": {
-		"sales": {"sales.order.record-invoice", "sales.order.record-delivery"},
+		"ledger": {"ledger.entry.post", "ledger.ledger.lookup"},
+		"revrec": {"revrec.allocation.read"},
+		"sales":  {"sales.order.record-invoice", "sales.order.record-delivery"},
 	},
 	"fulfillment": {
 		"sales": {"sales.order.record-delivery"},
@@ -92,6 +95,9 @@ var serviceGrants = map[string]map[string][]string{
 		"inventory":   {"inventory.read"},
 		"engineering": {"engineering.read"},
 	},
+	"costing": {
+		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
+	},
 	"eam": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read"},
 	},
@@ -100,6 +106,9 @@ var serviceGrants = map[string]map[string][]string{
 	},
 	"revrec": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read"},
+	},
+	"costacct": {
+		"ledger": {"ledger.balance.read", "ledger.ledger.lookup"},
 	},
 	"assets": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read"},
@@ -122,6 +131,8 @@ var serviceGrants = map[string]map[string][]string{
 		"payables":    {"payment-run.execute"},
 		"engineering": {"engineering.eco.workflow"},
 		"quality":     {"quality.capa.execute"},
+		"transport":   {"transport.tender.execute"},
+		"party":       {"party.approve"},
 	},
 	"party": {
 		"numbering": {"numbering.sequence.allocate"},

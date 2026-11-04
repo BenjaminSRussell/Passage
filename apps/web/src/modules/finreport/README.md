@@ -1,4 +1,4 @@
-# finreport web module (PSG-15, wave 15 slices 1-6)
+# finreport web module (PSG-15, wave 15 slices 1-10)
 
 Financial statements workspace over the `services/finreport` API
 (`/api/v1/reporting`). Pages use the shell primitives and `pages.module.css`.
@@ -15,6 +15,7 @@ Financial statements workspace over the `services/finreport` API
 | `/finreport/schedules` | Distribution schedules: definition, cron and zone, ledgers, formats, recipients, next run or paused | `GET /schedules` |
 | `/finreport/schedules/new`, `/finreport/schedules/:code` | Schedule form: published definition, currency type, cron, time zone, ledgers, formats, recipients, attachment limit, enabled; replace with If-Match | `GET /definitions`, `GET/PUT /schedules/{code}` |
 | `/finreport/audit-trail` | Audit trail: filter by dates (the current month by default), period, ledger, kind and actor; entries oldest first with kind, actor, object, details and trace link; load more; open an entry for its full details; Export CSV with the SHA-256 and export id shown | `GET /audit-trail?…&cursor=`, `GET /audit-trail:export?…` |
+| `/finreport/verifications`, `/finreport/verifications/:id` | Ledger verification (slice 10): check a ledger by id (one Idempotency-Key per ledger value, so a retried click returns the stored check), list of past checks with result, differing accounts and the sequence the read model was at; a check opens to the accounts that differ (read model, ledger, difference), withheld with a note for a user without `ledger.balance.read`; an inconclusive check says whether the mark moved or entries were waiting | `GET/POST /balance-verifications`, `GET /balance-verifications/{id}` |
 
 The drill panel checks exactly that the keys sum to the cell value (decimal
 strings summed as integer micro-units, no floats) and warns otherwise.

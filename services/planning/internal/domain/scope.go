@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -104,8 +105,8 @@ func RunWithinHorizon(today int, cal *Calendar, items []Item, horizonDays int) (
 }
 
 // LowLevelCodes returns the low-level code of every item of the snapshot
-// (longest BOM path from a root); an unknown component is ErrInvalidItem and a
-// cycle ErrBOMCycle.
+// (longest BOM path from a root); an unknown component is ErrInvalidItem. A cyclic
+// BOM gets the codes of the acyclic BOM a run plans (PLAN-0004, see breakBOMCycles).
 func LowLevelCodes(items []Item) (map[string]int, error) {
 	index := make(map[string]*Item, len(items))
 	for i := range items {
@@ -114,7 +115,17 @@ func LowLevelCodes(items []Item) (map[string]int, error) {
 		}
 		index[items[i].ID] = &items[i]
 	}
-	return lowLevelCodes(items, index)
+	llc, err := lowLevelCodes(items, index)
+	if errors.Is(err, ErrBOMCycle) {
+		cp := slices.Clone(items)
+		cidx := make(map[string]*Item, len(cp))
+		for i := range cp {
+			cp[i].Components = slices.Clone(cp[i].Components)
+			cidx[cp[i].ID] = &cp[i]
+		}
+		llc, _, err = breakBOMCycles(0, cp, cidx)
+	}
+	return llc, err
 }
 
 // ApplyScope returns the result restricted to the items inside the scope: their

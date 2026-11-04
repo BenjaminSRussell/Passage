@@ -91,6 +91,9 @@ func runOpenItems(ctx context.Context, tx pgx.Tx, in OpenItemsRun) (domain.PackR
 	for _, r := range plan.ToLoad {
 		present[domain.OpenItemKey(r.Side(), r.LegacyID)] = r.Amount
 	}
+	if run.Tolerances, err = loadTolerances(ctx, tx); err != nil {
+		return domain.PackRun{}, err
+	}
 	if err := domain.ReconcileOpenItems(&run, in.Records, in.Accepted, len(plan.ToLoad), present); err != nil {
 		return domain.PackRun{}, err
 	}
@@ -181,13 +184,25 @@ func insertTotals(ctx context.Context, tx pgx.Tx, runID string, totals []domain.
 }
 
 func insertQuarantine(ctx context.Context, tx pgx.Tx, runID string, seq int, legacyID, rule, reason string, record any) error {
+	return insertQuarantineLine(ctx, tx, runID, seq, legacyID, rule, reason, record, nil)
+}
+
+// insertQuarantineLine stores a quarantine row with the whole extracted line (bank_balances,
+// onhand), which a release corrects and loads; a nil line stores none.
+func insertQuarantineLine(ctx context.Context, tx pgx.Tx, runID string, seq int, legacyID, rule, reason string, record, line any) error {
 	rec, err := json.Marshal(record)
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `insert into pack_quarantine (tenant_id, run_id, seq, legacy_id, rule, reason, record)
-		values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, $6)`,
-		runID, seq, legacyID, rule, reason, rec); err != nil {
+	var raw []byte
+	if line != nil {
+		if raw, err = json.Marshal(line); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(ctx, `insert into pack_quarantine (tenant_id, run_id, seq, legacy_id, rule, reason, record, line)
+		values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, $6, $7)`,
+		runID, seq, legacyID, rule, reason, rec, raw); err != nil {
 		return fmt.Errorf("insert pack_quarantine: %w", err)
 	}
 	return nil

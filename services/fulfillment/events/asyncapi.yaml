@@ -46,11 +46,36 @@ channels:
     messages:
       warehouseSettingChanged:
         $ref: "#/components/messages/WarehouseSettingChanged"
+  exceptionRaised:
+    address: passage.fulfillment.exception
+    messages:
+      exceptionRaised:
+        $ref: "#/components/messages/ExceptionRaised"
+  exceptionResolved:
+    address: passage.fulfillment.exception
+    messages:
+      exceptionResolved:
+        $ref: "#/components/messages/ExceptionResolved"
+  returnablePackagingReturned:
+    address: passage.fulfillment.returnablepackaging
+    messages:
+      returnablePackagingReturned:
+        $ref: "#/components/messages/ReturnablePackagingReturned"
+  returnablePackagingAdjusted:
+    address: passage.fulfillment.returnablepackaging
+    messages:
+      returnablePackagingAdjusted:
+        $ref: "#/components/messages/ReturnablePackagingAdjusted"
   warehouseReleaseRuleChanged:
     address: passage.fulfillment.warehousereleaserule
     messages:
       warehouseReleaseRuleChanged:
         $ref: "#/components/messages/WarehouseReleaseRuleChanged"
+  deliveryToleranceChanged:
+    address: passage.fulfillment.deliverytolerance
+    messages:
+      deliveryToleranceChanged:
+        $ref: "#/components/messages/DeliveryToleranceChanged"
   legalEntitySettingChanged:
     address: passage.fulfillment.legalentitysetting
     messages:
@@ -130,9 +155,17 @@ channels:
       from either side wins) and the packing slip post refuses a stored JOURNAL order (FUL-0065), so a
       JOURNAL order never ships. An event without `order_type` is dead-lettered. The consumer keeps the highest sales order `version` and refuses
       (dead-letters) an event whose CloudEvents `source` is not `sales`.
+      The same topic carries order.remaindercancelled.v1 (w27 slice 23): per line the consumer stores the kept
+      quantity, cuts the quantity not yet packed (shipment lines shrink, picked stock above the new plan returns,
+      a shipment with nothing left is cancelled; shipment.closed with reason `order_remainder_cancelled` or
+      shipment.cancelled tell inventory to release the reservations), refuses a packing slip post of more than
+      the kept quantity (FUL-0066), and raises an exception for the warehouse supervisor when a slip was already
+      posted beyond it or packed quantity is left over.
     messages:
       orderConfirmed:
         $ref: "#/components/messages/OrderConfirmed"
+      orderRemainderCancelled:
+        $ref: "#/components/messages/OrderRemainderCancelled"
   salesOrderHold:
     address: passage.sales.orderhold
     description: |
@@ -156,6 +189,11 @@ operations:
     channel: { $ref: "#/channels/salesOrderHold" }
     messages:
       - $ref: "#/channels/salesOrderHold/messages/orderHoldReleased"
+  receiveOrderRemainderCancelled:
+    action: receive
+    channel: { $ref: "#/channels/salesOrder" }
+    messages:
+      - $ref: "#/channels/salesOrder/messages/orderRemainderCancelled"
   receiveOrderConfirmed:
     action: receive
     channel: { $ref: "#/channels/salesOrder" }
@@ -196,11 +234,36 @@ operations:
     channel: { $ref: "#/channels/warehouseSettingChanged" }
     messages:
       - $ref: "#/channels/warehouseSettingChanged/messages/warehouseSettingChanged"
+  publishExceptionRaised:
+    action: send
+    channel: { $ref: "#/channels/exceptionRaised" }
+    messages:
+      - $ref: "#/channels/exceptionRaised/messages/exceptionRaised"
+  publishExceptionResolved:
+    action: send
+    channel: { $ref: "#/channels/exceptionResolved" }
+    messages:
+      - $ref: "#/channels/exceptionResolved/messages/exceptionResolved"
+  publishReturnablePackagingReturned:
+    action: send
+    channel: { $ref: "#/channels/returnablePackagingReturned" }
+    messages:
+      - $ref: "#/channels/returnablePackagingReturned/messages/returnablePackagingReturned"
+  publishReturnablePackagingAdjusted:
+    action: send
+    channel: { $ref: "#/channels/returnablePackagingAdjusted" }
+    messages:
+      - $ref: "#/channels/returnablePackagingAdjusted/messages/returnablePackagingAdjusted"
   publishWarehouseReleaseRuleChanged:
     action: send
     channel: { $ref: "#/channels/warehouseReleaseRuleChanged" }
     messages:
       - $ref: "#/channels/warehouseReleaseRuleChanged/messages/warehouseReleaseRuleChanged"
+  publishDeliveryToleranceChanged:
+    action: send
+    channel: { $ref: "#/channels/deliveryToleranceChanged" }
+    messages:
+      - $ref: "#/channels/deliveryToleranceChanged/messages/deliveryToleranceChanged"
   publishLegalEntitySettingChanged:
     action: send
     channel: { $ref: "#/channels/legalEntitySettingChanged" }
@@ -294,6 +357,13 @@ components:
       description: Published by sales (w27); fulfillment stores the order type per sales order. Only `order_id`, `order_type` and `version` are read; the per-line `atp_qty` sales adds in a later slice is optional and not stored yet.
       payload:
         $ref: "#/components/schemas/OrderConfirmedData"
+    OrderRemainderCancelled:
+      x-passage-type: dev.passage.sales.order.remaindercancelled.v1
+      contentType: application/cloudevents+json
+      summary: Sales cancelled the remainder of a partly shipped order (consumed)
+      description: Published by sales (w27 slice 23). Fulfillment reads `order_id`, `legal_entity_id`, `version` and per line `line_id` and `kept_qty`, ordered by the sales order `version`.
+      payload:
+        $ref: "#/components/schemas/OrderRemainderCancelledData"
     ShipmentReleased:
       name: dev.passage.fulfillment.shipment.released.v1
       title: Shipment released
@@ -337,6 +407,7 @@ components:
                 order_line_id: { type: string, format: uuid }
                 qty: { type: string }
                 backordered: { type: string }
+                over_picked: { type: string, description: "Quantity picked above the planned one, allowed by the over-delivery tolerance (BR-28.7); present only for such a pick, when backordered is 0." }
                 short_reason: { type: string, enum: [OUT_OF_STOCK, DAMAGED, NOT_FOUND, QUALITY_HOLD, OTHER], description: "Reason of the short pick, present when one was given." }
     PackingSlipPosted:
       name: dev.passage.fulfillment.packingslip.posted.v1
@@ -444,6 +515,7 @@ components:
           order_id: { type: string, format: uuid }
           warehouse: { type: string, format: uuid }
           backorder_shipment_id: { type: string, format: uuid, description: "Set when the remainder moved to a new shipment (short pick action REMAINDER_BACKORDER): sales keeps the order lines open." }
+          reason: { type: string, enum: [order_remainder_cancelled], description: "Set when sales cancelled the remainder of the order (order.remaindercancelled.v1) and fulfillment cut the shipment back; sales already knows and must not cancel again. Absent when the warehouse closed the remainder." }
           lines:
             type: array
             items:
@@ -469,6 +541,76 @@ components:
           short_pick_action: { type: string, enum: [KEEP_OPEN, CANCEL_REMAINDER, REMAINDER_BACKORDER] }
           previous_short_pick_action: { type: string, enum: [KEEP_OPEN, CANCEL_REMAINDER, REMAINDER_BACKORDER] }
           version: { type: integer, minimum: 1 }
+    ExceptionRaised:
+      name: dev.passage.fulfillment.exception.raised.v1
+      title: Warehouse exception raised
+      summary: >
+        Fulfillment recorded a case the warehouse supervisor must handle: a packing slip
+        posted beyond the quantity sales kept when it cancelled the remainder of the order
+        (SLIP_POSTED_BEYOND_KEPT), packed quantity beyond it (PACKED_BEYOND_KEPT), or a vendor confirmation of a drop-ship beyond it (DROPSHIP_CONFIRMED_BEYOND_KEPT).
+      contentType: application/json
+      payload:
+        type: object
+        required: [exception_id, kind, order_id, order_line_id, qty, kept_qty, detail]
+        properties:
+          exception_id: { type: string, format: uuid }
+          kind: { type: string, enum: [SLIP_POSTED_BEYOND_KEPT, PACKED_BEYOND_KEPT, DROPSHIP_CONFIRMED_BEYOND_KEPT] }
+          order_id: { type: string, format: uuid }
+          order_line_id: { type: string, format: uuid }
+          shipment_id: { type: string, format: uuid }
+          packing_slip_id: { type: string, format: uuid, description: "The latest posted slip of the order line, set for SLIP_POSTED_BEYOND_KEPT." }
+          qty: { type: string, description: The quantity beyond what the order line keeps. }
+          kept_qty: { type: string }
+          detail: { type: string }
+    ExceptionResolved:
+      name: dev.passage.fulfillment.exception.resolved.v1
+      title: Warehouse exception resolved
+      summary: A warehouse supervisor closed an exception with a note.
+      contentType: application/json
+      payload:
+        type: object
+        required: [exception_id, kind, order_id, order_line_id, note, resolved_by]
+        properties:
+          exception_id: { type: string, format: uuid }
+          kind: { type: string, enum: [SLIP_POSTED_BEYOND_KEPT, PACKED_BEYOND_KEPT, DROPSHIP_CONFIRMED_BEYOND_KEPT] }
+          order_id: { type: string, format: uuid }
+          order_line_id: { type: string, format: uuid }
+          note: { type: string }
+          resolved_by: { type: string }
+    ReturnablePackagingReturned:
+      name: dev.passage.fulfillment.returnablepackaging.returned.v1
+      title: Returnable packaging returned
+      summary: A customer's return receipt lowered a returnable packaging balance (BR-28.13).
+      contentType: application/json
+      payload:
+        type: object
+        required: [movement_id, customer_id, container_type, kind, qty, balance_after]
+        properties:
+          movement_id: { type: string, format: uuid }
+          customer_id: { type: string, format: uuid }
+          container_type: { type: string }
+          kind: { type: string, enum: [RETURNED] }
+          qty: { type: string, description: "Signed whole number of containers; negative lowers the balance." }
+          balance_after: { type: string }
+          reference: { type: string, description: "The caller's own reference; omitted when none." }
+          reason: { type: string, description: "Why the balance was corrected; omitted on a return receipt." }
+    ReturnablePackagingAdjusted:
+      name: dev.passage.fulfillment.returnablepackaging.adjusted.v1
+      title: Returnable packaging balance adjusted
+      summary: A logistics admin corrected a returnable packaging balance by hand, with a reason (FR-28.16).
+      contentType: application/json
+      payload:
+        type: object
+        required: [movement_id, customer_id, container_type, kind, qty, balance_after]
+        properties:
+          movement_id: { type: string, format: uuid }
+          customer_id: { type: string, format: uuid }
+          container_type: { type: string }
+          kind: { type: string, enum: [ADJUSTED] }
+          qty: { type: string, description: "Signed whole number of containers; negative lowers the balance." }
+          balance_after: { type: string }
+          reference: { type: string, description: "The caller's own reference; omitted when none." }
+          reason: { type: string, description: "Why the balance was corrected; omitted on a return receipt." }
     WarehouseReleaseRuleChanged:
       name: dev.passage.fulfillment.warehousereleaserule.changed.v1
       title: Warehouse release rule changed
@@ -491,6 +633,24 @@ components:
           previous_release_requires_full_atp: { type: boolean }
           previous_wave_max_lines: { type: integer, minimum: 1, maximum: 2000 }
           previous_wave_max_orders: { type: integer, minimum: 1, maximum: 500 }
+          version: { type: integer, minimum: 1 }
+    DeliveryToleranceChanged:
+      name: dev.passage.fulfillment.deliverytolerance.changed.v1
+      title: Delivery tolerance changed
+      summary: >
+        The over-delivery tolerance of a product and customer scope was saved (BR-28.7): the
+        percentage of the planned quantity a pick may exceed, with the value it replaces (absent
+        for a new scope). A scope that names no product or no customer applies to every one.
+      contentType: application/json
+      payload:
+        type: object
+        required: [tolerance_id, overdelivery_pct, version]
+        properties:
+          tolerance_id: { type: string, format: uuid }
+          product_id: { type: string, format: uuid, description: "Absent when the tolerance applies to every product." }
+          customer_id: { type: string, format: uuid, description: "Absent when the tolerance applies to every customer." }
+          overdelivery_pct: { type: string, description: "0 to 100, at most 4 decimals." }
+          previous_overdelivery_pct: { type: string, description: "The value replaced; absent for a new scope." }
           version: { type: integer, minimum: 1 }
     LegalEntitySettingChanged:
       name: dev.passage.fulfillment.legalentitysetting.changed.v1
@@ -545,7 +705,7 @@ components:
     DropShipCancelled:
       name: dev.passage.fulfillment.dropship.cancelled.v1
       title: Drop-ship cancelled
-      summary: An OPEN drop-ship was cancelled before the vendor confirmed; nothing was booked.
+      summary: An OPEN drop-ship was cancelled before the vendor confirmed (by hand, or with reason order_remainder_cancelled when sales cancelled the remainder and the line keeps nothing); nothing was booked.
       contentType: application/json
       payload:
         $ref: "#/components/schemas/DropShipPayload"
@@ -555,7 +715,7 @@ components:
       summary: >
         The vendor shipped part of the drop-ship and will not ship the rest. qty_closed is the
         quantity that never shipped, the status is CONFIRMED, and the journal is empty (nothing is
-        booked for the closed quantity). Sales may cancel the order line remainder from it.
+        booked for the closed quantity). Sales may cancel the order line remainder from it, unless reason is order_remainder_cancelled (sales cancelled it first; the status then stays OPEN or PARTIALLY_CONFIRMED when quantity is still open).
       contentType: application/json
       payload:
         $ref: "#/components/schemas/DropShipPayload"
@@ -758,6 +918,26 @@ components:
           description: { type: string }
           event_time: { type: string, format: date-time }
   schemas:
+    OrderRemainderCancelledData:
+      type: object
+      description: The part of sales' payload fulfillment reads.
+      required: [order_id, legal_entity_id, version, lines]
+      properties:
+        order_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        version:
+          type: integer
+          minimum: 1
+          description: The sales order version; an older event never overwrites a newer one for the same order line.
+        lines:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [line_id, kept_qty]
+            properties:
+              line_id: { type: string, format: uuid, description: The sales order line (the shipment line's order_line_id). }
+              kept_qty: { type: string, description: "Decimal quantity the order line keeps, 0 or more." }
     OrderHoldData:
       type: object
       description: The part of sales' payload fulfillment reads.
@@ -814,6 +994,7 @@ components:
           type: array
           description: The journal of this confirmation in dropship.confirmed; empty in every other event.
           items: { $ref: "#/components/schemas/JournalEntry" }
+        reason: { type: string, enum: [order_remainder_cancelled], description: "Set in dropship.closed and dropship.cancelled when sales cancelled the remainder of the order and fulfillment followed it; sales already knows and must not cancel again." }
     SlipLine:
       type: object
       required: [order_line_id, qty, cost_amount, cost_snapshot_id]

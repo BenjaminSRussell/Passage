@@ -8,7 +8,6 @@ import {
   isDate,
   isPeriod,
   netPostingsBalanced,
-  parseJournalCsv,
   sumTicks,
   toTicks,
   validateAccountRange,
@@ -82,22 +81,6 @@ describe("validators", () => {
     expect(validateAccountRange("600000", "609999")).toBeNull();
     expect(validateAccountRange("609999", "600000")).toMatch(/reversed/);
     expect(validateAccountRange("", "1")).toMatch(/both/);
-  });
-});
-
-describe("parseJournalCsv", () => {
-  it("reads account,amount lines and skips a header", () => {
-    expect(parseJournalCsv("mainAccount,amount\n600100,100.00\n\n600200, -50.25\n")).toEqual({
-      ok: true,
-      value: [
-        { mainAccount: "600100", amount: "100.00" },
-        { mainAccount: "600200", amount: "-50.25" },
-      ],
-    });
-  });
-
-  it("names the first bad line", () => {
-    expect(parseJournalCsv("600100,abc")).toEqual({ ok: false, error: 'Line 1 must be "mainAccount,amount" with a decimal amount.' });
   });
 });
 

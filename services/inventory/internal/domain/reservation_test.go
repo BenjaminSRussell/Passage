@@ -126,3 +126,37 @@ func TestCheckReservableOrderedClaimsOnlyUnreservedExpectedReceipt(t *testing.T)
 		t.Fatalf("zero quantity: %v", err)
 	}
 }
+
+func TestPlanConversionTakesOldestFirstAndOnlyWhatArrived(t *testing.T) {
+	active := []Reservation{{ID: "a", Qty: decimal.NewFromInt(25)}, {ID: "b", Qty: decimal.NewFromInt(10)}}
+	steps := PlanConversion(active, decimal.NewFromInt(30))
+	if len(steps) != 2 || steps[0].ReservationID != "a" || !steps[0].Whole || steps[1].ReservationID != "b" || steps[1].Whole || !steps[1].Qty.Equal(decimal.NewFromInt(5)) {
+		t.Fatalf("steps %+v", steps)
+	}
+	if got := PlanConversion(active, decimal.NewFromInt(100)); len(got) != 2 || !got[0].Whole || !got[1].Whole {
+		t.Fatalf("more arrived than reserved converts only what is reserved: %+v", got)
+	}
+	if got := PlanConversion(active, decimal.Zero); len(got) != 0 {
+		t.Fatalf("nothing arrived: %+v", got)
+	}
+}
+
+func TestCheckOrderedCover(t *testing.T) {
+	before := OnHand{Ordered: decimal.NewFromInt(40), ReservedOrdered: decimal.NewFromInt(25)}
+	after := OnHand{Ordered: decimal.NewFromInt(20), Arrived: decimal.NewFromInt(5), ReservedOrdered: decimal.NewFromInt(25)}
+	if err := CheckOrderedCover(before, after); err != nil {
+		t.Fatalf("exactly covered: %v", err)
+	}
+	after.Ordered = decimal.NewFromInt(19)
+	if err := CheckOrderedCover(before, after); err == nil || err.(*Error).Code != CodeReservedOrderedCover {
+		t.Fatalf("short by one: %v", err)
+	}
+	// A row over-committed before the change: a change that narrows the gap passes, one that widens it does not.
+	before = OnHand{Ordered: decimal.NewFromInt(10), ReservedOrdered: decimal.NewFromInt(25)}
+	if err := CheckOrderedCover(before, OnHand{Ordered: decimal.NewFromInt(4), ReservedOrdered: decimal.NewFromInt(19)}); err != nil {
+		t.Fatalf("gap 15 to 15 is not worse: %v", err)
+	}
+	if err := CheckOrderedCover(before, OnHand{Ordered: decimal.NewFromInt(5), ReservedOrdered: decimal.NewFromInt(25)}); err == nil {
+		t.Fatal("gap 15 to 20 must be refused")
+	}
+}

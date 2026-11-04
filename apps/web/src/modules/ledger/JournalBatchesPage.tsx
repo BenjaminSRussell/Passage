@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, PageHeader, Select, type BadgeTone, type DataTableColumn } from "../../shell/ui";
-import { fetchJournalBatches, type BatchStatus, type JournalBatch } from "./api/client";
+import { fetchJournalBatchPage, type BatchStatus, type JournalBatch } from "./api/client";
 import styles from "./pages.module.css";
 
 const statusView: Record<BatchStatus, { label: string; tone: BadgeTone }> = {
@@ -44,7 +44,13 @@ export function JournalBatchesPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const status = params.get("status") ?? "";
-  const result = useQuery({ queryKey: ["ledger", "journal-batches", status], queryFn: () => fetchJournalBatches({ status }) });
+  const result = useInfiniteQuery({
+    queryKey: ["ledger", "journal-batches", status],
+    queryFn: ({ pageParam }) => fetchJournalBatchPage({ status }, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor,
+  });
+  const rows = result.data?.pages.flatMap((page) => page.items) ?? [];
 
   return (
     <div className={styles.stack}>
@@ -81,7 +87,7 @@ export function JournalBatchesPage() {
         <DataTable
           label="Journal batches"
           columns={columns}
-          rows={result.data ?? []}
+          rows={rows}
           getRowKey={(b) => b.id}
           loading={result.isPending}
           empty={
@@ -92,7 +98,13 @@ export function JournalBatchesPage() {
           onRowOpen={(b) => navigate(`/ledger/journal-batches/${b.id}`)}
         />
       )}
-      <p className={styles.note}>Shows the newest 200 batches.</p>
+      {result.hasNextPage ? (
+        <div className={styles.formActions}>
+          <Button onClick={() => void result.fetchNextPage()} loading={result.isFetchingNextPage}>
+            Load more
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

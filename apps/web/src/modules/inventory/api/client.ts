@@ -97,6 +97,8 @@ export interface LineInput {
   qty: string;
   enteredUnit: string;
   costPrice?: string;
+  /** Line key the service dedupes on; a fresh one is made when absent. */
+  clientKey?: string;
 }
 
 export interface OnHandRow {
@@ -247,14 +249,17 @@ export async function createJournal(input: CreateJournalInput, key: string = new
   return (await send<Journal>("/journals", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) })).body;
 }
 
-/** Adds lines; each line gets a client key so a retry never duplicates it. */
+/**
+ * Adds lines in one transaction (all or none). Each line carries a client key
+ * (the caller's, or a fresh one) so a retried request never duplicates it.
+ */
 export async function addLines(journalId: string, lines: LineInput[]): Promise<Journal> {
   const payload = lines.map((line) => {
     const dimensions: Record<string, string> = {};
     for (const [name, value] of Object.entries(line.dimensions)) {
       if (value && value.trim() !== "") dimensions[name] = value.trim();
     }
-    const out: Record<string, unknown> = { clientKey: newKey(), productId: line.productId, dimensions, qty: line.qty, enteredUnit: line.enteredUnit };
+    const out: Record<string, unknown> = { clientKey: line.clientKey || newKey(), productId: line.productId, dimensions, qty: line.qty, enteredUnit: line.enteredUnit };
     if (line.costPrice && line.costPrice.trim() !== "") out.costPrice = line.costPrice.trim();
     if (line.toDimensions) {
       const to: Record<string, string> = {};
@@ -301,6 +306,16 @@ export async function validateJournal(journalId: string): Promise<Validation> {
  */
 export async function reverseJournal(journalId: string, postingDate: string): Promise<Journal> {
   return (await send<Journal>(`/journals/${encodeURIComponent(journalId)}:reverse`, { method: "POST", body: JSON.stringify({ postingDate }) })).body;
+}
+
+/**
+ * Copies a journal of any status into a new DRAFT (AX copy journal). Pass the
+ * same key when retrying the same copy so the service returns the first copy
+ * instead of making a second one. An empty date keeps the source's posting date.
+ */
+export async function copyJournal(journalId: string, postingDate: string, key: string): Promise<Journal> {
+  const body = postingDate ? { postingDate } : {};
+  return (await send<Journal>(`/journals/${encodeURIComponent(journalId)}:copy`, { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) })).body;
 }
 
 // ---- Transaction inquiry (FR-16.13) ----
@@ -369,6 +384,15 @@ export interface Page<T> {
 
 export interface TransactionQuery {
   product?: string;
+  legalEntity?: string;
+  site?: string;
+  warehouse?: string;
+  location?: string;
+  batch?: string;
+  serial?: string;
+  inventoryStatus?: string;
+  owner?: string;
+  segment?: string;
   status?: TransactionStatus | "";
   sourceType?: SourceType | "";
   from?: string;
@@ -492,6 +516,8 @@ export interface Reservation {
   releasedAt?: string;
   /** When an ACTIVE reservation lapses; absent when it holds until released. */
   expiresAt?: string;
+  /** Set when a reservation against an expected receipt became physical because the receipt arrived. */
+  convertedAt?: string;
 }
 
 export interface ReserveInput {
@@ -800,6 +826,7 @@ export interface CountPlan {
   abcClass?: CountAbcClass;
   samplePct?: string;
   minDaysSinceCount?: number;
+  includeVendorOwned?: boolean;
   createdAt: string;
 }
 
@@ -820,6 +847,8 @@ export interface CountPlanInput {
   samplePct?: string;
   /** Select only rows not counted for this many days (whole days, 1 to 3650). */
   minDaysSinceCount?: number;
+  /** Count vendor-owned (consignment) stock too; its variance posts quantity only. */
+  includeVendorOwned?: boolean;
 }
 
 export interface CountSheetSummary {

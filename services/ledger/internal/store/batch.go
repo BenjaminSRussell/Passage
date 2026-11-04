@@ -22,17 +22,19 @@ import (
 
 // Problem codes of the journal workspace (README error table).
 const (
-	CodeBatchNotFound          = "LEDGER_BATCH_NOT_FOUND"
-	CodeBatchState             = "LEDGER_BATCH_STATE"
-	CodeBatchApprovalRequired  = "LEDGER_BATCH_APPROVAL_REQUIRED"
-	CodeSelfApproval           = "LEDGER_SELF_APPROVAL"
-	CodeJournalNameInvalid     = "LEDGER_JOURNAL_NAME_INVALID"
-	CodeLineLimit              = "LEDGER_LINE_LIMIT"
-	CodeVersionConflict        = "LEDGER_VERSION_CONFLICT"
-	batchAggregate             = "journal_batch"
-	batchListLimit             = 200
-	maxLastErrorLength         = 1000
-	manualJournalSourceURIRoot = "passage://ledger/journal-batches/"
+	CodeBatchNotFound           = "LEDGER_BATCH_NOT_FOUND"
+	CodeBatchState              = "LEDGER_BATCH_STATE"
+	CodeBatchApprovalRequired   = "LEDGER_BATCH_APPROVAL_REQUIRED"
+	CodeSelfApproval            = "LEDGER_SELF_APPROVAL"
+	CodeJournalNameInvalid      = "LEDGER_JOURNAL_NAME_INVALID"
+	CodeLineLimit               = "LEDGER_LINE_LIMIT"
+	CodeVersionConflict         = "LEDGER_VERSION_CONFLICT"
+	CodePostingRestricted       = "LEDGER_POSTING_RESTRICTED"
+	CodeReinstatementNotAllowed = "LEDGER_REINSTATEMENT_NOT_ALLOWED"
+	batchAggregate              = "journal_batch"
+	batchListLimit              = 200
+	maxLastErrorLength          = 1000
+	manualJournalSourceURIRoot  = "passage://ledger/journal-batches/"
 )
 
 // BatchLine is one line of a manual journal batch (FR-11.9). Amount is a
@@ -108,6 +110,9 @@ type BatchFilter struct {
 	LedgerID    string
 	Status      string
 	JournalName string
+	// Page is the keyset page (created_at descending, then id descending); After holds the created_at
+	// (RFC 3339) and the id of the last batch of the previous page. The list returns up to Limit+1 rows.
+	Page Page
 }
 
 // PostBatchInput posts a batch. Version, when > 0, must equal the batch's
@@ -122,6 +127,9 @@ type PostBatchInput struct {
 	TraceID               string
 	CanPostDirect         bool
 	CanPostLedgerSpecific bool
+	// Language is the poster's UI language (Accept-Language), used for default
+	// descriptions when the journal name sets description_language = user.
+	Language string
 }
 
 // batchFingerprint is what the posting idempotency hash covers: the batch
@@ -398,8 +406,9 @@ func (s *Postgres) ListBatches(ctx context.Context, f BatchFilter) ([]Batch, err
 		rows, err := tx.Query(ctx, batchSelect+`
 			where b.tenant_id = $1 and ($2 = '' or b.ledger_id::text = $2) and ($3 = '' or b.status = $3)
 				and ($4 = '' or b.journal_name = $4)
-			order by b.created_at desc, b.id
-			limit $5`, p.TenantID, f.LedgerID, f.Status, f.JournalName, batchListLimit)
+				and (cardinality($6::text[]) = 0 or (b.created_at, b.id) < ($6[1]::timestamptz, $6[2]::uuid))
+			order by b.created_at desc, b.id desc
+			limit $5`, p.TenantID, f.LedgerID, f.Status, f.JournalName, f.Page.pageLimit(batchListLimit), f.Page.keys())
 		if err != nil {
 			return err
 		}
@@ -649,6 +658,10 @@ func (s *Postgres) PostBatch(ctx context.Context, in PostBatchInput) (EntryResul
 			}
 			return batchStateProblem(err)
 		}
+		if name.PostingRestriction == domain.PostingOwnJournalsOnly && cur.CreatedBy != p.UserID {
+			return httpx.NewProblem(http.StatusForbidden, CodePostingRestricted,
+				"journal name "+cur.JournalName+" lets only the creator of a batch post it")
+		}
 		if cur.Status == domain.BatchValidated && !in.CanPostDirect {
 			return httpx.NewProblem(http.StatusForbidden, "AUTH-0003",
 				"posting a batch without approval needs duty "+DutyPostDirect)
@@ -660,6 +673,9 @@ func (s *Postgres) PostBatch(ctx context.Context, in PostBatchInput) (EntryResul
 		post.Key, post.Hash, post.Actor, post.TraceID, post.Today = in.Key, hash, p.UserID, in.TraceID, in.Today
 		attempted = true
 		post.CanPostLedgerSpecific = in.CanPostLedgerSpecific
+		if name.DescriptionLanguage == domain.DescriptionLanguageUser {
+			post.DescriptionLanguage = in.Language
+		}
 		res, err := postEntryTx(ctx, tx, p.TenantID, post)
 		if err != nil {
 			return err
