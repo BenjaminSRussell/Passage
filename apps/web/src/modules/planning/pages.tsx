@@ -49,7 +49,7 @@ export const scopeLabel = (x: { warehouseId?: string | null }) => (x.warehouseId
 
 const ORDER_STATUSES = ["unprocessed", "approved", "firmed"] as const;
 const MESSAGE_STATUS_FILTERS = ["open", "applied", "dismissed", "all"] as const;
-export const MESSAGE_ACTIONS = ["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone", "sales-on-top", "no-vendor", "lot-split"] as const;
+export const MESSAGE_ACTIONS = ["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone", "sales-on-top", "no-vendor", "no-quota-source", "lot-split", "bom-cycle"] as const;
 
 const orderTypeLabel: Record<PlannedOrder["orderType"], string> = {
   purchase: "Purchase",
@@ -68,7 +68,9 @@ export const actionTone: Record<Message["action"], BadgeTone> = {
   "red-zone": "danger",
   "sales-on-top": "info",
   "no-vendor": "warning",
+  "no-quota-source": "danger",
   "lot-split": "warning",
+  "bom-cycle": "warning",
 };
 
 /**
@@ -90,7 +92,7 @@ const targetLabel: Record<NonNullable<PlannedOrder["firmedTargetType"]>, string>
   "transfer-order": "Transfer order",
 };
 
-export const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).replace(/-/g, " ");
+export const sentence = (s: string) => s === "bom-cycle" ? "BOM cycle" : s.charAt(0).toUpperCase() + s.slice(1).replace(/-/g, " ");
 
 /** Counts planned orders per type and how many are delayed (the workspace tiles). */
 export function summarize(orders: PlannedOrder[], messages: Message[]) {

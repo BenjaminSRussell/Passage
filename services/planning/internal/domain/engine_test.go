@@ -447,16 +447,6 @@ func TestRun_RejectsInvalidSnapshot(t *testing.T) {
 	}
 }
 
-func TestRun_CycleIsRejected(t *testing.T) {
-	items := []Item{
-		{ID: "A", Coverage: CoverageRequirement, OrderType: OrderProduction, Components: []BOMLine{{ItemID: "B", Qty: d("1")}}},
-		{ID: "B", Coverage: CoverageRequirement, OrderType: OrderProduction, Components: []BOMLine{{ItemID: "A", Qty: d("1")}}},
-	}
-	if _, err := Run(0, items); !errors.Is(err, ErrBOMCycle) {
-		t.Fatalf("err = %v; want ErrBOMCycle", err)
-	}
-}
-
 func TestRun_UnknownComponentIsRejected(t *testing.T) {
 	items := []Item{{ID: "A", Coverage: CoverageRequirement, OrderType: OrderProduction, Components: []BOMLine{{ItemID: "Z", Qty: d("1")}}}}
 	if _, err := Run(0, items); !errors.Is(err, ErrInvalidItem) {

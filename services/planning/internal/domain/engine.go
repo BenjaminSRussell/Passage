@@ -52,6 +52,10 @@ const (
 	// maximum order quantity was split into several planned orders (FR-22.4).
 	// delay_days carries the number of orders and qty the maximum order quantity.
 	ActionLotSplit = "lot-split"
+	// ActionBOMCycle is the PLAN-0004 warning: a component line closes a BOM cycle, so
+	// the run did not explode demand through it (ItemID is the parent, DemandRef the
+	// component).
+	ActionBOMCycle = "bom-cycle"
 
 	PrioritySales     = 1
 	PriorityForecast  = 2
@@ -253,6 +257,12 @@ func RunWithCalendar(today int, cal *Calendar, in []Item) (Result, error) {
 		index[it.ID] = it
 	}
 	llc, err := lowLevelCodes(items, index)
+	var cycleMsgs []Message
+	if errors.Is(err, ErrBOMCycle) {
+		// PLAN-0004 (BR-22.1 step 2): a cyclic BOM is a warning, not a refusal. The
+		// edges that close a cycle are not exploded, and each raises a message.
+		llc, cycleMsgs, err = breakBOMCycles(today, items, index)
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -267,6 +277,7 @@ func RunWithCalendar(today int, cal *Calendar, in []Item) (Result, error) {
 		return order[a].ID < order[b].ID
 	})
 	rs := &runState{today: today, cal: cal, index: index}
+	rs.res.Messages = append(rs.res.Messages, cycleMsgs...)
 	for _, it := range order {
 		if err := rs.plan(it); err != nil {
 			return Result{}, err
@@ -1167,4 +1178,93 @@ func (rs *runState) issueDate(it *Item, day int) int {
 		day = rs.back(rs.demandDate(day), it.IssueMarginDays)
 	}
 	return rs.demandDate(day)
+}
+
+// breakBOMCycles makes a cyclic BOM plannable (PLAN-0004). A depth-first walk cuts
+// every component line that points back to an item still on the walk's path, which
+// leaves an acyclic BOM; the cut lines are removed from the items (the caller owns
+// the clones) so their dependent demand is not exploded, and each one raises a
+// bom-cycle message on the parent item naming the component.
+//
+// The walk does not depend on the order of the snapshot or of an item's lines, so
+// the same BOM always loses the same lines and the plan hash is stable (FR-22.14):
+// it starts from the top-level items (no parent) in id order, then from any item
+// still unvisited (a cycle no top-level item reaches) in id order, and follows an
+// item's components in component id order. Starting from the top keeps the lines
+// that carry real dependent demand and cuts the line that leads back up.
+// It returns the low-level codes of the acyclic BOM.
+func breakBOMCycles(today int, items []Item, index map[string]*Item) (map[string]int, []Message, error) {
+	const (
+		onPath = 1
+		done   = 2
+	)
+	hasParent := make(map[string]bool, len(items))
+	for i := range items {
+		for _, c := range items[i].Components {
+			hasParent[c.ItemID] = true
+		}
+	}
+	starts := make([]string, 0, len(items))
+	for i := range items {
+		starts = append(starts, items[i].ID)
+	}
+	slices.SortFunc(starts, func(a, b string) int {
+		if hasParent[a] != hasParent[b] {
+			if hasParent[b] {
+				return -1
+			}
+			return 1
+		}
+		return compareStrings(a, b)
+	})
+	state := make(map[string]int, len(items))
+	cut := map[string]map[int]bool{}
+	var walk func(id string)
+	walk = func(id string) {
+		state[id] = onPath
+		comps := index[id].Components
+		lines := make([]int, len(comps))
+		for i := range lines {
+			lines[i] = i
+		}
+		slices.SortStableFunc(lines, func(a, b int) int { return compareStrings(comps[a].ItemID, comps[b].ItemID) })
+		for _, i := range lines {
+			c := comps[i]
+			switch state[c.ItemID] {
+			case onPath:
+				if cut[id] == nil {
+					cut[id] = map[int]bool{}
+				}
+				cut[id][i] = true
+			case 0:
+				if index[c.ItemID] != nil {
+					walk(c.ItemID)
+				}
+			}
+		}
+		state[id] = done
+	}
+	for _, id := range starts {
+		if state[id] == 0 {
+			walk(id)
+		}
+	}
+	var msgs []Message
+	for i := range items {
+		it := &items[i]
+		if len(cut[it.ID]) == 0 {
+			continue
+		}
+		kept := make([]BOMLine, 0, len(it.Components))
+		for j, c := range it.Components {
+			if cut[it.ID][j] {
+				msgs = append(msgs, Message{Action: ActionBOMCycle, ItemID: it.ID, DemandRef: c.ItemID, SuggestedDate: today, Qty: c.Qty})
+				continue
+			}
+			kept = append(kept, c)
+		}
+		it.Components = kept
+	}
+	llc, err := lowLevelCodes(items, index)
+	return llc, msgs, err
 }

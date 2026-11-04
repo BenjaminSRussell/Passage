@@ -82,7 +82,9 @@ describe("message decision rules", () => {
       "red-zone",
       "sales-on-top",
       "no-vendor",
+      "no-quota-source",
       "lot-split",
+      "bom-cycle",
     ] as const)
       expect(isApplicable({ action })).toBe(false);
   });

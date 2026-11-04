@@ -780,8 +780,6 @@ func addFirmedSupply(items []domain.Item, asOf time.Time, firmed []store.FirmedS
 
 func runProblem(err error) error {
 	switch {
-	case errors.Is(err, domain.ErrBOMCycle):
-		return httpx.NewProblem(http.StatusUnprocessableEntity, "PLAN-0004", "BOM cycle detected; low-level codes not updated")
 	case errors.Is(err, domain.ErrTooManySplits):
 		return httpx.NewProblem(http.StatusUnprocessableEntity, "PLAN-0005", "a requirement splits into more orders than the limit of 1000")
 	case errors.Is(err, domain.ErrInvalidItem), errors.Is(err, domain.ErrInvalidCalendar), errors.Is(err, domain.ErrInvalidStrategy):
@@ -983,9 +981,9 @@ func (a *API) listMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch action {
-	case "", domain.ActionDelay, domain.ActionPostpone, domain.ActionAdvance, domain.ActionShortage, domain.ActionCancel, domain.ActionDecrease, domain.ActionIncrease, domain.ActionRedZone, domain.ActionSalesOnTop, domain.ActionNoVendor, domain.ActionLotSplit:
+	case "", domain.ActionDelay, domain.ActionPostpone, domain.ActionAdvance, domain.ActionShortage, domain.ActionCancel, domain.ActionDecrease, domain.ActionIncrease, domain.ActionRedZone, domain.ActionSalesOnTop, domain.ActionNoVendor, domain.ActionLotSplit, domain.ActionBOMCycle, domain.ActionNoQuotaSource:
 	default:
-		validationFailed(w, r, map[string]string{"action": "must be delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor or lot-split"})
+		validationFailed(w, r, map[string]string{"action": "must be delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor, no-quota-source, lot-split or bom-cycle"})
 		return
 	}
 	limit, ok := limitParam(w, r)

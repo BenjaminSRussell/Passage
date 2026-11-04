@@ -409,7 +409,7 @@ paths:
           schema: {type: string}
         - name: action
           in: query
-          schema: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor, lot-split]}
+          schema: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor, no-quota-source, lot-split, bom-cycle]}
         - name: status
           in: query
           description: 'Messages of this status; open when left out, all for every status (FR-22.7)'
@@ -2938,15 +2938,15 @@ components:
         decidedAt: {type: string, format: date-time, nullable: true}
         decisionNote: {type: string, description: The planner's reason; empty when none}
         carriedFrom: {type: string, format: uuid, nullable: true, description: 'The message of an earlier version the planner decided, when a later run raised the same message again (same item, scope, action, supply, demand, suggested date, quantity and delay) and carried the decision onto this one; null for a decision made on this message or an open message'}
-        action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor, lot-split]}
+        action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor, no-quota-source, lot-split, bom-cycle]}
         itemId: {type: string, format: uuid}
         warehouseId: {type: string, format: uuid, nullable: true, description: The warehouse planning scope the message is about (FR-22.18); null for the site scope}
         supplyRef: {type: string, description: 'Planned order number or the ref the run was sent on the receipt; for an open purchase order that ref is the PO number, unchanged, so procurement matches it to the order. A carried-forward firmed order is FP:<planned order id>. Empty for a shortage'}
-        demandRef: {type: string, description: Demand the message is about; empty when none}
-        suggestedDate: {type: string, format: date, description: 'delay: expected date; postpone/advance: suggested receipt date; shortage: demand date; cancel/decrease/increase: receipt date; red-zone: delivery date of the buffer replenishment order; sales-on-top: date of the sales line (PLAN-0015, qty is the excess over the forecast it could consume, demandRef the sales line); no-vendor: order date of the item''s earliest purchase without a vendor (PLAN-0008, supplyRef that order); lot-split: the requirement''s date (PLAN-0005, supplyRef the first of the split orders)'}
-        delayDays: {type: integer, description: 'Days of delay; lot-split: the number of planned orders the requirement was split into (PLAN-0005), not a delay'}
-        qty: {type: string, description: 'Decimal string in the inventory unit; no-vendor: the item''s purchase quantity left without a vendor; lot-split: the item''s maximum order quantity'}
-        code: {type: string, example: PLAN-0007, description: 'Message catalog code (PRD 4.22.18): PLAN-0006 postpone, PLAN-0007 delay, PLAN-0008 no-vendor, PLAN-0005 lot-split, PLAN-0010 red-zone, PLAN-0015 sales-on-top; absent for the other actions'}
+        demandRef: {type: string, description: 'Demand the message is about; empty when none. bom-cycle: the component of the skipped line (PLAN-0004); no-quota-source: the quota arrangement id (PLAN-0009)'}
+        suggestedDate: {type: string, format: date, description: 'delay: expected date; postpone/advance: suggested receipt date; shortage: demand date; cancel/decrease/increase: receipt date; red-zone: delivery date of the buffer replenishment order; sales-on-top: date of the sales line (PLAN-0015, qty is the excess over the forecast it could consume, demandRef the sales line); no-vendor: order date of the item''s earliest purchase without a vendor (PLAN-0008, supplyRef that order); lot-split: the requirement''s date (PLAN-0005, supplyRef the first of the split orders); bom-cycle: the plan date (PLAN-0004, itemId the parent and demandRef the component of the skipped line); no-quota-source: the delivery date of the order no source of its quota arrangement could take (PLAN-0009, supplyRef that order, demandRef the arrangement id)'}
+        delayDays: {type: integer, description: 'Days of delay; lot-split: the number of planned orders the requirement was split into (PLAN-0005), not a delay; bom-cycle: 0 (PLAN-0004)'}
+        qty: {type: string, description: 'Decimal string in the inventory unit; no-vendor: the item''s purchase quantity left without a vendor; lot-split: the item''s maximum order quantity; bom-cycle: the quantity per unit of the skipped component line; no-quota-source: the quantity of the order left without a source'}
+        code: {type: string, example: PLAN-0007, description: 'Message catalog code (PRD 4.22.18): PLAN-0006 postpone, PLAN-0007 delay, PLAN-0008 no-vendor, PLAN-0009 no-quota-source, PLAN-0005 lot-split, PLAN-0004 bom-cycle, PLAN-0010 red-zone, PLAN-0015 sales-on-top; absent for the other actions'}
         text: {type: string, description: 'The catalog user text with the message''s values filled in (the item is named by its id); absent when code is'}
         planningPriority: {type: string, nullable: true, description: 'Planning priority of the planned order the message is about when it replenishes a DDMRP buffer (FR-22.16); null otherwise'}
         bufferZone: {type: string, nullable: true, enum: [red, yellow, green, null], description: Zone of that buffer}
