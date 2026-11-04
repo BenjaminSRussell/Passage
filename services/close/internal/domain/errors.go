@@ -21,6 +21,8 @@ const (
 	CodeNoRun               = "CLOSE-0007"
 	CodeLedgerRejected      = "CLOSE-0008"
 	CodeLedgerData          = "CLOSE-0009"
+	CodeRegroupingExists    = "CLOSE-0010"
+	CodeUnprocessable       = "CLOSE-0011"
 	CodePeriodClosed        = "LEDGER-0013"
 	CodePeriodOnHold        = "LEDGER-0014"
 	CodeNoConvergence       = "ALLOC-0001"
