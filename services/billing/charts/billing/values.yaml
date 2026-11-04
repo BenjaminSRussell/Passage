@@ -23,11 +23,13 @@ serviceIdentity:
   keyId: ""
 # Unset, the journal postings answer 503 BIL-0200. When set, glProfiles (rendered as
 # BILLING_GL_PROFILES) lists per legal entity: legalEntityId, ledgerId, receivableAccount,
-# taxAccount, chargeAccount and deferredRevenueAccounts.
+# taxAccount, chargeAccount, deferredRevenueAccounts and contractAssetAccount (1250 Contract
+# Asset when omitted; open it in the ledger chart next to 2400 Contract Liability).
 ledgerUrl: ""
 glProfiles: []
-# Revrec reads the allocation of a contract (REVREC_URL). Unset, an invoice that has lines on a
-# deferred revenue account is not booked: it backs off with BIL-0207 until revrec answers.
+# Revrec reads the allocation of a contract (REVREC_URL). Required when ledgerUrl is set (the
+# chart and the service refuse to start without it): an order invoice is never booked at its
+# billed amounts, it backs off with BIL-0207 until revrec answers with the order's contract.
 revrecUrl: ""
 resources:
   requests: { cpu: 100m, memory: 128Mi }

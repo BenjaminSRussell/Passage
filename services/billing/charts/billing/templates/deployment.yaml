@@ -51,6 +51,9 @@ spec:
             - name: BILLING_TAX_RATES
               value: {{ .Values.taxRates | quote }}
             {{- if .Values.ledgerUrl }}
+            {{- if not .Values.revrecUrl }}
+            {{- fail "revrecUrl is required when ledgerUrl is set: order invoices book the revrec allocation" }}
+            {{- end }}
             - name: LEDGER_URL
               value: {{ .Values.ledgerUrl | quote }}
             - name: BILLING_GL_PROFILES

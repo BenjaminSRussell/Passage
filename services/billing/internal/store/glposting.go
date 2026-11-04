@@ -11,13 +11,18 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/domain"
 )
 
 const (
-	MaxGLAttempts      = 5
-	DeferredGL         = "2400"
-	OriginalParkedCode = "BIL-0206"
+	MaxGLAttempts = 5
+	// DeferredGL is 2400 contract liability: the deferred part of an allocation and what a contract billed above its
+	// allocation (ASC 606-10-45-2, IFRS 15.106).
+	DeferredGL = "2400"
+	// DefaultContractAssetGL is 1250 contract asset: what a contract recognized above its billings (ASC 606-10-45-3, IFRS 15.107).
+	DefaultContractAssetGL = "1250"
+	OriginalParkedCode     = "BIL-0206"
 )
 
 var ErrGLAlreadyBooked = errors.New("the document already has a ledger entry")
@@ -29,6 +34,7 @@ type GLProfile struct {
 	TaxAccount              string   `json:"taxAccount"`
 	ChargeAccount           string   `json:"chargeAccount"`
 	DeferredRevenueAccounts []string `json:"deferredRevenueAccounts"`
+	ContractAssetAccount    string   `json:"contractAssetAccount,omitempty"`
 }
 
 type GLShare struct {
@@ -68,6 +74,21 @@ type GLDocument struct {
 	Charges     decimal.Decimal
 	Tax         decimal.Decimal
 	Lines       []GLLine
+	// Held is the booking an earlier attempt sent to the ledger without a verdict; a retry posts it again unchanged, so the
+	// ledger key never meets a different entry and later documents of the contract count it as consumed.
+	Held *GLHeld
+}
+
+// GLHeld is a booking sent to the ledger: the shares per line and the contract position change (Liability: a credit to 2400
+// when positive; Asset: a debit to the contract asset account when positive).
+type GLHeld struct {
+	Shares   map[int]GLShare
+	Contract GLContractMove
+}
+
+type GLContractMove struct {
+	Liability decimal.Decimal `json:"liability"`
+	Asset     decimal.Decimal `json:"asset"`
 }
 
 // DueGLDocuments returns up to limit posted invoices and credit notes of the entity that have no ledger entry, are not parked and
@@ -108,6 +129,21 @@ func (s *Postgres) DueGLDocuments(ctx context.Context, legalEntityID string, now
 			}
 			d := GLDocument{ID: inv.ID, Number: inv.Number, CreditNote: inv.Type == domain.TypeCreditNote, Currency: inv.Currency,
 				PostingDate: inv.PostingDate.Format(dateLayout), Gross: inv.Totals.Gross, Charges: inv.Totals.Charges, Tax: inv.Totals.Tax}
+			var split, contract []byte
+			if err := tx.QueryRow(ctx, `select gl_split, gl_contract from invoice where id = $1::uuid`, id).Scan(&split, &contract); err != nil {
+				return err
+			}
+			if split != nil {
+				d.Held = &GLHeld{}
+				if err := json.Unmarshal(split, &d.Held.Shares); err != nil {
+					return err
+				}
+				if contract != nil {
+					if err := json.Unmarshal(contract, &d.Held.Contract); err != nil {
+						return err
+					}
+				}
+			}
 			var original map[int]GLShare
 			var originalLines []Line
 			if d.CreditNote {
@@ -117,8 +153,10 @@ func (s *Postgres) DueGLDocuments(ctx context.Context, legalEntityID string, now
 			}
 			for _, l := range lines {
 				gl := GLLine{No: l.No, Account: l.RevenueAccount, Net: l.Net, OrderID: l.Source.OrderID, ProductID: l.Source.ProductID}
-				if share, ok := original[l.OriginalLineNo]; ok {
-					if i := slices.IndexFunc(originalLines, func(o Line) bool { return o.No == l.OriginalLineNo }); i >= 0 {
+				if i := slices.IndexFunc(originalLines, func(o Line) bool { return o.No == l.OriginalLineNo }); d.CreditNote && i >= 0 {
+					// A credit note line has no source of its own: it moves the contract of its original line.
+					gl.OrderID, gl.ProductID = originalLines[i].Source.OrderID, originalLines[i].Source.ProductID
+					if share, ok := original[l.OriginalLineNo]; ok {
 						gl.Original = &GLOriginal{Net: originalLines[i].Net, Share: share}
 					}
 				}
@@ -143,12 +181,11 @@ func loadBookedOriginal(ctx context.Context, tx pgx.Tx, originalID string) (map[
 	if err := tx.QueryRow(ctx, `select gl_split from invoice where id = $1::uuid`, originalID).Scan(&raw); err != nil {
 		return nil, nil, err
 	}
-	if raw == nil {
-		return nil, nil, nil
-	}
 	var shares map[int]GLShare
-	if err := json.Unmarshal(raw, &shares); err != nil {
-		return nil, nil, err
+	if raw != nil {
+		if err := json.Unmarshal(raw, &shares); err != nil {
+			return nil, nil, err
+		}
 	}
 	lines, err := loadLines(ctx, tx, originalID)
 	return shares, lines, err
@@ -174,12 +211,31 @@ func (s *Postgres) MarkGLBooked(ctx context.Context, id, entryID string, shares 
 	return done, err
 }
 
+// HoldGLBooking stores the booking of a document about to be sent to the ledger (see GLDocument.Held).
+func (s *Postgres) HoldGLBooking(ctx context.Context, id string, held GLHeld) error {
+	split, err := json.Marshal(held.Shares)
+	if err != nil {
+		return err
+	}
+	contract, err := json.Marshal(held.Contract)
+	if err != nil {
+		return err
+	}
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update invoice set gl_split = $2::jsonb, gl_contract = $3::jsonb where id = $1::uuid and journal_posting_id is null`,
+			id, split, contract)
+		return err
+	})
+}
+
 // RecordGLRefusal schedules the next attempt with exponential backoff (5 minutes, doubling, at most a day) and records code. A
 // GLRefused outcome, the ledger's verdict, counts toward MaxGLAttempts and parks the document with code when it is reached; GLPark
-// parks at once; GLNoVerdict (an outage, a missing allocation) never parks. ErrGLAlreadyBooked says a concurrent call booked it.
+// parks at once; GLNoVerdict (an outage, a missing allocation) never parks. A verdict releases the held booking (the ledger
+// booked nothing), an outage keeps it for the retry. ErrGLAlreadyBooked says a concurrent call booked it.
 func (s *Postgres) RecordGLRefusal(ctx context.Context, id, code string, now time.Time, outcome GLOutcome) (parked bool, err error) {
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		err := tx.QueryRow(ctx, `update invoice set gl_attempt_count = gl_attempt_count + 1, gl_last_error = $2,
+			gl_split = case when $4::int = 0 then gl_split end, gl_contract = case when $4::int = 0 then gl_contract end,
 			gl_refusal_count = gl_refusal_count + case when $4::int = 1 then 1 else 0 end,
 			gl_next_attempt_at = $3::timestamptz + (5 * least(2 ^ gl_attempt_count, 288)) * interval '1 minute',
 			gl_parked_code = case when $4::int = 2 or ($4::int = 1 and gl_refusal_count + 1 >= $5) then $2 end
@@ -202,4 +258,95 @@ func (s *Postgres) UnparkGL(ctx context.Context, legalEntityID string) (int64, e
 		return err
 	})
 	return n, err
+}
+
+// ContractBalance is what the booked documents of an order hold against its revenue contract: per product the allocated
+// amount and its deferred part they booked (Consumed, credit notes subtracted), and the contract position, billed nets less
+// allocated amounts (positive: a contract liability in DeferredGL; negative: a contract asset).
+type ContractBalance struct {
+	Consumed map[string]GLShare
+	Position decimal.Decimal
+}
+
+// GLContractBalances sums per order the shares that the booked or held invoices and credit notes of the entity stored in gl_split; a
+// booked line without a share consumed its billed net. A credit note line counts against the order and product of its original.
+func (s *Postgres) GLContractBalances(ctx context.Context, legalEntityID string, orderIDs []string) (map[string]ContractBalance, error) {
+	out := map[string]ContractBalance{}
+	if len(orderIDs) == 0 {
+		return out, nil
+	}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select src.order_id::text, src.product_id::text,
+				sum(src.sign * coalesce((i.gl_split -> l.line_no::text ->> 'allocated')::numeric, l.line_net))::text,
+				sum(src.sign * coalesce((i.gl_split -> l.line_no::text ->> 'deferred')::numeric, 0))::text,
+				sum(src.sign * (l.line_net - coalesce((i.gl_split -> l.line_no::text ->> 'allocated')::numeric, l.line_net)))::text
+			from invoice i
+			join invoice_line l on l.tenant_id = i.tenant_id and l.invoice_id = i.id
+			left join invoice_line ol on i.invoice_type = 'CREDIT_NOTE' and ol.tenant_id = i.tenant_id
+			  and ol.invoice_id = i.original_invoice_id and ol.line_no = l.original_line_no
+			cross join lateral (select coalesce(ol.order_id, l.order_id) as order_id, coalesce(ol.product_id, l.product_id) as product_id,
+			  case when i.invoice_type = 'CREDIT_NOTE' then -1 else 1 end as sign) src
+			where i.legal_entity_id = $1::uuid and (i.journal_posting_id is not null or i.gl_split is not null) and src.order_id = any($2::uuid[])
+			group by 1, 2`, legalEntityID, orderIDs)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var order, product, allocated, deferred, position string
+			if err := rows.Scan(&order, &product, &allocated, &deferred, &position); err != nil {
+				return err
+			}
+			share, err := parseShare(allocated, deferred)
+			if err != nil {
+				return err
+			}
+			pos, err := decimal.NewFromString(position)
+			if err != nil {
+				return err
+			}
+			b := out[order]
+			if b.Consumed == nil {
+				b.Consumed = map[string]GLShare{}
+			}
+			b.Consumed[product], b.Position = share, b.Position.Add(pos)
+			out[order] = b
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+func parseShare(allocated, deferred string) (GLShare, error) {
+	a, err := decimal.NewFromString(allocated)
+	if err != nil {
+		return GLShare{}, err
+	}
+	d, err := decimal.NewFromString(deferred)
+	return GLShare{Allocated: a, Deferred: d}, err
+}
+
+// LockGLRun takes the posting-run lock of the entity, a session advisory lock on a connection held until unlock is called, so
+// two runs never book against the same contract balances; ok is false when another run holds it.
+func (s *Postgres) LockGLRun(ctx context.Context, legalEntityID string) (unlock func(), ok bool, err error) {
+	p, found := tenant.FromContext(ctx)
+	if !found {
+		return nil, false, errors.New("store: no principal in context")
+	}
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	key := "billing-gl-run:" + p.TenantID + ":" + legalEntityID
+	if err := conn.QueryRow(ctx, `select pg_try_advisory_lock(hashtextextended(current_schema() || $1, 0))`, key).Scan(&ok); err != nil || !ok {
+		conn.Release()
+		return nil, false, err
+	}
+	return func() {
+		if _, err := conn.Exec(context.WithoutCancel(ctx), `select pg_advisory_unlock(hashtextextended(current_schema() || $1, 0))`, key); err != nil {
+			// A connection that may still hold the lock never goes back to the pool.
+			_ = conn.Conn().Close(context.WithoutCancel(ctx))
+		}
+		conn.Release()
+	}, true, nil
 }

@@ -174,6 +174,7 @@ type glResult struct {
 	Items  []glBookedOut `json:"items"`
 	Failed []glFailedOut `json:"failed"`
 	More   bool          `json:"more"`
+	Halted string        `json:"halted"`
 }
 
 func (g *glRig) book(t *testing.T, want int, extra string) glResult {
@@ -323,7 +324,7 @@ func TestGLPostings_BundleInvoiceBooksTheAllocationNotTheContractualLinePrices(t
 	}
 }
 
-func TestGLPostings_InvoiceWhoseBilledNetsDifferFromTheAllocationIsParkedNotBooked(t *testing.T) {
+func TestGLPostings_BilledBelowTheAllocationBooksAContractAsset(t *testing.T) {
 	g := newGLRig(t, true)
 	id := g.invoice(t, gridLine{"1450.00", "4100", "", ""})
 	order, product := ids.New(), ids.New()
@@ -332,26 +333,113 @@ func TestGLPostings_InvoiceWhoseBilledNetsDifferFromTheAllocationIsParkedNotBook
 	free := g.invoice(t, gridLine{"300.00", "4100", "", ""})
 
 	out := g.book(t, http.StatusOK, "")
-	if len(out.Items) != 0 || len(out.Failed) != 2 || len(g.fake.Entries()) != 0 {
-		t.Fatalf("booked %+v with %d entries, want both refused locally and nothing in the ledger", out, len(g.fake.Entries()))
+	if len(out.Items) != 1 || out.Items[0].DocumentID != id || len(out.Failed) != 1 || out.Failed[0].DocumentID != free {
+		t.Fatalf("booked %+v, want the order invoice booked and the deferred line without obligation refused", out)
 	}
-	for _, doc := range []string{id, free} {
-		if g.parkedCode(t, doc) != CodeAllocationMismatch {
-			t.Errorf("document %s parked %q, want %s (billed 1,450.00 against 2,250.00 allocated; a deferred line with no obligation)", doc, g.parkedCode(t, doc), CodeAllocationMismatch)
-		}
+	want := map[string]string{"Dr 1200": "1450.00", "Cr 2400": "2250.00", "Dr 1250": "800.00"}
+	if got := lineAmounts(g.entryFor(t, id)); !sameAmounts(got, want) {
+		t.Errorf("entry %v, want %v (2,250.00 allocated deferred, 1,450.00 billed, 800.00 contract asset)", got, want)
+	}
+	if g.parkedCode(t, free) != CodeAllocationMismatch {
+		t.Errorf("deferred line with no obligation parked %q, want %s", g.parkedCode(t, free), CodeAllocationMismatch)
 	}
 }
 
-func TestGLPostings_HardwareShippedFirstIsParkedNotBookedAtTheBilledPrice(t *testing.T) {
+func TestGLPostings_HardwareShippedFirstBooksTheExcessAsAContractLiability(t *testing.T) {
 	g := newGLRig(t, true)
-	id := g.invoice(t, gridLine{"8000.00", "4000", "", ""})
-	order, hardware := ids.New(), ids.New()
-	g.shipLine(t, id, 1, order, hardware)
+	hardwareInvoice := g.invoice(t, gridLine{"8000.00", "4000", "", ""})
+	order, hardware, service := ids.New(), ids.New(), ids.New()
+	g.shipLine(t, hardwareInvoice, 1, order, hardware)
 	g.allocate(order, revrec.Obligation{ProductID: hardware, Allocated: decimal.RequireFromString("7200.00"), Method: revrec.MethodPoint},
-		revrec.Obligation{ProductID: ids.New(), Allocated: decimal.RequireFromString("3600.00"), Method: "RATABLE"})
+		revrec.Obligation{ProductID: service, Allocated: decimal.RequireFromString("3600.00"), Method: "RATABLE"})
+	if out := g.book(t, http.StatusOK, ""); len(out.Items) != 1 || len(out.Failed) != 0 {
+		t.Fatalf("hardware first: %+v, want it booked", out)
+	}
+	want := map[string]string{"Dr 1200": "8000.00", "Cr 4000": "7200.00", "Cr 2400": "800.00"}
+	if got := lineAmounts(g.entryFor(t, hardwareInvoice)); !sameAmounts(got, want) {
+		t.Fatalf("hardware entry %v, want %v (7,200.00 allocated is revenue, 800.00 billed above it is a contract liability)", got, want)
+	}
+
+	serviceInvoice := g.invoice(t, gridLine{"2800.00", "4100", "", ""})
+	g.shipLine(t, serviceInvoice, 1, order, service)
+	g.book(t, http.StatusOK, "")
+	want = map[string]string{"Dr 1200": "2800.00", "Cr 2400": "2800.00"}
+	if got := lineAmounts(g.entryFor(t, serviceInvoice)); !sameAmounts(got, want) {
+		t.Fatalf("service entry %v, want %v (3,600.00 deferred less the 800.00 contract liability it releases; no contract asset)", got, want)
+	}
+	if b2400, b1250 := g.balance(t, "2400"), g.balance(t, "1250"); b2400.Credit.Sub(b2400.Debit).StringFixed(2) != "3600.00" || !b1250.Net().IsZero() {
+		t.Errorf("2400 holds %s, 1250 nets %s; want the 3,600.00 revrec recognizes and no contract asset", b2400.Credit.Sub(b2400.Debit), b1250.Net())
+	}
+
+	cn := g.creditNote(t, hardwareInvoice)
+	g.book(t, http.StatusOK, "")
+	want = map[string]string{"Cr 1200": "8000.00", "Dr 4000": "7200.00", "Dr 1250": "800.00"}
+	if got := lineAmounts(g.entryFor(t, cn)); !sameAmounts(got, want) {
+		t.Errorf("hardware credit note %v, want %v (the service left is billed 800.00 below its allocation)", got, want)
+	}
+	again := g.invoice(t, gridLine{"8000.00", "4000", "", ""})
+	g.shipLine(t, again, 1, order, hardware)
+	g.book(t, http.StatusOK, "")
+	want = map[string]string{"Dr 1200": "8000.00", "Cr 4000": "7200.00", "Cr 1250": "800.00"}
+	if got := lineAmounts(g.entryFor(t, again)); !sameAmounts(got, want) {
+		t.Errorf("hardware invoiced again after its credit note %v, want %v (the credit note gave the allocation back)", got, want)
+	}
+}
+
+func TestGLPostings_SecondInvoiceOfAProductConsumesNoAllocation(t *testing.T) {
+	g := newGLRig(t, true)
+	order, product := ids.New(), ids.New()
+	g.allocate(order, revrec.Obligation{ProductID: product, Allocated: decimal.RequireFromString("1000.00"), Method: revrec.MethodPoint})
+	first := g.invoice(t, gridLine{"600.00", "4000", "", ""})
+	g.shipLine(t, first, 1, order, product)
+	g.book(t, http.StatusOK, "")
+	second := g.invoice(t, gridLine{"400.00", "4000", "", ""})
+	g.shipLine(t, second, 1, order, product)
+	g.book(t, http.StatusOK, "")
+
+	if got, want := lineAmounts(g.entryFor(t, first)), map[string]string{"Dr 1200": "600.00", "Cr 4000": "1000.00", "Dr 1250": "400.00"}; !sameAmounts(got, want) {
+		t.Errorf("first invoice %v, want %v", got, want)
+	}
+	if got, want := lineAmounts(g.entryFor(t, second)), map[string]string{"Dr 1200": "400.00", "Cr 1250": "400.00"}; !sameAmounts(got, want) {
+		t.Errorf("second invoice %v, want %v (the allocation is consumed: no revenue booked twice)", got, want)
+	}
+	if b := g.balance(t, "4000"); b.Credit.StringFixed(2) != "1000.00" || !g.balance(t, "1250").Net().IsZero() {
+		t.Errorf("4000 credited %s, want the 1,000.00 allocation once and 1250 back at 0", b.Credit)
+	}
+
+	g.allocate(order, revrec.Obligation{ProductID: product, Allocated: decimal.RequireFromString("900.00"), Method: revrec.MethodPoint})
+	third := g.invoice(t, gridLine{"50.00", "4000", "", ""})
+	g.shipLine(t, third, 1, order, product)
+	if out := g.book(t, http.StatusOK, ""); len(out.Failed) != 1 || g.parkedCode(t, third) != CodeAllocationMismatch {
+		t.Errorf("allocation reduced below what was booked: %+v parked %q, want %s", out, g.parkedCode(t, third), CodeAllocationMismatch)
+	}
+}
+
+func TestGLPostings_OrderInvoiceWithoutAContractBacksOff(t *testing.T) {
+	g := newGLRig(t, true)
+	id := g.invoice(t, gridLine{"500.00", "4000", "", ""})
+	g.shipLine(t, id, 1, ids.New(), ids.New())
 	out := g.book(t, http.StatusOK, "")
-	if len(out.Items) != 0 || len(out.Failed) != 1 || out.Failed[0].LedgerCode != CodeAllocationMismatch || len(g.fake.Entries()) != 0 || g.parkedCode(t, id) != CodeAllocationMismatch {
-		t.Fatalf("hardware first: %+v with %d entries, parked %q; want BIL-0208 and nothing booked (billed 8,000.00 against 7,200.00 allocated)", out, len(g.fake.Entries()), g.parkedCode(t, id))
+	if len(out.Failed) != 1 || out.Failed[0].LedgerCode != CodeAllocationUnavailable || out.Failed[0].Parked || len(g.fake.Entries()) != 0 || out.Halted != "" {
+		t.Errorf("order invoice before its contract: %+v with %d entries, want it backed off with %s and never booked at its billed amount", out, len(g.fake.Entries()), CodeAllocationUnavailable)
+	}
+}
+
+func TestGLPostings_ConcurrentRunIsRefused(t *testing.T) {
+	g := newGLRig(t, true)
+	g.invoice(t, gridLine{"10.00", "4000", "", ""})
+	books := g.api.glBooks.(*store.Postgres)
+	unlock, ok, err := books.LockGLRun(testkit.Ctx(testkit.TenantID(1)), leID)
+	if err != nil || !ok {
+		t.Fatalf("lock: ok %v err %v", ok, err)
+	}
+	rec := do(g.handler, http.MethodPost, "/v1/billing/gl-postings", "", `{"legalEntityId":"`+leID+`"}`)
+	if p := decodeProblemOf(t, rec); rec.Code != http.StatusConflict || p.Code != CodeGLRunInProgress || len(g.fake.Entries()) != 0 {
+		t.Fatalf("run while another holds the lock: %d %s, want 409 %s and nothing booked", rec.Code, p.Code, CodeGLRunInProgress)
+	}
+	unlock()
+	if out := g.book(t, http.StatusOK, ""); len(out.Items) != 1 {
+		t.Fatalf("after the other run ended %+v, want the invoice booked", out)
 	}
 }
 
@@ -362,8 +450,8 @@ func TestGLPostings_RevrecOutageEndsTheBatchAfterTheFirstFailure(t *testing.T) {
 	}
 	g.allocs.err = errors.New("status 503")
 	out := g.book(t, http.StatusOK, "")
-	if g.allocs.reads != 1 || len(out.Failed) != 1 || !out.More {
-		t.Errorf("outage: %d reads, %d failed, more %v; want one read, one failure and more", g.allocs.reads, len(out.Failed), out.More)
+	if g.allocs.reads != 1 || len(out.Failed) != 1 || out.More || out.Halted != CodeAllocationUnavailable {
+		t.Errorf("outage: %d reads, %d failed, more %v, halted %q; want one read, one failure, halted %s and more kept for a full page", g.allocs.reads, len(out.Failed), out.More, out.Halted, CodeAllocationUnavailable)
 	}
 }
 
@@ -413,13 +501,17 @@ func TestGLPostings_AllocationNotAvailableBacksOffAndNeverBooksTheBilledAmounts(
 	}
 }
 
-func TestGLPostings_RevrecNotConfiguredHoldsDeferredInvoices(t *testing.T) {
+func TestGLPostings_RevrecNotConfiguredHoldsEveryOrderInvoice(t *testing.T) {
 	g := newGLRig(t, true)
 	g.api.allocations = nil
-	id := g.invoice(t, gridLine{"900.00", "4100", "", ""})
-	g.shipLine(t, id, 1, ids.New(), ids.New())
-	if out := g.book(t, http.StatusOK, ""); len(out.Failed) != 1 || out.Failed[0].LedgerCode != CodeAllocationUnavailable || len(g.fake.Entries()) != 0 {
-		t.Errorf("without revrec %+v with %d entries, want the invoice held with %s", out, len(g.fake.Entries()), CodeAllocationUnavailable)
+	deferred := g.invoice(t, gridLine{"900.00", "4100", "", ""})
+	g.shipLine(t, deferred, 1, ids.New(), ids.New())
+	pointInTime := g.invoice(t, gridLine{"400.00", "4000", "", ""})
+	g.shipLine(t, pointInTime, 1, ids.New(), ids.New())
+	free := g.invoice(t, gridLine{"50.00", "4000", "", ""})
+	out := g.book(t, http.StatusOK, "")
+	if len(out.Failed) != 2 || out.Failed[0].LedgerCode != CodeAllocationUnavailable || out.Failed[1].LedgerCode != CodeAllocationUnavailable || len(out.Items) != 1 || out.Items[0].DocumentID != free || out.Halted != "" {
+		t.Errorf("without revrec %+v, want both order invoices held with %s (none booked at its billed amounts) and the free-text invoice booked", out, CodeAllocationUnavailable)
 	}
 }
 
@@ -438,6 +530,34 @@ func TestGLPostings_LostLedgerAnswerNeverBooksADocumentTwice(t *testing.T) {
 	}
 	if b := g.balance(t, "2400"); len(g.fake.Entries()) != 2 || b.Credit.StringFixed(2) != "1250.00" {
 		t.Errorf("%d entries and %s credited on 2400, want 2 and 1250.00", len(g.fake.Entries()), b.Credit)
+	}
+}
+
+func TestGLPostings_LostAnswerHoldsTheBookingSoTheRetryPostsTheSameEntry(t *testing.T) {
+	g := newGLRig(t, true)
+	order, product := ids.New(), ids.New()
+	g.allocate(order, revrec.Obligation{ProductID: product, Allocated: decimal.RequireFromString("1000.00"), Method: revrec.MethodPoint})
+	first := g.invoice(t, gridLine{"1000.00", "4000", "", ""})
+	g.shipLine(t, first, 1, order, product)
+	g.fake.LoseAnswers(errors.New("timeout"))
+	g.book(t, http.StatusBadGateway, "")
+	g.fake.LoseAnswers(nil)
+
+	second := g.invoice(t, gridLine{"1000.00", "4000", "", ""})
+	g.shipLine(t, second, 1, order, product)
+	if out := g.book(t, http.StatusOK, ""); len(out.Items) != 1 || out.Items[0].DocumentID != second {
+		t.Fatalf("while the first is backed off %+v, want the second booked", out)
+	}
+	if got, want := lineAmounts(g.entryFor(t, second)), map[string]string{"Dr 1200": "1000.00", "Cr 2400": "1000.00"}; !sameAmounts(got, want) {
+		t.Errorf("second invoice %v, want %v (the held first invoice consumed the allocation)", got, want)
+	}
+	g.allocs.err = errors.New("status 503")
+	g.clock = g.clock.Add(time.Hour)
+	if out := g.book(t, http.StatusOK, ""); len(out.Items) != 1 || out.Items[0].DocumentID != first {
+		t.Fatalf("retry %+v, want the held first invoice booked without asking revrec again", out)
+	}
+	if b := g.balance(t, "4000"); len(g.fake.Entries()) != 2 || b.Credit.StringFixed(2) != "1000.00" {
+		t.Errorf("%d entries, 4000 credited %s; want 2 entries and the allocation recognized once", len(g.fake.Entries()), b.Credit)
 	}
 }
 
@@ -564,7 +684,7 @@ func TestGLPostings_ProfileLedgerMustBelongToTheEntity(t *testing.T) {
 func TestGLEntry_UnbalancedDocumentIsNamedNotPosted(t *testing.T) {
 	p := store.GLProfile{LegalEntityID: leID, LedgerID: ids.New(), ReceivableAccount: "1200", TaxAccount: "2300", ChargeAccount: "4800", DeferredRevenueAccounts: []string{"4100"}}
 	d := store.GLDocument{ID: ids.New(), Currency: "USD", PostingDate: "2027-03-12", Gross: decimal.NewFromInt(100), Lines: []store.GLLine{{No: 1, Account: "4000", Net: decimal.NewFromInt(90)}}}
-	shares, code := glSplit(p, d, nil)
+	shares, code := glSplit(p, d, nil, nil)
 	if code != "" {
 		t.Fatalf("split code %q", code)
 	}
@@ -572,7 +692,7 @@ func TestGLEntry_UnbalancedDocumentIsNamedNotPosted(t *testing.T) {
 		t.Errorf("code %q, want %s for a gross that is not lines plus charges plus tax", code, CodeJournalImbalance)
 	}
 	d.Lines[0].Net = decimal.NewFromInt(100)
-	shares, _ = glSplit(p, d, nil)
+	shares, _ = glSplit(p, d, nil, nil)
 	if e, code := glEntry(p, d, shares); code != "" || len(e.Lines) != 2 {
 		t.Errorf("balanced document: code %q lines %d, want an entry of two lines", code, len(e.Lines))
 	}
@@ -584,7 +704,7 @@ func TestParseGLProfiles(t *testing.T) {
 		return fmt.Sprintf(`[{"legalEntityId":%q,"ledgerId":%q,"receivableAccount":"1200","taxAccount":"2300","chargeAccount":"4800","deferredRevenueAccounts":[%s]}]`, le, ledger, extra)
 	}
 	got, err := ParseGLProfiles(entry(le, ledger, `"4100"`))
-	if err != nil || got[le].LedgerID != ledger || got[le].TaxAccount != "2300" || got[le].DeferredRevenueAccounts[0] != "4100" {
+	if err != nil || got[le].LedgerID != ledger || got[le].TaxAccount != "2300" || got[le].DeferredRevenueAccounts[0] != "4100" || got[le].ContractAssetAccount != store.DefaultContractAssetGL {
 		t.Fatalf("good profile %+v, err %v", got, err)
 	}
 	twice := strings.TrimSuffix(entry(le, ledger, `"4100"`), "]") + "," + strings.TrimPrefix(entry(le, ids.New(), `"4100"`), "[")
@@ -596,6 +716,9 @@ func TestParseGLProfiles(t *testing.T) {
 		"no revenue":        entry(le, ledger, ``),
 		"bad account text":  entry(le, ledger, `"4 100"`),
 		"no tax account":    `[{"legalEntityId":"` + le + `","ledgerId":"` + ledger + `","receivableAccount":"1200","chargeAccount":"4800","deferredRevenueAccounts":["4100"]}]`,
+		"asset is 2400":     entry(le, ledger, `"4100"],"contractAssetAccount":"2400","x":[`),
+		"asset is the AR":   entry(le, ledger, `"4100"],"contractAssetAccount":"1200","x":[`),
+		"bad asset text":    entry(le, ledger, `"4100"],"contractAssetAccount":"12 50","x":[`),
 	} {
 		if _, err := ParseGLProfiles(raw); err == nil {
 			t.Errorf("%s accepted, want an error", name)

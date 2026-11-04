@@ -94,6 +94,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return fmt.Errorf("revrec client: %w", err)
 	}
+	if ledger != nil && allocations == nil {
+		// Every profile names deferred revenue accounts and every order line books its revrec allocation: without revrec the
+		// invoice journal would hold every order invoice (BIL-0207), so the service refuses to start half configured.
+		return fmt.Errorf("REVREC_URL is required when LEDGER_URL is set: order invoices book the revrec allocation")
+	}
 	if allocations != nil {
 		a.WithAllocations(allocations)
 	}
