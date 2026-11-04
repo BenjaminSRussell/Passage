@@ -2,7 +2,7 @@
 -- (FR-24.7). quantity stays the catch-weight count (cases); LineNet is priced
 -- per weight (nominal × cases until an actual weight is recorded). sales_order_line
 -- is a live table, so this file only changes the catalog: nullable columns and
--- a NOT VALID check. 0030 validates the check.
+-- a NOT VALID check. 0031 validates the check.
 SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE sales_order_line ADD COLUMN IF NOT EXISTS cw_nominal numeric(20,6);

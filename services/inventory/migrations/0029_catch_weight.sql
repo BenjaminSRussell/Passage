@@ -5,7 +5,7 @@
 --
 -- inventory_transaction is append-only; the trigger is replaced so cw_qty is
 -- part of the immutable identity. The check is NOT VALID so this file only
--- changes the catalog. 0029 validates it.
+-- changes the catalog. 0030 validates it.
 SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE inventory_transaction ADD COLUMN IF NOT EXISTS cw_qty integer;
