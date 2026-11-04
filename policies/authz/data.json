@@ -2786,7 +2786,8 @@
       {"resource": "/v1/scheduling/runs/*/kpis", "methods": ["GET"]},
       {"resource": "/v1/scheduling/order-imports", "methods": ["GET"]},
       {"resource": "/v1/scheduling/order-imports/*", "methods": ["GET"]},
-      {"resource": "/v1/scheduling/operations/*", "methods": ["GET"]}
+      {"resource": "/v1/scheduling/operations/*", "methods": ["GET"]},
+      {"resource": "/v1/scheduling/parameters", "methods": ["GET"]}
     ]},
     "scheduling.run": {"permissions": [
       {"resource": "/v1/scheduling/runs", "methods": ["POST"]},
@@ -2807,7 +2808,8 @@
       {"resource": "/v1/scheduling/cleanout-rules", "methods": ["POST"]},
       {"resource": "/v1/scheduling/networks", "methods": ["POST"]},
       {"resource": "/v1/scheduling/setup-matrices", "methods": ["POST"]},
-      {"resource": "/v1/scheduling/networks/*", "methods": ["PATCH"]}
+      {"resource": "/v1/scheduling/networks/*", "methods": ["PATCH"]},
+      {"resource": "/v1/scheduling/parameters", "methods": ["PATCH"]}
     ]},
     "shopfloor.check.override": {"permissions": [{"resource": "/v1/shopfloor/andon/*:clear", "methods": ["POST"]}]},
     "shopfloor.edge.configure": {"permissions": [
