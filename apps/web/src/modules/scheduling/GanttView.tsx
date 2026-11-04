@@ -24,6 +24,8 @@ export interface GanttViewProps {
   /** jobId → message; those bars get a danger outline and the message as tooltip (FR-23.7). */
   violations?: Record<string, string>;
   onSelect?(bar: GanttBar): void;
+  /** Drag grid in minutes; defaults to 5 (the scheduling parameter dragSnapMinutes). */
+  snapMinutes?: number;
   /** Called with the snapped new start after a horizontal drag. */
   onDrop?(bar: GanttBar, newStart: string): void;
 }
@@ -52,7 +54,7 @@ function dayLabel(ms: number): string {
  * pointer surface only: the page's jobs table offers the same actions from the
  * keyboard.
  */
-export function GanttView({ bars, resources, from, days, selectedJobId, violations = {}, onSelect, onDrop }: GanttViewProps) {
+export function GanttView({ bars, resources, from, days, selectedJobId, violations = {}, snapMinutes = SNAP_MINUTES, onSelect, onDrop }: GanttViewProps) {
   const [drag, setDrag] = useState<Drag | null>(null);
   const moved = useRef(false);
   const start = Date.parse(from);
@@ -85,11 +87,11 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
     if (!current) return;
     const dx = event.clientX - current.originX;
     const minutes = current.trackPx > 0 ? (dx / current.trackPx) * windowMinutes : 0;
-    if (!moved.current || Math.abs(minutes) < SNAP_MINUTES) {
+    if (!moved.current || Math.abs(minutes) < snapMinutes) {
       onSelect?.(current.bar);
       return;
     }
-    onDrop?.(current.bar, draggedStart(current.bar, dx, current.trackPx, windowMinutes));
+    onDrop?.(current.bar, draggedStart(current.bar, dx, current.trackPx, windowMinutes, snapMinutes));
   }
 
   return (

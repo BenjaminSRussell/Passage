@@ -4,6 +4,7 @@ import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, For
 import {
   describeProblem,
   fetchGantt,
+  getParameters,
   firmJob,
   listResources,
   moveJob,
@@ -52,6 +53,10 @@ export function WorkspacePage() {
     const [resources, bars] = await Promise.all([listResources(signal), fetchGantt(from, to, [], signal)]);
     return { resources, bars };
   }, `${from}|${days}`);
+
+  // The drag grid is a scheduling parameter; the board works on the 5-minute default while it loads or when it cannot be read.
+  const parameters = useLoad((signal) => getParameters(signal), "parameters");
+  const limits = { orders: parameters.data?.propagationOrders ?? 500, levels: parameters.data?.propagationLevels ?? 5 };
 
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -238,7 +243,7 @@ export function WorkspacePage() {
           <label htmlFor="gantt-propagate">Move pegged orders too</label>
         </span>
         <span id="gantt-propagate-hint" className={styles.note}>
-          Orders pegged to the moved order are pushed behind it, up to 500 orders or 5 levels.
+          {`Orders pegged to the moved order are pushed behind it, up to ${limits.orders} orders or ${limits.levels} levels (scheduling parameters).`}
         </span>
       </div>
       <Alert tone="success" live="status">
@@ -281,6 +286,7 @@ export function WorkspacePage() {
             days={days}
             selectedJobId={proposal?.job.jobId}
             violations={violations}
+            snapMinutes={parameters.data?.dragSnapMinutes}
             onSelect={(bar) => select(bar)}
             onDrop={onDrop}
           />
@@ -365,7 +371,7 @@ export function WorkspacePage() {
                     </p>
                     {preview.response.truncated ? (
                       <Alert tone="warning" title="Not every pegged order was re-planned">
-                        Propagation stopped at 500 orders or 5 pegging levels (SCHED-0007). Run the site schedule to re-plan the rest.
+                        {`Propagation stopped at ${limits.orders} orders or ${limits.levels} pegging levels (SCHED-0007). Run the site schedule to re-plan the rest.`}
                       </Alert>
                     ) : null}
                     {preview.proposal.propagate ? (

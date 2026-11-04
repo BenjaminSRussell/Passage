@@ -278,6 +278,7 @@ type Store interface {
 	PegStore
 	OverrideStore
 	ResourceUpdateStore
+	ParametersStore
 	SetupUpdateStore
 	CampaignStore
 	OrderImportStore
@@ -518,6 +519,7 @@ func (s *Postgres) MoveJob(ctx context.Context, req MoveRequest, idem Idem) (Mov
 			return err
 		}
 		var walk []string
+		var limit domain.PropagationLimit
 		var pegs []domain.Peg
 		var dependents []domain.Operation
 		if req.Propagate {
@@ -525,7 +527,12 @@ func (s *Postgres) MoveJob(ctx context.Context, req MoveRequest, idem Idem) (Mov
 			if err != nil {
 				return err
 			}
-			walk, out.Truncated = domain.DependentsOf(orderID, all, domain.PropagationLimit{})
+			params, err := loadParameters(ctx, tx, false)
+			if err != nil {
+				return err
+			}
+			limit = params.Domain().Limit()
+			walk, out.Truncated = domain.DependentsOf(orderID, all, limit)
 			pegs = pegsAmong(all, append([]string{orderID}, walk...))
 			if len(walk) > 0 {
 				if dependents, err = loadOperations(ctx, tx, "o.order_id = any($1::uuid[])", true, walk); err != nil {
@@ -601,7 +608,7 @@ func (s *Postgres) MoveJob(ctx context.Context, req MoveRequest, idem Idem) (Mov
 			TotalLatenessMinutes: domain.TotalLateness(plan.Changes), Messages: []string{}}
 		if out.Truncated {
 			run.Messages = append(run.Messages, fmt.Sprintf("%s: propagation truncated after %d orders / %d levels; run the site schedule",
-				domain.CodePropagationTruncated, len(walk), domain.DefaultPropagationLevels))
+				domain.CodePropagationTruncated, len(walk), limit.Levels))
 		}
 		if err := insertRun(ctx, tx, &run, Idem{}); err != nil {
 			return err

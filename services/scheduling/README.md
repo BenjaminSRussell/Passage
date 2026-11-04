@@ -146,7 +146,8 @@ Slice 4:
   resource's time zone, so a DST day keeps its true length; `COUNT` counts
   from the first date, not from the horizon.
 - **Propagation** (FR-23.8, BR-23.10): a move with `propagate` walks the pegs
-  from the moved order breadth-first, at most 500 orders and 5 levels; an
+  from the moved order breadth-first, at most the propagation limits of the
+  scheduling parameters (500 orders and 5 levels until changed); an
   order cut off by a limit sets `truncated` and the move run records
   SCHED-0007. Each reached order whose first operation would start before one
   of its parents ends is pushed forward to the latest parent end, with its
@@ -299,6 +300,8 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | POST | `/v1/scheduling/campaigns/{id}:cancel` (Idempotency-Key, If-Match, optional `reason`) | `scheduling.campaign.write` |
 | POST | `/v1/scheduling/campaigns/{id}:allocate-cost` (computes only; nothing is stored) | `scheduling.campaign.write` |
 | GET | `/v1/scheduling/campaign-proposals?from&windowDays&resourceId` (computes only; nothing is stored) | `scheduling.read` |
+| GET | `/v1/scheduling/parameters` (ETag; built-in defaults at version 1 until the first change) | `scheduling.read` |
+| PATCH | `/v1/scheduling/parameters` (Idempotency-Key, If-Match; 412 `SCHED-0140` when stale) | `scheduling.setup.write` |
 
 The browser reaches these as `/api/v1/scheduling/...` through the web BFF.
 `api/openapi.yaml` is checked against the router by `internal/api/openapi_test.go`.
@@ -315,6 +318,7 @@ The browser reaches these as `/api/v1/scheduling/...` through the web BFF.
 | `dev.passage.scheduling.campaign.completed.v1` | a started campaign is completed |
 | `dev.passage.scheduling.campaign.cancelled.v1` | a campaign is cancelled; carries the released order ids and whether the cleanout counter was given back |
 | `dev.passage.scheduling.orderimport.recorded.v1` | a production order event was applied: the operations created, updated or unchanged, the ones left out and why, removed and firmed-kept operation numbers, `replanRequired` |
+| `dev.passage.scheduling.parameters.updated.v1` | the tenant's scheduling parameters (run defaults, drag snap, propagation limits) changed |
 
 The PRD names the last one `passage.scheduling.order.dates-changed.v1`; the
 platform naming rule allows no hyphen in the verb, so the entity is
@@ -331,7 +335,7 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0002` | 422 | Move start is outside open capacity, would split a changeover across closed time (BR-23.3), or no capacity is left in the horizon |
 | `SCHED-0004` | 422 | Target resource is not a candidate of the operation |
 | `SCHED-0005` | 422 / run message | A move needs a secondary resource that is booked or closed for the job's segments (BR-23.4); in a run the primary slot is skipped instead, and an operation with no free slot in the horizon is unplaced with this code |
-| `SCHED-0007` | move run message / `truncated` | Propagation stopped at 500 orders or 5 pegging levels; run the site schedule |
+| `SCHED-0007` | move run message / `truncated` | Propagation stopped at the parameters' order or pegging-level limit; run the site schedule |
 | `SCHED-0008` | 422 | A firmed job cannot be moved, or the move would push a firmed successor or a firmed job of a pegged order |
 | `SCHED-0009` | 422 / run message | A move puts a network step on resources without an edge; in a run, the order is unplaced as `NETWORK_INFEASIBLE` |
 | `SCHED-0010` | 422 / run warning | A move breaks a network step's transfer or maximum wait; in a run, a frozen predecessor left the successor waiting too long |
@@ -366,6 +370,7 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0123` | 409 | Campaign start: the resource's cleanout counter moved after the campaign was sequenced; sequence it again |
 | `SCHED-0124` | 412 | If-Match is stale: the resource changed since it was read |
 | `SCHED-0125` | 422 | Complete needs a started campaign |
+| `SCHED-0140` | 412 | If-Match is stale: the scheduling parameters changed since they were read |
 | `precondition_required` | 428 | A campaign command was sent without If-Match |
 
 A dry-run move never fails for a constraint: it returns `feasible: false` and

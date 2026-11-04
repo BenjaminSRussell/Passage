@@ -31,11 +31,13 @@ var (
 	OperationUpdated = events.Type(Context, "operation", "updated", 1)
 	OperationDeleted = events.Type(Context, "operation", "deleted", 1)
 	OrderUnscheduled = events.Type(Context, "order", "unscheduled", 1)
+
+	ParametersUpdated = events.Type(Context, "parameters", "updated", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CampaignCompleted, CampaignCancelled, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated, CapacityBlockUpdated, NetworkUpdated, OrderImportRecorded, OperationUpdated, OperationDeleted, OrderUnscheduled}
+	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CampaignCompleted, CampaignCancelled, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated, CapacityBlockUpdated, NetworkUpdated, OrderImportRecorded, OperationUpdated, OperationDeleted, OrderUnscheduled, ParametersUpdated}
 }
 
 type RunCompletedData struct {
@@ -263,4 +265,16 @@ type OrderUnscheduledData struct {
 	OrderID    string `json:"orderId"`
 	Operations []int  `json:"operations"`
 	KeptFirmed []int  `json:"keptFirmed"`
+}
+
+// ParametersUpdatedData announces changed scheduling parameters: runs and
+// moves after the event take the new defaults and propagation limits.
+type ParametersUpdatedData struct {
+	DefaultMode       string `json:"defaultMode"`
+	DefaultDirection  string `json:"defaultDirection"`
+	DefaultFinite     bool   `json:"defaultFinite"`
+	DragSnapMinutes   int    `json:"dragSnapMinutes"`
+	PropagationOrders int    `json:"propagationOrders"`
+	PropagationLevels int    `json:"propagationLevels"`
+	Version           int    `json:"version"`
 }

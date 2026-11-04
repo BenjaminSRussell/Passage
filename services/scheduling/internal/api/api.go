@@ -236,6 +236,10 @@ func (a *API) Register(r chi.Router) {
 
 	// Slice 8: campaign proposals from scheduled orders sharing a key (FR-23.14).
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/campaign-proposals", a.campaignProposals)
+
+	// Slice 24: scheduling parameters, the defaults of runs and moves (PRD 4.23.13).
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/parameters", a.getParameters)
+	r.With(authz.RequireDuty(dutySetup)).Patch("/v1/scheduling/parameters", a.updateParameters)
 }
 
 // Metrics serves Prometheus text on the admin port.
@@ -547,11 +551,7 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 	if req.Scope != "selection" && req.Scope != "site" {
 		fields["scope"] = "must be selection or site"
 	}
-	mode := req.Mode
-	if mode == "" {
-		mode = "jobs"
-	}
-	if mode != "jobs" && mode != "operations" {
+	if req.Mode != "" && req.Mode != "jobs" && req.Mode != "operations" {
 		fields["mode"] = "must be jobs or operations"
 	}
 	if req.Direction != "" && req.Direction != "forward" && req.Direction != "backward" {
@@ -584,17 +584,19 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 		invalid(w, r, fields)
 		return
 	}
-	finite := true
-	if req.Finite != nil {
-		finite = *req.Finite
+	def, err := a.resolveRunDefaults(r, req.Mode, req.Direction, req.Finite)
+	if err != nil {
+		slog.Error("read scheduling parameters failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
 	}
 	start := time.Now().UTC().Truncate(time.Minute)
 	if req.Start != nil {
 		start = req.Start.UTC()
 	}
 	a.runs.Add(1)
-	run, created, err := a.store.RunSchedule(r.Context(), store.RunRequest{Scope: req.Scope, Mode: mode, Finite: finite,
-		OperationIDs: req.OperationIDs, Start: start, HorizonDays: horizon, Backward: req.Direction == "backward"}, idem)
+	run, created, err := a.store.RunSchedule(r.Context(), store.RunRequest{Scope: req.Scope, Mode: def.Mode, Finite: def.Finite,
+		OperationIDs: req.OperationIDs, Start: start, HorizonDays: horizon, Backward: def.Backward}, idem)
 	if err != nil {
 		slog.Error("schedule run failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -655,14 +657,21 @@ func (a *API) scheduleOrder(w http.ResponseWriter, r *http.Request) {
 		invalid(w, r, fields)
 		return
 	}
-	finite := req.Finite == nil || *req.Finite
+	// The per-order command always runs in jobs mode; direction and finite
+	// default from the parameters.
+	def, err := a.resolveRunDefaults(r, "jobs", req.Direction, req.Finite)
+	if err != nil {
+		slog.Error("read scheduling parameters failed", "err", err, "orderId", orderID, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
 	start := time.Now().UTC().Truncate(time.Minute)
 	if req.Start != nil {
 		start = req.Start.UTC()
 	}
 	a.runs.Add(1)
-	run, created, err := a.store.RunSchedule(r.Context(), store.RunRequest{Scope: "order", OrderID: orderID, Mode: "jobs", Finite: finite,
-		Start: start, HorizonDays: horizon, Backward: req.Direction == "backward"}, idem)
+	run, created, err := a.store.RunSchedule(r.Context(), store.RunRequest{Scope: "order", OrderID: orderID, Mode: "jobs", Finite: def.Finite,
+		Start: start, HorizonDays: horizon, Backward: def.Backward}, idem)
 	if err != nil {
 		slog.Error("order schedule run failed", "err", err, "orderId", orderID, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)

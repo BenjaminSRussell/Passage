@@ -20,6 +20,7 @@ describe("scheduling module", () => {
         "/scheduling/runs",
         "/scheduling/runs/new",
         "/scheduling/runs/:id",
+        "/scheduling/parameters",
         "/scheduling/resources",
         "/scheduling/resources/new",
         "/scheduling/resources/:id",

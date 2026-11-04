@@ -604,6 +604,39 @@ The OpenAPI and AsyncAPI specs have no FAIL lines on the doc gates.
 | `policies/authz/data.json`: resource row `/v1/scheduling/orders/*:unschedule` (POST) under `scheduling.schedule.write` | handoff - main session (authz seed) | Existing duty; only the route row is new. Until seeded the "Take the order off the schedule" button gets 403. The duty is Maintain schedule (like `:move`, `:firm` and `:reimport`, which also take jobs off the schedule), not Run scheduling of the per-order `:schedule`: placing an order is a run, removing its placements is schedule maintenance. Product decision open for Ben. |
 | Event `order.unscheduled` / `operation.updated` consumers (production dates cleared when an order is taken off the schedule) | handoff - wave 21 | Production keeps the dates of the last `job.scheduled` / `orderdates.changed` until it reads these events; nothing in this wave clears them. The outbox aggregate types are the new `operation` and `order`; deploy/kafka has no scheduling outbox connector yet, so the topics `passage.scheduling.operation` and `passage.scheduling.order` follow whenever that connector is added (deploy owner). |
 
+Slice 24 builds scheduling parameters (PRD 4.23.13 site parameters, tenant-wide):
+`GET /v1/scheduling/parameters` (duty `scheduling.read`, ETag with the version)
+and `PATCH /v1/scheduling/parameters` (duty `scheduling.setup.write`, Maintain
+scheduling setup, which PRD 4.23.17 gives the parameters; Idempotency-Key,
+If-Match, stale 412 SCHED-0140). The row holds the default run
+mode (jobs or operations), the default direction (forward or backward), the
+default finite flag, the Gantt drag snap (1 to 60 minutes) and the BR-23.10
+propagation limits (1 to 5000 orders, 1 to 20 levels; the PRD 4.23.13 allowed
+values). A tenant that never changed them reads the built-in defaults at
+version 1 (jobs, forward, finite, 5 minutes, 500 orders, 5 levels, so nothing
+behaves differently until a planner saves a change; the PRD defaults of
+backward and infinite are not used, see the decision row below); the first change stores the row and moves the version
+to 2. `POST /runs` and `POST /orders/{orderId}:schedule` take mode, direction
+and finite from the parameters when the request leaves them out (an explicit
+value wins; a failed read of the parameters fails the run instead of using other
+defaults); a propagated `:move` walks the pegs to the stored limits and its
+SCHED-0007 message names them. Event `parameters.updated` through the outbox
+(AsyncAPI documents it). Migration `0018_scheduling_parameters.sql` adds the
+table with tenant RLS and `SELECT, INSERT, UPDATE` for `passage_app`. Web: a
+Parameters page (`/scheduling/parameters`, loading, error with retry, stale
+version message with a reload, field errors, the missing-duty hint), the new run
+form starts from the defaults (a planner's own choices win), and the Gantt drags
+on the stored snap and names the stored propagation limits. Not built: per-site parameters, the resource selection rule,
+safety and queue times, a horizon parameter, and clearing back to the built-in
+defaults (set the values back by hand). The OpenAPI and AsyncAPI specs have no
+FAIL lines on the doc gates.
+
+| Item | Status | Reason |
+|---|---|---|
+| `policies/authz/data.json`: resource row `/v1/scheduling/parameters` (GET) under `scheduling.read` and resource row `/v1/scheduling/parameters` (PATCH) under `scheduling.setup.write` | handoff - main session (authz seed) | Existing duties; only the route rows are new (no new duty, nothing for #313). Until seeded the gateway answers 403 for the read and the save, so the Parameters page shows its error state and the Gantt and the new run form keep the built-in defaults. The nav entry uses `scheduling.read`. |
+| Built-in defaults forward and finite instead of the PRD 4.23.13 defaults backward and infinite | decision for Ben | Runs before this slice defaulted to forward and finite; taking the PRD defaults would change every run that leaves direction or finite out. A tenant can set backward or infinite on the Parameters page. |
+| Drag snap stored per tenant, not per user (PRD 4.23.13 scope `user`) | decision for Ben | There is no per-user preference store in the service; the per-user setting stays in the Gantt deliverable row. |
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
@@ -619,7 +652,7 @@ The OpenAPI and AsyncAPI specs have no FAIL lines on the doc gates.
 | 1 | Changeover cost and the matrix's cleaning operation set on each scheduled changeover | built (slice 7) | `Placement.ChangeoverCost` / `CleaningSetID`, stored on `scheduled_job` (first segment), on the Gantt bar and in `job.scheduled`. A route-setup fallback (SCHED-0012) has no matrix price and carries none. The cleaning set is a reference only: generating the cleaning operations it names is part of the cleanout orders handoff (deliverable 7). |
 | 1 | Reported hours and `finished` jobs frozen with remaining minutes (BR-23.6) | handoff — wave 25 (shop-floor feedback) | Only firmed jobs are frozen; there is no reported-hours input yet. |
 | 2 | Gantt with drag-reschedule, dry-run preview, constraint warnings and firm | built | `apps/web/src/modules/scheduling`. Bars are DOM buttons; a keyboard move form gives the same preview and commit. |
-| 2 | Canvas rendering above 1,000 bars, row virtualization, zoom, Shift+drag of a whole order, undo stack of 20 moves, user drag-snap setting | later slice of PSG-23 | The page fetches a 1-14 day window and snaps to 5 minutes. |
+| 2 | Canvas rendering above 1,000 bars, row virtualization, zoom, Shift+drag of a whole order, undo stack of 20 moves, per-user drag-snap setting | later slice of PSG-23 | The page fetches a 1-14 day window. The drag snap is a tenant parameter (slice 24, default 5 minutes), not a per-user setting. |
 | 2 | *Override scheduling constraints* duty to commit a move with violations | later slice of PSG-23 | Every violation blocks the commit. |
 | 3 | Capacity load by resource and ISO week with bottleneck flag (FR-23.9) | built | `GET /v1/scheduling/capacity-load`; weeks start Monday 00:00 UTC. |
 | 3 | Load by day and drill-down to jobs | built (slice 16) | `period=day` on `GET /capacity-load` and `GET /capacity-load/jobs`. Days are local days of the resource's calendar time zone. |
@@ -674,7 +707,8 @@ The OpenAPI and AsyncAPI specs have no FAIL lines on the doc gates.
 | Run comparison and network feasibility reports (4.23.14) | later slice of PSG-23 | Comparison needs per-run snapshots of the jobs, which a run replaces; not stored. |
 | Dispatch list, Gantt print, campaign sheet, cleanout record documents (4.23.15) | later slice of PSG-23 | No document templates yet. |
 | Feature flags `scheduling.cp-sat`, `scheduling.propagate-dependents`; config `SCHED_OPT_TIME_LIMIT_S` | later slice of PSG-23 | No flag client; CP-SAT is chosen per campaign with its sequence rule and switched off by leaving `SCHED_OPT_URL` empty, propagation is chosen per move with `propagate`, and the campaign solver limit is fixed at 20 s. |
-| Site parameters (default method and direction, resource selection rule, safety/queue time, drag snap, propagation limit) | later slice of PSG-23 | Defaults are fixed: jobs mode, forward, least finish, propagation 500 orders / 5 levels (`domain.DefaultPropagation*`). |
+| Site parameters (default method and direction, drag snap, propagation limit) | built (slice 24) as tenant-wide parameters | `GET/PATCH /v1/scheduling/parameters`; see the slice 24 section. |
+| Site parameters per site; resource selection rule, safety/queue time, horizon days and the default start | later slice of PSG-23 (per-site parameters are a handoff to wave 9, sites) | The parameters are one row per tenant. Selection stays least finish, no safety or queue time is added, and the horizon is `SCHED_HORIZON_DAYS`. |
 | Extension points `scheduling.constraint`, `scheduling.objective` | later slice of PSG-23 | |
 | `ScheduledJob.overlap_qty`; `ScheduleRun.time_limit_s`, `started_at`, `objective_value` | later slice of PSG-23 | Columns arrive with the features that fill them. |
 | Rollback by re-pointing to a previous run | later slice of PSG-23 | A run replaces the jobs it schedules; earlier runs stay as history rows only. |

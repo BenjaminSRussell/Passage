@@ -1,9 +1,10 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select, Textarea } from "../../shell/ui";
-import { describeProblem, newKey, startRun, type NewRun, type Problem } from "./api/client";
+import { describeProblem, getParameters, newKey, startRun, type NewRun, type Problem } from "./api/client";
 import { fromUtcInput, UUID } from "./format";
 import styles from "./pages.module.css";
+import { useLoad } from "./useLoad";
 
 interface Values {
   scope: "site" | "selection";
@@ -52,8 +53,23 @@ export function NewRunPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const touched = useRef(false);
+  const parameters = useLoad((signal) => getParameters(signal), "parameters");
+
+  // The scheduling parameters set the starting mode, direction and finite
+  // choice; a planner who already changed the form keeps their choices, and a
+  // failed read leaves the built-in defaults (the service applies the same
+  // parameters when a field is left out).
+  const loaded = parameters.data;
+  useEffect(() => {
+    if (!loaded || touched.current) return;
+    setValues((v) => ({ ...v, mode: loaded.defaultMode, direction: loaded.defaultDirection, finite: loaded.defaultFinite }));
+    // The body changed, so a later submit is a new request.
+    key.current = newKey();
+  }, [loaded]);
 
   function update(patch: Partial<Values>) {
+    touched.current = true;
     setValues({ ...values, ...patch });
     key.current = newKey();
   }

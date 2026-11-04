@@ -230,7 +230,7 @@ export interface MoveResponse {
   orderEnd?: string;
   /** Pegged orders that move too, parents first (propagate only). */
   dependents?: DependentChange[];
-  /** The dependent walk stopped at 500 orders or 5 levels (SCHED-0007, BR-23.10). */
+  /** The dependent walk stopped at the propagation limit of the scheduling parameters (SCHED-0007, BR-23.10). */
   truncated?: boolean;
   run?: Run;
 }
@@ -1134,4 +1134,35 @@ export async function deleteCapacityOverride(resourceId: string, id: string): Pr
   if (!res.ok) {
     throw await toError(res);
   }
+}
+
+/** Tenant scheduling parameters (PRD 4.23.13): the defaults of runs and moves. */
+export interface SchedulingParameters {
+  defaultMode: "jobs" | "operations";
+  defaultDirection: "forward" | "backward";
+  defaultFinite: boolean;
+  /** Grid a Gantt drag snaps to, in minutes (1 to 60). */
+  dragSnapMinutes: number;
+  /** Most dependent orders a propagated move re-plans (BR-23.10). */
+  propagationOrders: number;
+  /** Deepest peg level a propagated move reaches (BR-23.10). */
+  propagationLevels: number;
+  /** 1 until the first change; the If-Match of a change. */
+  version: number;
+  updatedAt: string | null;
+}
+
+export type SchedulingParametersPatch = Partial<Omit<SchedulingParameters, "version" | "updatedAt">>;
+
+export function getParameters(signal?: AbortSignal): Promise<SchedulingParameters> {
+  return send<SchedulingParameters>("/parameters", {}, signal);
+}
+
+/** Changes the parameters under the version the planner saw (If-Match). */
+export function updateParameters(version: number, patch: SchedulingParametersPatch, key: string = newKey()): Promise<SchedulingParameters> {
+  return send<SchedulingParameters>("/parameters", {
+    method: "PATCH",
+    headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
+    body: JSON.stringify(patch),
+  });
 }

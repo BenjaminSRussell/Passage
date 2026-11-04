@@ -73,6 +73,11 @@ channels:
     messages:
       orderUnscheduled:
         $ref: '#/components/messages/OrderUnscheduled'
+  parameters:
+    address: passage.scheduling.parameters
+    messages:
+      parametersUpdated:
+        $ref: '#/components/messages/ParametersUpdated'
 operations:
   publishRunCompleted:
     action: send
@@ -164,8 +169,23 @@ operations:
     messages:
       - $ref: '#/channels/order/messages/orderUnscheduled'
     summary: A planner took an order off the schedule
+  publishParametersUpdated:
+    action: send
+    channel: { $ref: '#/channels/parameters' }
+    messages:
+      - $ref: '#/channels/parameters/messages/parametersUpdated'
+    summary: The tenant's scheduling parameters changed
 components:
   messages:
+    ParametersUpdated:
+      title: Scheduling parameters updated
+      summary: >-
+        The tenant's scheduling parameters (default mode, direction and finite, drag snap, propagation limits)
+        changed; runs and moves after the event use the new values.
+      name: dev.passage.scheduling.parameters.updated.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/ParametersUpdatedData'
     OperationUpdated:
       title: Operation updated
       summary: >-
@@ -530,3 +550,14 @@ components:
           type: array
           description: Operation numbers a firmed job holds; they stay where they are.
           items: { type: integer }
+    ParametersUpdatedData:
+      type: object
+      required: [defaultMode, defaultDirection, defaultFinite, dragSnapMinutes, propagationOrders, propagationLevels, version]
+      properties:
+        defaultMode: { type: string, enum: [jobs, operations] }
+        defaultDirection: { type: string, enum: [forward, backward] }
+        defaultFinite: { type: boolean }
+        dragSnapMinutes: { type: integer }
+        propagationOrders: { type: integer }
+        propagationLevels: { type: integer }
+        version: { type: integer }

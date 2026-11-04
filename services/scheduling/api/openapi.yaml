@@ -548,8 +548,9 @@ paths:
         never split across closed time (BR-23.3): a start that would split it
         is SCHED-0002. With propagate, the orders pegged to the moved order
         (order-pegs) that would start before a parent ends are pushed forward
-        with their successors, parents first, up to 500 orders or 5 pegging
-        levels (BR-23.10); truncated reports a walk cut at a limit
+        with their successors, parents first, up to the propagation limits of
+        the scheduling parameters (BR-23.10; 500 orders or 5 pegging levels
+        until changed); truncated reports a walk cut at a limit
         (SCHED-0007), and a conflict in any dependent refuses the whole move.
         A move also needs each secondary resource of the operation (and of every
         job it pushes) free for the same segments, otherwise SCHED-0005.
@@ -1455,6 +1456,60 @@ paths:
       responses:
         '200': { description: Ready }
         '503': { description: Database unreachable }
+  /v1/scheduling/parameters:
+    get:
+      operationId: getParameters
+      summary: The tenant's scheduling parameters (PRD 4.23.13)
+      description: >
+        The defaults a run takes when its request leaves mode, direction or
+        finite out, the Gantt drag snap, and the BR-23.10 limits of a propagated
+        move. A tenant that never changed them gets the built-in defaults at
+        version 1 with a null updatedAt.
+      x-passage-duty: scheduling.read
+      responses:
+        '200':
+          description: 'The parameters, with ETag "<version>" for the If-Match of a change'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Parameters' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateParameters
+      summary: Change the scheduling parameters
+      description: >
+        Send at least one field; fields left out stay as they are. The change
+        needs the version in If-Match (the ETag of a read) so a stale screen
+        cannot overwrite another planner. It applies to runs and moves started
+        after it: jobs already placed are not re-planned. The first change
+        stores the row, so a tenant on the built-in defaults sends If-Match "1".
+        The duty is Maintain scheduling setup (PRD 4.23.17). Publishes
+        parameters.updated.
+      x-passage-duty: scheduling.setup.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: true
+          description: The parameters version from their ETag, for example "1". A stale version gets 412 SCHED-0140.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ParametersPatch' }
+      responses:
+        '200':
+          description: 'The changed parameters with ETag "<version>". A replay of the same Idempotency-Key returns the first answer with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Parameters' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
 components:
   parameters:
     Id:
@@ -1485,6 +1540,28 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Campaign' }
   schemas:
+    Parameters:
+      type: object
+      required: [defaultMode, defaultDirection, defaultFinite, dragSnapMinutes, propagationOrders, propagationLevels, version, updatedAt]
+      properties:
+        defaultMode: { type: string, enum: [jobs, operations] }
+        defaultDirection: { type: string, enum: [forward, backward] }
+        defaultFinite: { type: boolean }
+        dragSnapMinutes: { type: integer, minimum: 1, maximum: 60, description: Grid a Gantt drag snaps to, in minutes. }
+        propagationOrders: { type: integer, minimum: 1, maximum: 5000, description: 'Most dependent orders a propagated move re-plans (BR-23.10)' }
+        propagationLevels: { type: integer, minimum: 1, maximum: 20, description: 'Deepest peg level a propagated move reaches (BR-23.10)' }
+        version: { type: integer, minimum: 1 }
+        updatedAt: { type: [string, 'null'], format: date-time }
+    ParametersPatch:
+      type: object
+      minProperties: 1
+      properties:
+        defaultMode: { type: string, enum: [jobs, operations] }
+        defaultDirection: { type: string, enum: [forward, backward] }
+        defaultFinite: { type: boolean }
+        dragSnapMinutes: { type: integer, minimum: 1, maximum: 60 }
+        propagationOrders: { type: integer, minimum: 1, maximum: 5000 }
+        propagationLevels: { type: integer, minimum: 1, maximum: 20 }
     Problem:
       type: object
       required: [type, title, status, code]
@@ -1697,9 +1774,9 @@ components:
       required: [scope]
       properties:
         scope: { type: string, enum: [site, selection], description: 'site (every operation) or selection (operationIds)' }
-        mode: { type: string, enum: [operations, jobs], default: jobs, description: Recorded on the run; both modes place at minute granularity in this slice. }
-        finite: { type: boolean, default: true }
-        direction: { type: string, enum: [forward, backward], default: forward, description: 'backward schedules from each order''s due date (FR-23.2, BR-23.2)' }
+        mode: { type: string, enum: [operations, jobs], description: 'Recorded on the run; both modes place at minute granularity in this slice. Left out, it takes defaultMode of the scheduling parameters (jobs until changed).' }
+        finite: { type: boolean, description: 'Left out, it takes defaultFinite of the scheduling parameters (true until changed).' }
+        direction: { type: string, enum: [forward, backward], description: 'backward schedules from each order''s due date (FR-23.2, BR-23.2). Left out, it takes defaultDirection of the scheduling parameters (forward until changed).' }
         operationIds:
           type: array
           maxItems: 5000
@@ -1820,7 +1897,7 @@ components:
               oldEnd: { type: string, format: date-time }
               newStart: { type: string, format: date-time }
               newEnd: { type: string, format: date-time }
-        truncated: { type: boolean, description: The dependent walk stopped at 500 orders or 5 levels (SCHED-0007). }
+        truncated: { type: boolean, description: 'The dependent walk stopped at the propagation limit of the scheduling parameters (SCHED-0007).' }
         run: { $ref: '#/components/schemas/Run' }
     PegRequest:
       type: object
