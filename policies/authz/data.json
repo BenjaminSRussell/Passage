@@ -1277,7 +1277,8 @@
     "Maintain tax codes": {"flag": true, "permissions": []},
     "MigrationReview": {"permissions": [
       {"resource": "/api/v1/migration/parallel-runs/*/sign-off", "methods": ["POST"]},
-      {"resource": "/api/v1/migration/parallel-runs/*/variances/*/explain", "methods": ["POST"]}
+      {"resource": "/api/v1/migration/parallel-runs/*/variances/*/explain", "methods": ["POST"]},
+      {"resource": "/api/v1/migration/tolerances", "methods": ["PUT"]}
     ]},
     "MigrationRun": {"permissions": [
       {"resource": "/api/v1/migration/packs/*/runs", "methods": ["POST"]},
@@ -1294,7 +1295,8 @@
       {"resource": "/api/v1/migration/runs/*/control-totals", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/target-load", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/target-rows", "methods": ["GET"]},
-      {"resource": "/api/v1/migration/runs/*/projects/*/opening", "methods": ["GET"]}
+      {"resource": "/api/v1/migration/runs/*/projects/*/opening", "methods": ["GET"]},
+      {"resource": "/api/v1/migration/tolerances", "methods": ["GET"]}
     ]},
     "MssApprove": {"permissions": [
       {"resource": "/v1/hr/absence/requests/*/decide", "methods": ["POST"]},
