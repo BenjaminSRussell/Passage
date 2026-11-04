@@ -314,6 +314,49 @@ export interface PriceListQuery {
   type?: ConditionType | "";
 }
 
+export interface NetPriceQuery {
+  legalEntityId: string;
+  customerId: string;
+  customerGroupId?: string;
+  currency: string;
+  asOf: string;
+  productId?: string;
+  productGroupId?: string;
+  /** Prices with the procedure assigned to this channel (the default assignment when absent). */
+  salesChannel?: string;
+}
+
+export interface NetPriceApplied {
+  type: ConditionType;
+  recordId: string;
+  /** A statistical step: reported, but it did not change the net. */
+  statistical?: boolean;
+}
+
+export interface NetPriceBreak {
+  quantity: string;
+  unitPrice: string;
+  netUnitPrice: string;
+  lineNet: string;
+  priceRecordId?: string;
+  applied: NetPriceApplied[];
+  errorCode?: string;
+}
+
+export interface NetPriceRow {
+  productKind: ConditionRecord["productKind"];
+  productKey: string;
+  variant: string;
+  unit: string;
+  breaks: NetPriceBreak[];
+}
+
+export interface NetPriceList {
+  rows: NetPriceRow[];
+  /** True when more rows apply than the service prices (500 rows and 2,000 breaks per response). */
+  truncated: boolean;
+}
+
 export interface PriceList {
   items: PriceListItem[];
   /** True when more records apply than the service returns (it caps the list at 1000 entries). */
@@ -327,6 +370,15 @@ export async function getPriceList(q: PriceListQuery, signal?: AbortSignal): Pro
     throw new PricingApiError(0, "COM-0001", "The response has no items");
   }
   return { items: body.items, truncated: body.truncated === true };
+}
+
+/** GET /price-list/net-prices - the net price at each quantity break of the customer's price list rows. */
+export async function getNetPriceList(q: NetPriceQuery, signal?: AbortSignal): Promise<NetPriceList> {
+  const body = await send<{ rows?: NetPriceRow[]; truncated?: boolean }>(`/price-list/net-prices${query({ ...q })}`, {}, signal);
+  if (!Array.isArray(body.rows)) {
+    throw new PricingApiError(0, "COM-0001", "The response has no rows");
+  }
+  return { rows: body.rows, truncated: body.truncated === true };
 }
 
 // ---- Price journals (FR-26.9): mass create, update and delete; validate, post atomically, reverse.

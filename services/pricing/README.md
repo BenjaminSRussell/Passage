@@ -216,6 +216,7 @@ testdata/               fixtures
 | POST | `/v1/pricing/simulate?explain=true` | pricing.view | inline records (at most 1000), nothing stored |
 | POST | `/v1/pricing/compare?explain=true` | pricing.view | one request under two procedure versions of the request's legal entity (DRAFT included), with the differences; inline records at most 1000 |
 | GET | `/v1/pricing/price-list` | pricing.view | active records that apply to a customer on a date; at most 1000 items, `truncated` when more apply |
+| GET | `/v1/pricing/price-list/net-prices` | pricing.view | the same price list resolved as one-line sales at each quantity break (batch resolve); filters `productId`, `productGroupId`, `salesChannel`, `procedure`; at most 20 breaks a row, 500 rows and 2,000 breaks a response, `truncated` when more apply |
 | GET | `/v1/pricing/condition-records?legalEntityId=&status=&type=&customer=&product=&campaignId=&asOf=&validToFrom=&validToTo=&limit=` | pricing.view | at most 100 rows, ordered by id; with a `validToFrom` / `validToTo` range (last valid day, inclusive) ordered by valid to, then id |
 | POST | `/v1/pricing/condition-records` | pricing.maintain | `Idempotency-Key` honoured; creates DRAFT |
 | GET | `/v1/pricing/condition-records/{id}` | pricing.view | |

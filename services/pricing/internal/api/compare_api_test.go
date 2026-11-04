@@ -191,3 +191,95 @@ func TestPriceList_TruncatesAtTheCap(t *testing.T) {
 		t.Fatalf("a list at the cap is not truncated: %v", out["truncated"])
 	}
 }
+
+func TestNetPriceList_NetPricePerBreakWithFilters(t *testing.T) {
+	h := router(newFake())
+	mk := func(typ, ckind, ckey, pkind, pkey, from, amount, pct string) {
+		body := fmt.Sprintf(`{"legalEntityId":"%s","type":"%s","customerKind":"%s","customerKey":"%s","productKind":"%s","productKey":"%s","currency":"USD","unit":"EA","fromQuantity":"%s","amount":"%s","discPct1":"%s","validFrom":"2026-01-01","validTo":"2026-12-31"}`,
+			legalEntity, typ, ckind, ckey, pkind, pkey, from, amount, pct)
+		_, c := call(t, h, http.MethodPost, "/v1/pricing/condition-records", allDuties, body)
+		call(t, h, http.MethodPost, "/v1/pricing/condition-records/"+c["id"].(string)+":activate", allDuties, `{"version":1}`)
+	}
+	mk("PRICE", "all", "", "product", "P1", "0", "100", "0")
+	mk("PRICE", "customer", "C1", "product", "P1", "10", "85", "0")
+	mk("LINE_DISC", "all", "", "product", "P1", "50", "0", "10")
+	mk("PRICE", "all", "", "product_group", "G9", "0", "3", "0")
+	base := "/v1/pricing/price-list/net-prices?legalEntityId=" + legalEntity + "&customerId=C1&currency=USD&asOf=2026-06-01"
+	code, out := call(t, h, http.MethodGet, base, "pricing.view", "")
+	rows, _ := out["rows"].([]any)
+	if code != http.StatusOK || len(rows) != 2 || out["truncated"] != false {
+		t.Fatalf("net prices = %d %v; want two rows", code, out)
+	}
+	_, one := call(t, h, http.MethodGet, base+"&productId=P1", "pricing.view", "")
+	rows, _ = one["rows"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("productId filter = %v; want the P1 row", one)
+	}
+	row := rows[0].(map[string]any)
+	breaks := row["breaks"].([]any)
+	if row["productKey"] != "P1" || len(breaks) != 3 {
+		t.Fatalf("P1 row = %v; want breaks 1, 10, 50", row)
+	}
+	last := breaks[2].(map[string]any)
+	if last["quantity"] != "50" || last["netUnitPrice"] != "76.5" || last["lineNet"] != "3825" || breaks[1].(map[string]any)["priceRecordId"] == "" {
+		t.Fatalf("break at 50 = %v; want net 76.5, line net 3825", last)
+	}
+	if _, g := call(t, h, http.MethodGet, base+"&productGroupId=G9", "pricing.view", ""); len(g["rows"].([]any)) != 1 || g["rows"].([]any)[0].(map[string]any)["productKey"] != "G9" {
+		t.Fatalf("productGroupId filter = %v; want the G9 row", g)
+	}
+	if _, e := call(t, h, http.MethodGet, base+"&productId=NOPE", "pricing.view", ""); len(e["rows"].([]any)) != 0 {
+		t.Fatalf("unknown product = %v; want no rows", e)
+	}
+}
+
+func TestNetPriceList_ValidationAndDuty(t *testing.T) {
+	h := router(newFake())
+	code, out := call(t, h, http.MethodGet, "/v1/pricing/price-list/net-prices?legalEntityId=x&currency=usd&asOf=June&salesChannel=%25%25", "pricing.view", "")
+	errs, _ := out["errors"].(map[string]any)
+	if code != http.StatusUnprocessableEntity || errs["legalEntityId"] == nil || errs["customerId"] == nil || errs["currency"] == nil || errs["asOf"] == nil || errs["salesChannel"] == nil {
+		t.Fatalf("invalid query = %d %v; want 422 naming the fields", code, out)
+	}
+	url := "/v1/pricing/price-list/net-prices?legalEntityId=" + legalEntity + "&customerId=C1&currency=USD&asOf=2026-06-01"
+	if code, _ := call(t, h, http.MethodGet, url, "pricing.maintain", ""); code != http.StatusForbidden {
+		t.Fatalf("without pricing.view = %d; want 403", code)
+	}
+}
+
+// The net price of a break is what /resolve gives a one-line order of that quantity under the same
+// sales channel's procedure.
+func TestNetPriceList_BreakEqualsResolveUnderTheChannelProcedure(t *testing.T) {
+	h := router(newFake())
+	for _, rec := range []string{
+		`{"type":"PRICE","customerKind":"all","productKind":"product","productKey":"P1","unit":"EA","amount":"100.00"}`,
+		`{"type":"LINE_DISC","customerKind":"all","productKind":"all","amount":"0","discPct1":"8"}`,
+		`{"type":"MULTILINE_DISC","customerKind":"all","productKind":"all","amount":"0","discPct1":"12"}`,
+	} {
+		body := fmt.Sprintf(`{"legalEntityId":"%s","currency":"USD","fromQuantity":"0","validFrom":"2026-01-01","validTo":"2026-12-31",`, legalEntity) + rec[1:]
+		_, created := call(t, h, http.MethodPost, "/v1/pricing/condition-records", allDuties, body)
+		if code, out := call(t, h, http.MethodPost, "/v1/pricing/condition-records/"+created["id"].(string)+":activate", allDuties, `{"version":1}`); code != http.StatusOK {
+			t.Fatalf("activate record = %d %v", code, out)
+		}
+	}
+	activeProcedureNamed(t, h, "BEST_ONLY", bestSteps)
+	b := fmt.Sprintf(`{"legalEntityId":"%s","salesChannel":"WEB","procedureName":"BEST_ONLY","version":0}`, legalEntity)
+	if s, o := call(t, h, http.MethodPut, assignmentsURL, "pricing.admin", b, inEntity...); s != http.StatusOK {
+		t.Fatalf("assign = %d %v", s, o)
+	}
+	for _, c := range []struct{ channel, want string }{{"", "80.96"}, {"WEB", "88"}} {
+		resolve := fmt.Sprintf(`{"legalEntityId":"%s","customerId":"C1","currency":"USD","pricingDate":"2026-06-01","salesChannel":"%s","lines":[{"productId":"P1","unit":"EA","quantity":"1"}]}`, legalEntity, c.channel)
+		_, res := call(t, h, http.MethodPost, "/v1/pricing/resolve", allDuties, resolve)
+		code, out := call(t, h, http.MethodGet, "/v1/pricing/price-list/net-prices?legalEntityId="+legalEntity+"&customerId=C1&currency=USD&asOf=2026-06-01&productId=P1&salesChannel="+c.channel, "pricing.view", "")
+		rows, _ := out["rows"].([]any)
+		if code != http.StatusOK || len(rows) != 1 {
+			t.Fatalf("net prices on %q = %d %v", c.channel, code, out)
+		}
+		brk := rows[0].(map[string]any)["breaks"].([]any)[0].(map[string]any)
+		line := lineOf(res)
+		if brk["lineNet"] != c.want || line["lineNet"] != c.want || brk["netUnitPrice"] != line["netUnitPrice"] || fmt.Sprint(brk["applied"]) != fmt.Sprint(line["applied"]) {
+			t.Fatalf("channel %q: break %v; resolve line %v; want both %s", c.channel, brk, line, c.want)
+		}
+	}
+	if code, out := call(t, h, http.MethodGet, "/v1/pricing/price-list/net-prices?legalEntityId="+legalEntity+"&customerId=C1&currency=USD&asOf=2026-06-01&procedure=NOPE", "pricing.view", ""); code != http.StatusUnprocessableEntity || out["code"] != "PRC-0063" {
+		t.Fatalf("unknown procedure = %d %v; want 422 PRC-0063", code, out)
+	}
+}

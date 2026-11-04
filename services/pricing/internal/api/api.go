@@ -88,6 +88,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Post(simulatePath, a.simulate)
 	r.With(authz.RequireDuty(dutyView)).Post(comparePath, a.compare)
 	r.With(authz.RequireDuty(dutyView)).Get(priceListPath, a.priceList)
+	r.With(authz.RequireDuty(dutyView)).Get(netPriceListPath, a.netPriceList)
 	r.With(authz.RequireDuty(dutyMaintain)).Post(recordsPath, a.createRecord)
 	r.With(authz.RequireDuty(dutyView)).Get(recordsPath, a.listRecords)
 	r.With(authz.RequireDuty(dutyView)).Get(recordsPath+"/{id}", a.getRecord)

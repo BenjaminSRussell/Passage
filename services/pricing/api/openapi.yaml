@@ -200,6 +200,53 @@ paths:
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/price-list/net-prices:
+    get:
+      operationId: getCustomerNetPriceList
+      summary: Price list by customer with the net price at each quantity break (PRD 5.26.14).
+      description: >
+        Batch resolve over the customer's price list. Each product row of the applicable PRICE records
+        (see getCustomerPriceList) is priced as a one-line sale at its quantity breaks: the from-quantities
+        of the price, line discount and multiline discount records that can price a line of the row (its own,
+        its product's for a variant row, and the all-products ones, with the row's unit or none), from its
+        lowest price break up, at most 20 per row. Each break is priced exactly as the line of a
+        POST /v1/pricing/resolve of that one line, under the procedure the sales channel is assigned or the
+        named one; `priceRecordId` is the winning PRICE record and `applied` every condition the line
+        applied, so a client can mark the winning records. Rows are product, variant, unit combinations in
+        the order of the price list. A record keyed to a product group is priced as a line of that group,
+        a product row as a line with no product group. Order-level conditions (total discount, small-order
+        surcharge) and free goods are not part of a break: `lineNet` is the quantity times the net unit
+        price, and an INCLUSIVE free goods rule lowers the charged quantity only on an order.
+        One response resolves at most 500 rows and 2,000 breaks in all; rows are taken whole in order and
+        `truncated` is true when more apply (narrow with productId or productGroupId).
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: customerId, in: query, required: true, schema: {type: string}}
+        - {name: customerGroupId, in: query, required: false, schema: {type: string}}
+        - {name: currency, in: query, required: true, schema: {type: string, pattern: "^[A-Z]{3}$"}}
+        - {name: asOf, in: query, required: true, description: "Pricing date, YYYY-MM-DD.", schema: {type: string, format: date}}
+        - {name: productId, in: query, required: false, description: "Only rows keyed to this product or one of its variants (with productGroupId, rows matching either).", schema: {type: string}}
+        - {name: productGroupId, in: query, required: false, description: "Only rows keyed to this product group (with productId, rows matching either).", schema: {type: string}}
+        - {name: salesChannel, in: query, required: false, description: "Channel whose procedure assignment prices the breaks.", schema: {type: string}}
+        - {name: procedure, in: query, required: false, description: "Procedure name to price with instead of the assigned one.", schema: {type: string}}
+      responses:
+        "200":
+          description: The net price rows.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rows, truncated]
+                properties:
+                  rows:
+                    type: array
+                    maxItems: 500
+                    items: {$ref: "#/components/schemas/NetPriceRow"}
+                  truncated: {type: boolean, description: "True when more rows apply than the 500 rows or 2,000 breaks one response resolves."}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {description: "A query field is invalid, or PRC-0063 when the named or assigned procedure has no ACTIVE version.", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
   /v1/pricing/condition-records:
     get:
       operationId: listConditionRecords
@@ -2864,6 +2911,31 @@ components:
         a: {$ref: "#/components/schemas/ResolveResponse"}
         b: {$ref: "#/components/schemas/ResolveResponse"}
         comparison: {$ref: "#/components/schemas/Comparison"}
+    NetPriceRow:
+      type: object
+      required: [productKind, productKey, variant, unit, breaks]
+      properties:
+        productKind: {type: string, enum: [product, product_group, variant, all]}
+        productKey: {type: string}
+        variant: {type: string}
+        unit: {type: string, description: "Empty when the records apply to any unit."}
+        breaks:
+          type: array
+          maxItems: 20
+          items: {$ref: "#/components/schemas/NetPriceBreak"}
+    NetPriceBreak:
+      type: object
+      required: [quantity, unitPrice, netUnitPrice, lineNet, applied]
+      properties:
+        quantity: {type: string, description: "Decimal quantity of the one-line sale."}
+        unitPrice: {type: string, description: "PRICE before discounts; zero when errorCode is set."}
+        netUnitPrice: {type: string}
+        lineNet: {type: string, description: "Quantity times the net unit price, rounded to the currency's minor units."}
+        priceRecordId: {type: string, format: uuid, description: "The PRICE record that won this break; absent when errorCode is set."}
+        applied:
+          type: array
+          items: {$ref: "#/components/schemas/Applied"}
+        errorCode: {type: string, description: "PRC-0001 when no price applies at this quantity."}
     PriceListItem:
       allOf:
         - $ref: "#/components/schemas/ConditionRecord"

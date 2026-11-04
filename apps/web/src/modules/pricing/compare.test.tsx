@@ -1,9 +1,10 @@
 import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import type { CompareResponse, PriceListItem, Procedure, ResolveResponse } from "./api/client";
+import { describe, expect, it, vi } from "vitest";
+import type { NetPriceRow, CompareResponse, PriceListItem, Procedure, ResolveResponse } from "./api/client";
 import { referenceSteps } from "./ProcedureStepsEditor";
 import { validateComparison } from "./ComparePage";
+import { netPriceLines, netPricesCsv, winningQuantities } from "./format";
 import { json, pageViolations, renderAt, server, useFakeServer } from "./testServer";
 
 useFakeServer();
@@ -176,5 +177,108 @@ describe("Price list by customer", () => {
     ask();
     await waitFor(() => expect(screen.getByText("must be three upper-case letters")).toBeInTheDocument());
     expect(await screen.findByText(/COM-0001/)).toBeInTheDocument();
+  });
+
+  const netRows = {
+    rows: [
+      {
+        productKind: "product", productKey: "P1", variant: "", unit: "EA",
+        breaks: [
+          { quantity: "1", unitPrice: "100", netUnitPrice: "100", lineNet: "100", priceRecordId: "r3", applied: [{ type: "PRICE", recordId: "r3" }] },
+          { quantity: "10", unitPrice: "85", netUnitPrice: "85", lineNet: "850", priceRecordId: "r1", applied: [{ type: "PRICE", recordId: "r1" }] },
+        ],
+      },
+      { productKind: "product", productKey: "P2", variant: "", unit: "EA", breaks: [{ quantity: "5", unitPrice: "0", netUnitPrice: "0", lineNet: "0", applied: [], errorCode: "PRC-0001" }] },
+    ],
+    truncated: false,
+  };
+
+  it("resolves the net price per quantity break and marks the winning agreements", async () => {
+    server.handler = (url) => {
+      if (url.pathname.endsWith("/net-prices")) return json(200, netRows);
+      return url.pathname.endsWith("/price-list") ? json(200, { items: [item("r1", "CUSTOMER", "85"), item("r3", "ALL", "100")] }) : undefined;
+    };
+    const { container } = renderAt("/pricing/price-list", VIEW);
+    fireEvent.change(screen.getByLabelText(/^Product$/), { target: { value: "P1" } });
+    fireEvent.change(screen.getByLabelText(/^Sales channel/), { target: { value: "WEB" } });
+    ask();
+    const net = await findTable({ name: "Net prices" });
+    expect(within(net).getByText("850")).toBeInTheDocument();
+    expect(within(net).getByText("No price")).toBeInTheDocument();
+    const list = await findTable({ name: "Price list" });
+    expect(within(list).getByText("10")).toBeInTheDocument();
+    expect(within(list).getByText("1")).toBeInTheDocument();
+    const q = server.calls[1]!.url.searchParams;
+    expect(server.calls[1]!.url.pathname).toMatch(/\/price-list\/net-prices$/);
+    expect(q.get("productId")).toBe("P1");
+    expect(q.has("productGroupId")).toBe(false);
+    expect(q.get("salesChannel")).toBe("WEB");
+    expect(q.has("type")).toBe(false);
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("keeps the list when the net prices fail and names the bad field", async () => {
+    server.handler = (url) => {
+      if (url.pathname.endsWith("/net-prices")) return json(422, { code: "COM-0001", detail: "request is invalid", errors: { salesChannel: "must be upper case" } });
+      return url.pathname.endsWith("/price-list") ? json(200, { items: [item("r1", "ALL", "100")] }) : undefined;
+    };
+    renderAt("/pricing/price-list", VIEW);
+    ask();
+    expect(await screen.findByText("The net prices could not be loaded")).toBeInTheDocument();
+    expect(screen.getByText("Applicable agreements")).toBeInTheDocument();
+    expect(screen.getByText("must be upper case")).toBeInTheDocument();
+  });
+
+  it("warns when the net price rows were cut", async () => {
+    server.handler = (url) => (url.pathname.endsWith("/net-prices") ? json(200, { ...netRows, truncated: true }) : json(200, { items: [item("r1", "ALL", "100")] }));
+    renderAt("/pricing/price-list", VIEW);
+    ask();
+    expect(await screen.findByText("Only the first products are shown")).toBeInTheDocument();
+  });
+
+  it("shows an empty state when no product has a price", async () => {
+    server.handler = (url) => (url.pathname.endsWith("/net-prices") ? json(200, { rows: [], truncated: false }) : json(200, { items: [] }));
+    renderAt("/pricing/price-list", VIEW);
+    ask();
+    expect(await screen.findByText("No prices to resolve")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Export CSV" })).not.toBeInTheDocument();
+  });
+
+  it("exports the net prices as CSV", async () => {
+    const created: Blob[] = [];
+    const create = vi.fn((b: Blob) => (created.push(b), "blob:x"));
+    Object.assign(URL, { createObjectURL: create, revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    server.handler = (url) => (url.pathname.endsWith("/net-prices") ? json(200, netRows) : json(200, { items: [item("r1", "ALL", "100")] }));
+    renderAt("/pricing/price-list", VIEW);
+    ask();
+    const exportButton = await screen.findByRole("button", { name: "Export CSV" });
+    // Editing the form after the query does not change what the file says it is.
+    fireEvent.change(screen.getByLabelText(/^Customer$/), { target: { value: "OTHER" } });
+    fireEvent.change(screen.getByLabelText(/^Currency/), { target: { value: "EUR" } });
+    fireEvent.click(exportButton);
+    expect(click).toHaveBeenCalled();
+    expect((click.mock.contexts[0] as HTMLAnchorElement).download).toMatch(/^price-list-C1-\d{4}-\d{2}-\d{2}\.csv$/);
+    const text = await created[0]!.text();
+    expect(text.split("\r\n")[0]).toBe("Product,Unit,From quantity,List price USD,Net unit price USD,Line net USD,Winning price record,Error");
+    expect(text).toContain("P1,EA,10,85,85,850,r1,");
+    click.mockRestore();
+  });
+
+  it("flattens breaks, collects the winning quantities and escapes CSV cells", () => {
+    const rows = netRows.rows as NetPriceRow[];
+    expect(netPriceLines(rows).map((l) => `${l.product}@${l.quantity}`)).toEqual(["P1@1", "P1@10", "P2@5"]);
+    expect(winningQuantities(rows).get("r1")).toEqual(["10"]);
+    const statistical: NetPriceRow = { ...rows[0]!, breaks: [{ ...rows[0]!.breaks[0]!, applied: [{ type: "PRICE", recordId: "r3" }, { type: "LINE_DISC", recordId: "s1", statistical: true }] }] };
+    expect(winningQuantities([statistical]).has("s1")).toBe(false);
+    const line = netPriceLines(rows)[0]!;
+    const cells = (product: string) => netPricesCsv([{ ...line, product }], "USD").split("\r\n")[1]!;
+    expect(cells('=SUM(A1),"x"')).toMatch(/^"'=SUM\(A1\),""x""",/);
+    expect(cells("+1+1")).toMatch(/^'\+1\+1,/);
+    expect(cells("@cmd")).toMatch(/^'@cmd,/);
+    expect(cells("-2+3")).toMatch(/^'-2\+3,/);
+    expect(cells("\t=1")).toMatch(/^'\t=1,/);
+    expect(cells("\r=1")).toMatch(/^"'\r=1",/);
+    expect(cells("-12.5")).toMatch(/^-12\.5,/);
   });
 });

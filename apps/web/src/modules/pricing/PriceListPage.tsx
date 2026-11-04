@@ -1,12 +1,39 @@
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, type DataTableColumn } from "../../shell/ui";
-import { describeProblem, getPriceList, type ConditionType, type PriceList, type PriceListItem, type PriceListScope, type Problem } from "./api/client";
-import { DAY, describePercent, describeProduct, today, TYPE_LABELS, UUID } from "./format";
+import { describeProblem, getNetPriceList, getPriceList, type ConditionType, type NetPriceList, type PriceList, type PriceListItem, type PriceListScope, type Problem } from "./api/client";
+import { DAY, describePercent, describeProduct, netPriceLines, netPricesCsv, today, TYPE_LABELS, UUID, winningQuantities, type NetPriceLine } from "./format";
 import styles from "./pages.module.css";
 
 const SCOPE_LABELS: Record<PriceListScope, string> = { CUSTOMER: "This customer", GROUP: "Customer group", ALL: "All customers" };
 
-const columns: DataTableColumn<PriceListItem>[] = [
+const netColumns: DataTableColumn<NetPriceLine>[] = [
+  { key: "product", header: "Product", render: (l) => l.product },
+  { key: "unit", header: "Unit", render: (l) => l.unit || "Any" },
+  { key: "quantity", header: "From quantity", mono: true, align: "end", render: (l) => l.quantity },
+  { key: "unitPrice", header: "List price", mono: true, align: "end", render: (l) => (l.errorCode ? "—" : l.unitPrice) },
+  { key: "netUnitPrice", header: "Net unit price", mono: true, align: "end", render: (l) => (l.errorCode ? "No price" : l.netUnitPrice) },
+  { key: "lineNet", header: "Line net", mono: true, align: "end", render: (l) => (l.errorCode ? "—" : l.lineNet) },
+];
+
+function download(name: string, text: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function columnsFor(wins: Map<string, string[]>): DataTableColumn<PriceListItem>[] {
+  return [
+    ...baseColumns,
+    { key: "wins", header: "Applies at quantity", mono: true, align: "end", render: (r) => wins.get(r.id)?.join(", ") ?? "—" },
+  ];
+}
+
+const baseColumns: DataTableColumn<PriceListItem>[] = [
   { key: "productKey", header: "Product", render: (r) => describeProduct(r) },
   { key: "type", header: "Condition", render: (r) => TYPE_LABELS[r.type] ?? r.type },
   { key: "scope", header: "Applies as", render: (r) => SCOPE_LABELS[r.scope] },
@@ -18,11 +45,18 @@ const columns: DataTableColumn<PriceListItem>[] = [
 
 /** Price list by customer (PRD 5.26.14): every active agreement that applies to a customer on a date. */
 export function PriceListPage() {
-  const [f, setF] = useState({ legalEntityId: "", customerId: "", customerGroupId: "", currency: "USD", asOf: today(), type: "PRICE" as ConditionType | "" });
+  const [f, setF] = useState({ legalEntityId: "", customerId: "", customerGroupId: "", currency: "USD", asOf: today(), type: "PRICE" as ConditionType | "", productId: "", productGroupId: "", salesChannel: "" });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState<Problem | null>(null);
   const [list, setList] = useState<PriceList | null>(null);
+  const [net, setNet] = useState<NetPriceList | null>(null);
+  const [netFailure, setNetFailure] = useState<Problem | null>(null);
+  // The query the shown tables answer, for the CSV header and file name (the form may have changed since).
+  const [asked, setAsked] = useState({ customerId: "", asOf: "", currency: "USD" });
+
+  const wins = useMemo(() => winningQuantities(net?.rows ?? []), [net]);
+  const lines = useMemo(() => netPriceLines(net?.rows ?? []), [net]);
 
   const set = (patch: Partial<typeof f>) => setF((prev) => ({ ...prev, ...patch }));
 
@@ -35,22 +69,43 @@ export function PriceListPage() {
     if (!DAY.test(f.asOf)) found.asOf = "Enter the date.";
     setErrors(found);
     setFailure(null);
+    setNetFailure(null);
     if (Object.keys(found).length > 0) return;
     setLoading(true);
+    const who = { legalEntityId: f.legalEntityId.trim(), customerId: f.customerId.trim(), customerGroupId: f.customerGroupId.trim() || undefined, currency: f.currency, asOf: f.asOf };
     try {
-      setList(await getPriceList({ ...f, legalEntityId: f.legalEntityId.trim(), customerId: f.customerId.trim(), customerGroupId: f.customerGroupId.trim() || undefined }));
+      setList(await getPriceList({ ...who, type: f.type }));
+      setAsked({ customerId: who.customerId, asOf: who.asOf, currency: who.currency });
     } catch (error) {
       const problem = describeProblem(error);
       setList(null);
+      setNet(null);
       if (Object.keys(problem.fields).length > 0) setErrors(problem.fields);
       setFailure(problem);
+      setLoading(false);
+      return;
+    }
+    try {
+      setNet(
+        await getNetPriceList({
+          ...who,
+          productId: f.productId.trim() || undefined,
+          productGroupId: f.productGroupId.trim() || undefined,
+          salesChannel: f.salesChannel.trim() || undefined,
+        }),
+      );
+    } catch (error) {
+      const problem = describeProblem(error);
+      setNet(null);
+      if (Object.keys(problem.fields).length > 0) setErrors(problem.fields);
+      setNetFailure(problem);
     } finally {
       setLoading(false);
     }
   }
 
-  const text = (id: string, name: "legalEntityId" | "customerId" | "customerGroupId" | "currency" | "asOf", label: string, extra: { optional?: boolean; type?: string; mono?: boolean } = {}) => (
-    <FormField id={id} label={label} optional={extra.optional} error={errors[name]}>
+  const text = (id: string, name: "legalEntityId" | "customerId" | "customerGroupId" | "currency" | "asOf" | "productId" | "productGroupId" | "salesChannel", label: string, extra: { optional?: boolean; type?: string; mono?: boolean; hint?: string } = {}) => (
+    <FormField id={id} label={label} optional={extra.optional} hint={extra.hint} error={errors[name]}>
       {(c) => <Input {...c} type={extra.type ?? "text"} className={extra.mono ? styles.mono : undefined} value={f[name]} onChange={(e) => set({ [name]: e.target.value })} invalid={Boolean(errors[name])} />}
     </FormField>
   );
@@ -65,6 +120,9 @@ export function PriceListPage() {
           {text("pl-group", "customerGroupId", "Customer group", { optional: true })}
           {text("pl-currency", "currency", "Currency")}
           {text("pl-date", "asOf", "As of", { type: "date" })}
+          {text("pl-product", "productId", "Product", { optional: true, hint: "Narrows the net prices to this product." })}
+          {text("pl-product-group", "productGroupId", "Product group", { optional: true, hint: "Narrows the net prices to this group's own prices." })}
+          {text("pl-channel", "salesChannel", "Sales channel", { optional: true, hint: "Prices with the procedure assigned to the channel." })}
           <FormField id="pl-type" label="Condition">
             {(c) => (
               <Select {...c} value={f.type} onChange={(e) => set({ type: e.target.value as ConditionType | "" })}>
@@ -100,10 +158,40 @@ export function PriceListPage() {
         <Card title="Applicable agreements">
           <DataTable
             label="Price list"
-            columns={columns}
+            columns={columnsFor(wins)}
             rows={list.items}
             getRowKey={(r) => r.id}
             empty={{ title: "No agreements apply", description: "No active record matches this customer on that date." }}
+          />
+        </Card>
+      ) : null}
+      {!loading && netFailure ? (
+        <Alert tone="warning" title="The net prices could not be loaded" live="alert">
+          {netFailure.message} ({netFailure.code})
+        </Alert>
+      ) : null}
+      {!loading && net?.truncated ? (
+        <Alert tone="warning" title="Only the first products are shown" live="status">
+          More products apply than one response prices ({net.rows.length} shown, in product order). Enter a product or a product group to narrow it.
+        </Alert>
+      ) : null}
+      {!loading && net ? (
+        <Card
+          title="Net price per quantity break"
+          actions={
+            lines.length > 0 ? (
+              <Button variant="secondary" onClick={() => download(`price-list-${asked.customerId}-${asked.asOf}.csv`, netPricesCsv(lines, asked.currency))}>
+                Export CSV
+              </Button>
+            ) : undefined
+          }
+        >
+          <DataTable
+            label="Net prices"
+            columns={netColumns}
+            rows={lines}
+            getRowKey={(l) => l.key}
+            empty={{ title: "No prices to resolve", description: "No product has an active price for this customer on that date." }}
           />
         </Card>
       ) : null}
