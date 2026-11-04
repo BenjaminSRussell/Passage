@@ -34,7 +34,13 @@ failed=0
 for mod in "${modules[@]}"; do
   prefix=$(cd "$mod" && go list -m)
   pkgs=()
+  if ! listed=$(cd "$mod" && go list ./...); then
+    echo "go-test-shard: go list ./... failed in $mod" >&2
+    failed=1
+    continue
+  fi
   while IFS= read -r pkg; do
+    [ -n "$pkg" ] || continue
     [ "$(shard_for "$pkg")" = "$shard" ] || continue
     matched=$((matched + 1))
     rel=${pkg#"$prefix"}
@@ -43,7 +49,7 @@ for mod in "${modules[@]}"; do
     else
       pkgs+=(".$rel")
     fi
-  done < <(cd "$mod" && go list ./...)
+  done <<< "$listed"
   [ "${#pkgs[@]}" -eq 0 ] && continue
   echo "== go test $mod ${pkgs[*]}"
   if ! (cd "$mod" && go test -count=1 -p 4 "${pkgs[@]}"); then

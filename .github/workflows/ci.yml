@@ -85,6 +85,7 @@ jobs:
       PGPASSWORD: postgres
       PASSAGE_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
       PASSAGE_TEST_APP_DATABASE_URL: postgres://passage_app:passage_app@localhost:5432/postgres?sslmode=disable
+      PASSAGE_LATENCY_STRICT: ${{ matrix.shard == 'pricing-store' && '1' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
@@ -155,8 +156,11 @@ jobs:
       fail-fast: false
       matrix:
         # excluded until clean: services/close engineering fx migration org party payables tax,
-        # tools/connectors; also platform/go batch identity product receiving (lint drifted
-        # while the reusable ci workflow was not starting jobs).
+        # tools/connectors.
+        # Also excluded here: platform/go, batch, identity, product, receiving — 25 issues
+        # that accumulated while reusable CI was dark, including SA1019 on
+        # chi middleware.RealIP (IP spoofing) in platform/go/httpx/httpx.go:59.
+        # Restore those modules when the findings are fixed; do not hide new drift.
         module: [services/audit, services/metadata, services/numbering, services/platform-health, tools/importexport, tools/rlscheck]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
