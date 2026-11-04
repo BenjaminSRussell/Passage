@@ -58,7 +58,8 @@ export function PartyDetailPage() {
   const { id = "" } = useParams();
   const state = useLoad((signal) => getParty(id, signal), id);
   const canWrite = holdsDuty(usePrincipalDuties(), DUTY_WRITE);
-  const [lastCustomerId, setLastCustomerId] = useState("");
+  const [lastCustomer, setLastCustomer] = useState({ partyId: "", customerId: "" });
+  const lastCustomerId = lastCustomer.partyId === id ? lastCustomer.customerId : "";
 
   if (state.error && !state.data) {
     return (
@@ -144,7 +145,7 @@ export function PartyDetailPage() {
       {writable ? (
         <>
           <EditPartyCard key={party.id} party={party} onSaved={state.reload} />
-          <CustomerRoleCard partyId={party.id} onCreated={setLastCustomerId} />
+          <CustomerRoleCard partyId={party.id} onCreated={(customerId) => setLastCustomer({ partyId: id, customerId })} />
           <CreditLimitCard key={lastCustomerId} initialCustomerId={lastCustomerId} />
         </>
       ) : null}

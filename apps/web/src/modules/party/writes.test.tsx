@@ -1,6 +1,10 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Party } from "./api/client";
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
+import { render } from "@testing-library/react";
+import { PrincipalProvider } from "../../shell/principal";
+import party from "./module";
 import { json, pageViolations, problem, renderAt, useFakeApi, type Call } from "./testServer";
 
 const PARTY = "0195f0a0-0000-7000-8000-0000000000aa";
@@ -329,5 +333,102 @@ describe("write gating", () => {
     }
     expect(screen.queryByRole("button", { name: /merge/i })).not.toBeInTheDocument();
     expect(api.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+});
+
+describe("edit conflict rebase", () => {
+  it("keeps only the user's edits after a version conflict and drops the retry alert", async () => {
+    let server = org({ tradeName: "Old" });
+    api.handler = (call) => {
+      if (call.url.pathname.endsWith("/vendors")) return json(200, { vendors: [] });
+      if (call.method === "PATCH")
+        return server.version === 3 ? problem(409, "PTY-VERSION-CONFLICT", "stale") : json(200, org({ version: 5 }));
+      return json(200, server);
+    };
+    renderAt(`/party/${PARTY}`);
+    await screen.findByRole("heading", { name: "Northwind" });
+    type("Legal name", "Northwind GmbH");
+    click("Save changes");
+    await screen.findByText(/Someone changed this party after you opened it/);
+    server = org({ version: 4, tradeName: "New" });
+    click("Try again");
+    await waitFor(() => expect(screen.getByLabelText("Trade name")).toHaveValue("New"));
+    expect(screen.queryByText(/Someone changed this party after you opened it/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Legal name")).toHaveValue("Northwind GmbH");
+    click("Save changes");
+    await waitFor(() => expect(api.calls.filter((c) => c.method === "PATCH")).toHaveLength(2));
+    const retry = api.calls.filter((c) => c.method === "PATCH")[1]!;
+    expect(retry.headers.get("If-Match")).toBe('"4"');
+    expect(retry.body).toEqual({ legalName: "Northwind GmbH" });
+  });
+});
+
+describe("idempotency key follows the sent body", () => {
+  it("reuses the key when only whitespace changes", async () => {
+    let fail = true;
+    detail((call) => {
+      if (call.method !== "POST") return undefined;
+      if (fail) throw new Error("offline");
+      return json(201, { id: "v1", partyId: PARTY });
+    });
+    renderAt(`/party/${PARTY}`);
+    await screen.findByRole("heading", { name: "Northwind" });
+    type("Vendor account number", "V-100");
+    type("Vendor group id", GROUP);
+    type("Vendor currency", "EUR");
+    click("Add vendor role");
+    await screen.findByText(/offline \(COM-0001\)/);
+    fail = false;
+    type("Vendor account number", "V-100 ");
+    click("Add vendor role");
+    await waitFor(() => expect(posts()).toHaveLength(2));
+    expect(posts()[1]?.headers.get("Idempotency-Key")).toBe(posts()[0]?.headers.get("Idempotency-Key"));
+  });
+});
+
+describe("focus and navigation", () => {
+  it("focuses the first invalid field on a failed submit", async () => {
+    detail();
+    renderAt(`/party/${PARTY}`);
+    await screen.findByRole("heading", { name: "Northwind" });
+    click("Add vendor role");
+    await waitFor(() => expect(screen.getByLabelText("Vendor account number")).toHaveFocus());
+  });
+
+  it("does not carry a new customer role id to the next party", async () => {
+    const NEXT = "0195f0a0-0000-7000-8000-0000000000bb";
+    api.handler = (call) => {
+      if (call.url.pathname.endsWith("/vendors")) return json(200, { vendors: [] });
+      if (call.method === "POST") return json(201, { id: CUSTOMER, partyId: PARTY, accountNumber: "C-100" });
+      return json(200, org({ id: call.url.pathname.endsWith(NEXT) ? NEXT : PARTY }));
+    };
+    function Jump() {
+      const navigate = useNavigate();
+      return <button onClick={() => navigate(`/party/${NEXT}`)}>Go next</button>;
+    }
+    render(
+      <PrincipalProvider duties={["party.read", "party.write"]}>
+        <MemoryRouter initialEntries={[`/party/${PARTY}`]}>
+          <Routes>
+            {party.routes.map((route) => (
+              <Route key={route.path} path={route.path} element={route.element} />
+            ))}
+          </Routes>
+          <Jump />
+        </MemoryRouter>
+      </PrincipalProvider>,
+    );
+    await screen.findByRole("heading", { name: "Northwind" });
+    type("Customer account number", "C-100");
+    type("Customer group id", GROUP);
+    type("Customer payment term id", TERM);
+    type("Posting profile id", PROFILE);
+    type("Customer currency", "usd");
+    click("Add customer role");
+    await waitFor(() => expect(screen.getByLabelText("Customer role id")).toHaveValue(CUSTOMER));
+    click("Go next");
+    await waitFor(() => expect(api.calls.some((c) => c.url.pathname.endsWith(NEXT))).toBe(true));
+    await screen.findByLabelText("Customer role id");
+    await waitFor(() => expect(screen.getByLabelText("Customer role id")).toHaveValue(""));
   });
 });

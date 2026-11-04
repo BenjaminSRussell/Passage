@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Button, Card, FormField, Input } from "../../shell/ui";
 import { createCustomerRole, createVendorRole, setCreditLimit, updateParty, type Party, type Problem } from "./api/client";
@@ -63,6 +63,7 @@ function requireCommon(errors: Errors, accountNumber: string, currencyCode: stri
 export function EditPartyCard({ party, onSaved }: { party: Party; onSaved(): void }) {
   const [done, setDone] = useState<ReactNode>(null);
   const original = namesOf(party);
+  const base = useRef({ version: party.version, names: original });
   const form = useWriteForm<NameValues>(
     original,
     (values) => {
@@ -80,9 +81,23 @@ export function EditPartyCard({ party, onSaved }: { party: Party; onSaved(): voi
     },
   );
 
+  const { setValues, clearFailure } = form;
+  useEffect(() => {
+    if (party.version === base.current.version) return;
+    const edited = base.current.names;
+    setValues(
+      (values) =>
+        Object.fromEntries(
+          (Object.keys(values) as (keyof NameValues)[]).map((key) => [key, values[key] !== edited[key] ? values[key] : original[key]]),
+        ) as unknown as NameValues,
+    );
+    base.current = { version: party.version, names: original };
+    clearFailure();
+  }, [party.version]);
+
   return (
     <Card title="Edit party">
-      <form className={styles.form} onSubmit={(event) => void form.submit(event)} noValidate aria-label="Edit party">
+      <form ref={form.formRef} className={styles.form} onSubmit={(event) => void form.submit(event)} noValidate aria-label="Edit party">
         <NameFieldset type={party.partyType} idPrefix="edit-party" values={form.values} errors={form.errors} onChange={form.set} />
         {form.errors.form ? (
           <Alert tone="warning" live="alert">
@@ -107,6 +122,24 @@ export function EditPartyCard({ party, onSaved }: { party: Party; onSaved(): voi
   );
 }
 
+const vendorBody = (values: typeof emptyVendor) => {
+  const paymentTermId = values.paymentTermId.trim();
+  return {
+    accountNumber: values.accountNumber.trim(),
+    vendorGroupId: values.vendorGroupId.trim(),
+    currencyCode: values.currencyCode.trim().toUpperCase(),
+    ...(paymentTermId ? { paymentTermId } : {}),
+  };
+};
+
+const customerBody = (values: typeof emptyCustomer) => ({
+  accountNumber: values.accountNumber.trim(),
+  customerGroupId: values.customerGroupId.trim(),
+  paymentTermId: values.paymentTermId.trim(),
+  postingProfileId: values.postingProfileId.trim(),
+  currencyCode: values.currencyCode.trim().toUpperCase(),
+});
+
 const emptyVendor = {
   accountNumber: "",
   vendorGroupId: "",
@@ -127,26 +160,23 @@ export function VendorRoleCard({ partyId, onCreated }: { partyId: string; onCrea
     },
     async (values, key) => {
       setDone(null);
-      const paymentTermId = values.paymentTermId.trim();
-      await createVendorRole(
-        partyId,
-        {
-          accountNumber: values.accountNumber.trim(),
-          vendorGroupId: values.vendorGroupId.trim(),
-          currencyCode: values.currencyCode.trim().toUpperCase(),
-          ...(paymentTermId ? { paymentTermId } : {}),
-        },
-        key,
-      );
+      await createVendorRole(partyId, vendorBody(values), key);
       setDone(`Vendor role ${values.accountNumber.trim()} added.`);
       form.reset();
       onCreated();
     },
+    vendorBody,
   );
 
   return (
     <Card title="Add a vendor role">
-      <form className={styles.form} onSubmit={(event) => void form.submit(event)} noValidate aria-label="Add a vendor role">
+      <form
+        ref={form.formRef}
+        className={styles.form}
+        onSubmit={(event) => void form.submit(event)}
+        noValidate
+        aria-label="Add a vendor role"
+      >
         <Text
           id="vendor-account"
           label="Vendor account number"
@@ -219,17 +249,7 @@ export function CustomerRoleCard({ partyId, onCreated }: { partyId: string; onCr
     },
     async (values, key) => {
       setDone(null);
-      const customer = await createCustomerRole(
-        partyId,
-        {
-          accountNumber: values.accountNumber.trim(),
-          customerGroupId: values.customerGroupId.trim(),
-          paymentTermId: values.paymentTermId.trim(),
-          postingProfileId: values.postingProfileId.trim(),
-          currencyCode: values.currencyCode.trim().toUpperCase(),
-        },
-        key,
-      );
+      const customer = await createCustomerRole(partyId, customerBody(values), key);
       setDone(
         <>
           Customer role {customer.accountNumber} added. Its id is <span className={styles.mono}>{customer.id}</span>; use it below to
@@ -239,11 +259,18 @@ export function CustomerRoleCard({ partyId, onCreated }: { partyId: string; onCr
       form.reset();
       onCreated(customer.id);
     },
+    customerBody,
   );
 
   return (
     <Card title="Add a customer role">
-      <form className={styles.form} onSubmit={(event) => void form.submit(event)} noValidate aria-label="Add a customer role">
+      <form
+        ref={form.formRef}
+        className={styles.form}
+        onSubmit={(event) => void form.submit(event)}
+        noValidate
+        aria-label="Add a customer role"
+      >
         <Text
           id="customer-account"
           label="Customer account number"
@@ -337,7 +364,13 @@ export function CreditLimitCard({ initialCustomerId = "" }: { initialCustomerId?
 
   return (
     <Card title="Request a credit limit">
-      <form className={styles.form} onSubmit={(event) => void form.submit(event)} noValidate aria-label="Request a credit limit">
+      <form
+        ref={form.formRef}
+        className={styles.form}
+        onSubmit={(event) => void form.submit(event)}
+        noValidate
+        aria-label="Request a credit limit"
+      >
         <Text
           id="credit-customer"
           label="Customer role id"

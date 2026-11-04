@@ -15,6 +15,8 @@ interface Values extends NameValues {
 
 const initial: Values = { ...emptyNames, partyType: "organization" };
 
+const body = (values: Values) => ({ partyType: values.partyType, ...pickNames(values.partyType, values) });
+
 /** Create an organization or person (POST /v1/party/parties), then open it. */
 export function NewPartyPage() {
   const canWrite = holdsDuty(usePrincipalDuties(), DUTY_WRITE);
@@ -23,16 +25,23 @@ export function NewPartyPage() {
     initial,
     (values) => validateNames(values.partyType, values),
     async (values, key) => {
-      const created = await createParty({ partyType: values.partyType, ...pickNames(values.partyType, values) }, key);
+      const created = await createParty(body(values), key);
       navigate(`/party/${created.id}`);
     },
+    body,
   );
 
   return (
     <div className={styles.stack}>
       <PageHeader title="New party" description="Create an organization or a person. The party number is assigned by the service." />
       {canWrite ? (
-        <form className={styles.form} onSubmit={(event) => void form.submit(event)} noValidate aria-label="Create a party">
+        <form
+          ref={form.formRef}
+          className={styles.form}
+          onSubmit={(event) => void form.submit(event)}
+          noValidate
+          aria-label="Create a party"
+        >
           <FormField id="new-party-type" label="Type">
             {(control) => (
               <Select
