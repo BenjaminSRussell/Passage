@@ -1,4 +1,4 @@
-// Vite middleware that stands in for the mobile service during `vite serve` / Playwright.
+// Vite middleware that stands in for the mobile service during `vite serve` / Playwright; enabled by PASSAGE_MOBILE_STUB=1.
 import type { Plugin } from "vite";
 import { createMobileStore } from "./devStore";
 
@@ -41,7 +41,7 @@ function pathOf(req: StubReq): string {
 }
 
 /**
- * Serves GET/POST `/api/v1/mobile/{flows,menus,events}` from an in-process store seeded
+ * Serves GET/POST `/api/v1/mobile/{flows,menus,events,offline:replay}` from an in-process store seeded
  * with the bundled core flows. Unhandled `/api/v1/mobile/*` paths fall through to the proxy.
  */
 export function mobileDevStub(): Plugin {
@@ -88,6 +88,19 @@ export function mobileDevStub(): Plugin {
       const flow = JSON.parse(await readBody(req)) as { code: string; entryStepId: string; steps: never[] };
       send(res, 200, store.saveDraft(flow));
       return;
+    }
+    if (path === "/api/v1/mobile/offline:replay") {
+      if (req.method === "GET") {
+        send(res, 200, store.replays());
+        return;
+      }
+      if (req.method === "POST") {
+        const body = JSON.parse(await readBody(req)) as { idempotencyKey: string; command: string; payload: Record<string, unknown> };
+        const header = req.headers["idempotency-key"];
+        store.replay({ idempotencyKey: body.idempotencyKey, headerKey: Array.isArray(header) ? header[0] : header, command: body.command, payload: body.payload });
+        send(res, 200, { status: "APPLIED" });
+        return;
+      }
     }
     const publish = /^\/api\/v1\/mobile\/flows\/([^/]+):publish$/.exec(path);
     if (req.method === "POST" && publish) {

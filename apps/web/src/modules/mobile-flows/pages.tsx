@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Alert, Button, Card, FormField, Input, PageHeader, Select, Textarea } from "../../shell/ui";
 import { describeFlowError, publishFlow, saveDraft } from "./api/client";
 import { CORE_FLOWS, RECEIVE_PUTAWAY_FLOW } from "./domain/coreFlows";
@@ -20,6 +20,7 @@ export function FlowDesigner() {
   const [message, setMessage] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const savedDraft = useRef<{ text: string; flowId: string; version: number } | null>(null);
   const [scan, setScan] = useState("");
   const [expected, setExpected] = useState<ScanClass>("LP");
   const [simulated, setSimulated] = useState<{ classified: Classified; verdict: ScanVerdict | null } | null>(null);
@@ -54,12 +55,15 @@ export function FlowDesigner() {
     if (found.length > 0) return;
     setBusy(true);
     try {
-      const saved = await saveDraft(flow, crypto.randomUUID());
+      const reusable = savedDraft.current?.text === text ? savedDraft.current : null;
+      const saved = reusable ?? (await saveDraft(flow, crypto.randomUUID()));
+      savedDraft.current = { text, flowId: saved.flowId, version: saved.version };
       if (!publish) {
-        setMessage(`Saved ${saved.code} as draft version ${saved.version}.`);
+        setMessage(`Saved ${flow.code} as draft version ${saved.version}.`);
         return;
       }
       const published = await publishFlow(saved.flowId, crypto.randomUUID(), `"${saved.version}"`);
+      savedDraft.current = null;
       setMessage(`Published ${published.code} version ${published.version}. Devices pick this up within 60 s, with no app update.`);
     } catch (e) {
       setFailure(describeFlowError(e));

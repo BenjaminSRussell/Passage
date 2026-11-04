@@ -18,9 +18,9 @@ export function publishedDrafts(flows: readonly SavedFlow[]): FlowDraft[] {
 }
 
 /**
- * Replaces the device's menu with the published set. Codes not in `incoming` are dropped so a
- * retired flow disappears; the caller must not swap the in-flight graph (BR-32.9).
+ * The graph the next run of `running` should use: the newest menu entry with the same code.
+ * The run in progress keeps its own graph (BR-32.9); only a restart switches.
  */
-export function applyPublishedFlows(_current: readonly FlowDraft[], incoming: readonly SavedFlow[]): FlowDraft[] {
-  return publishedDrafts(incoming);
+export function latestGraph(menu: readonly FlowDraft[], running: FlowDraft): FlowDraft {
+  return menu.find((f) => f.code === running.code) ?? running;
 }

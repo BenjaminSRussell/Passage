@@ -73,4 +73,46 @@ describe("useDeviceFlows", () => {
     });
     await waitFor(() => expect(result.current.flows[0]?.steps.map((s) => s.id)).toContain("confirm_lot"));
   });
+
+  it("ignores a slow response that arrives after a newer menu load", async () => {
+    const sources: Array<{ listeners: Map<string, (ev: MessageEvent) => void> }> = [];
+    class FakeEventSource {
+      listeners = new Map<string, (ev: MessageEvent) => void>();
+      constructor() {
+        sources.push(this);
+      }
+      addEventListener(type: string, listener: (ev: MessageEvent) => void) {
+        this.listeners.set(type, listener);
+      }
+      close() {}
+    }
+    const releases: Array<() => void> = [];
+    const bodies = [published, published, v2];
+    let call = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        const body = bodies[Math.min(call++, bodies.length - 1)];
+        if (call === 2) await new Promise<void>((r) => releases.push(r));
+        return new Response(JSON.stringify(body), { status: 200 });
+      }),
+    );
+    const { result } = renderHook(() =>
+      useDeviceFlows({ fallback: [PICK_FLOW], EventSource: FakeEventSource as unknown as typeof EventSource }),
+    );
+    await waitFor(() => expect(result.current.source).toBe("menu"));
+    act(() => {
+      sources[0]?.listeners.get("flow.published")?.({ data: JSON.stringify({ flow_id: "RECEIVE_PUTAWAY", code: "RECEIVE_PUTAWAY", version: 2 }) } as MessageEvent);
+    });
+    await waitFor(() => expect(call).toBe(2));
+    act(() => {
+      sources[0]?.listeners.get("flow.published")?.({ data: JSON.stringify({ flow_id: "RECEIVE_PUTAWAY", code: "RECEIVE_PUTAWAY", version: 2 }) } as MessageEvent);
+    });
+    await waitFor(() => expect(result.current.flows[0]?.steps.map((s) => s.id)).toContain("confirm_lot"));
+    releases.forEach((r) => r());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.flows[0]?.steps.map((s) => s.id)).toContain("confirm_lot");
+  });
 });

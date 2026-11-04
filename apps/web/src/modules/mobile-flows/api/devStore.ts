@@ -6,11 +6,20 @@ import { CORE_FLOWS } from "../domain/coreFlows";
 import type { FlowDraft } from "../domain/flowGraph";
 import type { FlowPublished, MobileMenu, SavedFlow } from "./client";
 
+export interface ReplayedTx {
+  idempotencyKey: string;
+  headerKey: string | undefined;
+  command: string;
+  payload: Record<string, unknown>;
+}
+
 export interface MobileStore {
   saveDraft(flow: FlowDraft): SavedFlow;
   publish(flowId: string, ifMatch?: string): SavedFlow;
   menu(id: string): MobileMenu;
   onPublish(listener: (event: FlowPublished) => void): () => void;
+  replay(tx: ReplayedTx): void;
+  replays(): ReplayedTx[];
 }
 
 function clone(flow: FlowDraft, extra: Pick<SavedFlow, "flowId" | "version" | "status">): SavedFlow {
@@ -20,6 +29,7 @@ function clone(flow: FlowDraft, extra: Pick<SavedFlow, "flowId" | "version" | "s
 export function createMobileStore(): MobileStore {
   const drafts = new Map<string, SavedFlow>();
   const published = new Map<string, SavedFlow>();
+  const replayed = new Map<string, ReplayedTx>();
   const listeners = new Set<(event: FlowPublished) => void>();
 
   for (const flow of CORE_FLOWS) {
@@ -50,6 +60,12 @@ export function createMobileStore(): MobileStore {
     },
     menu(id) {
       return { id, flows: [...published.values()] };
+    },
+    replay(tx) {
+      if (!replayed.has(tx.idempotencyKey)) replayed.set(tx.idempotencyKey, tx);
+    },
+    replays() {
+      return [...replayed.values()];
     },
     onPublish(listener) {
       listeners.add(listener);

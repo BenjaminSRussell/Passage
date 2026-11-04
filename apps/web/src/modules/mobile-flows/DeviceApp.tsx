@@ -20,13 +20,15 @@ import {
 import { listenForScans } from "./domain/scanBridge";
 import type { ScanSource } from "./domain/scanRouting";
 import { appendTiming, type StepTiming } from "./domain/telemetry";
+import { latestGraph } from "./domain/menuSync";
 import { useDeviceFlows } from "./useDeviceFlows";
 import "./deviceApp.css";
 
 const REPLAY_URL = "/api/v1/mobile/offline:replay";
+const TRANSIENT_STATUSES: ReadonlySet<number> = new Set([401, 408, 429]);
 
 /** Sends one queued confirmation. The server enforces ordering and idempotency per key. */
-async function applyOne(tx: QueuedTx): Promise<ApplyOutcome> {
+export async function applyOne(tx: QueuedTx): Promise<ApplyOutcome> {
   const res = await fetch(REPLAY_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Idempotency-Key": tx.idempotencyKey },
@@ -34,7 +36,7 @@ async function applyOne(tx: QueuedTx): Promise<ApplyOutcome> {
   });
   if (res.ok) return { status: "APPLIED" };
   if (res.status === 409) return { status: "CONFLICT", reason: "conflict reported by the server" };
-  if (res.status >= 500) throw new Error("server unavailable");
+  if (res.status >= 500 || TRANSIENT_STATUSES.has(res.status)) throw new Error("server unavailable");
   return { status: "REJECTED", reason: `rejected with ${res.status}` };
 }
 
@@ -104,6 +106,8 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID }:
   const [syncing, setSyncing] = useState(false);
   const [, bump] = useState(0);
   const onScanRef = useRef<(raw: string, source: ScanSource) => void>(() => undefined);
+  const menuRef = useRef(menu);
+  menuRef.current = menu;
 
   // Open the sealed queue and the device key once per device.
   useEffect(() => {
@@ -155,7 +159,9 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID }:
 
   function restart() {
     if (!flow) return;
-    const started = startFlow(flow, Date.now());
+    const next = latestGraph(menuRef.current, flow);
+    setFlow(next);
+    const started = startFlow(next, Date.now());
     if (started.ok) setRunner(started.state);
   }
 

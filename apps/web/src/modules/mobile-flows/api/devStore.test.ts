@@ -29,4 +29,12 @@ describe("mobile dev store", () => {
     expect(store.menu("default").flows.find((f) => f.code === "RECEIVE_PUTAWAY")?.steps.map((s) => s.id)).toContain("confirm_lot");
     expect(seen).toEqual([{ code: "RECEIVE_PUTAWAY", version: 2 }]);
   });
+
+  it("records a replayed transaction once per idempotency key", () => {
+    const store = createMobileStore();
+    const tx = { idempotencyKey: "d1:1", headerKey: "d1:1", command: "ConfirmWorkLine", payload: { flowCode: "PICK" } };
+    store.replay(tx);
+    store.replay({ ...tx, payload: { flowCode: "OTHER" } });
+    expect(store.replays()).toEqual([tx]);
+  });
 });

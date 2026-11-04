@@ -69,7 +69,7 @@ Flow designer for warehouse handheld flows, plus the pure domain shared with
   still reports that it is unavailable.
 - `DeviceApp.tsx`: the handheld shell shared with `apps/warehouse-mobile`. It loads the
   published menu (`useDeviceFlows.ts`) and keeps an in-flight flow on the version it started
-  (BR-32.9). `/device` hosts it for Playwright Pixel 5 (AC-32.2, AC-32.4).
+  (BR-32.9). `/device` hosts it in dev builds only, for Playwright Pixel 5 (AC-32.2, AC-32.4); the in-process mobile stub runs only with PASSAGE_MOBILE_STUB=1.
 - `api/print.ts`: client for `services/print` through the BFF at `/api/v1/print`.
 - `pages.tsx`: designer screen. It opens on the bundled receive/put-away flow (any core flow can
   be loaded with "Start from"), edits the flow

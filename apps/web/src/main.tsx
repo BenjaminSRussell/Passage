@@ -12,10 +12,7 @@ import "./shell/theme.css";
 
 const modules = loadModules();
 const router = createBrowserRouter([
-  {
-    path: "/device",
-    element: <DeviceHost />,
-  },
+  ...(import.meta.env.DEV ? [{ path: "/device", element: <DeviceHost /> }] : []),
   {
     path: "/",
     element: <Shell modules={modules} />,
