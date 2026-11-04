@@ -25,6 +25,9 @@ export class FakeTransport {
   skewMs = 0;
   frozenSweeps = false;
   readOutage = false;
+  /** Start calls still to answer 503 before transport comes back; Infinity keeps it down. */
+  startOutages = 0;
+  startCalls = 0;
   lookups = 0;
   duringNextRead?: () => Promise<void>;
   startKey?: string;
@@ -44,6 +47,11 @@ export class FakeTransport {
     const method = init?.method ?? "GET";
 
     if (method === "POST" && url.pathname === `/v1/transport/loads/${LOAD_ID}:tender`) {
+      this.startCalls += 1;
+      if (this.startOutages > 0) {
+        this.startOutages -= 1;
+        return problem(503, "transport is down");
+      }
       const key = headers.get("Idempotency-Key");
       if (this.startKey && this.startKey !== key) return problem(409, "load already has an open tender", "TMS-0114");
       const body = JSON.parse(String(init?.body)) as { carriers: { carrierId: string }[]; timeoutMin?: number };

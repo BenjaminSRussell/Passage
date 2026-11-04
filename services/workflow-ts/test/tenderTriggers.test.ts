@@ -1,11 +1,14 @@
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { WorkflowExecutionAlreadyStartedError, WorkflowIdReusePolicy, WorkflowNotFoundError, type Client } from "@temporalio/client";
-import { handleLoadReleased, handleTenderOutcome, loadReleasedType, toTenderInput, type LoadReleasedEvent } from "../src/tenderTriggers.js";
+import { handleLoadReleased, handleTenderOutcome, loadReleasedSource, loadReleasedType, toTenderInput, type LoadReleasedEvent } from "../src/tenderTriggers.js";
 import { tenderResponseSignal, tenderWorkflow } from "../src/workflows.js";
 import { CARRIERS, LOAD_ID } from "./fakeTransport.js";
 
 const released: LoadReleasedEvent = {
   type: loadReleasedType,
+  source: loadReleasedSource,
   tenantid: "00000000-0000-0000-0000-000000000001",
   data: {
     loadId: LOAD_ID,
@@ -74,6 +77,29 @@ describe("tender triggers", () => {
     const { client, start } = clientWith(vi.fn());
     await expect(handleLoadReleased(client, "q", { ...released, data: { ...released.data, legalEntityScope: [] } })).rejects.toThrow(/legalEntityScope/);
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it("refuses a release from any source but transport, whose verified principal fills the scope", async () => {
+    const { client, start } = clientWith(vi.fn());
+    for (const source of ["/passage/tms/edi", "", "/passage/tms/transport/"]) {
+      await expect(handleLoadReleased(client, "q", { ...released, source })).rejects.toThrow(/accepted only from \/passage\/tms\/transport/);
+    }
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("states in the load.released contract that transport fills releasedBy and legalEntityScope from the verified principal", async () => {
+    const read = (path: string) => readFile(fileURLToPath(new URL(path, import.meta.url)), "utf8");
+    const schema = JSON.parse(await read("../schemas/current/tms.load.released.v1.json"));
+    expect(schema.properties.source.enum).toEqual([loadReleasedSource]);
+    expect(schema.properties.type.enum).toEqual([loadReleasedType]);
+    expect(schema.properties.data.required).toEqual(expect.arrayContaining(["releasedBy", "legalEntityScope", "legalEntityId"]));
+    expect(schema.description).toMatch(/MUST fill data\.releasedBy and data\.legalEntityScope from the gateway-verified principal/);
+    expect(schema.properties.data.properties.releasedBy.description).toMatch(/verified principal/);
+    expect(schema.properties.data.properties.legalEntityScope.description).toMatch(/verified principal/);
+    const asyncapi = await read("../events/asyncapi.yaml");
+    expect(asyncapi).toContain("name: dev.passage.tms.load.released.v1");
+    expect(asyncapi).toContain("$ref: ../schemas/current/tms.load.released.v1.json");
+    expect(asyncapi).toMatch(/gateway-verified principal/);
   });
 
   it("ignores an outcome for a tender no workflow is running", async () => {

@@ -90,4 +90,43 @@ describe("tender workflow during a transport outage", () => {
     expect(outageMs).toBeGreaterThanOrEqual(7 * DAY_MS);
     expect(outageMs).toBeLessThan(8 * DAY_MS);
   }, 300_000);
+
+  function startWorker(fake: FakeTransport, taskQueue: string): Promise<Worker> {
+    return Worker.create({
+      connection: environment.nativeConnection,
+      taskQueue,
+      workflowBundle,
+      activities: createTenderActivities("http://transport", createServiceTokenSigner({ seedBase64: Buffer.alloc(32, 9).toString("base64") }), fake.fetch),
+    });
+  }
+
+  it("rides out a start that fails for more than one activity window and then opens one tender", async () => {
+    const fake = new FakeTransport();
+    // One one-hour window holds about 65 attempts, so 100 failures need the workflow's own outage wait and a second window.
+    fake.startOutages = 100;
+    fake.duringNextRead = async () => fake.respond(CARRIERS[0]!, true);
+    const worker = await startWorker(fake, "tender-start-outage");
+    const startedAt = await environment.currentTimeMs();
+    const result = await worker.runUntil(
+      environment.client.workflow.execute(tenderWorkflow, { workflowId: `${tenderWorkflowId(input.tenantId, LOAD_ID)}:start`, taskQueue: "tender-start-outage", args: [{ ...input, outageRetryMs: DAY_MS }] }),
+    );
+    expect(result).toMatchObject({ status: "accepted", acceptedCarrierId: CARRIERS[0] });
+    expect(fake.starts).toBe(1);
+    expect(fake.startCalls).toBe(101);
+    expect((await environment.currentTimeMs()) - startedAt).toBeGreaterThanOrEqual(DAY_MS);
+  }, 300_000);
+
+  it("ends stalled, without a tender, when transport is unreachable for seven days from the start", async () => {
+    const fake = new FakeTransport();
+    fake.startOutages = Number.POSITIVE_INFINITY;
+    const worker = await startWorker(fake, "tender-start-down");
+    const startedAt = await environment.currentTimeMs();
+    const result = await worker.runUntil(
+      environment.client.workflow.execute(tenderWorkflow, { workflowId: `${tenderWorkflowId(input.tenantId, LOAD_ID)}:down`, taskQueue: "tender-start-down", args: [{ ...input, outageRetryMs: DAY_MS }] }),
+    );
+    expect(result).toMatchObject({ status: "stalled", attempted: [] });
+    expect(result.tenderId).toBeUndefined();
+    expect(fake.starts).toBe(0);
+    expect((await environment.currentTimeMs()) - startedAt).toBeGreaterThanOrEqual(7 * DAY_MS);
+  }, 300_000);
 });

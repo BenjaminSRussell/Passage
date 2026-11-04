@@ -2,7 +2,7 @@ asyncapi: 3.0.0
 info:
   title: Passage metadata event contract
   version: 1.0.0
-  description: Narrow Wave 03 boundary consumed by Wave 04 schema registration.
+  description: Events workflow-ts consumes. The Wave 03 entity definition boundary consumed by Wave 04 schema registration, and transport's load release that starts the tender cascade.
 servers:
   kafka:
     host: passage-kafka-bootstrap.kafka.svc:9093
@@ -13,11 +13,28 @@ channels:
     messages:
       changed:
         $ref: '#/components/messages/EntityDefinitionChanged'
+  load:
+    address: passage.tms.load
+    description: Topic for load events from services/transport; subject is the load id. Not yet published (transport has no release step).
+    messages:
+      released:
+        $ref: '#/components/messages/LoadReleased'
 operations:
   receiveEntityDefinitionChanged:
     action: receive
     channel:
       $ref: '#/channels/entityDefinition'
+  receiveLoadReleased:
+    action: receive
+    channel:
+      $ref: '#/channels/load'
+    summary: Starts tenderWorkflow for the load (src/tenderTriggers.ts).
+    description: >-
+      Contract on the producer. Only transport (source /passage/tms/transport) publishes it, and transport fills
+      data.releasedBy and data.legalEntityScope from the gateway-verified principal of the release request
+      (X-Passage-User, X-Passage-Legal-Entity), never from the request body; it does not publish a release whose load is
+      outside that scope. workflow-ts mints the tender's scoped=true transport.tender.execute token from these fields,
+      and refuses the event from any other source.
 components:
   messages:
     EntityDefinitionChanged:
@@ -25,3 +42,8 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: ../schemas/current/platform.entitydefinition.changed.v1.json
+    LoadReleased:
+      name: dev.passage.tms.load.released.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: ../schemas/current/tms.load.released.v1.json
