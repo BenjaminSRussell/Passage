@@ -47,6 +47,11 @@ channels:
     messages:
       orderCancelled:
         $ref: "#/components/messages/OrderCancelled"
+  orderClosed:
+    address: passage.sales.order
+    messages:
+      orderClosed:
+        $ref: "#/components/messages/OrderClosed"
   orderRemainderCancelled:
     address: passage.sales.order
     messages:
@@ -303,6 +308,12 @@ operations:
     summary: An order was cancelled; its open lines are CANCELLED and its active holds CLEARED. Consumers - fulfillment, planning, portal.
     messages:
       - {$ref: "#/channels/orderCancelled/messages/orderCancelled"}
+  publishOrderClosed:
+    action: send
+    channel: {$ref: "#/channels/orderClosed"}
+    summary: An INVOICED order unchanged for the grace period was closed by the nightly auto-close (BR-27.5); no further delivery, invoice, change or cancel is accepted. Consumers - customer portal, analytics.
+    messages:
+      - {$ref: "#/channels/orderClosed/messages/orderClosed"}
   publishOrderRemainderCancelled:
     action: send
     channel: {$ref: "#/channels/orderRemainderCancelled"}
@@ -552,6 +563,14 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/OrderCancelledData"
+    OrderClosed:
+      name: dev.passage.sales.order.closed.v1
+      title: Sales order closed
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/OrderClosedData"
     OrderRemainderCancelled:
       name: dev.passage.sales.order.remaindercancelled.v1
       title: Remainder of a partly shipped order cancelled, or line quantities of a confirmed order changed or cancelled
@@ -926,6 +945,16 @@ components:
           items: {type: string, format: uuid}
         reason: {type: string, maxLength: 500}
         actor: {type: string}
+    OrderClosedData:
+      type: object
+      required: [order_id, legal_entity_id, version, previous_status, grace_days, actor]
+      properties:
+        order_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        version: {type: integer, description: the order version the close produced}
+        previous_status: {type: string, enum: [INVOICED]}
+        grace_days: {type: integer, description: "the grace period the run applied: the order had been unchanged for at least this many days"}
+        actor: {type: string, description: the principal that ran the job}
     OrderRemainderCancelledData:
       type: object
       required: [order_id, legal_entity_id, version, status, lines, reason, actor]
@@ -1110,7 +1139,7 @@ components:
         legal_entity_id: {type: string, format: uuid}
         channel: {type: string}
         external_ref: {type: string}
-        request_hash: {type: string, description: hash of the refused payload; the payload is never carried}
+        request_hash: {type: string, description: "fingerprint of the refused payload; keyed (hmac:<key id>:<hex>) when the request carries a one-time buyer, so the buyer cannot be confirmed against it"}
         error_code: {type: string, description: problem code of the refusal}
         attempts: {type: integer, minimum: 1}
         actor: {type: string, description: the resolving user; absent on recorded}

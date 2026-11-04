@@ -347,6 +347,7 @@ type Store interface {
 	ResolveIntakeError(ctx context.Context, id string, version int, note, actor string, now time.Time) (IntakeError, error)
 	GetIntakeReplay(ctx context.Context, id string) (IntakeReplay, error)
 	ListIntakeReplays(ctx context.Context, f IntakeErrorFilter) ([]IntakeReplay, int, error)
+	AutoCloseOrders(ctx context.Context, f AutoCloseFilter, actor string, now time.Time) (AutoCloseResult, error)
 	RecordReplayFailure(ctx context.Context, id, code, message string, now time.Time) (IntakeError, error)
 	ResolveReplayed(ctx context.Context, id, orderID, orderNumber, actor string, now time.Time) (IntakeError, error)
 	GetParameters(ctx context.Context, legalEntityID string) (SalesParameters, error)

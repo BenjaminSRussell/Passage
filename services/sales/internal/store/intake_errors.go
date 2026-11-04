@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"strings"
@@ -156,6 +157,10 @@ func (s *Postgres) RecordIntakeError(ctx context.Context, in NewIntakeError, now
 	}
 	var out IntakeError
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		hash, err := s.intakeHash(ctx, tx, p.TenantID, in)
+		if err != nil {
+			return err
+		}
 		row := tx.QueryRow(ctx, `insert into intake_error (tenant_id, id, legal_entity_id, channel, external_ref, request_hash,
 				error_code, message, first_seen_at, last_seen_at, request_payload, request_payload_sealed, idempotency_key)
 			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12)
@@ -165,15 +170,90 @@ func (s *Postgres) RecordIntakeError(ctx context.Context, in NewIntakeError, now
 				request_payload = excluded.request_payload, request_payload_sealed = excluded.request_payload_sealed,
 				idempotency_key = excluded.idempotency_key, version = intake_error.version + 1
 			returning `+intakeErrorColumns,
-			p.TenantID, ids.New(), in.LegalEntityID, in.Channel, in.ExternalRef, in.RequestHash, in.ErrorCode,
+			p.TenantID, ids.New(), in.LegalEntityID, in.Channel, in.ExternalRef, hash, in.ErrorCode,
 			truncate(in.Message, maxIntakeMessage), now, clear, sealed, nullable(in.IdempotencyKey))
-		var err error
 		if out, err = scanIntakeError(row); err != nil {
 			return err
 		}
 		return enqueue(ctx, tx, "intakeerror", out.ID, salesevents.IntakeErrorRecorded, p.TenantID, intakeErrorData(out, ""))
 	})
 	return out, err
+}
+
+// unkeyedIntakeHash stands in for the request hash of a one-time customer
+// request when the service has no field encryption keys: any digest of the
+// request would let a guessed buyer be confirmed, so such refusals dedupe on
+// (legal entity, channel, reference, error code) alone. Nothing is lost by the
+// merge: without keys such a body is never kept (keepPayload), so the row has
+// no body another buyer's refusal could overwrite; attempts and the message
+// then count every buyer refused under that reference and code.
+const unkeyedIntakeHash = "unkeyed"
+
+// intakeHashDomain separates the keyed intake error hash from the order's.
+const intakeHashDomain = "sales.intake.error\x00"
+
+func (s *Postgres) intakeMAC(keyID, tenantID, digest string) (string, error) {
+	mac, err := s.crypt.MACWithKey(keyID, tenantID, []byte(intakeHashDomain+digest))
+	if err != nil {
+		return "", err
+	}
+	return keyedHashPrefix + keyID + ":" + hex.EncodeToString(mac), nil
+}
+
+// intakeHash is the request hash stored for a refusal. An ordinary request
+// keeps its plain SHA-256. A request that carries a one-time buyer (name, tax
+// id) gets a keyed hash like sales_order's, so a guessed buyer cannot be
+// confirmed against the log. The keyed value names its key, so a row recorded
+// under a key that has since rotated is still found: for each other key that
+// stored hashes of the same (legal entity, channel, reference, error code)
+// name, the request's hash under that key is computed once and looked up by
+// equality, and a match is reused so the retry raises attempts instead of
+// opening a second row. The HMAC work is bounded by the number of keys, not
+// rows. A row under the current key needs no lookup: the upsert finds it.
+//
+// Two refusals of one request recorded at once by replicas holding different
+// current keys (during a key rollout) can open two rows, one per key; later
+// retries all land on the older one. That split is accepted.
+func (s *Postgres) intakeHash(ctx context.Context, tx pgx.Tx, tenantID string, in NewIntakeError) (string, error) {
+	if !in.PersonalData {
+		return in.RequestHash, nil
+	}
+	if s.crypt == nil {
+		return unkeyedIntakeHash, nil
+	}
+	currentID := s.crypt.CurrentID()
+	current, err := s.intakeMAC(currentID, tenantID, in.RequestHash)
+	if err != nil {
+		return "", err
+	}
+	rows, err := tx.Query(ctx, `select distinct split_part(request_hash, ':', 2) from intake_error
+		where tenant_id = $1 and legal_entity_id = $2 and channel = $3 and external_ref = $4 and error_code = $5
+			and request_hash like 'hmac:%' and split_part(request_hash, ':', 2) <> $6`,
+		tenantID, in.LegalEntityID, in.Channel, in.ExternalRef, in.ErrorCode, currentID)
+	if err != nil {
+		return "", err
+	}
+	keyIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil || len(keyIDs) == 0 {
+		return current, err
+	}
+	candidates := make([]string, 0, len(keyIDs))
+	for _, keyID := range keyIDs {
+		// A key no longer in FIELDCRYPT_KEYS cannot be recomputed; its rows stay
+		// as they are and the retry opens a row under the current key.
+		if h, err := s.intakeMAC(keyID, tenantID, in.RequestHash); err == nil {
+			candidates = append(candidates, h)
+		}
+	}
+	var stored string
+	err = tx.QueryRow(ctx, `select request_hash from intake_error
+		where tenant_id = $1 and legal_entity_id = $2 and channel = $3 and external_ref = $4 and error_code = $5
+			and request_hash = any($6) order by first_seen_at, id limit 1`,
+		tenantID, in.LegalEntityID, in.Channel, in.ExternalRef, in.ErrorCode, candidates).Scan(&stored)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return current, nil
+	}
+	return stored, err
 }
 
 // ListIntakeErrors returns refusals in the caller's scope, most recently seen first.

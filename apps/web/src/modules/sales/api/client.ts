@@ -1783,6 +1783,44 @@ export function replayIntakeErrors(filter: Pick<IntakeErrorFilter, "legalEntityI
   );
 }
 
+export type AutoCloseResultKind = "CLOSED" | "CANDIDATE" | "SKIPPED";
+
+/** An order the auto-close looked at. */
+export interface AutoCloseItem {
+  orderId: string;
+  orderNumber: string;
+  legalEntityId: string;
+  /** When the order last changed (the invoice that completed it, or a later change); the grace period runs from here. */
+  lastChangedAt: string;
+  version: number;
+  result: AutoCloseResultKind;
+}
+
+export interface AutoCloseRun {
+  closed: number;
+  /** Orders that changed between the listing and the close and were left alone. */
+  skipped: number;
+  /** More candidates are left than the limit allowed. A scheduler repeats while this is true and the run closed something. */
+  more: boolean;
+  items: AutoCloseItem[];
+}
+
+export interface AutoCloseRequest {
+  legalEntityId?: string;
+  graceDays: number;
+  limit: number;
+  dryRun: boolean;
+}
+
+/** Closes the INVOICED orders unchanged for graceDays (BR-27.5), or lists them with dryRun. Repeating it is harmless. */
+export function autoCloseOrders(request: AutoCloseRequest, signal?: AbortSignal): Promise<AutoCloseRun> {
+  return json<AutoCloseRun>(
+    `/orders:auto-close${query({ legalEntityId: request.legalEntityId, graceDays: String(request.graceDays), limit: String(request.limit), dryRun: String(request.dryRun) })}`,
+    { method: "POST" },
+    signal,
+  );
+}
+
 export const PROGRESS_KINDS = ["DELIVERED", "INVOICED"] as const;
 export type ProgressKind = (typeof PROGRESS_KINDS)[number];
 

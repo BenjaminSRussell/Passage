@@ -1179,6 +1179,51 @@ paths:
         "422": {description: SLS-0049 the order is not CONFIRMED, content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
         "502": {description: SLS-0050 production could not plan a line; the lines planned before it are kept, content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
         "503": {description: SLS-0050 the production service is not configured, content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+  /v1/sales/orders:auto-close:
+    post:
+      summary: Close the INVOICED orders that nothing has changed for a grace period (the nightly auto-close, PRD 5.27.16)
+      description: >-
+        Moves INVOICED orders to CLOSED (BR-27.5), oldest first, up to limit. An order qualifies when it is INVOICED, has
+        been unchanged for graceDays (default 30; the payment signal of wave 30 is not available, so the period stands in
+        for it) and has no ACTIVE hold. Each order closes in its own transaction under its row lock, re-checked against
+        the version the run listed, so an order changed in between is SKIPPED; the close writes an order version with the
+        status diff and order.closed. A closed order takes no progress report, change or cancel. Safe to repeat, which is
+        what the scheduler does; with dryRun=true it lists the candidates and closes nothing. more is true when the limit
+        cut the list. The legal entity is the query parameter, or the caller's; without either, an all-scope caller covers
+        every legal entity.
+      operationId: autoCloseOrders
+      x-passage-duty: sales.order.write
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: graceDays, in: query, description: days an INVOICED order must be unchanged, schema: {type: integer, minimum: 0, maximum: 365, default: 30}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+        - {name: dryRun, in: query, description: list the candidates without closing them, schema: {type: boolean, default: false}}
+      responses:
+        "200":
+          description: what the run closed or, for a dry run, would close
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [closed, skipped, more, items]
+                properties:
+                  closed: {type: integer}
+                  skipped: {type: integer, description: orders that changed between the listing and the close and were left alone}
+                  more: {type: boolean, description: "more candidates are left than the limit allowed. A scheduler repeats the call while more is true and the run closed at least one order; an order that is SKIPPED every time (its lines no longer derive INVOICED) would otherwise hold the head of the list"}
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [orderId, orderNumber, legalEntityId, lastChangedAt, version, result]
+                      properties:
+                        orderId: {type: string, format: uuid}
+                        orderNumber: {type: string}
+                        legalEntityId: {type: string, format: uuid}
+                        lastChangedAt: {type: string, format: date-time, description: "when the order last changed (the invoice that completed it, or a later change such as a hold release); the grace period runs from here"}
+                        version: {type: integer, description: the order version seen, or reached when closed}
+                        result: {type: string, enum: [CLOSED, CANDIDATE, SKIPPED]}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
   /v1/sales/orders/{id}:cancel:
     post:
       summary: >-
@@ -3804,7 +3849,7 @@ components:
         legalEntityId: {type: string, format: uuid}
         channel: {type: string}
         externalRef: {type: string, description: absent when the request had none}
-        requestHash: {type: string, description: hash of the refused payload; the payload is not kept}
+        requestHash: {type: string, description: "fingerprint of the refused payload, the dedupe key of the log. A request that carries a one-time buyer has a keyed hash (hmac:<key id>:<hex>), or unkeyed when the service has no encryption keys, so a guessed buyer cannot be confirmed against it"}
         errorCode: {type: string, description: problem code of the refusal such as SLS-0007 or COM-0001}
         message: {type: string}
         status: {type: string, enum: [OPEN, RESOLVED]}

@@ -49,6 +49,7 @@ var (
 	OrderProgressRecorded = events.Type(Context, "orderprogress", "recorded", 1)
 
 	OrderRemainderCancelled = events.Type(Context, "order", "remaindercancelled", 1)
+	OrderClosed             = events.Type(Context, "order", "closed", 1)
 )
 
 // All lists every event type this service publishes.
@@ -58,7 +59,7 @@ func All() []string {
 		QuotationConverted, QuotationExpired, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
 		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted, ParametersChanged, IntakeErrorRecorded, IntakeErrorResolved,
 		OrderChangeRequested, OrderChangeApproved, OrderChangeRejected, OrderChangeWithdrawn, ChangePolicyChanged,
-		DeliveryTermsCreated, DeliveryTermsChanged, OrderProgressRecorded, OrderRemainderCancelled}
+		DeliveryTermsCreated, DeliveryTermsChanged, OrderProgressRecorded, OrderRemainderCancelled, OrderClosed}
 }
 
 // PromisedSlice is one schedule line of an ATP promise.
@@ -520,4 +521,15 @@ type OrderProgressData struct {
 	OrderStatus    string         `json:"order_status"`
 	Actor          string         `json:"actor"`
 	Version        int            `json:"version"`
+}
+
+// OrderClosedData is the data member of order.closed.v1: an INVOICED order was
+// moved to CLOSED by the nightly auto-close (BR-27.5).
+type OrderClosedData struct {
+	OrderID        string `json:"order_id"`
+	LegalEntityID  string `json:"legal_entity_id"`
+	Version        int    `json:"version"`
+	PreviousStatus string `json:"previous_status"`
+	GraceDays      int    `json:"grace_days"`
+	Actor          string `json:"actor"`
 }
