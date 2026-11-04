@@ -261,7 +261,8 @@
       {"resource": "/v1/reporting/runs/*/cells/*/*/balances", "methods": ["GET"]},
       {"resource": "/v1/reporting/runs/*/outputs/*", "methods": ["GET"]},
       {"resource": "/v1/reporting/lag", "methods": ["GET"]},
-      {"resource": "/v1/reporting/runs/*/definition", "methods": ["GET"]}
+      {"resource": "/v1/reporting/runs/*/definition", "methods": ["GET"]},
+      {"resource": "/v1/reporting/runs/*/tree", "methods": ["GET"]}
     ]},
     "reporting.definition.maintain": {"permissions": [
       {"resource": "/v1/reporting/definitions/*", "methods": ["PUT"]},
@@ -283,7 +284,9 @@
       {"resource": "/v1/reporting/column-set-templates", "methods": ["GET"]},
       {"resource": "/v1/reporting/definitions:compose", "methods": ["POST"]},
       {"resource": "/v1/reporting/trees", "methods": ["GET"]},
-      {"resource": "/v1/reporting/trees/*", "methods": ["GET", "PUT"]}
+      {"resource": "/v1/reporting/trees/*", "methods": ["GET", "PUT"]},
+      {"resource": "/v1/reporting/trees/*/revisions", "methods": ["GET"]},
+      {"resource": "/v1/reporting/trees/*/revisions/*", "methods": ["GET"]}
     ]},
     "reporting.statement.run": {"permissions": [
       {"resource": "/v1/reporting/runs", "methods": ["POST"]},
