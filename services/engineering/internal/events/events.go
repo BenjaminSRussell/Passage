@@ -1,16 +1,64 @@
 package events
 
 const (
-	BomVersionActivated = "dev.passage.engineering.bomversion.activated.v1"
-	BomVersionExpired   = "dev.passage.engineering.bomversion.expired.v1"
-	EcoSubmitted        = "dev.passage.engineering.eco.submitted.v1"
-	EcoApproved         = "dev.passage.engineering.eco.approved.v1"
-	EcoReleased         = "dev.passage.engineering.eco.released.v1"
-	EcrSubmitted        = "dev.passage.engineering.ecr.submitted.v1"
-	EcrApproved         = "dev.passage.engineering.ecr.approved.v1"
-	EcrRejected         = "dev.passage.engineering.ecr.rejected.v1"
-	EcrCancelled        = "dev.passage.engineering.ecr.cancelled.v1"
+	BomVersionActivated    = "dev.passage.engineering.bomversion.activated.v1"
+	BomVersionExpired      = "dev.passage.engineering.bomversion.expired.v1"
+	EcoSubmitted           = "dev.passage.engineering.eco.submitted.v1"
+	EcoApproved            = "dev.passage.engineering.eco.approved.v1"
+	EcoReleased            = "dev.passage.engineering.eco.released.v1"
+	EcrSubmitted           = "dev.passage.engineering.ecr.submitted.v1"
+	EcrApproved            = "dev.passage.engineering.ecr.approved.v1"
+	EcrRejected            = "dev.passage.engineering.ecr.rejected.v1"
+	EcrCancelled           = "dev.passage.engineering.ecr.cancelled.v1"
+	ReleaseSessionCreated  = "dev.passage.engineering.releasesession.created.v1"
+	ReleaseLineAccepted    = "dev.passage.engineering.releaseline.accepted.v1"
+	ReleasedProductChanged = "dev.passage.engineering.releasedproduct.changed.v1"
+	DocumentSigned         = "dev.passage.engineering.document.signed.v1"
+	DocumentReleased       = "dev.passage.engineering.document.released.v1"
+	EbomImported           = "dev.passage.engineering.ebom.imported.v1"
 )
+
+type ReleaseSessionCreatedData struct {
+	SessionID string `json:"sessionId"`
+	Number    string `json:"number"`
+	Source    string `json:"source"`
+}
+
+type ReleaseLineAcceptedData struct {
+	LineID        string `json:"lineId"`
+	SessionID     string `json:"sessionId"`
+	LegalEntityID string `json:"legalEntityId"`
+	AcceptedBy    string `json:"acceptedBy"`
+}
+
+type ReleasedProductChangedData struct {
+	ReleasedProductID string `json:"releasedProductId"`
+	ProductID         string `json:"productId"`
+	LegalEntityID     string `json:"legalEntityId"`
+	State             string `json:"state"`
+}
+
+type DocumentSignedData struct {
+	DocumentID string `json:"documentId"`
+	RecordID   string `json:"recordId"`
+	SignerID   string `json:"signerId"`
+	Meaning    string `json:"meaning"`
+	SignedAt   string `json:"signedAt"`
+}
+
+type DocumentReleasedData struct {
+	DocumentID string `json:"documentId"`
+	Number     string `json:"number"`
+	Version    string `json:"version"`
+}
+
+type EbomImportedData struct {
+	ImportID   string `json:"importId"`
+	PartNumber string `json:"partNumber"`
+	Revision   string `json:"revision"`
+	Added      int    `json:"added"`
+	Exceptions int    `json:"exceptions"`
+}
 
 type BomVersionActivatedData struct {
 	BomVersionID        string  `json:"bomVersionId"`

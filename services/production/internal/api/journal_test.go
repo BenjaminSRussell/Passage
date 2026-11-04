@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -271,6 +272,21 @@ func TestCreate_ItemGroupAndFlushing(t *testing.T) {
 			headers: map[string]string{idempotencyName: "c-" + field}}), http.StatusBadRequest, validationCode)
 		if _, ok := p.Errors[field]; !ok {
 			t.Errorf("%s: no field error in %v", field, p.Errors)
+		}
+	}
+}
+
+func TestIdempotencyKey_RejectsSystemPrefix(t *testing.T) {
+	for key, wantRejected := range map[string]bool{
+		"sys:shopfloor-jobcard:" + ids.New(): true,
+		"sys:shopfloor-jobcard-post:x":       true,
+		"user-key-1":                         false,
+	} {
+		r := httptest.NewRequest(http.MethodPost, "/", nil)
+		r.Header.Set(idempotencyName, key)
+		got, fields := idempotencyKey(r)
+		if rejected := len(fields) > 0; rejected != wantRejected || got != key {
+			t.Errorf("%q: rejected=%v key=%q, want rejected=%v", key, rejected, got, wantRejected)
 		}
 	}
 }

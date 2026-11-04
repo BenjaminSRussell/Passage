@@ -410,6 +410,7 @@ components:
         productId: { type: string, format: uuid }
         dimensionSet: { type: object, additionalProperties: { type: string } }
         qty: { type: string, description: Signed quantity; negative for issues }
+        cwQty: { type: integer, minimum: 1, description: Catch-weight count (cases); omitted when the item is not catch-weight }
         issueStatus: { type: [string, 'null'], enum: [ON_ORDER, RESERVED_ORDERED, RESERVED_PHYSICAL, PICKED, DEDUCTED, SOLD, null], description: 'Set for issues; journals, blocking and transfer legs post SOLD; the vendor-owned leg of an ownership change DEDUCTED; transactions:apply and the named backward commands any status' }
         receiptStatus: { type: [string, 'null'], enum: [ORDERED, ARRIVED, REGISTERED, RECEIVED, PURCHASED, null], description: 'Set for receipts; journals, blocking and transfer legs post PURCHASED; vendor-owned consignment receipts RECEIVED; transactions:apply and the named backward commands any status' }
         physicalDate: { type: string, format: date }

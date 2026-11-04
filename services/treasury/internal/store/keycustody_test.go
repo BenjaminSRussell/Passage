@@ -148,7 +148,7 @@ func TestKeyCustody_NoKeyBytesReachLogsOrTheDatabaseAcrossAFullSend(t *testing.T
 	t.Cleanup(restore)
 
 	cfg, err := bankconnect.LoadVaultConfig(func(k string) string {
-		return map[string]string{"VAULT_ADDR": vault.URL, "VAULT_TOKEN": token, "TREASURY_SIGNING_KEY_NAMES": "bank-a", "TREASURY_SFTP_KEY_NAME": "sftp-ed", "TREASURY_BANK_CHANNELS": "sftp"}[k]
+		return map[string]string{"VAULT_ADDR": vault.URL, "VAULT_TOKEN": token, "TREASURY_SIGNING_KEY_NAMES": "bank-a", "TREASURY_SFTP_KEY_NAME": "sftp-ed", "TREASURY_SFTP_KEY_VERSION": "1", "TREASURY_BANK_CHANNELS": "sftp"}[k]
 	})
 	if err != nil {
 		t.Fatal(err)

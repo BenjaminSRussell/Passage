@@ -8,3 +8,5 @@ resources:
 serviceMonitor: { enabled: false }
 serviceIdentity:
   publicKeys: ""
+auditUrl: ""
+environment: ""

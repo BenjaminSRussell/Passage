@@ -505,6 +505,11 @@ export interface EcoReplacement {
   newVersionId: string;
 }
 
+export interface EcoDocumentReplacement {
+  oldDocumentId: string;
+  newDocumentId: string;
+}
+
 export interface Eco {
   id: string;
   number: string;
@@ -514,6 +519,7 @@ export interface Eco {
   /** The approved change request this ECO carries out, if any. */
   ecrId?: string;
   replaces: EcoReplacement[];
+  documents?: EcoDocumentReplacement[];
 }
 
 export interface EcoInput {
@@ -611,4 +617,117 @@ export function createEcr(body: EcrInput, idempotencyKey: string): Promise<Ecr> 
 
 export function actOnEcr(id: string, action: EcrAction, reason?: string): Promise<Ecr> {
   return post(`/ecrs/${encodeURIComponent(id)}:${action}`, reason ? { reason } : {});
+}
+
+export interface EngineeringOrganization {
+  id: string;
+  legalEntityId: string;
+  code: string;
+  name: string;
+}
+
+export function listOrganizations(cursor?: string): Promise<Page<EngineeringOrganization>> {
+  return request(`/organizations${query({ cursor })}`);
+}
+
+export function createOrganization(body: { legalEntityId: string; code: string; name: string }, idempotencyKey: string): Promise<EngineeringOrganization> {
+  return post("/organizations", body, idempotencyKey);
+}
+
+export interface EngineeringDocument {
+  id: string;
+  typeCode: string;
+  number: string;
+  part?: string;
+  version?: string;
+  description?: string;
+  status: string;
+  lastEditor?: string;
+  ecoId?: string;
+  signedAt?: string;
+  originals?: { storageKey: string; sha256: string; sizeBytes?: number }[];
+}
+
+export interface DocumentSignature {
+  id: string;
+  recordId: string;
+  signerId: string;
+  printedName: string;
+  meaning: string;
+  signedAt: string;
+}
+
+export function listDocuments(number?: string, cursor?: string): Promise<Page<EngineeringDocument>> {
+  return request(`/documents${query({ number, cursor })}`);
+}
+
+export function getDocument(id: string): Promise<EngineeringDocument> {
+  return request(`/documents/${encodeURIComponent(id)}`);
+}
+
+export function listSignatures(id: string): Promise<{ items: DocumentSignature[] }> {
+  return request(`/documents/${encodeURIComponent(id)}/signatures`);
+}
+
+export function signDocument(id: string, body: { printedName?: string; method?: string }): Promise<EngineeringDocument> {
+  return post(`/documents/${encodeURIComponent(id)}:sign`, body);
+}
+
+export function createDocument(body: { typeCode: string; number: string; part?: string; version?: string; originals?: { storageKey: string; sha256: string }[] }, idempotencyKey: string): Promise<EngineeringDocument> {
+  return post("/documents", body, idempotencyKey);
+}
+
+export function transitionDocument(id: string, to: string): Promise<EngineeringDocument> {
+  return post(`/documents/${encodeURIComponent(id)}:transition`, { to });
+}
+
+export interface ReleaseLine {
+  id: string;
+  sessionId?: string;
+  productId: string;
+  engineeringVersion: string;
+  legalEntityId: string;
+  status: string;
+  reason?: string;
+  acceptedBy?: string;
+  copiedBomVersionId?: string;
+}
+
+export function listReleaseLines(filters: { status?: string; legalEntityId?: string }, cursor?: string): Promise<Page<ReleaseLine>> {
+  return request(`/release-lines${query({ ...filters, cursor })}`);
+}
+
+export function acceptReleaseLine(id: string, reason?: string): Promise<ReleaseLine> {
+  return post(`/release-lines/${encodeURIComponent(id)}:accept`, reason ? { reason } : {});
+}
+
+export function rejectReleaseLine(id: string, reason?: string): Promise<ReleaseLine> {
+  return post(`/release-lines/${encodeURIComponent(id)}:reject`, reason ? { reason } : {});
+}
+
+export interface EbomImport {
+  id: string;
+  source: string;
+  partNumber: string;
+  revision: string;
+  status?: string;
+  bomVersionId?: string;
+  ecrId?: string;
+  added?: number;
+  removed?: number;
+  changed?: number;
+  lines: { findNumber?: number; partNumber: string; quantity: string; unit?: string }[];
+  exceptions?: { partNumber: string; code: string }[];
+}
+
+export function importEbom(body: { source: string; partNumber: string; revision: string; lines: EbomImport["lines"] }, idempotencyKey: string): Promise<EbomImport> {
+  return post("/ebom-imports", body, idempotencyKey);
+}
+
+export function listEbomImports(cursor?: string): Promise<Page<EbomImport>> {
+  return request(`/ebom-imports${query({ cursor })}`);
+}
+
+export function getEbomImport(id: string): Promise<EbomImport> {
+  return request(`/ebom-imports/${encodeURIComponent(id)}`);
 }

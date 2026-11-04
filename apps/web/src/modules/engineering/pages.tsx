@@ -21,6 +21,10 @@ export function EngineeringHome({
   onOpenResourceGroups,
   onOpenCapabilities,
   onOpenCalendars,
+  onOpenOrganizations,
+  onOpenDocuments,
+  onOpenReleases,
+  onOpenEbom,
 }: {
   onOpenWhereUsed?: () => void;
   onOpenBoms?: () => void;
@@ -29,8 +33,16 @@ export function EngineeringHome({
   onOpenResourceGroups?: () => void;
   onOpenCapabilities?: () => void;
   onOpenCalendars?: () => void;
+  onOpenOrganizations?: () => void;
+  onOpenDocuments?: () => void;
+  onOpenReleases?: () => void;
+  onOpenEbom?: () => void;
 }) {
   const resourceCards = [
+    { title: "Engineering organizations", text: "Legal entities that own versions, nomenclatures and release policies.", open: onOpenOrganizations },
+    { title: "Documents", text: "Document info records with Part 11 electronic signatures.", open: onOpenDocuments },
+    { title: "Product releases", text: "Accept engineering versions into operational legal entities.", open: onOpenReleases },
+    { title: "eBOM imports", text: "CAD and PLM bills of material, with unknown parts listed as exceptions.", open: onOpenEbom },
     { title: "Resources", text: "Machines, tools, labor, vendors and locations, with their capabilities and calendars.", open: onOpenResources },
     { title: "Resource groups", text: "Groups of resources by site, each linking to its members.", open: onOpenResourceGroups },
     { title: "Capabilities", text: "Skills and abilities, each linking to the resources that hold it.", open: onOpenCapabilities },

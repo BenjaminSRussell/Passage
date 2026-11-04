@@ -61,6 +61,7 @@ type TransactionPostedData struct {
 	ProductID          string            `json:"productId"`
 	DimensionSet       map[string]string `json:"dimensionSet"`
 	Qty                string            `json:"qty"`
+	CWQty              *int              `json:"cwQty,omitempty"`
 	IssueStatus        *string           `json:"issueStatus"`
 	ReceiptStatus      *string           `json:"receiptStatus"`
 	PhysicalDate       string            `json:"physicalDate"`

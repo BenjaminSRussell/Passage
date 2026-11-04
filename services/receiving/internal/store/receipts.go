@@ -34,7 +34,7 @@ const (
 		COALESCE((SELECT g.cleared_amount FROM receiving_grir_open_item g WHERE g.tenant_id = receiving_receipt_line.tenant_id AND g.receipt_id = receiving_receipt_line.receipt_id AND g.line_no = receiving_receipt_line.line_no), 0),
 		COALESCE(ordered_remaining, 0), COALESCE(over_delivery_pct, 0),
 		unit_price, currency, COALESCE(unit, ''), COALESCE(batch, ''), COALESCE(location_id::text, ''), inventory_status,
-		batch_tracked, serial_tracked, amount, amount_acct`
+		batch_tracked, serial_tracked, amount, amount_acct, cw_qty, cw_nominal, cw_min, cw_max`
 )
 
 type scanner interface{ Scan(dest ...any) error }
@@ -87,8 +87,22 @@ func scanReceipt(row scanner) (Receipt, error) {
 
 func scanLine(row scanner) (Line, error) {
 	var l Line
+	var cwQty *int
+	var nominal, minv, maxv *decimal.Decimal
 	err := row.Scan(&l.LineNo, &l.POLineID, &l.POLineNo, &l.ProductID, &l.Qty, &l.InvoicedQty, &l.ClearedAmount, &l.OrderedRemaining, &l.OverDeliveryPct, &l.UnitPrice, &l.Currency,
-		&l.Unit, &l.Batch, &l.LocationID, &l.InventoryStatus, &l.BatchTracked, &l.SerialTracked, &l.Amount, &l.AmountAcct)
+		&l.Unit, &l.Batch, &l.LocationID, &l.InventoryStatus, &l.BatchTracked, &l.SerialTracked, &l.Amount, &l.AmountAcct, &cwQty, &nominal, &minv, &maxv)
+	if cwQty != nil {
+		l.CWQty = *cwQty
+	}
+	if nominal != nil {
+		l.CWNominal = *nominal
+	}
+	if minv != nil {
+		l.CWMin = *minv
+	}
+	if maxv != nil {
+		l.CWMax = *maxv
+	}
 	return l, err
 }
 
@@ -306,13 +320,14 @@ func registerTx(ctx context.Context, tx pgx.Tx, tenantID, id string, fn Register
 	}
 	var lineRows, serialRows [][]any
 	for _, l := range lines {
-		lineRows = append(lineRows, []any{tenantID, id, l.LineNo, l.Qty, l.Batch, l.LocationID, l.InventoryStatus})
+		lineRows = append(lineRows, []any{tenantID, id, l.LineNo, l.Qty, l.Batch, l.LocationID, l.InventoryStatus, nullInt(l.CWQty), nullDec(l.CWNominal), nullDec(l.CWMin), nullDec(l.CWMax)})
 		for _, serial := range l.Serials {
 			serialRows = append(serialRows, []any{tenantID, l.ProductID, serial, current.LegalEntityID, id, l.LineNo})
 		}
 	}
 	if err := execBatch(ctx, tx, `UPDATE receiving_receipt_line SET qty = $4, batch = NULLIF($5, ''), location_id = NULLIF($6, '')::uuid,
-		inventory_status = COALESCE(NULLIF($7, ''), 'AVAILABLE') WHERE tenant_id = $1 AND receipt_id = $2 AND line_no = $3`, lineRows); err != nil {
+		inventory_status = COALESCE(NULLIF($7, ''), 'AVAILABLE'), cw_qty = $8, cw_nominal = $9, cw_min = $10, cw_max = $11
+		WHERE tenant_id = $1 AND receipt_id = $2 AND line_no = $3`, lineRows); err != nil {
 		return Receipt{}, err
 	}
 	if err := execBatch(ctx, tx, `INSERT INTO receiving_serial (tenant_id, product_id, serial, legal_entity_id, receipt_id, line_no)
@@ -477,6 +492,20 @@ func nullTime(t time.Time) any {
 		return nil
 	}
 	return t
+}
+
+func nullInt(n int) any {
+	if n < 1 {
+		return nil
+	}
+	return n
+}
+
+func nullDec(d decimal.Decimal) any {
+	if d.IsZero() {
+		return nil
+	}
+	return d
 }
 
 func (s *Postgres) ListReceipts(ctx context.Context, f ReceiptFilter) ([]Receipt, error) {

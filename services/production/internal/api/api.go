@@ -705,6 +705,8 @@ func idempotencyKey(r *http.Request) (string, map[string]string) {
 	key := strings.TrimSpace(r.Header.Get(idempotencyName))
 	if key == "" || len(key) > maxIdempotencyKey {
 		fields[idempotencyName] = fmt.Sprintf("is required, at most %d characters", maxIdempotencyKey)
+	} else if strings.HasPrefix(key, store.SystemKeyPrefix) {
+		fields[idempotencyName] = fmt.Sprintf("must not start with %q", store.SystemKeyPrefix)
 	}
 	return key, fields
 }

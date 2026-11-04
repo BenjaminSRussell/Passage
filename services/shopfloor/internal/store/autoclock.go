@@ -72,7 +72,7 @@ func (s *Postgres) AutoClockOut(ctx context.Context, now time.Time, afterHours, 
 			if tag.RowsAffected() == 0 {
 				continue
 			}
-			if err := enqueue(ctx, tx, "registration", id, sfevents.RegistrationPosted, p.TenantID, sfevents.RegistrationPostedData{
+			if err := enqueuePosted(ctx, tx, p.TenantID, sfevents.RegistrationPostedData{
 				RegistrationID: id, WorkerID: c.WorkerID, Kind: domain.KindClockOut, Flags: []string{domain.FlagAutoClockOut},
 			}); err != nil {
 				return err

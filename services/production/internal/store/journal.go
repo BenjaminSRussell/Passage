@@ -113,6 +113,9 @@ type HoursInput struct {
 	QtyGood    decimal.Decimal
 	QtyError   decimal.Decimal
 	Finished   bool
+	// LaborRate, when positive, is stored on the draft line and values the hours
+	// at post instead of the operation's resource rate (BR-25.9).
+	LaborRate *decimal.Decimal
 }
 
 // NewJournal is a journal to create as a draft. Without explicit lines the
@@ -137,6 +140,7 @@ type NewJournal struct {
 	Actor                  string
 	IdempotencyKey         string
 	RequestHash            string
+	AllowFinished          bool
 }
 
 // PostRequest posts a draft journal. The duty and the two tolerances come
@@ -150,6 +154,7 @@ type PostRequest struct {
 	Actor               string
 	TraceID             string
 	IdempotencyKey      string
+	AllowFinished       bool
 }
 
 // CostSummary is the cost read of an order (FR-21.11): planned rows from the
@@ -339,7 +344,7 @@ func planJournal(in NewJournal, h orderHead, lines []domain.OrderLine, ops []dom
 					return nil, lineProblem("operation %d is not on the order's route, or is listed twice", hi.OperNumber)
 				}
 				seen[hi.OperNumber] = true
-				if err := checkFeedback(op); err != nil {
+				if err := checkFeedback(op, false); err != nil {
 					return nil, err
 				}
 				if err := checkCardMode(modes, op.OperNumber, in.Type); err != nil {
@@ -400,13 +405,13 @@ func planJobCard(in NewJournal, ops []domain.Operation, jobs []workJob, modes ma
 			}
 			seen[hi.JobID] = true
 			op, _ := findOperation(ops, job.oper)
-			if err := checkFeedback(op); err != nil {
+			if err := checkFeedback(op, in.AllowFinished); err != nil {
 				return nil, err
 			}
 			if err := checkCardMode(modes, op.OperNumber, domain.JournalJobCard); err != nil {
 				return nil, err
 			}
-			if job.status == "finished" {
+			if job.status == "finished" && !in.AllowFinished {
 				return nil, httpx.NewProblem(http.StatusConflict, CodeJobFinished, fmt.Sprintf("the %s job of operation %d is finished", job.typ, job.oper))
 			}
 			if job.typ != domain.JobProcess && (hi.QtyGood.IsPositive() || hi.QtyError.IsPositive()) {
@@ -417,7 +422,11 @@ func planJobCard(in NewJournal, ops []domain.Operation, jobs []workJob, modes ma
 					return nil, domainProblem(err)
 				}
 			}
-			out = append(out, jobHoursLine(op, job.typ, hi.Hours, hi.QtyGood, hi.QtyError, hi.Finished))
+			line := jobHoursLine(op, job.typ, hi.Hours, hi.QtyGood, hi.QtyError, hi.Finished)
+			if hi.LaborRate != nil && hi.LaborRate.IsPositive() {
+				line.UnitCost = *hi.LaborRate
+			}
+			out = append(out, line)
 		}
 		return out, nil
 	}
@@ -443,11 +452,11 @@ func jobHoursLine(op domain.Operation, typ domain.JobType, hours, good, bad deci
 
 // checkFeedback refuses route-card feedback on a subcontracted operation
 // (its cost comes from the vendor invoice, wave 17) or a finished one (FR-21.6).
-func checkFeedback(op domain.Operation) error {
+func checkFeedback(op domain.Operation, allowFinished bool) error {
 	if op.Subcontract {
 		return lineProblem("operation %d is subcontracted; its cost comes from the purchase order", op.OperNumber)
 	}
-	if op.Status == domain.OperFinished {
+	if op.Status == domain.OperFinished && !allowFinished {
 		return httpx.NewProblem(http.StatusConflict, CodeOperationFinished, fmt.Sprintf("operation %d is finished", op.OperNumber))
 	}
 	return nil
@@ -566,7 +575,7 @@ func (s *Postgres) PostJournal(ctx context.Context, r PostRequest) (Journal, boo
 			}
 			h.status = domain.Started
 		}
-		opts := postOptions{overDuty: r.OverConsumptionDuty, overPct: prm.OverConsumptionPct, rafTolerancePct: prm.RAFTolerancePct, actor: r.Actor, key: r.IdempotencyKey, claims: claims}
+		opts := postOptions{overDuty: r.OverConsumptionDuty, overPct: prm.OverConsumptionPct, rafTolerancePct: prm.RAFTolerancePct, actor: r.Actor, key: r.IdempotencyKey, allowFinished: r.AllowFinished, claims: claims}
 		if err := postJournal(ctx, tx, p.TenantID, &h, &j, opts); err != nil {
 			return err
 		}
@@ -610,6 +619,7 @@ type postOptions struct {
 	rafTolerancePct decimal.Decimal
 	actor           string
 	key             string
+	allowFinished   bool
 	claims          *claimScope
 }
 
@@ -688,19 +698,23 @@ func postJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, 
 			if !ok {
 				return lineProblem("operation %d is not on the order's route", *l.OperNumber)
 			}
-			if err := checkFeedback(op); err != nil {
+			if err := checkFeedback(op, o.allowFinished); err != nil {
 				return err
 			}
 			if err := checkCardMode(modes, op.OperNumber, j.Type); err != nil {
 				return err
 			}
 			if l.JobType != nil {
-				if err := checkJobOpen(ctx, tx, tenantID, h.id, *l.OperNumber, *l.JobType); err != nil {
+				if err := checkJobOpen(ctx, tx, tenantID, h.id, *l.OperNumber, *l.JobType, o.allowFinished); err != nil {
 					return err
 				}
 			}
-			l.UnitCost = op.LaborRate
-			l.Amount = domain.RoundMoney(l.Qty.Mul(op.LaborRate), h.currency)
+			labor := op.LaborRate
+			if l.UnitCost.IsPositive() {
+				labor = l.UnitCost
+			}
+			l.UnitCost = labor
+			l.Amount = domain.RoundMoney(l.Qty.Mul(labor), h.currency)
 			l.OverheadAmount = domain.RoundMoney(l.Qty.Mul(op.OverheadRate), h.currency)
 			postings = append(postings, domain.HoursPostings(profile, l.Amount, l.OverheadAmount)...)
 		case KindReceipt:
@@ -745,7 +759,7 @@ func postJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, 
 	if err := insertPostings(ctx, tx, tenantID, *h, &j.ID, j.PostingDate, postings); err != nil {
 		return err
 	}
-	if err := applyLines(ctx, tx, tenantID, h.id, j.ID, j.Lines); err != nil {
+	if err := applyLines(ctx, tx, tenantID, h.id, j.ID, j.Lines, o.allowFinished); err != nil {
 		return err
 	}
 	if j.Type == domain.JournalReportFinished {
@@ -776,7 +790,7 @@ func postJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, 
 // applyLines stores the valued lines of a posted journal and books them on
 // the BOM lines and operations: feedback starts an operation and a finishing
 // line closes it (FR-21.6).
-func applyLines(ctx context.Context, tx pgx.Tx, tenantID, orderID, journalID string, lines []JournalLine) error {
+func applyLines(ctx context.Context, tx pgx.Tx, tenantID, orderID, journalID string, lines []JournalLine, keepFinished bool) error {
 	for i, l := range lines {
 		if _, err := tx.Exec(ctx, `update production_journal_line set unit_cost = $4, amount = $5, overhead_amount = $6
 			where tenant_id = $1 and journal_id = $2 and line_seq = $3`,
@@ -795,7 +809,7 @@ func applyLines(ctx context.Context, tx pgx.Tx, tenantID, orderID, journalID str
 			}
 		case KindHours:
 			if l.JobType != nil {
-				if err := applyJobFeedback(ctx, tx, tenantID, orderID, l); err != nil {
+				if err := applyJobFeedback(ctx, tx, tenantID, orderID, l, keepFinished); err != nil {
 					return err
 				}
 				continue
@@ -875,7 +889,7 @@ func autoPost(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, in 
 	if err != nil {
 		return err
 	}
-	return postJournal(ctx, tx, tenantID, h, &j, postOptions{overDuty: true, rafTolerancePct: rafTolerancePct, actor: actor, key: key, claims: claims})
+	return postJournal(ctx, tx, tenantID, h, &j, postOptions{overDuty: true, rafTolerancePct: rafTolerancePct, actor: actor, key: key, allowFinished: in.AllowFinished, claims: claims})
 }
 
 // claimScope takes the inventory claims of the consumption one command posts
@@ -944,50 +958,7 @@ func reverseJournals(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHe
 		return err
 	}
 	for _, originalID := range toReverse {
-		orig, err := loadJournal(ctx, tx, tenantID, originalID)
-		if err != nil {
-			return err
-		}
-		number, err := nextJournalNumber(ctx, tx, tenantID, h.legalEntityID)
-		if err != nil {
-			return err
-		}
-		date := today()
-		if orig.PostingDate > date {
-			date = orig.PostingDate
-		}
-		rev := Journal{ID: ids.New(), OrderID: h.id, Type: orig.Type, JournalNumber: number, PostingDate: date, Posted: true,
-			QtyGood: orig.QtyGood.Neg(), QtyError: orig.QtyError.Neg(), ReversalOf: &orig.ID}
-		revKey := key + ":" + orig.ID
-		if _, err := tx.Exec(ctx, `insert into production_journal (tenant_id, id, legal_entity_id, order_id, journal_type, journal_number,
-				posting_date, posted, posted_at, posted_by, qty_good, qty_error, reversal_of, idempotency_key, request_hash, post_key, created_by)
-			values ($1, $2, $3, $4, $5, $6, $7::date, true, now(), $8, $9, $10, $11, $12, $12, $12, $8)`,
-			tenantID, rev.ID, h.legalEntityID, h.id, string(rev.Type), number, date, actor, rev.QtyGood.String(), rev.QtyError.String(),
-			orig.ID, revKey); err != nil {
-			return err
-		}
-		for _, l := range orig.Lines {
-			l.Qty, l.QtyGood, l.QtyError = l.Qty.Neg(), l.QtyGood.Neg(), l.QtyError.Neg()
-			l.Amount, l.OverheadAmount, l.Finished = l.Amount.Neg(), l.OverheadAmount.Neg(), false
-			rev.Lines = append(rev.Lines, l)
-			if l.Kind == KindReceipt {
-				h.qtyRAF, h.qtyError = h.qtyRAF.Add(l.QtyGood), h.qtyError.Add(l.QtyError)
-			}
-		}
-		if err := insertJournalLines(ctx, tx, tenantID, rev.ID, rev.Lines); err != nil {
-			return err
-		}
-		for _, w := range orig.Postings {
-			w.Dr, w.Cr = w.Cr, w.Dr
-			rev.Postings = append(rev.Postings, w)
-		}
-		if err := insertPostings(ctx, tx, tenantID, *h, &rev.ID, date, rev.Postings); err != nil {
-			return err
-		}
-		if err := applyReversal(ctx, tx, tenantID, h.id, rev.Lines); err != nil {
-			return err
-		}
-		if err := enqueueJournalPosted(ctx, tx, tenantID, *h, rev, actor); err != nil {
+		if err := reverseJournal(ctx, tx, tenantID, h, originalID, actor, key, false); err != nil {
 			return err
 		}
 	}
@@ -999,6 +970,58 @@ func reverseJournals(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHe
 		if h.qtyRAF.LessThan(h.quantity) {
 			return reopenJobsEndedByRAF(ctx, tx, tenantID, *h, actor)
 		}
+	}
+	return nil
+}
+
+// reverseJournal posts the reversal of one posted journal; keepStatus leaves the
+// operation and job status as they are (a reversal of late shop-floor hours).
+func reverseJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, originalID, actor, key string, keepStatus bool) error {
+	orig, err := loadJournal(ctx, tx, tenantID, originalID)
+	if err != nil {
+		return err
+	}
+	number, err := nextJournalNumber(ctx, tx, tenantID, h.legalEntityID)
+	if err != nil {
+		return err
+	}
+	date := today()
+	if orig.PostingDate > date {
+		date = orig.PostingDate
+	}
+	rev := Journal{ID: ids.New(), OrderID: h.id, Type: orig.Type, JournalNumber: number, PostingDate: date, Posted: true,
+		QtyGood: orig.QtyGood.Neg(), QtyError: orig.QtyError.Neg(), ReversalOf: &orig.ID}
+	revKey := key + ":" + orig.ID
+	if _, err := tx.Exec(ctx, `insert into production_journal (tenant_id, id, legal_entity_id, order_id, journal_type, journal_number,
+			posting_date, posted, posted_at, posted_by, qty_good, qty_error, reversal_of, idempotency_key, request_hash, post_key, created_by)
+		values ($1, $2, $3, $4, $5, $6, $7::date, true, now(), $8, $9, $10, $11, $12, $12, $12, $8)`,
+		tenantID, rev.ID, h.legalEntityID, h.id, string(rev.Type), number, date, actor, rev.QtyGood.String(), rev.QtyError.String(),
+		orig.ID, revKey); err != nil {
+		return err
+	}
+	for _, l := range orig.Lines {
+		l.Qty, l.QtyGood, l.QtyError = l.Qty.Neg(), l.QtyGood.Neg(), l.QtyError.Neg()
+		l.Amount, l.OverheadAmount, l.Finished = l.Amount.Neg(), l.OverheadAmount.Neg(), false
+		rev.Lines = append(rev.Lines, l)
+		if l.Kind == KindReceipt {
+			h.qtyRAF, h.qtyError = h.qtyRAF.Add(l.QtyGood), h.qtyError.Add(l.QtyError)
+		}
+	}
+	if err := insertJournalLines(ctx, tx, tenantID, rev.ID, rev.Lines); err != nil {
+		return err
+	}
+	for _, w := range orig.Postings {
+		w.Dr, w.Cr = w.Cr, w.Dr
+		rev.Postings = append(rev.Postings, w)
+	}
+	if err := insertPostings(ctx, tx, tenantID, *h, &rev.ID, date, rev.Postings); err != nil {
+		return err
+	}
+	if err := applyReversal(ctx, tx, tenantID, h.id, rev.Lines, keepStatus); err != nil {
+		return err
+	}
+	if err := enqueueJournalPosted(ctx, tx, tenantID, *h, rev, actor); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1164,7 +1187,7 @@ func checkCardMode(modes map[int]domain.JournalType, oper int, t domain.JournalT
 
 // checkJobOpen refuses a job-card line whose job is gone (a re-date after the draft was made can
 // drop a job of zero hours) or already finished.
-func checkJobOpen(ctx context.Context, tx pgx.Tx, tenantID, orderID string, oper int, typ string) error {
+func checkJobOpen(ctx context.Context, tx pgx.Tx, tenantID, orderID string, oper int, typ string, allowFinished bool) error {
 	var status string
 	err := tx.QueryRow(ctx, `select status from production_job where tenant_id = $1 and order_id = $2 and oper_number = $3 and job_type = $4`,
 		tenantID, orderID, oper, typ).Scan(&status)
@@ -1174,7 +1197,7 @@ func checkJobOpen(ctx context.Context, tx pgx.Tx, tenantID, orderID string, oper
 	if err != nil {
 		return err
 	}
-	if status == "finished" {
+	if status == "finished" && !allowFinished {
 		return httpx.NewProblem(http.StatusConflict, CodeJobFinished, fmt.Sprintf("the %s job of operation %d is finished", typ, oper))
 	}
 	return nil
@@ -1183,19 +1206,19 @@ func checkJobOpen(ctx context.Context, tx pgx.Tx, tenantID, orderID string, oper
 // applyJobFeedback books a job-card line on its job and on the operation: the job starts, or
 // finishes when the line says so, and the operation finishes once every setup and process job of
 // it is finished (FR-21.6 "unless reopened" still applies through :reopen).
-func applyJobFeedback(ctx context.Context, tx pgx.Tx, tenantID, orderID string, l JournalLine) error {
+func applyJobFeedback(ctx context.Context, tx pgx.Tx, tenantID, orderID string, l JournalLine, keepFinished bool) error {
 	if _, err := tx.Exec(ctx, `update production_job set hours_reported = hours_reported + $5, qty_good = qty_good + $6, qty_error = qty_error + $7,
-			ended_by_raf = false, status = case when $8 then 'finished' else 'started' end
+			ended_by_raf = case when $9 then ended_by_raf else false end, status = case when $8 or ($9 and status = 'finished') then 'finished' else 'started' end
 		where tenant_id = $1 and order_id = $2 and oper_number = $3 and job_type = $4`,
-		tenantID, orderID, *l.OperNumber, *l.JobType, l.Qty.String(), l.QtyGood.String(), l.QtyError.String(), l.Finished); err != nil {
+		tenantID, orderID, *l.OperNumber, *l.JobType, l.Qty.String(), l.QtyGood.String(), l.QtyError.String(), l.Finished, keepFinished); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `update production_operation o set hours_reported = hours_reported + $4,
-			qty_good = qty_good + $5, qty_error = qty_error + $6, ended_by_raf = false,
+			qty_good = qty_good + $5, qty_error = qty_error + $6, ended_by_raf = case when $7 then ended_by_raf else false end,
 			status = case when not exists (select 1 from production_job j where j.tenant_id = o.tenant_id and j.order_id = o.order_id
 				and j.oper_number = o.oper_number and j.job_type in ('setup', 'process') and j.status <> 'finished') then 'finished' else 'started' end
 		where o.tenant_id = $1 and o.order_id = $2 and o.oper_number = $3`,
-		tenantID, orderID, *l.OperNumber, l.Qty.String(), l.QtyGood.String(), l.QtyError.String())
+		tenantID, orderID, *l.OperNumber, l.Qty.String(), l.QtyGood.String(), l.QtyError.String(), keepFinished)
 	return err
 }
 
@@ -1209,7 +1232,7 @@ func reverseJobFeedback(ctx context.Context, tx pgx.Tx, tenantID, orderID string
 
 // applyReversal takes back the negated lines of a reversal journal; an
 // operation with nothing left reported is open again.
-func applyReversal(ctx context.Context, tx pgx.Tx, tenantID, orderID string, lines []JournalLine) error {
+func applyReversal(ctx context.Context, tx pgx.Tx, tenantID, orderID string, lines []JournalLine, keepStatus bool) error {
 	for _, l := range lines {
 		switch l.Kind {
 		case KindIssue:
@@ -1226,6 +1249,13 @@ func applyReversal(ctx context.Context, tx pgx.Tx, tenantID, orderID string, lin
 				if err := reverseJobFeedback(ctx, tx, tenantID, orderID, l); err != nil {
 					return err
 				}
+			}
+			if keepStatus {
+				if _, err := tx.Exec(ctx, `update production_operation set hours_reported = hours_reported + $4
+					where tenant_id = $1 and order_id = $2 and oper_number = $3`, tenantID, orderID, *l.OperNumber, l.Qty.String()); err != nil {
+					return err
+				}
+				continue
 			}
 			if _, err := tx.Exec(ctx, `update production_operation set hours_reported = hours_reported + $4,
 					qty_good = qty_good + $5, qty_error = qty_error + $6, ended_by_raf = false,

@@ -125,6 +125,116 @@ type Store interface {
 	ListRouteVersions(ctx context.Context, f RouteVersionFilter, afterID string, limit int) (Page[RouteVersionHeader], error)
 	ActiveRouteVersion(ctx context.Context, productID, siteID string, asOf time.Time) (domain.RouteVersion, error)
 	Ping(ctx context.Context) error
+
+	CreateOrganization(ctx context.Context, o domain.EngineeringOrganization, idem Idem) (domain.EngineeringOrganization, error)
+	GetOrganization(ctx context.Context, id string) (domain.EngineeringOrganization, error)
+	ListOrganizations(ctx context.Context, afterID string, limit int) (Page[domain.EngineeringOrganization], error)
+	CreateNomenclature(ctx context.Context, n domain.Nomenclature, idem Idem) (domain.Nomenclature, error)
+	GetNomenclature(ctx context.Context, id string) (domain.Nomenclature, error)
+	ListNomenclatures(ctx context.Context, afterID string, limit int) (Page[domain.Nomenclature], error)
+	CreateCategory(ctx context.Context, c domain.EngineeringCategory, idem Idem) (domain.EngineeringCategory, error)
+	GetCategory(ctx context.Context, id string) (domain.EngineeringCategory, error)
+	ListCategories(ctx context.Context, afterID string, limit int) (Page[domain.EngineeringCategory], error)
+	CreateEngineeringVersion(ctx context.Context, v domain.EngineeringVersion, idem Idem) (domain.EngineeringVersion, error)
+	GetEngineeringVersion(ctx context.Context, id string) (domain.EngineeringVersion, error)
+	ListEngineeringVersions(ctx context.Context, productID, afterID string, limit int) (Page[domain.EngineeringVersion], error)
+	PutIdentifier(ctx context.Context, idType, value, productID string) error
+
+	CreateReleasePolicy(ctx context.Context, p domain.ReleasePolicy, idem Idem) (domain.ReleasePolicy, error)
+	GetReleasePolicy(ctx context.Context, id string) (domain.ReleasePolicy, error)
+	ListReleasePolicies(ctx context.Context, afterID string, limit int) (Page[domain.ReleasePolicy], error)
+	PutSiteMapping(ctx context.Context, m domain.SiteMapping) error
+	CreateReleaseSession(ctx context.Context, in ReleaseSessionInput, idem Idem) (ReleaseSessionRecord, error)
+	GetReleaseSession(ctx context.Context, id string) (ReleaseSessionRecord, error)
+	ListReleaseSessions(ctx context.Context, afterID string, limit int) (Page[domain.ReleaseSession], error)
+	ListReleaseLines(ctx context.Context, f ReleaseLineFilter, afterID string, limit int) (Page[domain.ReleaseLine], error)
+	DecideReleaseLine(ctx context.Context, id, actor, reason string, accept bool) (domain.ReleaseLine, error)
+	CreateReadinessPolicy(ctx context.Context, p domain.ReadinessPolicy, idem Idem) (domain.ReadinessPolicy, error)
+	GetReadinessPolicy(ctx context.Context, id string) (domain.ReadinessPolicy, error)
+	ListReadinessPolicies(ctx context.Context, afterID string, limit int) (Page[domain.ReadinessPolicy], error)
+	GetReleasedProduct(ctx context.Context, id string) (ReleasedProduct, error)
+	ListReleasedProducts(ctx context.Context, legalEntityID, afterID string, limit int) (Page[ReleasedProduct], error)
+	SignReadinessCheck(ctx context.Context, releasedProductID, key, signer string) (ReleasedProduct, error)
+
+	CreateDocumentType(ctx context.Context, t domain.DocumentType, idem Idem) (domain.DocumentType, error)
+	GetDocumentType(ctx context.Context, code string) (domain.DocumentType, error)
+	ListDocumentTypes(ctx context.Context, afterID string, limit int) (Page[domain.DocumentType], error)
+	CreateDocument(ctx context.Context, d domain.Document, idem Idem) (domain.Document, error)
+	GetDocument(ctx context.Context, id string) (domain.Document, error)
+	ListDocuments(ctx context.Context, number, afterID string, limit int) (Page[domain.Document], error)
+	TransitionDocument(ctx context.Context, id, to, actor string, sig *domain.Signature) (domain.Document, error)
+	ListSignatures(ctx context.Context, documentID string) ([]domain.Signature, error)
+	DocumentWhereUsed(ctx context.Context, id string) ([]domain.DocumentWhereUsed, error)
+	SetDocumentStructure(ctx context.Context, parentID string, children []string) error
+
+	ImportEbom(ctx context.Context, in EbomImportInput, idem Idem) (EbomImportRecord, error)
+	GetEbomImport(ctx context.Context, id string) (EbomImportRecord, error)
+	ListEbomImports(ctx context.Context, afterID string, limit int) (Page[EbomImportRecord], error)
+
+	CanScanAudit(ctx context.Context) (bool, error)
+	ClaimAudit(ctx context.Context, limit int, lease time.Duration) ([]AuditJob, error)
+	CompleteAudit(ctx context.Context, id string) error
+	FailAudit(ctx context.Context, id string, attempts int, cause error, retryAfter time.Duration) error
+}
+
+// ReleaseSessionInput is one FR-9.15 workflow: a product version sent to receiving legal entities.
+type ReleaseSessionInput struct {
+	Number            string
+	CreatedBy         string
+	Source            string
+	PolicyID          string
+	EcoID             string
+	EngineeringLEID   string
+	ProductID         string
+	VersionCode       string
+	LegalEntities     []string
+	Facts             domain.ReadinessFacts
+	ReadinessPolicyID string
+}
+
+// ReleaseSessionRecord is a session plus its lines.
+type ReleaseSessionRecord struct {
+	Session domain.ReleaseSession
+	Lines   []domain.ReleaseLine
+}
+
+// ReleaseLineFilter narrows Open product releases; empty fields match everything.
+type ReleaseLineFilter struct {
+	Status, LegalEntityID string
+}
+
+// ReleasedProduct is a product received by an operational legal entity (FR-9.16/9.17).
+type ReleasedProduct struct {
+	ID                 string
+	ProductID          string
+	LegalEntityID      string
+	EngineeringVersion string
+	SessionID          string
+	State              string
+	Checks             []domain.ReadinessCheckResult
+	SessionCreator     string
+	ReadinessPolicyID  string
+}
+
+// EbomImportInput is one CAD/PLM payload (FR-9.27).
+type EbomImportInput struct {
+	Source  string
+	Payload domain.EbomPayload
+	Actor   string
+}
+
+// EbomImportRecord is the persisted import, its exceptions and the eBOM-versus-mBOM comparison.
+type EbomImportRecord struct {
+	ID           string
+	Source       string
+	PartNumber   string
+	Revision     string
+	Status       string
+	BOMVersionID string
+	EcrID        string
+	Payload      domain.EbomPayload
+	Exceptions   []domain.EbomException
+	Comparison   domain.EbomComparison
 }
 
 type Postgres struct{ pool *pgxpool.Pool }
@@ -533,7 +643,22 @@ func getEco(ctx context.Context, tx pgx.Tx, tenantID, id string) (domain.Eco, er
 		}
 		e.Replaces = append(e.Replaces, r)
 	}
-	return e, rows.Err()
+	if err := rows.Err(); err != nil {
+		return e, err
+	}
+	docs, err := tx.Query(ctx, `select old_document_id::text, new_document_id::text from eco_document_replacement where tenant_id = $1 and eco_id = $2::uuid order by new_document_id`, tenantID, id)
+	if err != nil {
+		return e, err
+	}
+	defer docs.Close()
+	for docs.Next() {
+		var r domain.DocumentReplacement
+		if err := docs.Scan(&r.OldDocumentID, &r.NewDocumentID); err != nil {
+			return e, err
+		}
+		e.Documents = append(e.Documents, r)
+	}
+	return e, docs.Err()
 }
 
 func emit(ctx context.Context, tx pgx.Tx, p tenant.Principal, correlationID, typ, aggregateType, aggregateID string, data any) error {
@@ -592,6 +717,45 @@ func (s *Postgres) CreateEco(ctx context.Context, e domain.Eco, idem Idem) (doma
 		for _, r := range e.Replaces {
 			if _, err := tx.Exec(ctx, `insert into eco_replacement (tenant_id, eco_id, old_version_id, new_version_id) values ($1, $2, $3, $4)`,
 				p.TenantID, e.ID, r.OldVersionID, r.NewVersionID); err != nil {
+				return err
+			}
+		}
+		docIDs := make([]string, 0, 2*len(e.Documents))
+		seenDoc := map[string]bool{}
+		for _, r := range e.Documents {
+			for _, id := range []string{r.OldDocumentID, r.NewDocumentID} {
+				if !seenDoc[id] {
+					seenDoc[id] = true
+					docIDs = append(docIDs, id)
+				}
+			}
+		}
+		if len(docIDs) > 0 {
+			var knownDocs int
+			if err := tx.QueryRow(ctx, `select count(*) from document where tenant_id = $1 and id = any($2::uuid[])`, p.TenantID, docIDs).Scan(&knownDocs); err != nil {
+				return err
+			}
+			if knownDocs != len(docIDs) {
+				return httpx.NewProblem(http.StatusNotFound, "ENG-DOC-NOTFOUND", "a replaced or replacing document does not exist")
+			}
+			newDocs := make([]string, 0, len(e.Documents))
+			for _, r := range e.Documents {
+				newDocs = append(newDocs, r.NewDocumentID)
+			}
+			var taken int
+			if err := tx.QueryRow(ctx, `select count(*) from document where tenant_id = $1 and id = any($2::uuid[]) and (eco_id is not null or status not in ('in_work', 'in_review'))`, p.TenantID, newDocs).Scan(&taken); err != nil {
+				return err
+			}
+			if taken > 0 {
+				return &domain.Error{Code: domain.CodeDocState, Detail: "a replacing document is already bound to an ECO or is no longer in work or in review"}
+			}
+		}
+		for _, r := range e.Documents {
+			if _, err := tx.Exec(ctx, `insert into eco_document_replacement (tenant_id, eco_id, old_document_id, new_document_id) values ($1, $2, $3, $4)`,
+				p.TenantID, e.ID, r.OldDocumentID, r.NewDocumentID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `update document set eco_id = $3 where tenant_id = $1 and id = $2::uuid`, p.TenantID, r.NewDocumentID, e.ID); err != nil {
 				return err
 			}
 		}
@@ -738,6 +902,9 @@ func (s *Postgres) ReleaseEco(ctx context.Context, e domain.Eco, prev domain.Eco
 			}
 		}
 		if e.State == domain.EcoReleased {
+			if err := releaseEcoDocuments(ctx, tx, p, e); err != nil {
+				return err
+			}
 			return emit(ctx, tx, p, e.ID, engevents.EcoReleased, aggregateEco, e.ID, e.EventData())
 		}
 		return nil

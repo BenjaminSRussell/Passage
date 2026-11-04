@@ -111,6 +111,7 @@ type transactionResponse struct {
 	Qty                string            `json:"qty"`
 	EnteredQty         string            `json:"enteredQty"`
 	EnteredUnit        string            `json:"enteredUnit"`
+	CWQty              *int              `json:"cwQty,omitempty"`
 	IssueStatus        string            `json:"issueStatus,omitempty"`
 	ReceiptStatus      string            `json:"receiptStatus,omitempty"`
 	PhysicalDate       string            `json:"physicalDate"`
@@ -470,7 +471,7 @@ func toTransactionResponse(t store.TransactionRow) transactionResponse {
 		JournalID: t.JournalID, Reference: t.Reference, ProductID: t.ProductID, Dimensions: t.Dims, Qty: t.Qty.String(),
 		EnteredQty: t.EnteredQty.String(), EnteredUnit: t.EnteredUnit, IssueStatus: t.IssueStatus, ReceiptStatus: t.ReceiptStatus,
 		PhysicalDate: t.PhysicalDate, FinancialDate: t.FinancialDate, Currency: t.Currency, CostAmountPhysical: t.CostAmountPhysical.String(),
-		CreatedAt: t.CreatedAt}
+		CreatedAt: t.CreatedAt, CWQty: t.CWQty}
 	if t.CostAmountPosted != nil {
 		v := t.CostAmountPosted.String()
 		item.CostAmountPosted = &v

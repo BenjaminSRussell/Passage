@@ -26,7 +26,9 @@ const (
 
 	// FR-9.19 usages and categories. An empty usage means production and an empty category material.
 	UsageProduction  = "production"
+	UsageEngineering = "engineering"
 	UsageCosting     = "costing"
+	UsageMaintenance = "maintenance"
 	UsageSales       = "sales"
 	UsageUniversal   = "universal"
 	CategoryMaterial = "material"

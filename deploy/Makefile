@@ -58,7 +58,7 @@ rollback-prod:
 	$(PYTHON) scripts/stage_release.py rollback --env prod
 
 test-stage-release:
-	$(PYTHON) -m unittest discover -s scripts -p 'test_*.py' -v
+	$(PYTHON) -m unittest discover -s scripts -p 'test_stage_release.py' -v
 
 test-policies:
 	@which kyverno >/dev/null || { echo "kyverno CLI not installed; install it from https://kyverno.io/docs/kyverno-cli/ to run the policy tests" >&2; exit 2; }

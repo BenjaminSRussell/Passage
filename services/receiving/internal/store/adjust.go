@@ -51,10 +51,11 @@ func (s *Postgres) Correct(ctx context.Context, id string, fn AdjustFunc) (Recei
 		}
 		var lineRows, grirRows [][]any
 		for _, c := range adj.Lines {
-			lineRows = append(lineRows, []any{tenantID, id, c.LineNo, c.Qty, c.Amount, c.AmountAcct})
+			lineRows = append(lineRows, []any{tenantID, id, c.LineNo, c.Qty, c.Amount, c.AmountAcct, nullInt(c.CWQty)})
 			grirRows = append(grirRows, []any{tenantID, id, c.LineNo, c.Qty, c.Amount})
 		}
-		if err := execBatch(ctx, tx, `UPDATE receiving_receipt_line SET qty = $4, amount = $5, amount_acct = $6 WHERE tenant_id = $1 AND receipt_id = $2 AND line_no = $3`, lineRows); err != nil {
+		if err := execBatch(ctx, tx, `UPDATE receiving_receipt_line SET qty = $4, amount = $5, amount_acct = $6, cw_qty = COALESCE($7::int, cw_qty)
+			WHERE tenant_id = $1 AND receipt_id = $2 AND line_no = $3`, lineRows); err != nil {
 			return err
 		}
 		if err := execBatch(ctx, tx, `UPDATE receiving_grir_open_item SET received_qty = $4::numeric, received_amount = $5,

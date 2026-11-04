@@ -37,6 +37,12 @@ spec:
               value: {{ .Values.migrateOnStart | quote }}
             - name: PASSAGE_SERVICE_NAME
               value: engineering
+{{- if .Values.auditUrl }}
+            - { name: AUDIT_URL, value: {{ .Values.auditUrl | quote }} }
+{{- end }}
+{{- if .Values.environment }}
+            - { name: PASSAGE_ENV, value: {{ .Values.environment | quote }} }
+{{- end }}
 {{- if .Values.serviceIdentity.publicKeys }}
             - { name: PASSAGE_SERVICE_PUBLIC_KEYS, value: {{ .Values.serviceIdentity.publicKeys | quote }} }
 {{- end }}

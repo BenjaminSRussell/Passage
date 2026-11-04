@@ -384,7 +384,7 @@ func TestRoleAssignmentLifecycle(t *testing.T) {
 		return f.do(c, http.MethodPost, "/v1/authz/assignments", body)
 	}
 	day := 24 * time.Hour
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	first := decode[assignmentRow](t, assign(map[string]any{"userId": userID, "role": "View vendors"}), http.StatusCreated)
 	if first.Role != "View vendors" || first.ValidTo != nil || first.LegalEntityID != "" || first.ValidFrom.IsZero() {

@@ -143,6 +143,34 @@ func enqueue(ctx context.Context, tx pgx.Tx, aggregateType, aggregateID, eventTy
 	return outbox.Enqueue(ctx, tx, aggregateType, aggregateID, evt)
 }
 
+// enqueuePosted writes registration.posted with the job's order and the worker's
+// cost rate when those rows exist, so w21 can post the job-card (FR-25.4, BR-25.9).
+func enqueuePosted(ctx context.Context, tx pgx.Tx, tenantID string, data sfevents.RegistrationPostedData) error {
+	if data.JobID != nil {
+		var orderRef, opRef string
+		err := tx.QueryRow(ctx, `select order_ref, operation_ref from shop_job where tenant_id = $1 and id = $2`, tenantID, *data.JobID).Scan(&orderRef, &opRef)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err == nil {
+			data.OrderRef, data.OperationRef = orderRef, opRef
+		}
+		if data.Kind == KindJobStop && data.Hours != nil {
+			var rate, currency string
+			err = tx.QueryRow(ctx, `select cost_rate::text, currency from worker where tenant_id = $1 and id = $2`, tenantID, data.WorkerID).Scan(&rate, &currency)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			if err == nil {
+				if r, perr := decimal.NewFromString(rate); perr == nil && r.IsPositive() {
+					data.CostRate, data.CostRateCurrency = &r, currency
+				}
+			}
+		}
+	}
+	return enqueue(ctx, tx, "registration", data.RegistrationID, sfevents.RegistrationPosted, tenantID, data)
+}
+
 func workerNotFound() error {
 	return httpx.NewProblem(http.StatusUnprocessableEntity, CodeWorkerNotFound, "worker not found")
 }
@@ -230,7 +258,7 @@ func (s *Postgres) CreateRegistrations(ctx context.Context, items []Registration
 				return mapForeignKey(err)
 			}
 			res := newResult(in.ID, StatusAccepted, flags)
-			if err := enqueue(ctx, tx, "registration", in.ID, sfevents.RegistrationPosted, p.TenantID, sfevents.RegistrationPostedData{
+			if err := enqueuePosted(ctx, tx, p.TenantID, sfevents.RegistrationPostedData{
 				RegistrationID: in.ID, WorkerID: in.WorkerID, Kind: in.Kind, JobID: in.JobID, BundleID: in.BundleID, AbsenceCodeID: in.AbsenceCodeID, Hours: in.Hours,
 				QtyGood: in.QtyGood, QtyScrap: in.QtyScrap, Offline: in.Offline, Flags: flags,
 			}); err != nil {

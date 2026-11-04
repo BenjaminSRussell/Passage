@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	allDuties  = "engineering.read,engineering.bom.write,engineering.eco.approve,engineering.resource.write"
+	allDuties  = "engineering.read,engineering.bom.write,engineering.eco.approve,engineering.resource.write,engineering.release.accept,engineering.doc.sign"
 	versions   = "/v1/engineering/bom-versions"
 	ecos       = "/v1/engineering/ecos"
 	oldVersion = "00000000-0000-0000-0000-0000000000a1"
@@ -68,6 +68,7 @@ type fakeStore struct {
 	capList     []domain.Capability
 	calList     []store.Calendar
 	inUse       bool
+	wave        *wave09State
 }
 
 func (f *fakeStore) CreateBomVersion(_ context.Context, v domain.BomVersion, idem store.Idem, check func(store.Snapshot) error) (domain.BomVersion, error) {
@@ -792,7 +793,7 @@ func TestSpecs_MatchRoutes(t *testing.T) {
 			t.Errorf("openapi.yaml documents %s but no route is registered", match[1])
 		}
 	}
-	for _, typ := range []string{engevents.BomVersionActivated, engevents.BomVersionExpired, engevents.EcoSubmitted, engevents.EcoApproved, engevents.EcoReleased} {
+	for _, typ := range []string{engevents.BomVersionActivated, engevents.BomVersionExpired, engevents.EcoSubmitted, engevents.EcoApproved, engevents.EcoReleased, engevents.ReleaseSessionCreated, engevents.ReleaseLineAccepted, engevents.ReleasedProductChanged, engevents.DocumentSigned, engevents.DocumentReleased, engevents.EbomImported} {
 		if !events.ValidType(typ) || !strings.Contains(string(asyncapi), typ) || !strings.Contains(string(asyncapi), events.Topic(typ)) {
 			t.Errorf("asyncapi.yaml does not document %s on %s", typ, events.Topic(typ))
 		}

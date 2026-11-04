@@ -54,6 +54,12 @@ type Line struct {
 	Serials          []string
 	Amount           decimal.NullDecimal
 	AmountAcct       decimal.NullDecimal
+	// CWQty is the catch-weight count (cases). Qty is the actual weight when
+	// CWQty is set, in the PO line's weight unit.
+	CWQty     int
+	CWNominal decimal.Decimal
+	CWMin     decimal.Decimal
+	CWMax     decimal.Decimal
 }
 
 type Receipt struct {
@@ -118,8 +124,10 @@ const (
 )
 
 type LineChange struct {
-	LineNo     int
-	Qty        decimal.Decimal
+	LineNo int
+	Qty    decimal.Decimal
+	// CWQty is the catch-weight count after the change; 0 keeps the stored count.
+	CWQty      int
 	Amount     decimal.Decimal
 	AmountAcct decimal.Decimal
 }

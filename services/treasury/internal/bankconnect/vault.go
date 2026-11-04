@@ -42,17 +42,20 @@ type VaultConfig struct {
 	K8sMount        string
 	K8sJWTPath      string
 	SFTPKeyName     string
+	SFTPKeyVersion  int
 	SigningKeyNames []string
 	BankChannels    []string
 	Client          *http.Client
 }
 
 // LoadVaultConfig reads VAULT_ADDR, VAULT_TOKEN or VAULT_K8S_ROLE (with
-// VAULT_K8S_AUTH_MOUNT and VAULT_K8S_JWT_PATH), TREASURY_SFTP_KEY_NAME (the
-// transit key behind the SFTP client login), TREASURY_SIGNING_KEY_NAMES (the
-// allow-list of transit keys that may sign bank files), TREASURY_BANK_CHANNELS
-// and TREASURY_ENV. With no VAULT_ADDR bank connectivity is off, which is
-// refused outside TREASURY_ENV=dev when a bank channel is enabled.
+// VAULT_K8S_AUTH_MOUNT and VAULT_K8S_JWT_PATH), TREASURY_SFTP_KEY_NAME and
+// TREASURY_SFTP_KEY_VERSION (the pinned transit key behind the SFTP client
+// login), TREASURY_SIGNING_KEY_NAMES (the allow-list of transit keys that may
+// sign bank files; disjoint from the SFTP login key), TREASURY_BANK_CHANNELS
+// (sftp or ebics, lowercased) and TREASURY_ENV. With no VAULT_ADDR bank
+// connectivity is off, which is refused outside TREASURY_ENV=dev when a bank
+// channel is enabled.
 func LoadVaultConfig(getenv func(string) string) (VaultConfig, error) {
 	c := VaultConfig{
 		Addr: getenv("VAULT_ADDR"), Token: getenv("VAULT_TOKEN"), K8sRole: getenv("VAULT_K8S_ROLE"),
@@ -60,6 +63,11 @@ func LoadVaultConfig(getenv func(string) string) (VaultConfig, error) {
 		SFTPKeyName: getenv("TREASURY_SFTP_KEY_NAME"), SigningKeyNames: splitList(getenv("TREASURY_SIGNING_KEY_NAMES")),
 		BankChannels: splitList(getenv("TREASURY_BANK_CHANNELS")),
 	}
+	channels, err := normalizeBankChannels(c.BankChannels)
+	if err != nil {
+		return VaultConfig{}, err
+	}
+	c.BankChannels = channels
 	if c.Addr == "" {
 		if c.Token != "" || c.K8sRole != "" || c.SFTPKeyName != "" || len(c.SigningKeyNames) > 0 {
 			return VaultConfig{}, errors.New("vault settings given without VAULT_ADDR")
@@ -79,6 +87,18 @@ func LoadVaultConfig(getenv func(string) string) (VaultConfig, error) {
 	for _, n := range names {
 		if n != "" && !vaultName.MatchString(n) {
 			return VaultConfig{}, fmt.Errorf("vault name %q must be letters, digits, - or _", n)
+		}
+	}
+	if c.SFTPKeyName != "" {
+		n, err := strconv.Atoi(getenv("TREASURY_SFTP_KEY_VERSION"))
+		if err != nil || n < 1 {
+			return VaultConfig{}, errors.New("TREASURY_SFTP_KEY_VERSION must be a positive integer")
+		}
+		c.SFTPKeyVersion = n
+	}
+	for _, n := range c.SigningKeyNames {
+		if n != "" && n == c.SFTPKeyName {
+			return VaultConfig{}, errors.New("TREASURY_SFTP_KEY_NAME must not also be a signing key")
 		}
 	}
 	if len(c.BankChannels) > 0 && len(c.SigningKeyNames) == 0 {
@@ -104,6 +124,18 @@ func splitList(raw string) []string {
 	return out
 }
 
+func normalizeBankChannels(raw []string) ([]string, error) {
+	out := make([]string, 0, len(raw))
+	for _, ch := range raw {
+		ch = strings.ToLower(ch)
+		if ch != ProtocolSFTP && ch != ProtocolEBICS {
+			return nil, fmt.Errorf("unknown bank channel %q", ch)
+		}
+		out = append(out, ch)
+	}
+	return out, nil
+}
+
 func orDefault(v, def string) string {
 	if v == "" {
 		return def
@@ -118,6 +150,7 @@ type Vault struct {
 	cfg       VaultConfig
 	now       func() time.Time
 	mu        sync.Mutex
+	closed    bool
 	token     string
 	renewAt   time.Time
 	expiresAt time.Time
@@ -129,11 +162,14 @@ func (v *Vault) Token(ctx context.Context) (string, error) {
 	if !v.cfg.Enabled() {
 		return "", errors.New("vault is not configured")
 	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.closed {
+		return "", errors.New("vault client is closed")
+	}
 	if v.cfg.Token != "" {
 		return v.cfg.Token, nil
 	}
-	v.mu.Lock()
-	defer v.mu.Unlock()
 	now := v.now()
 	if v.token != "" && now.Before(v.renewAt) {
 		return v.token, nil
@@ -143,6 +179,7 @@ func (v *Vault) Token(ctx context.Context) (string, error) {
 			return v.token, nil
 		}
 		slog.WarnContext(ctx, "vault token renewal failed, logging in again")
+		v.revokeLocked(ctx)
 	}
 	if err := v.login(ctx); err != nil {
 		return "", err
@@ -157,10 +194,10 @@ type authReply struct {
 	} `json:"auth"`
 }
 
-func (v *Vault) adopt(r authReply) {
+func (v *Vault) adopt(r authReply, fallback time.Duration) {
 	lease := time.Duration(r.Auth.LeaseDuration) * time.Second
 	if lease <= 0 {
-		lease = defaultLease
+		lease = fallback
 	}
 	if r.Auth.ClientToken != "" {
 		v.token = r.Auth.ClientToken
@@ -186,7 +223,7 @@ func (v *Vault) login(ctx context.Context) error {
 		return errors.New("vault login: no client token in reply")
 	}
 	v.token = ""
-	v.adopt(out)
+	v.adopt(out, defaultLease)
 	return nil
 }
 
@@ -195,14 +232,39 @@ func (v *Vault) renew(ctx context.Context) error {
 	if err := v.cfg.call(ctx, http.MethodPost, "/v1/auth/token/renew-self", v.token, []byte("{}"), &out); err != nil {
 		return err
 	}
-	v.adopt(out)
+	v.adopt(out, 0)
 	return nil
+}
+
+func (v *Vault) revokeLocked(ctx context.Context) {
+	if v.token == "" || v.cfg.Token != "" {
+		return
+	}
+	tok := v.token
+	v.token = ""
+	var out json.RawMessage
+	if err := v.cfg.call(ctx, http.MethodPost, "/v1/auth/token/revoke-self", tok, []byte("{}"), &out); err != nil {
+		slog.WarnContext(ctx, "vault token revoke failed", "err", err)
+	}
+}
+
+func (v *Vault) invalidate() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.token = ""
+}
+
+func (v *Vault) dropOnForbidden(err error) {
+	if err != nil && strings.Contains(err.Error(), "status 403") {
+		v.invalidate()
+	}
 }
 
 // Close revokes the Kubernetes-login token so it does not outlive the process.
 func (v *Vault) Close(ctx context.Context) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	v.closed = true
 	if v.token == "" || v.cfg.Token != "" {
 		return nil
 	}
@@ -224,13 +286,24 @@ func (a allowListSigner) Sign(ctx context.Context, keyName string, payload []byt
 	return a.inner.Sign(ctx, keyName, payload)
 }
 
+type clearingSigner struct {
+	inner Signer
+	vault *Vault
+}
+
+func (c clearingSigner) Sign(ctx context.Context, keyName string, payload []byte) (Signature, error) {
+	sig, err := c.inner.Sign(ctx, keyName, payload)
+	c.vault.dropOnForbidden(err)
+	return sig, err
+}
+
 // Signer signs bank files in transit, only with the configured key names.
 func (v *Vault) Signer() Signer {
 	allowed := map[string]bool{}
 	for _, n := range v.cfg.SigningKeyNames {
 		allowed[n] = true
 	}
-	return allowListSigner{inner: VaultTransit{Addr: v.cfg.Addr, TokenFunc: v.Token, Client: v.cfg.Client}, allowed: allowed}
+	return allowListSigner{inner: clearingSigner{inner: VaultTransit{Addr: v.cfg.Addr, TokenFunc: v.Token, Client: v.cfg.Client}, vault: v}, allowed: allowed}
 }
 
 // SFTPSigner returns the SFTP client login key as an ssh.Signer whose
@@ -248,18 +321,30 @@ func (v *Vault) SFTPSigner(ctx context.Context) (ssh.Signer, error) {
 	}
 	var out struct {
 		Data struct {
-			Type          string `json:"type"`
-			LatestVersion int    `json:"latest_version"`
-			Keys          map[string]struct {
+			Type                 string `json:"type"`
+			Exportable           bool   `json:"exportable"`
+			AllowPlaintextBackup bool   `json:"allow_plaintext_backup"`
+			Keys                 map[string]struct {
 				PublicKey string `json:"public_key"`
 			} `json:"keys"`
 		} `json:"data"`
 	}
 	if err := v.cfg.call(ctx, http.MethodGet, "/v1/transit/keys/"+name, tok, nil, &out); err != nil {
+		v.dropOnForbidden(err)
 		return nil, fmt.Errorf("vault read sftp public key: %w", err)
 	}
-	version := out.Data.LatestVersion
-	pub, err := transitPublicKey(out.Data.Type, out.Data.Keys[strconv.Itoa(version)].PublicKey)
+	if out.Data.Exportable || out.Data.AllowPlaintextBackup {
+		return nil, errors.New("sftp transit key must not be exportable or allow plaintext backup")
+	}
+	version := v.cfg.SFTPKeyVersion
+	if version < 1 {
+		return nil, errors.New("sftp client key version is not configured")
+	}
+	material, ok := out.Data.Keys[strconv.Itoa(version)]
+	if !ok || material.PublicKey == "" {
+		return nil, fmt.Errorf("vault read sftp public key: version %d is not present", version)
+	}
+	pub, err := transitPublicKey(out.Data.Type, material.PublicKey)
 	if err != nil {
 		return nil, fmt.Errorf("vault read sftp public key: %w", err)
 	}
@@ -339,6 +424,7 @@ func (s *transitSSHSigner) SignWithAlgorithm(_ io.Reader, data []byte, algorithm
 		} `json:"data"`
 	}
 	if err := s.vault.cfg.call(ctx, http.MethodPost, "/v1/transit/sign/"+s.name, tok, body, &out); err != nil {
+		s.vault.dropOnForbidden(err)
 		return nil, fmt.Errorf("vault sign: %w", err)
 	}
 	blob, err := parseVaultSignature(out.Data.Signature)

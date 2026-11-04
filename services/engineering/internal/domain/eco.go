@@ -34,12 +34,19 @@ type Replacement struct {
 	NewVersionID string
 }
 
+// DocumentReplacement is a change-controlled DIR pair an ECO releases (FR-9.25).
+type DocumentReplacement struct {
+	OldDocumentID string
+	NewDocumentID string
+}
+
 type Eco struct {
 	ID             string
 	Number         string
 	State          EcoState
 	ReleaseDate    time.Time
 	Replaces       []Replacement
+	Documents      []DocumentReplacement
 	DecidedBy      string
 	CreatedBy      string
 	DecisionReason string
