@@ -216,6 +216,9 @@ func ReconcileOnhand(r *PackRun, source, accepted []OnhandLine, loaded int, held
 		}
 	}
 	r.Totals = totals
+	if err := r.applyTolerances(); err != nil {
+		return err
+	}
 	if !r.HasMismatch() {
 		return r.Advance(StatusReconciled)
 	}

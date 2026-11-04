@@ -88,6 +88,9 @@ func runBankBalances(ctx context.Context, tx pgx.Tx, in BankRun) (domain.PackRun
 	for _, b := range toLoad {
 		held[b.LegacyID] = b
 	}
+	if run.Tolerances, err = loadTolerances(ctx, tx); err != nil {
+		return domain.PackRun{}, err
+	}
 	if err := domain.ReconcileBankBalances(&run, in.Lines, in.Accepted, len(toLoad), held); err != nil {
 		return domain.PackRun{}, err
 	}

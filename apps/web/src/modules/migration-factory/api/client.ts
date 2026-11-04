@@ -605,6 +605,26 @@ export interface GenerateCutoverRequest {
   rehearsalPlanId?: string;
 }
 
+/** A configured control-total tolerance (FR-49.2, migration.tolerance.<pack>). `total` is `*` for the pack default. */
+export interface Tolerance {
+  pack: Pack;
+  total: string;
+  amount: string;
+  reason: string;
+  version: number;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+export interface ToleranceRequest {
+  pack: Pack;
+  total: string;
+  amount: string;
+  reason?: string;
+  /** The stored version when changing an existing tolerance. */
+  version?: number;
+}
+
 export function newKey(): string {
   return crypto.randomUUID();
 }
@@ -807,4 +827,14 @@ export function exportFileUrl(planId: string, file: ExportFile): string {
 /** POST /migration/packs/open_orders/runs: open sales and purchase order lines (FR-49.1). */
 export function startOpenOrdersRun(body: OpenOrdersRunRequest, key: string = newKey()): Promise<PackRunDetail> {
   return post("/migration/packs/open_orders/runs", body, key);
+}
+
+/** GET /migration/tolerances: the configured tolerances; a total without one compares at 0.00. */
+export function listTolerances(signal?: AbortSignal): Promise<Tolerance[]> {
+  return items("/migration/tolerances", signal);
+}
+
+/** PUT /migration/tolerances: sets the tolerance of a pack's control total. */
+export function putTolerance(body: ToleranceRequest, key: string = newKey()): Promise<Tolerance> {
+  return send("/migration/tolerances", { method: "PUT", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) });
 }

@@ -38,6 +38,8 @@ describe("migration-factory module", () => {
       "/migration-factory/parallel-runs",
       "/migration-factory/parallel-runs/new",
       "/migration-factory/parallel-runs/:id",
+      "/migration-factory/tolerances",
+      "/migration-factory/tolerances/set",
       "/migration-factory/xref",
       "/migration-factory/cutover",
       "/migration-factory/cutover/new",
@@ -51,6 +53,7 @@ describe("migration-factory module", () => {
       { label: "Pack runs", to: "/migration-factory", duty: "MigrationView" },
       { label: "Pack catalog", to: "/migration-factory/packs", duty: "MigrationView" },
       { label: "Parallel runs", to: "/migration-factory/parallel-runs", duty: "MigrationView" },
+      { label: "Tolerances", to: "/migration-factory/tolerances", duty: "MigrationView" },
       { label: "Legacy reference", to: "/migration-factory/xref" },
       { label: "Cutover runbooks", to: "/migration-factory/cutover", duty: "CutoverManager" },
     ]);
