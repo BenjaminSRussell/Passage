@@ -306,7 +306,7 @@ operations:
   publishOrderRemainderCancelled:
     action: send
     channel: {$ref: "#/channels/orderRemainderCancelled"}
-    summary: The undelivered remainder of a partly shipped order, or of one of its lines (/lines/{lineNo}:cancel-remainder), was closed; the closed lines are CANCELLED or cut to what was delivered and the net total falls. After a one-line close the order stays PARTIALLY_SHIPPED while another line has quantity to deliver, and lines lists only the closed line. Holds are not changed. A PATCH that removes lines of a CONFIRMED order (removeLines, FR-27.9) also emits it, after order.changed and with the same version, for the removed lines and the supplementary lines cancelled with them (kept_qty 0, status CONFIRMED), so fulfillment cuts what it released for them. Consumers - fulfillment (cancel the open shipment and pick quantity beyond kept_qty and release its reservation; a slip already posted for it is refused by sales with SLS-0058), billing, credit exposure, portal.
+    summary: The undelivered remainder of a partly shipped order, or of one of its lines (/lines/{lineNo}:cancel-remainder), was closed; the closed lines are CANCELLED or cut to what was delivered and the net total falls. After a one-line close the order stays PARTIALLY_SHIPPED while another line has quantity to deliver, and lines lists only the closed line. Holds are not changed. A PATCH of a CONFIRMED order (FR-27.9) also emits it, after order.changed and with the same version (status CONFIRMED), for every line whose quantity ceiling moved - removed lines and supplementary lines cancelled with or below their parent (kept_qty 0), lines whose quantity was lowered (kept_qty the new quantity), and lines whose quantity was raised or that were reopened (kept_qty the new quantity, cancelled_qty 0, so a ceiling stored by an earlier cut rises again) - and a :cancel of a CONFIRMED order (direct or through an approved CANCEL request) emits it after order.cancelled with the same version (status CANCELLED, every cancelled line kept_qty 0), so fulfillment cuts what it released for them. kept_qty is always the line's whole current ceiling; a consumer keeps the newest version per line. Consumers - fulfillment (cancel the open shipment and pick quantity beyond kept_qty and release its reservation; a slip already posted for it is refused by sales with SLS-0058), billing, credit exposure, portal.
     messages:
       - {$ref: "#/channels/orderRemainderCancelled/messages/orderRemainderCancelled"}
   publishOrderConfirmed:
@@ -554,7 +554,7 @@ components:
         $ref: "#/components/schemas/OrderCancelledData"
     OrderRemainderCancelled:
       name: dev.passage.sales.order.remaindercancelled.v1
-      title: Remainder of a partly shipped order, or lines removed from a confirmed order, cancelled
+      title: Remainder of a partly shipped order cancelled, or line quantities of a confirmed order changed or cancelled
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
@@ -933,10 +933,10 @@ components:
         order_id: {type: string, format: uuid}
         legal_entity_id: {type: string, format: uuid}
         version: {type: integer}
-        status: {type: string, enum: [CONFIRMED, PARTIALLY_SHIPPED, SHIPPED, INVOICED], description: the order status after the remainder was closed; PARTIALLY_SHIPPED after a one-line close while another line has quantity to deliver; CONFIRMED when a PATCH removed lines of a confirmed order}
+        status: {type: string, enum: [CONFIRMED, CANCELLED, PARTIALLY_SHIPPED, SHIPPED, INVOICED], description: the order status after the remainder was closed; PARTIALLY_SHIPPED after a one-line close while another line has quantity to deliver; CONFIRMED when a PATCH removed, lowered, raised or reopened lines of a confirmed order; CANCELLED when a confirmed order was cancelled as a whole (every line goes out with kept_qty 0)}
         lines:
           type: array
-          description: the lines that gave up quantity (only the named line for a one-line close; the removed lines and their cancelled supplementary lines for a PATCH)
+          description: the lines that gave up quantity (only the named line for a one-line close; the removed lines and their cancelled supplementary lines, and the lines whose quantity was lowered, raised or reopened, for a PATCH; every cancelled line for a whole-order cancel)
           items:
             type: object
             required: [line_id, line_no, product_id, cancelled_qty, kept_qty, line_status]
@@ -944,9 +944,9 @@ components:
               line_id: {type: string, format: uuid}
               line_no: {type: integer}
               product_id: {type: string, format: uuid}
-              cancelled_qty: {type: string, description: decimal quantity the line gave up}
+              cancelled_qty: {type: string, description: decimal quantity the line gave up, 0 for a raised or reopened line}
               kept_qty: {type: string, description: decimal quantity the line keeps, 0 when the line was cancelled}
-              line_status: {type: string, enum: [CANCELLED, DELIVERED, INVOICED]}
+              line_status: {type: string, enum: [OPEN, RESERVED, CANCELLED, DELIVERED, INVOICED], description: the line status after the close; OPEN or RESERVED for a line a PATCH lowered, raised or reopened}
         reason: {type: string, maxLength: 500}
         actor: {type: string}
     OrderHoldData:

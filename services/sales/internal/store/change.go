@@ -581,6 +581,29 @@ func cancelOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, rea
 	}); err != nil {
 		return Order{}, err
 	}
+	// Fulfillment follows order.remaindercancelled, not order.cancelled: a
+	// confirmed order may hold released shipments, so each line cancelled now
+	// goes out with nothing kept (draft and open orders have none).
+	if o.Status == domain.OrderConfirmed {
+		cancelling := make(map[string]bool, len(lineIDs))
+		for _, lid := range lineIDs {
+			cancelling[lid] = true
+		}
+		var lines []salesevents.RemainderLine
+		for _, l := range o.Lines {
+			if cancelling[l.ID] {
+				lines = append(lines, salesevents.RemainderLine{LineID: l.ID, LineNo: l.LineNo, ProductID: l.ProductID,
+					CancelledQty: l.Quantity.String(), KeptQty: "0", LineStatus: domain.LineCancelled})
+			}
+		}
+		if len(lines) > 0 {
+			if err := enqueue(ctx, tx, "order", id, salesevents.OrderRemainderCancelled, tenantID, salesevents.OrderRemainderCancelledData{
+				OrderID: id, LegalEntityID: o.LegalEntityID, Version: next, Status: "CANCELLED", Lines: lines, Reason: reason, Actor: actor,
+			}); err != nil {
+				return Order{}, err
+			}
+		}
+	}
 	return loadOrder(ctx, tx, tenantID, id, false)
 }
 

@@ -251,7 +251,10 @@ type RemainderLine struct {
 // the undelivered remainder of a partly shipped order, or of one of its lines,
 // was closed. Status is SHIPPED or INVOICED, or PARTIALLY_SHIPPED after a
 // one-line close while another line still has quantity to deliver, or
-// CONFIRMED when a PATCH removed lines of a confirmed order (each kept at 0).
+// CONFIRMED when a PATCH removed lines of a confirmed order (each kept at 0) or
+// lowered, raised or reopened a line (kept at the new quantity; cancelled 0 for
+// a raise or reopen), and CANCELLED when a confirmed order was cancelled whole
+// (every line kept at 0). KeptQty is always the line's whole current ceiling.
 type OrderRemainderCancelledData struct {
 	OrderID       string          `json:"order_id"`
 	LegalEntityID string          `json:"legal_entity_id"`

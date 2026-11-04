@@ -149,9 +149,12 @@ paths:
         (cancel the order instead); all of these are 422 SLS-0024. The diff names
         an added line with a lineAdded entry (the product) and its fields with
         an empty old value, and a removed line with lineStatus OPEN to CANCELLED.
-        On a CONFIRMED order the removal also emits order.remaindercancelled
-        (kept quantity 0) for the removed lines and their supplementary lines,
-        so fulfillment cuts what it released; removing line 1 of an order
+        On a CONFIRMED order the change also emits order.remaindercancelled
+        for every line whose quantity ceiling moved: kept quantity 0 for the
+        removed lines and the supplementary lines cancelled with them, the new
+        quantity for a lowered, raised or reopened line, so fulfillment cuts
+        what it released above it and lifts the ceiling again on a raise;
+        removing line 1 of an order
         released from a sales agreement gives the release quantity back to the
         agreement.
         On a CONFIRMED order, a line whose quantity or requested date changes,
@@ -1180,8 +1183,10 @@ paths:
     post:
       summary: >-
         Cancel an order that has not shipped (BR-27.5). Every OPEN or RESERVED line is cancelled,
-        ACTIVE holds are CLEARED, a new version is written and order.cancelled is emitted. An order
-        with a picked, delivered or invoiced line is refused (SLS-0025).
+        ACTIVE holds are CLEARED, a new version is written and order.cancelled is emitted; a
+        CONFIRMED order also emits order.remaindercancelled (status CANCELLED, every cancelled line
+        kept at 0) so fulfillment cuts what it released. An order with a picked, delivered or
+        invoiced line is refused (SLS-0025).
       operationId: cancelOrder
       x-passage-duty: sales.order.confirm
       parameters:

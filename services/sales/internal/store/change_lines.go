@@ -273,17 +273,19 @@ func addedSupplementaryNotices(o Order) []Notice {
 // (at most the release quantity, once per release); on any other order there
 // is no release and nothing happens.
 //
-// On a CONFIRMED order, order.remaindercancelled.v1 is queued for the removed
-// lines and the supplementary lines cancelled with them, each with kept_qty 0.
-// Fulfillment follows that event and not order.changed: it cuts what it
-// released or picked for the lines, closes their drop-ships, and refuses a
-// later packing slip for them (FUL-0066). Such lines are cancelled for good (a
-// removed line cannot change again and its supplementary lines follow it), so
-// the kept quantity never has to rise again.
+// On a CONFIRMED order, order.remaindercancelled.v1 is queued, in one event,
+// for every line whose quantity ceiling the change moved: a line the change
+// cancelled (removed, or a supplementary line cancelled with or below its
+// parent) with kept_qty 0; a kept line whose quantity was lowered with kept_qty
+// the new quantity; and a line whose quantity was raised, or a supplementary
+// line reopened, with kept_qty the new quantity and cancelled_qty 0.
+// Fulfillment follows that event and not order.changed: it stores kept_qty as
+// the line's ceiling, cuts what it released or picked above it, closes
+// drop-ship quantity above it, and refuses a later packing slip beyond it
+// (FUL-0066). It keeps the newest version per line, so a raise after a cut
+// lifts the ceiling again (a raise of a line never cut only restates the
+// ceiling sales already enforces, SLS-0059).
 func followRemovalsTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, before map[int]Line, req ChangeRequest, actor string, version int, now time.Time) error {
-	if len(req.RemoveLines) == 0 {
-		return nil
-	}
 	removed := make(map[string]bool, len(req.RemoveLines))
 	for _, no := range req.RemoveLines {
 		removed[before[no].ID] = true
@@ -300,14 +302,23 @@ func followRemovalsTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, 
 	var lines []salesevents.RemainderLine
 	for _, l := range o.Lines {
 		b, existed := before[l.LineNo]
-		if !existed || b.LineStatus == domain.LineCancelled || l.LineStatus != domain.LineCancelled {
+		if !existed {
 			continue
 		}
-		if !removed[l.ID] && (l.SupplementaryOf == nil || !removed[*l.SupplementaryOf]) {
-			continue
+		wasLive, isLive := b.LineStatus != domain.LineCancelled, l.LineStatus != domain.LineCancelled
+		switch {
+		case wasLive && !isLive:
+			lines = append(lines, salesevents.RemainderLine{LineID: l.ID, LineNo: l.LineNo, ProductID: l.ProductID,
+				CancelledQty: b.Quantity.String(), KeptQty: "0", LineStatus: domain.LineCancelled})
+		case wasLive && l.Quantity.LessThan(b.Quantity):
+			lines = append(lines, salesevents.RemainderLine{LineID: l.ID, LineNo: l.LineNo, ProductID: l.ProductID,
+				CancelledQty: b.Quantity.Sub(l.Quantity).String(), KeptQty: l.Quantity.String(), LineStatus: l.LineStatus})
+		case isLive && (!wasLive || l.Quantity.GreaterThan(b.Quantity)):
+			// A raise or a reopened supplementary line lifts the ceiling a
+			// cut may have stored at fulfillment; nothing is given up.
+			lines = append(lines, salesevents.RemainderLine{LineID: l.ID, LineNo: l.LineNo, ProductID: l.ProductID,
+				CancelledQty: "0", KeptQty: l.Quantity.String(), LineStatus: l.LineStatus})
 		}
-		lines = append(lines, salesevents.RemainderLine{LineID: l.ID, LineNo: l.LineNo, ProductID: l.ProductID,
-			CancelledQty: b.Quantity.String(), KeptQty: "0", LineStatus: domain.LineCancelled})
 	}
 	if len(lines) == 0 {
 		return nil
