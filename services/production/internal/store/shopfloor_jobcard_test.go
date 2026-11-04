@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -322,5 +323,58 @@ func TestPostShopfloorJobCard_KeepsRAFEndedFlagsSoReversalReopens(t *testing.T) 
 	}
 	if jobs, ops := endedByRAF(t, s, st.orderID); jobs != 0 || ops != 0 {
 		t.Fatalf("flags after the reversal: %d jobs, %d operations", jobs, ops)
+	}
+}
+
+// FR-21.9: a reset before Started reverses the shop-floor card with every other job
+// card; a later correction of that registration must not book the labor again.
+func TestAdjustShopfloorJobCard_CardReversedByResetStaysReversed(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(9415))
+	st := startedOrder(t, s, ctx, routedOrder(t, "key-sf-jobcard-reset", ids.New(), 10))
+	reg := ids.New()
+	if _, posted, err := s.PostShopfloorJobCard(ctx, shopfloorCard(reg, st.orderID, ShopfloorJobCard{})); err != nil || !posted {
+		t.Fatalf("card: posted=%v err=%v", posted, err)
+	}
+	st.refresh()
+	st.must(domain.CmdResetStatus, func(tr *Transition) { tr.ResetTo = domain.Released })
+	st.must(domain.CmdStart, nil)
+	if got := sfLaborActual(st); !got.IsZero() {
+		t.Fatalf("labor %s after the reset, want 0", got)
+	}
+	changed, err := s.AdjustShopfloorJobCard(ctx, reg, d("1.5"), "t")
+	if err != nil || changed {
+		t.Fatalf("correction after reset: changed=%v err=%v, want a no-op", changed, err)
+	}
+	if got := sfLaborActual(st); !got.IsZero() {
+		t.Fatalf("labor %s, a correction brought back labor the reset reversed", got)
+	}
+}
+
+// The registration id keys the card: it is refused when not a UUID (an empty id would
+// share one key across registrations) and made canonical, so the adjust finds the card.
+func TestPostShopfloorJobCard_RegistrationIDIsCanonicalUUID(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(9416))
+	st := startedOrder(t, s, ctx, routedOrder(t, "key-sf-jobcard-regid", ids.New(), 10))
+	for _, bad := range []string{"", "reg-1"} {
+		in := shopfloorCard("", st.orderID, ShopfloorJobCard{})
+		in.RegistrationID = bad
+		if _, posted, err := s.PostShopfloorJobCard(ctx, in); posted || !errors.Is(err, ErrJobCardRefused) {
+			t.Fatalf("registration id %q: posted=%v err=%v, want ErrJobCardRefused", bad, posted, err)
+		}
+	}
+	if got := sfLaborActual(st); !got.IsZero() {
+		t.Fatalf("labor %s from refused cards", got)
+	}
+	reg := ids.New()
+	if _, posted, err := s.PostShopfloorJobCard(ctx, shopfloorCard(strings.ToUpper(reg), st.orderID, ShopfloorJobCard{})); err != nil || !posted {
+		t.Fatalf("upper-case id: posted=%v err=%v", posted, err)
+	}
+	if changed, err := s.AdjustShopfloorJobCard(ctx, reg, decimal.Zero, "t"); err != nil || !changed {
+		t.Fatalf("adjust by the lower-case id: changed=%v err=%v", changed, err)
+	}
+	if got := sfLaborActual(st); !got.IsZero() {
+		t.Fatalf("labor %s, want 0 after the adjust", got)
 	}
 }

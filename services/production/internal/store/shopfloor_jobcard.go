@@ -22,6 +22,7 @@ const (
 	SystemKeyPrefix         = "sys:"
 	shopfloorJobCardKey     = SystemKeyPrefix + "shopfloor-jobcard:"
 	shopfloorJobCardPostKey = SystemKeyPrefix + "shopfloor-jobcard-post:"
+	shopfloorJobCardRevKey  = SystemKeyPrefix + "shopfloor-jobcard-reverse:"
 	shopfloorActor          = "shopfloor"
 )
 
@@ -49,13 +50,19 @@ type ShopfloorJobCard struct {
 // order's currency, otherwise (rate unset or in another currency) at the
 // operation's resource labor rate. The rate is stored on the draft line, so a
 // later post of the same draft books the same value. A repeated registration id
-// is a no-op. Clock punches, open stops and non-UUID order refs are ignored; an
-// operation the order has no process job for is a permanent refusal.
+// is a no-op. Clock punches, open stops and non-UUID order refs are ignored; a
+// registration id that is not a UUID, and an operation the order has no process
+// job for, are permanent refusals.
 func (s *Postgres) PostShopfloorJobCard(ctx context.Context, in ShopfloorJobCard) (Journal, bool, error) {
 	hours, ok := shopfloorHours(in)
 	if !ok || in.Kind != "job-stop" || !ids.Valid(in.OrderRef) {
 		return Journal{}, false, nil
 	}
+	regID, ok := ids.Canonical(in.RegistrationID)
+	if !ok {
+		return Journal{}, false, fmt.Errorf("%w: registration id %q is not a UUID", ErrJobCardRefused, in.RegistrationID)
+	}
+	in.RegistrationID = regID
 	oper, err := strconv.Atoi(strings.TrimSpace(in.OperationRef))
 	if err != nil || oper < 1 {
 		return Journal{}, false, nil
@@ -159,13 +166,17 @@ func positiveRate(r *decimal.Decimal) *decimal.Decimal {
 // transaction it reverses the live card and, for positive hours, posts a new one
 // at the same rate. A registration with no card is a no-op, as is one whose live
 // card already has newHours. An order that no longer takes job cards (Ended,
-// settled) refuses with ErrJobCardRefused and nothing is reversed. Reports
-// whether anything changed.
+// settled) refuses with ErrJobCardRefused and nothing is reversed. A card that
+// something other than an adjust reversed (an order reset, FR-21.9) is left
+// reversed: the reset took the labor off the order and a correction does not
+// bring it back. Reports whether anything changed.
 func (s *Postgres) AdjustShopfloorJobCard(ctx context.Context, registrationID string, newHours decimal.Decimal, traceID string) (bool, error) {
 	newHours = newHours.Round(domain.HoursScale)
-	if !ids.Valid(registrationID) || newHours.IsNegative() {
+	canonical, ok := ids.Canonical(registrationID)
+	if !ok || newHours.IsNegative() {
 		return false, fmt.Errorf("%w: registration id %q, hours %s", ErrJobCardRefused, registrationID, newHours)
 	}
+	registrationID = canonical
 	p, _ := tenant.FromContext(ctx)
 	outcome := "no-op"
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -184,11 +195,15 @@ func (s *Postgres) AdjustShopfloorJobCard(ctx context.Context, registrationID st
 		if card.reversed && newHours.IsZero() || !card.reversed && card.hours.Equal(newHours) {
 			return nil
 		}
+		if card.reversed && !card.reversedByAdjust {
+			outcome = "no-op: card reversed by the order"
+			return nil
+		}
 		if !domain.JournalAllowed(domain.JournalJobCard, h.status, false) {
 			return journalNotAllowed(domain.JournalJobCard, h.status)
 		}
 		if !card.reversed {
-			if err := reverseJournal(ctx, tx, p.TenantID, &h, card.journalID, shopfloorActor, SystemKeyPrefix+"shopfloor-jobcard-reverse:"+registrationID, true); err != nil {
+			if err := reverseJournal(ctx, tx, p.TenantID, &h, card.journalID, shopfloorActor, shopfloorJobCardRevKey+registrationID, true); err != nil {
 				return err
 			}
 			outcome = "reversed"
@@ -223,7 +238,7 @@ func (s *Postgres) AdjustShopfloorJobCard(ctx context.Context, registrationID st
 		return false, refusal(err)
 	}
 	slog.InfoContext(ctx, "shop-floor job card adjusted", "registrationId", registrationID, "hours", newHours.String(), "outcome", outcome, "correlationId", traceID)
-	return outcome != "no-op", nil
+	return !strings.HasPrefix(outcome, "no-op"), nil
 }
 
 type postedJobCard struct {
@@ -231,11 +246,14 @@ type postedJobCard struct {
 	oper, revisions    int
 	hours, rate        decimal.Decimal
 	reversed           bool
+	// reversedByAdjust: the reversal is an adjust's own, not an order reset's.
+	reversedByAdjust bool
 }
 
 func latestShopfloorCard(ctx context.Context, tx pgx.Tx, tenantID, registrationID string) (postedJobCard, error) {
 	var c postedJobCard
 	var hours, rate string
+	var revKey *string
 	key := shopfloorJobCardKey + registrationID
 	err := tx.QueryRow(ctx, `select count(*) from production_journal where tenant_id = $1 and posted and reversal_of is null
 		and (idempotency_key = $2 or idempotency_key like $3)`, tenantID, key, key+":adj:%").Scan(&c.revisions)
@@ -243,11 +261,13 @@ func latestShopfloorCard(ctx context.Context, tx pgx.Tx, tenantID, registrationI
 		return c, err
 	}
 	err = tx.QueryRow(ctx, `select j.id::text, j.order_id::text, l.oper_number, l.qty::text, l.unit_cost::text,
-			exists (select 1 from production_journal r where r.tenant_id = j.tenant_id and r.reversal_of = j.id)
+			(select r.idempotency_key from production_journal r where r.tenant_id = j.tenant_id and r.reversal_of = j.id limit 1)
 		from production_journal j join production_journal_line l on l.tenant_id = j.tenant_id and l.journal_id = j.id and l.kind = 'hours'
 		where j.tenant_id = $1 and j.posted and j.reversal_of is null and (j.idempotency_key = $2 or j.idempotency_key like $3)
 		order by j.posted_at desc, j.id desc limit 1`, tenantID, key, key+":adj:%").
-		Scan(&c.journalID, &c.orderID, &c.oper, &hours, &rate, &c.reversed)
+		Scan(&c.journalID, &c.orderID, &c.oper, &hours, &rate, &revKey)
 	c.hours, c.rate = dec(hours), dec(rate)
+	c.reversed = revKey != nil
+	c.reversedByAdjust = c.reversed && strings.HasPrefix(*revKey, shopfloorJobCardRevKey)
 	return c, err
 }
