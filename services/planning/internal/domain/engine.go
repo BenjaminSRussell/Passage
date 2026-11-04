@@ -48,6 +48,10 @@ const (
 	// assemble-to-order-final found less forecast to consume than its quantity,
 	// so the excess is planned on top of the forecast left (BR-22.13, FR-22.19).
 	ActionSalesOnTop = "sales-on-top"
+	// ActionLotSplit is the PLAN-0005 warning: a requirement above the item's
+	// maximum order quantity was split into several planned orders (FR-22.4).
+	// delay_days carries the number of orders and qty the maximum order quantity.
+	ActionLotSplit = "lot-split"
 
 	PrioritySales     = 1
 	PriorityForecast  = 2
@@ -709,6 +713,7 @@ func (L *ledger) order(t int, need decimal.Decimal) error {
 		return err
 	}
 	safetyOnly := L.unmetSafetyOnly()
+	firstOrder := len(L.rs.res.Orders)
 	for _, q := range lots {
 		L.rs.seq++
 		number := fmt.Sprintf("PLN-%06d", L.rs.seq)
@@ -755,6 +760,11 @@ func (L *ledger) order(t int, need decimal.Decimal) error {
 				child.Demand = append(child.Demand, Requirement{Ref: number + "/" + c.ItemID, RefType: RefBOM, Date: orderDate, Qty: c.Qty.Mul(q), Priority: PriorityDependent})
 			}
 		}
+	}
+	if len(lots) > 1 {
+		// PLAN-0005: one warning per split requirement, naming its first order.
+		L.rs.res.Messages = append(L.rs.res.Messages, Message{Action: ActionLotSplit, ItemID: it.ID, SupplyRef: L.rs.res.Orders[firstOrder].Number,
+			SuggestedDate: t, DelayDays: len(lots), Qty: it.MaxOrderQty})
 	}
 	return nil
 }

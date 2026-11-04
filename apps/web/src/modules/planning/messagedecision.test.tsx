@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Message } from "./api/client";
 import { isApplicable, noteError } from "./MessageDetail";
 import planning from "./module";
+import { messageDelay } from "./pages";
 
 const ID = "00000000-0000-0000-0000-00000000f201";
 const cancel: Message = {
@@ -81,8 +82,13 @@ describe("message decision rules", () => {
       "red-zone",
       "sales-on-top",
       "no-vendor",
+      "lot-split",
     ] as const)
       expect(isApplicable({ action })).toBe(false);
+  });
+  it("never shows the order count of a lot-split warning as a delay", () => {
+    expect(messageDelay({ action: "lot-split", delayDays: 3 })).toBe(0);
+    expect(messageDelay({ action: "delay", delayDays: 3 })).toBe(3);
   });
   it("limits the note to 500 characters", () => {
     expect(noteError("x".repeat(500))).toBeNull();

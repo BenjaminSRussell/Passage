@@ -29,6 +29,7 @@ type fakeStore struct {
 	inputs     map[string]string
 	last       store.RunRequest
 	runErr     error
+	groupErr   error
 	pingErr    error
 	lastWindow int
 	orderID    string

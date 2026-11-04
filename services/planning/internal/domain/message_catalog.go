@@ -10,6 +10,7 @@ import (
 const (
 	CodePostpone   = "PLAN-0006"
 	CodeDelay      = "PLAN-0007"
+	CodeLotSplit   = "PLAN-0005"
 	CodeNoVendor   = "PLAN-0008"
 	CodeRedZone    = "PLAN-0010"
 	CodeSalesOnTop = "PLAN-0015"
@@ -35,6 +36,8 @@ func CatalogCode(action string) string {
 		return CodePostpone
 	case ActionDelay:
 		return CodeDelay
+	case ActionLotSplit:
+		return CodeLotSplit
 	case ActionNoVendor:
 		return CodeNoVendor
 	case ActionRedZone:
@@ -60,6 +63,8 @@ func CatalogText(m MessageView) string {
 			ref = m.SupplyRef
 		}
 		return fmt.Sprintf("Demand %s will be delayed %d days (expected %s).", ref, m.Days, m.Date)
+	case ActionLotSplit:
+		return fmt.Sprintf("Requirement for %s splits into %d orders (max %s).", m.ItemID, m.Days, qtyText(m.Qty))
 	case ActionNoVendor:
 		return fmt.Sprintf("No vendor for planned purchase of %s; using none.", m.ItemID)
 	case ActionRedZone:
@@ -76,4 +81,13 @@ func CatalogText(m MessageView) string {
 		return fmt.Sprintf("Sales demand %s exceeds consumable forecast by %s; added on top.", m.DemandRef, qty)
 	}
 	return ""
+}
+
+// qtyText writes a decimal string without trailing zeros; text that is not a
+// decimal is returned as it is.
+func qtyText(s string) string {
+	if q, err := decimal.NewFromString(s); err == nil {
+		return q.String()
+	}
+	return s
 }

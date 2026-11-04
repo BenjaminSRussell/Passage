@@ -342,6 +342,8 @@ NOT-IMPLEMENTED.md):
   `mts-gross` forecast is not netted against on-hand.
 - Default vendor (FR-22.3): a run item's `vendorId`, else the default vendor of its stored item coverage, is
   stamped on planned purchases after quota allocation; a purchase with none raises `no-vendor` (PLAN-0008).
+  An item with no coverage code and no stored item coverage takes the coverage group `REQ` (stored, else built-in requirement coverage). A requirement
+  that splits over the item's maximum order quantity raises `lot-split` (PLAN-0005).
   `GET /messages` returns the catalog `code` and `text` of the actions that have one.
 - Supply schedule and inventory forecast (FR-22.21, FR-22.22): day, week or
   30-day month buckets; value is closing on-hand × unit cost as platform

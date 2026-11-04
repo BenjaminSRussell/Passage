@@ -225,15 +225,15 @@ components:
         site_id: {type: string, format: uuid}
         action:
           type: string
-          enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor]
-          description: 'Values are added within v1 only (PRD appendix: additive evolution); a consumer must ignore an action it does not know. no-vendor is PLAN-0008, a planned purchase of the item with no vendor (supply_ref its earliest such order, qty the item''s vendorless quantity)'
-          x-passage-added-in: {red-zone: PSG-2220, sales-on-top: PSG-2223, no-vendor: PSG-2224}
+          enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor, lot-split]
+          description: 'Values are added within v1 only (PRD appendix: additive evolution); a consumer must ignore an action it does not know. no-vendor is PLAN-0008, a planned purchase of the item with no vendor (supply_ref its earliest such order, qty the item''s vendorless quantity). lot-split is PLAN-0005, a requirement split over its maximum order quantity (supply_ref its first order, delay_days the number of orders, qty the maximum order quantity)'
+          x-passage-added-in: {red-zone: PSG-2220, sales-on-top: PSG-2223, no-vendor: PSG-2224, lot-split: PSG-2232}
         item_id: {type: string, format: uuid}
         warehouse_id: {type: [string, 'null'], format: uuid, description: 'The warehouse planning scope the message is about (FR-22.18, added in PSG-2227); null for the site scope. A consumer that ignores it reads a warehouse message as a site one'}
-        supply_ref: {type: string, description: Planned order number or receipt ref; empty for a shortage}
+        supply_ref: {type: string, description: 'Planned order number or receipt ref as the run was sent it; for an open purchase order that is the PO number, unchanged, so procurement matches it to the order (a carried-forward firmed order is FP:<planned order id>); empty for a shortage'}
         demand_ref: {type: string, description: 'Demand the message is about (sales line, forecast, bom line); empty when none'}
         suggested_date: {type: string, format: date}
-        delay_days: {type: integer}
+        delay_days: {type: integer, description: Days of delay; for lot-split the number of planned orders the requirement was split into, not a delay}
         qty: {type: string, description: Decimal string in the inventory unit}
     MessageDecidedData:
       type: object
@@ -248,7 +248,7 @@ components:
         legal_entity_id: {type: [string, 'null'], format: uuid, description: Legal entity of the plan; null for a plan with none}
         action:
           type: string
-          enum: [postpone, advance, cancel, decrease, increase, delay, shortage, red-zone, sales-on-top, no-vendor]
+          enum: [postpone, advance, cancel, decrease, increase, delay, shortage, red-zone, sales-on-top, no-vendor, lot-split]
           description: 'Only postpone, advance, cancel, decrease and increase can be applied; every action can be dismissed. A consumer must ignore an action it does not know'
         item_id: {type: string, format: uuid}
         warehouse_id: {type: [string, 'null'], format: uuid, description: The warehouse planning scope the message is about; null for the site scope}

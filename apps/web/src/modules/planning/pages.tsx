@@ -49,7 +49,7 @@ export const scopeLabel = (x: { warehouseId?: string | null }) => (x.warehouseId
 
 const ORDER_STATUSES = ["unprocessed", "approved", "firmed"] as const;
 const MESSAGE_STATUS_FILTERS = ["open", "applied", "dismissed", "all"] as const;
-export const MESSAGE_ACTIONS = ["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone", "sales-on-top", "no-vendor"] as const;
+export const MESSAGE_ACTIONS = ["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone", "sales-on-top", "no-vendor", "lot-split"] as const;
 
 const orderTypeLabel: Record<PlannedOrder["orderType"], string> = {
   purchase: "Purchase",
@@ -68,7 +68,14 @@ export const actionTone: Record<Message["action"], BadgeTone> = {
   "red-zone": "danger",
   "sales-on-top": "info",
   "no-vendor": "warning",
+  "lot-split": "warning",
 };
+
+/**
+ * The delay of a message in days, 0 when it has none. A lot-split warning (PLAN-0005) carries the
+ * number of split orders in delayDays, not a delay, so it never shows as one.
+ */
+export const messageDelay = (m: Pick<Message, "action" | "delayDays">) => (m.action === "lot-split" ? 0 : m.delayDays);
 
 /** The DDMRP buffer priority and zone of an order that replenishes a buffer (FR-22.16). */
 function bufferPriority(o: PlannedOrder) {
@@ -570,7 +577,7 @@ export function MessagesPage() {
     { key: "supplyRef", header: "Supply", mono: true, render: (m) => m.supplyRef || dash },
     { key: "demandRef", header: "Demand", mono: true, render: (m) => m.demandRef || dash },
     { key: "suggestedDate", header: "Suggested date", render: (m) => m.suggestedDate || dash },
-    { key: "delayDays", header: "Delay (days)", align: "end", render: (m) => (m.delayDays > 0 ? m.delayDays : dash) },
+    { key: "delayDays", header: "Delay (days)", align: "end", render: (m) => (messageDelay(m) > 0 ? messageDelay(m) : dash) },
     { key: "qty", header: "Quantity", align: "end" },
     {
       key: "planningPriority",

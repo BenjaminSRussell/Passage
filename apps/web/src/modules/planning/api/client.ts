@@ -5,7 +5,7 @@ export const PLANNING_API = "/api/v1/planning";
 
 export const OrderType = z.enum(["purchase", "production", "transfer"]);
 export const OrderStatus = z.enum(["unprocessed", "approved", "firmed", "deleted"]);
-export const MessageAction = z.enum(["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone", "sales-on-top", "no-vendor"]);
+export const MessageAction = z.enum(["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone", "sales-on-top", "no-vendor", "lot-split"]);
 export const TargetType = z.enum(["purchase-order", "production-order", "transfer-order"]);
 export const BufferZone = z.enum(["red", "yellow", "green"]);
 export type BufferZone = z.infer<typeof BufferZone>;

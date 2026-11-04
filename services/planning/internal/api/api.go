@@ -493,7 +493,18 @@ func (a *API) buildSnapshot(w http.ResponseWriter, r *http.Request, code string,
 		httpx.Fail(w, r, err)
 		return time.Time{}, nil, nil, false
 	}
-	if fields := withStoredCoverage(req.Items, stored); len(fields) > 0 {
+	var def *store.RunCoverage
+	if needsDefaultCoverage(req.Items, stored) {
+		d := builtinDefaultCoverage()
+		if g, err := a.store.GetCoverageGroup(r.Context(), defaultCoverageCode); err == nil {
+			d = defaultCoverageOf(g)
+		} else if !isCoverageNotFound(err) {
+			httpx.Fail(w, r, err)
+			return time.Time{}, nil, nil, false
+		}
+		def = &d
+	}
+	if fields := withStoredCoverage(req.Items, stored, def); len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return time.Time{}, nil, nil, false
 	}
@@ -972,9 +983,9 @@ func (a *API) listMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch action {
-	case "", domain.ActionDelay, domain.ActionPostpone, domain.ActionAdvance, domain.ActionShortage, domain.ActionCancel, domain.ActionDecrease, domain.ActionIncrease, domain.ActionRedZone, domain.ActionSalesOnTop, domain.ActionNoVendor:
+	case "", domain.ActionDelay, domain.ActionPostpone, domain.ActionAdvance, domain.ActionShortage, domain.ActionCancel, domain.ActionDecrease, domain.ActionIncrease, domain.ActionRedZone, domain.ActionSalesOnTop, domain.ActionNoVendor, domain.ActionLotSplit:
 	default:
-		validationFailed(w, r, map[string]string{"action": "must be delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top or no-vendor"})
+		validationFailed(w, r, map[string]string{"action": "must be delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor or lot-split"})
 		return
 	}
 	limit, ok := limitParam(w, r)
