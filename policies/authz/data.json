@@ -243,8 +243,11 @@
     ]},
     "reporting.audit.view": {"permissions": [
       {"resource": "/v1/reporting/audit-trail", "methods": ["GET"]},
-      {"resource": "/v1/reporting/audit-trail:export", "methods": ["GET"]}
+      {"resource": "/v1/reporting/audit-trail:export", "methods": ["GET"]},
+      {"resource": "/v1/reporting/balance-verifications", "methods": ["GET"]},
+      {"resource": "/v1/reporting/balance-verifications/*", "methods": ["GET"]}
     ]},
+    "reporting.balance.verify": {"permissions": [{"resource": "/v1/reporting/balance-verifications", "methods": ["POST"]}]},
     "hub.subscription.write": {"permissions": [
       {"resource": "/v1/hub/subscriptions", "methods": ["POST"]},
       {"resource": "/v1/hub/subscriptions/*", "methods": ["PATCH", "DELETE"]},
@@ -2157,6 +2160,10 @@
       {"resource": "/v1/org/teams/*/members/*", "methods": ["DELETE"]},
       {"resource": "/v1/org/teams/*/members/*:end", "methods": ["POST"]}
     ]},
+    "org.package.manage": {"permissions": [
+      {"resource": "/v1/org/export", "methods": ["POST"]},
+      {"resource": "/v1/org/import", "methods": ["POST"]}
+    ]},
     "org.read": {"permissions": [
       {"resource": "/v1/org/address-versions/*", "methods": ["GET"]},
       {"resource": "/v1/org/addresses", "methods": ["GET"]},
@@ -3055,7 +3062,7 @@
     "PlatformAdmin": {"permissions": [{"resource": "/api/v1/agents/kill-switch", "methods": ["GET", "POST"]}]}
   },
   "service_grants": {
-    "finreport": {"ledger": ["ledger.entry.lookup"]},
+    "finreport": {"ledger": ["ledger.entry.lookup", "ledger.balance.read"]},
     "billing": {
       "ledger": ["ledger.entry.post", "ledger.ledger.lookup"],
       "revrec": ["revrec.allocation.read"],

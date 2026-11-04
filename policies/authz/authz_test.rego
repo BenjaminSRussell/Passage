@@ -1291,8 +1291,25 @@ test_hub_client_routes_split_write_consume_and_read if {
 
 test_finreport_ledger_consumer_reads_only_journal_lines if {
 	data.service_principals["finreport-ledger"] == ["ledger.entry.lookup"]
-	data.service_grants.finreport == {"ledger": ["ledger.entry.lookup"]}
+	data.service_grants.finreport == {"ledger": ["ledger.entry.lookup", "ledger.balance.read"]}
 	data.duties["ledger.entry.lookup"].service_only
 	allowed("ledger.entry.lookup", "GET", "/v1/ledger/journal-lines")
 	not allowed("ledger.entry.lookup", "GET", "/v1/ledger/journal-entries/e1")
+	allowed("ledger.balance.read", "GET", "/v1/ledger/balances")
+}
+
+test_reporting_balance_verification_routes if {
+	allowed("reporting.balance.verify", "POST", "/v1/reporting/balance-verifications")
+	not allowed("reporting.balance.verify", "GET", "/v1/reporting/balance-verifications")
+	allowed("reporting.audit.view", "GET", "/v1/reporting/balance-verifications")
+	allowed("reporting.audit.view", "GET", "/v1/reporting/balance-verifications/v1")
+	not allowed("reporting.audit.view", "POST", "/v1/reporting/balance-verifications")
+}
+
+test_org_package_manage_reaches_only_export_and_import if {
+	allowed("org.package.manage", "POST", "/v1/org/export")
+	allowed("org.package.manage", "POST", "/v1/org/import")
+	not allowed("org.package.manage", "GET", "/v1/org/legal-entities")
+	not allowed("org.read", "POST", "/v1/org/export")
+	not allowed("org.read", "POST", "/v1/org/import")
 }
