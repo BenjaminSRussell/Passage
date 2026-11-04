@@ -8,7 +8,6 @@ import {
   PACK_FLOW,
   PICK_FLOW,
   RECEIVE_PUTAWAY_FLOW,
-  SHIP_LOAD_FLOW,
   completionFor,
   confirmationPayload,
   offlineEnabledByDefault,
@@ -129,13 +128,6 @@ describe("core flow happy paths", () => {
     expect(r.visited).toEqual(["scan_source_lp", "enter_qty", "scan_destination", "confirm_move"]);
   });
 
-  it("ship load", () => {
-    expect(validateFlow(SHIP_LOAD_FLOW)).toEqual([]);
-    const r = walk(SHIP_LOAD_FLOW, [scan(SCAN.LP), scan(SCAN.LOCATION), confirm]);
-    expect(r.finished).toBe(true);
-    expect(r.visited).toEqual(["scan_container", "scan_dock", "confirm_load"]);
-  });
-
   it("count", () => {
     const r = walk(COUNT_FLOW, [scan(SCAN.LOCATION), scan(SCAN.GTIN), value("12"), confirm]);
     expect(r.finished).toBe(true);
@@ -176,7 +168,7 @@ describe("core flow scan rules", () => {
 
 describe("completionFor (FR-32.5, §6.32.13)", () => {
   it("queues work flows online and offline", () => {
-    for (const flow of [RECEIVE_PUTAWAY_FLOW, PICK_FLOW, CLUSTER_PICK_FLOW, PACK_FLOW, MOVE_FLOW, SHIP_LOAD_FLOW]) {
+    for (const flow of [RECEIVE_PUTAWAY_FLOW, PICK_FLOW, CLUSTER_PICK_FLOW, PACK_FLOW, MOVE_FLOW]) {
       expect(completionFor(flow.code, true), flow.code).toEqual({ kind: "queue" });
       expect(completionFor(flow.code, false), flow.code).toEqual({ kind: "queue" });
     }

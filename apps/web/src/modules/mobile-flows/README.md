@@ -65,13 +65,11 @@ Flow designer for warehouse handheld flows, plus the pure domain shared with
   (both mobile service endpoints, §6.32.5), `GET /api/v1/mobile/menus/{id}` and SSE
   `GET /api/v1/mobile/events` for `flow.published`, and the supervisor conflict calls
   `GET /api/v1/mobile/offline/conflicts` and `POST .../offline/conflicts/{key}:resolve`.
-  `vite serve` stands in for the flow/menu/SSE and offline replay paths (`api/devStub.ts`)
-  unless `PASSAGE_SVC_MOBILE_URL` is set or `PASSAGE_MOBILE_STUB=0`; a missing service
+  `vite serve` stands in for the flow/menu/SSE paths (`api/devStub.ts`); a missing service
   still reports that it is unavailable.
 - `DeviceApp.tsx`: the handheld shell shared with `apps/warehouse-mobile`. It loads the
   published menu (`useDeviceFlows.ts`) and keeps an in-flight flow on the version it started
-  (BR-32.9); the next start after a confirm takes the latest menu graph for that code.
-  `/device` is a `vite` DEV-only host for Playwright Pixel 5 (AC-32.2, AC-32.4).
+  (BR-32.9). `/device` hosts it in dev builds only, for Playwright Pixel 5 (AC-32.2, AC-32.4); the in-process mobile stub runs only with PASSAGE_MOBILE_STUB=1.
 - `api/print.ts`: client for `services/print` through the BFF at `/api/v1/print`.
 - `pages.tsx`: designer screen. It opens on the bundled receive/put-away flow (any core flow can
   be loaded with "Start from"), edits the flow

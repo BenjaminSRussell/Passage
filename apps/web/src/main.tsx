@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { DeviceHost } from "./modules/mobile-flows/DeviceHost";
 import { loadModules } from "./modules/registry";
 import { Shell } from "./shell/Shell";
 import { HomePage } from "./shell/pages/HomePage";
@@ -10,17 +11,8 @@ import { NotFoundPage } from "./shell/pages/NotFoundPage";
 import "./shell/theme.css";
 
 const modules = loadModules();
-// /device is the Playwright Pixel 5 host (AC-32.2). Production handhelds use apps/warehouse-mobile.
-const deviceRoute = import.meta.env.DEV
-  ? [
-      {
-        path: "/device",
-        lazy: () => import("./modules/mobile-flows/DeviceHost").then((m) => ({ Component: m.DeviceHost })),
-      },
-    ]
-  : [];
 const router = createBrowserRouter([
-  ...deviceRoute,
+  ...(import.meta.env.DEV ? [{ path: "/device", element: <DeviceHost /> }] : []),
   {
     path: "/",
     element: <Shell modules={modules} />,

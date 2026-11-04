@@ -2,30 +2,24 @@
 // handoff). Devices and the designer share this process so a publish reaches the menu
 // without an app release (AC-32.4).
 
-import { CORE_FLOWS, SHIP_LOAD_FLOW } from "../domain/coreFlows";
+import { CORE_FLOWS } from "../domain/coreFlows";
 import type { FlowDraft } from "../domain/flowGraph";
 import type { FlowPublished, MobileMenu, SavedFlow } from "./client";
 
-export interface ReplayRequest {
+export interface ReplayedTx {
   idempotencyKey: string;
+  headerKey: string | undefined;
   command: string;
-  payload?: unknown;
-  capturedAt?: string;
-}
-
-export interface ReplayReceipt {
-  applied: true;
-  idempotencyKey: string;
-  duplicate: boolean;
+  payload: Record<string, unknown>;
 }
 
 export interface MobileStore {
   saveDraft(flow: FlowDraft): SavedFlow;
   publish(flowId: string, ifMatch?: string): SavedFlow;
   menu(id: string): MobileMenu;
-  replay(tx: ReplayRequest): ReplayReceipt;
-  replayed(): readonly ReplayReceipt[];
   onPublish(listener: (event: FlowPublished) => void): () => void;
+  replay(tx: ReplayedTx): void;
+  replays(): ReplayedTx[];
 }
 
 function clone(flow: FlowDraft, extra: Pick<SavedFlow, "flowId" | "version" | "status">): SavedFlow {
@@ -35,11 +29,10 @@ function clone(flow: FlowDraft, extra: Pick<SavedFlow, "flowId" | "version" | "s
 export function createMobileStore(): MobileStore {
   const drafts = new Map<string, SavedFlow>();
   const published = new Map<string, SavedFlow>();
+  const replayed = new Map<string, ReplayedTx>();
   const listeners = new Set<(event: FlowPublished) => void>();
-  const receipts: ReplayReceipt[] = [];
-  const seenKeys = new Set<string>();
 
-  for (const flow of [...CORE_FLOWS, SHIP_LOAD_FLOW]) {
+  for (const flow of CORE_FLOWS) {
     published.set(flow.code, clone(flow, { flowId: flow.code, version: 1, status: "PUBLISHED" }));
   }
 
@@ -69,14 +62,10 @@ export function createMobileStore(): MobileStore {
       return { id, flows: [...published.values()] };
     },
     replay(tx) {
-      const duplicate = seenKeys.has(tx.idempotencyKey);
-      seenKeys.add(tx.idempotencyKey);
-      const receipt: ReplayReceipt = { applied: true, idempotencyKey: tx.idempotencyKey, duplicate };
-      if (!duplicate) receipts.push(receipt);
-      return receipt;
+      if (!replayed.has(tx.idempotencyKey)) replayed.set(tx.idempotencyKey, tx);
     },
-    replayed() {
-      return receipts;
+    replays() {
+      return [...replayed.values()];
     },
     onPublish(listener) {
       listeners.add(listener);

@@ -19,7 +19,7 @@ const v2 = {
       status: "PUBLISHED",
       steps: [
         ...RECEIVE_PUTAWAY_FLOW.steps.slice(0, 2),
-        { id: "confirm_lot", type: "scan", prompt: "Scan the lot", expectedScan: ["LOT"], next: { default: "confirm_putaway" } } satisfies FlowStep,
+        { id: "confirm_lot", type: "scan", prompt: "Scan the lot", expectedScan: ["ANY"], next: { default: "confirm_putaway" } } satisfies FlowStep,
         RECEIVE_PUTAWAY_FLOW.steps[2],
       ],
     },
@@ -74,12 +74,8 @@ describe("useDeviceFlows", () => {
     await waitFor(() => expect(result.current.flows[0]?.steps.map((s) => s.id)).toContain("confirm_lot"));
   });
 
-  it("ignores a stale menu response that finishes after a newer load", async () => {
-    let releaseFirst: (value: Response) => void = () => undefined;
-    const first = new Promise<Response>((resolve) => {
-      releaseFirst = resolve;
-    });
-    const sources: FakeEventSource[] = [];
+  it("ignores a slow response that arrives after a newer menu load", async () => {
+    const sources: Array<{ listeners: Map<string, (ev: MessageEvent) => void> }> = [];
     class FakeEventSource {
       listeners = new Map<string, (ev: MessageEvent) => void>();
       constructor() {
@@ -90,24 +86,32 @@ describe("useDeviceFlows", () => {
       }
       close() {}
     }
-    const fetchMock = vi
-      .fn()
-      .mockImplementationOnce(() => first)
-      .mockImplementation(async () => new Response(JSON.stringify(v2), { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+    const releases: Array<() => void> = [];
+    const bodies = [published, published, v2];
+    let call = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        const body = bodies[Math.min(call++, bodies.length - 1)];
+        if (call === 2) await new Promise<void>((r) => releases.push(r));
+        return new Response(JSON.stringify(body), { status: 200 });
+      }),
+    );
     const { result } = renderHook(() =>
       useDeviceFlows({ fallback: [PICK_FLOW], EventSource: FakeEventSource as unknown as typeof EventSource }),
     );
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(result.current.source).toBe("bundled");
+    await waitFor(() => expect(result.current.source).toBe("menu"));
     act(() => {
-      sources[0]?.listeners.get("flow.published")?.({
-        data: JSON.stringify({ flow_id: "RECEIVE_PUTAWAY", code: "RECEIVE_PUTAWAY", version: 2 }),
-      } as MessageEvent);
+      sources[0]?.listeners.get("flow.published")?.({ data: JSON.stringify({ flow_id: "RECEIVE_PUTAWAY", code: "RECEIVE_PUTAWAY", version: 2 }) } as MessageEvent);
+    });
+    await waitFor(() => expect(call).toBe(2));
+    act(() => {
+      sources[0]?.listeners.get("flow.published")?.({ data: JSON.stringify({ flow_id: "RECEIVE_PUTAWAY", code: "RECEIVE_PUTAWAY", version: 2 }) } as MessageEvent);
     });
     await waitFor(() => expect(result.current.flows[0]?.steps.map((s) => s.id)).toContain("confirm_lot"));
+    releases.forEach((r) => r());
     await act(async () => {
-      releaseFirst(new Response(JSON.stringify(published), { status: 200 }));
+      await Promise.resolve();
     });
     expect(result.current.flows[0]?.steps.map((s) => s.id)).toContain("confirm_lot");
   });

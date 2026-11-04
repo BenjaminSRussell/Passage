@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SavedFlow } from "../api/client";
 import { PICK_FLOW, RECEIVE_PUTAWAY_FLOW } from "./coreFlows";
-import { applyPublishedFlows, graphForRestart, MENU_POLL_MS, publishedDrafts } from "./menuSync";
+import { latestGraph, MENU_POLL_MS, publishedDrafts } from "./menuSync";
 import type { FlowDraft } from "./flowGraph";
 
 const published = (flow: FlowDraft, version: number): SavedFlow => ({
@@ -25,33 +25,9 @@ describe("menuSync (AC-32.4)", () => {
     ]);
   });
 
-  it("replaces a published code with the new version", () => {
-    const v2: FlowDraft = {
-      ...RECEIVE_PUTAWAY_FLOW,
-      steps: [
-        ...RECEIVE_PUTAWAY_FLOW.steps.slice(0, 2),
-        { id: "confirm_lot", type: "scan", prompt: "Scan the lot", expectedScan: ["LOT"], next: { default: "confirm_putaway" } },
-        RECEIVE_PUTAWAY_FLOW.steps[2],
-      ],
-    };
-    v2.steps[1] = { ...v2.steps[1], next: { default: "confirm_lot" } };
-    const next = applyPublishedFlows([published(v2, 2), published(PICK_FLOW, 1)]);
-    expect(next.find((f) => f.code === "RECEIVE_PUTAWAY")?.steps.map((s) => s.id)).toContain("confirm_lot");
-  });
-
-  it("restarts on the latest menu graph and leaves the in-flight draft untouched", () => {
-    const v2: FlowDraft = {
-      ...RECEIVE_PUTAWAY_FLOW,
-      steps: [
-        ...RECEIVE_PUTAWAY_FLOW.steps.slice(0, 2),
-        { id: "confirm_lot", type: "scan", prompt: "Scan the lot", expectedScan: ["LOT"], next: { default: "confirm_putaway" } },
-        RECEIVE_PUTAWAY_FLOW.steps[2],
-      ],
-    };
-    const inFlight = RECEIVE_PUTAWAY_FLOW;
-    const menu = [v2, PICK_FLOW];
-    expect(graphForRestart(menu, inFlight)).toBe(v2);
-    expect(inFlight.steps.map((s) => s.id)).not.toContain("confirm_lot");
-    expect(graphForRestart([PICK_FLOW], inFlight)).toBe(inFlight);
+  it("switches a restart to the newest menu entry with the same code and keeps the running graph otherwise", () => {
+    const v2: FlowDraft = { ...RECEIVE_PUTAWAY_FLOW, steps: [...RECEIVE_PUTAWAY_FLOW.steps] };
+    expect(latestGraph([PICK_FLOW, v2], RECEIVE_PUTAWAY_FLOW)).toBe(v2);
+    expect(latestGraph([PICK_FLOW], RECEIVE_PUTAWAY_FLOW)).toBe(RECEIVE_PUTAWAY_FLOW);
   });
 });

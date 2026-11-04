@@ -8,8 +8,8 @@ import type { FlowDraft } from "./domain/flowGraph";
 import { goBack, startFlow, submitStep, type RunnerResult, type RunnerState } from "./domain/flowRunner";
 import { CLASS_LABEL } from "./domain/gs1";
 import { fontSizePx, targetSizePx, textDirection } from "./domain/layout";
-import { graphForRestart } from "./domain/menuSync";
-import { DEFAULT_LIMITS, OfflineQueue, type QueuedTx } from "./domain/offlineQueue";
+import { latestGraph } from "./domain/menuSync";
+import { type ApplyOutcome, DEFAULT_LIMITS, OfflineQueue, type QueuedTx } from "./domain/offlineQueue";
 import {
   AesGcmSealer,
   IndexedDbStore,
@@ -28,7 +28,7 @@ import "./deviceApp.css";
 const REPLAY_URL = "/api/v1/mobile/offline:replay";
 
 /** Sends one queued confirmation. The server enforces ordering and idempotency per key. */
-async function applyOne(tx: QueuedTx) {
+export async function applyOne(tx: QueuedTx): Promise<ApplyOutcome> {
   const res = await fetch(REPLAY_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Idempotency-Key": tx.idempotencyKey },
@@ -103,6 +103,8 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID }:
   const [syncing, setSyncing] = useState(false);
   const [, bump] = useState(0);
   const onScanRef = useRef<(raw: string, source: ScanSource) => void>(() => undefined);
+  const menuRef = useRef(menu);
+  menuRef.current = menu;
 
   // Open the sealed queue and the device key once per device.
   useEffect(() => {
@@ -154,12 +156,9 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID }:
 
   function restart() {
     if (!flow) return;
-    const next = graphForRestart(menu, flow);
-    if (next !== flow) {
-      setFlow(next);
-      return;
-    }
-    const started = startFlow(flow, Date.now());
+    const next = latestGraph(menuRef.current, flow);
+    setFlow(next);
+    const started = startFlow(next, Date.now());
     if (started.ok) setRunner(started.state);
   }
 
