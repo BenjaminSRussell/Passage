@@ -104,13 +104,30 @@ func loadSourcingLines(ctx context.Context, tx pgx.Tx, lineIDs []string, lock bo
 		from purchase_requisition_line l join purchase_requisition r on r.tenant_id = l.tenant_id and r.id = l.requisition_id
 		where l.tenant_id = $1 and l.id = any($2::uuid[]) order by l.id`
 	if lock {
-		q += ` for update of l for share of r`
+		// One lock order for every writer of requisition lines (consolidation, direct PO, RFQ create and award,
+		// split, and releaseLines for a cancelled PO line): the requisitions first in id order, then the lines in
+		// id order. A requisition is locked for update, never for share, so two writers of one requisition queue
+		// on it instead of deadlocking on the upgrade.
+		if err := lockRequisitionsOf(ctx, tx, lineIDs); err != nil {
+			return nil, err
+		}
+		q += ` for update of l`
 	}
 	rows, err := tx.Query(ctx, q, p.TenantID, lineIDs)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, scanSourcingLine)
+}
+
+// lockRequisitionsOf locks, in id order, the requisitions that own the given requisition lines. A requisition id
+// never changes, so reading it unlocked is safe. Lines that do not exist lock nothing.
+func lockRequisitionsOf(ctx context.Context, tx pgx.Tx, lineIDs []string) error {
+	p, _ := tenant.FromContext(ctx)
+	_, err := tx.Exec(ctx, `select 1 from purchase_requisition where tenant_id = $1 and id in
+		(select requisition_id from purchase_requisition_line where tenant_id = $1 and id = any($2::uuid[]))
+		order by id for update`, p.TenantID, lineIDs)
+	return err
 }
 
 // ConsolidateRequisitionLines writes the POs built from approved requisition
@@ -235,6 +252,16 @@ func claimRequisitionLines(ctx context.Context, tx pgx.Tx, po PurchaseOrder) ([]
 		} else if held {
 			return nil, httpx.NewProblem(http.StatusConflict, CodeRequisitionOnRFQ, fmt.Sprintf(
 				"requisition %s line %d is being sourced on %s; award or cancel the RFQ first", s.RequisitionNumber, s.LineNo, number))
+		}
+		// A PO line consumes its whole requisition line (the line becomes CONSOLIDATED), so it must order that
+		// line's quantity in the line's unit: less would drop the rest of the need, more would over-order it, and
+		// purchasing has no unit conversion to compare quantities in other units. Split the line to order part of it.
+		for _, l := range po.Lines {
+			if l.RequisitionLineID == id && (!l.Qty.Equal(s.Qty) || l.Unit != s.Unit) {
+				return nil, httpx.NewProblem(http.StatusUnprocessableEntity, CodeRequisitionQty, fmt.Sprintf(
+					"purchase order line %d orders %s %s of requisition %s line %d, which needs %s %s; order the whole quantity, or split the requisition line first",
+					l.LineNo, l.Qty, l.Unit, s.RequisitionNumber, s.LineNo, s.Qty, s.Unit))
+			}
 		}
 		if !seen[s.RequisitionID] {
 			seen[s.RequisitionID] = true

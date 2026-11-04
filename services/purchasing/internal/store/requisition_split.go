@@ -20,6 +20,9 @@ import (
 // CodeRequisitionSplit is the 422 for quantities that cannot be cut out of the line.
 const CodeRequisitionSplit = "PRC-REQ-007"
 
+// CodeRequisitionQty is the 422 for a PO line that orders another quantity or unit than the requisition line it names.
+const CodeRequisitionQty = "PRC-REQ-008"
+
 // SplitRequisitionLine cuts new OPEN lines with the given quantities out of an OPEN line of an APPROVED
 // requisition (FR-17.3), so the parts can go to different POs, vendors or an RFQ. It takes the line and its
 // requisition under lock, checks the caller's requisition version, refuses a line a running RFQ holds
@@ -32,15 +35,12 @@ func (s *Postgres) SplitRequisitionLine(ctx context.Context, lineID string, vers
 	p, _ := tenant.FromContext(ctx)
 	var out Requisition
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
-		// Lock the line, then its requisition for update, the order consolidation and RFQ claims use (line
-		// first), and without a shared lock to upgrade: two splits of different lines of one requisition
-		// queue on the requisition instead of deadlocking on the upgrade.
-		var reqID string
-		if err := tx.QueryRow(ctx, `select requisition_id::text from purchase_requisition_line where tenant_id = $1 and id = $2 for update`,
-			p.TenantID, lineID).Scan(&reqID); err != nil {
-			return notFound(err, CodeRequisitionLineNotFound, "requisition line "+lineID+" not found")
+		// Lock the requisition, then the line: the order every writer of requisition lines uses (see
+		// loadSourcingLines), so a split cannot deadlock with a consolidation, a direct PO or an RFQ.
+		if err := lockRequisitionsOf(ctx, tx, []string{lineID}); err != nil {
+			return err
 		}
-		if _, err := tx.Exec(ctx, `select 1 from purchase_requisition where tenant_id = $1 and id = $2 for update`, p.TenantID, reqID); err != nil {
+		if _, err := tx.Exec(ctx, `select 1 from purchase_requisition_line where tenant_id = $1 and id = $2 for update`, p.TenantID, lineID); err != nil {
 			return err
 		}
 		lines, err := loadSourcingLines(ctx, tx, []string{lineID}, false)
@@ -113,10 +113,8 @@ func (s *Postgres) SplitRequisitionLine(ctx context.Context, lineID string, vers
 		out, err = loadRequisition(ctx, tx, src.RequisitionID)
 		return err
 	})
-	// A consolidation locks its lines with a share lock on their requisitions, line by line in id order; one that holds
-	// an earlier line of this requisition and waits for this line deadlocks with the split, which holds the line and
-	// waits for the requisition. Postgres aborts one of the two; when it is the split, the caller reloads and retries.
-	// (An award cannot meet it here: its lines are held by the RFQ, which a split refuses.)
+	// Every writer locks requisitions first and lines second, so a deadlock is not expected; if Postgres still
+	// aborts the split (40P01), the caller reloads and retries.
 	var pe *pgconn.PgError
 	if errors.As(err, &pe) && pe.Code == "40P01" {
 		return Requisition{}, httpx.NewProblem(http.StatusConflict, CodeVersionConflict,

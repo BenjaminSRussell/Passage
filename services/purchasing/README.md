@@ -542,6 +542,7 @@ store codes are returned as the `code` field.
 | PRC-REQ-LINE-NOT-FOUND | 404 | Requisition line not found |
 | PRC-REQ-006 | 409 | A requisition line is held by a running RFQ (DRAFT, SENT, REPLIES_OPEN, CLOSED): it cannot be ordered, put on a second RFQ or split |
 | PRC-REQ-007 | 422 | A split asks for quantities the line cannot give up: they must leave a quantity above zero on the original line |
+| PRC-REQ-008 | 422 | A PO line names a requisition line but orders another quantity or unit than the line's (order it whole in its unit, or split the requisition line first) |
 | PRC-CONS-001 | 422 | Consolidation window outside 1–60 days |
 | PRC-CONS-002 | 422 | A consolidation line has no vendor (needs sourcing) |
 | PRC-AGR-NOT-FOUND | 404 | Purchase agreement or agreement line not found |

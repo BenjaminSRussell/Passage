@@ -2,6 +2,9 @@ package store_test
 
 import (
 	"context"
+	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -221,10 +224,10 @@ func TestSplitRequisitionLine_StaleConsolidationAndRFQAreRefused(t *testing.T) {
 	}
 }
 
-// A consolidation holds its lines and a share lock on their requisition, line by line in id order. When it holds an
-// earlier line of the requisition and then waits for the line being split, while the split holds that line and waits
-// for the requisition, Postgres aborts the split (it waited first): the caller gets a 409 to reload, not a 500.
-func TestSplitRequisitionLine_DeadlockWithAConsolidationIsAConflict(t *testing.T) {
+// Every writer of requisition lines locks the requisition first and its lines after, in id order. A writer that
+// already holds the requisition and then takes its lines (the order below) therefore queues a consolidation and a
+// split on the requisition instead of deadlocking with them line by line.
+func TestRequisitionLineWriters_RequisitionFirstThenLines(t *testing.T) {
 	pool := migrated(t)
 	s := store.New(pool)
 	ctx := principalContext(31)
@@ -239,22 +242,180 @@ func TestSplitRequisitionLine_DeadlockWithAConsolidationIsAConflict(t *testing.T
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	const lock = `select l.id from purchase_requisition_line l join purchase_requisition r on r.tenant_id = l.tenant_id and r.id = l.requisition_id
-		where l.tenant_id = $1 and l.id = $2 for update of l for share of r`
 	tenantID := testkit.TenantID(31)
-	if _, err := tx.Exec(context.Background(), lock, tenantID, first.ID); err != nil {
+	if _, err := tx.Exec(context.Background(), `select 1 from purchase_requisition where tenant_id = $1 and id = $2 for update`, tenantID, req.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(context.Background(), `select 1 from purchase_requisition_line where tenant_id = $1 and id = $2 for update`, tenantID, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 2)
+	go func() {
+		_, err := s.SplitRequisitionLine(ctx, second.ID, req.Version, qtys("0.5"), 2, "", store.Idem{})
+		done <- err
+	}()
+	go func() {
+		_, err := s.ConsolidateRequisitionLines(ctx, []store.PurchaseOrder{orderFor(t, ids.New(), first, second)}, []string{first.ID, second.ID}, store.Idem{Key: "q-c", Hash: "h"})
+		done <- err
+	}()
+	time.Sleep(300 * time.Millisecond) // both are queued on the requisition, which the open transaction holds
+	select {
+	case err := <-done:
+		t.Fatalf("a writer did not wait for the requisition: %v", err)
+	default:
+	}
+	if _, err := tx.Exec(context.Background(), `select 1 from purchase_requisition_line where tenant_id = $1 and id = $2 for update`, tenantID, second.ID); err != nil {
+		t.Fatalf("taking the second line after the requisition was aborted: %v", err)
+	}
+	if err := tx.Commit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// The writer that goes second finds the requisition moved on (a stale version or quantity, a line already
+	// ordered); neither may be the deadlock backstop, which a split taking its line before the requisition hits.
+	for i := 0; i < 2; i++ {
+		err := <-done
+		if err != nil && problemCode(err) != store.CodeRequisitionState && problemCode(err) != store.CodeVersionConflict {
+			t.Fatalf("writer %d = %v", i, err)
+		}
+		if err != nil && strings.Contains(err.Error(), "at the same time") {
+			t.Fatalf("writer %d deadlocked: %v", i, err)
+		}
+	}
+}
+
+// Cancelling a PO reopens its requisition lines and their CLOSED requisition. It takes the requisition first, like
+// every other writer of requisition lines: a writer that holds the requisition and then takes the line (a split or
+// a consolidation) makes the cancel wait instead of deadlocking with it.
+func TestPurchaseOrderCancel_LocksTheRequisitionBeforeItsLine(t *testing.T) {
+	pool := migrated(t)
+	s := store.New(pool)
+	ctx := principalContext(31)
+	req := approved(t, s, ids.New(), "10")
+	line := req.Lines[0]
+	po, err := s.CreatePurchaseOrder(ctx, orderFor(t, ids.New(), line), store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetRequisition(ctx, req.ID); got.Status != "CLOSED" {
+		t.Fatalf("requisition after its only line was ordered = %s", got.Status)
+	}
+	admin, _ := adminPools.Load(pool)
+	tx, err := admin.(*pgxpool.Pool).Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	tenantID := testkit.TenantID(31)
+	if _, err := tx.Exec(context.Background(), `select 1 from purchase_requisition where tenant_id = $1 and id = $2 for update`, tenantID, req.ID); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := s.SplitRequisitionLine(ctx, second.ID, req.Version, []decimal.Decimal{second.Qty.Div(dec("2"))}, 2, "", store.Idem{})
+		_, err := s.ActOnPurchaseOrder(ctx, po.ID, po.RowVersion, domain.POActionCancel, store.Idem{})
 		done <- err
 	}()
-	time.Sleep(300 * time.Millisecond) // the split now holds its line and waits for the requisition
-	if _, err := tx.Exec(context.Background(), lock, tenantID, second.ID); err != nil {
-		t.Fatalf("the consolidation was aborted instead of the split: %v", err)
+	time.Sleep(300 * time.Millisecond) // the cancel holds its PO and waits for the requisition
+	select {
+	case err := <-done:
+		t.Fatalf("the cancel did not wait for the requisition: %v", err)
+	default:
 	}
-	if err := <-done; problemCode(err) != store.CodeVersionConflict {
-		t.Fatalf("split in a deadlock = %v, want %s", err, store.CodeVersionConflict)
+	if _, err := tx.Exec(context.Background(), `select 1 from purchase_requisition_line where tenant_id = $1 and id = $2 for update`, tenantID, line.ID); err != nil {
+		t.Fatalf("taking the line after the requisition was aborted: %v", err)
+	}
+	if err := tx.Commit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("cancel = %v", err)
+	}
+	got, err := s.GetRequisition(ctx, req.ID)
+	if err != nil || got.Status != store.RequisitionApproved || got.Lines[0].Status != "OPEN" {
+		t.Fatalf("requisition after cancel = %s, line %+v, %v", got.Status, got.Lines[0], err)
+	}
+}
+
+// Splits, consolidations, direct POs and RFQs of lines of the same requisitions, all at once, never deadlock: the
+// only refusals are the stale-read ones (a version or quantity that moved, a line already ordered).
+func TestRequisitionLineWriters_ConcurrentWritersDoNotDeadlock(t *testing.T) {
+	s := store.New(migrated(t))
+	ctx := principalContext(31)
+	for round := 0; round < 12; round++ {
+		req := approvedBulk(t, s)
+		a, b := req.Lines[0], req.Lines[1]
+		var wg sync.WaitGroup
+		errs := make(chan error, 8)
+		run := func(name string, f func() error) {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := f(); err != nil {
+					errs <- fmt.Errorf("%s: %w", name, err)
+				}
+			}()
+		}
+		run("split a", func() error {
+			_, err := s.SplitRequisitionLine(ctx, a.ID, req.Version, qtys("10"), 2, "", store.Idem{})
+			return err
+		})
+		run("split b", func() error {
+			_, err := s.SplitRequisitionLine(ctx, b.ID, req.Version, qtys("0.5"), 2, "", store.Idem{})
+			return err
+		})
+		run("consolidate a+b", func() error {
+			_, err := s.ConsolidateRequisitionLines(ctx, []store.PurchaseOrder{orderFor(t, ids.New(), a, b)}, []string{a.ID, b.ID}, store.Idem{Key: fmt.Sprintf("cc-%d", round), Hash: "h"})
+			return err
+		})
+		run("direct PO b+a", func() error {
+			_, err := s.CreatePurchaseOrder(ctx, orderFor(t, ids.New(), b, a), store.Idem{})
+			return err
+		})
+		run("rfq a+b", func() error {
+			_, err := s.CreateRFQ(ctx, rfqFor(a, b), store.Idem{})
+			return err
+		})
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if code := problemCode(err); code != store.CodeRequisitionState && code != store.CodeVersionConflict && code != store.CodeRequisitionOnRFQ && code != store.CodeRequisitionQty {
+				t.Fatalf("round %d: %v", round, err)
+			}
+			if strings.Contains(err.Error(), "at the same time") {
+				t.Fatalf("round %d: deadlock: %v", round, err)
+			}
+		}
+	}
+}
+
+// A direct PO that names a requisition line orders that line's quantity in its unit: ordering less would drop the
+// rest of the need, more would over-order it, and another unit cannot be compared (PRC-REQ-008); the line is
+// untouched by the refusal, and the whole quantity (at any decimal scale) or a split part goes through.
+func TestDirectPO_MustOrderTheRequisitionLineQuantity(t *testing.T) {
+	s := store.New(migrated(t))
+	ctx := principalContext(31)
+	req := approvedBulk(t, s)
+	line := req.Lines[0]
+	for _, c := range []struct{ qty, unit string }{{"99", "EA"}, {"101", "EA"}, {"100", "BOX"}} {
+		po := orderFor(t, ids.New(), line)
+		po.Lines[0].Qty, po.Lines[0].Unit = dec(c.qty), c.unit
+		if _, err := s.CreatePurchaseOrder(ctx, po, store.Idem{}); problemCode(err) != store.CodeRequisitionQty {
+			t.Fatalf("a PO line of %s %s against a requisition line of 100 EA = %v, want %s", c.qty, c.unit, err, store.CodeRequisitionQty)
+		}
+	}
+	if got, _ := s.GetRequisition(ctx, req.ID); got.Lines[0].Status != "OPEN" {
+		t.Fatalf("a refused PO consumed the line: %+v", got.Lines[0])
+	}
+	out, err := s.SplitRequisitionLine(ctx, line.ID, req.Version, qtys("40"), 2, "", store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := out.Lines[len(out.Lines)-1]
+	if _, err := s.CreatePurchaseOrder(ctx, orderFor(t, ids.New(), part), store.Idem{}); err != nil {
+		t.Fatalf("a PO for the split part's whole quantity = %v", err)
+	}
+	rest := orderFor(t, ids.New(), out.Lines[0])
+	rest.Lines[0].Qty = dec("60.000000")
+	if _, err := s.CreatePurchaseOrder(ctx, rest, store.Idem{}); err != nil {
+		t.Fatalf("a PO for the remainder's whole quantity = %v", err)
 	}
 }
