@@ -2081,7 +2081,8 @@
       {"resource": "/v1/integration/lookup-tables/*/versions", "methods": ["GET"]},
       {"resource": "/v1/integration/lookup-tables/*/entries.csv", "methods": ["GET"]},
       {"resource": "/v1/integration/entity-bindings", "methods": ["GET"]},
-      {"resource": "/v1/integration/entity-bindings/*", "methods": ["GET"]}
+      {"resource": "/v1/integration/entity-bindings/*", "methods": ["GET"]},
+      {"resource": "/v1/integration/migration-settings", "methods": ["GET"]}
     ]},
     "migration.connection.write": {"permissions": [
       {"resource": "/v1/integration/connection-profiles", "methods": ["POST"]},
@@ -2106,7 +2107,8 @@
       {"resource": "/v1/integration/projects/*/key-rewrite-rules", "methods": ["PUT"]},
       {"resource": "/v1/integration/lookup-tables", "methods": ["POST"]},
       {"resource": "/v1/integration/lookup-tables/*", "methods": ["PATCH"]},
-      {"resource": "/v1/integration/lookup-tables/*:import", "methods": ["POST"]}
+      {"resource": "/v1/integration/lookup-tables/*:import", "methods": ["POST"]},
+      {"resource": "/v1/integration/migration-settings", "methods": ["PUT"]}
     ]},
     "notify.read": {"permissions": [{"resource": "/v1/notify/messages", "methods": ["GET"]}]},
     "notify.send": {"permissions": [{"resource": "/v1/notify/messages", "methods": ["POST"]}]},
