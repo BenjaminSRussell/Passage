@@ -14,6 +14,7 @@ const TENANT_ADMIN_DUTY = "tenant.administer";
 const HIERARCHY_WRITE_DUTY = "org.hierarchy.write";
 const HIERARCHY_PUBLISH_DUTY = "org.hierarchy.publish";
 const HIERARCHY_BACKDATE_DUTY = "org.hierarchy.backdate";
+const PACKAGE_DUTY = "org.package.manage";
 
 export interface LegalEntityContextValue {
   entities: LegalEntity[];
@@ -29,6 +30,8 @@ export interface LegalEntityContextValue {
   canWriteSite: boolean;
   canAdministerTenant: boolean;
   canWriteHierarchy: boolean;
+  // Export and import of the organization model package: org.package.manage with tenant.administer.
+  canManagePackage: boolean;
   canPublishHierarchy: boolean;
   canBackdateHierarchy: boolean;
   loading: boolean;
@@ -69,6 +72,7 @@ export function LegalEntityProvider({ duties, children }: { duties?: readonly st
   const canWriteOperatingUnit = Array.isArray(duties) && duties.includes(OPERATING_UNIT_WRITE_DUTY);
   const canWriteSite = held(SITE_WRITE_DUTY);
   const canWriteHierarchy = held(HIERARCHY_WRITE_DUTY) && canAdministerTenant;
+  const canManagePackage = held(PACKAGE_DUTY) && canAdministerTenant;
   const canPublishHierarchy = held(HIERARCHY_PUBLISH_DUTY) && canAdministerTenant;
   const canBackdateHierarchy = Array.isArray(duties) && duties.includes(HIERARCHY_BACKDATE_DUTY);
   const [entities, setEntities] = useState<LegalEntity[]>([]);
@@ -122,8 +126,8 @@ export function LegalEntityProvider({ duties, children }: { duties?: readonly st
   );
 
   const value = useMemo(
-    () => ({ entities, scope, setScope, reload, canAll, canWriteReference, canWriteLegalEntity, canWriteFiscalCalendar, canWriteOperatingUnit, canWriteSite, canAdministerTenant, canWriteHierarchy, canPublishHierarchy, canBackdateHierarchy, loading, error }),
-    [entities, scope, setScope, reload, canAll, canWriteReference, canWriteLegalEntity, canWriteFiscalCalendar, canWriteOperatingUnit, canWriteSite, canAdministerTenant, canWriteHierarchy, canPublishHierarchy, canBackdateHierarchy, loading, error],
+    () => ({ entities, scope, setScope, reload, canAll, canWriteReference, canWriteLegalEntity, canWriteFiscalCalendar, canWriteOperatingUnit, canWriteSite, canAdministerTenant, canWriteHierarchy, canManagePackage, canPublishHierarchy, canBackdateHierarchy, loading, error }),
+    [entities, scope, setScope, reload, canAll, canWriteReference, canWriteLegalEntity, canWriteFiscalCalendar, canWriteOperatingUnit, canWriteSite, canAdministerTenant, canWriteHierarchy, canManagePackage, canPublishHierarchy, canBackdateHierarchy, loading, error],
   );
   return <LegalEntityContext.Provider value={value}>{children}</LegalEntityContext.Provider>;
 }
