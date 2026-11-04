@@ -263,7 +263,9 @@ func TestReconcileStatement_TwoThousandByTwoThousandWithTwentyRulesFinishesQuick
 		start := time.Now()
 		out := reconcile(t, lines, items, twentyRules(), DefaultThresholds)
 		elapsed := time.Since(start)
-		budget := time.Second
+		// 3s leaves headroom under a loaded machine (1s failed once at 1.08s).
+		// Keep the assertion under -race; the detector is about 10× slower.
+		budget := 3 * time.Second
 		if raceDetector {
 			budget *= 10
 		}
@@ -326,9 +328,24 @@ type ruleDecision struct {
 }
 
 func fullDecision(line Facts, items []Item, rules []Rule) ruleDecision {
-	open := map[string]Facts{}
+	return bruteDecision(line, items, rules)
+}
+
+// bruteDecision is the pre-index oracle: ScoreWith + strictEligible + Decide,
+// plus the same unique-reference / contradicting-reference demotion MatchLine
+// applies. Using MatchLine here would not catch drift from the rewrite.
+func bruteDecision(line Facts, items []Item, rules []Rule) ruleDecision {
+	preparedLine := prepare("", line)
+	refCount := map[string]int{}
+	preparedItems := make([]*prepared, 0, len(items))
+	byID := map[string]*prepared{}
 	for _, it := range items {
-		open[it.ID] = it.Facts
+		p := prepare(it.ID, it.Facts)
+		preparedItems = append(preparedItems, p)
+		byID[p.id] = p
+		if p.reference != "" {
+			refCount[p.reference]++
+		}
 	}
 	ordered := append([]Rule(nil), rules...)
 	sort.SliceStable(ordered, func(i, j int) bool {
@@ -337,13 +354,37 @@ func fullDecision(line Facts, items []Item, rules []Rule) ruleDecision {
 		}
 		return ordered[i].Name < ordered[j].Name
 	})
-	d := MatchLine(line, open, ordered, DefaultThresholds)
-	if d.Best == nil {
-		return ruleDecision{status: d.Status}
+	best := Decision{Status: StatusUnmatched}
+	for _, r := range ordered {
+		cands := make([]Candidate, 0, len(preparedItems))
+		for _, p := range preparedItems {
+			score := 0
+			if !r.Strict || strictEligible(preparedLine, p, r.Tolerance) {
+				score = ScoreWith(line, p.Facts, r.Tolerance, r.Weights)
+			}
+			cands = append(cands, Candidate{ID: p.id, Score: score})
+		}
+		d := Decide(cands, DefaultThresholds)
+		if d.Status == StatusMatched {
+			winner := byID[d.Best.ID]
+			if (r.Strict && refCount[winner.reference] > 1) || (!r.Strict && contradictsReference(preparedLine, winner)) {
+				d.Status = StatusSuggested
+			}
+		}
+		d.Rule = r.Name
+		if d.Status == StatusMatched {
+			return ruleDecision{status: d.Status, rule: d.Rule, item: d.Best.ID}
+		}
+		if d.Best != nil && (best.Best == nil || d.Best.Score > best.Best.Score) {
+			best = d
+		}
 	}
-	got := ruleDecision{status: d.Status, item: d.Best.ID}
-	if d.Status == StatusMatched {
-		got.rule = d.Rule
+	if best.Best == nil {
+		return ruleDecision{status: best.Status}
+	}
+	got := ruleDecision{status: best.Status, item: best.Best.ID}
+	if best.Status == StatusMatched {
+		got.rule = best.Rule
 	}
 	return got
 }
@@ -358,6 +399,22 @@ func reconciledDecision(t *testing.T, line Facts, items []Item, rules []Rule) ru
 		return ruleDecision{status: StatusSuggested, item: out.Suggestions[0].ItemID}
 	}
 	return ruleDecision{status: StatusUnmatched}
+}
+
+func TestMatchLine_StrictZeroReferenceWeightAutoMatchesExactRef(t *testing.T) {
+	// A strict amount+date rule (Reference weight 0) plus a later payer rule
+	// must still auto-match the reference-equal item. Skipping markRefHits
+	// when no rule has Reference weight left that item cold and only suggested.
+	rules := []Rule{
+		{Name: "amount-date-strict", Priority: 1, Weights: Weights{Amount: 80, Date: 20}, Tolerance: tol, Strict: true},
+		{Name: "payer", Priority: 2, Weights: Weights{Amount: 50, Date: 20, Counterparty: 30}, Tolerance: tol},
+	}
+	line := facts("120.00", "2026-10-22", "INV-2026-0001", "Acme Trading Ltd")
+	item := Item{ID: "tx-1", Facts: line}
+	got := reconciledDecision(t, line, []Item{item}, rules)
+	if want := bruteDecision(line, []Item{item}, rules); got != want || got.status != StatusMatched || got.item != "tx-1" || got.rule != "amount-date-strict" {
+		t.Fatalf("decision = %+v; want the strict rule to auto-match tx-1 (oracle %+v)", got, want)
+	}
 }
 
 func TestReconcileStatement_ExcludedCandidateDoesNotDemoteALeaderOfAnEarlierRule(t *testing.T) {
@@ -396,6 +453,7 @@ func TestReconcileStatement_RandomStatementsEqualFullScanDecisions(t *testing.T)
 		{{Name: "balanced", Priority: 1, Weights: DefaultWeights, Tolerance: tol}, {Name: "reference", Priority: 2, Weights: ReferenceWeights, Tolerance: tol, Strict: true}},
 		{{Name: "nodate", Priority: 1, Weights: w(50, 0, 25, 25), Tolerance: tol}, {Name: "balanced", Priority: 2, Weights: DefaultWeights, Tolerance: wide}, {Name: "payer", Priority: 3, Weights: w(40, 20, 0, 40), Tolerance: Tolerance{DateWindowDays: 5}}},
 		{{Name: "strict", Priority: 1, Weights: ReferenceWeights, Tolerance: wide, Strict: true}, {Name: "refcp", Priority: 2, Weights: w(30, 0, 40, 30), Tolerance: tol}},
+		{{Name: "amount-date-strict", Priority: 1, Weights: w(80, 20, 0, 0), Tolerance: tol, Strict: true}, {Name: "payer", Priority: 2, Weights: w(50, 20, 0, 30), Tolerance: tol}},
 	}
 	amounts := []string{"100.00", "100.40", "99.60", "100.80", "250.00", "5000.00"}
 	refs := []string{"", "NOTPROVIDED", "INV-AAAA1111", "INV-AAAA1112", "INV-BBBB2222", "PAY INV-AAAA1111 THX"}

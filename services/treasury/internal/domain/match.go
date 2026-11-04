@@ -445,9 +445,13 @@ func MatchLine(line Facts, cands map[string]Facts, rules []Rule, t Thresholds) D
 func (ix *matchIndex) matchLine(line *prepared, rules []Rule, t Thresholds, prefilter bool) Decision {
 	all := ix.items
 	best := Decision{Status: StatusUnmatched}
-	needRef, needSim := false, false
+	needRef, needContains, needSim := false, false, false
 	for _, r := range rules {
-		needRef = needRef || r.Weights.Reference > 0
+		// A strict rule auto-matches only on an exact reference, even when that
+		// rule's Reference weight is 0. Those items must be hot or decide
+		// returns before the cold loop and never sees them.
+		needRef = needRef || r.Weights.Reference > 0 || r.Strict
+		needContains = needContains || r.Weights.Reference > 0
 		needSim = needSim || r.Weights.Counterparty > 0
 	}
 	n := len(all)
@@ -472,7 +476,7 @@ func (ix *matchIndex) matchLine(line *prepared, rules []Rule, t Thresholds, pref
 		}
 	}
 	if needRef {
-		ix.markRefHits(line, hot)
+		ix.markRefHits(line, hot, needContains)
 	}
 	decided := map[ruleShape]Decision{}
 	for _, r := range rules {
@@ -513,7 +517,7 @@ type ruleShape struct {
 	strict    bool
 }
 
-func (ix *matchIndex) markRefHits(line *prepared, hot []bool) {
+func (ix *matchIndex) markRefHits(line *prepared, hot []bool, contains bool) {
 	for _, ref := range []string{line.reference, line.alt} {
 		if ref == "" || placeholderReference(ref) {
 			continue
@@ -521,11 +525,12 @@ func (ix *matchIndex) markRefHits(line *prepared, hot []bool) {
 		for _, p := range ix.byRef[ref] {
 			hot[p.idx] = true
 		}
-		if len(ref) < 6 {
+		if !contains || len(ref) < 6 {
 			continue
 		}
 		// Equal-length contains is equality, already covered by byRef. Longer or
-		// shorter refs are the only ones that can still score 0.5.
+		// shorter refs are the only ones that can still score 0.5. Skip this
+		// scan when no rule has Reference weight (strict rules only need equality).
 		for length, bucket := range ix.byRefLen {
 			if length == len(ref) {
 				continue
@@ -578,6 +583,9 @@ func (ix *matchIndex) decide(line *prepared, cands []*prepared, r Rule, t Thresh
 	}
 	// Cold items can score at most amount+date. Skip them once the top three
 	// cannot change, so equal-amount misses are not lines×items×rules.
+	// A strict rule scores 0 on every cold item (strictEligible requires an
+	// exact reference, which is hot), so Ranked is only the hot hits — it no
+	// longer fills score-0 runners-up. Reconcile reads Status/Best, not Ranked.
 	maxCold := 0
 	if !r.Strict {
 		maxCold = w.Amount + w.Date
