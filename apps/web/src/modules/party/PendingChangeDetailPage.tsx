@@ -1,8 +1,8 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
-import { Alert, Button, buttonClassName, Card, FormField, PageHeader, Skeleton, StatusPill, Textarea } from "../../shell/ui";
+import { Alert, Button, buttonClassName, Card, ConfirmDialog, FormField, PageHeader, Skeleton, StatusPill, Textarea } from "../../shell/ui";
 import { decidePendingChange, describeProblem, getPendingChange, type PendingChange, type Problem } from "./api/client";
 import { displayOrDash, DUTY_APPROVE, formatDateTime, pendingFieldLabel } from "./format";
 import styles from "./pages.module.css";
@@ -35,9 +35,14 @@ export function PendingChangeDetailPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const [confirming, setConfirming] = useState<"approve" | "reject" | null>(null);
+  const outcomeRef = useRef<HTMLDivElement>(null);
 
-  async function decide(action: "approve" | "reject", event?: FormEvent) {
-    event?.preventDefault();
+  useEffect(() => {
+    if (outcome) outcomeRef.current?.focus();
+  }, [outcome]);
+
+  async function decide(action: "approve" | "reject") {
     const text = reason.trim();
     if (text.length > REASON_MAX) {
       setError(`Use at most ${REASON_MAX} characters.`);
@@ -52,7 +57,10 @@ export function PendingChangeDetailPage() {
       await decidePendingChange(change.id, action, text);
       setOutcome({
         tone: "success",
-        text: action === "approve" ? "Approved. The stored credit limit is now the requested value." : "Rejected. The stored credit limit is unchanged.",
+        text:
+          action === "approve"
+            ? "Approved. The stored credit limit is now the requested value."
+            : "Rejected. The stored credit limit is unchanged.",
       });
       setReason("");
       state.reload();
@@ -102,16 +110,14 @@ export function PendingChangeDetailPage() {
           </Link>
         }
       />
-      {outcome?.tone === "danger" ? (
-        <Alert tone="danger" title="The decision failed" live="alert">
-          {problemText(outcome.problem)}
-        </Alert>
-      ) : null}
-      {outcome?.tone === "success" ? (
-        <Alert tone="success" live="status">
-          {outcome.text}
-        </Alert>
-      ) : null}
+      <div role="status" ref={outcomeRef} tabIndex={-1}>
+        {outcome?.tone === "danger" ? (
+          <Alert tone="danger" title="The decision failed">
+            {problemText(outcome.problem)}
+          </Alert>
+        ) : null}
+        {outcome?.tone === "success" ? <Alert tone="success">{outcome.text}</Alert> : null}
+      </div>
       <Card>
         <dl className={styles.details} aria-label="Credit limit change">
           {facts(change).map(([term, value]) => (
@@ -124,7 +130,7 @@ export function PendingChangeDetailPage() {
       {pending ? (
         <Card title="Decision">
           {canDecide ? (
-            <form className={styles.form} onSubmit={(event) => void decide("reject", event)} noValidate aria-label="Decision">
+            <form className={styles.form} onSubmit={(event) => event.preventDefault()} noValidate aria-label="Decision">
               <FormField
                 id="decision-reason"
                 label="Reason"
@@ -149,11 +155,17 @@ export function PendingChangeDetailPage() {
                   type="button"
                   loading={busy === "approve"}
                   disabled={busy !== null && busy !== "approve"}
-                  onClick={() => void decide("approve")}
+                  onClick={() => setConfirming("approve")}
                 >
                   Approve
                 </Button>
-                <Button type="submit" variant="danger" loading={busy === "reject"} disabled={busy !== null && busy !== "reject"}>
+                <Button
+                  type="button"
+                  variant="danger"
+                  loading={busy === "reject"}
+                  disabled={busy !== null && busy !== "reject"}
+                  onClick={() => setConfirming("reject")}
+                >
                   Reject
                 </Button>
               </div>
@@ -165,6 +177,24 @@ export function PendingChangeDetailPage() {
       ) : (
         <p className={styles.note}>This change is already {change.status}. The stored limit is not waiting on a decision.</p>
       )}
+      {confirming ? (
+        <ConfirmDialog
+          title={confirming === "approve" ? "Approve this credit limit increase?" : "Reject this credit limit increase?"}
+          description={
+            confirming === "approve"
+              ? `The stored credit limit becomes ${change.requestedValue}.`
+              : "The stored credit limit stays unchanged and the request is closed."
+          }
+          confirmLabel={confirming === "approve" ? "Confirm approval" : "Confirm rejection"}
+          cancelLabel="Cancel"
+          onCancel={() => setConfirming(null)}
+          onConfirm={() => {
+            const action = confirming;
+            setConfirming(null);
+            void decide(action);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

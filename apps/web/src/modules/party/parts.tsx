@@ -10,6 +10,13 @@ const KNOWN: Record<string, string> = {
   "PTY-CHANGE-DECIDED": "This change was already decided, or someone else decided it.",
   "PTY-PENDING-STALE": "The stored credit limit changed after this request. The request can only be rejected.",
   "PTY-REASON-TOO-LONG": "The decision reason must be at most 500 characters.",
+  "PTY-LEGAL-ENTITY-REQUIRED": "Writing a party or role needs exactly one legal entity in your session.",
+  "PTY-VERSION-CONFLICT": "Someone changed this party after you opened it. Reload and try again.",
+  "PTY-PARTY-MERGED": "This party was merged into another one and cannot take new roles.",
+  "PTY-VENDOR-EXISTS": "This party already has a vendor role here, or the account number is taken.",
+  "PTY-CUSTOMER-EXISTS": "This party already has a customer role here, or the account number is taken.",
+  "PTY-CHANGE-PENDING": "A credit limit change is already awaiting approval for this customer.",
+  "PTY-CUSTOMER-NOT-FOUND": "No customer role exists with that id in your legal entity.",
   "PTY-0001": "The tax registration failed format validation.",
   "AUTH-0003": "You don't have access to do this.",
 };
@@ -34,7 +41,13 @@ export function ProblemAlert({ problem, title, retry }: { problem: Problem; titl
       tone="danger"
       title={title}
       live="alert"
-      action={retry ? <Button size="sm" onClick={retry}>Try again</Button> : undefined}
+      action={
+        retry ? (
+          <Button size="sm" onClick={retry}>
+            Try again
+          </Button>
+        ) : undefined
+      }
     >
       {problemText(problem)}
     </Alert>

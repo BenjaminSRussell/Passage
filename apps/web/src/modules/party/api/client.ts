@@ -1,7 +1,7 @@
 // Client for the party service (services/party/api/openapi.yaml). Browser
 // calls use /api/v1/party/..., which the web BFF rewrites to the service.
 
-export const base = "/api/v1/party";
+const base = "/api/v1/party";
 
 export type PartyType = "organization" | "person";
 export type PartyStatus = "active" | "inactive" | "merged";
@@ -95,13 +95,28 @@ export interface Problem {
 
 export function describeProblem(error: unknown): Problem {
   if (error instanceof PartyApiError) {
-    return { status: error.status, code: error.code, message: error.message, fields: error.fields };
+    return {
+      status: error.status,
+      code: error.code,
+      message: error.message,
+      fields: error.fields,
+    };
   }
-  return { status: 0, code: "COM-0001", message: error instanceof Error ? error.message : "Request failed", fields: {} };
+  return {
+    status: 0,
+    code: "COM-0001",
+    message: error instanceof Error ? error.message : "Request failed",
+    fields: {},
+  };
 }
 
 async function toError(res: Response): Promise<PartyApiError> {
-  const body = (await res.json().catch(() => null)) as { code?: unknown; detail?: unknown; title?: unknown; errors?: unknown } | null;
+  const body = (await res.json().catch(() => null)) as {
+    code?: unknown;
+    detail?: unknown;
+    title?: unknown;
+    errors?: unknown;
+  } | null;
   const code = typeof body?.code === "string" && body.code !== "" ? body.code : `HTTP-${res.status}`;
   const message =
     typeof body?.detail === "string" ? body.detail : typeof body?.title === "string" ? body.title : `Request failed (HTTP ${res.status})`;
@@ -113,12 +128,78 @@ async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSigna
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
-  const res = await fetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await fetch(`${base}${path}`, {
+    ...init,
+    headers,
+    credentials: "same-origin",
+    signal,
+  });
   if (!res.ok) throw await toError(res);
   return (await res.json()) as T;
 }
 
-export const id = (value: string) => encodeURIComponent(value);
+const id = (value: string) => encodeURIComponent(value);
+
+const post = (body: unknown, key?: string): RequestInit => ({
+  method: "POST",
+  body: JSON.stringify(body),
+  headers: key ? { "Idempotency-Key": key } : undefined,
+});
+
+export type PartyNameFields = Partial<Record<"legalName" | "tradeName" | "registrationNumber" | "givenName" | "familyName", string>>;
+
+export type PartyReceipt = Pick<Party, "id" | "partyNumber" | "partyType" | "status" | "version">;
+
+export interface NewVendor {
+  accountNumber: string;
+  vendorGroupId: string;
+  paymentTermId?: string;
+  currencyCode: string;
+}
+
+export interface NewCustomer {
+  accountNumber: string;
+  customerGroupId: string;
+  paymentTermId: string;
+  postingProfileId: string;
+  currencyCode: string;
+}
+
+export interface Customer extends NewCustomer {
+  id: string;
+  partyId: string;
+  legalEntityId: string;
+  creditLimit?: string;
+}
+
+export interface CreditLimitResult {
+  creditLimit: string | null;
+  pendingChange?: PendingChange;
+}
+
+export function createParty(input: { partyType: PartyType } & PartyNameFields, key: string): Promise<PartyReceipt> {
+  return send<PartyReceipt>("/parties", post(input, key));
+}
+
+export function updateParty(partyId: string, version: number, fields: PartyNameFields): Promise<PartyReceipt> {
+  return send<PartyReceipt>(`/parties/${id(partyId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(fields),
+    headers: { "If-Match": `"${version}"` },
+  });
+}
+
+export function createVendorRole(partyId: string, input: NewVendor, key: string): Promise<Vendor> {
+  return send<Vendor>(`/parties/${id(partyId)}/vendor`, post(input, key));
+}
+
+export function createCustomerRole(partyId: string, input: NewCustomer, key: string): Promise<Customer> {
+  return send<Customer>(`/parties/${id(partyId)}/customer`, post(input, key));
+}
+
+export function setCreditLimit(customerId: string, creditLimit: string): Promise<CreditLimitResult> {
+  return send<CreditLimitResult>(`/customers/${id(customerId)}/credit-limit`, post({ creditLimit }));
+}
 
 export function getParty(partyId: string, signal?: AbortSignal): Promise<Party> {
   return send<Party>(`/parties/${id(partyId)}`, {}, signal);
@@ -130,9 +211,15 @@ export async function listPartyVendors(partyId: string, signal?: AbortSignal): P
 }
 
 export function validateTaxRegistration(input: { type: TaxType; country?: string; number: string }): Promise<TaxValidation> {
-  const body: Record<string, string> = { type: input.type, number: input.number };
+  const body: Record<string, string> = {
+    type: input.type,
+    number: input.number,
+  };
   if (input.country) body.country = input.country;
-  return send<TaxValidation>("/tax-registrations:validate", { method: "POST", body: JSON.stringify(body) });
+  return send<TaxValidation>("/tax-registrations:validate", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 export function getPendingChange(changeId: string, signal?: AbortSignal): Promise<PendingChange> {
@@ -141,5 +228,8 @@ export function getPendingChange(changeId: string, signal?: AbortSignal): Promis
 
 export function decidePendingChange(changeId: string, action: "approve" | "reject", reason: string): Promise<PendingChange> {
   const body = reason === "" ? undefined : JSON.stringify({ reason });
-  return send<PendingChange>(`/pending-changes/${id(changeId)}:${action}`, { method: "POST", body });
+  return send<PendingChange>(`/pending-changes/${id(changeId)}:${action}`, {
+    method: "POST",
+    body,
+  });
 }

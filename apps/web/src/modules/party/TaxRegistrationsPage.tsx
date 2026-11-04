@@ -72,11 +72,12 @@ export function TaxRegistrationsPage() {
       />
       {canValidate ? (
         <form className={styles.form} onSubmit={(event) => void submit(event)} noValidate aria-label="Validate a tax registration">
-          <FormField id="tax-type" label="Type">
+          <FormField id="tax-type" label="Type" error={errors.type}>
             {(control) => (
               <Select
                 {...control}
                 value={values.type}
+                invalid={Boolean(errors.type)}
                 onChange={(event) => setValues({ ...values, type: event.target.value as TaxType })}
               >
                 {TYPES.map((type) => (
@@ -101,7 +102,12 @@ export function TaxRegistrationsPage() {
                 maxLength={2}
                 placeholder="DE"
                 className={styles.mono}
-                onChange={(event) => setValues({ ...values, country: event.target.value.toUpperCase() })}
+                onChange={(event) =>
+                  setValues({
+                    ...values,
+                    country: event.target.value.toUpperCase(),
+                  })
+                }
                 invalid={Boolean(errors.country)}
               />
             )}
@@ -133,24 +139,26 @@ export function TaxRegistrationsPage() {
           {problemText(failure)}
         </Alert>
       ) : null}
-      {result ? (
-        <Card title="Result">
-          <dl className={styles.details} aria-label="Tax validation result">
-            <Entry term="Type">{taxTypeLabel[result.type] ?? result.type}</Entry>
-            <Entry term="Number" mono>
-              {result.number}
-            </Entry>
-            {result.country ? (
-              <Entry term="Country" mono>
-                {result.country}
+      <div role="status">
+        {result ? (
+          <Card title="Result">
+            <dl className={styles.details} aria-label="Tax validation result">
+              <Entry term="Type">{taxTypeLabel[result.type] ?? result.type}</Entry>
+              <Entry term="Number" mono>
+                {result.number}
               </Entry>
-            ) : null}
-            <Entry term="Status">
-              <StatusPill status={result.validationStatus} />
-            </Entry>
-          </dl>
-        </Card>
-      ) : null}
+              {result.country ? (
+                <Entry term="Country" mono>
+                  {result.country}
+                </Entry>
+              ) : null}
+              <Entry term="Status">
+                <StatusPill status={result.validationStatus} />
+              </Entry>
+            </dl>
+          </Card>
+        ) : null}
+      </div>
     </div>
   );
 }

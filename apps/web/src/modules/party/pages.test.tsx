@@ -60,7 +60,9 @@ describe("party search", () => {
   it("looks up a party by id, opens it, and passes the page checks", async () => {
     api.handler = (call) => (call.url.pathname.endsWith(`/parties/${PARTY}`) ? json(200, org(PARTY, "Northwind")) : undefined);
     const { container } = renderAt("/party");
-    fireEvent.change(screen.getByLabelText("Party id"), { target: { value: PARTY } });
+    fireEvent.change(screen.getByLabelText("Party id"), {
+      target: { value: PARTY },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Find party" }));
     const table = await findTable({ name: "Matching party" });
     expect(within(table).getByText("Northwind")).toBeInTheDocument();
@@ -73,10 +75,30 @@ describe("party search", () => {
 
   it("validates the id before calling the API", async () => {
     renderAt("/party");
-    fireEvent.change(screen.getByLabelText("Party id"), { target: { value: "x" } });
+    fireEvent.change(screen.getByLabelText("Party id"), {
+      target: { value: "x" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Find party" }));
     expect(await screen.findByText("Enter the party id (a UUID).")).toBeInTheDocument();
     expect(api.calls).toHaveLength(0);
+  });
+
+  it("shows a load failure and recovers on Try again", async () => {
+    let failing = true;
+    api.handler = () => (failing ? problem(500, "COM-0500", "boom") : json(200, org(PARTY, "Northwind")));
+    renderAt(`/party?id=${PARTY}`);
+    expect(await screen.findByText(/boom \(COM-0500\)/)).toBeInTheDocument();
+    failing = false;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Northwind")).toBeInTheDocument();
+  });
+
+  it("reports a network failure as COM-0001", async () => {
+    api.handler = () => {
+      throw new Error("offline");
+    };
+    renderAt(`/party?id=${PARTY}`);
+    expect(await screen.findByText(/offline \(COM-0001\)/)).toBeInTheDocument();
   });
 
   it("explains a missing party", async () => {
@@ -103,6 +125,23 @@ describe("party detail", () => {
     noMergeControls();
   });
 
+  it("warns and links to the survivor of a merged party", async () => {
+    api.handler = (call) =>
+      call.url.pathname.endsWith("/vendors")
+        ? json(200, { vendors: [] })
+        : json(
+            200,
+            org(PARTY, "Old Northwind", {
+              status: "merged",
+              mergedIntoId: OTHER,
+            }),
+          );
+    renderAt(`/party/${PARTY}`);
+    expect(await screen.findByText("Merged party")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: OTHER })).toHaveAttribute("href", `/party/${OTHER}`);
+    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+  });
+
   it("notes when the opened id redirected to a survivor", async () => {
     api.handler = (call) => {
       if (call.url.pathname.endsWith("/vendors")) return json(200, { vendors: [] });
@@ -119,33 +158,89 @@ describe("tax registrations", () => {
   it("posts a VAT number and shows the validation status", async () => {
     api.handler = (call) =>
       call.method === "POST" && call.url.pathname.endsWith("/tax-registrations:validate")
-        ? json(200, { type: "VAT", country: "DE", number: "DE123456789", validationStatus: "valid" })
+        ? json(200, {
+            type: "VAT",
+            country: "DE",
+            number: "DE123456789",
+            validationStatus: "valid",
+          })
         : undefined;
     const { container } = renderAt("/party/tax-registrations");
-    fireEvent.change(screen.getByLabelText("Country"), { target: { value: "de" } });
-    fireEvent.change(screen.getByLabelText("Number"), { target: { value: "DE123456789" } });
+    fireEvent.change(screen.getByLabelText("Country"), {
+      target: { value: "de" },
+    });
+    fireEvent.change(screen.getByLabelText("Number"), {
+      target: { value: "DE123456789" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Validate" }));
     expect(await screen.findByText("DE123456789")).toBeInTheDocument();
     expect(screen.getByText("Valid")).toBeInTheDocument();
-    expect(api.calls[0]?.body).toEqual({ type: "VAT", number: "DE123456789", country: "DE" });
+    expect(api.calls[0]?.body).toEqual({
+      type: "VAT",
+      number: "DE123456789",
+      country: "DE",
+    });
     expect(pageViolations(container)).toEqual([]);
   });
 
   it("requires a country for VAT before calling the API", async () => {
     renderAt("/party/tax-registrations");
-    fireEvent.change(screen.getByLabelText("Number"), { target: { value: "DE1" } });
+    fireEvent.change(screen.getByLabelText("Number"), {
+      target: { value: "DE1" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Validate" }));
     expect(await screen.findByText("Enter the two-letter country code, for example DE.")).toBeInTheDocument();
     expect(api.calls).toHaveLength(0);
   });
 
   it("maps server field errors onto the form", async () => {
-    api.handler = () => problem(422, "PTY-0001", "tax registration failed validation", { number: "an EIN has 9 digits" });
+    api.handler = () =>
+      problem(422, "PTY-0001", "tax registration failed validation", {
+        number: "an EIN has 9 digits",
+      });
     renderAt("/party/tax-registrations");
-    fireEvent.change(screen.getByLabelText("Type"), { target: { value: "EIN" } });
-    fireEvent.change(screen.getByLabelText("Number"), { target: { value: "12" } });
+    fireEvent.change(screen.getByLabelText("Type"), {
+      target: { value: "EIN" },
+    });
+    fireEvent.change(screen.getByLabelText("Number"), {
+      target: { value: "12" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Validate" }));
     expect(await screen.findByText("an EIN has 9 digits")).toBeInTheDocument();
+  });
+
+  it("shows a server error keyed to the type field", async () => {
+    api.handler = () => problem(422, "PTY-0001", "invalid", { type: "type is not supported" });
+    renderAt("/party/tax-registrations");
+    fireEvent.change(screen.getByLabelText("Country"), {
+      target: { value: "de" },
+    });
+    fireEvent.change(screen.getByLabelText("Number"), {
+      target: { value: "x" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+    expect(await screen.findByText("type is not supported")).toBeInTheDocument();
+  });
+
+  it("announces the result through a persistent status region", async () => {
+    api.handler = () =>
+      json(200, {
+        type: "VAT",
+        country: "DE",
+        number: "DE1",
+        validationStatus: "valid",
+      });
+    renderAt("/party/tax-registrations");
+    const region = screen.getByRole("status");
+    expect(region).toBeEmptyDOMElement();
+    fireEvent.change(screen.getByLabelText("Country"), {
+      target: { value: "de" },
+    });
+    fireEvent.change(screen.getByLabelText("Number"), {
+      target: { value: "DE1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+    expect(await within(region).findByText("Valid")).toBeInTheDocument();
   });
 
   it("hides the validate action without party.write", async () => {
@@ -163,8 +258,12 @@ describe("duplicate candidates", () => {
       return undefined;
     };
     const { container } = renderAt("/party/duplicates");
-    fireEvent.change(screen.getByLabelText("First party id"), { target: { value: PARTY } });
-    fireEvent.change(screen.getByLabelText("Second party id"), { target: { value: OTHER } });
+    fireEvent.change(screen.getByLabelText("First party id"), {
+      target: { value: PARTY },
+    });
+    fireEvent.change(screen.getByLabelText("Second party id"), {
+      target: { value: OTHER },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Compare" }));
     const table = await findTable({ name: "Field comparison" });
     expect(within(table).getAllByText("Northwind").length).toBeGreaterThan(0);
@@ -174,10 +273,31 @@ describe("duplicate candidates", () => {
     noMergeControls();
   });
 
+  it("marks identical fields as Same", async () => {
+    api.handler = (call) => {
+      if (call.url.pathname.endsWith(`/parties/${PARTY}`)) return json(200, org(PARTY, "Northwind"));
+      if (call.url.pathname.endsWith(`/parties/${OTHER}`)) return json(200, org(OTHER, "Northwind"));
+      return undefined;
+    };
+    renderAt(`/party/duplicates?a=${PARTY}&b=${OTHER}`);
+    const table = await findTable({ name: "Field comparison" });
+    expect(within(table).getAllByText("Same").length).toBeGreaterThan(0);
+    expect(within(table).getAllByText("Different").length).toBeGreaterThan(0);
+  });
+
+  it("states that merge is ungranted", () => {
+    renderAt("/party/duplicates");
+    expect(screen.getByText(/merge is ungranted until its approval workflow \(#450\)/)).toBeInTheDocument();
+  });
+
   it("rejects comparing a party with itself", async () => {
     renderAt("/party/duplicates");
-    fireEvent.change(screen.getByLabelText("First party id"), { target: { value: PARTY } });
-    fireEvent.change(screen.getByLabelText("Second party id"), { target: { value: PARTY } });
+    fireEvent.change(screen.getByLabelText("First party id"), {
+      target: { value: PARTY },
+    });
+    fireEvent.change(screen.getByLabelText("Second party id"), {
+      target: { value: PARTY },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Compare" }));
     expect(await screen.findByText("Enter a different party id to compare.")).toBeInTheDocument();
     expect(api.calls).toHaveLength(0);
@@ -187,7 +307,9 @@ describe("duplicate candidates", () => {
 describe("credit limit approvals", () => {
   it("opens a pending change by id", async () => {
     renderAt("/party/pending-changes");
-    fireEvent.change(screen.getByLabelText("Pending change id"), { target: { value: CHANGE } });
+    fireEvent.change(screen.getByLabelText("Pending change id"), {
+      target: { value: CHANGE },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Open change" }));
     expect(screen.getByTestId("where")).toHaveTextContent(`/party/pending-changes/${CHANGE}`);
   });
@@ -195,15 +317,27 @@ describe("credit limit approvals", () => {
   it("shows the held increase and approves it", async () => {
     api.handler = (call) =>
       call.method === "POST"
-        ? json(200, change({ status: "approved", decidedBy: "grace", decidedAt: "2026-03-02T09:00:00Z" }))
+        ? json(
+            200,
+            change({
+              status: "approved",
+              decidedBy: "grace",
+              decidedAt: "2026-03-02T09:00:00Z",
+            }),
+          )
         : json(200, change());
     const { container } = renderAt(`/party/pending-changes/${CHANGE}`);
     expect(await screen.findByText("25000.00")).toBeInTheDocument();
     expect(screen.getByText("10000.00")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
-    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "reviewed statements" } });
+    fireEvent.change(screen.getByLabelText("Reason"), {
+      target: { value: "reviewed statements" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(api.calls.some((c) => c.method === "POST")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm approval" }));
     expect(await screen.findByText(/The stored credit limit is now the requested value/)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveFocus();
     const post = api.calls.find((c) => c.method === "POST");
     expect(post?.url.pathname).toBe(`/api/v1/party/pending-changes/${CHANGE}:approve`);
     expect(post?.body).toEqual({ reason: "reviewed statements" });
@@ -214,6 +348,7 @@ describe("credit limit approvals", () => {
     renderAt(`/party/pending-changes/${CHANGE}`);
     await screen.findByText("25000.00");
     fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm rejection" }));
     expect(await screen.findByText(/The stored credit limit is unchanged/)).toBeInTheDocument();
     expect(api.calls.find((c) => c.method === "POST")?.body).toBeUndefined();
     expect(api.calls.find((c) => c.method === "POST")?.url.pathname).toContain(":reject");
@@ -233,6 +368,30 @@ describe("credit limit approvals", () => {
     renderAt(`/party/pending-changes/${CHANGE}`);
     await screen.findByText("25000.00");
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm approval" }));
     expect(await screen.findByText(/You cannot approve or reject a change you requested/)).toBeInTheDocument();
+  });
+
+  it("does not decide when the confirmation is cancelled", async () => {
+    api.handler = () => json(200, change());
+    renderAt(`/party/pending-changes/${CHANGE}`);
+    await screen.findByText("25000.00");
+    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(api.calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  it.each([
+    ["PTY-PENDING-STALE", /can only be rejected/],
+    ["PTY-CHANGE-DECIDED", /already decided/],
+  ])("explains %s", async (code, text) => {
+    api.handler = (call) => (call.method === "POST" ? problem(409, code, "conflict") : json(200, change()));
+    renderAt(`/party/pending-changes/${CHANGE}`);
+    await screen.findByText("25000.00");
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm approval" }));
+    expect(await screen.findByText(text)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
   });
 });

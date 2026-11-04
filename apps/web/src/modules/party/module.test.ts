@@ -8,6 +8,7 @@ describe("party module", () => {
     expect(party.id).toBe("party");
     expect(party.routes.map((r) => r.path)).toEqual([
       "/party",
+      "/party/new",
       "/party/tax-registrations",
       "/party/duplicates",
       "/party/pending-changes",
@@ -17,6 +18,7 @@ describe("party module", () => {
     expect(party.routes.every((r) => r.element !== null && r.element !== undefined)).toBe(true);
     expect(party.nav).toEqual([
       { label: "Parties", to: "/party", duty: DUTY_READ },
+      { label: "New party", to: "/party/new", duty: DUTY_WRITE },
       { label: "Tax registrations", to: "/party/tax-registrations", duty: DUTY_WRITE },
       { label: "Duplicate candidates", to: "/party/duplicates", duty: DUTY_READ },
       { label: "Credit limit approvals", to: "/party/pending-changes", duty: DUTY_READ },

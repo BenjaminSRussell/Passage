@@ -4,6 +4,10 @@ export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 
 export const COUNTRY = /^[A-Za-z]{2}$/;
 
+export const CURRENCY = /^[A-Za-z]{3}$/;
+
+export const AMOUNT = /^[0-9]{1,16}(\.[0-9]{1,2})?$/;
+
 export const DUTY_READ = "party.read";
 export const DUTY_WRITE = "party.write";
 export const DUTY_APPROVE = "party.approve";

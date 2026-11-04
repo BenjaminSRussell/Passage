@@ -23,31 +23,34 @@ const columns: DataTableColumn<CompareRow>[] = [
   { key: "field", header: "Field" },
   { key: "left", header: "First party" },
   { key: "right", header: "Second party" },
-  { key: "same", header: "Match", render: (row) => (row.same ? "Same" : "Different") },
+  {
+    key: "same",
+    header: "Match",
+    render: (row) => (row.same ? "Same" : "Different"),
+  },
 ];
 
-function value(party: Party, key: keyof Party | "displayName"): string {
-  if (key === "displayName") return party.name;
-  const found = party[key];
-  if (typeof found === "boolean") return found ? "yes" : "no";
-  if (typeof found === "number") return String(found);
-  return displayOrDash(found);
+type FieldKey = "partyNumber" | "name" | "partyType" | "status" | "legalName" | "registrationNumber" | "givenName" | "familyName";
+
+const FIELDS: { field: string; key: FieldKey }[] = [
+  { field: "Number", key: "partyNumber" },
+  { field: "Name", key: "name" },
+  { field: "Type", key: "partyType" },
+  { field: "Status", key: "status" },
+  { field: "Legal name", key: "legalName" },
+  { field: "Registration number", key: "registrationNumber" },
+  { field: "Given name", key: "givenName" },
+  { field: "Family name", key: "familyName" },
+];
+
+function value(party: Party, key: FieldKey): string {
+  return key === "partyType" ? (partyTypeLabel[party.partyType] ?? party.partyType) : displayOrDash(party[key]);
 }
 
 function rows(left: Party, right: Party): CompareRow[] {
-  const fields: { field: string; key: keyof Party | "displayName" }[] = [
-    { field: "Number", key: "partyNumber" },
-    { field: "Name", key: "displayName" },
-    { field: "Type", key: "partyType" },
-    { field: "Status", key: "status" },
-    { field: "Legal name", key: "legalName" },
-    { field: "Registration number", key: "registrationNumber" },
-    { field: "Given name", key: "givenName" },
-    { field: "Family name", key: "familyName" },
-  ];
-  return fields.map(({ field, key }) => {
-    const a = key === "partyType" ? (partyTypeLabel[left.partyType] ?? left.partyType) : value(left, key);
-    const b = key === "partyType" ? (partyTypeLabel[right.partyType] ?? right.partyType) : value(right, key);
+  return FIELDS.map(({ field, key }) => {
+    const a = value(left, key);
+    const b = value(right, key);
     return { field, left: a, right: b, same: a === b };
   });
 }
@@ -62,15 +65,7 @@ function Comparison({ leftId, rightId }: { leftId: string; rightId: string }) {
     return <ProblemAlert problem={state.error} title="Could not load those parties" retry={state.reload} />;
   }
   if (!state.data) {
-    return (
-      <DataTable
-        label="Field comparison"
-        columns={columns}
-        rows={[]}
-        getRowKey={(row) => row.field}
-        loading
-      />
-    );
+    return <DataTable label="Field comparison" columns={columns} rows={[]} getRowKey={(row) => row.field} loading />;
   }
 
   const { left, right } = state.data;
@@ -110,12 +105,7 @@ function Comparison({ leftId, rightId }: { leftId: string; rightId: string }) {
           </div>
         </dl>
       </Card>
-      <DataTable
-        label="Field comparison"
-        columns={columns}
-        rows={rows(left, right)}
-        getRowKey={(row) => row.field}
-      />
+      <DataTable label="Field comparison" columns={columns} rows={rows(left, right)} getRowKey={(row) => row.field} />
     </div>
   );
 }
@@ -147,7 +137,7 @@ export function DuplicatesPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Duplicate candidates"
-        description="Compare two party records the service already knows. The duplicate queue and merge API are not on these screens: merge stays ungated until its approval workflow is built."
+        description="Compare two party records the service already knows. The duplicate queue and merge API are not on these screens: merge is ungranted until its approval workflow (#450) is built."
       />
       <form className={styles.form} onSubmit={compare} noValidate aria-label="Compare two parties">
         <FormField id="dup-a" label="First party id" error={errors.a}>
