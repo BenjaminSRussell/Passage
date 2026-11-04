@@ -267,8 +267,8 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | POST | `/v1/scheduling/runs` (Idempotency-Key) | `scheduling.run` |
 | POST | `/v1/scheduling/orders/{orderId}:schedule` (Idempotency-Key; every operation of one order, scope `order`; 404 `SCHED-0135` when scheduling holds no operation of it) | `scheduling.run` |
 | GET | `/v1/scheduling/runs`, `/v1/scheduling/runs/{id}` | `scheduling.read` |
-| GET | `/v1/scheduling/gantt?from&to&resourceIds` (at most 5,000 bars; `outsideCapacity` per bar) | `scheduling.read` |
-| POST | `/v1/scheduling/jobs/{id}:move` (Idempotency-Key unless `dryRun`) | `scheduling.schedule.write` |
+| GET | `/v1/scheduling/gantt?from&to&resourceIds` (at most 5,000 bars; `outsideCapacity` and `blockBreach` per bar) | `scheduling.read` |
+| POST | `/v1/scheduling/jobs/{id}:move` (Idempotency-Key unless `dryRun`; `overrideConstraints` also needs `scheduling.constraints.override`, checked in the handler, 403 `SCHED-0141` without it) | `scheduling.schedule.write` |
 | POST | `/v1/scheduling/jobs/{id}:firm` (Idempotency-Key) | `scheduling.schedule.write` |
 | GET | `/v1/scheduling/capacity-load?period&from&weeks&days&resourceIds` | `scheduling.read` |
 | GET | `/v1/scheduling/capacity-load/jobs?resourceId&from&to` | `scheduling.read` |
@@ -372,6 +372,7 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0124` | 412 | If-Match is stale: the resource changed since it was read |
 | `SCHED-0125` | 422 | Complete needs a started campaign |
 | `SCHED-0140` | 412 | If-Match is stale: the scheduling parameters changed since they were read |
+| `SCHED-0141` | 403 | A move asked for `overrideConstraints` without the `scheduling.constraints.override` duty |
 | `precondition_required` | 428 | A campaign command was sent without If-Match |
 
 A dry-run move never fails for a constraint: it returns `feasible: false` and

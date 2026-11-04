@@ -90,3 +90,64 @@ func TestDispatchLines_NumbersByStartAndClipsToTheWindow(t *testing.T) {
 		t.Fatalf("empty = %+v %d", none, sum)
 	}
 }
+
+// The resource calendar resolves shift ends in a DST gap or overlap the way the
+// dispatch list window does, so a dispatch window and the open capacity agree.
+func TestOpenIntervals_ShiftsInADaylightSavingGapMatchTheDispatchWindow(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("no tz database")
+	}
+	utc := func(mo time.Month, d, h, mi int) time.Time { return time.Date(2027, mo, d, h, mi, 0, 0, time.UTC) }
+	cases := []struct {
+		name       string
+		day        time.Time
+		start, end int
+		want       []Interval
+	}{
+		{"start in the gap", utc(3, 14, 12, 0), 150, 240, []Interval{{utc(3, 14, 7, 0), utc(3, 14, 8, 0)}}},
+		{"end in the gap", utc(3, 14, 12, 0), 100, 130, []Interval{{utc(3, 14, 6, 40), utc(3, 14, 7, 0)}}},
+		{"wholly in the gap", utc(3, 14, 12, 0), 130, 150, nil},
+		{"start in the overlap", utc(11, 7, 12, 0), 90, 180, []Interval{{utc(11, 7, 5, 30), utc(11, 7, 8, 0)}}},
+	}
+	for _, c := range cases {
+		got := OpenIntervals(ny, []Shift{{Weekday: time.Sunday, StartMinute: c.start, EndMinute: c.end}}, c.day, 1)
+		if len(got) != len(c.want) {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
+			continue
+		}
+		for i := range got {
+			if !got[i].Start.Equal(c.want[i].Start) || !got[i].End.Equal(c.want[i].End) {
+				t.Errorf("%s: %v, want %v", c.name, got, c.want)
+			}
+		}
+		from, to := DispatchWindow(ny, time.Date(c.day.Year(), c.day.Month(), c.day.Day(), 0, 0, 0, 0, time.UTC), 1, c.start, c.end)
+		if len(got) == 1 && (!got[0].Start.Equal(from) || !got[0].End.Equal(to)) {
+			t.Errorf("%s: calendar %v differs from dispatch window %s..%s", c.name, got[0], from, to)
+		}
+	}
+}
+
+// An RRULE block window whose start falls in a spring-forward gap starts at the
+// change, as a weekly window (OpenIntervals) does, not an hour earlier.
+func TestRecurrenceWindows_ResolveADaylightSavingGapLikeTheCalendar(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("no tz database")
+	}
+	day := time.Date(2027, 3, 14, 0, 0, 0, 0, time.UTC)
+	rc := Recurrence{Rule: "FREQ=DAILY;COUNT=1", StartDate: day, StartMinute: 150, EndMinute: 240}
+	got, err := rc.Windows(ny, day.Add(-24*time.Hour), day.Add(48*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	weekly := OpenIntervals(ny, []Shift{{Weekday: time.Sunday, StartMinute: 150, EndMinute: 240}}, day.Add(12*time.Hour), 1)
+	if len(got) != 1 || len(weekly) != 1 || !got[0].Start.Equal(weekly[0].Start) || !got[0].End.Equal(weekly[0].End) {
+		t.Fatalf("recurring %v, weekly %v", got, weekly)
+	}
+	// Wholly inside the gap: no window.
+	rc.StartMinute, rc.EndMinute = 130, 150
+	if got, _ = rc.Windows(ny, day.Add(-24*time.Hour), day.Add(48*time.Hour)); len(got) != 0 {
+		t.Fatalf("window in the gap = %v", got)
+	}
+}

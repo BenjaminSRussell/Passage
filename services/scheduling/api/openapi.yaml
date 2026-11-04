@@ -554,6 +554,19 @@ paths:
         (SCHED-0007), and a conflict in any dependent refuses the whole move.
         A move also needs each secondary resource of the operation (and of every
         job it pushes) free for the same segments, otherwise SCHED-0005.
+        With overrideConstraints (preview or commit) the moved job is placed at
+        the asked start although that start is outside open capacity or inside
+        a block it does not match (SCHED-0002), or a secondary resource is
+        closed (SCHED-0005); the job becomes one continuous span over the
+        closed time, the Gantt flags it outsideCapacity (or blockBreach), and
+        the response lists what was committed over in violations with
+        overridden true; a commit also writes the violations into the move
+        run's messages. The flag needs the scheduling.constraints.override duty
+        on top of this route's duty (403 SCHED-0141 without it). Double booking
+        (SCHED-0001), a secondary resource booked by another job (SCHED-0005),
+        a slot ending beyond the planning horizon, a firmed job, a resource that
+        is not a candidate, and conflicts of the jobs the move pushes are never
+        overridden.
       x-passage-duty: scheduling.schedule.write
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -574,6 +587,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/MoveResponse' }
         '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
@@ -1912,6 +1926,7 @@ components:
         changeoverCurrency: { type: [string, 'null'], pattern: '^[A-Z]{3}$', description: 'ISO 4217 currency of changeoverCost (the setup matrix currency); null with it.' }
         cleaningSetId: { type: [string, 'null'], description: 'Cleaning standard operation set the matrix entry requires (recipe-dependent cleaning); null when none.' }
         outsideCapacity: { type: boolean, description: 'True when part of the segment lies outside the resource''s open capacity as it is now, calendar and overrides applied, such as inside a downtime added after the job was booked (SCHED-0002, AC-23.7). Also true when a secondary resource booked with the job is closed for the segment.' }
+        blockBreach: { type: boolean, description: 'True when the segment lies in open capacity but in time the resource''s active capacity blocks do not leave a job with the operation''s attributes (BR-23.15), for example after a block was added or its condition changed. The job stays where it is until the next run or move. Never true together with outsideCapacity, nor for infinite-run jobs.' }
         secondaryResourceIds:
           type: array
           items: { type: string, format: uuid }
@@ -1927,14 +1942,20 @@ components:
           type: boolean
           default: false
           description: Also push the orders pegged to the moved order forward behind their parents (FR-23.8, BR-23.10).
+        overrideConstraints:
+          type: boolean
+          default: false
+          description: Commit (or preview) the move over capacity violations of the moved job (SCHED-0002; SCHED-0005 for a closed secondary resource, never a booked one). Needs the scheduling.constraints.override duty (403 SCHED-0141 without it).
     MoveResponse:
       type: object
-      required: [dryRun, feasible, violations, changes, dependents, truncated]
+      required: [dryRun, feasible, overridden, violations, changes, dependents, truncated]
       properties:
         dryRun: { type: boolean }
         feasible: { type: boolean }
+        overridden: { type: boolean, description: 'True when overrideConstraints was set and the move went over at least one violation; violations then lists them.' }
         violations:
           type: array
+          description: Why a dry run is infeasible, or, with overridden true, what a feasible move went over.
           items:
             type: object
             required: [code, detail]

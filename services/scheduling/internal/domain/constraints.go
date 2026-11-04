@@ -149,6 +149,23 @@ func fillSlot(c capacity, iv []Interval, op Operation, bs []Busy, t time.Time, e
 	return out, nil
 }
 
+// forceSlot lays op at exactly t as one continuous span, closed time and
+// blocks ignored, for a move committed over a constraint violation. The span
+// holds the changeover from the group before it and the process minutes; it
+// is still refused when it overlaps a booked job (SCHED-0001).
+func forceSlot(c capacity, op Operation, bs []Busy, t time.Time, seq bool) (slot, *Conflict) {
+	start := ceilMinute(t)
+	total := BookedMinutes(op.Minutes, c.res.EfficiencyPct)
+	if seq {
+		co, _ := c.need(groupBefore(c, bs, start), op.SetupGroup, op.SetupMinutes)
+		total += co
+	}
+	if total < 1 {
+		total = 1
+	}
+	return fillSlot(c, []Interval{{Start: start, End: start.Add(time.Duration(total) * time.Minute)}}, op, bs, start, true, seq)
+}
+
 // nextOpen is the start of the first open interval that begins at or after t.
 func nextOpen(iv []Interval, t time.Time) (time.Time, bool) {
 	i := sort.Search(len(iv), func(k int) bool { return !iv[k].Start.Before(t) })

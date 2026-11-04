@@ -666,6 +666,54 @@ The OpenAPI spec has no FAIL lines on the doc gate.
 | `policies/authz/data.json`: resource row `/v1/scheduling/dispatch-list` (GET) under `scheduling.read` | handoff - main session (authz seed) | Existing duty; only the route row is needed. |
 | Dispatch list as PDF and the shop-floor kiosk view; item and quantity per line | handoff - wave 25 (kiosk) and wave 21 (order header data) | The page prints through the browser; there is no document template service call and no order header data here. |
 
+Slice 26 builds the override of scheduling constraints (PRD 4.23.14, FR-23.7),
+block breaches on the Gantt, and the DST alignment of the resource calendar.
+`POST /jobs/{id}:move` takes `overrideConstraints` (preview or commit). It needs
+the duty `scheduling.constraints.override` on top of the route's
+`scheduling.schedule.write` (403 `SCHED-0141` without it; the handler checks it,
+so a move that does not ask for the override is unaffected). With it the moved
+job is placed at the asked start although that start is outside open capacity,
+inside a block the job does not match, or a changeover does not fit
+(SCHED-0002), or a secondary resource is closed (SCHED-0005): the job becomes
+one continuous span (changeover included) over the closed time, so the Gantt
+flags it `outsideCapacity` like a job a later downtime overlaps (or
+`blockBreach` when it sits in open time a block keeps from it). A block start
+whose span also runs past the close lists both. The answer lists what
+it went over in `violations` with `overridden: true`, a commit writes each as a
+line in the move run's messages (`SCHED-0002 overridden for job <id>: ...`) and a
+warning log, and an Idempotency-Key replay returns the same answer. Never
+overridden: double booking (SCHED-0001, also the exclusion constraint), a
+secondary resource another job holds (SCHED-0005; the secondary exclusion
+constraint would refuse it too), a slot ending beyond the planning horizon
+(nothing there says the time is open), a firmed job, a resource that is not a
+candidate, and any conflict of the successors or dependents the move pushes. No migration, no new event (`job.scheduled` carries
+the new placement as before). Gantt block breaches: `GET /gantt` bars carry
+`blockBreach`, true when the segment lies in open capacity but in time the
+resource's active blocks do not leave a job with the operation's attributes
+(BR-23.15, the same test as the `affectedJobs` of a block change, finite
+bookings only, so not jobs of an infinite run; never together with
+`outsideCapacity`). DST: `OpenIntervals` now
+resolves shift starts and ends as the dispatch list window does
+(`firstInstantAt`): a wall time skipped by a spring-forward gap is the instant
+of the change, a repeated one its first occurrence, and a shift wholly inside a
+gap is dropped, so the calendar, runs, moves and the dispatch window agree.
+RRULE block windows resolve the same way, so a recurring and a weekly window
+agree. Days without a DST change, and DST days whose shift ends are not in the
+gap, keep exactly the instants they had.
+Web: the move form offers "Preview with override" after a refusal whose
+violations are all SCHED-0002 or SCHED-0005 (not for double booking), shows the
+violations in a warning, and confirms with "Confirm move over constraints"; a
+403 shows the duty message and its code; an overridden preview that is still
+refused says why and does not offer the override again. The Gantt dots a block-breach bar and
+names it in the title; the jobs table badges it. The OpenAPI spec has no FAIL
+lines on the doc gate. Not built: placing campaign jobs on the Gantt (row 7
+below), an override of pushed jobs' conflicts, and a per-bar breach explanation
+naming the block.
+
+| Item | Status | Reason |
+|---|---|---|
+| `policies/authz/data.json`: new flag duty `"scheduling.constraints.override": {"flag": true, "permissions": []}` (after `scheduling.capacity.write`), and `"scheduling.constraints.override"` added to `flag_duties` in `policies/authz/authz_test.rego` `test_flag_duties_grant_no_routes`; the duty for #313 | handoff - main session (authz seed) and #313 | A flag duty, like `production.order.bom-after-release`: the handler checks it with `HasDuty` (`api.DutyOverrideConstraints`) on top of the `:move` route row already seeded under `scheduling.schedule.write`. It must grant no route: a route row would let a holder of only the override duty move jobs. Until it is seeded the override answers 403 `SCHED-0141` and every other move works. PRD 4.23.17 flags it for segregation of duties with *Maintain capacity* (`scheduling.capacity.write`); there is no SoD mechanism in the seed, so that is a role-assignment rule for identity. The web move form does not read duties, so the override button is offered after a capacity refusal; gating it needs the principal's duties in the web shell. |
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
@@ -682,7 +730,7 @@ The OpenAPI spec has no FAIL lines on the doc gate.
 | 1 | Reported hours and `finished` jobs frozen with remaining minutes (BR-23.6) | handoff — wave 25 (shop-floor feedback) | Only firmed jobs are frozen; there is no reported-hours input yet. |
 | 2 | Gantt with drag-reschedule, dry-run preview, constraint warnings and firm | built | `apps/web/src/modules/scheduling`. Bars are DOM buttons; a keyboard move form gives the same preview and commit. |
 | 2 | Canvas rendering above 1,000 bars, row virtualization, zoom, Shift+drag of a whole order, undo stack of 20 moves, per-user drag-snap setting | later slice of PSG-23 | The page fetches a 1-14 day window. The drag snap is a tenant parameter (slice 24, default 5 minutes), not a per-user setting. |
-| 2 | *Override scheduling constraints* duty to commit a move with violations | later slice of PSG-23 | Every violation blocks the commit. |
+| 2 | *Override scheduling constraints* duty to commit a move with violations | built (slice 26) for capacity violations of the moved job | `overrideConstraints` on `POST /jobs/{id}:move`, duty `scheduling.constraints.override` (see Slice 26). SCHED-0001, SCHED-0004, SCHED-0008 and conflicts of pushed jobs and dependents still block every commit. |
 | 3 | Capacity load by resource and ISO week with bottleneck flag (FR-23.9) | built | `GET /v1/scheduling/capacity-load`; weeks start Monday 00:00 UTC. |
 | 3 | Load by day and drill-down to jobs | built (slice 16) | `period=day` on `GET /capacity-load` and `GET /capacity-load/jobs`. Days are local days of the resource's calendar time zone. |
 | 3 | Load by resource group; US week numbering; weeks in the resource's time zone | later slice of PSG-23 | Groups come from wave 9; weeks start Monday 00:00 UTC (slice 3). |
@@ -714,7 +762,7 @@ The OpenAPI spec has no FAIL lines on the doc gate.
 | 8 | Operation attributes fed from product variant dimensions (w8) and order or batch attributes (w21, w24) | handoff — waves 8, 21 and 24 | Attributes are set on `POST /operations` until those waves publish them. |
 | 8 | RRULE recurrence on capacity blocks | built | `recurrence {rule, startDate, startMinute, endMinute}` on `POST /capacity-blocks`; the subset is FREQ=DAILY or WEEKLY with INTERVAL, BYDAY (plain weekday codes) and COUNT or UNTIL. Other RRULE parts (BYMONTHDAY, BYSETPOS, ordinal weekdays, MONTHLY) are refused rather than guessed. |
 | 8 | Block update and deactivation | built (slice 15) for priority, condition and the active flag | `PATCH /capacity-blocks/{id}` and `GET /capacity-blocks/{id}`, duty `scheduling.capacity.write`, Idempotency-Key and If-Match. The resource, code and window (weekly, dated or recurrence) are fixed at creation: to change them, deactivate the block and create another. Jobs already placed stay where they are until the next run or move; the answer and the event list those the blocks now keep out. |
-| 8 | Showing block breaches on the Gantt (a booked job inside a block it may not use) | later slice of PSG-23 | Listed once, in the block update answer and `capacityblock.updated`; the Gantt does not mark them. |
+| 8 | Showing block breaches on the Gantt (a booked job inside a block it may not use) | built (slice 26) | `blockBreach` on every Gantt bar; the workspace dots the bar and badges the jobs table row. |
 | 6 | Jobs whose transitions break a network after its end date is moved later | later slice of PSG-23 | Ending a network earlier only relaxes the schedule. Moving the end date later re-applies the network to days that runs may have planned without it; those jobs are not listed in `network.updated` and keep their placement until the next run or move. |
 
 ## PRD items (section 4.23) not built yet

@@ -31,16 +31,20 @@ import (
 )
 
 const (
-	readyTimeout     = 500 * time.Millisecond
-	idempotencyKey   = "Idempotency-Key"
-	dutyRead         = "scheduling.read"
-	dutyRun          = "scheduling.run"
-	dutySchedule     = "scheduling.schedule.write"
-	dutyCapacity     = "scheduling.capacity.write"
-	validationDetail = "request failed validation"
-	maxBody          = 4 << 20
-	maxSelection     = 5000
-	maxRunTimeZone   = 64
+	readyTimeout   = 500 * time.Millisecond
+	idempotencyKey = "Idempotency-Key"
+	dutyRead       = "scheduling.read"
+	dutyRun        = "scheduling.run"
+	dutySchedule   = "scheduling.schedule.write"
+	dutyCapacity   = "scheduling.capacity.write"
+	// DutyOverrideConstraints lets a planner commit a Gantt move over capacity
+	// violations (PRD 4.23.14, Override scheduling constraints). It is checked
+	// in the handler, on top of the route's dutySchedule.
+	DutyOverrideConstraints = "scheduling.constraints.override"
+	validationDetail        = "request failed validation"
+	maxBody                 = 4 << 20
+	maxSelection            = 5000
+	maxRunTimeZone          = 64
 )
 
 var resourceCode = regexp.MustCompile(`^[A-Z0-9][A-Z0-9_-]{0,31}$`)
@@ -128,6 +132,11 @@ type moveRequest struct {
 	DryRun     bool      `json:"dryRun"`
 	// Propagate also re-plans the orders pegged to the moved order (FR-23.8).
 	Propagate bool `json:"propagate"`
+	// OverrideConstraints commits (or previews) the move over capacity
+	// violations of the moved job: SCHED-0002 and SCHED-0005. It needs the
+	// scheduling.constraints.override duty; double booking, a firmed job and a
+	// resource that is not a candidate are never overridden.
+	OverrideConstraints bool `json:"overrideConstraints"`
 }
 
 type violation struct {
@@ -137,9 +146,13 @@ type violation struct {
 }
 
 type moveResponse struct {
-	DryRun     bool           `json:"dryRun"`
-	Feasible   bool           `json:"feasible"`
+	DryRun   bool `json:"dryRun"`
+	Feasible bool `json:"feasible"`
+	// Violations are empty when the move is feasible, except under
+	// overrideConstraints, where they list the violations committed over and
+	// Overridden is true.
 	Violations []violation    `json:"violations"`
+	Overridden bool           `json:"overridden"`
 	Changes    []store.Change `json:"changes"`
 	OrderID    string         `json:"orderId,omitempty"`
 	OrderStart time.Time      `json:"orderStart,omitempty"`
@@ -810,9 +823,16 @@ func (a *API) moveJob(w http.ResponseWriter, r *http.Request) {
 		invalid(w, r, fields)
 		return
 	}
+	if req.OverrideConstraints {
+		actor, ok := tenant.FromContext(r.Context())
+		if !ok || !actor.HasDuty(DutyOverrideConstraints) {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "SCHED-0141", "overriding scheduling constraints needs the "+DutyOverrideConstraints+" duty"))
+			return
+		}
+	}
 	a.moves.Add(1)
 	out, replayed, err := a.store.MoveJob(r.Context(), store.MoveRequest{JobID: jobID, ResourceID: strings.ToLower(req.ResourceID),
-		Start: req.Start.UTC(), HorizonDays: a.cfg.HorizonDays, DryRun: req.DryRun, Propagate: req.Propagate}, idem)
+		Start: req.Start.UTC(), HorizonDays: a.cfg.HorizonDays, DryRun: req.DryRun, Propagate: req.Propagate, Override: req.OverrideConstraints}, idem)
 	if err != nil {
 		slog.Error("move job failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -836,7 +856,15 @@ func (a *API) moveJob(w http.ResponseWriter, r *http.Request) {
 	if deps == nil {
 		deps = []store.DependentChange{}
 	}
-	httpx.JSON(w, http.StatusOK, moveResponse{DryRun: req.DryRun, Feasible: true, Violations: []violation{}, Changes: out.Changes,
+	violations := make([]violation, 0, len(out.Overridden))
+	for _, v := range out.Overridden {
+		violations = append(violations, violation{Code: v.Code, Detail: v.Detail, JobID: v.JobID})
+	}
+	if len(violations) > 0 {
+		slog.Warn("move committed over constraint violations", "dryRun", req.DryRun, "jobId", jobID, "violations", len(violations),
+			"correlationId", middleware.GetReqID(r.Context()))
+	}
+	httpx.JSON(w, http.StatusOK, moveResponse{DryRun: req.DryRun, Feasible: true, Violations: violations, Overridden: len(violations) > 0, Changes: out.Changes,
 		OrderID: out.OrderID, OrderStart: out.OrderStart, OrderEnd: out.OrderEnd, Dependents: deps, Truncated: out.Truncated, Run: out.Run})
 }
 

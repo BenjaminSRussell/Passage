@@ -129,6 +129,9 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                 const violation = violations[bar.jobId];
                 // AC-23.7: a booked job a later downtime overlaps is outlined like a violation.
                 const outside = bar.outsideCapacity ? ", outside open capacity (SCHED-0002)" : "";
+                // BR-23.15: a booked job in time a capacity block now keeps from it is dotted, not outlined as a violation.
+                const breach = bar.blockBreach && !bar.outsideCapacity;
+                const blocked = breach ? ", inside a capacity block it does not match (BR-23.15)" : "";
                 const dragging = drag?.bar.jobId === bar.jobId;
                 const shift = dragging && drag.trackPx > 0 ? (drag.dx / drag.trackPx) * VIEW_WIDTH : 0;
                 const late = bar.lateMinutes > 0 ? `, late by ${bar.lateMinutes} min` : "";
@@ -161,6 +164,7 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                         bar.lateMinutes > 0 && styles.late,
                         bar.firmed && styles.firmed,
                         (violation || bar.outsideCapacity) && styles.violation,
+                        breach && !violation && styles.breach,
                         selectedJobId === bar.jobId && styles.selected,
                         dragging && styles.dragging,
                       )}
@@ -171,7 +175,7 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                     >
                       <title>
                         {violation ??
-                          `Order ${bar.orderId.slice(0, 8)} operation ${bar.operNumber}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}${setup}${tools}${late}${bar.firmed ? ", firmed" : ""}${outside}`}
+                          `Order ${bar.orderId.slice(0, 8)} operation ${bar.operNumber}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}${setup}${tools}${late}${bar.firmed ? ", firmed" : ""}${outside}${blocked}`}
                       </title>
                     </rect>
                     {changeoverPos ? (

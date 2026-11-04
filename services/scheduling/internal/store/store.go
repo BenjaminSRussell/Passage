@@ -165,6 +165,15 @@ type Bar struct {
 	// resource's open capacity as it is now, for example inside a downtime
 	// added after the job was booked (SCHED-0002, AC-23.7).
 	OutsideCapacity bool `json:"outsideCapacity"`
+	// BlockBreach is true when the segment lies in open capacity but in time
+	// the resource's active capacity blocks do not leave a job with these
+	// attributes (BR-23.15), for example after a block was added or its
+	// condition changed. The job stays where it is until the next run or move.
+	BlockBreach bool `json:"blockBreach"`
+	// attributes (the operation's, as JSON) and finite (the row reserves
+	// capacity, so it is not from an infinite run) feed BlockBreach.
+	attributes string
+	finite     bool
 	// SecondaryResourceIDs are the resources booked with the job's primary for
 	// the same segments (BR-23.4).
 	SecondaryResourceIDs []string `json:"secondaryResourceIds"`
@@ -192,6 +201,17 @@ type MoveRequest struct {
 	// Propagate also re-plans the orders pegged to the moved order (FR-23.8),
 	// up to the BR-23.10 limits.
 	Propagate bool
+	// Override commits the move over capacity violations of the moved job
+	// (SCHED-0002, SCHED-0005; see domain.MoveInput.Override). The caller has
+	// checked the override duty.
+	Override bool
+}
+
+// Violation is a constraint a move was committed over.
+type Violation struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail"`
+	JobID  string `json:"jobId,omitempty"`
 }
 
 // Change is one operation whose placement moves.
@@ -227,7 +247,10 @@ type MoveOutcome struct {
 	Dependents []DependentChange `json:"dependents"`
 	Truncated  bool              `json:"truncated"`
 	Run        *Run              `json:"run,omitempty"`
-	Conflict   *domain.Conflict  `json:"-"`
+	// Overridden lists the violations the move was planned or committed over
+	// (MoveRequest.Override); empty otherwise.
+	Overridden []Violation      `json:"overridden"`
+	Conflict   *domain.Conflict `json:"-"`
 }
 
 // Firm is the result of firming or unfirming an operation's placement.
@@ -575,12 +598,16 @@ func (s *Postgres) MoveJob(ctx context.Context, req MoveRequest, idem Idem) (Mov
 		}
 		plan := domain.PlanMove(domain.MoveInput{Resources: resources, Start: horizonStart, HorizonDays: req.HorizonDays,
 			Booked: booked, Order: ops, Current: placements, Moved: req.JobID, ResourceID: rid, At: req.Start, Firmed: firmed, Networks: networks,
-			Dependents: dependents, Pegs: pegs})
+			Dependents: dependents, Pegs: pegs, Override: req.Override})
 		if plan.Conflict != nil {
 			out.Conflict = plan.Conflict
 			return nil
 		}
 		out.OrderID = orderID
+		out.Overridden = make([]Violation, 0, len(plan.Overridden))
+		for _, c := range plan.Overridden {
+			out.Overridden = append(out.Overridden, Violation{Code: c.Code, Detail: c.Detail, JobID: c.JobID})
+		}
 		out.Changes = make([]Change, 0, len(plan.Changes))
 		merged := maps.Clone(placements)
 		for _, c := range plan.Changes {
@@ -607,6 +634,9 @@ func (s *Postgres) MoveJob(ctx context.Context, req MoveRequest, idem Idem) (Mov
 		run := Run{ID: ids.New(), Scope: scopeMove, Mode: "jobs", Direction: "forward", Finite: true, Algorithm: "heuristic",
 			Status: "completed", OperationsCount: len(plan.Changes), MakespanMinutes: domain.Makespan(plan.Changes),
 			TotalLatenessMinutes: domain.TotalLateness(plan.Changes), Messages: []string{}}
+		for _, v := range out.Overridden {
+			run.Messages = append(run.Messages, fmt.Sprintf("%s overridden for job %s: %s", v.Code, req.JobID, v.Detail))
+		}
 		if out.Truncated {
 			run.Messages = append(run.Messages, fmt.Sprintf("%s: propagation truncated after %d orders / %d levels; run the site schedule",
 				domain.CodePropagationTruncated, len(walk), limit.Levels))
@@ -760,7 +790,7 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select j.job_id::text, j.order_id::text, j.oper_number, j.resource_id::text, j.segment_no, j.start_at, j.end_at,
 				j.late_minutes, j.firmed, o.setup_group, j.changeover_minutes, j.changeover_cost::text, j.changeover_currency, j.cleaning_operation_set_id,
-				o.secondary_resource_ids::text[]
+				o.secondary_resource_ids::text[], o.attributes::text, j.finite
 			from scheduled_job j join scheduling_operation o on o.tenant_id = j.tenant_id and o.id = j.job_id
 			where j.end_at > $1 and j.start_at < $2 and ($3::boolean or j.resource_id = any($4::uuid[]))
 			order by j.start_at, j.resource_id, j.segment_no limit $5`,
@@ -772,7 +802,7 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 			var b Bar
 			var cost *string
 			if err := rows.Scan(&b.JobID, &b.OrderID, &b.OperNumber, &b.ResourceID, &b.Segment, &b.Start, &b.End, &b.LateMinutes, &b.Firmed,
-				&b.SetupGroup, &b.ChangeoverMinutes, &cost, &b.ChangeoverCurrency, &b.CleaningSetID, &b.SecondaryResourceIDs); err != nil {
+				&b.SetupGroup, &b.ChangeoverMinutes, &cost, &b.ChangeoverCurrency, &b.CleaningSetID, &b.SecondaryResourceIDs, &b.attributes, &b.finite); err != nil {
 				rows.Close()
 				return err
 			}
@@ -835,6 +865,51 @@ func flagOutsideCapacity(ctx context.Context, tx pgx.Tx, bars []Bar) error {
 				b.OutsideCapacity = true
 			}
 		}
+	}
+	return flagBlockBreach(ctx, tx, bars, resources, open, from, days)
+}
+
+// flagBlockBreach marks the bars of finite bookings (not infinite runs) that lie in their resource's
+// open capacity but outside the capacity its active blocks leave a job with
+// the operation's attributes (BR-23.15, domain.Placeable), the same test as
+// blockedOutJobs. A bar that is outside open capacity is not also a breach.
+func flagBlockBreach(ctx context.Context, tx pgx.Tx, bars []Bar, resources []domain.Resource,
+	open map[string][]domain.Interval, from time.Time, days int) error {
+	blocks, err := activeBlocks(ctx, tx)
+	if err != nil || len(blocks) == 0 {
+		return err
+	}
+	loc := make(map[string]*time.Location, len(resources))
+	for _, r := range resources {
+		loc[r.ID] = r.Location
+	}
+	expanded := map[string][]domain.CapacityBlock{}
+	placeable := map[string][]domain.Interval{}
+	for i := range bars {
+		b := &bars[i]
+		if b.OutsideCapacity || !b.finite || len(blocks[b.ResourceID]) == 0 {
+			continue
+		}
+		if _, ok := expanded[b.ResourceID]; !ok {
+			for _, blk := range blocks[b.ResourceID] {
+				db, err := blk.expand(loc[b.ResourceID], from, days)
+				if err != nil {
+					return err
+				}
+				expanded[b.ResourceID] = append(expanded[b.ResourceID], db)
+			}
+		}
+		key := b.ResourceID + "|" + b.attributes
+		iv, ok := placeable[key]
+		if !ok {
+			var attrs map[string]string
+			if err := json.Unmarshal([]byte(b.attributes), &attrs); err != nil {
+				return err
+			}
+			iv = domain.Placeable(open[b.ResourceID], expanded[b.ResourceID], attrs)
+			placeable[key] = iv
+		}
+		b.BlockBreach = domain.OutsideOpen(iv, b.Start, b.End)
 	}
 	return nil
 }

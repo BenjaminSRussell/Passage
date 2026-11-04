@@ -77,6 +77,8 @@ type fakeStore struct {
 	lastNetPatch   store.NetworkPatch
 	// slice 22
 	lastRun store.RunRequest
+	// slice 26
+	overridden []store.Violation
 }
 
 func (f *fakeStore) CreateResource(_ context.Context, in store.Resource, _ store.Idem) (store.Resource, bool, error) {
@@ -146,7 +148,7 @@ func (f *fakeStore) MoveJob(_ context.Context, req store.MoveRequest, idem store
 		return store.MoveOutcome{Conflict: f.conflict}, false, nil
 	}
 	return store.MoveOutcome{OrderID: ids.New(), Changes: []store.Change{{OperationID: req.JobID, ResourceID: req.ResourceID,
-		NewStart: req.Start, NewEnd: req.Start.Add(time.Hour)}}}, f.replay, nil
+		NewStart: req.Start, NewEnd: req.Start.Add(time.Hour)}}, Overridden: f.overridden}, f.replay, nil
 }
 
 func (f *fakeStore) FirmJob(_ context.Context, id string, firmed bool, idem store.Idem) (store.Firm, bool, error) {

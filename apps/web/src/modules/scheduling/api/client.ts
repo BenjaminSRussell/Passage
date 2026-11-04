@@ -184,6 +184,13 @@ export interface GanttBar {
    * now, e.g. inside a downtime added after it was booked (SCHED-0002, AC-23.7).
    */
   outsideCapacity: boolean;
+  /**
+   * The segment lies in open capacity but in time the resource's active
+   * capacity blocks do not leave a job with the operation's attributes
+   * (BR-23.15), e.g. after a block was added or its condition changed. The job
+   * stays where it is until the next run or move. Absent on older servers.
+   */
+  blockBreach?: boolean;
 }
 
 export interface MoveRequest {
@@ -192,6 +199,12 @@ export interface MoveRequest {
   dryRun: boolean;
   /** Also push the orders pegged to the moved order forward behind their parents (FR-23.8). */
   propagate?: boolean;
+  /**
+   * Commit or preview the move over capacity violations of the moved job
+   * (SCHED-0002, SCHED-0005). Needs the scheduling.constraints.override duty;
+   * the service answers 403 SCHED-0141 without it.
+   */
+  overrideConstraints?: boolean;
 }
 
 export interface MoveViolation {
@@ -223,6 +236,8 @@ export interface DependentChange {
 export interface MoveResponse {
   dryRun: boolean;
   feasible: boolean;
+  /** With overridden true, the violations the move went over (feasible is true). */
+  overridden?: boolean;
   violations: MoveViolation[];
   changes: MoveChange[];
   orderId?: string;

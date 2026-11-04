@@ -512,6 +512,15 @@ type MoveInput struct {
 	// propagate beyond the moved order.
 	Dependents []Operation
 	Pegs       []Peg
+	// Override commits the moved job at the asked start although it breaks a
+	// capacity rule (SCHED-0002: outside open capacity, inside a block it does
+	// not match, a changeover that does not fit; SCHED-0005: a secondary
+	// resource is closed). The caller has checked the override duty. Double
+	// booking (SCHED-0001), a secondary resource booked by another job
+	// (SCHED-0005), a firmed job, a resource that is not a candidate, a slot
+	// that ends beyond the planning horizon, and conflicts of successors or
+	// dependents are never overridden.
+	Override bool
 }
 
 // MovePlan is the proposed change set. Conflict is set when the move is
@@ -523,6 +532,8 @@ type MovePlan struct {
 	Changes    []Placement
 	Dependents []string
 	Conflict   *Conflict
+	// Overridden lists the violations the move was committed over (in.Override).
+	Overridden []Conflict
 }
 
 // PlanMove plans a move (FR-23.8). The moved operation starts no earlier than
@@ -567,8 +578,13 @@ func PlanMove(in MoveInput) MovePlan {
 		}
 	}
 	iv := c.usable(*mv)
+	var overridden []Conflict
 	if t := ceilMinute(at); insideAny(c.iv, t) && !insideAny(iv, t) {
-		return MovePlan{Conflict: &Conflict{Code: CodeOutsideCapacity, Detail: "start is inside a capacity block the job does not match (BR-23.15)"}}
+		blocked := Conflict{Code: CodeOutsideCapacity, Detail: "start is inside a capacity block the job does not match (BR-23.15)"}
+		if !in.Override {
+			return MovePlan{Conflict: &blocked}
+		}
+		overridden = append(overridden, blocked)
 	}
 	touched := map[string]time.Time{}
 	touch := func(rid string, t time.Time) {
@@ -586,12 +602,47 @@ func PlanMove(in MoveInput) MovePlan {
 		bs = busy[in.ResourceID]
 	}
 	s, conf := fillSlot(c, iv, *mv, bs, at, true, sequenced(c, *mv, false))
+	if conf != nil && in.Override && conf.Code == CodeOutsideCapacity {
+		// Commit the job at the asked start as one continuous span, over the
+		// closed time. It still may not overlap a booked job (SCHED-0001), and
+		// it must end inside the planning horizon: beyond it nothing says
+		// whether the time is open, so the move stays refused.
+		horizonEnd := in.Start.AddDate(0, 0, in.HorizonDays)
+		forced, forcedConf := forceSlot(c, *mv, bs, at, sequenced(c, *mv, false))
+		switch {
+		case forcedConf != nil:
+			conf = forcedConf
+		case forced.segs[len(forced.segs)-1].End.After(horizonEnd):
+			// conf stays the refusal of the exact slot.
+		default:
+			span := forced.segs[0]
+			switch {
+			case len(overridden) == 0:
+				overridden = append(overridden, *conf)
+			case OutsideOpen(c.iv, span.Start, span.End):
+				// The start is inside a block it does not match (listed) and the
+				// span also runs over closed time.
+				overridden = append(overridden, Conflict{Code: CodeOutsideCapacity, Detail: "the job runs over time outside the resource's open capacity"})
+			}
+			s, conf = forced, nil
+		}
+	}
 	if conf != nil {
 		return MovePlan{Conflict: conf}
 	}
 	if sec := secondaryChecker(caps, busy, *mv, false); sec != nil {
 		if shift, detail := sec(s.segs); shift > 0 {
-			return MovePlan{Conflict: &Conflict{Code: CodeSecondaryBusy, Detail: detail, JobID: mv.ID}}
+			busyConf := Conflict{Code: CodeSecondaryBusy, Detail: detail, JobID: mv.ID}
+			if !in.Override {
+				return MovePlan{Conflict: &busyConf}
+			}
+			// Only a closed secondary is overridden: one booked by another job
+			// would be double booked (the exclusion constraint on secondary
+			// bookings refuses it too), so that stays SCHED-0005.
+			if booked := secondaryBooked(caps, busy, *mv, s.segs); booked != nil {
+				return MovePlan{Conflict: booked}
+			}
+			overridden = append(overridden, busyConf)
 		}
 	}
 	moved := newPlacement(*mv, in.ResourceID, s.segs).withSlot(s)
@@ -713,7 +764,7 @@ func PlanMove(in MoveInput) MovePlan {
 			}
 		}
 	}
-	return MovePlan{Changes: changes, Dependents: dependents}
+	return MovePlan{Changes: changes, Dependents: dependents, Overridden: overridden}
 }
 
 // byOperNumber sorts operations by operation number in place and returns them.
