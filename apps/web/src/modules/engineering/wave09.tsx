@@ -294,12 +294,12 @@ export function DocumentCreatePage({ onCreated, onCancel }: { onCreated?: (id: s
             </FormField>
           </div>
           <div className={styles.field}>
-            <FormField id="new-doc-key" label="Original storage key" optional>
+            <FormField id="new-doc-key" label="Original storage key" hint="Starts with your tenant id and a slash." error={fields["originals[0]"]} optional>
               {(control) => <Input {...control} value={storageKey} onChange={(e) => setStorageKey(e.target.value)} />}
             </FormField>
           </div>
           <div className={styles.field}>
-            <FormField id="new-doc-hash" label="Original SHA-256" optional>
+            <FormField id="new-doc-hash" label="Original SHA-256" hint="64 lowercase hex characters." optional>
               {(control) => <Input {...control} value={sha256} onChange={(e) => setSha256(e.target.value)} />}
             </FormField>
           </div>
@@ -333,7 +333,6 @@ export function DocumentPage({ id, onBack, canWrite = false, canSign = false }: 
   const [loadError, setLoadError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [printedName, setPrintedName] = useState("");
-  const [assertion, setAssertion] = useState("");
   const [busy, setBusy] = useState("");
   const [actionError, setActionError] = useState("");
   const [announcement, setAnnouncement] = useState("");
@@ -374,10 +373,9 @@ export function DocumentPage({ id, onBack, canWrite = false, canSign = false }: 
     setActionError("");
     setBusy("sign");
     try {
-      const next = await signDocument(id, { printedName: printedName.trim(), method: "password" }, assertion.trim());
+      const next = await signDocument(id, { printedName: printedName.trim(), method: "password" });
       setDoc(next);
-      setAnnouncement(`Document ${next.number} is signed and ${next.status}`);
-      setAssertion("");
+      setAnnouncement(next.status === "released" ? `Document ${next.number} is signed and released` : `Document ${next.number} is signed and waits for its change order to release it`);
       const signatures = await listSignatures(id);
       setSigs(signatures.items);
     } catch (e) {
@@ -439,17 +437,12 @@ export function DocumentPage({ id, onBack, canWrite = false, canSign = false }: 
               <dd>{doc.lastEditor || "—"}</dd>
             </dl>
           </Card>
-          {doc.status === "in_review" && canSign ? (
+          {doc.status === "in_review" && canSign && !doc.signedAt ? (
             <Card title="Electronic signature">
               <form className={styles.form} onSubmit={sign}>
                 <div className={styles.field}>
                   <FormField id="sign-name" label="Printed name">
                     {(control) => <Input {...control} value={printedName} onChange={(e) => setPrintedName(e.target.value)} required />}
-                  </FormField>
-                </div>
-                <div className={styles.field}>
-                  <FormField id="sign-reauth" label="Re-authentication assertion" hint="Step-up proof that the signer just re-authenticated (21 CFR 11.200).">
-                    {(control) => <Input {...control} value={assertion} onChange={(e) => setAssertion(e.target.value)} required />}
                   </FormField>
                 </div>
                 <Button type="submit" variant="primary" loading={busy === "sign"}>
@@ -525,7 +518,7 @@ export function ReleaseLinesPage({ canAccept = false }: { canAccept?: boolean })
       key: "id",
       header: "Decision",
       render: (row) =>
-        canAccept && (row.status === "sent" || row.status === "pending") ? (
+        canAccept && row.status === "sent" ? (
           <>
             <Button size="sm" variant="primary" loading={busy === row.id} onClick={() => decide(row.id, true)}>
               Accept
@@ -655,6 +648,7 @@ export function EbomImportPage({ onCreated, onCancel }: { onCreated?: (id: strin
   const [error, setError] = useState("");
   const [fields, setFields] = useState<Record<string, string>>({});
   const [result, setResult] = useState<EbomImport | null>(null);
+  const [importedId, setImportedId] = useState("");
   const idempotency = useRef({ body: "", key: "" });
 
   async function submit(event: FormEvent) {
@@ -662,6 +656,7 @@ export function EbomImportPage({ onCreated, onCancel }: { onCreated?: (id: strin
     setError("");
     setFields({});
     setResult(null);
+    setImportedId("");
     setSubmitting(true);
     const lines = linesText
       .split("\n")
@@ -677,7 +672,7 @@ export function EbomImportPage({ onCreated, onCancel }: { onCreated?: (id: strin
     try {
       const created = await importEbom(input, idempotency.current.key);
       setResult(created);
-      onCreated?.(created.id);
+      setImportedId(created.id);
     } catch (e) {
       setError(errorText(e));
       if (e instanceof ApiError) setFields(e.errors);
@@ -725,13 +720,35 @@ export function EbomImportPage({ onCreated, onCancel }: { onCreated?: (id: strin
         </Alert>
       </div>
       {result ? (
-        <Card title="Import result">
+        <Card
+          title="Import result"
+          actions={
+            onCreated ? (
+              <Button size="sm" variant="primary" onClick={() => onCreated(importedId)}>
+                View imports
+              </Button>
+            ) : undefined
+          }
+        >
           <p className={styles.lead}>
-            {result.partNumber} revision {result.revision}
-            {result.exceptions && result.exceptions.length > 0
-              ? ` — ${result.exceptions.length} unknown part${result.exceptions.length === 1 ? "" : "s"}: ${result.exceptions.map((e) => e.partNumber).join(", ")}`
-              : " — every part resolved."}
+            {result.partNumber} revision {result.revision}: {result.added ?? 0} added, {result.removed ?? 0} removed, {result.changed ?? 0} changed against the active BOM.
           </p>
+          {result.exceptions && result.exceptions.length > 0 ? (
+            <>
+              <p>
+                {result.exceptions.length} unknown part{result.exceptions.length === 1 ? "" : "s"} left out of the draft BOM:
+              </p>
+              <ul aria-label="Unknown parts">
+                {result.exceptions.map((e) => (
+                  <li key={e.partNumber}>
+                    {e.partNumber} <span className="visually-hidden">({e.code})</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p>Every part resolved.</p>
+          )}
         </Card>
       ) : null}
     </>

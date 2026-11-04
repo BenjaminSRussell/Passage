@@ -669,12 +669,8 @@ export function listSignatures(id: string): Promise<{ items: DocumentSignature[]
   return request(`/documents/${encodeURIComponent(id)}/signatures`);
 }
 
-export function signDocument(id: string, body: { printedName?: string; method?: string }, reauthAssertion: string): Promise<EngineeringDocument> {
-  return request(`/documents/${encodeURIComponent(id)}:sign`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Passage-Reauth-Assertion": reauthAssertion },
-    body: JSON.stringify(body),
-  });
+export function signDocument(id: string, body: { printedName?: string; method?: string }): Promise<EngineeringDocument> {
+  return post(`/documents/${encodeURIComponent(id)}:sign`, body);
 }
 
 export function createDocument(body: { typeCode: string; number: string; part?: string; version?: string; originals?: { storageKey: string; sha256: string }[] }, idempotencyKey: string): Promise<EngineeringDocument> {
