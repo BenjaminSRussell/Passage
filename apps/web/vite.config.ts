@@ -2,6 +2,7 @@
 import { configDefaults } from "vitest/config";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
+import { mobileDevStub } from "./src/modules/mobile-flows/api/devStub";
 import { federationRemotes } from "./src/shell/federation";
 import { devProxy } from "./src/shell/devProxy";
 
@@ -13,7 +14,7 @@ import { devProxy } from "./src/shell/devProxy";
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, decodeURIComponent(new URL(".", import.meta.url).pathname), "PASSAGE_");
   return {
-    plugins: [react()],
+    plugins: [react(), ...(command === "serve" && env.PASSAGE_MOBILE_STUB === "1" ? [mobileDevStub()] : [])],
     define: {
       __PASSAGE_REMOTES__: JSON.stringify(federationRemotes),
       __PASSAGE_DEV_DUTIES__: JSON.stringify(command === "serve" && mode !== "test" ? (env.PASSAGE_DEV_DUTIES ?? "") : ""),
