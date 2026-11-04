@@ -384,6 +384,15 @@ export interface Page<T> {
 
 export interface TransactionQuery {
   product?: string;
+  legalEntity?: string;
+  site?: string;
+  warehouse?: string;
+  location?: string;
+  batch?: string;
+  serial?: string;
+  inventoryStatus?: string;
+  owner?: string;
+  segment?: string;
   status?: TransactionStatus | "";
   sourceType?: SourceType | "";
   from?: string;

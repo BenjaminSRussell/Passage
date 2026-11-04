@@ -221,10 +221,22 @@ paths:
       description: |
         Inventory transactions with their origin. status matches the issue or the receipt status;
         from and to bound the physical date (inclusive). journalId is set for journal lines,
-        reference (the blocking id) for blocking legs.
+        reference (the blocking id) for blocking legs. site, warehouse, location, batch, serial,
+        inventoryStatus, owner and segment keep the transactions whose dimension set holds every
+        named value (the drill-down from an on-hand row); a value over 100 characters is a 400.
+        legalEntity only narrows: a caller sees no rows outside its legal-entity scope.
       x-passage-duty: inventory.read
       parameters:
         - { name: product, in: query, schema: { type: string, format: uuid } }
+        - { name: legalEntity, in: query, description: Only transactions of this legal entity, schema: { type: string, format: uuid } }
+        - { name: site, in: query, description: Only transactions whose dimension set has this site, schema: { type: string, maxLength: 100 } }
+        - { name: warehouse, in: query, description: Only transactions whose dimension set has this warehouse, schema: { type: string, maxLength: 100 } }
+        - { name: location, in: query, description: Only transactions whose dimension set has this location, schema: { type: string, maxLength: 100 } }
+        - { name: batch, in: query, description: Only transactions whose dimension set has this batch, schema: { type: string, maxLength: 100 } }
+        - { name: serial, in: query, description: Only transactions whose dimension set has this serial number, schema: { type: string, maxLength: 100 } }
+        - { name: inventoryStatus, in: query, description: Only transactions whose dimension set has this inventory status, schema: { type: string, maxLength: 100 } }
+        - { name: owner, in: query, description: Only transactions of stock owned by this vendor id, schema: { type: string, maxLength: 100 } }
+        - { name: segment, in: query, description: 'Only transactions of this segment (SALES_ORDER:<ref> or PROJECT:<ref>)', schema: { type: string, maxLength: 100 } }
         - { name: status, in: query, schema: { $ref: '#/components/schemas/TransactionStatus' } }
         - { name: sourceType, in: query, schema: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE, TRANSFER_IN, PURCH_LINE, RECEIPT_LINE, SALES_LINE, PROD_LINE] } }
         - { name: from, in: query, schema: { type: string, format: date } }

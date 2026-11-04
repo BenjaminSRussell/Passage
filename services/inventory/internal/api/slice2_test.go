@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -203,6 +204,46 @@ func TestTransactionInquiryFiltersAndPages(t *testing.T) {
 		if p.Errors[field] == "" {
 			t.Errorf("no field error for %s: %v", field, p.Errors)
 		}
+	}
+}
+
+func TestTransactionInquiryDrillsDownByDimension(t *testing.T) {
+	fs := &fakeStore{txRows: 1}
+	h := newServer(t, fs)
+	le := ids.New()
+	rec := do(t, h, http.MethodGet, "/v1/inventory/transactions?legalEntity="+le+"&site=S1&warehouse=W1&location=A-01&batch=B7&serial=SN9"+
+		"&inventoryStatus=BLOCKED&owner=V1&segment=SALES_ORDER%3ASO-1", "", []string{"inventory.read"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	f := fs.txFilter
+	want := map[string]string{"site": "S1", "warehouse": "W1", "location": "A-01", "batch": "B7", "serial": "SN9",
+		"inventory_status": "BLOCKED", "owner": "V1", "segment": "SALES_ORDER:SO-1"}
+	if f.LegalEntityID != le || len(f.Dims) != len(want) {
+		t.Fatalf("store filter %+v", f)
+	}
+	for k, v := range want {
+		if f.Dims[k] != v {
+			t.Errorf("dimension %s = %q, want %q", k, f.Dims[k], v)
+		}
+	}
+	rec = do(t, h, http.MethodGet, "/v1/inventory/transactions", "", []string{"inventory.read"}, nil)
+	if rec.Code != http.StatusOK || len(fs.txFilter.Dims) != 0 || fs.txFilter.LegalEntityID != "" {
+		t.Fatalf("no filter: %d %+v", rec.Code, fs.txFilter)
+	}
+	rec = do(t, h, http.MethodGet, "/v1/inventory/transactions?legalEntity=x&batch="+strings.Repeat("b", 101), "", []string{"inventory.read"}, nil)
+	p := decodeProblem(t, rec)
+	if rec.Code != http.StatusBadRequest || p.Errors["legalEntity"] == "" || p.Errors["batch"] == "" {
+		t.Fatalf("validation: %d %v", rec.Code, p.Errors)
+	}
+	// The limit counts characters, not bytes: 100 two-byte characters pass.
+	rec = do(t, h, http.MethodGet, "/v1/inventory/transactions?location="+strings.Repeat("%C3%A9", 100), "", []string{"inventory.read"}, nil)
+	if rec.Code != http.StatusOK || len([]rune(fs.txFilter.Dims["location"])) != 100 {
+		t.Fatalf("100 characters: %d %+v", rec.Code, fs.txFilter.Dims)
+	}
+	rec = do(t, h, http.MethodGet, "/v1/inventory/transactions?site=S1", "", nil, nil)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("without inventory.read: %d", rec.Code)
 	}
 }
 
