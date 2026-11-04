@@ -857,6 +857,56 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/issue-claims:
+    post:
+      operationId: claimInventoryIssue
+      summary: Claim a quantity that is about to leave a warehouse
+      description: |
+        Service-to-service call of warehouse (pick), fulfillment (packing-slip post) and production
+        (consume). Under the row locks of the product's on-hand it refuses a claim that would reach
+        held stock: with any quantity held in the warehouse, only physical - held minus the claims of
+        the same kind already taken is free; a claim that names a batch must also fit within that
+        batch. BLOCKED and QUARANTINE rows are not counted. The Idempotency-Key names the claim; a
+        repeat is a replay.
+      x-passage-duty: inventory.issue.claim
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, productId, warehouse, kind, qty]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                productId: { type: string, format: uuid }
+                warehouse: { type: string, minLength: 1, maxLength: 120 }
+                batch: { type: string, maxLength: 120 }
+                kind: { type: string, enum: [PICK, SHIP, CONSUME] }
+                qty: { $ref: '#/components/schemas/Decimal' }
+      responses:
+        '200':
+          description: Replay of a claim already taken
+        '201':
+          description: Claimed
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/issue-claims:release:
+    post:
+      operationId: releaseInventoryIssueClaim
+      summary: Withdraw a claim whose movement did not commit
+      x-passage-duty: inventory.issue.claim
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: Withdrawn (an unknown key is already withdrawn)
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /v1/inventory/count-plans:
     post:
       operationId: createInventoryCountPlan

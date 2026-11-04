@@ -76,6 +76,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerReservations(r)
 	a.registerBlocking(r)
 	a.registerHolds(r)
+	a.registerIssueClaims(r)
 	a.registerCount(r)
 	a.registerTransfers(r)
 	a.registerReports(r)

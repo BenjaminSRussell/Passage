@@ -72,6 +72,8 @@ type Store interface {
 	ReleaseHold(ctx context.Context, id string, version int, qty *decimal.Decimal) (domain.Hold, error)
 	ReleaseHoldsBySource(ctx context.Context, sourceType, sourceRef string, keep decimal.Decimal, moveTo *HoldSource) (SourceRelease, error)
 	ListHolds(ctx context.Context, f HoldFilter) ([]domain.Hold, error)
+	ClaimIssue(ctx context.Context, in IssueClaimInput) (bool, error)
+	ReleaseIssueClaim(ctx context.Context, key string) error
 	CreateCountPlan(ctx context.Context, key string, p domain.CountPlan) (domain.CountPlan, bool, error)
 	ListCountPlans(ctx context.Context) ([]domain.CountPlan, error)
 	GenerateCountSheet(ctx context.Context, planID, key string) (domain.CountSheet, bool, error)

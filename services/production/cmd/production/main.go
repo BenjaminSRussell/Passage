@@ -13,6 +13,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/issueclaim"
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/production/internal/api"
@@ -121,7 +122,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
 		return err
 	}
-	st := store.New(pool)
+	holds, err := issueclaim.FromEnv(getenv)
+	if err != nil {
+		return fmt.Errorf("inventory client: %w", err)
+	}
+	st := store.New(pool).WithHolds(holds)
 	a := api.New(st, cfg)
 	ledger, err := ledgerclient.FromEnv(getenv, "production")
 	if err != nil {

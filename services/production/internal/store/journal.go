@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/issueclaim"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/production/internal/domain"
 	prodevents "github.com/BenjaminSRussell/passage/services/production/internal/events"
@@ -35,6 +36,8 @@ const (
 	CodePostingBeforeOrder  = "PRODUCTION_POSTING_DATE_BEFORE_ORDER"
 	CodeUnpostedJournals    = "PRODUCTION_UNPOSTED_JOURNALS"
 	CodeEndBeforeLastPosted = "PRODUCTION_END_BEFORE_LAST_JOURNAL"
+	// CodeQualityHold refuses a consume that would issue held stock (wave 33 AC2).
+	CodeQualityHold = "QUALITY_HOLD"
 )
 
 // Journal line kinds.
@@ -520,6 +523,7 @@ func (s *Postgres) PostJournal(ctx context.Context, r PostRequest) (Journal, boo
 	p, _ := tenant.FromContext(ctx)
 	var out Journal
 	replayed := false
+	claims := &claimScope{claimer: s.claims}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var postedID string
 		err := tx.QueryRow(ctx, `select id::text from production_journal where tenant_id = $1 and post_key = $2`, p.TenantID, r.IdempotencyKey).Scan(&postedID)
@@ -563,7 +567,7 @@ func (s *Postgres) PostJournal(ctx context.Context, r PostRequest) (Journal, boo
 		from := h.status
 		if h.status == domain.Released {
 			// FR-21.6: feedback on a Released order starts it, with the effects of :start.
-			if err := startOrder(ctx, tx, p.TenantID, &h, r.Actor, "sys:auto-start:"+r.IdempotencyKey); err != nil {
+			if err := startOrder(ctx, tx, p.TenantID, &h, r.Actor, "sys:auto-start:"+r.IdempotencyKey, claims); err != nil {
 				return err
 			}
 			if err := logStatus(ctx, tx, p.TenantID, h, domain.CmdStart, from, domain.Started, r.Actor, r.TraceID, "sys:auto-start:"+r.IdempotencyKey); err != nil {
@@ -571,7 +575,7 @@ func (s *Postgres) PostJournal(ctx context.Context, r PostRequest) (Journal, boo
 			}
 			h.status = domain.Started
 		}
-		opts := postOptions{overDuty: r.OverConsumptionDuty, overPct: prm.OverConsumptionPct, rafTolerancePct: prm.RAFTolerancePct, actor: r.Actor, key: r.IdempotencyKey, allowFinished: r.AllowFinished}
+		opts := postOptions{overDuty: r.OverConsumptionDuty, overPct: prm.OverConsumptionPct, rafTolerancePct: prm.RAFTolerancePct, actor: r.Actor, key: r.IdempotencyKey, allowFinished: r.AllowFinished, claims: claims}
 		if err := postJournal(ctx, tx, p.TenantID, &h, &j, opts); err != nil {
 			return err
 		}
@@ -589,6 +593,9 @@ func (s *Postgres) PostJournal(ctx context.Context, r PostRequest) (Journal, boo
 		out, err = loadJournal(ctx, tx, p.TenantID, r.JournalID)
 		return err
 	})
+	if err != nil {
+		claims.rollback()
+	}
 	return out, replayed, err
 }
 
@@ -613,6 +620,7 @@ type postOptions struct {
 	actor           string
 	key             string
 	allowFinished   bool
+	claims          *claimScope
 }
 
 // postJournal posts j on the locked order h: it checks the posting date
@@ -667,6 +675,7 @@ func postJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, 
 		}
 	}
 	consumed := map[string]decimal.Decimal{}
+	issued := map[string]decimal.Decimal{}
 	var postings []domain.Posting
 	for i := range j.Lines {
 		l := &j.Lines[i]
@@ -680,6 +689,7 @@ func postJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, 
 			if err := domain.CheckConsumption(bl.LineNo, bl.QtyRequired, after, o.overPct, o.overDuty); err != nil {
 				return domainProblem(err)
 			}
+			issued[bl.ItemID] = issued[bl.ItemID].Add(l.Qty)
 			consumed[bl.LineNo] = consumed[bl.LineNo].Add(l.Qty)
 			l.Amount = domain.RoundMoney(l.Qty.Mul(l.UnitCost), h.currency)
 			postings = append(postings, domain.IssuePostings(profile, l.Amount)...)
@@ -742,6 +752,9 @@ func postJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, 
 	}
 	if !domain.Balanced(postings) {
 		return fmt.Errorf("journal %s postings do not balance", j.ID)
+	}
+	if err := o.claims.issue(ctx, *h, j.ID, issued); err != nil {
+		return err
 	}
 	if err := insertPostings(ctx, tx, tenantID, *h, &j.ID, j.PostingDate, postings); err != nil {
 		return err
@@ -851,7 +864,7 @@ func enqueueJournalPosted(ctx context.Context, tx pgx.Tx, tenantID string, h ord
 // startOrder applies the posting effect of Released → Started (BR-21.1): the
 // start-flushed lines are issued for their remaining quantity by an
 // auto-posted picking list. key makes the journal idempotent with the command.
-func startOrder(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, actor, key string) error {
+func startOrder(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, actor, key string, claims *claimScope) error {
 	lines, err := loadLines(ctx, tx, tenantID, h.id)
 	if err != nil {
 		return err
@@ -865,18 +878,54 @@ func startOrder(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, a
 	if len(issues) == 0 {
 		return nil
 	}
-	return autoPost(ctx, tx, tenantID, h, NewJournal{Type: domain.JournalPickingList, Issues: issues}, actor, key, decimal.Zero)
+	return autoPost(ctx, tx, tenantID, h, NewJournal{Type: domain.JournalPickingList, Issues: issues}, actor, key, decimal.Zero, claims)
 }
 
 // autoPost creates and posts a system journal (start backflush, report as
 // finished through the :report-finished command) under key.
-func autoPost(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, in NewJournal, actor, key string, rafTolerancePct decimal.Decimal) error {
+func autoPost(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, in NewJournal, actor, key string, rafTolerancePct decimal.Decimal, claims *claimScope) error {
 	in.OrderID, in.PostingDate, in.Actor, in.IdempotencyKey, in.RequestHash = h.id, today(), actor, key, key
 	j, err := createJournal(ctx, tx, tenantID, h, in)
 	if err != nil {
 		return err
 	}
-	return postJournal(ctx, tx, tenantID, h, &j, postOptions{overDuty: true, rafTolerancePct: rafTolerancePct, actor: actor, key: key, allowFinished: in.AllowFinished})
+	return postJournal(ctx, tx, tenantID, h, &j, postOptions{overDuty: true, rafTolerancePct: rafTolerancePct, actor: actor, key: key, allowFinished: in.AllowFinished, claims: claims})
+}
+
+// claimScope takes the inventory claims of the consumption one command posts
+// and withdraws them when the command's transaction fails afterwards.
+type claimScope struct {
+	claimer issueclaim.Claimer
+	undo    []func()
+}
+
+func (c *claimScope) rollback() {
+	for _, u := range c.undo {
+		u()
+	}
+}
+
+// issue claims the quantity consumed per item at the order's warehouse, summed
+// over the journal's lines, so held stock is never consumed. The key names the
+// journal and the quantity; ClaimAll adds the attempt, so each post owns its claim.
+func (c *claimScope) issue(ctx context.Context, h orderHead, journalID string, byItem map[string]decimal.Decimal) error {
+	if c == nil || c.claimer == nil || len(byItem) == 0 {
+		return nil
+	}
+	var claims []issueclaim.Claim
+	for item, qty := range byItem {
+		claims = append(claims, issueclaim.Claim{LegalEntityID: h.legalEntityID, ProductID: item, Warehouse: h.warehouseID, Kind: issueclaim.Consume, Qty: qty,
+			Key: fmt.Sprintf("production-consume:%s:%s:%s", journalID, item, qty)})
+	}
+	undo, err := issueclaim.ClaimAll(ctx, c.claimer, claims)
+	switch {
+	case err == nil:
+		c.undo = append(c.undo, undo)
+		return nil
+	case issueclaim.Refused(err):
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeQualityHold, "an item of this order "+issueclaim.Reason(err)+"; consume not allowed")
+	}
+	return httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "inventory hold check failed")
 }
 
 // reverseJournals reverses the posted journals of the given types that are

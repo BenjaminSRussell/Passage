@@ -419,6 +419,10 @@
       {"resource": "/v1/inventory/holds", "methods": ["POST"]},
       {"resource": "/v1/inventory/holds:release-source", "methods": ["POST"]}
     ]},
+    "inventory.issue.claim": {"service_only": true, "permissions": [
+      {"resource": "/v1/inventory/issue-claims", "methods": ["POST"]},
+      {"resource": "/v1/inventory/issue-claims:release", "methods": ["POST"]}
+    ]},
     "inventory.transaction.apply": {"service_only": true, "permissions": [{"resource": "/internal/v1/inventory/transactions:apply", "methods": ["POST"]}]},
     "inventory.transaction.step": {"permissions": [
       {"resource": "/v1/inventory/transactions/*:unpick", "methods": ["POST"]},
@@ -3200,7 +3204,8 @@
       "sales": ["sales.order.record-invoice", "sales.order.record-delivery"]
     },
     "fulfillment": {
-      "sales": ["sales.order.record-delivery"]
+      "sales": ["sales.order.record-delivery"],
+      "inventory": ["inventory.issue.claim"]
     },
     "batch": {
       "product": ["product.variants.explode", "product.released.read", "product.jobs.write"]
@@ -3219,7 +3224,8 @@
       "ledger": ["ledger.ledger.lookup", "ledger.entry.post", "ledger.journal.reverse", "ledger.balance.read", "ledger.account.lookup", "ledger.period.postclosed"]
     },
     "production": {
-      "ledger": ["ledger.entry.post", "ledger.balance.read"]
+      "ledger": ["ledger.entry.post", "ledger.balance.read"],
+      "inventory": ["inventory.issue.claim"]
     },
     "productcost": {
       "ledger": ["ledger.entry.post", "ledger.journal.reverse"],
@@ -3289,6 +3295,9 @@
     },
     "quality": {
       "inventory": ["inventory.hold.apply"]
+    },
+    "warehouse": {
+      "inventory": ["inventory.issue.claim"]
     },
     "hr": {
       "numbering": ["numbering.sequence.allocate"],

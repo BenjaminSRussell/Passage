@@ -19,6 +19,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	kernelevents "github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/platform/issueclaim"
 	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	evts "github.com/BenjaminSRussell/passage/services/warehouse/internal/events"
@@ -49,11 +50,20 @@ type Idem struct {
 
 // Store is the Postgres repository of the warehouse context.
 type Store struct {
-	pool *pgxpool.Pool
+	pool  *pgxpool.Pool
+	holds issueclaim.Claimer
 }
 
 // New returns a store on pool.
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+
+// WithHolds claims PICK confirmations at inventory, so held stock is never
+// picked. A nil claimer (the default, when INVENTORY_URL is unset) leaves
+// current behaviour.
+func (s *Store) WithHolds(h issueclaim.Claimer) *Store {
+	s.holds = h
+	return s
+}
 
 // Ping checks the database for /readyz.
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }

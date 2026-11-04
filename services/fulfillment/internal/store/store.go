@@ -20,6 +20,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/issueclaim"
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -49,14 +50,17 @@ const (
 	CodeRTPNegative        = "FUL-0015"
 	CodeValidation         = "FUL-0050"
 	CodeSSCCInvalid        = "FUL-0007"
-	CodePickBelowPacked    = "FUL-0031"
-	CodeWaveLimits         = "FUL-0032"
-	CodeGroupBy            = "FUL-0033"
-	CodeWaveTooLarge       = "FUL-0034"
-	CodeWaveNotFound       = "FUL-0052"
-	CodeWaveConflict       = "FUL-0053"
-	CodeContainerNotFound  = "FUL-0054"
-	CodeNesting            = "FUL-0056"
+	// CodeQualityHold refuses a packing-slip post that would ship held stock
+	// (wave 33 AC2). Distinct from the short-pick reason of the same name.
+	CodeQualityHold       = "QUALITY_HOLD"
+	CodePickBelowPacked   = "FUL-0031"
+	CodeWaveLimits        = "FUL-0032"
+	CodeGroupBy           = "FUL-0033"
+	CodeWaveTooLarge      = "FUL-0034"
+	CodeWaveNotFound      = "FUL-0052"
+	CodeWaveConflict      = "FUL-0053"
+	CodeContainerNotFound = "FUL-0054"
+	CodeNesting           = "FUL-0056"
 	// CodeWarehouseLegalEntity refuses a warehouse setting saved for a legal
 	// entity the warehouse does not belong to.
 	CodeWarehouseLegalEntity = "FUL-0057"
@@ -333,6 +337,7 @@ type Postgres struct {
 	extension int
 	// releaseDefaults is what a warehouse without a saved release rule reads.
 	releaseDefaults ReleaseRuleInput
+	claims          issueclaim.Claimer
 }
 
 // New returns a Postgres store that issues SSCCs under gs1Prefix.
@@ -347,6 +352,40 @@ func New(pool *pgxpool.Pool, gs1Prefix string, extension int) *Postgres {
 func (s *Postgres) WithReleaseDefaults(horizonDays int, requireFullATP bool) *Postgres {
 	s.releaseDefaults.HorizonDays, s.releaseDefaults.RequireFullATP = horizonDays, requireFullATP
 	return s
+}
+
+// WithHolds claims shipped quantity at inventory on packing-slip post, so held
+// stock is never shipped. A nil claimer (the default, when INVENTORY_URL is
+// unset) leaves current behaviour.
+func (s *Postgres) WithHolds(c issueclaim.Claimer) *Postgres {
+	s.claims = c
+	return s
+}
+
+func (s *Postgres) claimShipment(ctx context.Context, sh Shipment) (func(), error) {
+	undo := func() {}
+	if s.claims == nil {
+		return undo, nil
+	}
+	perProduct := map[string]decimal.Decimal{}
+	for _, l := range sh.Lines {
+		if q := l.Packed.Sub(l.Shipped); q.IsPositive() {
+			perProduct[l.ProductID] = perProduct[l.ProductID].Add(q)
+		}
+	}
+	var claims []issueclaim.Claim
+	for product, q := range perProduct {
+		claims = append(claims, issueclaim.Claim{LegalEntityID: sh.LegalEntityID, ProductID: product, Warehouse: sh.WarehouseID, Kind: issueclaim.Ship, Qty: q,
+			Key: fmt.Sprintf("fulfillment-ship:%s:%d:%s:%s", sh.ID, sh.Version, product, q)})
+	}
+	undo, err := issueclaim.ClaimAll(ctx, s.claims, claims)
+	switch {
+	case err == nil:
+		return undo, nil
+	case issueclaim.Refused(err):
+		return undo, httpx.NewProblem(http.StatusUnprocessableEntity, CodeQualityHold, "an item of this shipment "+issueclaim.Reason(err)+"; ship not allowed")
+	}
+	return undo, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "inventory hold check failed")
 }
 
 // Ping checks the database connection for readiness.
@@ -1134,6 +1173,7 @@ func (s *Postgres) PackContainer(ctx context.Context, id string, version int, co
 func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, in PostInput, idem Idem) (PackingSlip, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out PackingSlip
+	undo := func() {}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		res, err := runIdempotent(ctx, tx, p.TenantID, idem, func() (PackingSlip, error) {
 			sh, err := loadShipment(ctx, tx, id)
@@ -1194,6 +1234,9 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 			}
 			// Sales cancelled the remainder of the order line: shipping more than it keeps is refused (FUL-0066).
 			if err := checkKeptQty(ctx, tx, slip.Lines); err != nil {
+				return PackingSlip{}, err
+			}
+			if undo, err = s.claimShipment(ctx, sh); err != nil {
 				return PackingSlip{}, err
 			}
 			journal, err := domain.PackingSlipPosting(postLines, in.CogsAtShipment, in.Currency)
@@ -1281,6 +1324,9 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 		out = res
 		return err
 	})
+	if err != nil {
+		undo()
+	}
 	return out, err
 }
 

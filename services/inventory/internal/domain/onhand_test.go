@@ -86,6 +86,39 @@ func TestCheckNegative(t *testing.T) {
 
 // A receipt into a row left negative while the policy allowed it raises
 // availability, so a forbid policy must not reject it; a further issue must be.
+func TestCheckNegative_HeldQuantityIsQualityHold(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		physical := rapid.IntRange(1, 40).Draw(rt, "physical")
+		held := rapid.IntRange(0, physical).Draw(rt, "held")
+		issue := rapid.IntRange(1, physical+5).Draw(rt, "issue")
+		before := OnHand{PostedQty: d(itoa(physical)), HeldPhysical: d(itoa(held))}
+		after := before
+		after.PostedQty = before.PostedQty.Sub(d(itoa(issue)))
+		err := after.CheckNegative(before, NegativePolicy{})
+		if issue <= physical-held {
+			if err != nil {
+				rt.Fatalf("issue %d of free %d (held %d of %d): %v", issue, physical-held, held, physical, err)
+			}
+			return
+		}
+		var ne *NegativeError
+		if !errors.As(err, &ne) {
+			rt.Fatalf("issue %d of held %d / %d: want refusal, got %v", issue, held, physical, err)
+		}
+		if held > 0 && physical-issue < held {
+			if ne.Code != CodeQualityHold {
+				rt.Fatalf("code %s, want %s", ne.Code, CodeQualityHold)
+			}
+			return
+		}
+		if ne.Code != CodeNegativePhysical {
+			rt.Fatalf("code %s, want %s", ne.Code, CodeNegativePhysical)
+		}
+	})
+}
+
+func itoa(n int) string { return decimal.NewFromInt(int64(n)).String() }
+
 func TestCheckNegative_ReceiptIntoNegativeRowAllowed(t *testing.T) {
 	before := OnHand{PostedQty: d("-10")}
 	after := OnHand{PostedQty: d("-4")}

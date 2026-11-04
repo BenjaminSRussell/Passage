@@ -542,6 +542,19 @@ test_inventory_hold_duties_open_only_their_routes if {
 	not allowed("inventory.hold.apply", "POST", "/v1/inventory/journals")
 }
 
+test_inventory_issue_claim_is_service_only_and_opens_only_its_routes if {
+	data.duties["inventory.issue.claim"].service_only
+	every svc in ["warehouse", "fulfillment", "production"] {
+		data.service_grants[svc].inventory == ["inventory.issue.claim"]
+	}
+	allowed("inventory.issue.claim", "POST", "/v1/inventory/issue-claims")
+	allowed("inventory.issue.claim", "POST", "/v1/inventory/issue-claims:release")
+	not allowed("inventory.issue.claim", "GET", "/v1/inventory/onhand")
+	not allowed("inventory.issue.claim", "POST", "/v1/inventory/holds")
+	not allowed("inventory.issue.claim", "POST", "/v1/inventory/journals")
+	not allowed("inventory.read", "POST", "/v1/inventory/issue-claims")
+}
+
 test_edi_source_read_duties_open_only_their_get_routes if {
 	data.service_grants.edi == {
 		"fulfillment": ["fulfillment.shipment.read"],

@@ -11,7 +11,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/issueclaim"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/warehouse/internal/domain"
 	evts "github.com/BenjaminSRussell/passage/services/warehouse/internal/events"
 )
@@ -238,6 +241,7 @@ func (s *Store) ConfirmLine(ctx context.Context, idem Idem, in ConfirmInput) (do
 	var (
 		out      domain.Work
 		replayed bool
+		claims   undoLog
 	)
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		var err error
@@ -254,7 +258,7 @@ func (s *Store) ConfirmLine(ctx context.Context, idem Idem, in ConfirmInput) (do
 			if err != nil {
 				return w, err
 			}
-			if err := moveStock(ctx, tx, line); err != nil {
+			if err := s.moveStock(ctx, tx, w, line, &claims); err != nil {
 				return w, err
 			}
 			if err := updateWork(ctx, tx, &w); err != nil {
@@ -272,6 +276,9 @@ func (s *Store) ConfirmLine(ctx context.Context, idem Idem, in ConfirmInput) (do
 		})
 		return err
 	})
+	if err != nil {
+		claims.run()
+	}
 	return out, replayed, err
 }
 
@@ -309,6 +316,7 @@ func (s *Store) ExceptWork(ctx context.Context, idem Idem, in ExceptionInput) (E
 	var (
 		out      Excepted
 		replayed bool
+		claims   undoLog
 	)
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		var err error
@@ -319,7 +327,7 @@ func (s *Store) ExceptWork(ctx context.Context, idem Idem, in ExceptionInput) (E
 			}
 			switch in.Action {
 			case ActionShortPick:
-				return shortPick(ctx, tx, w, in)
+				return s.shortPick(ctx, tx, w, in, &claims)
 			case ActionCancel:
 				if err := w.Cancel(in.Reason, in.User, in.Supervise); err != nil {
 					return Excepted{}, err
@@ -336,10 +344,13 @@ func (s *Store) ExceptWork(ctx context.Context, idem Idem, in ExceptionInput) (E
 		})
 		return err
 	})
+	if err != nil {
+		claims.run()
+	}
 	return out, replayed, err
 }
 
-func shortPick(ctx context.Context, tx pgx.Tx, w domain.Work, in ExceptionInput) (Excepted, error) {
+func (s *Store) shortPick(ctx context.Context, tx pgx.Tx, w domain.Work, in ExceptionInput, claims *undoLog) (Excepted, error) {
 	remainder, err := w.ShortPick(in.LineNo, in.Qty, in.Reason, ids.New(), in.User)
 	if err != nil {
 		return Excepted{}, err
@@ -348,7 +359,7 @@ func shortPick(ctx context.Context, tx pgx.Tx, w domain.Work, in ExceptionInput)
 	if err != nil {
 		return Excepted{}, err
 	}
-	if err := moveStock(ctx, tx, line); err != nil {
+	if err := s.moveStock(ctx, tx, w, line, claims); err != nil {
 		return Excepted{}, err
 	}
 	if err := updateWork(ctx, tx, &w); err != nil {
@@ -384,7 +395,7 @@ func lockWork(ctx context.Context, tx pgx.Tx, id string, ifMatch int) (domain.Wo
 }
 
 // moveStock applies a confirmed line to its location under a row lock.
-func moveStock(ctx context.Context, tx pgx.Tx, line domain.WorkLine) error {
+func (s *Store) moveStock(ctx context.Context, tx pgx.Tx, w domain.Work, line domain.WorkLine, claims *undoLog) error {
 	if line.ConfirmedQty.IsZero() {
 		return nil
 	}
@@ -396,10 +407,47 @@ func moveStock(ctx context.Context, tx pgx.Tx, line domain.WorkLine) error {
 	if err != nil {
 		return err
 	}
+	if err := s.claimPick(ctx, w, line, claims); err != nil {
+		return err
+	}
 	if refusal, ok := loc.Move(line.Direction, line.ItemID, line.ConfirmedQty, line.ConfirmedUsage()); !ok {
 		return domain.MoveError(refusal)
 	}
 	return writeLocation(ctx, tx, loc, line.ItemID)
+}
+
+// undoLog collects the withdrawals of the inventory claims a command took, to
+// run when the command's transaction fails afterwards.
+type undoLog struct{ fns []func() }
+
+func (u *undoLog) run() {
+	for _, f := range u.fns {
+		f()
+	}
+}
+
+// claimPick claims the picked quantity at inventory for the whole warehouse
+// (stock and holds are both counted there, not per location), so held stock is
+// never picked and repeated picks cannot add up to it.
+func (s *Store) claimPick(ctx context.Context, w domain.Work, line domain.WorkLine, claims *undoLog) error {
+	if s.holds == nil || line.Direction != domain.DirectionPick {
+		return nil
+	}
+	p, ok := tenant.FromContext(ctx)
+	if !ok || !ids.Valid(p.LegalEntityID) {
+		return httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a pick of held-checked stock needs a principal scoped to a legal entity")
+	}
+	claim := issueclaim.Claim{LegalEntityID: p.LegalEntityID, ProductID: line.ItemID, Warehouse: w.WarehouseID, Batch: line.Attributes["batch"], Kind: issueclaim.Pick,
+		Qty: line.ConfirmedQty, Key: fmt.Sprintf("warehouse-pick:%s:%d:%s", w.ID, line.LineNo, line.ConfirmedQty)}
+	undo, err := issueclaim.ClaimAll(ctx, s.holds, []issueclaim.Claim{claim})
+	switch {
+	case err == nil:
+		claims.fns = append(claims.fns, undo)
+		return nil
+	case issueclaim.Refused(err):
+		return &domain.Error{Code: domain.CodeHoldBlocked, Detail: fmt.Sprintf("item %s %s; pick not allowed", line.ItemID, issueclaim.Reason(err))}
+	}
+	return httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "inventory hold check failed")
 }
 
 const workColumns = `id::text, warehouse_id::text, work_type, status, priority, coalesce(parent_work_id::text, ''),

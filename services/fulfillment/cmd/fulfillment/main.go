@@ -13,6 +13,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/issueclaim"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/api"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/store"
@@ -76,7 +77,11 @@ func run() error {
 		}
 	}
 
-	s := store.New(pool, prefix, ext).WithReleaseDefaults(horizon, fullATP)
+	holds, err := issueclaim.FromEnv(os.Getenv)
+	if err != nil {
+		return fmt.Errorf("inventory client: %w", err)
+	}
+	s := store.New(pool, prefix, ext).WithReleaseDefaults(horizon, fullATP).WithHolds(holds)
 	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
 		return err
 	}

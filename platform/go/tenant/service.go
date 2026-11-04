@@ -62,7 +62,8 @@ var serviceGrants = map[string]map[string][]string{
 		"sales":  {"sales.order.record-invoice", "sales.order.record-delivery"},
 	},
 	"fulfillment": {
-		"sales": {"sales.order.record-delivery"},
+		"sales":     {"sales.order.record-delivery"},
+		"inventory": {"inventory.issue.claim"},
 	},
 	"batch": {
 		"product": {"product.variants.explode", "product.released.read", "product.jobs.write"},
@@ -90,7 +91,8 @@ var serviceGrants = map[string]map[string][]string{
 		"ledger": {"ledger.ledger.lookup", "ledger.entry.post", "ledger.journal.reverse", "ledger.balance.read", "ledger.account.lookup", "ledger.period.postclosed"},
 	},
 	"production": {
-		"ledger": {"ledger.entry.post", "ledger.balance.read"},
+		"ledger":    {"ledger.entry.post", "ledger.balance.read"},
+		"inventory": {"inventory.issue.claim"},
 	},
 	"productcost": {
 		"ledger":      {"ledger.entry.post", "ledger.journal.reverse"},
@@ -151,6 +153,9 @@ var serviceGrants = map[string]map[string][]string{
 	},
 	"quality": {
 		"inventory": {"inventory.hold.apply"},
+	},
+	"warehouse": {
+		"inventory": {"inventory.issue.claim"},
 	},
 	"hr": {
 		"compliance": {"compliance.legal_hold.check"},

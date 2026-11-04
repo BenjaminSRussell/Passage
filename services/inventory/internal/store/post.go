@@ -516,7 +516,7 @@ func lockRow(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, currency s
 }
 
 // checkNegative applies the negative policy to a row after its deltas
-// (FR-16.4), turning a violation into INV-NEG-001 / INV-NEG-002.
+// (FR-16.4), turning a violation into QUALITY_HOLD, INV-NEG-001 or INV-NEG-002.
 func checkNegative(r *row, neg domain.NegativePolicy) error {
 	err := r.oh.CheckNegative(r.before, neg)
 	var ne *domain.NegativeError
@@ -524,8 +524,11 @@ func checkNegative(r *row, neg domain.NegativePolicy) error {
 		return err
 	}
 	what := "available physical"
-	if ne.Code == domain.CodeNegativeFinancial {
+	switch ne.Code {
+	case domain.CodeNegativeFinancial:
 		what = "financial (ordered)"
+	case domain.CodeQualityHold:
+		what = "held"
 	}
 	return problem(http.StatusUnprocessableEntity, ne.Code,
 		fmt.Sprintf("issue would make %s stock negative for product %s at %s (shortfall %s)", what, r.product, describeDims(r.dims), ne.Shortfall))

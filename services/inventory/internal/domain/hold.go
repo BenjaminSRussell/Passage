@@ -114,3 +114,15 @@ func CheckHoldRelease(h Hold, qty decimal.Decimal) error {
 	}
 	return nil
 }
+
+var IssueKinds = []string{"PICK", "SHIP", "CONSUME"}
+
+// CheckIssueClaim refuses a claim that would reach held stock: with any quantity
+// held, only physical - held - claimed is free to move. Without a hold the
+// stock is not this rule's to police.
+func CheckIssueClaim(qty, physical, held, claimed decimal.Decimal) error {
+	if !held.IsPositive() || !qty.GreaterThan(physical.Sub(held).Sub(claimed)) {
+		return nil
+	}
+	return &Error{Code: CodeQualityHold, Detail: "the quantity is still on hold: " + held.String() + " held of " + physical.String() + " on hand, " + claimed.String() + " already claimed"}
+}

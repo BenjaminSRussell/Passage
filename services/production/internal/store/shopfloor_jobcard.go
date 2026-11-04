@@ -222,7 +222,7 @@ func (s *Postgres) AdjustShopfloorJobCard(ctx context.Context, registrationID st
 				Type: domain.JournalJobCard, Proposal: domain.ProposeNone, AutoStart: true,
 				Hours: []HoursInput{{JobID: jobID, Hours: newHours, LaborRate: &rate}}, AllowFinished: true,
 			}
-			if err := autoPost(ctx, tx, p.TenantID, &h, in, shopfloorActor, key, decimal.Zero); err != nil {
+			if err := autoPost(ctx, tx, p.TenantID, &h, in, shopfloorActor, key, decimal.Zero, nil); err != nil {
 				return err
 			}
 			outcome = "reversed and rebooked"
