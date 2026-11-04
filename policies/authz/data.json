@@ -457,8 +457,11 @@
       {"resource": "/v1/procurement/purchase-orders/*/lines/*/service", "methods": ["GET"]},
       {"resource": "/v1/procurement/purchase-orders/*/lines/*/service/limit-check", "methods": ["GET"]},
       {"resource": "/v1/procurement/model-service-specs", "methods": ["GET"]},
-      {"resource": "/v1/procurement/model-service-specs/*", "methods": ["GET"]}
+      {"resource": "/v1/procurement/model-service-specs/*", "methods": ["GET"]},
+      {"resource": "/v1/procurement/inbound-changes", "methods": ["GET"]},
+      {"resource": "/v1/procurement/inbound-changes/*", "methods": ["GET"]}
     ]},
+    "purchasing.inbound.apply": {"flag": true, "permissions": []},
     "PurchaseOrderConfirm": {"permissions": [
       {"resource": "/v1/procurement/purchase-orders/*:approve", "methods": ["POST"]},
       {"resource": "/v1/procurement/purchase-orders/*:reject", "methods": ["POST"]},
@@ -3129,6 +3132,7 @@
     }
   },
   "service_principals": {
+    "purchasing-inbound": ["purchasing.inbound.apply"],
     "fulfillment-order": ["fulfillment.order.sync"],
     "integration-hub": ["migration.outbound.render", "migration.xref.record"],
     "migration-loader": ["party.import.write", "product.import.write", "receivables.import.write"],
