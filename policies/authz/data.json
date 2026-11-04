@@ -2210,7 +2210,8 @@
     "planning.forecast.maintain": {"permissions": [
       {"resource": "/v1/planning/forecasts/*/lines", "methods": ["PUT"]},
       {"resource": "/v1/planning/forecasts/*:submit", "methods": ["POST"]},
-      {"resource": "/v1/planning/forecasts/*:generate", "methods": ["POST"]}
+      {"resource": "/v1/planning/forecasts/*:generate", "methods": ["POST"]},
+      {"resource": "/v1/planning/forecasts/*:allocate", "methods": ["POST"]}
     ]},
     "planning.order.firm": {"permissions": [{"resource": "/v1/planning/planned-orders:firm", "methods": ["POST"]}]},
     "planning.order.maintain": {"permissions": [
@@ -2247,7 +2248,9 @@
       {"resource": "/v1/planning/plans/*/projection", "methods": ["GET"]},
       {"resource": "/v1/planning/messages/*", "methods": ["GET"]},
       {"resource": "/v1/planning/strategies", "methods": ["GET"]},
-      {"resource": "/v1/planning/strategies/*", "methods": ["GET"]}
+      {"resource": "/v1/planning/strategies/*", "methods": ["GET"]},
+      {"resource": "/v1/planning/forecast-allocation-keys", "methods": ["GET"]},
+      {"resource": "/v1/planning/forecast-allocation-keys/*", "methods": ["GET"]}
     ]},
     "planning.run": {"permissions": [
       {"resource": "/v1/planning/ddmrp/buffers:recalculate", "methods": ["POST"]},
@@ -2263,7 +2266,9 @@
       {"resource": "/v1/planning/quota-arrangements", "methods": ["POST"]},
       {"resource": "/v1/planning/quota-arrangements/*", "methods": ["PUT"]},
       {"resource": "/v1/planning/strategies", "methods": ["POST"]},
-      {"resource": "/v1/planning/strategies/*", "methods": ["PUT"]}
+      {"resource": "/v1/planning/strategies/*", "methods": ["PUT"]},
+      {"resource": "/v1/planning/forecast-allocation-keys", "methods": ["POST"]},
+      {"resource": "/v1/planning/forecast-allocation-keys/*", "methods": ["PUT"]}
     ]},
     "planning.simulate": {"permissions": [
       {"resource": "/v1/planning/scenarios", "methods": ["POST"]},
