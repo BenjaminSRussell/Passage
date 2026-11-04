@@ -231,7 +231,13 @@
       {"resource": "/v1/reporting/hierarchies", "methods": ["GET"]},
       {"resource": "/v1/reporting/hierarchies/*", "methods": ["GET", "PUT"]},
       {"resource": "/v1/reporting/hierarchies/*/members", "methods": ["GET"]},
-      {"resource": "/v1/reporting/hierarchies/*:publish", "methods": ["POST"]}
+      {"resource": "/v1/reporting/hierarchies/*:publish", "methods": ["POST"]},
+      {"resource": "/v1/reporting/row-sets", "methods": ["GET"]},
+      {"resource": "/v1/reporting/row-sets/*", "methods": ["GET", "PUT"]},
+      {"resource": "/v1/reporting/column-sets", "methods": ["GET"]},
+      {"resource": "/v1/reporting/column-sets/*", "methods": ["GET", "PUT"]},
+      {"resource": "/v1/reporting/column-set-templates", "methods": ["GET"]},
+      {"resource": "/v1/reporting/definitions:compose", "methods": ["POST"]}
     ]},
     "reporting.statement.run": {"permissions": [
       {"resource": "/v1/reporting/runs", "methods": ["POST"]},
