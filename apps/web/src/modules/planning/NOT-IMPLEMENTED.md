@@ -1,8 +1,17 @@
-# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 30)
+# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 31)
 
 Screens of slices 1 to 13 (slice 19 adds the quota arrangement link and source on the planned-order detail; slice 20 adds the DDMRP buffer priority and zone as a Priority column on the planned orders list and on the planned-order detail, and the red-zone message action; slice 21 adds a Sort by selector on the planned orders and messages screens, whose default puts the buffer orders of priority-based items first by planning priority and whose "Planning priority" option does so for every buffer order, and a Priority column on messages; slice 23 adds the sales-on-top (PLAN-0015) message action to the messages list and its Action filter; slice 24 adds the no-vendor (PLAN-0008) action and a Message column with the catalog code and text), all registered in `module.ts` and built from the
 shell primitives (`src/shell/ui`) with CSS Modules:
 
+- `/planning/allocation-keys`, `/planning/allocation-keys/new` and `/planning/allocation-keys/:code` (slice 31, `AllocationPages.tsx`): the
+  allocation keys of FR-22.8 as a list (code, name, forecast unit, item count, version), a create form with one block per item (item id,
+  percentage share, inventory units per forecast unit) and a live share total that must reach 100, and a detail page with the items, the
+  settings form (update under If-Match, reload offer on 412) and an Allocate card: model code, site, first month and one aggregate
+  quantity per month; it reads the model's version (0 when the model does not exist), posts `:allocate` and reports the manual cells
+  written, with a message for a locked model (409) and an overflow (422). Nav item "Allocation keys" on `planning.read`; the writes
+  need `planning.setup.maintain` (keys) and `planning.forecast.maintain` (allocation), which the service enforces. Not built: the
+  allocate card takes the site and items as ids (no item or site picker until the item master is read, PSG-9), and the forecast page
+  does not link to the keys.
 - `/planning/forecast` Statistical forecast card (slice 28, `ForecastGenerate.tsx`): enter an item, site and monthly history, first month, months to forecast, method and season detection; generates under If-Match into a draft model (manual cells stay), reports the cells written and kept and shows per series the model used, season length, MAPE and wMAPE; refusals `PLAN-FEATURE-OFF`, `PLAN-FORECAST-UNAVAILABLE`, `PLAN-FORECAST-RANGE` and 412 are explained. One series per submit (the API takes up to 1,000); no file import of histories; the item and site are entered as ids (no pickers). The writes need `planning.forecast.maintain`, enforced by the service; the gateway route row for `:generate` is an authz seed handoff (`services/planning/NOT-IMPLEMENTED.md`, slice 28 handoffs).
 - `/planning/strategies` and `/planning/strategies/:code` (slice 22): the six planning strategies of FR-22.19 with their stored
   setup or defaults, and a form for the consumption mode, backward and forward windows, marking and segregated stock (create on

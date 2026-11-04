@@ -30,6 +30,8 @@ channels:
         $ref: '#/components/messages/ForecastPublishedV1'
       forecastGeneratedV1:
         $ref: '#/components/messages/ForecastGeneratedV1'
+      forecastAllocatedV1:
+        $ref: '#/components/messages/ForecastAllocatedV1'
   scenario:
     address: passage.planning.scenario
     messages:
@@ -90,6 +92,13 @@ operations:
     messages:
       - $ref: '#/channels/forecast/messages/forecastGeneratedV1'
     summary: A statistical forecast generation wrote cells into a model (FR-22.9). Written in the generating transaction; manual and consensus cells are never overwritten and are counted in cells_kept.
+  publishForecastAllocated:
+    action: send
+    channel:
+      $ref: '#/channels/forecast'
+    messages:
+      - $ref: '#/channels/forecast/messages/forecastAllocatedV1'
+    summary: An aggregate forecast was split across items by an allocation key into a model (FR-22.8, BR-22.10). Written in the allocating transaction; quantities are in each item's inventory unit.
   publishScenarioSimulated:
     action: send
     channel:
@@ -155,6 +164,13 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/ForecastGeneratedData'
+    ForecastAllocatedV1:
+      name: dev.passage.planning.forecast.allocated.v1
+      title: A forecast was allocated to items
+      summary: An aggregate forecast was split across items by an allocation key (CloudEvent dev.passage.planning.forecast.allocated.v1).
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ForecastAllocatedData'
     ScenarioSimulatedV1:
       name: dev.passage.planning.scenario.simulated.v1
       title: A scenario simulation finished
@@ -296,6 +312,23 @@ components:
         period_from: {type: string, format: date, description: First period start}
         period_to: {type: string, format: date, description: Last period end}
         generated_by: {type: string, description: User who ran the generation}
+    ForecastAllocatedData:
+      type: object
+      required: [model_id, model_code, version, key_id, key_code, key_version, site_id, items, periods, cells_written, period_from, period_to, allocated_by]
+      properties:
+        model_id: {type: string, format: uuid}
+        model_code: {type: string}
+        version: {type: integer, description: The model's version (ETag) after the allocation}
+        key_id: {type: string, format: uuid}
+        key_code: {type: string}
+        key_version: {type: integer, description: Version of the allocation key the shares were read from}
+        site_id: {type: string, format: uuid}
+        items: {type: integer, description: Items of the key}
+        periods: {type: integer, description: Periods allocated}
+        cells_written: {type: integer, description: Forecast cells written (items x periods), as manual cells in the items' inventory unit}
+        period_from: {type: string, format: date, description: First period start}
+        period_to: {type: string, format: date, description: Last period end}
+        allocated_by: {type: string, description: User who ran the allocation}
     ForecastPublishedData:
       type: object
       required: [model_id, model_code, version, items, horizon_periods, period_from, period_to, submitted_by, approved_by]

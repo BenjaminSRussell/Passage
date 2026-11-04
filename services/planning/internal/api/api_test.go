@@ -57,6 +57,10 @@ type fakeStore struct {
 	// quotas is what RunQuotas returns (run_quota_test.go).
 	runQuotas    []domain.RunQuota
 	runQuotasErr error
+	// allocKeys and allocated serve the allocation tests (allocation_test.go).
+	allocKeys []store.AllocationKey
+	allocated store.AllocateRequest
+
 	// lastLimit is the page size the last list read received.
 	lastLimit int
 	// editors are the users who wrote cells of each forecast model

@@ -1,5 +1,6 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { AllocationKeyPage, AllocationKeysPage, NewAllocationKeyPage } from "./AllocationPages";
 import { BufferProfilePage, BufferProfilesPage, DdmrpBuffersPage, NewBufferProfilePage } from "./BufferPages";
 import { CalculatorsPage } from "./calculators";
 import { CoverageGroupPage, CoverageGroupsPage, NewCoverageGroupPage } from "./CoverageGroupsPage";
@@ -19,7 +20,7 @@ const planning: PassageModule = {
   id: "planning",
   title: "Master planning",
   description:
-    "Run the plan in working days, review, change, approve and firm planned orders, read action messages and apply or dismiss them, read net requirements, project the supply schedule and inventory value of items from the stored plan, explain any planned order back to its demand, maintain the forecast and its consensus, set up coverage groups with their fences and auto-firming, set up how each item is planned per site, warehouse or subcontractor, maintain DDMRP buffer profiles and see buffer status by zone and priority, split requirements across sources with quota arrangements, set how each planning strategy treats forecast against sales, and simulate what-if scenarios beside the operational plan.",
+    "Run the plan in working days, review, change, approve and firm planned orders, read action messages and apply or dismiss them, read net requirements, project the supply schedule and inventory value of items from the stored plan, explain any planned order back to its demand, maintain the forecast and its consensus, split a family forecast across items with allocation keys and unit conversion, set up coverage groups with their fences and auto-firming, set up how each item is planned per site, warehouse or subcontractor, maintain DDMRP buffer profiles and see buffer status by zone and priority, split requirements across sources with quota arrangements, set how each planning strategy treats forecast against sales, and simulate what-if scenarios beside the operational plan.",
   routes: [
     { path: "/planning", element: createElement(PlanningHome) },
     { path: "/planning/planned-orders", element: createElement(PlannedOrdersPage) },
@@ -32,6 +33,9 @@ const planning: PassageModule = {
     { path: "/planning/runs/compare", element: createElement(PlanDiffPage) },
     { path: "/planning/runs/new", element: createElement(RunPlanPage) },
     { path: "/planning/forecast", element: createElement(ForecastPage) },
+    { path: "/planning/allocation-keys", element: createElement(AllocationKeysPage) },
+    { path: "/planning/allocation-keys/new", element: createElement(NewAllocationKeyPage) },
+    { path: "/planning/allocation-keys/:code", element: createElement(AllocationKeyPage) },
     { path: "/planning/calculators", element: createElement(CalculatorsPage) },
     { path: "/planning/coverage-groups", element: createElement(CoverageGroupsPage) },
     { path: "/planning/coverage-groups/new", element: createElement(NewCoverageGroupPage) },
@@ -62,6 +66,7 @@ const planning: PassageModule = {
     { label: "Compare runs", to: "/planning/runs/compare", duty: "planning.read" },
     { label: "Run plan", to: "/planning/runs/new", duty: "planning.run" },
     { label: "Forecast", to: "/planning/forecast", duty: "planning.read" },
+    { label: "Allocation keys", to: "/planning/allocation-keys", duty: "planning.read" },
     { label: "Calculators", to: "/planning/calculators", duty: "planning.read" },
     { label: "Coverage groups", to: "/planning/coverage-groups", duty: "planning.read" },
     { label: "Item coverage", to: "/planning/item-coverages", duty: "planning.read" },
