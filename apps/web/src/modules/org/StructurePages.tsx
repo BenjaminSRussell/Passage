@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Alert, Button, Card, FormField, Input, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
 import {
   describeProblem,
@@ -27,6 +27,10 @@ import {
   setOperatingUnitStatus,
   setSiteStatus,
   setWarehouseStatus,
+  updateLocation,
+  updateOperatingUnit,
+  updateSite,
+  updateWarehouse,
   warehouseTypes,
   type LocationType,
   type OperatingUnitType,
@@ -36,6 +40,7 @@ import { withFreshRowOnConflict } from "./api/structure";
 import { useLegalEntity } from "./legalEntityContext";
 import { ScopedListPage, type ListControls } from "./pages";
 import styles from "./pages.module.css";
+import { EditAction } from "./RowEdit";
 import { StatusAction, useRows } from "./referenceParts";
 
 const dash = "—";
@@ -115,6 +120,32 @@ export function validateLocation({ warehouseId, code, name }: LocationValues): E
   });
 }
 
+// Edit forms: the name is required and a blank default (legal entity, warehouse) clears it. The service cannot clear a
+// time zone (it accepts only an IANA name), so the edit form requires one rather than silently dropping a blank.
+export function validateEditName({ name }: { name: string }): Errors<"name"> {
+  return compact({ name: checkName(name) });
+}
+
+function checkTimeZone(zone: string): string | undefined {
+  const message = "Enter an IANA time zone such as America/Detroit.";
+  if (zone.trim() === "") {
+    return message;
+  }
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: zone.trim() });
+    return undefined;
+  } catch {
+    return message;
+  }
+}
+
+export function validateEditZoned({ name, timeZone }: { name: string; timeZone: string }): Errors<"name" | "timeZone"> {
+  return compact({ name: checkName(name), timeZone: checkTimeZone(timeZone) });
+}
+
+// A trimmed text field, or undefined (left out of the request) when the user did not change it.
+const trimmed = (value: string | undefined) => (value === undefined ? undefined : value.trim());
+
 const label = (value: string) => value.replace(/_/g, " ");
 
 interface CreateFormProps<V, K extends string> {
@@ -188,10 +219,13 @@ function useEntityCode(): (id?: string) => string {
   return (id) => (id ? (entities.find((entity) => entity.id === id)?.code ?? id) : dash);
 }
 
-function EntityOptions() {
+// EntityOptions lists the active legal entities; current (an edit form's saved value) is kept as an option even when
+// it is no longer active, so the select shows what the row really holds.
+function EntityOptions({ current }: { current?: string }) {
   const { entities } = useLegalEntity();
   return (
     <>
+      {current && !entities.some((entity) => entity.id === current) ? <option value={current}>{current} (inactive)</option> : null}
       {entities.map((entity) => (
         <option key={entity.id} value={entity.id}>
           {entity.code} - {entity.name}
@@ -206,25 +240,33 @@ function statusColumns<T extends { id: string; code: string; status: string; ver
   controls: ListControls<T>,
   noun: string,
   write: { set(row: T, status: "active" | "inactive"): Promise<T>; get(row: T): Promise<T> },
+  edit?: (row: T, save: (change: () => Promise<T>) => Promise<void>) => ReactNode,
 ): DataTableColumn<T>[] {
   const columns: DataTableColumn<T>[] = [{ key: "status", header: "Status", render: (row) => <StatusPill status={row.status} /> }];
   if (canWrite) {
     columns.push({
       key: "actions",
       header: "Actions",
-      render: (row) => (
-        <StatusAction
-          subject={`${noun} ${row.code}`}
-          status={row.status as "active" | "inactive"}
-          apply={(next) =>
-            withFreshRowOnConflict(
-              () => write.set(row, next),
-              () => write.get(row),
-              (fresh) => controls.update((rows) => rows.map((item) => (item.id === row.id ? { ...item, ...fresh } : item))),
-            )
-          }
-        />
-      ),
+      render: (row) => {
+        const apply = (change: () => Promise<T>) =>
+          withFreshRowOnConflict(
+            change,
+            () => write.get(row),
+            // Replace the row, not merge into it: the service leaves a cleared default out of the response
+            // (omitempty), so a merge would keep showing the old default.
+            (fresh) => controls.update((rows) => rows.map((item) => (item.id === row.id ? fresh : item))),
+          );
+        return (
+          <div className={styles.rowActions}>
+            {edit ? edit(row, apply) : null}
+            <StatusAction
+              subject={`${noun} ${row.code}`}
+              status={row.status as "active" | "inactive"}
+              apply={(next) => apply(() => write.set(row, next))}
+            />
+          </div>
+        );
+      },
     });
   }
   return columns;
@@ -250,7 +292,39 @@ export function OperatingUnitsPage() {
         ...statusColumns(canWriteOperatingUnit, controls, "operating unit", {
           set: (row, status) => setOperatingUnitStatus(row.id, row.version, status),
           get: (row) => getOperatingUnit(row.id),
-        }),
+        }, (row, save) => (
+          <EditAction<{ name: string; defaultLegalEntityId: string }, "name" | "defaultLegalEntityId">
+            subject={`operating unit ${row.code}`}
+            initial={{ name: row.name, defaultLegalEntityId: row.defaultLegalEntityId ?? "" }}
+            validate={validateEditName}
+            fieldCodes={{
+              "ORG-OU-LEGAL-ENTITY-INVALID": { field: "defaultLegalEntityId", message: "Choose an active legal entity you can access." },
+            }}
+            save={(change) =>
+              save(() =>
+                updateOperatingUnit(row.id, row.version, {
+                  name: trimmed(change.name),
+                  defaultLegalEntityId: change.defaultLegalEntityId,
+                }),
+              )
+            }
+            fields={({ errors, text }) => (
+              <>
+                <FormField id={`ou-edit-name-${row.id}`} label="Name" error={errors.name}>
+                  {(control) => <Input {...control} {...text("name")} maxLength={120} />}
+                </FormField>
+                <FormField id={`ou-edit-le-${row.id}`} label="Default legal entity" optional error={errors.defaultLegalEntityId}>
+                  {(control) => (
+                    <Select {...control} {...text("defaultLegalEntityId")}>
+                      <option value="">None</option>
+                      <EntityOptions current={row.defaultLegalEntityId} />
+                    </Select>
+                  )}
+                </FormField>
+              </>
+            )}
+          />
+        )),
       ]}
       toolbar={({ reload }) =>
         canWriteOperatingUnit ? (
@@ -308,7 +382,12 @@ export function OperatingUnitsPage() {
 
 export function SitesPage() {
   const entityCode = useEntityCode();
-  const { canWriteSite } = useLegalEntity();
+  const { canWriteSite, scope } = useLegalEntity();
+  // Warehouses in the selected scope, for the default-warehouse choice (ALL needs the all-scope duty).
+  const warehouses = useRows(
+    (signal) => (scope === "" || !canWriteSite ? Promise.resolve([]) : listWarehouses(scope, { signal }).then((page) => page.items)),
+    `site-warehouses:${scope}:${canWriteSite}`,
+  );
   return (
     <ScopedListPage<Site>
       title="Sites"
@@ -325,7 +404,58 @@ export function SitesPage() {
         ...statusColumns(canWriteSite, controls, "site", {
           set: (row, status) => setSiteStatus(row.legalEntityId, row.id, row.version, status),
           get: (row) => getSite(row.legalEntityId, row.id),
-        }),
+        }, (row, save) => (
+          <EditAction<{ name: string; timeZone: string; defaultWarehouseId: string }, "name" | "timeZone" | "defaultWarehouseId">
+            subject={`site ${row.code}`}
+            initial={{ name: row.name, timeZone: row.timeZone, defaultWarehouseId: row.defaultWarehouseId ?? "" }}
+            validate={validateEditZoned}
+            fieldCodes={{
+              "ORG-SITE-DEFAULT-WAREHOUSE-INVALID": { field: "defaultWarehouseId", message: "Choose an active warehouse of this site." },
+            }}
+            save={(change) =>
+              save(() =>
+                updateSite(row.legalEntityId, row.id, row.version, {
+                  name: trimmed(change.name),
+                  timeZone: trimmed(change.timeZone),
+                  defaultWarehouseId: change.defaultWarehouseId,
+                }),
+              )
+            }
+            fields={({ errors, text }) => {
+              const choices = warehouses.rows.filter((wh) => wh.siteId === row.id && (wh.status === "active" || wh.id === row.defaultWarehouseId));
+              const current = row.defaultWarehouseId;
+              return (
+                <>
+                  <FormField id={`site-edit-name-${row.id}`} label="Name" error={errors.name}>
+                    {(control) => <Input {...control} {...text("name")} maxLength={120} />}
+                  </FormField>
+                  <FormField id={`site-edit-tz-${row.id}`} label="Time zone" hint="IANA name." error={errors.timeZone}>
+                    {(control) => <Input {...control} {...text("timeZone")} />}
+                  </FormField>
+                  <FormField
+                    id={`site-edit-wh-${row.id}`}
+                    label="Default warehouse"
+                    optional
+                    hint={warehouses.error ? `Warehouses could not be loaded (${warehouses.error.code}).` : undefined}
+                    error={errors.defaultWarehouseId}
+                  >
+                    {(control) => (
+                      <Select {...control} {...text("defaultWarehouseId")}>
+                        <option value="">None</option>
+                        {current && !choices.some((wh) => wh.id === current) ? <option value={current}>{current}</option> : null}
+                        {choices.map((wh) => (
+                          <option key={wh.id} value={wh.id}>
+                            {wh.code} - {wh.name}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
+                  </FormField>
+                </>
+              );
+            }}
+          />
+        )),
       ]}
       toolbar={({ reload }) =>
         canWriteSite ? (
@@ -397,7 +527,43 @@ export function WarehousesPage() {
         ...statusColumns(canWriteSite, controls, "warehouse", {
           set: (row, status) => setWarehouseStatus(row.legalEntityId, row.id, row.version, status),
           get: (row) => getWarehouse(row.legalEntityId, row.id),
-        }),
+        }, (row, save) => (
+          <EditAction<{ name: string; type: WarehouseType; timeZone: string }, "name" | "timeZone">
+            subject={`warehouse ${row.code}`}
+            initial={{ name: row.name, type: row.type, timeZone: row.timeZone }}
+            validate={validateEditZoned}
+            save={(change) =>
+              save(() =>
+                updateWarehouse(row.legalEntityId, row.id, row.version, {
+                  name: trimmed(change.name),
+                  type: change.type,
+                  timeZone: trimmed(change.timeZone),
+                }),
+              )
+            }
+            fields={({ errors, text }) => (
+              <>
+                <FormField id={`wh-edit-name-${row.id}`} label="Name" error={errors.name}>
+                  {(control) => <Input {...control} {...text("name")} maxLength={120} />}
+                </FormField>
+                <FormField id={`wh-edit-type-${row.id}`} label="Type">
+                  {(control) => (
+                    <Select {...control} {...text("type")}>
+                      {warehouseTypes.map((type) => (
+                        <option key={type} value={type}>
+                          {label(type)}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                </FormField>
+                <FormField id={`wh-edit-tz-${row.id}`} label="Time zone" hint="IANA name." error={errors.timeZone}>
+                  {(control) => <Input {...control} {...text("timeZone")} />}
+                </FormField>
+              </>
+            )}
+          />
+        )),
       ]}
       toolbar={({ reload }) =>
         canWriteSite ? (
@@ -490,7 +656,32 @@ export function LocationsPage() {
         ...statusColumns(canWriteSite, controls, "location", {
           set: (row, status) => setLocationStatus(row.legalEntityId, row.id, row.version, status),
           get: (row) => getLocation(row.legalEntityId, row.id),
-        }),
+        }, (row, save) => (
+          <EditAction<{ name: string; type: LocationType }, "name">
+            subject={`location ${row.code}`}
+            initial={{ name: row.name, type: row.type }}
+            validate={validateEditName}
+            save={(change) => save(() => updateLocation(row.legalEntityId, row.id, row.version, { name: trimmed(change.name), type: change.type }))}
+            fields={({ errors, text }) => (
+              <>
+                <FormField id={`loc-edit-name-${row.id}`} label="Name" error={errors.name}>
+                  {(control) => <Input {...control} {...text("name")} maxLength={120} />}
+                </FormField>
+                <FormField id={`loc-edit-type-${row.id}`} label="Type">
+                  {(control) => (
+                    <Select {...control} {...text("type")}>
+                      {locationTypes.map((type) => (
+                        <option key={type} value={type}>
+                          {label(type)}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                </FormField>
+              </>
+            )}
+          />
+        )),
       ]}
       toolbar={({ reload }) =>
         canWriteSite ? (

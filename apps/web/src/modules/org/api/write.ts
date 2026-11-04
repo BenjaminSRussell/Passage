@@ -52,6 +52,29 @@ export const getOperatingUnit = (id: string) => get<OperatingUnit>("/operating-u
 export const setOperatingUnitStatus = (id: string, version: number, status: RowStatus) =>
   patch<OperatingUnit>("/operating-units", id, { version, status });
 
+export interface OperatingUnitPatch {
+  name?: string;
+  defaultLegalEntityId?: string; // "" clears it
+}
+export const updateOperatingUnit = (id: string, version: number, change: OperatingUnitPatch) =>
+  patch<OperatingUnit>("/operating-units", id, { version, ...change });
+
+export interface SitePatch {
+  name?: string;
+  timeZone?: string;
+  defaultWarehouseId?: string; // "" clears it
+}
+export const updateSite = (legalEntityId: string, id: string, version: number, change: SitePatch) =>
+  scopedPatch<Site>(legalEntityId, "/sites", id, { version, ...change });
+
+export interface WarehousePatch {
+  name?: string;
+  type?: WarehouseType;
+  timeZone?: string;
+}
+export const updateWarehouse = (legalEntityId: string, id: string, version: number, change: WarehousePatch) =>
+  scopedPatch<Warehouse>(legalEntityId, "/warehouses", id, { version, ...change });
+
 export const createSite = (input: CreateSiteInput) => scopedPost<Site>(input.legalEntityId, "/sites", input);
 export const getSite = (legalEntityId: string, id: string) => scopedGet<Site>(legalEntityId, "/sites", id);
 export const setSiteStatus = (legalEntityId: string, id: string, version: number, status: RowStatus) =>
