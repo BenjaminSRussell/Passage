@@ -40,9 +40,17 @@ func newSigner(t *testing.T) ssh.Signer {
 // from the real file system under a temp dir; only the fixture's client key may log in.
 func newSSHFixture(t *testing.T) *sshFixture {
 	t.Helper()
-	host, client := newSigner(t), newSigner(t)
+	client := newSigner(t)
+	fx := newSSHFixtureForKey(t, client.PublicKey())
+	fx.clientKey = client
+	return fx
+}
+
+func newSSHFixtureForKey(t *testing.T, allowed ssh.PublicKey) *sshFixture {
+	t.Helper()
+	host := newSigner(t)
 	conf := &ssh.ServerConfig{PublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-		if string(key.Marshal()) == string(client.PublicKey().Marshal()) {
+		if string(key.Marshal()) == string(allowed.Marshal()) {
 			return nil, nil
 		}
 		return nil, os.ErrPermission
@@ -62,7 +70,7 @@ func newSSHFixture(t *testing.T) *sshFixture {
 			go serveSSH(conn, conf)
 		}
 	}()
-	return &sshFixture{addr: ln.Addr().String(), hostPrint: ssh.FingerprintSHA256(host.PublicKey()), clientKey: client, rootDir: t.TempDir()}
+	return &sshFixture{addr: ln.Addr().String(), hostPrint: ssh.FingerprintSHA256(host.PublicKey()), rootDir: t.TempDir()}
 }
 
 func serveSSH(conn net.Conn, conf *ssh.ServerConfig) {
