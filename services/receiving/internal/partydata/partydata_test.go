@@ -77,3 +77,39 @@ func TestSelfBillParties_FailsWhenAMasterAnswersAnError(t *testing.T) {
 		t.Fatal("a call without a principal succeeded")
 	}
 }
+
+func TestSelfBillParties_RefusesASupplierWithoutAnAddressAndPrefersTheInvoiceAddress(t *testing.T) {
+	var items string
+	party := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/party/vendors/") {
+			_, _ = w.Write([]byte(`{"partyId":"` + partyID + `"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"legalName":"Acme"}`))
+	}))
+	org := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/org/addresses":
+			_, _ = w.Write([]byte(`{"items":` + items + `}`))
+		case r.URL.Path == "/v1/org/legal-entities/"+leID:
+			_, _ = w.Write([]byte(`{"name":"Passage","country":"DE"}`))
+		}
+	}))
+	t.Cleanup(party.Close)
+	t.Cleanup(org.Close)
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: leID, UserID: "alice"})
+	c := partydata.New(party.URL, org.URL, nil)
+	items = `[]`
+	if _, err := c.SelfBillParties(ctx, leID, vendorID); err == nil {
+		t.Fatal("a supplier without an address produced a document")
+	}
+	items = `[{"countryCode":"","formatted":"x"}]`
+	if _, err := c.SelfBillParties(ctx, leID, vendorID); err == nil {
+		t.Fatal("a supplier address without a country produced a document")
+	}
+	items = `[{"countryCode":"FR","formatted":"Home","purposes":["home"]},{"countryCode":"DE","formatted":"Billing","purposes":["invoice"]}]`
+	got, err := c.SelfBillParties(ctx, leID, vendorID)
+	if err != nil || got.Supplier.Address != "Billing" || got.Supplier.Country != "DE" {
+		t.Fatalf("supplier %+v err %v", got.Supplier, err)
+	}
+}

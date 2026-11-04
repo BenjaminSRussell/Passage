@@ -86,7 +86,7 @@ func (a *API) applyERSTax(ctx context.Context, in *store.Invoice, parties domain
 		return domain.ErrTaxNotDetermined
 	}
 	country := parties.Customer.Country
-	if supplier := parties.Supplier.Country; supplier != "" && !strings.EqualFold(supplier, country) {
+	if supplier := parties.Supplier.Country; supplier == "" || !strings.EqualFold(supplier, country) {
 		return domain.ErrTaxNotDetermined
 	}
 	doc := domain.TaxDocument{Country: country, Currency: in.Currency, Date: in.InvoiceDate.Format(dateLayout)}

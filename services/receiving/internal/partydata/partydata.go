@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -78,8 +79,9 @@ func (c *Client) get(ctx context.Context, base, audience, duty, legalEntityID, p
 }
 
 type addressBody struct {
-	CountryCode string `json:"countryCode"`
-	Formatted   string `json:"formatted"`
+	CountryCode string   `json:"countryCode"`
+	Formatted   string   `json:"formatted"`
+	Purposes    []string `json:"purposes"`
 }
 
 type addressList struct {
@@ -88,12 +90,19 @@ type addressList struct {
 
 func (c *Client) partyAddress(ctx context.Context, legalEntityID, partyID string) (addressBody, error) {
 	var list addressList
-	path := "/v1/org/addresses?ownerType=party&ownerId=" + url.QueryEscape(partyID) + "&limit=1"
+	path := "/v1/org/addresses?ownerType=party&ownerId=" + url.QueryEscape(partyID) + "&limit=100"
 	if err := c.get(ctx, c.orgURL, orgAudience, dutyOrgRead, legalEntityID, path, &list); err != nil {
 		return addressBody{}, err
 	}
 	if len(list.Items) == 0 {
 		return addressBody{}, nil
+	}
+	for _, purpose := range []string{"invoice", "business"} {
+		for _, item := range list.Items {
+			if slices.Contains(item.Purposes, purpose) {
+				return item, nil
+			}
+		}
 	}
 	return list.Items[0], nil
 }
@@ -139,6 +148,9 @@ func (c *Client) SelfBillParties(ctx context.Context, legalEntityID, vendorID st
 	out := domain.SelfBillParties{
 		Supplier: domain.SelfBillParty{Name: supplierName, Address: supplierAddress.Formatted, Country: supplierAddress.CountryCode, RegistrationNumber: party.RegistrationNumber},
 		Customer: domain.SelfBillParty{Name: entity.Name, Address: customerAddress.Formatted, Country: entity.Country, RegistrationNumber: entity.RegistrationNumber},
+	}
+	if out.Supplier.Address == "" || out.Supplier.Country == "" {
+		return domain.SelfBillParties{}, errors.New("self-billing parties: the supplier has no address with a country in the org master")
 	}
 	if out.Supplier.Name == "" || out.Customer.Name == "" || out.Customer.Country == "" {
 		return domain.SelfBillParties{}, errors.New("self-billing parties: the party or legal entity master has no name or country")

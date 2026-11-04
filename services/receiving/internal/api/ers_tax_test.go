@@ -128,10 +128,13 @@ func TestErs_PartyMasterFailureAnswers503AndPostsNothing(t *testing.T) {
 func TestErs_SkipsAsTaxNotDeterminedInsteadOfIssuingAZeroTaxDocument(t *testing.T) {
 	foreign := testParties
 	foreign.Parties.Supplier.Country = "FR"
+	unknown := testParties
+	unknown.Parties.Supplier.Country = ""
 	cases := map[string]*rig{
-		"no tax service":          taxRig(nil, nil, testParties, true),
-		"no rule for the country": taxRig(domain.FakeTaxCalculator{Err: domain.ErrTaxNotDetermined}, nil, testParties, true),
-		"cross-border supplier":   taxRig(vat19(), &domain.FakeTaxRecorder{}, foreign, true),
+		"unknown supplier country": taxRig(vat19(), &domain.FakeTaxRecorder{}, unknown, true),
+		"no tax service":           taxRig(nil, nil, testParties, true),
+		"no rule for the country":  taxRig(domain.FakeTaxCalculator{Err: domain.ErrTaxNotDetermined}, nil, testParties, true),
+		"cross-border supplier":    taxRig(vat19(), &domain.FakeTaxRecorder{}, foreign, true),
 	}
 	for name, rg := range cases {
 		rg.enableErs(t, true)
@@ -204,4 +207,31 @@ func (f *flakyParties) SelfBillParties(ctx context.Context, le, vendor string) (
 		return domain.SelfBillParties{}, errors.New("party down")
 	}
 	return f.src.SelfBillParties(ctx, le, vendor)
+}
+
+type switchableTax struct{ err error }
+
+func (s *switchableTax) CalculateInput(ctx context.Context, le string, in domain.TaxDocument) (domain.TaxResult, error) {
+	if s.err != nil {
+		return domain.TaxResult{}, s.err
+	}
+	return vat19().CalculateInput(ctx, le, in)
+}
+
+func TestErs_ATaxNotDeterminedSkipLeavesTheReceiptForALaterRun(t *testing.T) {
+	tax := &switchableTax{err: domain.ErrTaxNotDetermined}
+	rg := taxRig(tax, &domain.FakeTaxRecorder{}, testParties, true)
+	rg.enableErs(t, true)
+	rg.posted(t, "PS-LATER", 10, 4)
+	if run := rg.ersRun(t, http.StatusOK); len(run.Settled) != 0 || len(run.Skipped) != 1 {
+		t.Fatalf("first run %+v", run)
+	}
+	evt := lastOfType(t, rg, api.ReceiptPostedType)
+	if err := rg.consume(evt); err != nil || grirStatus(t, rg) != "OPEN" {
+		t.Fatalf("the consumer consumed the receipt: %v %s", err, grirStatus(t, rg))
+	}
+	tax.err = nil
+	if run := rg.ersRun(t, http.StatusOK); len(run.Settled) != 1 {
+		t.Fatalf("a later run did not settle the receipt: %+v", run)
+	}
 }

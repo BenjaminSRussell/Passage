@@ -321,3 +321,26 @@ func TestServiceSheet_AcceptFailsWhenThePurchaseOrderCannotBeRead(t *testing.T) 
 		t.Fatalf("ledger %+v", rg.ledger.Entries)
 	}
 }
+
+func TestServiceSheet_AuditReleaseOfAnERSInvoicePostsTheDifferenceToExpense(t *testing.T) {
+	rg := newSheetRig(servicePO())
+	created := parseSheet(t, rg.sheetAs("alice", sheetBodyFor(sheetLine(1, "4", "2.5"))), http.StatusCreated)
+	accepted := parseSheet(t, rg.decideSheet(created.ID, "accept", "bob", ""), http.StatusOK)
+	repriced := servicePO()
+	repriced.Lines[0].UnitPrice = decimal.RequireFromString("3")
+	rg.orders[poID] = repriced
+	rg.enableErs(t, true)
+	rg.sampleRate(t, "100")
+	rg.confirmPrice(t, accepted.ReceiptID, 1, "3", http.StatusOK)
+	run := rg.ersRun(t, http.StatusOK)
+	if len(run.Settled) != 1 || run.Settled[0].Status != "AUDIT_BLOCKED" {
+		t.Fatalf("run %+v", run)
+	}
+	if code, body := rg.release(run.Settled[0].InvoiceID, "auditor"); code != http.StatusOK {
+		t.Fatalf("release %d %s", code, body)
+	}
+	wantLines(t, lastEntry(t, rg), "2100=10", "6000=2", "2000=-12")
+	if rg.ledger.Balance("1400").Sign() != 0 {
+		t.Fatalf("Inventory %s", rg.ledger.Balance("1400"))
+	}
+}

@@ -5,8 +5,10 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -235,5 +237,51 @@ func TestPostInvoice_ASelfBillFailureRollsTheInvoiceBack(t *testing.T) {
 	}
 	if n := scalar(t, db, `select count(*) from receiving_vendor_invoice where invoice_number = 'ERS-RCV-RB'`); n != "0" {
 		t.Fatalf("the invoice stayed posted without its self-bill")
+	}
+}
+
+func TestSelfBillCounter_IncrementsPerLegalEntityUnderForcedRLS(t *testing.T) {
+	db := seedInvoice(t)
+	seedOpenGrir(t, db)
+	if err := db.run(db.one, `insert into receiving_receipt_line (tenant_id, receipt_id, line_no, legal_entity_id, product_id, qty, unit_price, currency)
+		values ($1, $2, 2, $3, $4, 5, 2, 'USD')`, db.one.TenantID, receiptID, db.one.LegalEntityID, poID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.run(db.one, `insert into receiving_grir_open_item (tenant_id, id, legal_entity_id, receipt_id, line_no, received_qty, received_amount, currency, vendor_id, po_line_id)
+		values ($1, gen_random_uuid(), $2, $3, 2, 5, 10, 'USD', $4, $5)`, db.one.TenantID, db.one.LegalEntityID, receiptID, vendorID, poID); err != nil {
+		t.Fatal(err)
+	}
+	st := store.New(db.pool)
+	ctx := tenant.With(context.Background(), db.one)
+	for i, id := range []string{"00000000-0000-0000-0000-00000000c600", "00000000-0000-0000-0000-00000000c601"} {
+		held := fullInvoice(db, id, "ERS-CNT-"+id[len(id)-1:], domain.InvoiceSourceERS)
+		held.Lines[0].ReceiptLineNo = i + 1
+		if _, err := st.PostInvoice(ctx, held, holdFunc(t, db, held, true)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.ReleaseInvoice(ctx, id, db.one.LegalEntityID, "bob", func(inv store.Invoice) (store.InvoiceOutcome, error) {
+			return store.InvoiceOutcome{LedgerEntryID: "r" + id, Total: decimal.NewFromInt(10), Event: event(t, db.one, "vendorinvoice", "posted"), SelfBill: selfBillBuilder(t, db, inv)}, nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := st.GetSelfBill(ctx, id)
+		if want := store.SelfBillNumber(i + 1); err != nil || got.Number != want {
+			t.Fatalf("invoice %d numbered %q (%v), want %s", i, got.Number, err, want)
+		}
+	}
+	other := tenant.Principal{TenantID: db.one.TenantID, LegalEntityID: testkit.TenantID(8)}
+	for want := 1; want <= 2; want++ {
+		var got int
+		err := dbx.WithTenantTx(tenant.With(context.Background(), other), db.pool, func(tx pgx.Tx) error {
+			return tx.QueryRow(context.Background(), `INSERT INTO receiving_self_bill_counter (tenant_id, legal_entity_id, last_no) VALUES ($1, $2, 1)
+				ON CONFLICT (tenant_id, legal_entity_id) DO UPDATE SET last_no = receiving_self_bill_counter.last_no + 1 RETURNING last_no`,
+				other.TenantID, other.LegalEntityID).Scan(&got)
+		})
+		if err != nil || got != want {
+			t.Fatalf("second legal entity counter %d (%v), want %d", got, err, want)
+		}
+	}
+	if n := scalar(t, db, `select count(*) from receiving_self_bill_counter`); n != "1" {
+		t.Fatalf("legal entity one sees %s counters, want its own only", n)
 	}
 }
