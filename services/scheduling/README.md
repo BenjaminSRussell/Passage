@@ -273,6 +273,8 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | GET | `/v1/scheduling/capacity-load?period&from&weeks&days&resourceIds` | `scheduling.read` |
 | GET | `/v1/scheduling/capacity-load/jobs?resourceId&from&to` | `scheduling.read` |
 | GET | `/v1/scheduling/runs/{id}/kpis` | `scheduling.read` |
+| GET | `/v1/scheduling/runs/{id}/compare?to` (jobs added, removed and changed between two runs' snapshots; lists cut at 500, counts exact) | `scheduling.read` |
+| POST | `/v1/scheduling/runs/{id}:rollback` (Idempotency-Key; restores the jobs the run placed under a new run of scope `rollback`) | `scheduling.run` |
 | GET | `/v1/scheduling/late-orders?minLateMinutes&limit` | `scheduling.read` |
 | GET | `/v1/scheduling/dispatch-list?resourceId&date&days&startMinute&endMinute` | `scheduling.read` |
 | GET | `/v1/scheduling/order-imports?status&limit` | `scheduling.read` |
@@ -374,6 +376,10 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0140` | 412 | If-Match is stale: the scheduling parameters changed since they were read |
 | `SCHED-0141` | 403 | A move asked for `overrideConstraints` without the `scheduling.constraints.override` duty |
 | `SCHED-0142` | 422 | Operation change: an overlap quantity needs a quantity and cannot exceed it (BR-23.5) |
+| `SCHED-0143` | 422 | Run comparison or rollback: the run kept no job snapshot (a move run, or a run from before slice 29) |
+| `SCHED-0144` | 409 | Rollback: a job of the run overlaps a booking made since; nothing was changed |
+| `SCHED-0145` | 422 | Rollback: no job of the run can be restored (all firmed, or operation changed or gone, or resource gone) |
+| `SCHED-0146` | 409 | Rollback: a restored job would break a rule as the plan is now (open capacity, a block, the order's sequence and queue times, a peg, a changeover); nothing was changed, `errors` names the jobs |
 | `precondition_required` | 428 | A campaign command was sent without If-Match |
 
 A dry-run move never fails for a constraint: it returns `feasible: false` and

@@ -19,7 +19,7 @@ import (
 const (
 	resourceCols = "id::text, code, name, finite, time_zone, shifts, version, created_at, engineering_resource_id::text, efficiency_pct"
 	opCols       = "id::text, order_id::text, oper_number, minutes, due_at, ready_at, priority, candidate_resource_ids::text[], secondary_resource_ids::text[], setup_group, setup_minutes, queue_before_minutes, queue_after_minutes, quantity::text, overlap_quantity::text, attributes, network_id::text, status, created_at, version, updated_at"
-	runCols      = "id::text, scope, mode, direction, finite, algorithm, status, operations_count, makespan_minutes, total_lateness_minutes, solver_status, messages, warnings, created_at"
+	runCols      = "id::text, scope, mode, direction, finite, algorithm, status, operations_count, makespan_minutes, total_lateness_minutes, solver_status, messages, warnings, created_at, snapshot, rollback_of::text"
 )
 
 func scanResource(row pgx.Row, fp *string) (Resource, error) {
@@ -266,7 +266,7 @@ func scanRun(row pgx.Row, fp *string) (Run, error) {
 	var r Run
 	var msgs, warnings []byte
 	dest := []any{&r.ID, &r.Scope, &r.Mode, &r.Direction, &r.Finite, &r.Algorithm, &r.Status, &r.OperationsCount,
-		&r.MakespanMinutes, &r.TotalLatenessMinutes, &r.SolverStatus, &msgs, &warnings, &r.CreatedAt}
+		&r.MakespanMinutes, &r.TotalLatenessMinutes, &r.SolverStatus, &msgs, &warnings, &r.CreatedAt, &r.Snapshot, &r.RollbackOf}
 	if fp != nil {
 		dest = append([]any{fp}, dest...)
 	}
@@ -295,10 +295,10 @@ func insertRun(ctx context.Context, tx pgx.Tx, r *Run, idem Idem) error {
 		return err
 	}
 	return tx.QueryRow(ctx, `insert into schedule_run (tenant_id, id, scope, mode, direction, finite, algorithm, status, operations_count,
-		makespan_minutes, total_lateness_minutes, messages, warnings, idempotency_key, idempotency_fingerprint, finished_at)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now()) returning created_at`,
+		makespan_minutes, total_lateness_minutes, messages, warnings, idempotency_key, idempotency_fingerprint, finished_at, snapshot, rollback_of)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now(), $16, $17) returning created_at`,
 		tenantOf(ctx), r.ID, r.Scope, r.Mode, r.Direction, r.Finite, r.Algorithm, r.Status, r.OperationsCount,
-		r.MakespanMinutes, r.TotalLatenessMinutes, msgs, warnings, nullable(idem.Key), nullable(idem.Fingerprint)).Scan(&r.CreatedAt)
+		r.MakespanMinutes, r.TotalLatenessMinutes, msgs, warnings, nullable(idem.Key), nullable(idem.Fingerprint), r.Snapshot, r.RollbackOf).Scan(&r.CreatedAt)
 }
 
 // GetRun returns one schedule run.

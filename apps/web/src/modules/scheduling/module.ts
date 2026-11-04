@@ -31,6 +31,7 @@ import { OrderPegsPage } from "./OrderPegsPage";
 import { ParametersPage } from "./ParametersPage";
 import { ResourceDetailPage } from "./ResourceDetailPage";
 import { ResourcesPage } from "./ResourcesPage";
+import { RunComparePage } from "./RunComparePage";
 import { RunDetailPage } from "./RunDetailPage";
 import { RunsPage } from "./RunsPage";
 import { NewSetupMatrixPage } from "./NewSetupMatrixPage";
@@ -42,7 +43,7 @@ const scheduling: PassageModule = {
   id: "scheduling",
   title: "Scheduling",
   description:
-    "Finite capacity scheduling: the Gantt workspace, schedule runs, capacity load by week or day with its job drill-down, late orders, the dispatch list of a resource for a day or shift, production orders received from wave 21, run utilization and lateness measures, resources, operations (change, delete, take an order off the schedule), order pegs, campaigns and campaign proposals, setup matrices, cleanout rules, resource networks, capacity blocks, capacity overrides (downtimes and extra shifts) and the scheduling parameters (run defaults, drag snap, propagation limits).",
+    "Finite capacity scheduling: the Gantt workspace, schedule runs, capacity load by week or day with its job drill-down, late orders, the dispatch list of a resource for a day or shift, production orders received from wave 21, run utilization and lateness measures, run comparison and rollback to a previous run, resources, operations (change, delete, take an order off the schedule), order pegs, campaigns and campaign proposals, setup matrices, cleanout rules, resource networks, capacity blocks, capacity overrides (downtimes and extra shifts) and the scheduling parameters (run defaults, drag snap, propagation limits).",
   routes: [
     { path: "/scheduling", element: createElement(WorkspacePage), handle: { title: "Scheduling workspace" } },
     { path: "/scheduling/load", element: createElement(CapacityLoadPage), handle: { title: "Capacity load" } },
@@ -52,6 +53,7 @@ const scheduling: PassageModule = {
     { path: "/scheduling/runs", element: createElement(RunsPage), handle: { title: "Schedule runs" } },
     { path: "/scheduling/runs/new", element: createElement(NewRunPage), handle: { title: "Start a schedule run" } },
     { path: "/scheduling/runs/:id", element: createElement(RunDetailPage), handle: { title: "Schedule run" } },
+    { path: "/scheduling/runs/:id/compare", element: createElement(RunComparePage), handle: { title: "Compare schedule runs" } },
     { path: "/scheduling/resources", element: createElement(ResourcesPage), handle: { title: "Resources" } },
     { path: "/scheduling/resources/new", element: createElement(NewResourcePage), handle: { title: "New resource" } },
     { path: "/scheduling/resources/:id", element: createElement(ResourceDetailPage), handle: { title: "Resource" } },

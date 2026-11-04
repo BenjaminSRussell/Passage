@@ -789,6 +789,68 @@ stays a later column) or shown on the Gantt bar; the quantity is entered on the
 operation, not fed from the production order event yet (wave 21 carries the
 quantity); the pegs between orders use the parent's end, not a transfer batch.
 
+## Slice 29: run comparison and rollback to a previous run (PRD 4.23.14)
+
+Slice 29 keeps what each run placed and builds on it. Every `POST /runs`,
+`:schedule` and rollback run writes a snapshot of the jobs it placed (one row
+per segment in `schedule_run_job`, with the changeover, lateness, secondary
+resources and the operation's version) in the run's own transaction;
+`Run.snapshot` says whether one exists.
+Gantt move runs and runs from before this slice have none (`snapshot: false`).
+`GET /runs/{id}/compare?to=` diffs two snapshots by job: `added` (only the other
+run placed it), `removed` (only the base run did) and `changed` (a different
+resource, start or end) with start and end shifts and the lateness change in
+minutes, plus each side's figures (jobs, orders, late jobs, total and maximum
+lateness, changeover, makespan, and the utilization the PRD's run comparison
+names: booked over open minutes of the resources the run booked, primary and
+secondary, over its own span, calendars as they are now). Counts are exact;
+each list is cut at 500 (`truncated`). Runs of a different scope or horizon are
+compared as they are (a job only one selected is added or removed); the page
+warns when the scopes differ. `POST /runs/{id}:rollback` (duty `scheduling.run`, Idempotency-Key)
+restores the jobs a run placed as the current plan under a new run of scope
+`rollback` (`rollbackOf` names the restored run, and it keeps its own snapshot):
+the current non-firmed jobs of those operations are replaced in one transaction;
+firmed jobs, jobs whose operation or resource no longer exists, and jobs whose
+operation was changed or re-imported since the run (`operation_changed`: its
+version moved, so the old placement has the wrong minutes, candidates, queue
+times, overlap or due date) are skipped and listed in `skipped`; operations the
+run did not place keep their jobs (a later order is not taken off the plan). The
+plan the rest would leave is then checked as it is now, and any break refuses
+the whole rollback with nothing changed: a restored job that overlaps a booking
+made since (409 SCHED-0144, the exclusion constraints on every segment, primary
+and secondary), or 409 SCHED-0146 (`errors` maps up to 50 jobs to the first rule
+each breaks) for a restored segment outside open capacity or in a block the job
+does not match (the Gantt's own outsideCapacity and blockBreach test, so a
+downtime or calendar change since counts), a restored job out of sequence with
+the job of a neighbouring operation of its order (queue times and overlap
+release included; this is what a firmed or changed operation left in place
+between restored ones trips), a peg to or from a restored order whose dependent
+would start before its parent ends or behind an unplaced parent, or a changeover
+on a finite resource with a setup matrix that no longer covers the step into or
+out of a restored job. Only breaks that involve a restored job are listed. No
+restorable job is 422 SCHED-0145; a run without a snapshot is 422 SCHED-0143.
+The rollback locks the operations of every order the run placed in order id and
+operation number order, the order `POST /runs` and `:schedule` lock in, so a
+rollback and a concurrent run serialize rather than deadlock. It publishes `job.scheduled`, `orderdates.changed`
+and `run.completed` (scope `rollback`, `rolledBackToRunId`) through the outbox.
+Migration `0021_run_snapshots.sql`: `schedule_run.snapshot` and `rollback_of`, the
+scope check gains `rollback`, new table `schedule_run_job` (tenant and RLS policy,
+`GRANT SELECT, INSERT` to `passage_app`: the store only inserts and reads it).
+Web: the run detail page has Compare with another run and Roll back to this run
+(confirmation, skipped jobs listed, refusals shown); a new compare page at
+`/scheduling/runs/:id/compare` picks the other run and shows the measures side by
+side with the moved, added and dropped jobs. The OpenAPI and AsyncAPI specs have
+no FAIL lines on the doc gates.
+
+| Item | Status | Reason |
+|---|---|---|
+| `policies/authz/data.json`: resource row `/v1/scheduling/runs/*/compare` (GET) under `scheduling.read` and resource row `/v1/scheduling/runs/*:rollback` (POST) under `scheduling.run` | handoff - main session (authz seed) | Existing duties; only the route rows are new. Until seeded the compare page and the Roll back button answer 403. |
+| Retention of `schedule_run_job` (it grows by the placed segments of every run) | later slice of PSG-23 | Nothing prunes old snapshots; a site run of 5,000 operations adds a few thousand rows. A keep-the-last-N-runs job needs the job runner (FR-23.11). |
+| Snapshots of Gantt moves, and of runs before this slice | later slice of PSG-23 | A move changes one order's jobs; rolling back to one is not defined. Older runs stay as history rows only. |
+| Rollback of operations the run left unplaced, and a rollback that also moves jobs of other operations out of the way | later slice of PSG-23 | Only the jobs the run placed are restored; an overlap with a booking made since, or a SCHED-0146 break, refuses the rollback instead of re-planning around it. |
+| Rollback re-checks not done: resource efficiency changed since the run (job lengths), network transfer time and maximum wait (BR-23.11), a setup matrix version that changed between the run's day and the restored jobs' day, and jobs restored into the past | later slice of PSG-23 | The checks above cover what the Gantt flags and what runs and moves refuse; efficiency and network waits are not flagged on existing jobs either, and runs themselves accept a start in the past. |
+| Network feasibility report (4.23.14) | later slice of PSG-23 | Not part of this slice. |
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
@@ -857,7 +919,8 @@ quantity); the pegs between orders use the parent's end, not a transfer batch.
 | Order header data on bars and late orders (item, quantity) | handoff — wave 21 | Bars and late orders carry the order id, operation counts and dates only. |
 | Block utilization inquiry (4.23.14) | built (slice 5) | `GET /resources/{id}/block-utilization` per resource and range, shown on the resource detail screen. A cross-resource report screen with period totals is not built; the inquiry is per resource. |
 | Resource utilization and changeover time of a run (4.23.14) | built (slice 17) | `GET /runs/{id}/kpis` and the Plan measures card on the run detail; they describe the jobs the run still holds. |
-| Run comparison and network feasibility reports (4.23.14) | later slice of PSG-23 | Comparison needs per-run snapshots of the jobs, which a run replaces; not stored. |
+| Run comparison (4.23.14) | built (slice 29) | `GET /runs/{id}/compare`, per-run snapshots in `schedule_run_job`; see the slice 29 section. |
+| Network feasibility report (4.23.14) | later slice of PSG-23 | |
 | Dispatch list (4.23.15) | built (slice 25) as an inquiry and a printable page | See the slice 25 section; a PDF template and the kiosk view are handoffs. |
 | Gantt print, campaign sheet, cleanout record documents (4.23.15) | later slice of PSG-23 | No document templates yet. |
 | Feature flags `scheduling.cp-sat`, `scheduling.propagate-dependents`; config `SCHED_OPT_TIME_LIMIT_S` | later slice of PSG-23 | No flag client; CP-SAT is chosen per campaign with its sequence rule and switched off by leaving `SCHED_OPT_URL` empty, propagation is chosen per move with `propagate`, and the campaign solver limit is fixed at 20 s. |
@@ -865,7 +928,7 @@ quantity); the pegs between orders use the parent's end, not a transfer batch.
 | Site parameters per site; resource selection rule, safety/queue time, horizon days and the default start | later slice of PSG-23 (per-site parameters are a handoff to wave 9, sites) | The parameters are one row per tenant. Selection stays least finish, no default safety or queue time is added (queue times are per operation, slice 27), and the horizon is `SCHED_HORIZON_DAYS`. |
 | Extension points `scheduling.constraint`, `scheduling.objective` | later slice of PSG-23 | |
 | `ScheduledJob.overlap_qty` (the overlap lives on the operation since slice 28); `ScheduleRun.time_limit_s`, `started_at`, `objective_value` | later slice of PSG-23 | Columns arrive with the features that fill them. |
-| Rollback by re-pointing to a previous run | later slice of PSG-23 | A run replaces the jobs it schedules; earlier runs stay as history rows only. |
+| Rollback by re-pointing to a previous run | built (slice 29) | `POST /runs/{id}:rollback` restores the run's snapshot under a new run; see the slice 29 section. |
 | Optimistic version check on moves (If-Match) | later slice of PSG-23 | Moves lock the order's operations and the exclusion constraint refuses concurrent bookings, so a stale screen gets a fresh preview rather than a silent overwrite; resources now have an If-Match update (slice 13), moves still do not take If-Match. |
 | scheduler-opt KEDA scale-to-zero and the `scheduling-db` CloudNativePG cluster | handoff — deploy owner | Charts ship the deployment and service only. |
 | Playwright Gantt move + propagate test (4.23.9) | later slice of PSG-23 | Covered by the store move and propagation tests and the page tests. |

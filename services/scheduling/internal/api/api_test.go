@@ -79,6 +79,9 @@ type fakeStore struct {
 	lastRun store.RunRequest
 	// slice 26
 	overridden []store.Violation
+	// slice 29
+	lastCompare  [2]string
+	lastRollback string
 }
 
 func (f *fakeStore) CreateResource(_ context.Context, in store.Resource, _ store.Idem) (store.Resource, bool, error) {

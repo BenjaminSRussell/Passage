@@ -47,6 +47,8 @@ type RunCompletedData struct {
 	MakespanMinutes      int     `json:"makespanMinutes"`
 	TotalLatenessMinutes int     `json:"totalLatenessMinutes"`
 	SolverStatus         *string `json:"solverStatus"`
+	// RolledBackToRunID is the run a rollback restored (scope rollback only).
+	RolledBackToRunID string `json:"rolledBackToRunId,omitempty"`
 }
 
 // JobScheduledData is one placed operation. ChangeoverMinutes is the

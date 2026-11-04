@@ -209,6 +209,9 @@ func (a *API) Register(r chi.Router) {
 	// Slice 17: run measures and the late orders inquiry (PRD 4.23.14).
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/runs/{id}/kpis", a.runKPIs)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/late-orders", a.lateOrders)
+	// Slice 29: run comparison and rollback to a previous run (PRD 4.23.14).
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/runs/{id}/compare", a.compareRuns)
+	r.With(authz.RequireDuty(dutyRun)).Post("/v1/scheduling/runs/{id}:rollback", a.rollbackRun)
 	// Slice 25: the dispatch list of a resource for a day or shift (PRD 4.23.15).
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/dispatch-list", a.dispatchList)
 

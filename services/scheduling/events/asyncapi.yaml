@@ -318,11 +318,12 @@ components:
       required: [runId, scope, operations, makespanMinutes, totalLatenessMinutes]
       properties:
         runId: { type: string, format: uuid }
-        scope: { type: string, enum: [site, selection, order] }
+        scope: { type: string, enum: [site, selection, order, rollback] }
         operations: { type: integer }
         makespanMinutes: { type: integer }
         totalLatenessMinutes: { type: integer }
         solverStatus: { type: [string, 'null'] }
+        rolledBackToRunId: { type: string, format: uuid, description: The run a rollback restored; present for scope rollback only. }
     JobScheduledData:
       type: object
       required: [jobId, orderId, operNumber, orderRef, operationRef, resourceId, start, end, changeoverMinutes, runId, firmed]

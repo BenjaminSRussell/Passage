@@ -143,6 +143,12 @@ type Run struct {
 	Messages             []string     `json:"messages"`
 	Warnings             []RunWarning `json:"warnings"`
 	CreatedAt            time.Time    `json:"createdAt"`
+	// Snapshot is true when the jobs the run placed were kept (slice 29), so
+	// the run can be compared and rolled back to. Move runs and runs from
+	// before slice 29 have none.
+	Snapshot bool `json:"snapshot"`
+	// RollbackOf is the run a rollback restored; nil for other runs.
+	RollbackOf *string `json:"rollbackOf"`
 }
 
 // Bar is one segment of a scheduled job, as drawn on the Gantt. The first
@@ -307,6 +313,7 @@ type Store interface {
 	LoadStore
 	DispatchStore
 	RunKPIStore
+	RunSnapshotStore
 	SetupStore
 	PegStore
 	OverrideStore
@@ -479,8 +486,11 @@ func (s *Postgres) RunSchedule(ctx context.Context, req RunRequest, idem Idem) (
 		run := Run{ID: ids.New(), Scope: req.Scope, Mode: req.Mode, Direction: direction, Finite: req.Finite, Algorithm: "heuristic",
 			Status: "completed", OperationsCount: len(todo), MakespanMinutes: domain.Makespan(res.Placements),
 			TotalLatenessMinutes: domain.TotalLateness(res.Placements), Messages: unplacedMessages(res.Unplaced),
-			Warnings: runWarnings(res.Warnings)}
+			Warnings: runWarnings(res.Warnings), Snapshot: true}
 		if err := insertRun(ctx, tx, &run, idem); err != nil {
+			return err
+		}
+		if err := writeSnapshot(ctx, tx, run.ID, res.Placements); err != nil {
 			return err
 		}
 		rowFinite := finite

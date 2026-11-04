@@ -144,7 +144,7 @@ export interface RunWarning {
 
 export interface Run {
   id: string;
-  scope: "site" | "selection" | "order" | "move";
+  scope: "site" | "selection" | "order" | "move" | "rollback";
   mode: string;
   direction: string;
   finite: boolean;
@@ -159,6 +159,10 @@ export interface Run {
   /** Findings on placed operations (SCHED-0010, SCHED-0012, SCHED-0014). */
   warnings: RunWarning[];
   createdAt: string;
+  /** True when the run kept its jobs, so it can be compared and rolled back to (slice 29). */
+  snapshot?: boolean;
+  /** The run a rollback restored; null for other runs. */
+  rollbackOf?: string | null;
 }
 
 export interface NewRun {
@@ -1241,4 +1245,79 @@ export function updateParameters(version: number, patch: SchedulingParametersPat
     headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
     body: JSON.stringify(patch),
   });
+}
+
+// Slice 29: run comparison and rollback to a previous run (PRD 4.23.14).
+
+export interface RunCompareJob {
+  jobId: string;
+  orderId: string;
+  operNumber: number;
+  resourceId: string;
+  start: string;
+  end: string;
+  lateMinutes: number;
+}
+
+export interface RunCompareChange {
+  jobId: string;
+  orderId: string;
+  operNumber: number;
+  fromResourceId: string;
+  toResourceId: string;
+  fromStart: string;
+  toStart: string;
+  fromEnd: string;
+  toEnd: string;
+  /** The other run minus the base run, in minutes; negative when earlier. */
+  startShiftMinutes: number;
+  endShiftMinutes: number;
+  lateDeltaMinutes: number;
+}
+
+export interface RunMeasures {
+  jobs: number;
+  orders: number;
+  lateJobs: number;
+  totalLateMinutes: number;
+  maxLateMinutes: number;
+  changeoverMinutes: number;
+  makespanMinutes: number;
+  /** Minutes booked on the run's resources (primary and secondary) and their open minutes over the run's span. */
+  bookedMinutes: number;
+  openMinutes: number;
+  utilizationPct: number;
+}
+
+export interface RunComparison {
+  base: { run: Run; measures: RunMeasures };
+  other: { run: Run; measures: RunMeasures };
+  addedCount: number;
+  removedCount: number;
+  changedCount: number;
+  unchangedCount: number;
+  added: RunCompareJob[];
+  removed: RunCompareJob[];
+  changed: RunCompareChange[];
+  /** True when a list was cut at 500 entries; the counts stay exact. */
+  truncated: boolean;
+}
+
+export interface RunRollback {
+  run: Run;
+  restored: number;
+  skipped: { jobId: string; reason: "firmed" | "operation_missing" | "operation_changed" | "resource_missing" }[];
+}
+
+export async function compareRuns(id: string, to: string, signal?: AbortSignal): Promise<RunComparison> {
+  const body = await send<Partial<RunComparison>>(`/runs/${encodeURIComponent(id)}/compare${query({ to })}`, {}, signal);
+  if (!body.base || !body.other || !Array.isArray(body.changed)) {
+    throw new SchedulingApiError(0, "COM-0001", "The response is not a run comparison");
+  }
+  return body as RunComparison;
+}
+
+/** Restores the jobs a previous run placed as the current plan (POST /runs/{id}:rollback). */
+export function rollbackRun(id: string, key: string = newKey()): Promise<RunRollback> {
+  return post<RunRollback>(`/runs/${encodeURIComponent(id)}:rollback`, {}, key);
 }
