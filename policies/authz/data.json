@@ -1535,8 +1535,10 @@
       {"resource": "/v1/service/technicians/*", "methods": ["GET"]},
       {"resource": "/v1/service/dispatch/board", "methods": ["GET"]},
       {"resource": "/v1/service/dispatch/runs", "methods": ["GET"]},
-      {"resource": "/v1/service/dispatch/runs/*", "methods": ["GET"]}
+      {"resource": "/v1/service/dispatch/runs/*", "methods": ["GET"]},
+      {"resource": "/v1/service/work-orders/*/actions", "methods": ["GET"]}
     ]},
+    "SvcTechnician": {"permissions": [{"resource": "/v1/service/work-orders/*/actions", "methods": ["POST"]}]},
     "SvcDispatch": {"permissions": [
       {"resource": "/v1/service/technicians", "methods": ["POST"]},
       {"resource": "/v1/service/technicians/*", "methods": ["PUT"]},
