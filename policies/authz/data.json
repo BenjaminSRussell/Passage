@@ -2457,7 +2457,8 @@
       {"resource": "/v1/pricing/commission/sales-groups", "methods": ["GET"]},
       {"resource": "/v1/pricing/commission/sales-groups/*", "methods": ["GET"]},
       {"resource": "/v1/pricing/commission/settlement-export", "methods": ["GET"]},
-      {"resource": "/v1/pricing/commission/transactions", "methods": ["GET"]}
+      {"resource": "/v1/pricing/commission/transactions", "methods": ["GET"]},
+      {"resource": "/v1/pricing/commission/reps/*/statement", "methods": ["GET"]}
     ]},
     "pricing.fund.maintain": {"permissions": [
       {"resource": "/v1/pricing/funds", "methods": ["GET", "POST"]},
