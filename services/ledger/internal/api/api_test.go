@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,13 +45,15 @@ type fakeStore struct {
 	batchPage    []store.Batch
 	clearingPage []store.ClearingDocument
 	posted       []store.PostInput
-	reversed     []store.ReverseInput
-	err          error
-	replay       bool
-	accounts     []store.Account
-	validate     domain.Result
-	reasons      []store.ReasonCode
-	created      bool
+	// postedServices is the principal's verified service (the store's posted_by_service) for each PostEntry call.
+	postedServices []string
+	reversed       []store.ReverseInput
+	err            error
+	replay         bool
+	accounts       []store.Account
+	validate       domain.Result
+	reasons        []store.ReasonCode
+	created        bool
 	// balanceFilter is the last trial balance filter the handler passed down.
 	balanceFilter store.BalanceFilter
 	// trial is what TrialBalance returns.
@@ -154,8 +157,10 @@ func (f *fakeStore) GetLedger(context.Context, string) (store.Ledger, error) {
 	return store.Ledger{ID: testLedger}, f.err
 }
 
-func (f *fakeStore) PostEntry(_ context.Context, in store.PostInput) (store.EntryResult, error) {
+func (f *fakeStore) PostEntry(ctx context.Context, in store.PostInput) (store.EntryResult, error) {
 	f.posted = append(f.posted, in)
+	p, _ := tenant.FromContext(ctx)
+	f.postedServices = append(f.postedServices, p.Service)
 	if f.err != nil {
 		return store.EntryResult{}, f.err
 	}
@@ -713,7 +718,13 @@ func TestTrialBalance_ExcludeYearEndClosingOption(t *testing.T) {
 	if rec := call(h, http.MethodGet, base, "", dutyBalanceRead, nil); rec.Code != http.StatusOK || fs.balanceFilter.ExcludeYearEndClosing {
 		t.Fatalf("the option is off by default: %d %+v", rec.Code, fs.balanceFilter)
 	}
-	for _, q := range []string{"&exclude_year_end_closing=false", "&exclude_year_end_closing=1", "&exclude_year_end_closing=true&group_by=CC", "&exclude_year_end_closing=true&dim.DEPT=D1"} {
+	if rec := call(h, http.MethodGet, base+"&exclude_year_end_closing=false", "", dutyBalanceRead, nil); rec.Code != http.StatusOK || fs.balanceFilter.ExcludeYearEndClosing {
+		t.Fatalf("false is the boolean default and must be accepted: %d %+v", rec.Code, fs.balanceFilter)
+	}
+	if rec := call(h, http.MethodGet, base+"&exclude_year_end_closing=false&group_by=CC", "", dutyBalanceRead, nil); rec.Code != http.StatusOK {
+		t.Fatalf("false combines with group_by: %d", rec.Code)
+	}
+	for _, q := range []string{"&exclude_year_end_closing=1", "&exclude_year_end_closing=yes", "&exclude_year_end_closing=true&group_by=CC", "&exclude_year_end_closing=true&dim.DEPT=D1"} {
 		if rec := call(h, http.MethodGet, base+q, "", dutyBalanceRead, nil); rec.Code != http.StatusBadRequest {
 			t.Fatalf("%s must be refused, got %d", q, rec.Code)
 		}

@@ -198,3 +198,20 @@ func TestNarrowHumanPostDutiesEachOpenOneRoute(t *testing.T) {
 		}
 	}
 }
+
+// The store writes posted_by_service from the principal's verified service; the issuer of the token must reach it, and
+// a forwarded header or an end user must never set it (#469).
+func TestPostedByServiceIsTheVerifiedTokenIssuer(t *testing.T) {
+	rig := newTokenRig(t)
+	token, _ := rig.receiving.Mint("ledger", endUser(), "")
+	if rec := serviceCall(rig.handler, http.MethodPost, "/v1/ledger/journal-entries", entryBody, token, map[string]string{"X-Passage-Service": "close"}); rec.Code != http.StatusCreated {
+		t.Fatalf("post status %d: %s", rec.Code, rec.Body.String())
+	}
+	rec := call(rig.handler, http.MethodPost, "/v1/ledger/journal-entries", entryBody, dutyPost, map[string]string{"X-Passage-Service": "close", "Idempotency-Key": "end-user-key-1"})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("end-user post status %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rig.store.postedServices; len(got) != 2 || got[0] != "receiving" || got[1] != "" {
+		t.Fatalf("posted_by_service = %q, want [receiving, \"\"]", got)
+	}
+}
