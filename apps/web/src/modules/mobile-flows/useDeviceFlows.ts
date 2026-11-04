@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { DEFAULT_MENU_ID, fetchMenu, subscribePublishes, type SubscribePublishesDeps } from "./api/client";
 import { CORE_FLOWS } from "./domain/coreFlows";
 import type { FlowDraft } from "./domain/flowGraph";
@@ -27,15 +27,17 @@ export function useDeviceFlows(opts: UseDeviceFlowsOpts = {}): DeviceFlows {
   const pollMs = opts.pollMs ?? MENU_POLL_MS;
   const [state, setState] = useState<DeviceFlows>({ flows: fallback, source: "bundled" });
 
-  const latestRequest = useRef(0);
-
   useEffect(() => {
     let cancelled = false;
+    let next = 0;
+    let applied = 0;
     const load = () => {
-      const request = ++latestRequest.current;
+      const request = ++next;
       return fetchMenu(menuId).then(
         (menu) => {
-          if (!cancelled && request === latestRequest.current) setState({ flows: publishedDrafts(menu.flows), source: "menu" });
+          if (cancelled || request <= applied) return;
+          applied = request;
+          setState({ flows: publishedDrafts(menu.flows), source: "menu" });
         },
         () => {
           /* Keep whatever is on the device: bundled at start, last menu after a blip. */

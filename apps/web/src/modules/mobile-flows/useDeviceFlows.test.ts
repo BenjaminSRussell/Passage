@@ -19,7 +19,7 @@ const v2 = {
       status: "PUBLISHED",
       steps: [
         ...RECEIVE_PUTAWAY_FLOW.steps.slice(0, 2),
-        { id: "confirm_lot", type: "scan", prompt: "Scan the lot", expectedScan: ["ANY"], next: { default: "confirm_putaway" } } satisfies FlowStep,
+        { id: "confirm_lot", type: "scan", prompt: "Scan the lot", expectedScan: ["LOT"], next: { default: "confirm_putaway" } } satisfies FlowStep,
         RECEIVE_PUTAWAY_FLOW.steps[2],
       ],
     },

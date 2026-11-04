@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Alert, Button, Card, FormField, Input, PageHeader, Select, Textarea } from "../../shell/ui";
-import { describeFlowError, publishFlow, saveDraft } from "./api/client";
+import { describeFlowError, FlowApiError, publishFlow, saveDraft } from "./api/client";
 import { CORE_FLOWS, RECEIVE_PUTAWAY_FLOW } from "./domain/coreFlows";
 import { type FlowDraft, type GraphIssue, validateFlow } from "./domain/flowGraph";
 import { checkScan, type Classified, classifyScan, type ScanClass, type ScanVerdict } from "./domain/gs1";
@@ -66,6 +66,9 @@ export function FlowDesigner() {
       savedDraft.current = null;
       setMessage(`Published ${published.code} version ${published.version}. Devices pick this up within 60 s, with no app update.`);
     } catch (e) {
+      if (e instanceof FlowApiError && (e.status === 409 || e.status === 412)) {
+        savedDraft.current = null;
+      }
       setFailure(describeFlowError(e));
     } finally {
       setBusy(false);

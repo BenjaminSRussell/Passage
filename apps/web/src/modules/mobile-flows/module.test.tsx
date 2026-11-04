@@ -119,4 +119,31 @@ describe("mobile-flows module", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("saves a new draft after a 412 so the next Publish does not reuse a stale If-Match", async () => {
+    let publishes = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/flows") && init?.method === "POST") {
+        return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), flowId: "flow-1", version: 2, status: "DRAFT" }), { status: 200 });
+      }
+      if (url.includes(":publish")) {
+        publishes += 1;
+        if (publishes === 1) return new Response(JSON.stringify({ detail: "version mismatch" }), { status: 412 });
+        return new Response(JSON.stringify({ code: "RECEIVE_PUTAWAY", flowId: "flow-1", version: 2, status: "PUBLISHED", entryStepId: "scan_lp", steps: [] }), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(createElement(MemoryRouter, null, mobileFlows.routes[0].element));
+      fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+      expect(await findAlert()).toHaveTextContent("version mismatch");
+      fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+      expect(await screen.findByRole("status")).toHaveTextContent("Published RECEIVE_PUTAWAY version 2");
+      expect(fetchMock.mock.calls.filter((c) => String(c[0]).endsWith("/flows") && c[1]?.method === "POST")).toHaveLength(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

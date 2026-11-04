@@ -157,8 +157,11 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID }:
   function restart() {
     if (!flow) return;
     const next = latestGraph(menuRef.current, flow);
-    setFlow(next);
-    const started = startFlow(next, Date.now());
+    if (next !== flow) {
+      setFlow(next);
+      return;
+    }
+    const started = startFlow(flow, Date.now());
     if (started.ok) setRunner(started.state);
   }
 
