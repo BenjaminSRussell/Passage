@@ -2,11 +2,11 @@
   "criterion": "AC1",
   "issue": 10,
   "budget": "30m0s",
-  "elapsed": "1m54.737256667s",
-  "elapsedMs": 114737,
+  "elapsed": "1m59.93299425s",
+  "elapsedMs": 119932,
   "ok": true,
   "env": {
-    "commit": "a119fa119f6e39cd995eefcbfe5bb228538e21a5 (base; report generated before the fix commit)",
+    "commit": "20ae238e3acdfb484a4345653eddb00d9c7a45d7",
     "host": "Zacharys-MacBook-Pro",
     "dbVersion": "PostgreSQL 16.15 (Homebrew) on aarch64-apple-darwin27.0.0, compiled by Apple clang version 21.0.0 (clang-2100.3.34.2), 64-bit",
     "dbRole": "passage_app"
@@ -20,8 +20,8 @@
   "entities": [
     {
       "entity": "customer",
-      "elapsed": "20.00144825s",
-      "elapsedMs": 20001,
+      "elapsed": "1m17.389866208s",
+      "elapsedMs": 77389,
       "extracted": 50000,
       "created": 50000,
       "updated": 0,
@@ -57,8 +57,8 @@
     },
     {
       "entity": "vendor",
-      "elapsed": "3.109016792s",
-      "elapsedMs": 3109,
+      "elapsed": "4.773680375s",
+      "elapsedMs": 4773,
       "extracted": 20000,
       "created": 20000,
       "updated": 0,
@@ -94,8 +94,8 @@
     },
     {
       "entity": "item",
-      "elapsed": "17.625153042s",
-      "elapsedMs": 17625,
+      "elapsed": "29.732894833s",
+      "elapsedMs": 29732,
       "extracted": 100000,
       "created": 100000,
       "updated": 0,
@@ -131,8 +131,8 @@
     },
     {
       "entity": "bom",
-      "elapsed": "2.189338334s",
-      "elapsedMs": 2189,
+      "elapsed": "2.285180583s",
+      "elapsedMs": 2285,
       "extracted": 10000,
       "created": 10000,
       "updated": 0,
