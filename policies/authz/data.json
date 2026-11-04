@@ -505,7 +505,8 @@
       {"resource": "/v1/procurement/rfqs/*:send", "methods": ["POST"]},
       {"resource": "/v1/procurement/rfqs/*:close", "methods": ["POST"]},
       {"resource": "/v1/procurement/rfqs/*:cancel", "methods": ["POST"]},
-      {"resource": "/v1/procurement/rfqs/*/replies", "methods": ["POST"]}
+      {"resource": "/v1/procurement/rfqs/*/replies", "methods": ["POST"]},
+      {"resource": "/v1/procurement/rfqs:from-requisitions", "methods": ["POST"]}
     ]},
     "RFQAward": {"permissions": [
       {"resource": "/v1/procurement/rfqs", "methods": ["GET"]},
