@@ -427,6 +427,11 @@ func (s *Postgres) AddJournalLines(ctx context.Context, journalID string, lines 
 				return domainProblem(err)
 			}
 		}
+		if j.Type == domain.JournalBOM {
+			if err := domain.CheckBOMLines(append(slices.Clone(j.Lines), lines...), false); err != nil {
+				return domainProblem(err)
+			}
+		}
 		existing := map[string]domain.JournalLine{}
 		for _, l := range j.Lines {
 			if l.ClientKey != "" {

@@ -35,8 +35,7 @@ func fail(code, format string, args ...any) *Error {
 	return &Error{Code: code, Detail: fmt.Sprintf(format, args...)}
 }
 
-// JournalType is the kind of inventory journal. TRANSFER and BOM are not built
-// yet (the BOM explosion is wave 9's).
+// JournalType is the kind of inventory journal.
 type JournalType string
 
 const (
@@ -60,14 +59,25 @@ const (
 	// value at the destination, so the inventory account does not move and no
 	// offset account is needed.
 	JournalTransfer JournalType = "TRANSFER"
+	// JournalBOM assembles one parent from its components (FR-16.6, AX
+	// InventBOMJournal): the issue lines (negative quantity) consume the
+	// components at their running average and the one receipt line (positive
+	// quantity) receives the parent at the summed component value, so the
+	// inventory account does not move and no offset account is needed. The
+	// component lines are keyed: exploding the engineering BOM into them is
+	// the caller's (wave 9 explosion), not the journal's.
+	JournalBOM JournalType = "BOM"
 )
 
+// CodeBOMLine is a BOM journal line that breaks the BOM rules.
+const CodeBOMLine = "INV-JNL-007"
+
 // JournalTypes are the journal types stored and listed.
-var JournalTypes = []JournalType{JournalMovement, JournalAdjustment, JournalOpeningBalance, JournalCount, JournalOwnershipChange, JournalTransfer}
+var JournalTypes = []JournalType{JournalMovement, JournalAdjustment, JournalOpeningBalance, JournalCount, JournalOwnershipChange, JournalTransfer, JournalBOM}
 
 // KeyedJournalTypes are the journal types a user may create directly; COUNT
 // journals come from count sheets.
-var KeyedJournalTypes = []JournalType{JournalMovement, JournalAdjustment, JournalOpeningBalance, JournalOwnershipChange, JournalTransfer}
+var KeyedJournalTypes = []JournalType{JournalMovement, JournalAdjustment, JournalOpeningBalance, JournalOwnershipChange, JournalTransfer, JournalBOM}
 
 // JournalStatus is the journal state machine of BR-16.11.
 type JournalStatus string
@@ -282,6 +292,41 @@ func ValidateJournal(j Journal, r JournalRules) error {
 	if j.Type == JournalTransfer {
 		return CheckTransferLines(j.Lines)
 	}
+	if j.Type == JournalBOM {
+		return CheckBOMLines(j.Lines, true)
+	}
+	return nil
+}
+
+// CheckBOMLines checks the lines of a BOM journal: at most one receipt line
+// (the parent), entered with a zero cost price because its value is the sum
+// of the component issues, and no component of the parent's own product. When
+// complete (at posting) it also needs the parent and at least one component.
+func CheckBOMLines(lines []JournalLine, complete bool) error {
+	parent, components := -1, 0
+	for i, l := range lines {
+		if l.Qty.Sign() < 0 {
+			components++
+			continue
+		}
+		if parent >= 0 {
+			return fail(CodeBOMLine, "line %d: a BOM journal receives one parent; line %d already is the receipt", l.LineNo, lines[parent].LineNo)
+		}
+		if !l.CostPrice.IsZero() {
+			return fail(CodeBOMLine, "line %d: the parent is valued at the sum of its components; leave its cost price at zero", l.LineNo)
+		}
+		parent = i
+	}
+	if parent >= 0 {
+		for _, l := range lines {
+			if l.Qty.Sign() < 0 && l.ProductID == lines[parent].ProductID {
+				return fail(CodeBOMLine, "line %d issues the parent product %s of line %d as a component", l.LineNo, l.ProductID, lines[parent].LineNo)
+			}
+		}
+	}
+	if complete && (parent < 0 || components == 0) {
+		return fail(CodeBOMLine, "a BOM journal needs one receipt line (the parent) and at least one issue line (a component)")
+	}
 	return nil
 }
 
@@ -434,6 +479,9 @@ func ReverseJournal(orig Journal, newID string, postingDate time.Time) (Journal,
 	}
 	if orig.Type == JournalTransfer {
 		return Journal{}, fail(CodeJournalNotReady, "a transfer cannot be reversed: post a transfer back from the destination")
+	}
+	if orig.Type == JournalBOM {
+		return Journal{}, fail(CodeJournalNotReady, "a BOM journal cannot be reversed: disassembly is not supported yet; correct the stock with an adjustment")
 	}
 	if orig.ReversedByJournalID != "" {
 		return Journal{}, fail(CodeJournalNotReady, "journal is already reversed by %s", orig.ReversedByJournalID)

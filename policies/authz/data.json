@@ -404,6 +404,10 @@
       {"resource": "/v1/inventory/blockings/*:block", "methods": ["POST"]}
     ]},
     "inventory.blocking.scrap": {"flag": true, "permissions": []},
+    "inventory.gl.post": {"permissions": [
+      {"resource": "/v1/inventory/gl-postings", "methods": ["POST"]},
+      {"resource": "/v1/inventory/gl-postings:requeue", "methods": ["POST"]}
+    ]},
     "inventory.hold.write": {"permissions": [
       {"resource": "/v1/inventory/holds", "methods": ["POST"]},
       {"resource": "/v1/inventory/holds/*:release", "methods": ["POST"]},
@@ -3241,6 +3245,9 @@
     },
     "costing": {
       "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
+    },
+    "inventory": {
+      "ledger": ["ledger.entry.post", "ledger.ledger.lookup"]
     },
     "eam": {
       "ledger": ["ledger.entry.post", "ledger.balance.read"]

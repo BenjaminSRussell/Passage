@@ -138,7 +138,7 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 		return domainProblem(err)
 	}
 	offset := offsetAccount(j, p)
-	if offset == "" && j.Type != domain.JournalTransfer {
+	if offset == "" && !valuedBeforeLoop(j.Type) {
 		return problem(http.StatusUnprocessableEntity, CodeAccountMissing, fmt.Sprintf("no offset account is configured for %s journals", j.Type))
 	}
 	plan := domain.PlanPosting(j)
@@ -168,8 +168,13 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 	if err != nil {
 		return err
 	}
-	if j.Type == domain.JournalTransfer {
+	switch j.Type {
+	case domain.JournalTransfer:
 		if err := valueTransfer(ctx, tx, tenantID, j, plan, rows, order); err != nil {
+			return err
+		}
+	case domain.JournalBOM:
+		if err := valueBOM(ctx, tx, tenantID, j, plan, rows, order); err != nil {
 			return err
 		}
 	}
@@ -188,8 +193,8 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 			if vendorOwned {
 				// Vendor-owned stock never carries value (BR-16.14).
 				plan[i].Value = decimal.Zero
-			} else if j.Type == domain.JournalTransfer {
-				// Valued before the row locks of the loop (valueTransfer).
+			} else if valuedBeforeLoop(j.Type) {
+				// Valued before the row locks of the loop (valueTransfer, valueBOM).
 			} else if orig, ok := corrected[l.ReversesLineID]; ok {
 				// A reversal line mirrors the transaction it corrects (BR-16.12).
 				plan[i].Value, plan[i].Corrects = orig.value.Neg(), orig.id
@@ -220,9 +225,10 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 		return err
 	}
 	entry := domain.JournalEntry{Currency: j.Currency, Lines: []domain.GLLine{}}
-	if j.Type != domain.JournalTransfer {
-		// A transfer moves value between dimension sets of the same inventory
-		// account: both legs cancel and there is no GL entry.
+	if !valuedBeforeLoop(j.Type) {
+		// A transfer moves value between dimension sets, and a BOM journal
+		// from the components to the parent, of the same inventory account:
+		// both sides cancel and there is no GL entry.
 		if entry, err = domain.BuildEntry(plan, p.InventoryAccount, offset, j.Currency); err != nil {
 			return err
 		}
@@ -272,6 +278,47 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 	if j.Type == domain.JournalOwnershipChange {
 		return enqueue(ctx, tx, "journal", j.ID, invevents.OwnershipChanged, tenantID, ownershipChanged(j, plan))
 	}
+	return nil
+}
+
+// valuedBeforeLoop reports the journal types whose lines are valued against
+// each other before the posting loop and leave the inventory account unmoved
+// (no offset account, no GL entry).
+func valuedBeforeLoop(t domain.JournalType) bool {
+	return t == domain.JournalTransfer || t == domain.JournalBOM
+}
+
+// valueBOM values a BOM journal before the posting loop: it locks every row in
+// key order, values each component issue at its row's running average (lines
+// of one row in line order) and gives the parent receipt the summed component
+// value, so the inventory account does not move. CheckBOMLines guarantees one
+// receipt and no component of the parent's product, so the parent row is never
+// a component row.
+func valueBOM(ctx context.Context, tx pgx.Tx, tenantID string, j domain.Journal, plan []domain.PostedLine, rows map[string]*row, order []string) error {
+	total, parent := decimal.Zero, -1
+	for _, k := range order {
+		r := rows[k]
+		if err := lockRow(ctx, tx, tenantID, j.LegalEntityID, j.Currency, r); err != nil {
+			return err
+		}
+		oh := r.oh
+		for _, i := range r.lines {
+			l := plan[i].Line
+			if l.Qty.Sign() > 0 {
+				parent = i
+				continue
+			}
+			v := oh.IssueValue(l.Qty, l.CostPrice, j.Currency)
+			plan[i].Value, total = v, total.Add(v)
+			if err := oh.Post(plan[i].Status, l.Qty, v, 1); err != nil {
+				return err
+			}
+		}
+	}
+	if parent < 0 {
+		return errors.New("inventory: BOM journal has no parent receipt")
+	}
+	plan[parent].Value = total.Neg()
 	return nil
 }
 

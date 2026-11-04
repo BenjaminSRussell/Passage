@@ -102,6 +102,9 @@ var serviceGrants = map[string]map[string][]string{
 	"costing": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
 	},
+	"inventory": {
+		"ledger": {"ledger.entry.post", "ledger.ledger.lookup"},
+	},
 	"eam": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read"},
 	},
