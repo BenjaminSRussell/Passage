@@ -28,7 +28,12 @@ func strPtr(s string) *string { return &s }
 
 // record is a row the tenant already has (or that this import created), keyed by natural code.
 // parent is the site id of a warehouse; empty for every other kind.
-type record struct{ id, name, status, parent string }
+type record struct {
+	id, name, status, parent string
+	// purposes and backdate describe a hierarchy type.
+	purposes []string
+	backdate bool
+}
 
 type importer struct {
 	ctx      context.Context
@@ -44,6 +49,12 @@ type importer struct {
 	types    map[string]record // code
 	teams    map[string]record // code
 	siteCode map[string]string // site id -> code, for messages
+	cals     map[string]store.FiscalCalendar
+	// today is the UTC date as YYYY-MM-DD; a hierarchy version dated before it is backdated.
+	today    string
+	versions map[string]versionState // hierarchy type code
+	// backdated holds type code/effectiveFrom of each version published as a backdate (BR-6.3).
+	backdated map[string]bool
 }
 
 func (im *importer) tally(kind string, existed bool) {
@@ -66,8 +77,8 @@ func (im *importer) unchanged(kind, code string, existing record, wanted string)
 	im.tally(kind, true)
 }
 
-func importOrgPackage(ctx context.Context, st store.Store, pkg OrgPackage, dryRun bool) (ImportReport, error) {
-	im := &importer{ctx: ctx, st: st, dryRun: dryRun, report: ImportReport{DryRun: dryRun, Kinds: map[string]ImportCounts{}, Differences: []ImportDifference{}}}
+func importOrgPackage(ctx context.Context, st store.Store, pkg OrgPackage, dryRun bool, today string) (ImportReport, error) {
+	im := &importer{ctx: ctx, st: st, dryRun: dryRun, today: today, report: ImportReport{DryRun: dryRun, Kinds: map[string]ImportCounts{}, Differences: []ImportDifference{}, Skipped: []ImportSkip{}}}
 	if pkg.SchemaVersion != PackageSchemaVersion {
 		return im.report, httpx.NewProblem(http.StatusUnprocessableEntity, codePackageVersion, "schemaVersion must be 1")
 	}
@@ -75,7 +86,7 @@ func importOrgPackage(ctx context.Context, st store.Store, pkg OrgPackage, dryRu
 		return im.report, err
 	}
 	problems := packageProblems{}
-	validatePackage(pkg, problems)
+	validatePackage(pkg, problems, st.TreeLimits())
 	if len(problems) > 0 {
 		return im.report, invalidPackage(problems)
 	}
@@ -88,7 +99,7 @@ func importOrgPackage(ctx context.Context, st store.Store, pkg OrgPackage, dryRu
 	if len(problems) > 0 {
 		return im.report, invalidPackage(problems)
 	}
-	steps := []func(OrgPackage) error{im.legalEntities, im.operatingUnits, im.sitesAndStock, im.hierarchyTypes, im.teamTypes, im.teamsOf}
+	steps := []func(OrgPackage) error{im.legalEntities, im.operatingUnits, im.sitesAndStock, im.hierarchyTypes, im.hierarchyVersions, im.fiscalCalendars, im.teamTypes, im.teamsOf}
 	for _, step := range steps {
 		if err := step(pkg); err != nil {
 			return im.report, err
@@ -111,7 +122,7 @@ func packageWithinCap(pkg OrgPackage) error {
 		kind string
 		n    int
 	}{{"legal entities", len(pkg.LegalEntities)}, {"operating units", len(pkg.OperatingUnits)}, {"sites", len(pkg.Sites)}, {"warehouses", warehouses},
-		{"locations", locations}, {"hierarchy types", len(pkg.HierarchyTypes)}, {"team types", len(pkg.TeamTypes)}, {"teams", len(pkg.Teams)}} {
+		{"locations", locations}, {"hierarchy types", len(pkg.HierarchyTypes)}, {"fiscal calendars", len(pkg.FiscalCalendars)}, {"team types", len(pkg.TeamTypes)}, {"teams", len(pkg.Teams)}} {
 		if c.n > packageRowCap {
 			return tooLarge(c.kind)
 		}
@@ -206,7 +217,7 @@ func (im *importer) load() error {
 		return tooLarge("hierarchy types, team types or teams")
 	}
 	for _, t := range hier.Items {
-		im.hier[t.Code] = record{id: t.ID, name: t.Name, status: t.Status}
+		im.hier[t.Code] = record{id: t.ID, name: t.Name, status: t.Status, purposes: t.Purposes, backdate: t.BackdateAllowed}
 	}
 	for _, t := range types.Items {
 		im.types[t.Code] = record{id: t.ID, name: t.Name}
@@ -214,7 +225,7 @@ func (im *importer) load() error {
 	for _, t := range teams.Items {
 		im.teams[t.Code] = record{id: t.ID, name: t.Name, status: t.Status}
 	}
-	return nil
+	return im.loadCalendars()
 }
 
 // resolve checks every code reference against the package and the tenant's rows, and every rule
@@ -269,7 +280,8 @@ func (im *importer) resolve(pkg OrgPackage, p packageProblems) error {
 		im.resolveSite(indexPath(kindSite, i), s, active, p)
 	}
 	im.resolveTeams(pkg, p)
-	return nil
+	im.resolveCalendars(pkg, p)
+	return im.resolveVersions(pkg, p)
 }
 
 // resolveReferenceData checks that each legal entity the import creates names a country,
@@ -528,13 +540,16 @@ func (im *importer) hierarchyTypes(pkg OrgPackage) error {
 			im.unchanged(kindHierarchyType, code, existing, t.Name)
 			continue
 		}
+		id := "dry:" + code
 		if !im.dryRun {
-			if _, err := im.st.CreateHierarchyType(im.ctx, store.HierarchyType{Code: code, Name: strings.TrimSpace(t.Name), Purposes: t.Purposes, BackdateAllowed: t.BackdateAllowed},
-				keyPrefix+"hier-type:"+code); err != nil {
+			created, err := im.st.CreateHierarchyType(im.ctx, store.HierarchyType{Code: code, Name: strings.TrimSpace(t.Name), Purposes: t.Purposes, BackdateAllowed: t.BackdateAllowed},
+				keyPrefix+"hier-type:"+code)
+			if err != nil {
 				return err
 			}
+			id = created.ID
 		}
-		im.hier[code] = record{status: statusActive}
+		im.hier[code] = record{id: id, status: statusActive, purposes: t.Purposes, backdate: t.BackdateAllowed}
 		im.tally(kindHierarchyType, false)
 	}
 	return nil

@@ -334,6 +334,29 @@ func writeHierarchyNodes(ctx context.Context, tx pgx.Tx, tenantID, versionID str
 	return err
 }
 
+// HierarchyVersionDraftKeys returns, by version id, the idempotency key each version of a type
+// was drafted with; a version drafted without a key is left out.
+func (s *Postgres) HierarchyVersionDraftKeys(ctx context.Context, typeID string) (map[string]string, error) {
+	p, _ := tenant.FromContext(ctx)
+	out := map[string]string{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select id, idempotency_key from hierarchy_version where tenant_id = $1 and hierarchy_type_id = $2 and idempotency_key is not null`, p.TenantID, typeID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id, key string
+			if err := rows.Scan(&id, &key); err != nil {
+				return err
+			}
+			out[id] = key
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 func (s *Postgres) CreateHierarchyDraft(ctx context.Context, typeID, idempotencyKey, editedBy string) (HierarchyVersion, error) {
 	p, _ := tenant.FromContext(ctx)
 	var v HierarchyVersion

@@ -25,6 +25,9 @@ const kindLabels: Record<string, string> = {
   warehouses: "Warehouses",
   locations: "Locations",
   hierarchyTypes: "Hierarchy types",
+  hierarchyVersions: "Hierarchy versions",
+  fiscalCalendars: "Fiscal calendars",
+  fiscalYears: "Fiscal years",
   teamTypes: "Team types",
   teams: "Teams",
 };
@@ -121,7 +124,7 @@ export function ModelPackagePage() {
               <Button variant="secondary" loading={exporting} onClick={runExport}>
                 Export package
               </Button>
-              {exported ? <span role="status">Exported {exported}. Hierarchy versions, fiscal calendars, addresses and team members are not included.</span> : null}
+              {exported ? <span role="status">Exported {exported}. Addresses, translations, calendar assignments and team members are not included.</span> : null}
             </div>
           </Card>
           <Card title="Import">
@@ -172,6 +175,17 @@ export function ModelPackagePage() {
                 {report.differences.map((d) => (
                   <li key={`${d.kind}:${d.code}:${d.field}`}>
                     {kindLabels[d.kind] ?? d.kind} {d.code}: {d.field}
+                  </li>
+                ))}
+              </ul>
+            </Alert>
+          ) : null}
+          {report.skipped && report.skipped.length > 0 ? (
+            <Alert tone="info" title="Left out on purpose">
+              <ul className={styles.problemList}>
+                {report.skipped.map((s) => (
+                  <li key={`${s.kind}:${s.code}`}>
+                    {kindLabels[s.kind] ?? s.kind} {s.code}: {s.reason}
                   </li>
                 ))}
               </ul>

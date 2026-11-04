@@ -1322,7 +1322,7 @@ paths:
     post:
       operationId: exportOrgPackage
       summary: Export the organization model as a package
-      description: Reads every legal entity, operating unit, site with its warehouses and locations, hierarchy type, team type and team of the caller's tenant into one versioned JSON package whose records name each other by code. A POST because the export is an administrative action; it changes nothing. Hierarchy versions, fiscal calendars, addresses, translations and team members are not part of the package.
+      description: Reads every legal entity, operating unit, site with its warehouses and locations, hierarchy type, team type and team of the caller's tenant into one versioned JSON package whose records name each other by code. A POST because the export is an administrative action; it changes nothing. Each hierarchy type carries its published and superseded versions (a draft is not exported) and the package carries the fiscal calendars with their generated years. Addresses, translations, calendar assignments and team members are not part of the package.
       x-passage-duty: org.package.manage
       responses:
         '200':
@@ -1333,7 +1333,7 @@ paths:
     post:
       operationId: importOrgPackage
       summary: Import an organization model package
-      description: Creates the records of the package that the tenant does not have yet, matched by natural code (legal entity code; operating unit type and code; legal entity and site, warehouse or location code; hierarchy type, team type and team code). Existing records are never updated or deleted; their differing names are listed. Before the first write the package is validated, every code reference resolved and every rule the creates apply checked against the tenant's rows (active parent records, active country, currency and language, the legal entity and team limits, warehouse codes unique per legal entity), so a package that fails any of them imports nothing. Each record is then created in its own transaction and raises its own event through the outbox. A change someone else commits after that check can still fail a create; the records created before it stay, and importing the package again creates only what is missing. A second import of the same package reports no creates. The exportedAt field of an exported file is accepted and ignored.
+      description: Creates the records of the package that the tenant does not have yet, matched by natural code (legal entity code; operating unit type and code; legal entity and site, warehouse or location code; hierarchy type, team type and team code; hierarchy version by type code and effectiveFrom; fiscal calendar by code; fiscal year by calendar code and year). Existing records are never updated or deleted; their differing names are listed. Before the first write the package is validated, every code reference resolved and every rule the creates apply checked against the tenant's rows (active parent records, active country, currency and language, the legal entity and team limits, warehouse codes unique per legal entity), so a package that fails any of them imports nothing. A hierarchy version is created as a draft of its type, given its nodes and published with its effectiveFrom, oldest first, each published before the next is drafted, so each must be later than the latest version the type already has and the tree must fit the configured depth and node limits. A date before today is a backdate (the org.hierarchy.backdate duty and a type with backdateAllowed) only when the type already holds a version that no package import made; loading a history into an empty type, or finishing one an earlier import started, changes no as-of answer anyone else wrote, and the publish keeps the reason 'Imported from an organization package'. A type with an open draft takes no new version, except the draft an earlier run of the same import left open (its key is orgpkg:hier-draft:<type>/<effectiveFrom>), which the import fills and publishes. New versions of a security-purpose type are not imported (publishing needs a second person) and each is listed under skipped. A fiscal year is generated for its calendar from the calendar's settings (a custom calendar from the listed periods). Each record is then created in its own transaction and raises its own event through the outbox. A change someone else commits after that check can still fail a create; the records created before it stay, and importing the package again creates only what is missing. A second import of the same package reports no creates. The exportedAt field of an exported file is accepted and ignored.
       x-passage-duty: org.package.manage
       parameters:
         - { name: dryRun, in: query, schema: { type: boolean, default: false }, description: When true nothing is written and the report shows what a real import would create. }
@@ -1345,7 +1345,7 @@ paths:
           description: The import report with created and unchanged counts per kind. 400 COM-0001 for a malformed body or dryRun. 403 AUTH-0003 unless the caller holds tenant.administer and has no legal-entity claim. A store error part-way (409 or 422 with the store's code) leaves the earlier records created; importing again resumes.
           content: { application/json: { schema: { $ref: '#/components/schemas/OrgImportReport' } } }
         '422':
-          description: ORG-PKG-VERSION-UNSUPPORTED when schemaVersion is not 1. ORG-PKG-INVALID with a path-to-message errors map (at most 50 entries) for a field error, a duplicate code in the package, an unknown or inactive referenced record, inactive reference data, a warehouse code already used at another site of the legal entity, or a tenant limit. ORG-PKG-TOO-LARGE when the package or the tenant holds more than 10000 rows of one kind.
+          description: ORG-PKG-VERSION-UNSUPPORTED when schemaVersion is not 1. ORG-PKG-INVALID with a path-to-message errors map (at most 50 entries) for a field error, a duplicate code in the package, an unknown or inactive referenced record, a version tree with a cycle, several roots, too many levels or nodes, a version dated at or before the type's latest, an open draft the import did not make, a backdated version without the duty or on a type without backdateAllowed, a fiscal year that does not generate or belongs to an existing calendar with other settings, inactive reference data, a warehouse code already used at another site of the legal entity, or a tenant limit. ORG-PKG-TOO-LARGE when the package or the tenant holds more than 10000 rows of one kind.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '413':
           description: COM-0413 when the body exceeds 8 MiB; the limit applies while the body is read.
@@ -1977,6 +1977,53 @@ components:
               name: { type: string }
               purposes: { type: array, minItems: 1, items: { type: string, enum: [reporting, procurement, expenditure, security, centralized_payments, custom] } }
               backdateAllowed: { type: boolean }
+              versions:
+                type: array
+                description: Published versions, oldest first. The effectiveFrom of a version is its key within the type.
+                items:
+                  type: object
+                  required: [effectiveFrom, nodes]
+                  properties:
+                    effectiveFrom: { type: string, format: date }
+                    nodes:
+                      type: array
+                      description: One node per org unit; exactly one has no parent.
+                      items:
+                        type: object
+                        required: [unit]
+                        properties:
+                          unit: { $ref: '#/components/schemas/OrgPackageNodeRef' }
+                          parent: { $ref: '#/components/schemas/OrgPackageNodeRef' }
+                          sortOrder: { type: integer, minimum: 0 }
+        fiscalCalendars:
+          type: array
+          items:
+            type: object
+            required: [code, name, pattern]
+            properties:
+              code: { type: string }
+              name: { type: string }
+              pattern: { type: string, enum: [calendar, 4-4-5, 4-5-4, 5-4-4, 13-period, custom] }
+              startMonth: { type: integer, minimum: 1, maximum: 12, description: Defaults to 1. }
+              weekStart: { type: string, description: 'Lower-case day name; defaults to monday.' }
+              openingClosing: { type: boolean, description: Defaults to true. }
+              specialPeriods: { type: integer, minimum: 0, maximum: 4 }
+              years:
+                type: array
+                items:
+                  type: object
+                  required: [fiscalYear]
+                  properties:
+                    fiscalYear: { type: integer, minimum: 1900, maximum: 2999 }
+                    periods:
+                      type: array
+                      description: The operating period ranges of a custom calendar's year; required for a custom calendar and refused for every other pattern.
+                      items:
+                        type: object
+                        required: [start, end]
+                        properties:
+                          start: { type: string, format: date }
+                          end: { type: string, format: date }
         teamTypes:
           type: array
           items:
@@ -2005,6 +2052,14 @@ components:
               effectiveFrom: { type: string, format: date }
               effectiveTo: { type: string, format: date }
         exportedAt: { type: string, format: date-time, description: Written by export; ignored by import. }
+    OrgPackageNodeRef:
+      type: object
+      required: [kind, code]
+      description: An org unit named by code; it must be in the package or already exist.
+      properties:
+        kind: { type: string, enum: [legalEntity, operatingUnit] }
+        type: { type: string, enum: [department, cost_center, business_unit, value_stream], description: Required for an operating unit. }
+        code: { type: string }
     OrgPackageExport:
       allOf:
         - $ref: '#/components/schemas/OrgPackage'
@@ -2020,18 +2075,18 @@ components:
         unchanged: { type: integer }
     OrgImportReport:
       type: object
-      required: [dryRun, created, unchanged, kinds, differences]
+      required: [dryRun, created, unchanged, kinds, differences, skipped]
       properties:
         dryRun: { type: boolean }
         created: { type: integer, description: Records created, or that a dry run would create. }
         unchanged: { type: integer, description: Records that already existed. }
         kinds:
           type: object
-          description: Counts per kind (legalEntities, operatingUnits, sites, warehouses, locations, hierarchyTypes, teamTypes, teams).
+          description: Counts per kind (legalEntities, operatingUnits, sites, warehouses, locations, hierarchyTypes, hierarchyVersions, fiscalCalendars, fiscalYears, teamTypes, teams).
           additionalProperties: { $ref: '#/components/schemas/OrgImportCounts' }
         differences:
           type: array
-          description: Existing records of any kind whose name differs from the package; they are left as they are. The code is the record's natural key (for example USMF, department/FIN, USMF/DET, USMF/DET-MAIN/RCV-01).
+          description: Existing records of any kind whose name (or, for a fiscal calendar, pattern or settings; for a hierarchy version, node set) differs from the package; they are left as they are. The code is the record's natural key (for example USMF, department/FIN, USMF/DET, USMF/DET-MAIN/RCV-01, REPORTING/2026-01-01 for a version).
           items:
             type: object
             required: [kind, code, field]
@@ -2039,6 +2094,16 @@ components:
               kind: { type: string }
               code: { type: string }
               field: { type: string }
+        skipped:
+          type: array
+          description: Records left alone on purpose, for example each new version (code <type>/<effectiveFrom>) of a security-purpose hierarchy type, which needs a second person to publish.
+          items:
+            type: object
+            required: [kind, code, reason]
+            properties:
+              kind: { type: string }
+              code: { type: string }
+              reason: { type: string }
   responses:
     Problem:
       description: RFC 9457 problem details.

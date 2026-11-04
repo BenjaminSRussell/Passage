@@ -84,6 +84,26 @@ describe("model package page", () => {
     expect(init?.body).toBe(packageText);
   });
 
+  it("labels versions and calendars and lists what the import left out", async () => {
+    serve({
+      "POST /import?dryRun=true": () =>
+        json({
+          ...report,
+          kinds: { hierarchyVersions: { created: 2, unchanged: 0 }, fiscalCalendars: { created: 1, unchanged: 0 }, fiscalYears: { created: 3, unchanged: 0 } },
+          differences: [{ kind: "hierarchyVersions", code: "REPORTING/2026-01-01", field: "nodes" }],
+          skipped: [{ kind: "hierarchyVersions", code: "SECURITY/2026-01-01", reason: "publish this version in the designer" }],
+        }),
+    });
+    const { user } = renderPage();
+    await paste(user, packageText);
+    await user.click(screen.getByRole("button", { name: "Check package" }));
+    const table = await screen.findByRole("table", { name: "Records by kind" });
+    for (const label of ["Hierarchy versions", "Fiscal calendars", "Fiscal years"]) expect(within(table).getByText(label)).toBeInTheDocument();
+    expect(screen.getByText("Left out on purpose")).toBeInTheDocument();
+    expect(screen.getByText(/SECURITY\/2026-01-01: publish this version in the designer/)).toBeInTheDocument();
+    expect(screen.getByText(/REPORTING\/2026-01-01: nodes/)).toBeInTheDocument();
+  });
+
   it("imports for real without the dry-run flag", async () => {
     const fetchMock = serve({ "POST /import": () => json({ ...report, dryRun: false }) });
     const { user } = renderPage();

@@ -16,6 +16,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
 )
 
@@ -41,13 +42,14 @@ const (
 // OrgPackage is the versioned JSON package of the organization model (FR-6.12).
 // Records name each other by code, never by id, so a package moves between tenants.
 type OrgPackage struct {
-	SchemaVersion  int                    `json:"schemaVersion"`
-	LegalEntities  []packageLegalEntity   `json:"legalEntities"`
-	OperatingUnits []packageOperatingUnit `json:"operatingUnits"`
-	Sites          []packageSite          `json:"sites"`
-	HierarchyTypes []packageHierarchyType `json:"hierarchyTypes"`
-	TeamTypes      []packageTeamType      `json:"teamTypes"`
-	Teams          []packageTeam          `json:"teams"`
+	SchemaVersion   int                     `json:"schemaVersion"`
+	LegalEntities   []packageLegalEntity    `json:"legalEntities"`
+	OperatingUnits  []packageOperatingUnit  `json:"operatingUnits"`
+	Sites           []packageSite           `json:"sites"`
+	HierarchyTypes  []packageHierarchyType  `json:"hierarchyTypes"`
+	FiscalCalendars []packageFiscalCalendar `json:"fiscalCalendars"`
+	TeamTypes       []packageTeamType       `json:"teamTypes"`
+	Teams           []packageTeam           `json:"teams"`
 	// ExportedAt is written by export and ignored by import, so an exported file imports as is.
 	ExportedAt string `json:"exportedAt,omitempty"`
 }
@@ -97,6 +99,8 @@ type packageHierarchyType struct {
 	Name            string   `json:"name"`
 	Purposes        []string `json:"purposes"`
 	BackdateAllowed bool     `json:"backdateAllowed"`
+	// Versions are the published versions, oldest first; a draft is not exported.
+	Versions []packageHierarchyVersion `json:"versions,omitempty"`
 }
 
 type packageTeamType struct {
@@ -134,6 +138,13 @@ type ImportDifference struct {
 	Field string `json:"field"`
 }
 
+// ImportSkip names records the import left alone on purpose, with the reason.
+type ImportSkip struct {
+	Kind   string `json:"kind"`
+	Code   string `json:"code"`
+	Reason string `json:"reason"`
+}
+
 // ImportReport is the answer of POST /v1/org/import.
 type ImportReport struct {
 	DryRun      bool                    `json:"dryRun"`
@@ -141,6 +152,7 @@ type ImportReport struct {
 	Unchanged   int                     `json:"unchanged"`
 	Kinds       map[string]ImportCounts `json:"kinds"`
 	Differences []ImportDifference      `json:"differences"`
+	Skipped     []ImportSkip            `json:"skipped"`
 }
 
 func (a *API) registerPackage(r chi.Router) {
@@ -192,7 +204,7 @@ func (a *API) importPackage(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	report, err := importOrgPackage(r.Context(), a.store, pkg, dryRun == "true")
+	report, err := importOrgPackage(r.Context(), a.store, pkg, dryRun == "true", a.now().UTC().Format(dateLayout))
 	if err != nil {
 		slog.Error("import organization package failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -211,7 +223,7 @@ func tooLarge(kind string) error {
 
 func exportOrgPackage(ctx context.Context, st store.Store) (OrgPackage, error) {
 	pkg := OrgPackage{SchemaVersion: PackageSchemaVersion, LegalEntities: []packageLegalEntity{}, OperatingUnits: []packageOperatingUnit{},
-		Sites: []packageSite{}, HierarchyTypes: []packageHierarchyType{}, TeamTypes: []packageTeamType{}, Teams: []packageTeam{}}
+		Sites: []packageSite{}, HierarchyTypes: []packageHierarchyType{}, FiscalCalendars: []packageFiscalCalendar{}, TeamTypes: []packageTeamType{}, Teams: []packageTeam{}}
 	entities, err := st.ListLegalEntities(ctx, store.LegalEntityFilter{}, "", packageRowCap)
 	if err != nil {
 		return pkg, err
@@ -220,8 +232,10 @@ func exportOrgPackage(ctx context.Context, st store.Store) (OrgPackage, error) {
 		return pkg, tooLarge("legal entities")
 	}
 	entityCodes := map[string]string{}
+	nodeRefs := map[string]packageNodeRef{}
 	for _, e := range entities.Items {
 		entityCodes[e.ID] = e.Code
+		nodeRefs[e.ID] = packageNodeRef{Kind: nodeKindLegalEntity, Code: e.Code}
 		pkg.LegalEntities = append(pkg.LegalEntities, packageLegalEntity{Code: e.Code, Name: e.Name, Country: e.Country, Currency: e.Currency,
 			TimeZone: e.TimeZone, DefaultLanguage: e.DefaultLanguage, RegistrationNumber: e.RegistrationNumber})
 	}
@@ -235,6 +249,7 @@ func exportOrgPackage(ctx context.Context, st store.Store) (OrgPackage, error) {
 	unitRefs := map[string]packageUnitRef{}
 	for _, u := range units.Items {
 		unitRefs[u.ID] = packageUnitRef{Type: u.Type, Code: u.Code}
+		nodeRefs[u.ID] = packageNodeRef{Kind: nodeKindOperatingUnit, Type: u.Type, Code: u.Code}
 		out := packageOperatingUnit{Type: u.Type, Code: u.Code, Name: u.Name}
 		if u.DefaultLegalEntityID != nil {
 			out.LegalEntity = entityCodes[*u.DefaultLegalEntityID]
@@ -252,7 +267,14 @@ func exportOrgPackage(ctx context.Context, st store.Store) (OrgPackage, error) {
 		return pkg, tooLarge("hierarchy types")
 	}
 	for _, t := range types.Items {
-		pkg.HierarchyTypes = append(pkg.HierarchyTypes, packageHierarchyType{Code: t.Code, Name: t.Name, Purposes: t.Purposes, BackdateAllowed: t.BackdateAllowed})
+		out := packageHierarchyType{Code: t.Code, Name: t.Name, Purposes: t.Purposes, BackdateAllowed: t.BackdateAllowed}
+		if out.Versions, err = exportVersions(ctx, st, t.ID, nodeRefs); err != nil {
+			return pkg, err
+		}
+		pkg.HierarchyTypes = append(pkg.HierarchyTypes, out)
+	}
+	if err := exportFiscalCalendars(ctx, st, &pkg); err != nil {
+		return pkg, err
 	}
 	return pkg, exportTeams(ctx, st, unitRefs, &pkg)
 }
@@ -355,7 +377,7 @@ func (p packageProblems) add(path, message string) {
 	}
 }
 
-func validatePackage(pkg OrgPackage, p packageProblems) {
+func validatePackage(pkg OrgPackage, p packageProblems, limits domain.TreeLimits) {
 	seen := map[string]bool{}
 	dup := func(path, kind, key string) {
 		if seen[kind+"/"+key] {
@@ -408,6 +430,10 @@ func validatePackage(pkg OrgPackage, p packageProblems) {
 			p.add(path+".purposes", msg)
 		}
 		dup(path+".code", "hierarchy type", code)
+		validatePackageVersions(path, t, p, dup, limits)
+	}
+	for i, c := range pkg.FiscalCalendars {
+		validatePackageCalendar(fmt.Sprintf("fiscalCalendars[%d]", i), c, p, dup)
 	}
 	for i, t := range pkg.TeamTypes {
 		path := fmt.Sprintf("teamTypes[%d]", i)

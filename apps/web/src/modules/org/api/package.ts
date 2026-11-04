@@ -14,12 +14,19 @@ export interface ImportDifference {
   field: string;
 }
 
+export interface ImportSkip {
+  kind: string;
+  code: string;
+  reason: string;
+}
+
 export interface ImportReport {
   dryRun: boolean;
   created: number;
   unchanged: number;
   kinds: Record<string, ImportCounts>;
   differences: ImportDifference[];
+  skipped?: ImportSkip[];
 }
 
 export type OrgPackage = Record<string, unknown> & { schemaVersion: number };

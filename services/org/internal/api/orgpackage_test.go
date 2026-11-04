@@ -11,6 +11,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/org/internal/api"
+	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
 )
 
@@ -27,6 +28,14 @@ type memOrg struct {
 	hier       []store.HierarchyType
 	teamTypes  []store.TeamType
 	teams      []store.Team
+	cals       []store.FiscalCalendar
+	custom     map[string][]store.FiscalPeriod // calendar id/year -> operating periods
+	versions   []memVersion
+	publishes  []publishCall
+	// failPublish makes the publish of a version with this effectiveFrom fail once, leaving its draft open.
+	failPublish string
+	// limits stands in for the store's configured tree limits; zero means the defaults.
+	limits domain.TreeLimits
 	// inactive lists reference codes (country, currency, language) the tenant has deactivated.
 	inactive map[string]bool
 	// failWarehouse makes CreateWarehouse fail, standing in for a store error part-way.
