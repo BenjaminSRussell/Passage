@@ -344,3 +344,17 @@ func TestServiceSheet_AuditReleaseOfAnERSInvoicePostsTheDifferenceToExpense(t *t
 		t.Fatalf("Inventory %s", rg.ledger.Balance("1400"))
 	}
 }
+
+func TestServiceSheet_InvoiceAdjustmentOfAServiceLinePostsToExpense(t *testing.T) {
+	rg := newSheetRig(servicePO())
+	created := parseSheet(t, rg.sheetAs("alice", sheetBodyFor(sheetLine(1, "4", "2.5"))), http.StatusCreated)
+	accepted := parseSheet(t, rg.decideSheet(created.ID, "accept", "bob", ""), http.StatusOK)
+	inv := decode[invoiceJSON](t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-SES-ADJ", accepted.ReceiptID, 4, ""), rg.apPosterFor(legalEntityID)), http.StatusCreated)
+	decode[adjustmentJSON](t, rg.call(http.MethodPost, adjustmentsPath, adjustmentBody(inv.ID, "CREDIT", "CN-SES-1", adjLine(1, "1.50")), rg.apPosterFor(legalEntityID)), http.StatusCreated)
+	wantLines(t, lastEntry(t, rg), "6000=-1.5", "2000=1.5")
+	decode[adjustmentJSON](t, rg.call(http.MethodPost, adjustmentsPath, adjustmentBody(inv.ID, "DEBIT", "DN-SES-1", adjLine(1, "0.75")), rg.apPosterFor(legalEntityID)), http.StatusCreated)
+	wantLines(t, lastEntry(t, rg), "6000=0.75", "2000=-0.75")
+	if rg.ledger.Balance("1400").Sign() != 0 {
+		t.Fatalf("a service adjustment reached Inventory: %s", rg.ledger.Balance("1400"))
+	}
+}

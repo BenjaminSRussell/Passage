@@ -3,6 +3,7 @@ package domain
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -23,6 +24,11 @@ type SelfBillParties struct {
 	Supplier SelfBillParty
 	Customer SelfBillParty
 }
+
+// ErrSelfBillPartyIncomplete marks master data that cannot carry a self-billing
+// document (no supplier address or country, no name). It is a data gap, not an
+// outage: ERS skips the receipt instead of answering 503.
+var ErrSelfBillPartyIncomplete = errors.New("self-billing parties: master data incomplete")
 
 type SelfBillPartySource interface {
 	SelfBillParties(ctx context.Context, legalEntityID, vendorID string) (SelfBillParties, error)

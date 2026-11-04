@@ -55,6 +55,10 @@ func (a *API) selfBillParties(ctx context.Context, in store.Invoice) (domain.Sel
 		return domain.SelfBillParties{}, unavailable("self-billing party data is not configured")
 	}
 	parties, err := a.ports.SelfBillParties.SelfBillParties(ctx, in.LegalEntityID, in.VendorID)
+	if errors.Is(err, domain.ErrSelfBillPartyIncomplete) {
+		slog.WarnContext(ctx, "self-billing party data incomplete", "err", err, "invoiceId", in.ID, "vendorId", in.VendorID, "correlationId", middleware.GetReqID(ctx))
+		return domain.SelfBillParties{}, err
+	}
 	if err != nil {
 		slog.ErrorContext(ctx, "self-billing party lookup failed", "err", err, "invoiceId", in.ID, "vendorId", in.VendorID, "correlationId", middleware.GetReqID(ctx))
 		return domain.SelfBillParties{}, unavailable("self-billing party data unavailable")

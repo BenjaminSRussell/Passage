@@ -23,18 +23,19 @@ const (
 	ersScanPages = 5
 	priceScale   = 6
 
-	skipNotPosted     = "RECEIPT_NOT_POSTED"
-	skipNotErs        = "NOT_ERS_VENDOR"
-	skipNoOrder       = "PO_NOT_FOUND"
-	skipOrderDenied   = "PO_FORBIDDEN"
-	skipOrderOpen     = "PO_NOT_APPROVED"
-	skipNoPOLine      = "NO_PO_LINE"
-	skipManyPOLines   = "AMBIGUOUS_PO_LINE"
-	skipPlanSettled   = "PLAN_SETTLED"
-	skipPartial       = "PARTIALLY_INVOICED"
-	skipPriceChange   = "PRICE_CHANGED"
-	skipSelfConfirmed = "PRICE_CONFIRMED_BY_RUNNER"
-	skipTaxUndefined  = "TAX_NOT_DETERMINED"
+	skipNotPosted       = "RECEIPT_NOT_POSTED"
+	skipNotErs          = "NOT_ERS_VENDOR"
+	skipNoOrder         = "PO_NOT_FOUND"
+	skipOrderDenied     = "PO_FORBIDDEN"
+	skipOrderOpen       = "PO_NOT_APPROVED"
+	skipNoPOLine        = "NO_PO_LINE"
+	skipManyPOLines     = "AMBIGUOUS_PO_LINE"
+	skipPlanSettled     = "PLAN_SETTLED"
+	skipPartial         = "PARTIALLY_INVOICED"
+	skipPriceChange     = "PRICE_CHANGED"
+	skipSelfConfirmed   = "PRICE_CONFIRMED_BY_RUNNER"
+	skipTaxUndefined    = "TAX_NOT_DETERMINED"
+	skipPartyIncomplete = "PARTY_DATA_INCOMPLETE"
 )
 
 type ersRunRequest struct {
@@ -258,6 +259,10 @@ func (r *ersRun) receipt(receiptID string) error {
 	posted, err := r.api.submitInvoice(r.ctx, r.groups, r.principal, in)
 	if errors.Is(err, domain.ErrTaxNotDetermined) {
 		r.skip(ref, skipTaxUndefined)
+		return nil
+	}
+	if errors.Is(err, domain.ErrSelfBillPartyIncomplete) {
+		r.skipWithDetail(ref, skipPartyIncomplete, err.Error())
 		return nil
 	}
 	var domainErr *domain.Error

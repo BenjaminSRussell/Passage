@@ -157,6 +157,30 @@ func TestServiceSheet_AcceptWritesPostedReceiptAndGrir(t *testing.T) {
 	if db.rows(db.one, "outbox") != 2 {
 		t.Fatalf("outbox %d, want decided and receipt.posted", db.rows(db.one, "outbox"))
 	}
+
+	const sesInvoice = "00000000-0000-0000-0000-00000000c701"
+	inv := fullInvoice(db, sesInvoice, "INV-SES-PG", domain.InvoiceSourceManual)
+	inv.Lines = []store.InvoiceLine{{ReceiptID: rec.ID, ReceiptLineNo: 1, Qty: decimal.NewFromInt(1), UnitPrice: decimal.NewFromInt(70), Amount: decimal.NewFromInt(70)}}
+	var sawService bool
+	if _, err := st.PostInvoice(ctx, inv, func(items []*domain.GrirItem) (store.InvoiceOutcome, error) {
+		sawService = items[0].Service
+		return store.InvoiceOutcome{LedgerEntryID: "e-ses", Total: decimal.NewFromInt(70), Clearings: []decimal.Decimal{decimal.NewFromInt(70)}, Event: event(t, db.one, "vendorinvoice", "posted")}, nil
+	}); err != nil || !sawService {
+		t.Fatalf("invoice on the service receipt: %v, GR/IR item service %v", err, sawService)
+	}
+	adj := store.InvoiceAdjustment{
+		ID: "00000000-0000-0000-0000-00000000c702", OriginalInvoiceID: sesInvoice, LegalEntityID: db.one.LegalEntityID, Kind: domain.AdjustmentCredit, DocumentNumber: "CN-SES-PG",
+		DocumentDate: postDay(), PostingDate: postDay(), LedgerID: ledgerUUID, FiscalPeriodID: ledgerUUID,
+		Lines: []domain.AdjustmentLine{{InvoiceLineNo: 1, Amount: decimal.NewFromInt(5)}},
+	}
+	if _, err := st.PostInvoiceAdjustment(ctx, adj, func(base store.InvoiceBase) (store.AdjustmentOutcome, error) {
+		if len(base.Lines) != 1 || !base.Lines[0].Service {
+			t.Fatalf("adjustment base lines %+v: the service flag is lost, so the credit would post to inventory", base.Lines)
+		}
+		return store.AdjustmentOutcome{LedgerEntryID: "e-ses-cn", Total: decimal.NewFromInt(5), Event: event(t, db.one, "invoice", "adjusted")}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func selfBillBuilder(t *testing.T, db settlementDB, inv store.Invoice) store.SelfBillBuild {

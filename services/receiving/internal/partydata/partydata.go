@@ -78,10 +78,20 @@ func (c *Client) get(ctx context.Context, base, audience, duty, legalEntityID, p
 	return nil
 }
 
+// addressPurpose is the org service's AddressPurpose object ({"purpose", "primary"}), not a bare string.
+type addressPurpose struct {
+	Purpose string `json:"purpose"`
+	Primary bool   `json:"primary"`
+}
+
 type addressBody struct {
-	CountryCode string   `json:"countryCode"`
-	Formatted   string   `json:"formatted"`
-	Purposes    []string `json:"purposes"`
+	CountryCode string           `json:"countryCode"`
+	Formatted   string           `json:"formatted"`
+	Purposes    []addressPurpose `json:"purposes"`
+}
+
+func (a addressBody) has(purpose string, primaryOnly bool) bool {
+	return slices.ContainsFunc(a.Purposes, func(p addressPurpose) bool { return p.Purpose == purpose && (p.Primary || !primaryOnly) })
 }
 
 type addressList struct {
@@ -98,9 +108,11 @@ func (c *Client) partyAddress(ctx context.Context, legalEntityID, partyID string
 		return addressBody{}, nil
 	}
 	for _, purpose := range []string{"invoice", "business"} {
-		for _, item := range list.Items {
-			if slices.Contains(item.Purposes, purpose) {
-				return item, nil
+		for _, primaryOnly := range []bool{true, false} {
+			for _, item := range list.Items {
+				if item.has(purpose, primaryOnly) {
+					return item, nil
+				}
 			}
 		}
 	}
@@ -150,10 +162,10 @@ func (c *Client) SelfBillParties(ctx context.Context, legalEntityID, vendorID st
 		Customer: domain.SelfBillParty{Name: entity.Name, Address: customerAddress.Formatted, Country: entity.Country, RegistrationNumber: entity.RegistrationNumber},
 	}
 	if out.Supplier.Address == "" || out.Supplier.Country == "" {
-		return domain.SelfBillParties{}, errors.New("self-billing parties: the supplier has no address with a country in the org master")
+		return domain.SelfBillParties{}, fmt.Errorf("%w: the supplier has no address with a country in the org master", domain.ErrSelfBillPartyIncomplete)
 	}
 	if out.Supplier.Name == "" || out.Customer.Name == "" || out.Customer.Country == "" {
-		return domain.SelfBillParties{}, errors.New("self-billing parties: the party or legal entity master has no name or country")
+		return domain.SelfBillParties{}, fmt.Errorf("%w: the party or legal entity master has no name or country", domain.ErrSelfBillPartyIncomplete)
 	}
 	return out, nil
 }

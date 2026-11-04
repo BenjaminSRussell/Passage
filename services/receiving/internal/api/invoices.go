@@ -204,6 +204,11 @@ func (a *API) postVendorInvoice(w http.ResponseWriter, r *http.Request) {
 func (a *API) submitInvoice(ctx context.Context, memo groupMemo, p tenant.Principal, in store.Invoice) (store.Invoice, error) {
 	var parties domain.SelfBillParties
 	if in.Source == domain.InvoiceSourceERS {
+		// No tax service means no self-billing document can carry tax: skip
+		// before the party lookup, which is not configured without TAX_URL.
+		if a.ports.Tax == nil {
+			return store.Invoice{}, domain.ErrTaxNotDetermined
+		}
 		var err error
 		if parties, err = a.selfBillParties(ctx, in); err != nil {
 			return store.Invoice{}, err

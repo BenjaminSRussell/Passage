@@ -2,6 +2,7 @@ package partydata_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/partydata"
 )
 
@@ -38,11 +40,11 @@ func servers(t *testing.T, partyStatus int) (*httptest.Server, *httptest.Server)
 	org := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/v1/org/addresses" && strings.Contains(r.URL.RawQuery, "ownerType=party") && strings.Contains(r.URL.RawQuery, "ownerId="+partyID):
-			_, _ = w.Write([]byte(`{"items":[{"countryCode":"DE","formatted":"Hauptstr 1, 10115 Berlin"}]}`))
+			_, _ = w.Write([]byte(`{"items":[{"id":"` + addrID + `","ownerType":"party","countryCode":"DE","formatted":"Hauptstr 1, 10115 Berlin","purposes":[{"purpose":"business","primary":true}]}]}`))
 		case r.URL.Path == "/v1/org/legal-entities/"+leID:
 			_, _ = w.Write([]byte(`{"name":"Passage Werke AG","country":"DE","registrationNumber":"HRB 999","primaryAddressId":"` + addrID + `"}`))
 		case r.URL.Path == "/v1/org/addresses/"+addrID:
-			_, _ = w.Write([]byte(`{"countryCode":"DE","formatted":"Ring 5, 80331 Muenchen"}`))
+			_, _ = w.Write([]byte(`{"id":"` + addrID + `","countryCode":"DE","formatted":"Ring 5, 80331 Muenchen","purposes":[{"purpose":"invoice","primary":true},{"purpose":"business","primary":false}]}`))
 		default:
 			t.Errorf("org path %s?%s", r.URL.Path, r.URL.RawQuery)
 		}
@@ -100,16 +102,26 @@ func TestSelfBillParties_RefusesASupplierWithoutAnAddressAndPrefersTheInvoiceAdd
 	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: leID, UserID: "alice"})
 	c := partydata.New(party.URL, org.URL, nil)
 	items = `[]`
-	if _, err := c.SelfBillParties(ctx, leID, vendorID); err == nil {
-		t.Fatal("a supplier without an address produced a document")
+	if _, err := c.SelfBillParties(ctx, leID, vendorID); !errors.Is(err, domain.ErrSelfBillPartyIncomplete) {
+		t.Fatalf("a supplier without an address: %v, want ErrSelfBillPartyIncomplete", err)
 	}
-	items = `[{"countryCode":"","formatted":"x"}]`
-	if _, err := c.SelfBillParties(ctx, leID, vendorID); err == nil {
-		t.Fatal("a supplier address without a country produced a document")
+	items = `[{"countryCode":"","formatted":"x","purposes":[{"purpose":"invoice"}]}]`
+	if _, err := c.SelfBillParties(ctx, leID, vendorID); !errors.Is(err, domain.ErrSelfBillPartyIncomplete) {
+		t.Fatalf("a supplier address without a country: %v, want ErrSelfBillPartyIncomplete", err)
 	}
-	items = `[{"countryCode":"FR","formatted":"Home","purposes":["home"]},{"countryCode":"DE","formatted":"Billing","purposes":["invoice"]}]`
+	// The org service returns purposes as AddressPurpose objects; the invoice
+	// address wins over business, and a primary one over a non-primary one.
+	items = `[{"countryCode":"FR","formatted":"Home","purposes":[{"purpose":"home","primary":true}]},
+		{"countryCode":"AT","formatted":"Office","purposes":[{"purpose":"business","primary":true}]},
+		{"countryCode":"NL","formatted":"Old billing","purposes":[{"purpose":"invoice","primary":false}]},
+		{"countryCode":"DE","formatted":"Billing","purposes":[{"purpose":"delivery"},{"purpose":"invoice","primary":true}]}]`
 	got, err := c.SelfBillParties(ctx, leID, vendorID)
 	if err != nil || got.Supplier.Address != "Billing" || got.Supplier.Country != "DE" {
 		t.Fatalf("supplier %+v err %v", got.Supplier, err)
+	}
+	items = `[{"countryCode":"FR","formatted":"Home","purposes":[{"purpose":"home"}]},
+		{"countryCode":"AT","formatted":"Office","purposes":[{"purpose":"business","primary":false}]}]`
+	if got, err = c.SelfBillParties(ctx, leID, vendorID); err != nil || got.Supplier.Address != "Office" {
+		t.Fatalf("without an invoice address the business one is used: %+v err %v", got.Supplier, err)
 	}
 }

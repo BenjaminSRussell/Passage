@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -133,8 +134,10 @@ func TestErs_SkipsAsTaxNotDeterminedInsteadOfIssuingAZeroTaxDocument(t *testing.
 	cases := map[string]*rig{
 		"unknown supplier country": taxRig(vat19(), &domain.FakeTaxRecorder{}, unknown, true),
 		"no tax service":           taxRig(nil, nil, testParties, true),
-		"no rule for the country":  taxRig(domain.FakeTaxCalculator{Err: domain.ErrTaxNotDetermined}, nil, testParties, true),
-		"cross-border supplier":    taxRig(vat19(), &domain.FakeTaxRecorder{}, foreign, true),
+		// cmd/receiving leaves SelfBillParties nil when TAX_URL is unset.
+		"no tax service, no party source": taxRig(nil, nil, nil, true),
+		"no rule for the country":         taxRig(domain.FakeTaxCalculator{Err: domain.ErrTaxNotDetermined}, nil, testParties, true),
+		"cross-border supplier":           taxRig(vat19(), &domain.FakeTaxRecorder{}, foreign, true),
 	}
 	for name, rg := range cases {
 		rg.enableErs(t, true)
@@ -147,6 +150,53 @@ func TestErs_SkipsAsTaxNotDeterminedInsteadOfIssuingAZeroTaxDocument(t *testing.
 		if len(rg.ledger.Entries) != before || grirStatus(t, rg) != "OPEN" {
 			t.Fatalf("%s: the receipt was consumed", name)
 		}
+	}
+}
+
+func TestErs_NoTaxServiceSkipIsAckedByTheConsumer(t *testing.T) {
+	rg := taxRig(nil, nil, nil, true)
+	rg.enableErs(t, true)
+	rg.posted(t, "PS-NOTAX", 10, 4)
+	if err := rg.consume(lastOfType(t, rg, api.ReceiptPostedType)); err != nil || grirStatus(t, rg) != "OPEN" || len(rg.ledger.Entries) != 1 {
+		t.Fatalf("without a tax service the consumer must skip and ack, got %v grir %s entries %d", err, grirStatus(t, rg), len(rg.ledger.Entries))
+	}
+}
+
+func TestErs_IncompletePartyDataIsASkipNotAnOutage(t *testing.T) {
+	incomplete := domain.FakeSelfBillParties{Err: fmt.Errorf("%w: the supplier has no address", domain.ErrSelfBillPartyIncomplete)}
+	rg := taxRig(vat19(), &domain.FakeTaxRecorder{}, incomplete, true)
+	rg.enableErs(t, true)
+	rg.posted(t, "PS-NOADDR", 10, 4)
+	before := len(rg.ledger.Entries)
+	run := rg.ersRun(t, http.StatusOK)
+	if len(run.Settled) != 0 || len(run.Skipped) != 1 || run.Skipped[0].Reason != "PARTY_DATA_INCOMPLETE" || !strings.Contains(run.Skipped[0].Detail, "no address") {
+		t.Fatalf("run %+v", run)
+	}
+	if err := rg.consume(lastOfType(t, rg, api.ReceiptPostedType)); err != nil {
+		t.Fatalf("the consumer must ack a data gap, not retry it into the DLQ: %v", err)
+	}
+	if len(rg.ledger.Entries) != before || grirStatus(t, rg) != "OPEN" {
+		t.Fatal("the receipt was consumed")
+	}
+}
+
+func TestErs_AuditReleaseWithIncompletePartyDataAnswers422AndPostsNothing(t *testing.T) {
+	parties := &flakyParties{src: testParties}
+	rg := taxRig(vat19(), &domain.FakeTaxRecorder{}, parties, true)
+	rg.enableErs(t, true)
+	rg.sampleRate(t, "100")
+	rg.posted(t, "PS-REL422", 10, 4)
+	run := rg.ersRun(t, http.StatusOK)
+	if len(run.Settled) != 1 || run.Settled[0].Status != "AUDIT_BLOCKED" {
+		t.Fatalf("run %+v", run)
+	}
+	before := len(rg.ledger.Entries)
+	parties.err = fmt.Errorf("%w: the supplier has no address", domain.ErrSelfBillPartyIncomplete)
+	if code, body := rg.release(run.Settled[0].InvoiceID, "auditor"); code != http.StatusUnprocessableEntity || !strings.Contains(body, "AP-ERS-005") {
+		t.Fatalf("release %d %s", code, body)
+	}
+	if len(rg.ledger.Entries) != before {
+		t.Fatal("the release posted without a self-billing document")
 	}
 }
 
@@ -200,9 +250,13 @@ func TestErs_ReleaseWithoutPartyDataKeepsTheInvoiceBlocked(t *testing.T) {
 type flakyParties struct {
 	src  domain.FakeSelfBillParties
 	fail bool
+	err  error
 }
 
 func (f *flakyParties) SelfBillParties(ctx context.Context, le, vendor string) (domain.SelfBillParties, error) {
+	if f.err != nil {
+		return domain.SelfBillParties{}, f.err
+	}
 	if f.fail {
 		return domain.SelfBillParties{}, errors.New("party down")
 	}
