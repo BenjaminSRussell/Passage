@@ -1326,6 +1326,12 @@ test_pricing_cache_principal_holds_only_its_flag if {
 	not principal_allowed("pricing-cache", "GET", "/v1/pricing/parameters")
 }
 
+test_scheduling_run_compare_and_rollback_routes if {
+	allowed("scheduling.read", "GET", "/v1/scheduling/runs/r1/compare")
+	allowed("scheduling.run", "POST", "/v1/scheduling/runs/r1:rollback")
+	not allowed("scheduling.read", "POST", "/v1/scheduling/runs/r1:rollback")
+}
+
 test_purchasing_action_routes_match_their_colon_suffix if {
 	allowed("PurchaseOrderMaintain", "POST", "/v1/procurement/inbound-changes/c1:retry")
 	allowed("PurchaseOrderMaintain", "POST", "/v1/procurement/inbound-changes/c1:acknowledge")

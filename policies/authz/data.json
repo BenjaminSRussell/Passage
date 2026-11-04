@@ -2857,11 +2857,13 @@
       {"resource": "/v1/scheduling/order-imports/*", "methods": ["GET"]},
       {"resource": "/v1/scheduling/operations/*", "methods": ["GET"]},
       {"resource": "/v1/scheduling/parameters", "methods": ["GET"]},
-      {"resource": "/v1/scheduling/dispatch-list", "methods": ["GET"]}
+      {"resource": "/v1/scheduling/dispatch-list", "methods": ["GET"]},
+      {"resource": "/v1/scheduling/runs/*/compare", "methods": ["GET"]}
     ]},
     "scheduling.run": {"permissions": [
       {"resource": "/v1/scheduling/runs", "methods": ["POST"]},
-      {"resource": "/v1/scheduling/orders/*:schedule", "methods": ["POST"]}
+      {"resource": "/v1/scheduling/orders/*:schedule", "methods": ["POST"]},
+      {"resource": "/v1/scheduling/runs/*:rollback", "methods": ["POST"]}
     ]},
     "scheduling.schedule.write": {"permissions": [
       {"resource": "/v1/scheduling/campaigns/*:sequence", "methods": ["POST"]},
