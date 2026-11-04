@@ -16,6 +16,7 @@ shard_for() {
     github.com/BenjaminSRussell/passage/services/inventory/internal/store) echo inventory-store ;;
     github.com/BenjaminSRussell/passage/services/ledger/internal/store) echo ledger-store ;;
     github.com/BenjaminSRussell/passage/services/org/internal/store) echo org-store ;;
+    github.com/BenjaminSRussell/passage/services/engineering/internal/store) echo engineering-store ;;
     *)
       local n
       n=$(printf '%s' "$pkg" | cksum | awk '{print $1}')

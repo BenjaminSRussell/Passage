@@ -64,6 +64,7 @@ jobs:
           - inventory-store
           - ledger-store
           - org-store
+          - engineering-store
           - rest-0
           - rest-1
           - rest-2
