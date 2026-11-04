@@ -86,12 +86,22 @@ func releasedDefault(t *testing.T, s *store.Postgres, ctx context.Context, qtys 
 // releasedIn releases one order of legalEntity in warehouse.
 func releasedIn(t *testing.T, s *store.Postgres, ctx context.Context, warehouse, legalEntity string, qtys ...int64) fixture {
 	t.Helper()
+	return releasedOf(t, s, ctx, warehouse, legalEntity, nil, qtys...)
+}
+
+// releasedOf is releasedIn with the product of each line named (a fresh one when products is nil).
+func releasedOf(t *testing.T, s *store.Postgres, ctx context.Context, warehouse, legalEntity string, products []string, qtys ...int64) fixture {
+	t.Helper()
 	f := fixture{legalEntity: legalEntity, warehouse: warehouse}
 	order, customer := ids.New(), ids.New()
 	var lines []domain.ReleaseLine
-	for _, q := range qtys {
+	for i, q := range qtys {
+		product := ids.New()
+		if products != nil {
+			product = products[i]
+		}
 		lines = append(lines, domain.ReleaseLine{OrderID: order, OrderLineID: ids.New(), CustomerID: customer, LegalEntityID: f.legalEntity,
-			WarehouseID: f.warehouse, ProductID: ids.New(), Unit: "EA", Qty: decimal.NewFromInt(q), ConfirmedShipDate: today(), ATPOK: true})
+			WarehouseID: f.warehouse, ProductID: product, Unit: "EA", Qty: decimal.NewFromInt(q), ConfirmedShipDate: today(), ATPOK: true})
 	}
 	groups, skipped := domain.Release(lines, domain.ReleaseRule{Today: today(), HorizonDays: 2, RequireFullATP: true})
 	if len(skipped) != 0 || len(groups) != 1 {

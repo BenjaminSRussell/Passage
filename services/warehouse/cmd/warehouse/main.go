@@ -12,8 +12,8 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/issueclaim"
 	"github.com/BenjaminSRussell/passage/services/warehouse/internal/api"
-	"github.com/BenjaminSRussell/passage/services/warehouse/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/warehouse/internal/store"
 	"github.com/BenjaminSRussell/passage/services/warehouse/migrations"
 )
@@ -68,7 +68,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return err
 		}
 		st := store.New(pool)
-		holds, err := inventory.FromEnv(getenv)
+		holds, err := issueclaim.FromEnv(getenv)
 		if err != nil {
 			return fmt.Errorf("inventory client: %w", err)
 		}

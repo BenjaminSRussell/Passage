@@ -162,8 +162,14 @@ people; the service-only `inventory.hold.apply` (granted to `quality`) reaches p
 test `TestHoldProperty_AvailablePlusHeldIsOnHandAndNeverNegative` proves available + held + reserved = on-hand and no negative
 availability under random place, whole-lot, release, release-by-source and issue sequences. An issue or transfer that would
 leave physical below held returns `QUALITY_HOLD` before `INV-NEG-001` (`CheckNegative`, `TestCheckNegative_HeldQuantityIsQualityHold`),
-even when negative stock is allowed. Warehouse pick, fulfillment packing-slip post and production consume refuse the same
-held quantity by reading this on-hand. Not built: a hold on a whole lot
+even when negative stock is allowed. Warehouse pick, fulfillment packing-slip post and production consume claim their quantity
+through `POST /v1/inventory/issue-claims` (duty `inventory.issue.claim`, service only; migration 0029, `inventory_issue_claim`;
+`:release` withdraws a claim whose movement failed). The claim locks the product's on-hand rows, sums physical and held over the
+unrestricted (not BLOCKED or QUARANTINE) rows of the warehouse (and batch), subtracts the claims of the same kind (PICK, SHIP,
+CONSUME) already taken, and refuses with 422 `QUALITY_HOLD` when a hold exists and the quantity exceeds what is left
+(`TestIssueClaim_*`). The three kinds are tallied apart: inventory books none of these movements as journals, so physical does not
+fall, and a unit picked and then shipped must not count twice; claims of different kinds are therefore not bounded by one
+another. Not built: a hold on a whole lot
 does not follow later receipts into the lot, holds are not shown on the web on-hand page, and holds do not freeze count sheets.
 
 PSG-1615 (wave 16 slice 15) adds partial shipments and a planned receipt date on transfer orders (FR-16.15, BR-16.13). `POST

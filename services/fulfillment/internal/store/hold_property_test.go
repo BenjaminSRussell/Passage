@@ -1,26 +1,41 @@
 package store_test
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
 	"pgregory.net/rapid"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
-	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/inventory"
+	"github.com/BenjaminSRussell/passage/platform/issueclaim"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/store"
 )
+
+func qn(n int64) decimal.Decimal { return decimal.NewFromInt(n) }
+
+func postIn(sh store.Shipment) store.PostInput {
+	return store.PostInput{PostingDate: today(), Currency: "USD", Costs: costs(sh, "1")}
+}
+
+func packedIn(t *testing.T, s *store.Postgres, ctx context.Context, warehouse, legalEntity string, products []string, qtys ...int64) (store.PackResult, store.PostInput) {
+	t.Helper()
+	f := releasedOf(t, s, ctx, warehouse, legalEntity, products, qtys...)
+	return pickAndPack(t, s, ctx, f.shipment), postIn(f.shipment)
+}
 
 func TestPostPackingSlip_RefusesHeldQuantity(t *testing.T) {
 	s, _ := setup(t)
 	ctx := ctxFor(1, "")
-	holds := &inventory.MapHold{}
+	holds := &issueclaim.Fake{}
 	s.WithHolds(holds)
 	f := released(t, s, ctx, 10)
 	packed := pickAndPack(t, s, ctx, f.shipment)
 	product := f.shipment.Lines[0].ProductID
-	holds.Set(product, decimal.NewFromInt(10), decimal.NewFromInt(8))
-	in := store.PostInput{PostingDate: today(), Currency: "USD", Costs: costs(f.shipment, "12.50")}
+	holds.Set(product, qn(10), qn(8))
+	in := postIn(f.shipment)
 	_, err := s.PostPackingSlip(ctx, f.shipment.ID, packed.Shipment.Version, in, idem("held"))
 	if problemCode(err) != store.CodeQualityHold {
 		t.Fatalf("held ship: %v, want %s", err, store.CodeQualityHold)
@@ -29,47 +44,116 @@ func TestPostPackingSlip_RefusesHeldQuantity(t *testing.T) {
 	if err != nil || got.Status != packed.Shipment.Status || !got.Lines[0].Shipped.IsZero() {
 		t.Fatalf("held ship moved stock: %+v %v", got, err)
 	}
-	holds.Set(product, decimal.NewFromInt(10), decimal.Zero)
+	holds.Set(product, qn(10), decimal.Zero)
 	slip, err := s.PostPackingSlip(ctx, f.shipment.ID, packed.Shipment.Version, in, idem("released"))
 	if err != nil || slip.ID == "" {
 		t.Fatalf("ship after usage decision: %+v %v", slip, err)
 	}
 }
 
-// TestHoldProperty_ShipNeverMovesHeldUntilUsageDecision is wave 33 AC2: random
-// hold, release (usage decision) and ship sequences never move held quantity.
+func TestPostPackingSlip_RepeatedShipmentsCannotEatHeldStock(t *testing.T) {
+	s, _ := setup(t)
+	ctx := ctxFor(1, "")
+	holds := &issueclaim.Fake{}
+	s.WithHolds(holds)
+	warehouse, entity, product := ids.New(), ids.New(), ids.New()
+	keepOpen(t, s, ctx, warehouse, entity)
+	holds.Set(product, qn(10), qn(8))
+	a, inA := packedIn(t, s, ctx, warehouse, entity, []string{product}, 2)
+	b, inB := packedIn(t, s, ctx, warehouse, entity, []string{product}, 2)
+	if _, err := s.PostPackingSlip(ctx, a.Shipment.ID, a.Shipment.Version, inA, idem("a")); err != nil {
+		t.Fatalf("shipping the free 2: %v", err)
+	}
+	_, err := s.PostPackingSlip(ctx, b.Shipment.ID, b.Shipment.Version, inB, idem("b"))
+	if problemCode(err) != store.CodeQualityHold {
+		t.Fatalf("second shipment of the same free 2 against 8 held of 10: %v, want %s", err, store.CodeQualityHold)
+	}
+	if got, gerr := s.GetShipment(ctx, b.Shipment.ID); gerr != nil || !got.Lines[0].Shipped.IsZero() {
+		t.Fatalf("refused shipment moved quantity: %+v %v", got, gerr)
+	}
+	if !holds.Claimed(product, issueclaim.Ship).Equal(qn(2)) {
+		t.Fatalf("claimed %s, want only the shipped 2", holds.Claimed(product, issueclaim.Ship))
+	}
+	holds.Set(product, qn(10), decimal.Zero)
+	if _, err := s.PostPackingSlip(ctx, b.Shipment.ID, b.Shipment.Version, inB, idem("b2")); err != nil {
+		t.Fatalf("after the usage decision: %v", err)
+	}
+}
+
+func TestPostPackingSlip_SumsLinesOfOneProductBeforeChecking(t *testing.T) {
+	s, _ := setup(t)
+	ctx := ctxFor(1, "")
+	holds := &issueclaim.Fake{}
+	s.WithHolds(holds)
+	product, warehouse, entity := ids.New(), ids.New(), ids.New()
+	keepOpen(t, s, ctx, warehouse, entity)
+	holds.Set(product, qn(20), qn(10))
+	packed, in := packedIn(t, s, ctx, warehouse, entity, []string{product, product}, 6, 6)
+	_, err := s.PostPackingSlip(ctx, packed.Shipment.ID, packed.Shipment.Version, in, idem("two-lines"))
+	if problemCode(err) != store.CodeQualityHold {
+		t.Fatalf("6+6 against 10 free: %v, want %s", err, store.CodeQualityHold)
+	}
+	if !holds.Claimed(product, issueclaim.Ship).IsZero() {
+		t.Fatalf("refused post left %s claimed", holds.Claimed(product, issueclaim.Ship))
+	}
+}
+
+type brokenInventory struct{}
+
+func (brokenInventory) Claim(context.Context, issueclaim.Claim) error {
+	return errors.New("dial tcp inventory.internal:8080: connection refused")
+}
+func (brokenInventory) Release(context.Context, issueclaim.Claim) {}
+
+func TestPostPackingSlip_InventoryOutageIsAGeneric503(t *testing.T) {
+	s, _ := setup(t)
+	ctx := ctxFor(1, "")
+	s.WithHolds(brokenInventory{})
+	f := released(t, s, ctx, 1)
+	packed := pickAndPack(t, s, ctx, f.shipment)
+	_, err := s.PostPackingSlip(ctx, f.shipment.ID, packed.Shipment.Version, postIn(f.shipment), idem("outage"))
+	if problemCode(err) != "COM-0503" || strings.Contains(err.Error(), "inventory.internal") {
+		t.Fatalf("outage: %v, want COM-0503 without the URL", err)
+	}
+}
+
 func TestHoldProperty_ShipNeverMovesHeldUntilUsageDecision(t *testing.T) {
 	s, _ := setup(t)
 	ctx := ctxFor(1, "")
-	holds := &inventory.MapHold{}
+	holds := &issueclaim.Fake{}
 	s.WithHolds(holds)
 	rapid.Check(t, func(rt *rapid.T) {
-		qty := rapid.IntRange(1, 20).Draw(rt, "qty")
-		held := rapid.IntRange(0, 20).Draw(rt, "held")
-		physical := 20
-		f := released(t, s, ctx, int64(qty))
-		packed := pickAndPack(t, s, ctx, f.shipment)
-		product := f.shipment.Lines[0].ProductID
-		holds.Set(product, decimal.NewFromInt(int64(physical)), decimal.NewFromInt(int64(held)))
-		in := store.PostInput{PostingDate: today(), Currency: "USD", Costs: costs(f.shipment, "1")}
-		_, err := s.PostPackingSlip(ctx, f.shipment.ID, packed.Shipment.Version, in, idem("p-"+ids.New()))
-		blocked := held > 0 && qty > physical-held
-		if blocked {
-			if problemCode(err) != store.CodeQualityHold {
-				rt.Fatalf("held %d of %d, ship %d: %v, want %s", held, physical, qty, err, store.CodeQualityHold)
+		const physical = 20
+		warehouse, entity, product := ids.New(), ids.New(), ids.New()
+		keepOpen(t, s, ctx, warehouse, entity)
+		holds.Set(product, qn(physical), decimal.Zero)
+		held, shipped := 0, 0
+		for i, steps := 0, rapid.IntRange(3, 6).Draw(rt, "steps"); i < steps; i++ {
+			switch rapid.IntRange(0, 2).Draw(rt, "op") {
+			case 0:
+				held = rapid.IntRange(0, physical).Draw(rt, "held")
+				holds.Set(product, qn(physical), qn(int64(held)))
+			case 1:
+				held = 0
+				holds.Set(product, qn(physical), decimal.Zero)
+			default:
+				qty := rapid.IntRange(1, 8).Draw(rt, "qty")
+				packed, in := packedIn(t, s, ctx, warehouse, entity, []string{product}, int64(qty))
+				_, err := s.PostPackingSlip(ctx, packed.Shipment.ID, packed.Shipment.Version, in, idem("p-"+ids.New()))
+				if held > 0 && qty > physical-held-shipped {
+					if problemCode(err) != store.CodeQualityHold {
+						rt.Fatalf("held %d of %d, %d already shipped, ship %d: %v, want %s", held, physical, shipped, qty, err, store.CodeQualityHold)
+					}
+					if got, gerr := s.GetShipment(ctx, packed.Shipment.ID); gerr != nil || !got.Lines[0].Shipped.IsZero() {
+						rt.Fatalf("held ship moved quantity: %+v %v", got, gerr)
+					}
+					continue
+				}
+				if err != nil {
+					rt.Fatalf("free ship of %d (held %d, %d shipped): %v", qty, held, shipped, err)
+				}
+				shipped += qty
 			}
-			got, gerr := s.GetShipment(ctx, f.shipment.ID)
-			if gerr != nil || !got.Lines[0].Shipped.IsZero() {
-				rt.Fatalf("held ship moved quantity: %+v %v", got, gerr)
-			}
-			holds.Set(product, decimal.NewFromInt(int64(physical)), decimal.Zero)
-			if _, err := s.PostPackingSlip(ctx, f.shipment.ID, packed.Shipment.Version, in, idem("r-"+ids.New())); err != nil {
-				rt.Fatalf("ship after usage decision: %v", err)
-			}
-			return
-		}
-		if err != nil {
-			rt.Fatalf("free ship of %d with held %d: %v", qty, held, err)
 		}
 	})
 }

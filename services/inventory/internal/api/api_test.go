@@ -24,6 +24,7 @@ import (
 
 // fakeStore records the calls the HTTP layer makes; it never touches Postgres.
 type fakeStore struct {
+	claim           issueClaimFake
 	backfillAfter   string
 	backfillLimit   int
 	lineFilter      store.TransferLineFilter

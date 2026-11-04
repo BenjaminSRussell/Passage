@@ -349,6 +349,10 @@
       {"resource": "/v1/inventory/holds", "methods": ["POST"]},
       {"resource": "/v1/inventory/holds:release-source", "methods": ["POST"]}
     ]},
+    "inventory.issue.claim": {"service_only": true, "permissions": [
+      {"resource": "/v1/inventory/issue-claims", "methods": ["POST"]},
+      {"resource": "/v1/inventory/issue-claims:release", "methods": ["POST"]}
+    ]},
     "inventory.transaction.apply": {"service_only": true, "permissions": [{"resource": "/internal/v1/inventory/transactions:apply", "methods": ["POST"]}]},
     "inventory.transaction.step": {"permissions": [
       {"resource": "/v1/inventory/transactions/*:unpick", "methods": ["POST"]},
@@ -3007,7 +3011,7 @@
     },
     "fulfillment": {
       "sales": ["sales.order.record-delivery"],
-      "inventory": ["inventory.read"]
+      "inventory": ["inventory.issue.claim"]
     },
     "batch": {
       "product": ["product.variants.explode", "product.released.read", "product.jobs.write"]
@@ -3025,7 +3029,7 @@
     },
     "production": {
       "ledger": ["ledger.entry.post", "ledger.balance.read"],
-      "inventory": ["inventory.read"]
+      "inventory": ["inventory.issue.claim"]
     },
     "productcost": {
       "ledger": ["ledger.entry.post", "ledger.journal.reverse"],
@@ -3086,7 +3090,7 @@
       "inventory": ["inventory.hold.apply"]
     },
     "warehouse": {
-      "inventory": ["inventory.read"]
+      "inventory": ["inventory.issue.claim"]
     },
     "hr": {
       "numbering": ["numbering.sequence.allocate"],

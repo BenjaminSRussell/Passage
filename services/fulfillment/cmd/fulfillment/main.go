@@ -13,9 +13,9 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/issueclaim"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/api"
-	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/store"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/migrations"
 )
@@ -77,7 +77,7 @@ func run() error {
 		}
 	}
 
-	holds, err := inventory.FromEnv(os.Getenv)
+	holds, err := issueclaim.FromEnv(os.Getenv)
 	if err != nil {
 		return fmt.Errorf("inventory client: %w", err)
 	}

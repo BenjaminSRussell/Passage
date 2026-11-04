@@ -20,12 +20,12 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/issueclaim"
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/domain"
 	fulevents "github.com/BenjaminSRussell/passage/services/fulfillment/internal/events"
-	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/inventory"
 )
 
 // Error codes returned by the store (service catalog FUL-*).
@@ -332,7 +332,7 @@ type Postgres struct {
 	extension int
 	// releaseDefaults is what a warehouse without a saved release rule reads.
 	releaseDefaults ReleaseRuleInput
-	holds           inventory.Checker
+	claims          issueclaim.Claimer
 }
 
 // New returns a Postgres store that issues SSCCs under gs1Prefix.
@@ -349,32 +349,38 @@ func (s *Postgres) WithReleaseDefaults(horizonDays int, requireFullATP bool) *Po
 	return s
 }
 
-// WithHolds checks inventory holds on packing-slip post. A nil checker (the
-// default, when INVENTORY_URL is unset) leaves current behaviour.
-func (s *Postgres) WithHolds(h inventory.Checker) *Postgres {
-	s.holds = h
+// WithHolds claims shipped quantity at inventory on packing-slip post, so held
+// stock is never shipped. A nil claimer (the default, when INVENTORY_URL is
+// unset) leaves current behaviour.
+func (s *Postgres) WithHolds(c issueclaim.Claimer) *Postgres {
+	s.claims = c
 	return s
 }
 
-func (s *Postgres) checkHolds(ctx context.Context, sh Shipment) error {
-	if s.holds == nil {
-		return nil
+func (s *Postgres) claimShipment(ctx context.Context, sh Shipment) (func(), error) {
+	undo := func() {}
+	if s.claims == nil {
+		return undo, nil
 	}
+	perProduct := map[string]decimal.Decimal{}
 	for _, l := range sh.Lines {
-		q := l.Packed.Sub(l.Shipped)
-		if !q.IsPositive() {
-			continue
-		}
-		lot, err := s.holds.Lot(ctx, sh.LegalEntityID, l.ProductID, sh.WarehouseID, "")
-		if err != nil {
-			return httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "inventory hold check failed")
-		}
-		if inventory.Blocks(lot.Physical, lot.Held, q) {
-			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeQualityHold,
-				fmt.Sprintf("item %s is on quality hold; ship not allowed", l.ProductID))
+		if q := l.Packed.Sub(l.Shipped); q.IsPositive() {
+			perProduct[l.ProductID] = perProduct[l.ProductID].Add(q)
 		}
 	}
-	return nil
+	var claims []issueclaim.Claim
+	for product, q := range perProduct {
+		claims = append(claims, issueclaim.Claim{LegalEntityID: sh.LegalEntityID, ProductID: product, Warehouse: sh.WarehouseID, Kind: issueclaim.Ship, Qty: q,
+			Key: fmt.Sprintf("fulfillment-ship:%s:%d:%s:%s", sh.ID, sh.Version, product, q)})
+	}
+	undo, err := issueclaim.ClaimAll(ctx, s.claims, claims)
+	switch {
+	case err == nil:
+		return undo, nil
+	case issueclaim.Refused(err):
+		return undo, httpx.NewProblem(http.StatusUnprocessableEntity, CodeQualityHold, "an item of this shipment is on quality hold; ship not allowed")
+	}
+	return undo, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "inventory hold check failed")
 }
 
 // Ping checks the database connection for readiness.
@@ -1139,6 +1145,7 @@ func (s *Postgres) PackContainer(ctx context.Context, id string, version int, co
 func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, in PostInput, idem Idem) (PackingSlip, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out PackingSlip
+	undo := func() {}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		res, err := runIdempotent(ctx, tx, p.TenantID, idem, func() (PackingSlip, error) {
 			sh, err := loadShipment(ctx, tx, id)
@@ -1201,7 +1208,7 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 			if err := checkKeptQty(ctx, tx, slip.Lines); err != nil {
 				return PackingSlip{}, err
 			}
-			if err := s.checkHolds(ctx, sh); err != nil {
+			if undo, err = s.claimShipment(ctx, sh); err != nil {
 				return PackingSlip{}, err
 			}
 			journal, err := domain.PackingSlipPosting(postLines, in.CogsAtShipment, in.Currency)
@@ -1289,6 +1296,9 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 		out = res
 		return err
 	})
+	if err != nil {
+		undo()
+	}
 	return out, err
 }
 
