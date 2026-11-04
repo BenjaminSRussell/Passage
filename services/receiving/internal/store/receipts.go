@@ -29,7 +29,7 @@ const (
 
 	receiptColumns = `id::text, COALESCE(receipt_number, ''), legal_entity_id::text, vendor_id::text, purchase_order_id::text, packing_slip,
 		COALESCE(carrier, ''), pallet_count, state, receipt_date, COALESCE(currency, ''), exchange_rate, posting_date, posted_at,
-		COALESCE(ledger_entry_id, ''), created_at, row_version, correction_seq, posted_by`
+		COALESCE(ledger_entry_id, ''), created_at, row_version, correction_seq, posted_by, COALESCE(source, 'PRODUCT')`
 	lineColumns = `line_no, COALESCE(po_line_id::text, ''), COALESCE(po_line_no, 0), product_id::text, qty, invoiced_qty,
 		COALESCE((SELECT g.cleared_amount FROM receiving_grir_open_item g WHERE g.tenant_id = receiving_receipt_line.tenant_id AND g.receipt_id = receiving_receipt_line.receipt_id AND g.line_no = receiving_receipt_line.line_no), 0),
 		COALESCE(ordered_remaining, 0), COALESCE(over_delivery_pct, 0),
@@ -81,7 +81,7 @@ func allocateNumber(ctx context.Context, tx pgx.Tx, tenantID string) (string, er
 func scanReceipt(row scanner) (Receipt, error) {
 	var r Receipt
 	err := row.Scan(&r.ID, &r.Number, &r.LegalEntityID, &r.VendorID, &r.PurchaseOrderID, &r.PackingSlip, &r.Carrier, &r.PalletCount,
-		&r.State, &r.Date, &r.Currency, &r.ExchangeRate, &r.PostingDate, &r.PostedAt, &r.LedgerEntryID, &r.CreatedAt, &r.Version, &r.CorrectionSeq, &r.PostedBy)
+		&r.State, &r.Date, &r.Currency, &r.ExchangeRate, &r.PostingDate, &r.PostedAt, &r.LedgerEntryID, &r.CreatedAt, &r.Version, &r.CorrectionSeq, &r.PostedBy, &r.Source)
 	return r, err
 }
 
@@ -357,8 +357,8 @@ func attachOtherReceived(ctx context.Context, tx pgx.Tx, tenantID string, r *Rec
 			continue
 		}
 		if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(l.qty), 0) FROM receiving_receipt_line l JOIN receiving_receipt r ON r.tenant_id = l.tenant_id AND r.id = l.receipt_id
-			WHERE l.tenant_id = $1 AND r.purchase_order_id = $2 AND l.po_line_no = $3 AND r.id <> $4 AND r.state IN `+receivedStates,
-			tenantID, r.PurchaseOrderID, l.POLineNo, r.ID).Scan(&r.Lines[i].OtherReceived); err != nil {
+			WHERE l.tenant_id = $1 AND r.purchase_order_id = $2 AND l.po_line_no = $3 AND r.id <> $4 AND r.source <> $5 AND r.state IN `+receivedStates,
+			tenantID, r.PurchaseOrderID, l.POLineNo, r.ID, domain.ReceiptSourceService).Scan(&r.Lines[i].OtherReceived); err != nil {
 			return err
 		}
 	}
@@ -373,7 +373,7 @@ func (s *Postgres) ReceivedOnPurchaseOrder(ctx context.Context, purchaseOrderID 
 	out := map[int]decimal.Decimal{}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT l.po_line_no, sum(l.qty) FROM receiving_receipt_line l JOIN receiving_receipt r ON r.tenant_id = l.tenant_id AND r.id = l.receipt_id
-			WHERE l.tenant_id = $1 AND r.purchase_order_id = $2 AND l.po_line_no IS NOT NULL AND r.state IN `+receivedStates+` GROUP BY l.po_line_no`, tenantID, purchaseOrderID)
+			WHERE l.tenant_id = $1 AND r.purchase_order_id = $2 AND l.po_line_no IS NOT NULL AND r.source <> $3 AND r.state IN `+receivedStates+` GROUP BY l.po_line_no`, tenantID, purchaseOrderID, domain.ReceiptSourceService)
 		if err != nil {
 			return err
 		}

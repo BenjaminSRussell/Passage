@@ -5,7 +5,7 @@ import type { ScanClass } from "./gs1";
 export const STEP_TYPES = ["scan", "input", "select", "confirm", "display", "branch", "call"] as const;
 export type StepType = (typeof STEP_TYPES)[number];
 
-export const SCAN_CLASSES: readonly ScanClass[] = ["LP", "GTIN", "LOCATION", "ANY"];
+export const SCAN_CLASSES: readonly ScanClass[] = ["LP", "GTIN", "LOT", "LOCATION", "ANY"];
 
 export interface FlowStep {
   id: string;

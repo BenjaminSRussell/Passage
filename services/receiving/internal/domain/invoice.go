@@ -27,6 +27,8 @@ type VendorInvoice struct {
 	PostingDate    time.Time
 	InvoiceDate    time.Time
 	Currency       string
+	TaxAmount      decimal.Decimal
+	TaxCode        string
 	Lines          []PostLine
 	// VendorGroupCode is the short code of the vendor's group in the party
 	// master; empty when unknown. It rides on the vendor-control line.
@@ -37,6 +39,7 @@ type HeldLine struct {
 	Qty          decimal.Decimal
 	UnitPrice    decimal.Decimal
 	StandardCost bool
+	Service      bool
 	Clearing     decimal.Decimal
 }
 
@@ -47,12 +50,18 @@ func clearingFor(item GrirItem, qty decimal.Decimal, exhausts bool, clearedInInv
 	return roundedMoney(item.ReceivedAmount.Value.Mul(qty).Div(item.ReceivedQty), item.ReceivedAmount.Currency)
 }
 
-func checkInvoiceHeader(in VendorInvoice, lines int) error {
+func checkInvoiceHeader(in VendorInvoice, lines int, profile PostingProfile) error {
 	if in.PostingDate.IsZero() || lines == 0 {
 		return fail(CodeInvalidReceipt, "invoice %s needs a posting date and at least one line", in.ID)
 	}
 	if in.LedgerID == "" || in.FiscalPeriodID == "" {
 		return fail(CodeInvalidReceipt, "invoice %s needs a ledger and a fiscal period", in.ID)
+	}
+	if in.TaxAmount.IsNegative() {
+		return fail(CodeInvalidReceipt, "invoice %s tax amount must not be negative", in.ID)
+	}
+	if in.TaxAmount.IsPositive() && profile.InputTax == "" {
+		return fail(CodeInvalidReceipt, "invoice %s has input tax but the posting profile has no input-tax account", in.ID)
 	}
 	return nil
 }
@@ -74,12 +83,19 @@ func buildInvoiceEntry(in VendorInvoice, lines []HeldLine, profile PostingProfil
 		entry.Lines = append(entry.Lines, JournalLine{Account: profile.GRIR, Amount: money.Amount{Value: l.Clearing, Currency: in.Currency}})
 		if diff := amount.Value.Sub(l.Clearing); !diff.IsZero() {
 			account := profile.Inventory
-			if l.StandardCost {
+			switch {
+			case l.Service:
+				account = profile.Expense
+			case l.StandardCost:
 				account = profile.PPV
 			}
 			entry.Lines = append(entry.Lines, JournalLine{Account: account, Amount: money.Amount{Value: diff, Currency: in.Currency}})
 		}
 		entry.GrirCleared = append(entry.GrirCleared, l.Clearing)
+	}
+	if in.TaxAmount.IsPositive() {
+		entry.Lines = append(entry.Lines, JournalLine{Account: profile.InputTax, Amount: money.Amount{Value: in.TaxAmount, Currency: in.Currency}})
+		payable.Value = payable.Value.Add(in.TaxAmount)
 	}
 	profile.addVendorControlLine(&entry, payable.Neg(), in.VendorGroupCode)
 	return entry
@@ -103,7 +119,7 @@ func assessInvoice(in VendorInvoice, profile PostingProfile) (JournalEntry, erro
 		exhausts := claimed[l.Item].Equal(l.Item.ReceivedQty.Sub(l.Item.InvoicedQty))
 		clearing := clearingFor(*l.Item, l.Qty, exhausts, cleared[l.Item])
 		cleared[l.Item] = cleared[l.Item].Add(clearing.Value)
-		held[i] = HeldLine{Qty: l.Qty, UnitPrice: l.UnitPrice, StandardCost: l.StandardCost, Clearing: clearing.Value}
+		held[i] = HeldLine{Qty: l.Qty, UnitPrice: l.UnitPrice, StandardCost: l.StandardCost, Service: l.Item.Service, Clearing: clearing.Value}
 	}
 	return buildInvoiceEntry(in, held, profile), nil
 }
@@ -116,7 +132,7 @@ func applyInvoice(in VendorInvoice, entry JournalEntry) {
 }
 
 func PostInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, ledger LedgerPoster, profile PostingProfile) (JournalEntry, error) {
-	if err := checkInvoiceHeader(in, len(in.Lines)); err != nil {
+	if err := checkInvoiceHeader(in, len(in.Lines), profile); err != nil {
 		return JournalEntry{}, err
 	}
 	if err := checkAPPeriod(ctx, periods, in.LegalEntityID, in.LedgerID, in.FiscalPeriodID, in.PostingDate, in.ID); err != nil {
@@ -134,7 +150,7 @@ func PostInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, l
 }
 
 func HoldInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, profile PostingProfile) (JournalEntry, error) {
-	if err := checkInvoiceHeader(in, len(in.Lines)); err != nil {
+	if err := checkInvoiceHeader(in, len(in.Lines), profile); err != nil {
 		return JournalEntry{}, err
 	}
 	if err := checkAPPeriod(ctx, periods, in.LegalEntityID, in.LedgerID, in.FiscalPeriodID, in.PostingDate, in.ID); err != nil {
@@ -149,7 +165,7 @@ func HoldInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, p
 }
 
 func PostHeldInvoice(ctx context.Context, in VendorInvoice, lines []HeldLine, periods PeriodControl, ledger LedgerPoster, profile PostingProfile) (JournalEntry, error) {
-	if err := checkInvoiceHeader(in, len(lines)); err != nil {
+	if err := checkInvoiceHeader(in, len(lines), profile); err != nil {
 		return JournalEntry{}, err
 	}
 	if err := checkAPPeriod(ctx, periods, in.LegalEntityID, in.LedgerID, in.FiscalPeriodID, in.PostingDate, in.ID); err != nil {

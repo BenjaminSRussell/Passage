@@ -44,7 +44,7 @@ func TestMigrationsApplyWithRLS(t *testing.T) {
 	if metadataErr != nil || currentUser != "passage_app" || roleSuper || roleBypass {
 		t.Fatalf("RLS test must use non-bypass passage_app role: user=%q super=%v bypass=%v err=%v", currentUser, roleSuper, roleBypass, metadataErr)
 	}
-	tables := []string{"receiving_receipt", "receiving_receipt_line", "receiving_serial", "receiving_grir_open_item", "idempotency_keys", "outbox", "consumer_inbox", "receiving_number_counter"}
+	tables := []string{"receiving_receipt", "receiving_receipt_line", "receiving_serial", "receiving_grir_open_item", "idempotency_keys", "outbox", "consumer_inbox", "receiving_number_counter", "receiving_ers_self_bill"}
 	for _, table := range tables {
 		var enabled, forced bool
 		err := pool.QueryRow(ctx, `select relrowsecurity, relforcerowsecurity from pg_class where relname = $1 and relnamespace = current_schema()::regnamespace`, table).Scan(&enabled, &forced)

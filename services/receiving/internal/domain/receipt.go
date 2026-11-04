@@ -25,6 +25,7 @@ const (
 	CodeCorrectionBelow   = "RCV-COR-001"
 	CodePostingPending    = "RCV-IDM-001"
 	CodeLedgerRejected    = "RCV-LDG-001"
+	CodeServiceReceipt    = "RCV-SVC-001"
 
 	receiptKeyFormat    = "post:receiving:productreceipt:%s:receipt"
 	correctionKeyFormat = "post:receiving:productreceipt:%s:correction:%d"
@@ -104,6 +105,7 @@ type GrirItem struct {
 	InvoicedQty    decimal.Decimal
 	ReceivedAmount money.Amount
 	ClearedAmount  money.Amount
+	Service        bool
 }
 
 func (g GrirItem) OpenAmount() decimal.Decimal {

@@ -294,3 +294,64 @@ func TestPostInvoice_VendorGroupDimensionIsOptionalAndOnlyOnTheControlLine(t *te
 		})
 	}
 }
+
+func TestPostInvoice_InputTaxDebitsAndVendorCreditIncludesTax(t *testing.T) {
+	item := grirItem("50", "10")
+	in := invoiceFor(item, "50", "10", august15)
+	in.Currency = "EUR"
+	item.ReceivedAmount.Currency = "EUR"
+	item.ClearedAmount.Currency = "EUR"
+	in.TaxAmount = dec("95")
+	in.TaxCode = "VAT19"
+	profile := testProfile
+	profile.InputTax = "1570"
+	ledger := &domain.FakeLedger{}
+	entry, err := domain.PostInvoice(context.Background(), in, domain.FakePeriods{Status: domain.PeriodOpen}, ledger, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := decimal.Zero
+	for _, l := range entry.Lines {
+		sum = sum.Add(l.Amount.Value)
+	}
+	if !sum.IsZero() {
+		t.Fatalf("entry not balanced: %s %+v", sum, entry.Lines)
+	}
+	last := entry.Lines[len(entry.Lines)-1]
+	if last.Account != "2000" || !last.Amount.Value.Equal(dec("-595")) {
+		t.Fatalf("vendor credit %+v, want 2000 -595", last)
+	}
+	if got := ledger.Balance("1570"); !got.Equal(dec("95")) {
+		t.Fatalf("input tax %s, want 95", got)
+	}
+	if got := ledger.Balance("2100"); !got.Equal(dec("500")) {
+		t.Fatalf("GR/IR %s, want 500", got)
+	}
+}
+
+func TestPostInvoice_RefusesTaxWithoutAnInputTaxAccount(t *testing.T) {
+	item := grirItem("1", "10")
+	in := invoiceFor(item, "1", "10", august15)
+	in.TaxAmount = dec("1.90")
+	_, err := domain.PostInvoice(context.Background(), in, domain.FakePeriods{Status: domain.PeriodOpen}, &domain.FakeLedger{}, testProfile)
+	if codeOf(t, err) != domain.CodeInvalidReceipt {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestPostInvoice_ServiceLineDifferenceGoesToExpenseNotInventory(t *testing.T) {
+	item := grirItem("10", "5")
+	item.Service = true
+	profile := testProfile
+	profile.Expense = "6000"
+	entry, err := domain.PostInvoice(context.Background(), invoiceFor(item, "10", "5.10", august15), domain.FakePeriods{Status: domain.PeriodOpen}, &domain.FakeLedger{}, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"2100": "50", "6000": "1", "2000": "-51"}
+	for _, l := range entry.Lines {
+		if w, ok := want[l.Account]; !ok || !l.Amount.Value.Equal(dec(w)) {
+			t.Fatalf("%s = %s, want %v", l.Account, l.Amount.Value, want)
+		}
+	}
+}
