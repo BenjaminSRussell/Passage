@@ -40,6 +40,10 @@ type fakeStore struct {
 	purchaseAgreements map[string]store.AgreementDetail
 	sourcing           []store.SourcingLine
 	openLines          []store.OpenOrderLine
+	vendorOpen         []store.VendorOpenOrders
+	overdue            []store.OverdueLine
+	priceHist          []store.PriceHistoryEntry
+	lastInquiry        store.InquiryFilter
 	lastOpenLines      store.OpenLineFilter
 	lastAgrFilter      store.AgreementFilter
 	lastSourcing       store.SourcingFilter
@@ -240,6 +244,21 @@ func (f *fakeStore) ListOpenRequisitionLines(_ context.Context, sf store.Sourcin
 func (f *fakeStore) ListOpenOrderLines(_ context.Context, of store.OpenLineFilter, after string, limit int) (store.Page[store.OpenOrderLine], error) {
 	f.lastOpenLines, f.lastAfter, f.lastLimit = of, after, limit
 	return store.Page[store.OpenOrderLine]{Items: f.openLines}, nil
+}
+
+func (f *fakeStore) ListOpenOrdersByVendor(_ context.Context, qf store.InquiryFilter, after string, limit int) (store.Page[store.VendorOpenOrders], error) {
+	f.lastInquiry, f.lastAfter, f.lastLimit = qf, after, limit
+	return store.Page[store.VendorOpenOrders]{Items: f.vendorOpen}, nil
+}
+
+func (f *fakeStore) ListOverdueLines(_ context.Context, qf store.InquiryFilter, after string, limit int) (store.Page[store.OverdueLine], error) {
+	f.lastInquiry, f.lastAfter, f.lastLimit = qf, after, limit
+	return store.Page[store.OverdueLine]{Items: f.overdue}, nil
+}
+
+func (f *fakeStore) ListPriceHistory(_ context.Context, qf store.InquiryFilter, after string, limit int) (store.Page[store.PriceHistoryEntry], error) {
+	f.lastInquiry, f.lastAfter, f.lastLimit = qf, after, limit
+	return store.Page[store.PriceHistoryEntry]{Items: f.priceHist}, nil
 }
 
 func (f *fakeStore) RequisitionLinesByID(_ context.Context, lineIDs []string) ([]store.SourcingLine, error) {

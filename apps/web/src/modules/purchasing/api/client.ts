@@ -658,6 +658,69 @@ export function listOpenOrderLines(filters: OpenSupplyFilters = {}, options: Lis
   return list<OpenOrderLine>("/purchase-order-lines", { ...filters }, options);
 }
 
+// --- Inquiries (PRD 3.17.14) ---
+
+/** Open CONFIRMED purchase orders of one vendor in one currency. */
+export interface VendorOpenOrders {
+  vendorId: string;
+  currency: string;
+  orderCount: number;
+  lineCount: number;
+  openValue: string;
+  overdueLines: number;
+  overdueValue: string;
+  earliestDue: string;
+}
+
+/**
+ * An open line past its due date. `deliveryDate` is the requested date; `dueDate` is the vendor's
+ * confirmed date when there is one, else the requested date (with a delivery schedule, of the first
+ * row the received quantity does not cover); `confirmedDate` is that row's confirmed date.
+ */
+export interface OverdueLine extends OpenOrderLine {
+  dueDate: string;
+  currency: string;
+  daysLate: number;
+  openValue: string;
+}
+
+/** A priced line of an approved purchase order for one product. */
+export interface PriceHistoryEntry {
+  purchaseOrderId: string;
+  number: string;
+  lineNo: number;
+  orderDate: string;
+  vendorId: string;
+  currency: string;
+  unit: string;
+  qty: string;
+  unitPrice: string;
+  priceUnit: string;
+  discountPct: string;
+  priceSource: string;
+  agreementLineId?: string;
+}
+
+export interface InquiryFilters {
+  vendorId?: string;
+  productId?: string;
+  asOf?: string;
+  from?: string;
+  to?: string;
+}
+
+export function listOpenOrdersByVendor(filters: InquiryFilters = {}, options: ListOptions = {}) {
+  return list<VendorOpenOrders>("/inquiries/open-orders-by-vendor", { ...filters }, options);
+}
+
+export function listOverdueLines(filters: InquiryFilters = {}, options: ListOptions = {}) {
+  return list<OverdueLine>("/inquiries/overdue-lines", { ...filters }, options);
+}
+
+export function listPriceHistory(filters: InquiryFilters = {}, options: ListOptions = {}) {
+  return list<PriceHistoryEntry>("/inquiries/price-history", { ...filters }, options);
+}
+
 // --- Requests for quotation (FR-17.4, BR-17.11) ---
 
 export type RFQStatus = "DRAFT" | "SENT" | "REPLIES_OPEN" | "CLOSED" | "AWARDED" | "CANCELLED";
