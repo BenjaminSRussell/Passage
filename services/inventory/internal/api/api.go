@@ -88,6 +88,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerOps(r)
 	a.registerStatusSteps(r)
 	a.registerReconciliation(r)
+	a.registerReturnReceipts(r)
 }
 
 // Metrics serves the counters for the admin port.
@@ -252,8 +253,11 @@ func (a *API) createJournal(w http.ResponseWriter, r *http.Request) {
 		fields["journalNameId"] = "must be a UUID"
 	}
 	key := strings.TrimSpace(r.Header.Get(idempotencyHeader))
-	if key == "" || len(key) > maxKeyLength {
+	switch {
+	case key == "" || len(key) > maxKeyLength:
 		fields[idempotencyHeader] = fmt.Sprintf("is required (1 to %d characters)", maxKeyLength)
+	case reservedJournalKey(key):
+		fields[idempotencyHeader] = "must not start with " + returnReceiptKeyPrefix + " (reserved for return receipts)"
 	}
 	if len(fields) > 0 {
 		fieldProblem(w, r, fields)

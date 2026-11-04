@@ -187,6 +187,31 @@ channels:
     messages:
       atpPromised:
         $ref: "#/components/messages/ATPPromised"
+  returnOrderAuthorized:
+    address: passage.sales.returnorder
+    messages:
+      returnOrderAuthorized:
+        $ref: "#/components/messages/ReturnOrderAuthorized"
+  returnOrderReceived:
+    address: passage.sales.returnorder
+    messages:
+      returnOrderReceived:
+        $ref: "#/components/messages/ReturnOrderReceived"
+  returnOrderInspected:
+    address: passage.sales.returnorder
+    messages:
+      returnOrderInspected:
+        $ref: "#/components/messages/ReturnOrderInspected"
+  returnOrderDispositioned:
+    address: passage.sales.returnorder
+    messages:
+      returnOrderDispositioned:
+        $ref: "#/components/messages/ReturnOrderDispositioned"
+  returnOrderCredited:
+    address: passage.sales.returnorder
+    messages:
+      returnOrderCredited:
+        $ref: "#/components/messages/ReturnOrderCredited"
 operations:
   publishParametersChanged:
     action: send
@@ -408,6 +433,36 @@ operations:
       Keyed by the order id. Consumers - fulfillment, planning, portal.
     messages:
       - {$ref: "#/channels/atpPromised/messages/atpPromised"}
+  publishReturnOrderAuthorized:
+    action: send
+    channel: {$ref: "#/channels/returnOrderAuthorized"}
+    summary: An RMA was authorized (FR-30.11). Consumers - fulfillment, inventory, portal.
+    messages:
+      - {$ref: "#/channels/returnOrderAuthorized/messages/returnOrderAuthorized"}
+  publishReturnOrderReceived:
+    action: send
+    channel: {$ref: "#/channels/returnOrderReceived"}
+    summary: Returned goods were received; RETURN_TO_STOCK restocks inventory at original cost.
+    messages:
+      - {$ref: "#/channels/returnOrderReceived/messages/returnOrderReceived"}
+  publishReturnOrderInspected:
+    action: send
+    channel: {$ref: "#/channels/returnOrderInspected"}
+    summary: An RMA was inspected.
+    messages:
+      - {$ref: "#/channels/returnOrderInspected/messages/returnOrderInspected"}
+  publishReturnOrderDispositioned:
+    action: send
+    channel: {$ref: "#/channels/returnOrderDispositioned"}
+    summary: RMA line dispositions were confirmed (BR-30.3). Consumers - inventory, billing, portal.
+    messages:
+      - {$ref: "#/channels/returnOrderDispositioned/messages/returnOrderDispositioned"}
+  publishReturnOrderCredited:
+    action: send
+    channel: {$ref: "#/channels/returnOrderCredited"}
+    summary: The RMA credit note posted to AR and GL (AC-30.5). Consumers - receivables, ledger, portal.
+    messages:
+      - {$ref: "#/channels/returnOrderCredited/messages/returnOrderCredited"}
 components:
   messages:
     QuotationConverted:
@@ -683,6 +738,46 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/AllocationData"
+    ReturnOrderAuthorized:
+      name: dev.passage.sales.returnorder.authorized.v1
+      title: Return order authorized
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/ReturnOrderData"
+    ReturnOrderReceived:
+      name: dev.passage.sales.returnorder.received.v1
+      title: Return order received
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/ReturnOrderData"
+    ReturnOrderInspected:
+      name: dev.passage.sales.returnorder.inspected.v1
+      title: Return order inspected
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/ReturnOrderData"
+    ReturnOrderDispositioned:
+      name: dev.passage.sales.returnorder.dispositioned.v1
+      title: Return order dispositioned
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/ReturnOrderData"
+    ReturnOrderCredited:
+      name: dev.passage.sales.returnorder.credited.v1
+      title: Return order credited
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/ReturnOrderData"
     ATPPromised:
       name: dev.passage.sales.atp.promised.v1
       title: Order line promised against ATP
@@ -692,6 +787,38 @@ components:
       payload:
         $ref: "#/components/schemas/ATPPromisedData"
   schemas:
+    ReturnOrderData:
+      type: object
+      required: [return_order_id, rma_number, legal_entity_id, customer_id, status, currency, gross, restocking, net, lines, actor, version]
+      properties:
+        return_order_id: {type: string, format: uuid}
+        rma_number: {type: string}
+        legal_entity_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        status: {type: string, enum: [REQUESTED, AUTHORIZED, RECEIVED, INSPECTED, DISPOSITIONED, CREDITED, CLOSED, REJECTED, EXPIRED]}
+        currency: {type: string}
+        gross: {type: string}
+        restocking: {type: string}
+        net: {type: string}
+        credit_note_id: {type: string}
+        journal_posting_id: {type: string}
+        actor: {type: string}
+        version: {type: integer}
+        lines:
+          type: array
+          items:
+            type: object
+            required: [line_id, line_no, product_id, quantity_expected, quantity_received, unit_price, restocking]
+            properties:
+              line_id: {type: string, format: uuid}
+              line_no: {type: integer}
+              product_id: {type: string, format: uuid}
+              disposition: {type: string, enum: [CREDIT_ONLY, RETURN_TO_STOCK]}
+              quantity_expected: {type: string}
+              quantity_received: {type: string}
+              unit_price: {type: string}
+              restocking: {type: string}
+              inventory_receipt_id: {type: string}
     ATPPromisedData:
       type: object
       required: [order_id, line_id, line_no, product_id, site_id, warehouse_id, quantity, requested_ship_date, source, complete, backorder_qty, schedule, actor, version]

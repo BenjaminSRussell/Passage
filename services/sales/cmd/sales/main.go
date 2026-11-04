@@ -82,7 +82,8 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if keys == nil {
 		slog.Warn("FIELDCRYPT_KEYS is unset: one-time customer orders are refused (SLS-0054)")
 	}
-	a := api.New(store.New(pool).WithFieldCrypt(keys)).WithConfigurations(up).WithProduction(up)
+	st := wireReturns(store.New(pool).WithFieldCrypt(keys), up, signer != nil, getenv)
+	a := api.New(st).WithConfigurations(up).WithProduction(up)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -94,6 +95,32 @@ func run(ctx context.Context, getenv func(string) string) error {
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
 	return <-errs
+}
+
+// wireReturns connects the return-order peers that are configured: billing and fulfillment price a return, inventory restocks
+// it and receivables credits it. A missing peer leaves its step answering 503 (the return order keeps its state).
+func wireReturns(st *store.Postgres, up *upstream.Client, signed bool, getenv func(string) string) *store.Postgres {
+	if !signed {
+		slog.Warn("the service signing key is unset: return orders cannot be priced, restocked or credited (SLS-0124, SLS-0121)")
+		return st
+	}
+	r := upstream.NewReturns(up, getenv("BILLING_URL"), getenv("FULFILLMENT_URL"), getenv("INVENTORY_URL"), getenv("RECEIVABLES_URL"), getenv("SALES_RETURN_OFFSET_ACCOUNT"))
+	if getenv("BILLING_URL") != "" && getenv("FULFILLMENT_URL") != "" {
+		st.WithReturnSources(r, r)
+	} else {
+		slog.Warn("BILLING_URL or FULFILLMENT_URL is unset: return orders cannot be created (SLS-0124)")
+	}
+	if getenv("INVENTORY_URL") != "" && getenv("SALES_RETURN_OFFSET_ACCOUNT") != "" {
+		st.WithInventory(r)
+	} else {
+		slog.Warn("INVENTORY_URL or SALES_RETURN_OFFSET_ACCOUNT is unset: accepted returns cannot be restocked (SLS-0124)")
+	}
+	if getenv("RECEIVABLES_URL") != "" {
+		st.WithAR(r)
+	} else {
+		slog.Warn("RECEIVABLES_URL is unset: return orders cannot be credited (SLS-0121)")
+	}
+	return st
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

@@ -124,8 +124,15 @@ var serviceGrants = map[string]map[string][]string{
 		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
 	},
 	"sales": {
-		"product":    {"product.configuration.read"},
-		"production": {"production.order.create-from-sales"},
+		"product":     {"product.configuration.read"},
+		"production":  {"production.order.create-from-sales"},
+		"billing":     {"billing.invoice.read"},
+		"fulfillment": {"fulfillment.packing-slip.read"},
+		"inventory":   {"inventory.read", "inventory.return-receipt.post"},
+		"receivables": {"ar.rmacredit.post"},
+	},
+	"receivables": {
+		"ledger": {"ledger.entry.post", "ledger.ledger.lookup"},
 	},
 	"ledger": {
 		"close": {"period.check"},

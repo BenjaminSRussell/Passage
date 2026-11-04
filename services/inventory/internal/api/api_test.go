@@ -667,8 +667,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		served[route+" "+strings.ToLower(method)] = true
 		return nil
 	})
-	if len(served) != 88 {
-		t.Fatalf("router walk yielded %d operations, want 88: %v", len(served), served)
+	if len(served) != 89 {
+		t.Fatalf("router walk yielded %d operations, want 89: %v", len(served), served)
 	}
 	declared := declaredOperations(string(spec))
 	for op := range served {

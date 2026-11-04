@@ -4,13 +4,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/store"
 	"github.com/BenjaminSRussell/passage/services/receivables/migrations"
@@ -21,6 +25,23 @@ func main() {
 		slog.Error("receivables exited", "err", err)
 		os.Exit(1)
 	}
+}
+
+// parseRMALedgers reads RECEIVABLES_RMA_LEDGERS: a JSON object from legal entity id to the ledger id its RMA credit journals post to.
+func parseRMALedgers(raw string) (map[string]string, error) {
+	out := map[string]string{}
+	if raw == "" {
+		return out, nil
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil, fmt.Errorf("RECEIVABLES_RMA_LEDGERS must be a JSON object of legal entity id to ledger id: %w", err)
+	}
+	for le, ledger := range out {
+		if !ids.Valid(le) || !ids.Valid(ledger) {
+			return nil, fmt.Errorf("RECEIVABLES_RMA_LEDGERS entry %q needs UUID legal entity and ledger ids", le)
+		}
+	}
+	return out, nil
 }
 
 func run() error {
@@ -47,7 +68,18 @@ func run() error {
 			return err
 		}
 	}
-	h := api.New(store.New(pool))
+	s := store.New(pool)
+	if gl, err := ledgerclient.FromEnv(os.Getenv, "receivables"); err != nil {
+		return err
+	} else if gl != nil {
+		s.WithLedger(gl)
+	}
+	rmaLedgers, err := parseRMALedgers(os.Getenv("RECEIVABLES_RMA_LEDGERS"))
+	if err != nil {
+		return err
+	}
+	s.WithRMALedgers(rmaLedgers)
+	h := api.New(s)
 	r := httpx.NewRouter()
 	h.Register(r)
 	admin := http.NewServeMux()
@@ -55,6 +87,13 @@ func run() error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	sweep, err := newRMASweep(os.Getenv, s)
+	if err != nil {
+		return err
+	}
+	if sweep != nil {
+		go sweep.loop(ctx)
+	}
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr, r) }()
 	go func() { errs <- httpx.Serve(ctx, adminAddr, admin) }()

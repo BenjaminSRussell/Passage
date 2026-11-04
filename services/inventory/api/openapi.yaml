@@ -2837,6 +2837,58 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /internal/v1/inventory/return-receipts:
+    post:
+      operationId: postReturnReceipt
+      summary: Service-to-service restock of one returned line (sales RMA, wave 30 AC3)
+      description: |
+        Creates, fills and posts in one call a MOVEMENT journal of one line under the journal key
+        `return-receipt:{Idempotency-Key}`; the line's client key is the Idempotency-Key (sales sends
+        `rma-receive:{returnOrderLineId}`). Site and warehouse are required. A repeat answers the same
+        journal (200, Idempotent-Replayed) and posts nothing twice; the key with another line is 422
+        idempotency_key_reuse; a journal under the key that holds another line or more than one, is
+        another type, or is SUBMITTED, REJECTED or CANCELLED is 409 INV-RETURN-RECEIPT. The
+        `return-receipt:` key prefix is reserved: POST /v1/inventory/journals refuses it (400), so a
+        journal user cannot plant a journal under an RMA line's key. The service duty holds only this
+        route, not the general journal duties. Internal path: not exposed by the web BFF.
+      x-passage-duty: inventory.return-receipt.post
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [legalEntityId, postingDate, currency, offsetAccountId, productId, dimensions, qty, enteredUnit]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                postingDate: { type: string, format: date }
+                currency: { type: string, pattern: '^[A-Z]{3}$' }
+                offsetAccountId: { type: string }
+                productId: { type: string, format: uuid }
+                dimensions: { type: object, additionalProperties: { type: string }, description: site and warehouse required }
+                qty: { type: string, description: Decimal greater than 0 }
+                enteredUnit: { type: string }
+                costPrice: { type: string, description: Non-negative decimal unit cost }
+      responses:
+        '201':
+          description: Receipt posted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '200':
+          description: Idempotent replay (Idempotent-Replayed true)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
 components:
   parameters:
     Limit:

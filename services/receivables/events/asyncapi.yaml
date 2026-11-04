@@ -65,6 +65,11 @@ channels:
     messages:
       openItemsImported:
         $ref: "#/components/messages/OpenItemsImported"
+  creditNoteEvents:
+    address: passage.receivables.creditnote
+    messages:
+      creditNotePosted:
+        $ref: "#/components/messages/CreditNotePosted"
 operations:
   publishDisputeOpened:
     action: send
@@ -146,6 +151,11 @@ operations:
     channel: { $ref: "#/channels/openItemEvents" }
     messages:
       - { $ref: "#/channels/openItemEvents/messages/openItemsImported" }
+  publishCreditNotePosted:
+    action: send
+    channel: { $ref: "#/channels/creditNoteEvents" }
+    messages:
+      - { $ref: "#/channels/creditNoteEvents/messages/creditNotePosted" }
 components:
   messages:
     PaymentReceived:
@@ -252,7 +262,37 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/OpenItemsImportedData"
+    CreditNotePosted:
+      name: dev.passage.receivables.creditnote.posted.v1
+      summary: An RMA credit note was stored as a CREDIT_NOTE open item and posted Dr 4000 / Cr 4200 / Cr 1200 (AC-30.5).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/CreditNotePostedData"
   schemas:
+    CreditNotePostedData:
+      type: object
+      required: [open_item_id, return_order_id, rma_number, legal_entity_id, customer_id, document_number, currency, gross, restocking, net, postings]
+      properties:
+        open_item_id: { type: string, format: uuid }
+        return_order_id: { type: string, format: uuid }
+        rma_number: { type: string }
+        legal_entity_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        document_number: { type: string }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        gross: { type: string, description: "decimal string" }
+        restocking: { type: string, description: "decimal string" }
+        net: { type: string, description: "decimal string; the AR credit" }
+        journal_posting_id: { type: [string, "null"] }
+        postings:
+          type: array
+          items:
+            type: object
+            required: [account, debit, credit]
+            properties:
+              account: { type: string, description: "4000 sales returns, 4200 restocking, 1200 receivables" }
+              debit: { type: string, description: "decimal string" }
+              credit: { type: string, description: "decimal string" }
     OpenItemsImportedData:
       type: object
       required: [batch_id, legal_entity_id, import_source, created, updated, unchanged, rejected, items]

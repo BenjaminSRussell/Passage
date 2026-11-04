@@ -1,0 +1,106 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/receivables/internal/store"
+)
+
+const (
+	rmaSweepActor           = "system:receivables-rma-sweep"
+	defaultRMASweepInterval = 5 * time.Minute
+	minRMASweepInterval     = time.Minute
+	rmaSweepTimeout         = 5 * time.Minute
+)
+
+// rmaSweeper is the store side the sweep drives.
+type rmaSweeper interface {
+	RMASweepLegalEntities(ctx context.Context) ([]string, error)
+	SweepRMACredits(ctx context.Context, now time.Time, limit int) (store.RMASweepResult, error)
+}
+
+// rmaSweep posts the PENDING RMA credits the request path left behind (a ledger outage, a lost answer, a crash after
+// the PENDING commit). Per tenant it lists the legal entities with due credits under an all-scope read principal, then
+// sweeps each under a principal scoped to that legal entity, which the ledger post's service token needs.
+type rmaSweep struct {
+	interval time.Duration
+	tenants  []string
+	store    rmaSweeper
+}
+
+func newRMASweep(getenv func(string) string, s rmaSweeper) (*rmaSweep, error) {
+	raw := getenv("RECEIVABLES_RMA_SWEEP_TENANT_IDS")
+	if strings.TrimSpace(raw) == "" {
+		slog.Info("receivables RMA credit sweep disabled; RECEIVABLES_RMA_SWEEP_TENANT_IDS is not set")
+		return nil, nil
+	}
+	var tenants []string
+	seen := map[string]bool{}
+	for _, part := range strings.Split(raw, ",") {
+		id, ok := ids.Canonical(strings.TrimSpace(part))
+		if !ok || id == ids.Nil {
+			return nil, fmt.Errorf("RECEIVABLES_RMA_SWEEP_TENANT_IDS entry %q is not a UUID", part)
+		}
+		if !seen[id] {
+			seen[id] = true
+			tenants = append(tenants, id)
+		}
+	}
+	interval := defaultRMASweepInterval
+	if v := getenv("RECEIVABLES_RMA_SWEEP_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < minRMASweepInterval {
+			return nil, errors.New("RECEIVABLES_RMA_SWEEP_INTERVAL must be a duration of at least 1m, got " + v)
+		}
+		interval = d
+	}
+	return &rmaSweep{interval: interval, tenants: tenants, store: s}, nil
+}
+
+func (s *rmaSweep) loop(ctx context.Context) {
+	s.once(ctx)
+	ticker := time.NewTicker(s.interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.once(ctx)
+		}
+	}
+}
+
+func (s *rmaSweep) once(ctx context.Context) {
+	for _, tenantID := range s.tenants {
+		listCtx, cancel := context.WithTimeout(tenant.With(ctx, tenant.Principal{
+			TenantID: tenantID, UserID: rmaSweepActor, Duties: map[string]struct{}{tenant.DutyAllScope: {}},
+		}), rmaSweepTimeout)
+		entities, err := s.store.RMASweepLegalEntities(listCtx)
+		cancel()
+		if err != nil {
+			slog.Error("receivables RMA credit sweep failed", "tenantId", tenantID, "err", err)
+			continue
+		}
+		for _, le := range entities {
+			runCtx, cancel := context.WithTimeout(tenant.With(ctx, tenant.Principal{TenantID: tenantID, LegalEntityID: le, UserID: rmaSweepActor}), rmaSweepTimeout)
+			res, err := s.store.SweepRMACredits(runCtx, time.Now().UTC(), store.MaxRMASweepBatch)
+			cancel()
+			if err != nil {
+				slog.Error("receivables RMA credit sweep failed", "tenantId", tenantID, "legalEntityId", le, "err", err)
+				continue
+			}
+			if res != (store.RMASweepResult{}) {
+				slog.Info("receivables RMA credit sweep finished", "tenantId", tenantID, "legalEntityId", le,
+					"posted", res.Posted, "failed", res.Failed, "parked", res.Parked)
+			}
+		}
+	}
+}

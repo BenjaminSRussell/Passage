@@ -32,6 +32,8 @@ type fakeStore struct {
 	statement   statementCall
 	snapshots   store.SnapshotFilter
 	opening     store.OpeningImport
+	rmaRetries  []string
+	rmaFilter   store.RMACreditFilter
 }
 
 func (f *fakeStore) CreateOpenItem(context.Context, store.OpenItem) (store.OpenItem, error) {
@@ -62,6 +64,20 @@ func (f *fakeStore) ApplyPayment(_ context.Context, id string, version int, plan
 	return store.ApplyResult{Payment: store.Payment{ID: id, Version: version + 1, Status: "APPLIED"}}, nil
 }
 func (f *fakeStore) Ping(context.Context) error { return nil }
+func (f *fakeStore) PostRMACredit(context.Context, store.RMACredit) (store.RMACreditNote, error) {
+	return store.RMACreditNote{}, nil
+}
+func (f *fakeStore) RetryRMACredit(_ context.Context, id, postingDate string) (store.RMACreditView, error) {
+	f.rmaRetries = append(f.rmaRetries, id+"|"+postingDate)
+	return store.RMACreditView{ID: id, Status: "POSTED", PostingDate: postingDate}, nil
+}
+func (f *fakeStore) ListRMACredits(_ context.Context, rf store.RMACreditFilter) ([]store.RMACreditView, error) {
+	f.rmaFilter = rf
+	return []store.RMACreditView{}, nil
+}
+func (f *fakeStore) SweepRMACredits(context.Context, time.Time, int) (store.RMASweepResult, error) {
+	return store.RMASweepResult{Posted: 1}, nil
+}
 
 // Collections, dunning and interest stubs; collectionsFake overrides them.
 func (f *fakeStore) OpenDispute(context.Context, store.Dispute, string) (store.Dispute, error) {

@@ -29,6 +29,7 @@ const (
 	readyTimeout     = 500 * time.Millisecond
 	dutyView         = "ARView"
 	dutyPayment      = "ARPaymentPost"
+	dutyRMACredit    = "ar.rmacredit.post"
 	dutyImport       = "ARImport"
 	maxLockboxBytes  = 3 << 20 // below httpx.Decode's 4 MiB body cap, leaving room for JSON escaping
 	validationDetail = "request failed validation"
@@ -85,6 +86,10 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyImport)).Post("/lockbox/imports", a.importLockbox)
 		r.With(authz.RequireDuty(dutyView)).Get("/lockbox/imports", a.listLockboxBatches)
 		r.With(authz.RequireDuty(dutyView)).Get("/worklist", a.worklist)
+		r.With(authz.RequireDuty(dutyRMACredit)).Post("/rma-credits", a.postRMACredit)
+		r.With(authz.RequireDuty(dutyView)).Get("/rma-credits", a.listRMACredits)
+		r.With(authz.RequireDuty(dutyPayment)).Post("/rma-credits:sweep", a.sweepRMACredits)
+		r.Post("/rma-credits/{ref}", a.rmaCreditAction)
 	})
 }
 
