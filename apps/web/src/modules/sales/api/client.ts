@@ -1659,20 +1659,33 @@ export interface ChangePolicy {
   legalEntityId: string;
   customerId: string;
   approvalRequired: boolean;
+  /** A change moving the order total by less applies at once; absent when every change needs approval. */
+  approvalThreshold?: string;
+  thresholdCurrency?: string;
+  /** The only users who may approve or reject the customer's requests; empty when any approver may. */
+  approverIds?: string[];
   version: number;
   updatedBy?: string;
   updatedAt?: string;
+}
+
+/** What a PUT replaces: a member it names (null / [] clears); a member left out keeps its stored value. */
+export interface ChangePolicyInput {
+  approvalRequired: boolean;
+  approvalThreshold?: string | null;
+  thresholdCurrency?: string | null;
+  approverIds?: string[];
 }
 
 export function getChangePolicy(legalEntityId: string, customerId: string, signal?: AbortSignal): Promise<Versioned<ChangePolicy>> {
   return versioned<ChangePolicy>(`/customers/${encodeURIComponent(customerId)}/change-policy${query({ legalEntityId })}`, {}, signal);
 }
 
-/** Creates (etag "0") or replaces the switch at the given ETag. */
-export function putChangePolicy(legalEntityId: string, customerId: string, approvalRequired: boolean, etag: string): Promise<Versioned<ChangePolicy>> {
+/** Creates (etag "0") or replaces the policy at the given ETag. */
+export function putChangePolicy(legalEntityId: string, customerId: string, policy: ChangePolicyInput, etag: string): Promise<Versioned<ChangePolicy>> {
   return versioned<ChangePolicy>(`/customers/${encodeURIComponent(customerId)}/change-policy${query({ legalEntityId })}`, {
     method: "PUT",
-    body: JSON.stringify({ approvalRequired }),
+    body: JSON.stringify(policy),
     headers: { "If-Match": etag },
   });
 }

@@ -141,7 +141,13 @@ paths:
         When the order is CONFIRMED, its customer has change approval switched
         on (change-policy) and the caller lacks sales.order.approve, the change
         is validated and stored as a PENDING change request instead of applied
-        (202); a caller with sales.order.approve changes the order directly.
+        (202); a caller with sales.order.approve changes the order directly,
+        unless the customer names its approvers (approverIds) and the caller is
+        not one, in which case the change is stored like anyone else's. With a
+        threshold set, the change applies at once only while the value it moves
+        (the sum of each line's absolute net movement), added to what earlier
+        changes of the order applied without approval moved, stays below the
+        threshold.
       operationId: changeOrder
       x-passage-duty: sales.order.write
       parameters:
@@ -162,7 +168,7 @@ paths:
         "202":
           description: >-
             the customer's changes to confirmed orders need approval (see
-            changeOrder description) and the caller lacks sales.order.approve:
+            changeOrder description) and the caller may not skip it:
             nothing was applied, the order is returned unchanged with
             pendingChange holding the stored change request
           headers:
@@ -883,7 +889,7 @@ paths:
                   order: {$ref: "#/components/schemas/Order"}
         "400": {$ref: "#/components/responses/Problem"}
         "403":
-          description: the caller lacks sales.order.approve, or SLS-0045 the caller requested the change
+          description: the caller lacks sales.order.approve, or SLS-0045 the caller requested the change, or SLS-0150 the customer names its approvers and the caller is not one
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
@@ -925,7 +931,11 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/ChangeRequest"}
         "400": {$ref: "#/components/responses/Problem"}
-        "403": {$ref: "#/components/responses/Problem"}
+        "403":
+          description: the caller lacks sales.order.approve, or SLS-0150 the customer names its approvers and the caller is not one
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
         "409":
           description: SLS-0044 the request was already decided
@@ -993,7 +1003,25 @@ paths:
         "400": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
     put:
-      summary: Turn change approval on or off for a customer (If-Match carries the current ETag; first save uses "0")
+      summary: Set a customer's change approval switch, amount threshold and approver group (If-Match carries the current ETag; first save uses "0")
+      description: >-
+        approvalRequired is always replaced. A member the body names replaces
+        the stored value (null or [] clears it); a member it leaves out keeps
+        the stored value, so the plain {"approvalRequired": true} body of older
+        clients does not wipe a threshold or group. approvalThreshold and
+        thresholdCurrency go together: naming either replaces both. With
+        approvalRequired on and a threshold set, a change to a confirmed order
+        applies without approval only while the value it moves (the sum of each
+        line's absolute net movement), added to what earlier unapproved changes
+        of the order moved, stays below the threshold, so a large change cannot
+        be split into small ones; a cancellation moves the whole total. An order
+        in another currency than thresholdCurrency always needs approval, since
+        no rate converts it. A non-empty approverIds (identity user ids) limits
+        who may approve or reject the customer's requests (SLS-0150) and who
+        may change or cancel its confirmed orders without a request; the
+        sales.order.approve duty is still required. An empty group lets anyone
+        holding the duty decide, so a policy never leaves requests without an
+        approver.
       operationId: putChangePolicy
       x-passage-duty: sales.order.approve
       parameters:
@@ -1007,9 +1035,12 @@ paths:
               required: [approvalRequired]
               properties:
                 approvalRequired: {type: boolean}
+                approvalThreshold: {type: [string, "null"], description: "decimal string, greater than 0 and below 10^15, at most 4 places; needs thresholdCurrency; null clears it, absent keeps it"}
+                thresholdCurrency: {type: [string, "null"], pattern: "^[A-Z]{3}$", description: "the threshold's currency; null clears it with the threshold, absent keeps it"}
+                approverIds: {type: array, maxItems: 20, items: {type: string, format: uuid}, description: "identity user ids, stored in canonical form, de-duplicated and sorted; [] clears the group, absent keeps it"}
       responses:
         "200":
-          description: the saved switch; changepolicy.changed is written in the same transaction
+          description: the saved policy; changepolicy.changed is written in the same transaction
           headers:
             ETag: {$ref: "#/components/headers/ETag"}
           content:
@@ -1153,8 +1184,10 @@ paths:
               schema: {$ref: "#/components/schemas/Order"}
         "202":
           description: >-
-            the customer's changes to confirmed orders need approval and the caller
-            lacks sales.order.approve: nothing was cancelled, the order is returned
+            the customer's changes to confirmed orders need approval (a cancellation
+            moves the whole total, on top of what earlier unapproved changes moved)
+            and the caller lacks sales.order.approve or is outside the customer's
+            named approvers: nothing was cancelled, the order is returned
             unchanged with pendingChange holding the stored request (kind CANCEL)
           headers:
             ETag: {$ref: "#/components/headers/ETag"}
@@ -3341,6 +3374,9 @@ components:
         legalEntityId: {type: string, format: uuid}
         customerId: {type: string, format: uuid}
         approvalRequired: {type: boolean}
+        approvalThreshold: {type: string, description: changes applied without approval may together move an order by less than this; absent when every change needs approval}
+        thresholdCurrency: {type: string, pattern: "^[A-Z]{3}$"}
+        approverIds: {type: array, items: {type: string, format: uuid}, description: the only users who may decide the customer's requests or change its confirmed orders directly; empty when anyone holding sales.order.approve may}
         version: {type: integer, minimum: 0}
         updatedBy: {type: string}
         updatedAt: {type: string, format: date-time}

@@ -737,11 +737,14 @@ components:
         applied_version: {type: integer, description: order version the approval produced; absent on a rejection or a withdrawal}
     ChangePolicyChangedData:
       type: object
-      required: [legal_entity_id, customer_id, approval_required, actor, version]
+      required: [legal_entity_id, customer_id, approval_required, approver_ids, actor, version]
       properties:
         legal_entity_id: {type: string, format: uuid}
         customer_id: {type: string, format: uuid}
         approval_required: {type: boolean}
+        approval_threshold: {type: string, description: changes applied without approval may together move an order by less than this; absent when every change needs approval}
+        threshold_currency: {type: string, pattern: "^[A-Z]{3}$"}
+        approver_ids: {type: array, items: {type: string, format: uuid}, description: the only users who may decide the customer's requests or change its confirmed orders directly; empty when anyone holding sales.order.approve may}
         actor: {type: string}
         version: {type: integer, description: version after the change}
     ParametersChangedData:

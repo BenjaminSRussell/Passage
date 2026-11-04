@@ -453,8 +453,13 @@ type ChangePolicyChangedData struct {
 	LegalEntityID    string `json:"legal_entity_id"`
 	CustomerID       string `json:"customer_id"`
 	ApprovalRequired bool   `json:"approval_required"`
-	Actor            string `json:"actor"`
-	Version          int    `json:"version"`
+	// ApprovalThreshold is the amount below which a change needs no approval,
+	// empty when every change does; ThresholdCurrency is its currency.
+	ApprovalThreshold string   `json:"approval_threshold,omitempty"`
+	ThresholdCurrency string   `json:"threshold_currency,omitempty"`
+	ApproverIDs       []string `json:"approver_ids"`
+	Actor             string   `json:"actor"`
+	Version           int      `json:"version"`
 }
 
 // IntakeErrorData is the data member of intakeerror.recorded.v1 and

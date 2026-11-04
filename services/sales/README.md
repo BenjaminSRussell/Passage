@@ -134,7 +134,7 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | POST | `/v1/sales/change-requests/{id}:withdraw` | `sales.order.write` | `If-Match`; the requester takes a PENDING request back (WITHDRAWN, comment optional); anyone else is `SLS-0114`, a decided request `SLS-0044` |
 | POST | `/v1/sales/change-requests/{id}:approve` | `sales.order.approve` | `If-Match`; applies the stored change to the order and records the approval in one transaction (`order.changed`, then `orderchange.approved`; for a `CANCEL` request the order is cancelled as by `:cancel`, `order.cancelled` then `orderchange.approved`, and a line no longer OPEN/RESERVED is `SLS-0025`); the requester cannot approve (`SLS-0045`), a decided request is `SLS-0044`, an order that moved since is `SLS-0046` |
 | POST | `/v1/sales/change-requests/{id}:reject` | `sales.order.approve` | `If-Match`; a `comment` is required; the order stays as it was |
-| GET / PUT | `/v1/sales/customers/{customerId}/change-policy` | `sales.order.read` / `sales.order.approve` | `legalEntityId` required; `approvalRequired` switch, off at version 0; PUT takes `If-Match` (`"0"` to create); `changepolicy.changed` |
+| GET / PUT | `/v1/sales/customers/{customerId}/change-policy` | `sales.order.read` / `sales.order.approve` | `legalEntityId` required; `approvalRequired` switch, off at version 0, with an optional `approvalThreshold` + `thresholdCurrency` (changes of a confirmed order apply at once while the value they move, summed per line and over every change applied without approval, stays below it, so splitting a change does not avoid approval; a cancellation moves the whole total; another currency always needs approval) and `approverIds` (identity user ids: only these users approve or reject, `SLS-0150`, or change and cancel the customer's confirmed orders without a request); PUT takes `If-Match` (`"0"` to create), replaces `approvalRequired` and each member it names (`null` / `[]` clears) and keeps the members it leaves out; `changepolicy.changed` |
 | GET | `/v1/sales/credit-profiles` | `sales.order.read` | Optional `legalEntityId`, `limit` |
 | GET / PUT | `/v1/sales/credit-profiles/{customerId}` | `sales.order.read` / `sales.credit.maintain` | `legalEntityId` query or the caller's `Passage-Legal-Entity`; PUT takes `If-Match` (`"0"` to create) |
 | GET / POST | `/v1/sales/quotations` | `sales.order.read` / `sales.quotation.maintain` | List (`legalEntityId`, `customerId`, `status`, `limit`) without lines; create a DRAFT with `Idempotency-Key`, numbered `SQ-`, validity default +30 days, probability 50 |
@@ -335,6 +335,7 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0043` | 409 | The order already has a change waiting for approval |
 | `SLS-0044` | 409 | The change request was already decided |
 | `SLS-0045` | 403 | A change cannot be approved by the user who requested it |
+| `SLS-0150` | 403 | The customer names its change approvers and the caller is not one |
 | `SLS-0046` | 409 | The order changed since the change request was made; reject it and ask for a new change |
 | `SLS-0047` | 422 | A line's `configurationId` does not exist, is not valid or does not belong to the line's product |
 | `SLS-0048` | 503 | The product service could not confirm a line's configuration (or is not configured); nothing is stored, retry |

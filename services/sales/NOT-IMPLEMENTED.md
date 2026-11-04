@@ -539,6 +539,53 @@ on every REJECTED hold) and in `orderhold.rejected.v1`. A rejection also counts
 in `sales_orders_cancelled_total`. The OpenAPI and AsyncAPI documents pass the doc gates with no
 FAIL lines.
 
+Slice 27 finishes the amount-threshold and named-approver half of change
+approval (FR-27.9). `customer_change_policy` (migration 0032, no new table, so
+no new grant: 0016 already gives SELECT, INSERT, UPDATE) gains
+`approval_threshold` + `threshold_currency` and `approver_user_ids` (uuid[], at
+most 20); `sales_order` gains `unapproved_change_value` (0032, its check
+validated in 0033; 0009 already grants UPDATE). `PUT
+/customers/{id}/change-policy` replaces `approvalRequired` and every member the
+body names (`approvalThreshold` as a decimal string above 0 and below 10^15
+with at most 4 places, together with a three-letter `thresholdCurrency`;
+`approverIds` as identity user ids, stored canonical, de-duplicated and
+sorted; `null` / `[]` clear them) and keeps a member the body leaves out, so
+the plain `{"approvalRequired": true}` body of slice 13 clients does not wipe a
+threshold or group set since. With the switch on and a threshold set, a PATCH
+of a CONFIRMED order is measured on a copy with the same `ApplyChange` the
+PATCH would use (an invalid change is still 422 before anything is stored):
+the value it moves is the sum of each line's absolute net movement, so a rise
+on one line and an equal cut on another count twice, not zero. It applies at
+once only while that value plus the order's `unapproved_change_value` (what
+earlier changes applied without approval moved) stays below the threshold; the
+applied value is then added to it. A large change split into several small
+PATCHes therefore reaches the threshold like the large change would. A
+date-only change moves no money and applies at once. Approved changes and the
+direct changes of an approver are not counted. A `:cancel` moves the whole
+order total on top of that. An order in a different currency than
+`thresholdCurrency` always needs approval, because there is no rate (w12) to
+convert it; the web form says so. A non-empty `approverIds` limits who may
+approve or reject a request for that customer (anyone else gets 403
+`SLS-0150`, new code, README catalogue) and who may skip approval with the
+`sales.order.approve` duty: a duty holder outside the group who PATCHes or
+cancels the customer's confirmed order gets a stored request (202) like a
+requester, otherwise the group could be bypassed by a direct change. The
+requester cannot approve their own request and can still withdraw it. An empty
+group lets anyone holding the duty decide, so no policy leaves requests
+without an approver; a group whose members all left is changed through the
+same PUT (duty `sales.order.approve`, not limited to the group, so it cannot
+lock itself). The group is read at decision time, so a change of the group
+applies to requests already waiting. `changepolicy.changed.v1` carries
+`approval_threshold`, `threshold_currency` and `approver_ids`. The web
+"Customer change approval" page gains the threshold, currency and named
+approvers fields with client-side checks (user ids must be UUIDs) and sends
+`null` / `[]` to clear them. No new duty and no new route: the existing
+`sales.order.approve` / `sales.order.read` rows cover it, so there is nothing
+to seed. Not checked: that a named approver exists in identity or holds
+`sales.order.approve` (no identity user lookup from sales; a member without the
+duty simply cannot decide). The OpenAPI and AsyncAPI documents pass the doc
+gates with no FAIL lines.
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
@@ -589,7 +636,7 @@ FAIL lines.
 |---|---|---|
 | FR-27.11 configured products and make-to-order production link (AC-27.4) | implemented in part | Built: `configurationId` on an order line (migration 0017), checked on order create against the product service (`GET /v1/product/saved-configurations/{id}?productId=`, service token holding only `product.configuration.read`): unknown, not valid or another product's configuration is `SLS-0047`, an unreachable product service `SLS-0048` (fail closed, nothing stored); carried in `order.confirmed` as `configuration_id`; `POST /orders/{id}:plan-production` (duty `sales.order.plan-production`) creates, per configured line of a CONFIRMED order, the production order with origin `SalesOrderLine` through `POST /v1/production/sales-line-orders` (service token holding only `production.order.create-from-sales`, `Idempotency-Key` `sales-line-<lineId>`) and links it in `order_line_production` (RLS tenant + restrictive legal entity); idempotent per line on both sides. Integration style: synchronous HTTP with a service grant, the repo's pattern between services; the Kafka consumer of #405 is not used because sales events reach Kafka only through the outbox relay and no production consumer deployment exists. Not built: planning on confirm (the call is explicit, so a confirm never depends on production being up; a scheduler or an `order.confirmed` consumer in production can call the same route), the BOM and route of the configured product (production creates the order with none, to be resolved from the configuration with w9), re-planning after a PATCH of the line quantity or a cancel (the production order keeps the quantity it was planned with), and the production-side status on the order line. |
 | FR-27.13 alternative items | implemented in part | See deliverable 2 and slice 16. |
-| FR-27.9 change approval: notification of the manager, approval by amount threshold or by a named approver group | later slice of PSG-27 | Slice 13 built the per customer switch, the stored request and approve/reject; slice 17 added withdrawal by the requester and cancellations. The queue is polled, nothing notifies a manager; every approver holding `sales.order.approve` can decide any request. |
+| FR-27.9 change approval: notification of the manager, approval by amount threshold or by a named approver group | implemented in part (slice 27) | Slice 13 built the per customer switch, the stored request and approve/reject; slice 17 added withdrawal by the requester and cancellations; slice 27 added the amount threshold and the named approver group per customer (see the slice 27 note above). Not built: the notification of the manager (the queue is polled; handoff to w3 notifications), a threshold per legal entity or customer group (it is per customer), a threshold in a currency other than the order's (no w12 rate: such orders always need approval), approver groups by role (the group is named user ids, as the role mapping is edge-identity), a check that named approvers exist in identity, and resetting an order's unapproved change value (it only grows over the order's life; see decisions). |
 | Duties `sales.order.approve` for change requests and the customer change policy | done (seeded in `policies/authz/data.json`) | `sales.order.approve` is seeded with the change request decisions and the customer change policy PUT. |
 | Change requests of other types of change (hold) | later slice of PSG-27 | A PATCH and `:cancel` (slice 17) are routed to approval; holds apply at once. |
 | Duty for withdrawing a change request | decision to confirm | PRD §5.27.17 names no duty for a withdrawal. `:withdraw` requires `sales.order.write` (the PATCH duty) and that the caller is the requester; a user holding only `sales.order.confirm` who asked for a cancellation needs `sales.order.write` to withdraw it. |
@@ -689,6 +736,9 @@ consumers depend on it.
 | Duty for `:cancel-remainder` (slice 23) | decision to confirm | The PRD has two answers: the API table puts `:confirm, :cancel; /lines/{l}:cancel-remainder` under SalesOrderConfirm, and the duty catalog (and the Backorders screen) puts `:cancel-remainder` under SalesOrderMaintain, with SalesOrderConfirm only for `:confirm`. The route takes `sales.order.write` (SalesOrderMaintain), as the catalog says, while `:cancel` keeps `sales.order.confirm`. Alternative: `sales.order.confirm`, like `:cancel`. |
 | Holds at a remainder close (slice 23) | decision to confirm | ACTIVE holds stay on the closed order and are released by their owners (see the slice 23 note). Alternative: clear a CREDIT hold at the close, because the exposure it guarded is gone, emitting `orderhold.released` so fulfillment's copy follows. FRAUD and MANUAL holds would still stay. |
 | Remainder close needs no approval (slice 23) | decision to confirm | FR-27.9 change approval applies to CONFIRMED orders. A close of a PARTIALLY_SHIPPED order keeps the delivered quantity and is allowed to a holder of `sales.order.confirm`, without an approver or a change request. |
+| Threshold measure and budget (slice 27) | decision to confirm | The PRD names only a per-customer switch (5.27.13 `change_approval_required`); the amount threshold and its measure are a slice default. A change is measured as the sum of each line's absolute net movement, and the changes applied to an order without approval share one budget below the threshold for the order's whole life (approved changes do not reset it), so a change cannot be split to avoid approval. Alternatives: measure the net total delta (a line swap would count 0), or reset the budget at each approval. |
+| Named approvers vs the approve duty (slice 27) | decision to confirm | A non-empty group limits both deciding a request and skipping approval with `sales.order.approve`; the policy PUT itself stays open to any holder of the duty, so a group whose members left can be changed, at the cost that a duty holder outside the group can rewrite the group (audited in `changepolicy.changed`). Alternative: limit the PUT to the group once one is named, with an administrator override. |
+| PUT keeps members it does not name (slice 27) | decision to confirm | `PUT /change-policy` keeps a stored threshold or group the body leaves out (null / [] clear them), so slice 13 clients cannot wipe them. Alternative: a strict whole-policy replace, which is simpler but lets an older client silently drop a threshold and group. |
 | Jobs: ATP rebuild 01:00, credit review daily, order auto-close, intake DLQ replay | later slice of PSG-27 | No jobs built. |
 | SLO alerts (lag > 120 s, hold queue age, intake 5xx) and runbooks | handoff (deployment-cicd) | Alert rules live in deploy/ (outside owned paths). |
 

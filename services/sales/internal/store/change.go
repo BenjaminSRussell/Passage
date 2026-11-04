@@ -43,7 +43,8 @@ type ChangeRequest struct {
 	RequestedShipDate *string      `json:"requestedShipDate,omitempty"`
 	Lines             []LineChange `json:"lines"`
 	// Approver is set by the API when the caller holds SalesOrderApprove: such
-	// a change applies at once even for a customer whose changes need approval.
+	// a change applies at once even for a customer whose changes need approval,
+	// unless the customer names its approvers and the caller is not one.
 	Approver bool `json:"-"`
 }
 
@@ -258,22 +259,48 @@ func (s *Postgres) ChangeOrder(ctx context.Context, id string, version int, req 
 		if !domain.CanChange(o.Status) {
 			return problem(http.StatusUnprocessableEntity, CodeNotChangeable, fmt.Sprintf("order is %s and cannot be changed", o.Status))
 		}
-		if o.Status == domain.OrderConfirmed && !req.Approver {
-			required, err := changeApprovalRequired(ctx, tx, p.TenantID, o.LegalEntityID, o.CustomerID)
+		// countMoved is the value this change adds to the order's unapproved
+		// change value, when it goes through only because it stays under the
+		// customer's threshold.
+		var countMoved *decimal.Decimal
+		if o.Status == domain.OrderConfirmed {
+			pol, err := loadApprovalPolicy(ctx, tx, p.TenantID, o.LegalEntityID, o.CustomerID)
 			if err != nil {
 				return err
 			}
-			if required {
-				pending, err := submitChangeRequestTx(ctx, tx, p.TenantID, o, req, actor, now)
-				if err != nil {
-					return err
+			// The approve duty skips approval only for a user the customer's
+			// named group (if any) lets decide; anyone else is routed like a
+			// requester, or the group would be bypassed by a direct PATCH.
+			if !(req.Approver && pol.MayDecide(actor)) {
+				required := pol.Required
+				if pol.UsesThreshold(o.Currency) {
+					change, err := changeValue(ctx, tx, p.TenantID, o, req, now)
+					if err != nil {
+						return err
+					}
+					moved, err := unapprovedChangeValue(ctx, tx, p.TenantID, id)
+					if err != nil {
+						return err
+					}
+					required = pol.NeedsApproval(moved, change, o.Currency)
+					countMoved = &change
 				}
-				out = o
-				out.PendingChange = pending
-				return nil
+				if required {
+					pending, err := submitChangeRequestTx(ctx, tx, p.TenantID, o, req, actor, now)
+					if err != nil {
+						return err
+					}
+					out = o
+					out.PendingChange = pending
+					return nil
+				}
 			}
 		}
 		out, err = applyChangeTx(ctx, tx, p.TenantID, o, id, req, actor, now)
+		if err == nil && countMoved != nil && countMoved.IsPositive() {
+			_, err = tx.Exec(ctx, `update sales_order set unapproved_change_value = unapproved_change_value + $3::numeric where tenant_id = $1 and id = $2`,
+				p.TenantID, id, countMoved.String())
+		}
 		return err
 	})
 	return out, err
@@ -416,12 +443,21 @@ func (s *Postgres) CancelOrderAs(ctx context.Context, id string, version int, re
 		if !domain.CanCancel(o.Status) {
 			return problem(http.StatusUnprocessableEntity, CodeNotCancellable, fmt.Sprintf("order is %s and cannot be cancelled", o.Status))
 		}
-		if o.Status == domain.OrderConfirmed && !approver {
-			required, err := changeApprovalRequired(ctx, tx, p.TenantID, o.LegalEntityID, o.CustomerID)
+		if o.Status == domain.OrderConfirmed {
+			pol, err := loadApprovalPolicy(ctx, tx, p.TenantID, o.LegalEntityID, o.CustomerID)
 			if err != nil {
 				return err
 			}
-			if required {
+			moved := decimal.Zero
+			if pol.UsesThreshold(o.Currency) {
+				if moved, err = unapprovedChangeValue(ctx, tx, p.TenantID, id); err != nil {
+					return err
+				}
+			}
+			// A cancellation moves the whole total, on top of what earlier
+			// unapproved changes moved. The approve duty skips approval only for
+			// a user the customer's named group (if any) lets decide.
+			if !(approver && pol.MayDecide(actor)) && pol.NeedsApproval(moved, o.NetTotal, o.Currency) {
 				if _, err := cancelLineIDs(o); err != nil {
 					return err
 				}
