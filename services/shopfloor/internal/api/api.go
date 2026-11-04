@@ -77,6 +77,9 @@ type Store interface {
 	LookupReplay(ctx context.Context, idem store.Idem) (*store.Replay, error)
 	CreateWorker(ctx context.Context, in store.Worker, idem store.Idem) (store.Worker, error)
 	GetWorker(ctx context.Context, id string) (store.Worker, error)
+	UpdateWorker(ctx context.Context, workerID string, version int, in store.WorkerInput, savedBy string, idem store.Idem) (store.Worker, error)
+	DeactivateWorker(ctx context.Context, workerID string, version int, reason, savedBy string, idem store.Idem) (store.Worker, error)
+	ReactivateWorker(ctx context.Context, workerID string, version int, savedBy string, idem store.Idem) (store.Worker, error)
 	ListWorkers(ctx context.Context, activeOnly bool, limit int) ([]store.Worker, error)
 	CreateRegistrations(ctx context.Context, items []store.Registration) ([]store.RegistrationResult, error)
 	ListRegistrations(ctx context.Context, workerID string, start, end time.Time, limit int) ([]store.RegistrationView, error)
@@ -278,6 +281,7 @@ type itemsResponse[T any] struct {
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	a.registerAbsence(r)
+	a.registerWorkerMaintenance(r)
 	a.registerDowntimeReasons(r)
 	a.registerProcessCategories(r)
 	a.registerEdge(r)

@@ -56,6 +56,12 @@ channels:
     messages:
       workerAssigned:
         $ref: "#/components/messages/WorkerAssigned"
+  workerSaved:
+    address: passage.shopfloor.worker
+    description: A worker was edited, deactivated or reactivated (D2a'). Not in the PRD event table.
+    messages:
+      workerSaved:
+        $ref: "#/components/messages/WorkerSaved"
   absenceCodeSaved:
     address: passage.shopfloor.absencecode
     description: An absence code was created or changed (FR-25.2). Not in the PRD event table.
@@ -289,6 +295,14 @@ operations:
       $ref: "#/channels/workerAssigned"
     messages:
       - $ref: "#/channels/workerAssigned/messages/workerAssigned"
+  publishWorkerSaved:
+    action: send
+    summary: Worker saved
+    description: Sends the worker saved event through the outbox.
+    channel:
+      $ref: "#/channels/workerSaved"
+    messages:
+      - $ref: "#/channels/workerSaved/messages/workerSaved"
   publishAbsenceCodeSaved:
     action: send
     summary: Absence code saved
@@ -431,6 +445,13 @@ components:
       description: Published when a worker's profile, agreement or home resource link changes; a null id means the defaults apply. Days already calculated keep their pay lines until recalculated.
       payload:
         $ref: "#/components/schemas/WorkerAssignedData"
+    WorkerSaved:
+      name: dev.passage.shopfloor.worker.saved.v1
+      contentType: application/cloudevents+json
+      summary: Worker edited, deactivated or reactivated
+      description: Published when a worker's name, sign-in user, cost rate or currency changes, or when the worker is deactivated or reactivated. The badge is not published. No pay line changes with it; days already calculated or approved keep the rate they were calculated with until a supervisor recalculates or revises them.
+      payload:
+        $ref: "#/components/schemas/WorkerSavedData"
     PaydayRevised:
       name: dev.passage.shopfloor.payday.revised.v1
       contentType: application/cloudevents+json
@@ -1123,6 +1144,37 @@ components:
         previousVersion:
           type: [integer, "null"]
           minimum: 1
+    WorkerSavedData:
+      type: object
+      required: [workerId, name, userId, costRate, currency, active, version, change, reason, savedBy]
+      additionalProperties: false
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        userId:
+          type: [string, "null"]
+          description: Identity-provider user the worker signs in as; null when none.
+        costRate:
+          type: string
+          description: Decimal string, per hour.
+        currency:
+          type: string
+        active:
+          type: boolean
+        version:
+          type: integer
+          minimum: 1
+        change:
+          type: string
+          enum: [updated, deactivated, reactivated]
+        reason:
+          type: [string, "null"]
+          description: The deactivation reason; null for other changes.
+        savedBy:
+          type: string
     WorkerAssignedData:
       type: object
       required: [workerId, profileId, payAgreementId, defaultResourceId, assignedBy]

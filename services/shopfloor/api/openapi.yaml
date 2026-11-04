@@ -15,7 +15,8 @@ info:
     FR-25.5). Slice 11: time profiles, pay agreements and the worker links the pay
     calculation reads (FR-25.7); a replace takes `If-Match` with the version read.
     Slice 14: the edge fleet (FR-25.19): edge nodes, versioned configuration documents and
-    the connector heartbeat.
+    the connector heartbeat. Slice 22: worker maintenance (edit, deactivate with a reason,
+    reactivate).
     Commands that change state
     (except the registration batch, idempotent per item id, process message
     creation, idempotent per source and sourceMessageId, job plans keyed by job id,
@@ -114,6 +115,60 @@ paths:
         "403":
           $ref: "#/components/responses/Problem"
         "404":
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: updateWorker
+      summary: Edit a worker's name, badge, sign-in user, cost rate and currency
+      description: |
+        Replaces the editable fields of a worker (D2a'); the party link never changes. `If-Match`
+        carries the worker version you read (SF-0143, 412). A badge held by another worker is SF-0105
+        (409); `badgeId` null removes the badge. An inactive worker can be edited. The worker's own
+        sign-in user cannot edit the worker (SF-0106, 403). The currency cannot change once a day of
+        the worker is approved (SF-0169, 422). The edit rewrites no pay line: days already calculated
+        keep the cost rate they were calculated with until a supervisor recalculates them, and
+        approved days keep theirs (a later `pay:revise` of an approved day prices it at the rate then
+        current). Publishes `dev.passage.shopfloor.worker.saved.v1` (change `updated`).
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorker"
+      responses:
+        "200":
+          description: The worker with its new version (or the stored outcome of a repeated key).
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Worker"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
           $ref: "#/components/responses/Problem"
   /v1/shopfloor/registrations:
     get:
@@ -2761,6 +2816,99 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
+  /v1/shopfloor/workers/{id}:deactivate:
+    post:
+      operationId: deactivateWorker
+      summary: Deactivate a worker who left, with a reason
+      description: |
+        Marks the worker inactive (D2a') and records who, when and why. The badge no longer signs in
+        (SF-0001) and no new time can be registered for the worker (SF-0101), while the pay of the days
+        already worked is still calculated, approved, revised and exported. A worker who is clocked in
+        or has an open job start is SF-0166 (409): close the open time first. A worker who is already
+        inactive is SF-0167 (409). `If-Match` carries the worker version you read (SF-0143, 412).
+        Publishes `dev.passage.shopfloor.worker.saved.v1` (change `deactivated`).
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeactivateWorker"
+      responses:
+        "200":
+          description: The worker with its new state and version (or the stored outcome of a repeated key).
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Worker"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/workers/{id}:reactivate:
+    post:
+      operationId: reactivateWorker
+      summary: Reactivate a deactivated worker
+      description: |
+        Makes an inactive worker active again and clears the deactivation record. A worker who is
+        already active is SF-0168 (409). `If-Match` carries the worker version you read (SF-0143, 412).
+        Publishes `dev.passage.shopfloor.worker.saved.v1` (change `reactivated`). The request has no body.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: The worker with its new state and version (or the stored outcome of a repeated key).
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Worker"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
   /v1/shopfloor/workers/{id}:assign-setup:
     post:
       operationId: assignWorkerSetup
@@ -2953,7 +3101,7 @@ components:
           pattern: "^[A-Z]{3}$"
     Worker:
       type: object
-      required: [id, partyId, name, badgeId, userId, costRate, currency, active, version, createdAt, profileId, payAgreementId, defaultResourceId]
+      required: [id, partyId, name, badgeId, userId, costRate, currency, active, version, createdAt, profileId, payAgreementId, defaultResourceId, deactivatedAt, deactivatedBy, deactivationReason]
       properties:
         id:
           type: string
@@ -2990,6 +3138,16 @@ components:
           type: [string, "null"]
           format: uuid
           description: Home resource whose jobs make up the worker's dispatch list; null means every job.
+        deactivatedAt:
+          type: [string, "null"]
+          format: date-time
+          description: When the worker was last deactivated; null while active.
+        deactivatedBy:
+          type: [string, "null"]
+          description: The user who deactivated the worker; null while active.
+        deactivationReason:
+          type: [string, "null"]
+          description: The reason given at deactivation; null while active.
     BreakWindow:
       type: object
       required: [from, to]
@@ -3662,6 +3820,39 @@ components:
         premium:
           type: string
           description: Decimal string above 0 and up to 2 with up to 4 decimals; 0.15 pays 15% of the worker's rate extra.
+    UpdateWorker:
+      type: object
+      required: [name, badgeId, userId, costRate, currency]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        badgeId:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 64
+          description: Badge printed or encoded for the kiosk; null removes it.
+        userId:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 200
+          description: Identity-provider user the worker signs in as; null removes the link.
+        costRate:
+          type: string
+          description: Non-negative decimal string, per hour.
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+    DeactivateWorker:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Why the worker is deactivated; kept on the worker and published.
     AssignWorkerResource:
       type: object
       required: [resourceId]

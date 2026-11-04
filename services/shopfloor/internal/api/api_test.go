@@ -79,6 +79,18 @@ func (f *fakeStore) GetWorker(_ context.Context, id string) (store.Worker, error
 	return store.Worker{}, httpx.NewProblem(http.StatusNotFound, store.CodeWorkerNotFound, "worker not found")
 }
 
+func (f *fakeStore) UpdateWorker(context.Context, string, int, store.WorkerInput, string, store.Idem) (store.Worker, error) {
+	return store.Worker{}, nil
+}
+
+func (f *fakeStore) DeactivateWorker(context.Context, string, int, string, string, store.Idem) (store.Worker, error) {
+	return store.Worker{}, nil
+}
+
+func (f *fakeStore) ReactivateWorker(context.Context, string, int, string, store.Idem) (store.Worker, error) {
+	return store.Worker{}, nil
+}
+
 func (f *fakeStore) ListWorkers(context.Context, bool, int) ([]store.Worker, error) {
 	return f.workers, nil
 }

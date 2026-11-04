@@ -29,6 +29,10 @@ export interface Worker {
   payAgreementId: string | null;
   /** Resource whose jobs make up the worker's own dispatch list ("my jobs"); null means every job. */
   defaultResourceId: string | null;
+  /** When the worker was last deactivated; null or absent while active. */
+  deactivatedAt?: string | null;
+  deactivatedBy?: string | null;
+  deactivationReason?: string | null;
 }
 
 export interface NewWorker {
@@ -1151,6 +1155,41 @@ export function assignWorkerResource(workerId: string, version: number, resource
     method: "POST",
     headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
     body: JSON.stringify({ resourceId }),
+  });
+}
+
+/** The editable fields of a worker; the party link never changes. */
+export type WorkerEdit = Omit<NewWorker, "partyId">;
+
+/**
+ * Replaces a worker's name, badge, sign-in user, cost rate and currency. The worker version is the
+ * If-Match entity tag (SF-0143, 412); a badge held by another worker is SF-0105 (409).
+ */
+export function updateWorker(workerId: string, version: number, input: WorkerEdit, key: string = newKey()): Promise<Worker> {
+  return send<Worker>(`/workers/${encodeURIComponent(workerId)}`, {
+    method: "PUT",
+    headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
+    body: JSON.stringify({ ...input, badgeId: input.badgeId ?? null, userId: input.userId ?? null }),
+  });
+}
+
+/**
+ * Deactivates a worker with a reason. A worker who is clocked in or has an open job is SF-0166 (409);
+ * an inactive worker is SF-0167 (409).
+ */
+export function deactivateWorker(workerId: string, version: number, reason: string, key: string = newKey()): Promise<Worker> {
+  return send<Worker>(`/workers/${encodeURIComponent(workerId)}:deactivate`, {
+    method: "POST",
+    headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
+    body: JSON.stringify({ reason }),
+  });
+}
+
+/** Reactivates a deactivated worker; an active worker is SF-0168 (409). */
+export function reactivateWorker(workerId: string, version: number, key: string = newKey()): Promise<Worker> {
+  return send<Worker>(`/workers/${encodeURIComponent(workerId)}:reactivate`, {
+    method: "POST",
+    headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
   });
 }
 

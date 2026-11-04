@@ -3,6 +3,31 @@
 Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
 (Shop Floor Execution, Time Registration & IoT), PRD section 4.25.
 
+## Slice 22: worker maintenance (D2a')
+
+A supervisor edits a worker and deactivates one who left (migration `0021_worker_maintenance.sql`: the
+`deactivated_at`, `deactivated_by` and `deactivation_reason` columns of `worker`; no new table, so no new grant).
+All three routes use the existing duty `shopfloor.setup.maintain`, `If-Match` on the worker version (SF-0143, 412)
+and an `Idempotency-Key`, and publish `dev.passage.shopfloor.worker.saved.v1` through the outbox.
+
+- `PUT workers/{id}` replaces name, badge, sign-in user, cost rate and currency (the party link never changes).
+  A badge held by another worker is SF-0105; a null badge removes it. An inactive worker can be edited. The worker's
+  own sign-in user cannot edit the worker (SF-0106, 403): unlinking the user would get round the own-approval rule, and
+  the cost rate is the worker's pay. The currency cannot change once a day of the worker is approved (SF-0169, 422),
+  since a revision of that day would mix currencies in it.
+- `POST workers/{id}:deactivate` (body `reason`, 1 to 500 characters) marks the worker inactive and records who, when and
+  why. The badge then fails with SF-0001 and registrations with SF-0101. A worker who is clocked in or has an open job
+  start is SF-0166 (close the open time first); an inactive worker is SF-0167.
+- `POST workers/{id}:reactivate` makes the worker active again and clears the record; an active worker is SF-0168.
+- The pay of days already worked is not blocked by deactivation: `pay:calculate`, `pay:approve`, `pay:revise` and the
+  export still run for an inactive worker (earlier they refused it with SF-0101, which would have stranded the final pay).
+  A change of cost rate rewrites no pay line: approved days keep their lines and stay approved (the edit does not make
+  them stale), and days already calculated keep theirs until a supervisor recalculates them. Rates are not effective-dated:
+  a recalculation, or a `pay:revise` of an approved day, prices the day at the rate current when it runs.
+- Registrations lock the row of every worker in the batch (for share; for update when the batch opens a job), so a
+  punch that races a deactivation either is seen by it (SF-0166) or sees the inactive worker (SF-0101); an inactive
+  worker is never left clocked in.
+
 ## Slice 16: a worker's home resource and "my jobs" (D2a')
 
 A worker has an optional home resource, the machine or work centre the worker normally runs
@@ -567,7 +592,7 @@ OpenAPI and AsyncAPI files in step with the router and the published event types
 |---|---|
 | POST `/v1/shopfloor/workers` | `shopfloor.setup.maintain` (Maintain shop floor setup) |
 | GET `/v1/shopfloor/workers`, `/workers/{id}` | `shopfloor.view` (View shop floor) |
-| POST and PUT `/time-profiles`, `/pay-agreements`, `/absence-codes`; POST `/workers/{id}:assign-setup` and `:assign-resource` | `shopfloor.setup.maintain` |
+| POST and PUT `/time-profiles`, `/pay-agreements`, `/absence-codes`; PUT `/workers/{id}`; POST `/workers/{id}:assign-setup`, `:assign-resource`, `:deactivate` and `:reactivate` | `shopfloor.setup.maintain` |
 | GET `/time-profiles`, `/pay-agreements`, `/absence-codes` and their `{id}` | `shopfloor.view` |
 | POST `/v1/shopfloor/registrations` | `shopfloor.time.register` (Register time) |
 | GET `/v1/shopfloor/registrations` | `shopfloor.view` |
@@ -668,6 +693,10 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0163` | 422 | Only a quality-fail alert is cleared by hand; a downtime or scrap-rate alert clears itself after 5 minutes |
 | `SF-0164` | 404 or 422 | The process category does not exist (404 on a read or change; 422 when a message names a code that is neither a built-in default nor a master row) |
 | `SF-0165` | 422 | The process category is inactive; its messages are refused |
+| `SF-0166` | 409 | The worker is clocked in or has an open job start and cannot be deactivated |
+| `SF-0167` | 409 | The worker is already inactive |
+| `SF-0168` | 409 | The worker is already active |
+| `SF-0169` | 422 | The worker's currency cannot change once a day of the worker is approved |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Warnings on an accepted registration (`items[].warnings`, the request succeeds):

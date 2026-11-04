@@ -339,10 +339,11 @@ func lockBundle(ctx context.Context, tx pgx.Tx, tenantID, bundleID string) error
 }
 
 // lockWorker takes a row lock on the worker so calculation and approval for one
-// worker serialize, and reports SF-0101 when the worker is unknown or inactive.
+// worker serialize, and reports SF-0101 when the worker is unknown. A deactivated worker is
+// still locked: the days worked before leaving are calculated, approved and revised as usual.
 // It returns the worker's sign-in user id ("" when none is linked).
 func lockWorker(ctx context.Context, tx pgx.Tx, tenantID, workerID string) (userID string, err error) {
-	err = tx.QueryRow(ctx, `select coalesce(user_id, '') from worker where tenant_id = $1 and id = $2 and active for update`,
+	err = tx.QueryRow(ctx, `select coalesce(user_id, '') from worker where tenant_id = $1 and id = $2 for update`,
 		tenantID, workerID).Scan(&userID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", workerNotFound()
@@ -358,7 +359,7 @@ func (s *Postgres) LoadPunches(ctx context.Context, workerID string, start, end 
 	var in PunchInput
 	var rate string
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `select cost_rate::text, currency from worker where tenant_id = $1 and id = $2 and active`,
+		err := tx.QueryRow(ctx, `select cost_rate::text, currency from worker where tenant_id = $1 and id = $2`,
 			p.TenantID, workerID).Scan(&rate, &in.Currency)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return workerNotFound()

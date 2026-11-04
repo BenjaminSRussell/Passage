@@ -40,6 +40,10 @@ var (
 	TimeProfileSaved  = events.Type(Context, "timeprofile", "saved", 1)
 	PayAgreementSaved = events.Type(Context, "payagreement", "saved", 1)
 	WorkerAssigned    = events.Type(Context, "worker", "assigned", 1)
+	// WorkerSaved is not in the PRD event table: payroll (w43) and reporting need to know when a
+	// worker's name, cost rate or active state changes, as the pay lines of earlier days keep the
+	// rate they were calculated with.
+	WorkerSaved = events.Type(Context, "worker", "saved", 1)
 	// AbsenceCodeSaved is not in the PRD event table: payroll (w43) needs the pay terms
 	// behind the absence lines of a worker-day.
 	AbsenceCodeSaved = events.Type(Context, "absencecode", "saved", 1)
@@ -60,7 +64,7 @@ var (
 // All lists every event type the service publishes (used by the startup registry check).
 func All() []string {
 	return []string{RegistrationPosted, PaydayApproved, PaydayExported, AndonRaised, ProcessMessageReceived, ProcessMessageDelivered, ProcessMessageDeleted,
-		OEEBucketUpdated, OEEBucketRemoved, JobReported, JobReopened, RegistrationCorrected, PaydayRevised, TimeProfileSaved, PayAgreementSaved, WorkerAssigned, AbsenceCodeSaved,
+		OEEBucketUpdated, OEEBucketRemoved, JobReported, JobReopened, RegistrationCorrected, PaydayRevised, TimeProfileSaved, PayAgreementSaved, WorkerAssigned, WorkerSaved, AbsenceCodeSaved,
 		EdgeNodeSaved, EdgeConfigPublished, EdgeConfigApplied, DowntimeReasonSaved, ProcessCategorySaved}
 }
 
@@ -318,6 +322,24 @@ type WorkerAssignedData struct {
 	// DefaultResourceID is the resource whose jobs the worker's dispatch list shows.
 	DefaultResourceID *string `json:"defaultResourceId"`
 	AssignedBy        string  `json:"assignedBy"`
+}
+
+// WorkerSavedData is the payload of dev.passage.shopfloor.worker.saved.v1, published when a
+// worker's own fields change or the worker is deactivated or reactivated. Change is
+// "updated", "deactivated" or "reactivated"; Reason is set for a deactivation. The badge is a
+// personal identifier and is not published. CostRate is a decimal string. Days already calculated
+// keep the rate they were calculated with until a supervisor recalculates them.
+type WorkerSavedData struct {
+	WorkerID string  `json:"workerId"`
+	Name     string  `json:"name"`
+	UserID   *string `json:"userId"`
+	CostRate string  `json:"costRate"`
+	Currency string  `json:"currency"`
+	Active   bool    `json:"active"`
+	Version  int     `json:"version"`
+	Change   string  `json:"change"`
+	Reason   *string `json:"reason"`
+	SavedBy  string  `json:"savedBy"`
 }
 
 // AbsenceCodeSavedData is the payload of dev.passage.shopfloor.absencecode.saved.v1,
