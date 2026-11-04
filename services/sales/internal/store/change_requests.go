@@ -155,12 +155,21 @@ func changeValue(ctx context.Context, tx pgx.Tx, tenantID string, o Order, req C
 		return decimal.Zero, err
 	}
 	trial.dates = rule
+	req, err = prepareChange(ctx, tx, tenantID, o, req, "", now)
+	if err != nil {
+		return decimal.Zero, err
+	}
 	if _, _, err := ApplyChange(&trial, req); err != nil {
 		return decimal.Zero, problem(http.StatusUnprocessableEntity, CodeInvalidChange, err.Error())
 	}
 	moved := decimal.Zero
 	for i, l := range trial.Lines {
-		moved = moved.Add(effectiveNet(l).Sub(effectiveNet(o.Lines[i])).Abs())
+		// A line the change added moves its whole net.
+		was := decimal.Zero
+		if i < len(o.Lines) {
+			was = effectiveNet(o.Lines[i])
+		}
+		moved = moved.Add(effectiveNet(l).Sub(was).Abs())
 	}
 	return moved, nil
 }
@@ -194,7 +203,11 @@ func submitChangeRequestTx(ctx context.Context, tx pgx.Tx, tenantID string, o Or
 		return nil, err
 	}
 	trial.dates = rule
-	diff, _, err := ApplyChange(&trial, req)
+	prepared, err := prepareChange(ctx, tx, tenantID, o, req, actor, now)
+	if err != nil {
+		return nil, err
+	}
+	diff, _, err := ApplyChange(&trial, prepared)
 	if err != nil {
 		return nil, problem(http.StatusUnprocessableEntity, CodeInvalidChange, err.Error())
 	}
@@ -352,7 +365,12 @@ func (s *Postgres) ApproveChangeRequest(ctx context.Context, id string, version 
 		if r.Kind == KindCancel {
 			applied, err = cancelOrderTx(ctx, tx, p.TenantID, o, r.Reason, r.RequestedBy, now)
 		} else {
-			applied, err = applyChangeTx(ctx, tx, p.TenantID, o, r.OrderID, r.Change, r.RequestedBy, now)
+			// The approver holds sales.order.approve (the route) and is one the
+			// customer lets decide, so a listing override the request carries
+			// (listingOverrideReason) is accepted on their approval.
+			change := r.Change
+			change.Approver = true
+			applied, err = applyChangeTx(ctx, tx, p.TenantID, o, r.OrderID, change, r.RequestedBy, now)
 		}
 		if err != nil {
 			return err

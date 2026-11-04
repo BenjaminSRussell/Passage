@@ -100,6 +100,8 @@ type Line struct {
 	// quantity per base, kept so a parent change recomputes the line.
 	suppBase    decimal.Decimal
 	suppPerBase decimal.Decimal
+	// added marks a line a change adds in memory, still to be inserted.
+	added bool
 }
 
 // Notice is a non-blocking message returned with a result, such as the

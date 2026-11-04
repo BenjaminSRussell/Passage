@@ -306,7 +306,7 @@ operations:
   publishOrderRemainderCancelled:
     action: send
     channel: {$ref: "#/channels/orderRemainderCancelled"}
-    summary: The undelivered remainder of a partly shipped order, or of one of its lines (/lines/{lineNo}:cancel-remainder), was closed; the closed lines are CANCELLED or cut to what was delivered and the net total falls. After a one-line close the order stays PARTIALLY_SHIPPED while another line has quantity to deliver, and lines lists only the closed line. Holds are not changed. Consumers - fulfillment (cancel the open shipment and pick quantity beyond kept_qty and release its reservation; a slip already posted for it is refused by sales with SLS-0058), billing, credit exposure, portal.
+    summary: The undelivered remainder of a partly shipped order, or of one of its lines (/lines/{lineNo}:cancel-remainder), was closed; the closed lines are CANCELLED or cut to what was delivered and the net total falls. After a one-line close the order stays PARTIALLY_SHIPPED while another line has quantity to deliver, and lines lists only the closed line. Holds are not changed. A PATCH that removes lines of a CONFIRMED order (removeLines, FR-27.9) also emits it, after order.changed and with the same version, for the removed lines and the supplementary lines cancelled with them (kept_qty 0, status CONFIRMED), so fulfillment cuts what it released for them. Consumers - fulfillment (cancel the open shipment and pick quantity beyond kept_qty and release its reservation; a slip already posted for it is refused by sales with SLS-0058), billing, credit exposure, portal.
     messages:
       - {$ref: "#/channels/orderRemainderCancelled/messages/orderRemainderCancelled"}
   publishOrderConfirmed:
@@ -554,7 +554,7 @@ components:
         $ref: "#/components/schemas/OrderCancelledData"
     OrderRemainderCancelled:
       name: dev.passage.sales.order.remaindercancelled.v1
-      title: Remainder of a partly shipped order cancelled
+      title: Remainder of a partly shipped order, or lines removed from a confirmed order, cancelled
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
@@ -897,7 +897,11 @@ components:
             parent line also lists the follow-on changes of its supplementary
             lines (BR-27.14): quantity, requested and confirmed ship date, and
             lineStatus OPEN to CANCELLED when the parent drops below the rule's
-            base quantity.
+            base quantity. A line added by the change is listed with a lineAdded
+            entry (new is the product id) followed by lineId, unit, siteId,
+            warehouseId, quantity, unitPrice, discPct, requestedShipDate and, on
+            a confirmed order, confirmedShipDate, each with an empty old; a line
+            the change removed is listed as lineStatus OPEN to CANCELLED.
           items:
             type: object
             required: [line_no, field, old, new]
@@ -908,7 +912,7 @@ components:
               new: {type: string}
         repromised_lines:
           type: array
-          description: line numbers whose confirmed ship date was re-promised (quantity or date changed on a confirmed order), including supplementary lines that moved with their parent
+          description: line numbers whose confirmed ship date was re-promised (quantity or date changed on a confirmed order), including supplementary lines that moved with their parent and lines the change added
           items: {type: integer}
     OrderCancelledData:
       type: object
@@ -929,10 +933,10 @@ components:
         order_id: {type: string, format: uuid}
         legal_entity_id: {type: string, format: uuid}
         version: {type: integer}
-        status: {type: string, enum: [PARTIALLY_SHIPPED, SHIPPED, INVOICED], description: the order status after the remainder was closed; PARTIALLY_SHIPPED after a one-line close while another line has quantity to deliver}
+        status: {type: string, enum: [CONFIRMED, PARTIALLY_SHIPPED, SHIPPED, INVOICED], description: the order status after the remainder was closed; PARTIALLY_SHIPPED after a one-line close while another line has quantity to deliver; CONFIRMED when a PATCH removed lines of a confirmed order}
         lines:
           type: array
-          description: the lines that gave up quantity (only the named line for a one-line close)
+          description: the lines that gave up quantity (only the named line for a one-line close; the removed lines and their cancelled supplementary lines for a PATCH)
           items:
             type: object
             required: [line_id, line_no, product_id, cancelled_qty, kept_qty, line_status]

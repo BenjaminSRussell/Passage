@@ -46,6 +46,17 @@ type ChangeRequest struct {
 	// a change applies at once even for a customer whose changes need approval,
 	// unless the customer names its approvers and the caller is not one.
 	Approver bool `json:"-"`
+
+	// AddLines adds lines to the order and RemoveLines cancels lines by number
+	// (FR-27.9). ListingOverrideReason lets a caller with SalesOrderApprove
+	// accept an added line the product listing denies (FR-27.15). The unexported
+	// fields are what prepareChange computed for AddLines; they are not stored.
+	AddLines              []NewLine `json:"addLines,omitempty"`
+	RemoveLines           []int     `json:"removeLines,omitempty"`
+	ListingOverrideReason string    `json:"listingOverrideReason,omitempty"`
+	added                 []Line
+	addedSupp             []Line
+	overrides             []ListingOverride
 }
 
 // OrderVersion is one entry of an order's change history: the version a change
@@ -163,6 +174,17 @@ func ApplyChange(o *Order, req ChangeRequest) ([]domain.FieldChange, []int, erro
 		l.LineNet = net
 		diff = append(diff, lineDiff...)
 	}
+	removeDiff, err := applyRemovals(o, req, index, seen)
+	if err != nil {
+		return nil, nil, err
+	}
+	diff = append(diff, removeDiff...)
+	addDiff, promised, err := applyAdditions(o, req)
+	if err != nil {
+		return nil, nil, err
+	}
+	diff = append(diff, addDiff...)
+	repromised = append(repromised, promised...)
 	followDiff, followed, err := followParents(o)
 	if err != nil {
 		return nil, nil, err
@@ -171,10 +193,22 @@ func ApplyChange(o *Order, req ChangeRequest) ([]domain.FieldChange, []int, erro
 	if o.Status == domain.OrderConfirmed {
 		repromised = append(repromised, followed...)
 	}
+	if len(req.RemoveLines) > 0 && !hasActiveLine(o.Lines) {
+		return nil, nil, errNoActiveLine
+	}
 	if len(diff) > 0 {
 		o.NetTotal = netOf(o.Lines)
 	}
 	return diff, repromised, nil
+}
+
+func hasActiveLine(lines []Line) bool {
+	for _, l := range lines {
+		if l.LineStatus != domain.LineCancelled {
+			return true
+		}
+	}
+	return false
 }
 
 func netOf(lines []Line) decimal.Decimal {
@@ -325,6 +359,10 @@ func applyChangeTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, id 
 			}
 			o.dates = rule
 		}
+		req, err := prepareChange(ctx, tx, tenantID, o, req, actor, now)
+		if err != nil {
+			return err
+		}
 		diff, repromised, err := ApplyChange(&o, req)
 		if err != nil {
 			return problem(http.StatusUnprocessableEntity, CodeInvalidChange, err.Error())
@@ -333,6 +371,12 @@ func applyChangeTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, id 
 			out = o
 			return nil
 		}
+		if err := insertAddedLinesTx(ctx, tx, tenantID, o); err != nil {
+			return err
+		}
+		if err := appendListingOverridesTx(ctx, tx, tenantID, id, req.overrides); err != nil {
+			return err
+		}
 		if o.isOneTime() && o.NetTotal.GreaterThan(oldTotal) {
 			if err := checkOneTimeLimitTx(ctx, tx, p.TenantID, o.LegalEntityID, o.NetTotal, o.Currency); err != nil {
 				return err
@@ -340,7 +384,11 @@ func applyChangeTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, id 
 		}
 		reallocate := map[int]bool{}
 		for _, l := range o.Lines {
-			b := before[l.LineNo]
+			b, existed := before[l.LineNo]
+			if !existed {
+				reallocate[l.LineNo] = true // an added line draws like a confirmed one
+				continue
+			}
 			if !l.Quantity.Equal(b.Quantity) || l.RequestedShipDate != b.RequestedShipDate || l.LineStatus != b.LineStatus {
 				reallocate[l.LineNo] = true
 			}
@@ -388,6 +436,9 @@ func applyChangeTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, id 
 		}); err != nil {
 			return err
 		}
+		if err := followRemovalsTx(ctx, tx, p.TenantID, o, before, req, actor, next, now); err != nil {
+			return err
+		}
 		checked := false
 		if o.Status == domain.OrderConfirmed && o.OrderType != domain.OrderTypeJournal && o.NetTotal.GreaterThan(oldTotal) {
 			if checked, err = checksAtTx(ctx, tx, p.TenantID, o.LegalEntityID, domain.CheckPointConfirm); err != nil {
@@ -406,7 +457,7 @@ func applyChangeTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, id 
 			}
 		}
 		loaded, err := loadOrder(ctx, tx, p.TenantID, id, false)
-		loaded.Warnings = notices
+		loaded.Warnings = append(notices, addedSupplementaryNotices(o)...)
 		out = loaded
 		return err
 	}()

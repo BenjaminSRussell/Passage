@@ -381,11 +381,19 @@ export interface LineChangeInput {
   requestedShipDate?: string;
 }
 
-/** A PATCH body: send lines, requestedShipDate or both; absent fields keep their value. */
+/**
+ * A PATCH body: send lines, addLines, removeLines, requestedShipDate or any of
+ * them; absent fields keep their value. A removed line is cancelled and keeps
+ * its number; an added line is numbered after the order's highest.
+ */
 export interface ChangeOrderInput {
   reason?: string;
   requestedShipDate?: string;
   lines?: LineChangeInput[];
+  addLines?: NewOrderLine[];
+  removeLines?: number[];
+  /** Accepts an added line the product listing denies; only a caller with sales.order.approve. */
+  listingOverrideReason?: string;
 }
 
 export interface FieldChange {

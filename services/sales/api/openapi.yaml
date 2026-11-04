@@ -133,6 +133,27 @@ paths:
         parent's quantity recomputes it, cancels it when the parent drops below
         the rule's base quantity, and a change of the parent's dates moves it
         with the parent. Those follow-on changes are part of the version's diff.
+        addLines adds lines (numbered after the order's highest line number, so a
+        number is never reused) and removeLines cancels lines by number, in the
+        same version as the other edits. An added line is entered like an order
+        line (a configurationId is refused), is checked against the product
+        listings of the customer (SLS-0011; a caller with sales.order.approve
+        and a listingOverrideReason may accept a denied line, and the override is
+        logged on the order), gets the MANDATORY supplementary lines its product
+        calls for (SLS-0012 in warnings) and, on a CONFIRMED order, is promised at
+        once through the delivery date control, allocated, scheduled and counted
+        in the credit re-check. A removed line is cancelled, not deleted; only an
+        OPEN or RESERVED line can go, a supplementary line goes with its parent
+        and cannot be removed alone, a line with a production order planned
+        cannot be removed, and a change cannot leave the order without a line
+        (cancel the order instead); all of these are 422 SLS-0024. The diff names
+        an added line with a lineAdded entry (the product) and its fields with
+        an empty old value, and a removed line with lineStatus OPEN to CANCELLED.
+        On a CONFIRMED order the removal also emits order.remaindercancelled
+        (kept quantity 0) for the removed lines and their supplementary lines,
+        so fulfillment cuts what it released; removing line 1 of an order
+        released from a sales agreement gives the release quantity back to the
+        agreement.
         On a CONFIRMED order, a line whose quantity or requested date changes,
         or that is cancelled or reopened with its parent, returns its allocation
         quota draw and draws again (BR-27.15); a line moved to a later period
@@ -186,7 +207,7 @@ paths:
               schema: {$ref: "#/components/schemas/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "422":
-          description: SLS-0023 the order cannot be changed; SLS-0024 the change is invalid; SLS-0013 allocation quota cannot cover a changed line in any period
+          description: SLS-0023 the order cannot be changed; SLS-0024 the change is invalid; SLS-0011 an added line's product is not listed for the customer; SLS-0013 allocation quota cannot cover a changed or added line in any period
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
@@ -3413,10 +3434,21 @@ components:
         version: {type: integer}
     ChangeOrderRequest:
       type: object
-      description: At least one of lines or requestedShipDate. Absent line fields keep their value.
+      description: At least one of lines, addLines, removeLines or requestedShipDate. Absent line fields keep their value.
       properties:
         reason: {type: string, maxLength: 500}
         requestedShipDate: {type: string, format: date}
+        addLines:
+          type: array
+          maxItems: 2000
+          description: lines to add, entered like order lines; configurationId is refused (400)
+          items: {$ref: "#/components/schemas/OrderLineRequest"}
+        removeLines:
+          type: array
+          maxItems: 2000
+          description: numbers of the lines to cancel (a removed line keeps its number)
+          items: {type: integer, minimum: 1}
+        listingOverrideReason: {type: string, maxLength: 500, description: "accepts an added line the product listing denies; effective only for a caller with sales.order.approve (FR-27.15)"}
         lines:
           type: array
           maxItems: 2000
