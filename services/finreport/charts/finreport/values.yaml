@@ -25,3 +25,21 @@ reporting:
   # {traceId} slot, e.g. https://grafana.example/explore?traceId={traceId}.
   # Empty shows trace ids without a link.
   traceUrl: ""
+# Service identity the consumer signs ledger requests with (PASSAGE_SERVICE_NAME=finreport).
+# The ledger must hold finreport's public key and the platform must seed the
+# finreport-ledger principal and the finreport to ledger grant (NOT-IMPLEMENTED.md).
+serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""
+serviceUrls:
+  ledger: ""
+# Kafka consumer of dev.passage.ledger.journal.posted.v1 (FR-15.1): one pod per
+# partition set; ordering across partitions is handled by the read model.
+consumer:
+  enabled: false
+  replicaCount: 1
+  kafka:
+    brokers: ""
+    group: reporting-balances
+    username: finreport-consumer
+    secret: ""
