@@ -10,7 +10,7 @@ const (
 	// CodeCatchWeight is BR-24.5: the actual weight is outside min/max × cases.
 	CodeCatchWeight = "SLS-0061"
 	// CodeCatchWeightInput is a malformed catch-weight spec, case count or actualWeight report.
-	CodeCatchWeightInput = "SLS-0062"
+	CodeCatchWeightInput = "SLS-0063"
 	cwQtyPrecision       = 6
 )
 

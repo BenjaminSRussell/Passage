@@ -18,6 +18,19 @@ func TestValidateCatchWeight_AC245(t *testing.T) {
 	}
 }
 
+func TestIsWeightUnit_OrgMassUnitsAndUNECECodes(t *testing.T) {
+	for _, u := range []string{"kg", "G", "mg", "t", "lb", "oz", "st", "ct", "KGM", "grm", "MGM", "TNE", "LBR", "ONZ", "STI", "CTM"} {
+		if !IsWeightUnit(u) {
+			t.Errorf("%s is a mass unit", u)
+		}
+	}
+	for _, u := range []string{"CS", "EA", "PCE", "L", "m", ""} {
+		if IsWeightUnit(u) {
+			t.Errorf("%s is not a mass unit", u)
+		}
+	}
+}
+
 func TestValidateCatchWeight(t *testing.T) {
 	spec := CatchWeight{Nominal: dec("10"), Min: dec("9"), Max: dec("11")}
 	tests := []struct {

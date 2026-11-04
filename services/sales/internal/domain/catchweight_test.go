@@ -18,7 +18,7 @@ func TestValidateCatchWeight_AC245(t *testing.T) {
 	}
 	for _, cases := range []string{"2.5", "0"} {
 		if err := ValidateCatchWeight(spec, dec(cases), dec("25")); err == nil || err.(*CatchWeightError).Code != CodeCatchWeightInput {
-			t.Fatalf("%s cases should fail with SLS-0062, got %v", cases, err)
+			t.Fatalf("%s cases should fail with SLS-0063, got %v", cases, err)
 		}
 	}
 }

@@ -45,6 +45,7 @@ type correctedLineData struct {
 	POLineID        string `json:"po_line_id"`
 	ProductID       string `json:"product_id"`
 	QtyDelta        string `json:"qty_delta"`
+	CWQtyDelta      int    `json:"cw_qty_delta,omitempty"`
 	AmountDelta     string `json:"amount_delta"`
 	AmountAcctDelta string `json:"amount_acct_delta"`
 }

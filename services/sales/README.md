@@ -345,7 +345,9 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0052` | 422 | The agreement is closed: no release, schedule release, revision or second close |
 | `SLS-0053` | 422 | Agreement commitment revised below the quantity already released |
 | `SLS-0054` | 503 | One-time customer order while the service has no field encryption keys (`FIELDCRYPT_KEYS_FILE` / `FIELDCRYPT_CURRENT_KEY_ID`): the buyer is never stored or returned in clear |
+| `SLS-0061` | 422 | BR-24.5: the actual catch weight of a DELIVERED report is outside min × cases to max × cases (FR-24.7) |
 | `SLS-0062` | 422 | A hold cannot be rejected: it is not a CREDIT hold, or its order is no longer awaiting confirmation (DRAFT or OPEN) |
+| `SLS-0063` | 422 | A catch-weight report is malformed: a report on a catch-weight line that is not a whole number of cases, or `actualWeight` on a line that is not catch-weight or on a report that is not DELIVERED |
 | `SLS-0100` | 404 | Order not found |
 | `SLS-0101` | 404 | Hold not found |
 | `SLS-0102` | 404 | Credit profile not found |

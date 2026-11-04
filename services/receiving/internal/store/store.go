@@ -123,8 +123,10 @@ const (
 )
 
 type LineChange struct {
-	LineNo     int
-	Qty        decimal.Decimal
+	LineNo int
+	Qty    decimal.Decimal
+	// CWQty is the catch-weight count after the change; 0 keeps the stored count.
+	CWQty      int
 	Amount     decimal.Decimal
 	AmountAcct decimal.Decimal
 }

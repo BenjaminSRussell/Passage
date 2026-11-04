@@ -215,10 +215,46 @@ func postReceiptEntry(ctx context.Context, ledger LedgerPoster, entry JournalEnt
 	return entryID, nil
 }
 
+// LineChange is a line's quantity (and catch-weight count) after an
+// adjustment, with the amount it now carries.
 type LineChange struct {
 	LineNo int
 	Qty    decimal.Decimal
+	CWQty  int
 	Amount money.Amount
+}
+
+// WithCaseDeltas applies catch-weight count corrections (cases, FR-24.7) before
+// Correct re-checks BR-24.5 against the corrected weight and count. Only a
+// catch-weight line takes one, and the count stays at least 1.
+func (r Receipt) WithCaseDeltas(deltas map[int]int) (Receipt, error) {
+	if len(deltas) == 0 {
+		return r, nil
+	}
+	out := r
+	out.Lines = slices.Clone(r.Lines)
+	seen := 0
+	for i, l := range out.Lines {
+		d, ok := deltas[l.LineNo]
+		if !ok {
+			continue
+		}
+		seen++
+		switch next := l.CWQty + d; {
+		case l.CWQty < 1:
+			return r, fail(CodeInvalidReceipt, "line %d is not a catch-weight line and has no case count to correct", l.LineNo)
+		case d == 0:
+			return r, fail(CodeInvalidReceipt, "line %d case delta must not be zero", l.LineNo)
+		case next < 1:
+			return r, fail(CodeInvalidReceipt, "line %d corrected case count must stay at least 1, cancel the receipt instead", l.LineNo)
+		default:
+			out.Lines[i].CWQty = next
+		}
+	}
+	if seen != len(deltas) {
+		return r, fail(CodeInvalidReceipt, "correction names lines the receipt does not have")
+	}
+	return out, nil
 }
 
 func (r Receipt) adjustmentEntry(key string, postingDate time.Time, changes []LineChange, profile PostingProfile) JournalEntry {
@@ -291,7 +327,7 @@ func (r Receipt) Correct(ctx context.Context, ledger LedgerPoster, profile Posti
 		if l.InvoicedQty.Sign() > 0 && next.Equal(l.InvoicedQty) {
 			amount = money.Amount{Value: l.ClearedAmount, Currency: l.UnitPrice.Currency}
 		}
-		changes = append(changes, LineChange{LineNo: l.LineNo, Qty: next, Amount: amount})
+		changes = append(changes, LineChange{LineNo: l.LineNo, Qty: next, CWQty: l.CWQty, Amount: amount})
 	}
 	if len(changes) != len(deltas) {
 		return "", nil, fail(CodeInvalidReceipt, "correction names lines the receipt does not have")

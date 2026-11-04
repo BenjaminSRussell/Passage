@@ -25,7 +25,7 @@ func catchWeightOrder(t *testing.T, le, customer string, cases int64) NewOrder {
 	return NewOrder{LegalEntityID: le, CustomerID: customer, InvoiceAccountID: customer, OrderType: "ORDER", Currency: "USD",
 		RequestedShipDate: "2027-03-04", Channel: "UI", RequestHash: ids.New(), OrderDate: time.Date(2027, 2, 20, 0, 0, 0, 0, time.UTC),
 		Actor: "sales-rep", Lines: []Line{{
-			LineNo: 1, ProductID: ids.New(), Quantity: d(cases), Unit: "KG", SiteID: ids.New(), WarehouseID: ids.New(),
+			LineNo: 1, ProductID: ids.New(), Quantity: d(cases), Unit: "CS", SiteID: ids.New(), WarehouseID: ids.New(),
 			UnitPrice: d(2), DiscPct: d(0), LineNet: net, RequestedShipDate: "2027-03-04", CatchWeight: spec,
 		}}}
 }
@@ -138,18 +138,26 @@ func TestPostgres_CatchWeightReportRefusals(t *testing.T) {
 
 	if _, _, err := s.RecordProgress(ctx, progressIn(o.ID, domain.ProgressDelivered, "PS-HALF", "k-half", "h-half",
 		ProgressLineInput{LineNo: 1, Quantity: decimal.RequireFromString("2.5"), ActualWeight: weigh("25")}), time.Now().UTC()); problemCode(t, err) != domain.CodeCatchWeightInput {
-		t.Fatalf("2.5 cases with a weight: %v, want SLS-0062", err)
+		t.Fatalf("2.5 cases with a weight: %v, want SLS-0063", err)
+	}
+	if _, _, err := s.RecordProgress(ctx, progressIn(o.ID, domain.ProgressDelivered, "PS-HALF-NOW", "k-half-now", "h-half-now",
+		ProgressLineInput{LineNo: 1, Quantity: decimal.RequireFromString("2.5")}), time.Now().UTC()); problemCode(t, err) != domain.CodeCatchWeightInput {
+		t.Fatalf("2.5 cases without a weight: %v, want SLS-0063", err)
 	}
 	if _, err := report(t, s, ctx, o.ID, domain.ProgressDelivered, "PS-1", 10, weigh("100")); err != nil {
 		t.Fatal(err)
 	}
+	if _, _, err := s.RecordProgress(ctx, progressIn(o.ID, domain.ProgressInvoiced, "INV-HALF", "k-inv-half", "h-inv-half",
+		ProgressLineInput{LineNo: 1, Quantity: decimal.RequireFromString("0.5")}), time.Now().UTC()); problemCode(t, err) != domain.CodeCatchWeightInput {
+		t.Fatalf("0.5 cases invoiced: %v, want SLS-0063", err)
+	}
 	if _, err := report(t, s, ctx, o.ID, domain.ProgressInvoiced, "INV-1", 10, weigh("100")); problemCode(t, err) != domain.CodeCatchWeightInput {
-		t.Fatalf("actualWeight on an INVOICED report: %v, want SLS-0062", err)
+		t.Fatalf("actualWeight on an INVOICED report: %v, want SLS-0063", err)
 	}
 
 	plain := confirmed(t, s, ctx, orderOf(ids.New(), ids.New(), ids.New(), "2027-03-04", 10))
 	if _, err := report(t, s, ctx, plain.ID, domain.ProgressDelivered, "PS-P", 5, weigh("51")); problemCode(t, err) != domain.CodeCatchWeightInput {
-		t.Fatalf("actualWeight on a line that is not catch-weight: %v, want SLS-0062", err)
+		t.Fatalf("actualWeight on a line that is not catch-weight: %v, want SLS-0063", err)
 	}
 }
 

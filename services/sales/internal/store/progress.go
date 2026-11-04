@@ -291,6 +291,12 @@ func (s *Postgres) ListProgress(ctx context.Context, f ProgressFilter) ([]OrderP
 }
 
 func applyCatchWeightProgress(l *Line, kind string, cases decimal.Decimal, delivered decimal.Decimal, actual *decimal.Decimal) error {
+	if l.CatchWeight != nil && !domain.WholeCases(cases) {
+		// Every report on a catch-weight line counts whole cases, a delivery
+		// without a weight (priced at nominal) and an invoice included.
+		return problem(http.StatusUnprocessableEntity, domain.CodeCatchWeightInput,
+			fmt.Sprintf("line %d is a catch-weight item; a %s report must cover a whole number of cases", l.LineNo, kind))
+	}
 	if actual != nil {
 		switch {
 		case kind != domain.ProgressDelivered:

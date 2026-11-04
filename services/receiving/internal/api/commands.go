@@ -33,8 +33,11 @@ const (
 )
 
 const (
-	maxCWQty         = 1_000_000
-	catchWeightScale = "must have at most 6 decimals and 14 integer digits"
+	maxCWQty = 1_000_000
+	// qtyScale is the numeric(20,6) bound of receiving_receipt_line.qty, for
+	// every received quantity (a larger or finer value was a 500 or silently
+	// rounded before).
+	qtyScale = "must have at most 6 decimals and 14 integer digits"
 )
 
 var inventoryStatuses = []string{inventoryOK, "QUARANTINE", "BLOCKED"}
@@ -77,6 +80,9 @@ type directReceiptRequest struct {
 type deltaLine struct {
 	LineNo   int           `json:"lineNo"`
 	QtyDelta *fieldDecimal `json:"qtyDelta"`
+	// CWQtyDelta corrects the case count of a catch-weight line together with
+	// its weight (qtyDelta); BR-24.5 is checked on the corrected pair.
+	CWQtyDelta *int `json:"cwQtyDelta"`
 }
 
 type correctRequest struct {
@@ -130,7 +136,7 @@ func parseReceived(fields map[string]string, prefix string, f receivedFields) re
 		if v.Sign() <= 0 {
 			fields[prefix+"qty"] = "must be greater than zero"
 		} else if !domain.FitsColumn(v) {
-			fields[prefix+"qty"] = catchWeightScale
+			fields[prefix+"qty"] = qtyScale
 		}
 		in.Qty = v
 	}
@@ -219,13 +225,14 @@ func registerFn(inputs map[int]registerInput, version int, poQty map[int]decimal
 			if !ok {
 				return nil, &domain.Error{Code: domain.CodeInvalidReceipt, Detail: fmt.Sprintf("line %d has no received quantity", lines[i].LineNo)}
 			}
+			if in.CWQty > 0 && !domain.IsWeightUnit(lines[i].Unit) {
+				// Also without a PO line: qty is a weight, so the line's unit must be one.
+				return nil, &domain.Error{Code: domain.CodeCatchWeightUnit, Detail: fmt.Sprintf("line %d is received in %q; a catch-weight line is received and priced per mass unit", lines[i].LineNo, lines[i].Unit)}
+			}
 			if lines[i].POLineNo > 0 {
 				ordered, known := poQty[lines[i].LineNo]
 				if !known {
 					return nil, &domain.Error{Code: domain.CodeInvalidReceipt, Detail: fmt.Sprintf("line %d has no purchase order quantity to check against", lines[i].LineNo)}
-				}
-				if in.CWQty > 0 && !domain.IsWeightUnit(lines[i].Unit) {
-					return nil, &domain.Error{Code: domain.CodeCatchWeightUnit, Detail: fmt.Sprintf("line %d is received in %q; a catch-weight line needs a purchase order line priced per weight unit", lines[i].LineNo, lines[i].Unit)}
 				}
 				if err := checkOpenQuantity(r.Lines[i], in.Qty, ordered); err != nil {
 					return nil, err
@@ -408,6 +415,7 @@ func (a *API) correctReceipt(w http.ResponseWriter, r *http.Request) {
 	}
 	fields := map[string]string{}
 	deltas := map[int]decimal.Decimal{}
+	caseDeltas := map[int]int{}
 	if len(req.Lines) == 0 || len(req.Lines) > maxLines {
 		fields["lines"] = fmt.Sprintf("must hold 1 to %d lines", maxLines)
 	}
@@ -424,6 +432,13 @@ func (a *API) correctReceipt(w http.ResponseWriter, r *http.Request) {
 				fields[prefix+"qtyDelta"] = "must not be zero"
 			}
 			deltas[l.LineNo] = v
+		}
+		if l.CWQtyDelta != nil {
+			if d := *l.CWQtyDelta; d == 0 || d < -maxCWQty || d > maxCWQty {
+				fields[prefix+"cwQtyDelta"] = fmt.Sprintf("must be a non-zero whole number from -%d to %d", maxCWQty, maxCWQty)
+			} else {
+				caseDeltas[l.LineNo] = d
+			}
 		}
 	}
 	if len(fields) > 0 {
@@ -457,7 +472,11 @@ func (a *API) correctReceipt(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		seq := rec.CorrectionSeq + 1
-		entryID, changes, err := toDomain(rec).Correct(ctx, a.ledgerFor(rec.ID), a.ports.Profile, seq, postingDate, deltas)
+		dr, err := toDomain(rec).WithCaseDeltas(caseDeltas)
+		if err != nil {
+			return store.Adjustment{}, err
+		}
+		entryID, changes, err := dr.Correct(ctx, a.ledgerFor(rec.ID), a.ports.Profile, seq, postingDate, deltas)
 		if err != nil {
 			return store.Adjustment{}, err
 		}
@@ -466,9 +485,9 @@ func (a *API) correctReceipt(w http.ResponseWriter, r *http.Request) {
 		for _, c := range changes {
 			line := rec.Lines[slices.IndexFunc(rec.Lines, func(l store.Line) bool { return l.LineNo == c.LineNo })]
 			amountDelta := c.Amount.Value.Sub(line.Amount.Decimal)
-			adj.Lines = append(adj.Lines, store.LineChange{LineNo: c.LineNo, Qty: c.Qty, Amount: c.Amount.Value, AmountAcct: acct(c.Amount.Value, rec.ExchangeRate)})
+			adj.Lines = append(adj.Lines, store.LineChange{LineNo: c.LineNo, Qty: c.Qty, CWQty: c.CWQty, Amount: c.Amount.Value, AmountAcct: acct(c.Amount.Value, rec.ExchangeRate)})
 			eventLines = append(eventLines, correctedLineData{
-				LineNo: c.LineNo, POLineID: line.POLineID, ProductID: line.ProductID, QtyDelta: c.Qty.Sub(line.Qty).String(),
+				LineNo: c.LineNo, POLineID: line.POLineID, ProductID: line.ProductID, QtyDelta: c.Qty.Sub(line.Qty).String(), CWQtyDelta: c.CWQty - line.CWQty,
 				AmountDelta: amountDelta.String(), AmountAcctDelta: acct(amountDelta, rec.ExchangeRate).String(),
 			})
 		}

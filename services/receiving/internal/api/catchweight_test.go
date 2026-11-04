@@ -70,12 +70,49 @@ func TestCatchWeightReceipt_ValidatesTheRequest(t *testing.T) {
 	}
 }
 
-func TestCorrect_CatchWeightReceiptKeepsTheBandAndTheOverDeliveryCap(t *testing.T) {
-	rg := newRig(domain.PeriodOpen)
-	body := directBody("PS-CW", 100, 102, `,"cwQty":10,"catchWeight":`+catchSpec)
+// postedCatchReceipt is a posted direct receipt of 10 cases at 102 kg against
+// 100 kg ordered (+5%).
+func postedCatchReceipt(t *testing.T, rg *rig) (receiptJSON, string) {
+	t.Helper()
+	body := strings.Replace(directBody("PS-CW", 100, 102, `,"cwQty":10,"catchWeight":`+catchSpec), `"unit":"EA"`, `"unit":"KG"`, 1)
 	r := decode[receiptJSON](t, rg.call(http.MethodPost, receiptsPath, body, rg.maintain()), http.StatusCreated)
 	posted := decode[receiptJSON](t, rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":post", "", rg.poster(r.Version)), http.StatusOK)
-	path := receiptsPath + "/" + r.ID + ":correct"
+	return posted, receiptsPath + "/" + r.ID + ":correct"
+}
+
+func TestDirectReceipt_CatchWeightNeedsAMassUnitWithoutAPOLine(t *testing.T) {
+	rg := newRig(domain.PeriodOpen)
+	rec := rg.call(http.MethodPost, receiptsPath, directBody("PS-CW", 100, 102, `,"cwQty":10,"catchWeight":`+catchSpec), rg.maintain())
+	problemCode(t, rec, http.StatusUnprocessableEntity, domain.CodeCatchWeightUnit)
+}
+
+// TestCorrect_CatchWeightCaseCount: a short-case correction (9 of 10 cases,
+// 92 kg) moves the count with the weight and BR-24.5 checks the new pair.
+func TestCorrect_CatchWeightCaseCount(t *testing.T) {
+	rg := newRig(domain.PeriodOpen)
+	posted, path := postedCatchReceipt(t, rg)
+	body := func(qty, cases string) string {
+		return fmt.Sprintf(`{"lines":[{"lineNo":1,"qtyDelta":%s,"cwQtyDelta":%s}]}`, qty, cases)
+	}
+	problemCode(t, rg.call(http.MethodPost, path, `{"lines":[{"lineNo":1,"qtyDelta":-10}]}`, rg.poster(posted.Version)), http.StatusUnprocessableEntity, domain.CodeCatchWeight)
+	problemCode(t, rg.call(http.MethodPost, path, body("-10", "-10"), rg.poster(posted.Version)), http.StatusUnprocessableEntity, domain.CodeInvalidReceipt)
+	problemCode(t, rg.call(http.MethodPost, path, body("-30", "-1"), rg.poster(posted.Version)), http.StatusUnprocessableEntity, domain.CodeCatchWeight)
+	if rec := rg.call(http.MethodPost, path, body("-10", "0"), rg.poster(posted.Version)); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "lines[0].cwQtyDelta") {
+		t.Fatalf("zero case delta: %d %s", rec.Code, rec.Body)
+	}
+	got := rg.call(http.MethodPost, path, body("-10", "-1"), rg.poster(posted.Version))
+	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"qty":"92"`) || !strings.Contains(got.Body.String(), `"cwQty":9`) {
+		t.Fatalf("9 cases at 92 kg is inside 88.2-99 and must correct: %d %s", got.Code, got.Body)
+	}
+
+	plain := newRig(domain.PeriodOpen)
+	p := plain.posted(t, "PS-P", 10, 4)
+	problemCode(t, plain.call(http.MethodPost, receiptsPath+"/"+p.ID+":correct", body("1", "1"), plain.poster(p.Version)), http.StatusUnprocessableEntity, domain.CodeInvalidReceipt)
+}
+
+func TestCorrect_CatchWeightReceiptKeepsTheBandAndTheOverDeliveryCap(t *testing.T) {
+	rg := newRig(domain.PeriodOpen)
+	posted, path := postedCatchReceipt(t, rg)
 	delta := func(d int) string { return fmt.Sprintf(`{"lines":[{"lineNo":1,"qtyDelta":%d}]}`, d) }
 
 	problemCode(t, rg.call(http.MethodPost, path, delta(-10), rg.poster(posted.Version)), http.StatusUnprocessableEntity, domain.CodeCatchWeight)

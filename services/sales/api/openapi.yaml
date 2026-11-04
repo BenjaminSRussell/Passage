@@ -2531,7 +2531,9 @@ paths:
             SLS-0058 the order cannot take it (not CONFIRMED or PARTIALLY_SHIPPED, SHIPPED for an invoice; a JOURNAL or
             RETURNED order; an invoice on a SUBSCRIPTION order, which billing invoices per period),
             SLS-0059 the quantity passes the ordered quantity (delivery) or the delivered quantity (invoice), or the
-            Idempotency-Key was used with another body, SLS-0061 the actual catch weight is outside min/max × cases
+            Idempotency-Key was used with another body, SLS-0061 the actual catch weight is outside min/max × cases,
+            SLS-0063 a report on a catch-weight line is not a whole number of cases, or actualWeight is on a line that is
+            not catch-weight or on a report that is not DELIVERED
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
@@ -3175,7 +3177,7 @@ components:
           type: object
           additionalProperties: false
           required: [nominal, min, max]
-          description: "Catch-weight spec (FR-24.7). quantity is then the catch-weight count (cases, a whole number ≥ 1) and unitPrice is per weight. LineNet is price × cases × nominal until an actual weight is recorded on a DELIVERED report."
+          description: "Catch-weight spec (FR-24.7). quantity is then the catch-weight count (cases, a whole number ≥ 1) and unit is the unit of that count (the case unit, such as CS), not the weight unit. nominal, min, max, actualWeight and unitPrice are per the product's inventory weight unit, which the line does not store (product master, #480). LineNet is price × cases × nominal until an actual weight is recorded on a DELIVERED report. Not accepted on a quotation line or on a line added by a change (400)."
           properties:
             nominal: {$ref: "#/components/schemas/WeightQuantity"}
             min: {$ref: "#/components/schemas/WeightQuantity"}
@@ -3986,7 +3988,7 @@ components:
             properties:
               lineNo: {type: integer, minimum: 1, description: once per report}
               quantity: {$ref: "#/components/schemas/Money", description: "what this report covers (positive, at most 6 places), not the cumulative quantity"}
-              actualWeight: {$ref: "#/components/schemas/WeightQuantity", description: "DELIVERED only, catch-weight lines only: actual weight of the quantity cases this report delivers (a whole number of cases; FR-24.7). Added to the line total; BR-24.5 SLS-0061 when outside min/max × the cases reported, SLS-0062 when the line is not catch-weight, the report is not DELIVERED or the cases are not whole"}
+              actualWeight: {$ref: "#/components/schemas/WeightQuantity", description: "DELIVERED only, catch-weight lines only: actual weight of the quantity cases this report delivers (a whole number of cases; FR-24.7). Added to the line total; BR-24.5 SLS-0061 when outside min/max × the cases reported, SLS-0063 when the line is not catch-weight, the report is not DELIVERED or the cases are not whole"}
     OrderProgress:
       type: object
       required: [id, legalEntityId, orderId, orderNumber, kind, sourceRef, lines, orderStatus, orderVersion, recordedBy, recordedAt]

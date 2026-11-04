@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,5 +91,32 @@ func TestCatchWeightReceiptPostsWeightAndCases(t *testing.T) {
 	})
 	if err != nil || !qty.Equal(decimal.RequireFromString("102")) || !amount.Equal(decimal.RequireFromString("204")) {
 		t.Fatalf("GR/IR qty=%s amount=%s err=%v, want 102 and 204", qty, amount, err)
+	}
+
+	// A short-case correction stores the new count with the weight; a change
+	// without a count (CWQty 0) keeps the stored one.
+	correct := func(weight string, cases int) store.Receipt {
+		t.Helper()
+		w := decimal.RequireFromString(weight)
+		got, err := st.Correct(ctxOf(p), r.ID, func(store.Receipt) (store.Adjustment, error) {
+			return store.Adjustment{Lines: []store.LineChange{{LineNo: 1, Qty: w, CWQty: cases, Amount: w.Mul(decimal.NewFromInt(2)), AmountAcct: w.Mul(decimal.NewFromInt(2))}}}, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := correct("92", 9); !got.Lines[0].Qty.Equal(decimal.NewFromInt(92)) || got.Lines[0].CWQty != 9 {
+		t.Fatalf("short-case correction: qty=%s cwQty=%d, want 92 and 9", got.Lines[0].Qty, got.Lines[0].CWQty)
+	}
+	if got := correct("93", 0); !got.Lines[0].Qty.Equal(decimal.NewFromInt(93)) || got.Lines[0].CWQty != 9 {
+		t.Fatalf("weight-only correction: qty=%s cwQty=%d, want 93 and 9", got.Lines[0].Qty, got.Lines[0].CWQty)
+	}
+	err = dbx.WithTenantTx(ctxOf(p), e.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `update receiving_receipt_line set cw_nominal = null where receipt_id = $1`, r.ID)
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "receiving_receipt_line_catch_weight_check") {
+		t.Fatalf("a catch-weight line without its nominal must fail receiving_receipt_line_catch_weight_check: %v", err)
 	}
 }

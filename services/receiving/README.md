@@ -85,6 +85,8 @@ Every POST except the tester requires `Idempotency-Key`; replays carry `Idempote
 | AUTH-0001 | 401 | missing or malformed tenant |
 | AUTH-0003 | 403 | missing duty |
 | RCV-OVR-001 | domain | receipt quantity above the over-delivery allowance |
+| RCV-CW-001 | 422 | catch weight outside min × cases to max × cases (BR-24.5), on registration and on a correction |
+| RCV-CW-002 | 422 | catch-weight line received in a unit that is not a mass unit |
 | INV-SER-001 | domain | duplicate or empty serial |
 | RCV-VAL-001 | domain | invalid receipt or invoice input |
 | RCV-STA-001 | domain | invalid receipt state transition |

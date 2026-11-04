@@ -1152,7 +1152,8 @@ components:
             required: [lineNo, qtyDelta]
             properties:
               lineNo: { type: integer, minimum: 1 }
-              qtyDelta: { type: [number, string], description: Non-zero; negative reduces the received quantity. }
+              qtyDelta: { type: [number, string], description: Non-zero; negative reduces the received quantity (the weight on a catch-weight line). }
+              cwQtyDelta: { type: integer, description: "Catch-weight lines only: non-zero change of the case count, sent with the qtyDelta of the weight; the corrected count stays at least 1 and BR-24.5 (RCV-CW-001) is checked on the corrected weight and count. RCV-VAL-001 (422) on a line that is not catch-weight." }
     ReceiptPage:
       type: object
       required: [items]

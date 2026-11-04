@@ -14,7 +14,16 @@ const (
 	qtyPrecision        = 6
 )
 
-var weightUnits = []string{"KG", "G", "LB", "OZ", "T"}
+// weightUnits are the mass units a catch-weight PO line may be priced in: the
+// org service's standard mass units (services/org/migrations/reference/units.csv:
+// kg, g, mg, t, lb, oz, st, ct) and their UN/ECE Recommendation 20 codes. The PO
+// line carries only a unit code and receiving has no org UoM client, so a
+// tenant's own mass unit is not recognised and is refused RCV-CW-002 (see
+// NOT-IMPLEMENTED: reading the unit class from org UoM is #480).
+var weightUnits = []string{
+	"KG", "G", "MG", "T", "LB", "OZ", "ST", "CT",
+	"KGM", "GRM", "MGM", "TNE", "LBR", "ONZ", "STI", "CTM",
+}
 
 var columnLimit = decimal.New(1, 14)
 

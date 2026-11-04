@@ -10,7 +10,7 @@ import (
 )
 
 func catchWeightOrderBody(quantity, spec string) string {
-	line := map[string]any{"productId": ids.New(), "quantity": quantity, "unit": "KG", "siteId": ids.New(), "warehouseId": ids.New(), "unitPrice": "2", "requestedShipDate": "2027-03-04"}
+	line := map[string]any{"productId": ids.New(), "quantity": quantity, "unit": "CS", "siteId": ids.New(), "warehouseId": ids.New(), "unitPrice": "2", "requestedShipDate": "2027-03-04"}
 	if spec != "" {
 		var parsed any
 		if err := json.Unmarshal([]byte(spec), &parsed); err != nil {

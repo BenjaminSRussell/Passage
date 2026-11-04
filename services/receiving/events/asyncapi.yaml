@@ -245,6 +245,7 @@ components:
               po_line_id: { type: string }
               product_id: { type: string, format: uuid }
               qty_delta: { type: string, description: "decimal string, negative when the received quantity falls" }
+              cw_qty_delta: { type: integer, description: "catch-weight lines only, present when the case count changed (FR-24.7)" }
               amount_delta: { type: string, description: "decimal string, receipt currency" }
               amount_acct_delta: { type: string, description: "decimal string, accounting currency" }
     InvoicePostedData:

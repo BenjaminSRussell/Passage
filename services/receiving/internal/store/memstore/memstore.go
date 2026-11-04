@@ -734,6 +734,9 @@ func (s *Store) Correct(ctx context.Context, id string, fn store.AdjustFunc) (ou
 			for i := range current.Lines {
 				if l := &current.Lines[i]; l.LineNo == c.LineNo {
 					l.Qty, l.Amount, l.AmountAcct = c.Qty, decimal.NullDecimal{Decimal: c.Amount, Valid: true}, decimal.NullDecimal{Decimal: c.AmountAcct, Valid: true}
+					if c.CWQty > 0 {
+						l.CWQty = c.CWQty
+					}
 				}
 			}
 			if g := t.grirFor(id, c.LineNo); g >= 0 {
