@@ -390,7 +390,17 @@ func checkJournal(ctx context.Context, tx pgx.Tx, j *domain.Journal) (bool, erro
 	if err := rows.Err(); err != nil {
 		return false, err
 	}
-	return domain.ValidateJournal(j, stored, domain.DefaultSmartBands()), nil
+	// Smart rounding uses the legal entity's table (FR-26.7, smart_rounding_bands).
+	tp, _ := tenant.FromContext(ctx)
+	params, err := loadParameters(ctx, tx, tp.TenantID, j.LegalEntityID)
+	if err != nil {
+		return false, err
+	}
+	bands, faults := domain.ParseBands(params.SmartRoundingBands)
+	if faults != nil {
+		bands = domain.DefaultSmartBands()
+	}
+	return domain.ValidateJournal(j, stored, bands), nil
 }
 
 // applyJournal writes each validated line to condition_record and enqueues the matching

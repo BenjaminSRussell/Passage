@@ -155,6 +155,12 @@ func (a *API) netPriceList(w http.ResponseWriter, r *http.Request) {
 	// The resolve input keeps the cache's shared RecordSet (or the loaded records), as /resolve does.
 	in.Header = domain.Header{CustomerID: q.Get("customerId"), CustomerGroupID: group, Currency: q.Get("currency"), PricingDate: day}
 	in.Procedure = proc
+	params, err := a.entityParameters(r, q.Get("legalEntityId"))
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	in.TotalDiscountBasis = params.TotalDiscountBasis
 	filter := domain.NetPriceFilter{ProductID: q.Get("productId"), ProductGroupID: q.Get("productGroupId")}
 	rows, truncated := domain.NetPriceList(in, domain.PriceListFor(records, q.Get("customerId"), group, nil), filter, domain.NetPriceLimits{Rows: MaxNetPriceRows, Breaks: MaxNetPriceBreaks})
 	a.resolves.Add(1)

@@ -1406,17 +1406,32 @@ export interface PricingParameters {
   legalEntityId: string;
   /** When true, the user who created a price journal cannot post it (PRC-0057). */
   journalFourEyes: boolean;
+  /** Document date that prices a resolve sent without a pricingDate (BR-26.2). */
+  pricingDateBasis: PricingDateBasis;
+  /** What TOTAL_DISC applies to: the line nets, or the line amounts at the unit price. */
+  totalDiscountBasis: TotalDiscountBasis;
+  /** Smart rounding table of journal adjustments, lowest band first; the last band has no upTo. */
+  smartRoundingBands: SmartRoundingBand[];
   /** 0 when the legal entity has no stored parameters. */
   version: number;
   updatedBy?: string;
   updatedAt?: string;
 }
 
+export type PricingDateBasis = "SHIP_DATE" | "ORDER_DATE" | "DELIVERY_DATE";
+export type TotalDiscountBasis = "AFTER_LINE_DISC" | "GROSS";
+export interface SmartRoundingBand {
+  upTo?: string;
+  ending: string;
+}
+
 export function getPricingParameters(legalEntityId: string, signal?: AbortSignal): Promise<PricingParameters> {
   return send<PricingParameters>(`/parameters${query({ legalEntityId })}`, {}, signal);
 }
 
-export function setPricingParameters(body: { legalEntityId: string; journalFourEyes: boolean; version: number }, key: string = newKey()): Promise<PricingParameters> {
+export type PricingParametersInput = Omit<PricingParameters, "updatedBy" | "updatedAt">;
+
+export function setPricingParameters(body: PricingParametersInput, key: string = newKey()): Promise<PricingParameters> {
   return send<PricingParameters>("/parameters", { method: "PUT", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) });
 }
 

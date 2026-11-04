@@ -12,6 +12,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/pricing/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/pricing/internal/store"
 )
 
@@ -24,20 +25,36 @@ const parametersPath = "/v1/pricing/parameters"
 type parametersRequest struct {
 	LegalEntityID   string `json:"legalEntityId"`
 	JournalFourEyes *bool  `json:"journalFourEyes"`
+	// PricingDateBasis, TotalDiscountBasis and SmartRoundingBands are required too (the PUT
+	// replaces every value).
+	PricingDateBasis   *string           `json:"pricingDateBasis"`
+	TotalDiscountBasis *string           `json:"totalDiscountBasis"`
+	SmartRoundingBands []domain.BandSpec `json:"smartRoundingBands"`
 	// Version is the version read (0 when the legal entity has no stored parameters).
 	Version int `json:"version"`
 }
 
 type parametersView struct {
-	LegalEntityID   string     `json:"legalEntityId"`
-	JournalFourEyes bool       `json:"journalFourEyes"`
-	Version         int        `json:"version"`
-	UpdatedBy       string     `json:"updatedBy,omitempty"`
-	UpdatedAt       *time.Time `json:"updatedAt,omitempty"`
+	LegalEntityID   string `json:"legalEntityId"`
+	JournalFourEyes bool   `json:"journalFourEyes"`
+	// PricingDateBasis is SHIP_DATE, ORDER_DATE or DELIVERY_DATE; TotalDiscountBasis is
+	// AFTER_LINE_DISC or GROSS; SmartRoundingBands is the effective table (the default when
+	// none is stored).
+	PricingDateBasis   string            `json:"pricingDateBasis"`
+	TotalDiscountBasis string            `json:"totalDiscountBasis"`
+	SmartRoundingBands []domain.BandSpec `json:"smartRoundingBands"`
+	Version            int               `json:"version"`
+	UpdatedBy          string            `json:"updatedBy,omitempty"`
+	UpdatedAt          *time.Time        `json:"updatedAt,omitempty"`
 }
 
 func parametersResponse(p store.Parameters) parametersView {
-	return parametersView{LegalEntityID: p.LegalEntityID, JournalFourEyes: p.JournalFourEyes, Version: p.Version,
+	if p.PricingDateBasis == "" { // a store with nothing for the entity
+		d := store.DefaultParameters(p.LegalEntityID)
+		p.PricingDateBasis, p.TotalDiscountBasis, p.SmartRoundingBands = d.PricingDateBasis, d.TotalDiscountBasis, d.SmartRoundingBands
+	}
+	return parametersView{LegalEntityID: p.LegalEntityID, JournalFourEyes: p.JournalFourEyes, PricingDateBasis: p.PricingDateBasis,
+		TotalDiscountBasis: p.TotalDiscountBasis, SmartRoundingBands: p.SmartRoundingBands, Version: p.Version,
 		UpdatedBy: p.UpdatedBy, UpdatedAt: p.UpdatedAt}
 }
 
@@ -78,6 +95,23 @@ func (a *API) setParameters(w http.ResponseWriter, r *http.Request) {
 	if req.JournalFourEyes == nil {
 		fields["journalFourEyes"] = "is required"
 	}
+	if req.PricingDateBasis == nil {
+		fields["pricingDateBasis"] = "is required"
+	} else if !domain.ValidDateBasis(*req.PricingDateBasis) {
+		fields["pricingDateBasis"] = "must be SHIP_DATE, ORDER_DATE or DELIVERY_DATE"
+	}
+	if req.TotalDiscountBasis == nil {
+		fields["totalDiscountBasis"] = "is required"
+	} else if !domain.ValidTotalBasis(*req.TotalDiscountBasis) {
+		fields["totalDiscountBasis"] = "must be AFTER_LINE_DISC or GROSS"
+	}
+	if req.SmartRoundingBands == nil {
+		fields["smartRoundingBands"] = "is required"
+	} else if _, faults := domain.ParseBands(req.SmartRoundingBands); faults != nil {
+		for k, v := range faults {
+			fields[k] = v
+		}
+	}
 	if req.Version < 0 {
 		fields["version"] = "must be the version read, or 0 when none was stored"
 	}
@@ -89,7 +123,8 @@ func (a *API) setParameters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, err := a.store.SetParameters(r.Context(), store.Parameters{LegalEntityID: req.LegalEntityID,
-		JournalFourEyes: *req.JournalFourEyes}, req.Version, r.Header.Get(idempotencyKey))
+		JournalFourEyes: *req.JournalFourEyes, PricingDateBasis: *req.PricingDateBasis, TotalDiscountBasis: *req.TotalDiscountBasis,
+		SmartRoundingBands: req.SmartRoundingBands}, req.Version, r.Header.Get(idempotencyKey))
 	if err != nil {
 		slog.Error("set pricing parameters failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -114,4 +149,70 @@ func legalEntityInScope(w http.ResponseWriter, r *http.Request, legalEntityID st
 func (a *API) registerParameterRoutes(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Get(parametersPath, a.getParameters)
 	r.With(authz.RequireDuty(dutyAdmin)).Put(parametersPath, a.setParameters)
+}
+
+// entityParameters reads the parameters the engine needs for a legal entity: one primary
+// key lookup per resolve. The caller has checked the legal entity is a UUID.
+func (a *API) entityParameters(r *http.Request, legalEntityID string) (store.Parameters, error) {
+	return a.store.GetParameters(r.Context(), legalEntityID)
+}
+
+// pricingDateFor returns the pricing date of a resolve, simulate or compare request (BR-26.2):
+// the pricingDate the caller named, else the document date the legal entity's
+// pricing_date_basis selects (shipDate, orderDate or deliveryDate). The caller's explicit
+// pricingDate always wins. Faults are keyed by the document date field at fault, or by
+// pricingDate when the basis date is missing.
+func pricingDateFor(req resolveRequest, p store.Parameters) (string, map[string]string) {
+	fields := map[string]string{}
+	for name, v := range map[string]string{"orderDate": req.OrderDate, "shipDate": req.ShipDate, "deliveryDate": req.DeliveryDate} {
+		if v == "" {
+			continue
+		}
+		if _, err := time.Parse(dateLayout, v); err != nil {
+			fields[name] = "must be a date in YYYY-MM-DD form"
+		}
+	}
+	date := req.PricingDate
+	if date == "" {
+		basis, field, v := domain.DateBasisShip, "shipDate", req.ShipDate
+		switch p.PricingDateBasis {
+		case domain.DateBasisOrder:
+			basis, field, v = domain.DateBasisOrder, "orderDate", req.OrderDate
+		case domain.DateBasisDelivery:
+			basis, field, v = domain.DateBasisDelivery, "deliveryDate", req.DeliveryDate
+		}
+		if v == "" {
+			fields["pricingDate"] = "is required unless " + field + " is sent (pricing date basis " + basis + ")"
+		}
+		date = v
+	}
+	if len(fields) == 0 {
+		return date, nil
+	}
+	return date, fields
+}
+
+// documentInput validates a resolve, simulate or compare request and builds the document to
+// price, with the pricing date chosen by pricingDateFor.
+func (a *API) documentInput(req resolveRequest, p store.Parameters) (domain.Header, []domain.Line, *httpx.Problem) {
+	date, faults := pricingDateFor(req, p)
+	sent := req.PricingDate != ""
+	req.PricingDate = date
+	header, lines, problem := a.buildInput(req)
+	if faults == nil {
+		return header, lines, problem
+	}
+	if problem == nil {
+		return header, lines, validation(faults)
+	}
+	if problem.Errors != nil {
+		if !sent {
+			// The date came from a document date: its fault is reported on that field.
+			delete(problem.Errors, "pricingDate")
+		}
+		for k, v := range faults {
+			problem.Errors[k] = v
+		}
+	}
+	return header, lines, problem
 }

@@ -163,7 +163,12 @@ type resolveRequest struct {
 	CustomerID      string `json:"customerId"`
 	CustomerGroupID string `json:"customerGroupId"`
 	Currency        string `json:"currency"`
-	PricingDate     string `json:"pricingDate"`
+	// PricingDate wins when sent. Without it the pricing date is the document date the legal
+	// entity's pricing_date_basis names (BR-26.2).
+	PricingDate  string `json:"pricingDate"`
+	OrderDate    string `json:"orderDate"`
+	ShipDate     string `json:"shipDate"`
+	DeliveryDate string `json:"deliveryDate"`
 	// SalesChannel selects the channel's procedure assignment (PRD 5.26.13); Procedure names
 	// a procedure to price with instead of the assigned one.
 	SalesChannel string    `json:"salesChannel"`
@@ -191,10 +196,14 @@ type resolveResponse struct {
 	OrderNet      decimal.Decimal  `json:"orderNet"`
 	Applied       []domain.Applied `json:"applied"`
 	// Procedure names the procedure version the prices came from; absent under the reference order.
-	Procedure       *domain.ProcedureRef `json:"procedure,omitempty"`
-	ExplainRef      string               `json:"explainRef"`
-	ExplainTruncate bool                 `json:"explainTruncated,omitempty"`
-	Trace           []domain.TraceStep   `json:"trace,omitempty"`
+	Procedure *domain.ProcedureRef `json:"procedure,omitempty"`
+	// PricingDate is the date the document was priced on: the pricingDate sent, else the document
+	// date the legal entity's pricing date basis chose. A caller that stores it re-resolves the
+	// same document on the same date whatever the basis is later changed to.
+	PricingDate     string             `json:"pricingDate"`
+	ExplainRef      string             `json:"explainRef"`
+	ExplainTruncate bool               `json:"explainTruncated,omitempty"`
+	Trace           []domain.TraceStep `json:"trace,omitempty"`
 	// FreeGoods lists the zero-priced supplementary line proposals (FR-26.22) for w27.
 	FreeGoods []domain.FreeGoodsProposal `json:"freeGoods"`
 }
@@ -208,15 +217,25 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	header, lines, problem := a.buildInput(req)
 	if !ids.Valid(req.LegalEntityID) {
+		// Report the other faults of the body with it.
+		_, _, problem := a.buildInput(req)
 		if problem == nil {
 			problem = validation(map[string]string{})
 		}
 		if problem.Errors != nil {
 			problem.Errors["legalEntityId"] = "must be a UUID"
 		}
+		httpx.Fail(w, r, problem)
+		return
 	}
+	params, err := a.entityParameters(r, req.LegalEntityID)
+	if err != nil {
+		slog.Error("get pricing parameters failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	header, lines, problem := a.documentInput(req, params)
 	if problem != nil {
 		httpx.Fail(w, r, problem)
 		return
@@ -243,6 +262,7 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 	a.resolves.Add(1)
 	a.linesPriced.Add(int64(len(lines)))
 	in.Header, in.Lines, in.SmallOrderThreshold, in.Procedure = header, lines, domain.SmallOrderThreshold(header.Currency), proc
+	in.TotalDiscountBasis = params.TotalDiscountBasis
 	res, free := domain.ResolveWithFreeGoods(in, rules)
 	a.respond(w, r, res, free, r.URL.Query().Get("explain") == "true")
 }
@@ -274,7 +294,22 @@ func (a *API) simulate(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	header, lines, problem := a.buildInput(req.resolveRequest)
+	// A simulation names a legal entity to choose the procedure and to read its parameters (the
+	// pricing date basis and the total discount basis); without one the defaults apply.
+	params := store.DefaultParameters(req.LegalEntityID)
+	if req.LegalEntityID != "" || req.Procedure != "" {
+		if !ids.Valid(req.LegalEntityID) {
+			validationFailed(w, r, map[string]string{"legalEntityId": "must be a UUID"})
+			return
+		}
+		var err error
+		if params, err = a.entityParameters(r, req.LegalEntityID); err != nil {
+			slog.Error("get pricing parameters failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+			httpx.Fail(w, r, err)
+			return
+		}
+	}
+	header, lines, problem := a.documentInput(req.resolveRequest, params)
 	if problem != nil {
 		httpx.Fail(w, r, problem)
 		return
@@ -284,13 +319,8 @@ func (a *API) simulate(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, problem)
 		return
 	}
-	// A simulation names a legal entity only to choose the procedure it prices with.
 	var proc *domain.Procedure
 	if req.LegalEntityID != "" || req.Procedure != "" {
-		if !ids.Valid(req.LegalEntityID) {
-			validationFailed(w, r, map[string]string{"legalEntityId": "must be a UUID"})
-			return
-		}
 		var err error
 		if proc, err = a.store.DetermineProcedure(r.Context(), req.LegalEntityID, req.SalesChannel, req.Procedure); err != nil {
 			slog.Error("determine procedure failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
@@ -299,7 +329,7 @@ func (a *API) simulate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	res := domain.Resolve(domain.Input{Header: header, Lines: lines, Records: records, Procedure: proc,
-		SmallOrderThreshold: domain.SmallOrderThreshold(header.Currency)})
+		SmallOrderThreshold: domain.SmallOrderThreshold(header.Currency), TotalDiscountBasis: params.TotalDiscountBasis})
 	a.respond(w, r, res, nil, r.URL.Query().Get("explain") != "false")
 }
 
@@ -393,7 +423,8 @@ func (a *API) responseOf(res domain.Result, free []domain.FreeGoodsProposal, exp
 		return resolveResponse{}, err
 	}
 	out := resolveResponse{Currency: res.Currency, Lines: make([]lineView, len(res.Lines)), Subtotal: res.Subtotal,
-		TotalDiscount: res.TotalDiscount, Surcharge: res.Surcharge, OrderNet: res.OrderNet, Applied: res.Applied, Procedure: res.Procedure, ExplainRef: ref, FreeGoods: free}
+		TotalDiscount: res.TotalDiscount, Surcharge: res.Surcharge, OrderNet: res.OrderNet, Applied: res.Applied, Procedure: res.Procedure,
+		PricingDate: res.PricingDate, ExplainRef: ref, FreeGoods: free}
 	if out.FreeGoods == nil {
 		out.FreeGoods = []domain.FreeGoodsProposal{}
 	}

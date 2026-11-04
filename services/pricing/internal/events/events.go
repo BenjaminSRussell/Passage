@@ -62,8 +62,19 @@ type ProcedureAssignmentChangedData struct {
 type ParametersChangedData struct {
 	LegalEntityID   string `json:"legal_entity_id"`
 	JournalFourEyes bool   `json:"journal_four_eyes"`
-	Version         int    `json:"version"`
-	UpdatedBy       string `json:"updated_by"`
+	// PricingDateBasis, TotalDiscountBasis and SmartRoundingBands are the values in force
+	// after the change (the audit record of PRD 5.26.13 parameters).
+	PricingDateBasis   string     `json:"pricing_date_basis"`
+	TotalDiscountBasis string     `json:"total_discount_basis"`
+	SmartRoundingBands []BandData `json:"smart_rounding_bands"`
+	Version            int        `json:"version"`
+	UpdatedBy          string     `json:"updated_by"`
+}
+
+// BandData is one smart rounding band; the last band has no up_to.
+type BandData struct {
+	UpTo   string `json:"up_to,omitempty"`
+	Ending string `json:"ending"`
 }
 
 // VendorRebateClaimData is the payload of vendorrebateclaim.created and .approved. Amount

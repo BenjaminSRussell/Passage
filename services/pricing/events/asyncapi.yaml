@@ -240,7 +240,7 @@ operations:
   publishParametersChanged:
     action: send
     channel: {$ref: "#/channels/parameters"}
-    summary: A legal entity's pricing parameters (journal_four_eyes) were changed (PricingAdmin).
+    summary: A legal entity's pricing parameters (journal_four_eyes, pricing_date_basis, total_discount_basis, smart_rounding_bands) were changed (PricingAdmin).
     messages:
       - {$ref: "#/channels/parameters/messages/parametersChanged"}
   publishProcedureAssignmentChanged:
@@ -835,12 +835,24 @@ components:
     ParametersChanged:
       type: object
       description: A legal entity's pricing parameters after a change (PRD 5.26.13).
-      required: [legal_entity_id, journal_four_eyes, version, updated_by]
+      required: [legal_entity_id, journal_four_eyes, pricing_date_basis, total_discount_basis, smart_rounding_bands, version, updated_by]
       properties:
         legal_entity_id: {type: string, format: uuid}
         journal_four_eyes: {type: boolean, description: "True when the user who created a price journal cannot post it."}
+        pricing_date_basis: {type: string, enum: [SHIP_DATE, ORDER_DATE, DELIVERY_DATE], description: "Document date used as the pricing date when the caller sends none (BR-26.2)."}
+        total_discount_basis: {type: string, enum: [AFTER_LINE_DISC, GROSS], description: "Amount TOTAL_DISC applies to."}
+        smart_rounding_bands: {$ref: "#/components/schemas/SmartRoundingBands"}
         version: {type: integer, minimum: 1}
         updated_by: {type: string}
+    SmartRoundingBands:
+      type: array
+      description: The smart rounding table in force for price journal adjustments (FR-26.7), lowest band first.
+      items:
+        type: object
+        required: [ending]
+        properties:
+          up_to: {type: string, description: "Decimal string; amounts below it use this band. Absent on the last band."}
+          ending: {type: string, description: "Decimal string from 0 up to 1: the value the rounded price ends in."}
     ProcedureAssignmentChanged:
       type: object
       description: >

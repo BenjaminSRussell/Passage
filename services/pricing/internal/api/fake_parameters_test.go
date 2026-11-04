@@ -14,7 +14,7 @@ func (f *fakeStore) GetParameters(_ context.Context, legalEntityID string) (stor
 	if p, ok := f.params[legalEntityID]; ok {
 		return p, nil
 	}
-	return store.Parameters{LegalEntityID: legalEntityID}, nil
+	return store.DefaultParameters(legalEntityID), nil
 }
 
 func (f *fakeStore) SetParameters(_ context.Context, in store.Parameters, version int, _ string) (store.Parameters, error) {

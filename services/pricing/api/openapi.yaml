@@ -661,9 +661,13 @@ paths:
       summary: Read the pricing parameters of a legal entity.
       description: >
         Returns the stored parameters, or the defaults at version 0 when none are stored
-        (PRD 5.26.13). Today the parameter is journalFourEyes (default false): when true, the
-        user who created a price journal cannot post it (403 PRC-0057). A legal entity outside
-        the caller's scope is 403 AUTH-0003.
+        (PRD 5.26.13): journalFourEyes (default false; when true the user who created a price
+        journal cannot post it, 403 PRC-0057), pricingDateBasis (SHIP_DATE, ORDER_DATE or
+        DELIVERY_DATE; the document date that prices a resolve that sends no pricingDate),
+        totalDiscountBasis (AFTER_LINE_DISC, or GROSS to apply TOTAL_DISC to the line amounts at
+        the unit price before line discounts) and smartRoundingBands (the table of price journal
+        smart rounding; the PRD default 0-10 .99, 10-100 .95, 100 and up whole when none is
+        stored). A legal entity outside the caller's scope is 403 AUTH-0003.
       x-passage-duty: pricing.view
       parameters:
         - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
@@ -683,7 +687,9 @@ paths:
         version is the version read (0 when none was stored); a different stored version is
         412 conflict_version. The change writes dev.passage.pricing.parameters.changed.v1 to the
         outbox in the same transaction (the audit record: value, version and the user). Every
-        value is required, since the PUT replaces them all. A legal entity outside the caller's
+        value is required, since the PUT replaces them all (a body with only journalFourEyes, as
+        before slice 18, is 422 naming the missing fields). A change applies from the next resolve
+        whatever its pricing date: the parameters are not effective-dated. A legal entity outside the caller's
         scope is 403 AUTH-0003. A retry with the same Idempotency-Key replays the first response.
       x-passage-duty: pricing.admin
       parameters:
@@ -694,10 +700,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [legalEntityId, journalFourEyes, version]
+              required: [legalEntityId, journalFourEyes, pricingDateBasis, totalDiscountBasis, smartRoundingBands, version]
               properties:
                 legalEntityId: {type: string, format: uuid}
                 journalFourEyes: {type: boolean}
+                pricingDateBasis: {type: string, enum: [SHIP_DATE, ORDER_DATE, DELIVERY_DATE]}
+                totalDiscountBasis: {type: string, enum: [AFTER_LINE_DISC, GROSS]}
+                smartRoundingBands: {$ref: "#/components/schemas/SmartRoundingBands"}
                 version: {type: integer, minimum: 0}
       responses:
         "200":
@@ -2921,13 +2930,16 @@ components:
         quantity: {type: string, description: "Decimal string greater than 0."}
     ResolveRequest:
       type: object
-      required: [legalEntityId, customerId, currency, pricingDate, lines]
+      required: [legalEntityId, customerId, currency, lines]
       properties:
         legalEntityId: {type: string, format: uuid}
         customerId: {type: string, description: "Customer id (w7); matched exactly against record customer keys."}
         customerGroupId: {type: string, description: "Customer pricing group of the document, if any."}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
-        pricingDate: {type: string, format: date}
+        pricingDate: {type: string, format: date, description: "The pricing date. When omitted, the pricing date is the document date the legal entity's pricingDateBasis names (BR-26.2): shipDate, orderDate or deliveryDate; 422 when that date is missing too. A pricingDate that is sent always wins."}
+        orderDate: {type: string, format: date, description: "Order date, the pricing date under basis ORDER_DATE when pricingDate is omitted."}
+        shipDate: {type: string, format: date, description: "Requested ship date, the pricing date under basis SHIP_DATE (the default) when pricingDate is omitted."}
+        deliveryDate: {type: string, format: date, description: "Delivery date, the pricing date under basis DELIVERY_DATE when pricingDate is omitted."}
         salesChannel: {type: string, pattern: "^([A-Z0-9][A-Z0-9_-]{0,31})?$", description: "Selects the channel's procedure assignment; empty uses the legal entity's default (PRD 5.26.13)."}
         procedure: {type: string, description: "Name of a procedure to price with; its ACTIVE version is used instead of the assigned one (422 PRC-0063 when it has none)."}
         lines:
@@ -3236,9 +3248,10 @@ components:
         warning: {type: string, enum: [PRC-0014], description: "PRC-0014 when the line is already priced at nothing, so free goods would give the goods twice."}
     ResolveResponse:
       type: object
-      required: [currency, lines, subtotal, totalDiscount, surcharge, orderNet, applied, explainRef, freeGoods]
+      required: [currency, pricingDate, lines, subtotal, totalDiscount, surcharge, orderNet, applied, explainRef, freeGoods]
       properties:
         currency: {type: string}
+        pricingDate: {type: string, format: date, description: "The date the document was priced on: the pricingDate sent, else the document date the legal entity's pricingDateBasis chose (BR-26.2). Send it back as pricingDate to re-resolve the same document on the same date after the basis changes."}
         lines:
           type: array
           items:
@@ -3303,6 +3316,7 @@ components:
         selected: {type: string}
         stepNo: {type: integer, description: "Procedure step of the condition; absent under the reference order."}
         reason: {type: string, description: "Why a condition that found a record did not apply: an exclusion group (FR-26.8) kept another member."}
+        basis: {type: string, enum: [GROSS], description: "On the TOTAL_DISC step when the legal entity's totalDiscountBasis is GROSS (the discount applied to the line amounts at the unit price); absent under AFTER_LINE_DISC."}
         accesses:
           type: array
           items:
@@ -3354,12 +3368,30 @@ components:
         version: {type: integer, minimum: 1}
         updatedBy: {type: string}
         updatedAt: {type: string, format: date-time}
+    SmartRoundingBands:
+      type: array
+      minItems: 1
+      maxItems: 10
+      description: >
+        Ordered smart rounding bands (FR-26.7). upTo strictly increases; amounts below upTo round
+        up to the next value ending in `ending`. The last band has no upTo (422 otherwise). ending is
+        a decimal string from 0 up to 1 with at most four places. The table is stored and returned in
+        canonical form (trailing zeros dropped, "0.50" becomes "0.5").
+      items:
+        type: object
+        required: [ending]
+        properties:
+          upTo: {type: string, description: "Decimal string greater than 0; absent on the last band."}
+          ending: {type: string, description: "Decimal string, 0 to 0.9999."}
     PricingParameters:
       type: object
-      required: [legalEntityId, journalFourEyes, version]
+      required: [legalEntityId, journalFourEyes, pricingDateBasis, totalDiscountBasis, smartRoundingBands, version]
       properties:
         legalEntityId: {type: string, format: uuid}
         journalFourEyes: {type: boolean}
+        pricingDateBasis: {type: string, enum: [SHIP_DATE, ORDER_DATE, DELIVERY_DATE], description: "Default SHIP_DATE."}
+        totalDiscountBasis: {type: string, enum: [AFTER_LINE_DISC, GROSS], description: "Default AFTER_LINE_DISC."}
+        smartRoundingBands: {$ref: "#/components/schemas/SmartRoundingBands"}
         version: {type: integer, minimum: 0, description: "0 when the legal entity has no stored parameters."}
         updatedBy: {type: string}
         updatedAt: {type: string, format: date-time}

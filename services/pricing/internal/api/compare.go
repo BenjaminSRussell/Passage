@@ -39,7 +39,18 @@ func (a *API) compare(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	header, lines, problem := a.buildInput(req.resolveRequest)
+	// The pricing date follows the legal entity's basis as on resolve; the defaults apply until
+	// the legal entity is known to be a UUID (the fault is reported below).
+	params := store.DefaultParameters(req.LegalEntityID)
+	if ids.Valid(req.LegalEntityID) {
+		var err error
+		if params, err = a.entityParameters(r, req.LegalEntityID); err != nil {
+			slog.Error("get pricing parameters failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+			httpx.Fail(w, r, err)
+			return
+		}
+	}
+	header, lines, problem := a.documentInput(req.resolveRequest, params)
 	if problem != nil {
 		httpx.Fail(w, r, problem)
 		return
@@ -91,7 +102,8 @@ func (a *API) compare(w http.ResponseWriter, r *http.Request) {
 		}
 		procs[i] = &p
 	}
-	in := domain.Input{Header: header, Lines: lines, SmallOrderThreshold: domain.SmallOrderThreshold(header.Currency)}
+	in := domain.Input{Header: header, Lines: lines, SmallOrderThreshold: domain.SmallOrderThreshold(header.Currency),
+		TotalDiscountBasis: params.TotalDiscountBasis}
 	if req.Records != nil {
 		in.Records = inline
 	} else {
