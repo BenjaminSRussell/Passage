@@ -121,6 +121,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyConfirm)).Post(orders+"/{id}:cancel", a.cancelOrder)
 	r.With(authz.RequireDuty(dutyWrite)).Post(orders+"/{id}:cancel-remainder", a.cancelRemainder)
 	r.With(authz.RequireDuty(dutyWrite)).Post(orders+"/{id}/lines/{lineNo}:cancel-remainder", a.cancelLineRemainder)
+	r.With(authz.RequireDuty(dutyWrite)).Post(orders+":auto-close", a.autoCloseOrders)
 	r.With(authz.RequireDuty(dutyPlanProduction)).Post(orders+"/{id}:plan-production", a.planProduction)
 	r.With(authz.RequireDuty(dutyRead)).Get(orders+"/{id}/versions", a.listOrderVersions)
 	r.With(authz.RequireAnyDuty(dutyRecordDelivery, dutyRecordInvoice)).Post(orders+"/{id}:record-progress", a.recordProgress)

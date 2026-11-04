@@ -155,7 +155,7 @@ describe("legal entities page", () => {
   });
 
   it("explains a version conflict", async () => {
-    serve({ ...lookups, "GET /legal-entities": () => json({ items: [entity] }), "PATCH /legal-entities/le-1": () => problem("ORG-VERSION-CONFLICT", 409, "stale version") });
+    serve({ ...lookups, "GET /legal-entities/le-1": () => json(entity), "GET /legal-entities": () => json({ items: [entity] }), "PATCH /legal-entities/le-1": () => problem("ORG-VERSION-CONFLICT", 409, "stale version") });
     const { user } = renderPage("/org/legal-entities", LegalEntitiesPage, LE_ADMIN);
     await findTable({ name: "Legal entities" });
     await user.click(await screen.findByRole("button", { name: "Deactivate legal entity USMF" }));

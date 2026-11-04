@@ -26,6 +26,13 @@ const (
 
 func main() {
 	slog.SetDefault(newLogger(os.Stdout))
+	run := run
+	if len(os.Args) > 1 && os.Args[1] == "consume" {
+		run = runConsume
+	} else if len(os.Args) > 1 {
+		slog.Error("purchasing stopped", "err", fmt.Errorf("unknown command %q (use no argument to serve or \"consume\" to follow fulfillment and planning events)", os.Args[1]))
+		os.Exit(1)
+	}
 	if err := run(context.Background(), os.Getenv); err != nil {
 		slog.Error("purchasing stopped", "err", err)
 		os.Exit(1)

@@ -35,6 +35,7 @@ const (
 	// CodeJournalOrder: the order is a JOURNAL order, which never ships.
 	CodeJournalOrder       = "FUL-0065"
 	CodeOverPick           = "FUL-0004"
+	CodeOverShip           = "FUL-0005"
 	CodeInvalidMove        = "FUL-0021"
 	CodeOverPack           = "FUL-0023"
 	CodeNegativeQty        = "FUL-0030"
@@ -156,6 +157,10 @@ type ShipmentLine struct {
 	// Partial marks a line released for less than the order line quantity
 	// because ATP was short; a later release run releases the open remainder.
 	Partial bool `json:"partial"`
+	// OverTolerancePct is the over-delivery tolerance (percent of the planned
+	// quantity) in force when the pick was last confirmed (BR-28.7); the picked
+	// quantity may exceed the planned one by up to that much.
+	OverTolerancePct decimal.Decimal `json:"overTolerancePct"`
 }
 
 // Container is a closed package with its SSCC (BR-28.5). Tare, returnable and
@@ -459,6 +464,8 @@ func mapDomain(err error) error {
 	switch {
 	case errors.Is(err, domain.ErrOverPick):
 		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeOverPick, err.Error())
+	case errors.Is(err, domain.ErrOverShip):
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeOverShip, err.Error())
 	case errors.Is(err, domain.ErrOverPack):
 		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeOverPack, err.Error())
 	case errors.Is(err, domain.ErrNegativeQty):
@@ -889,19 +896,20 @@ func loadShipment(ctx context.Context, tx pgx.Tx, id string) (Shipment, error) {
 	}
 	sh.Status = domain.ShipmentStatus(status)
 	sh.Lines = []ShipmentLine{}
-	rows, err := tx.Query(ctx, `select id, order_line_id, product_id, unit, qty_planned::text, qty_picked::text, qty_packed::text, qty_shipped::text, pick_confirmed, zone_code, qty_closed::text, short_pick_reason, tracking_required, partial
+	rows, err := tx.Query(ctx, `select id, order_line_id, product_id, unit, qty_planned::text, qty_picked::text, qty_packed::text, qty_shipped::text, pick_confirmed, zone_code, qty_closed::text, short_pick_reason, tracking_required, partial, over_tolerance_pct::text
 		from shipment_line where shipment_id = $1 order by id`, id)
 	if err != nil {
 		return sh, err
 	}
 	for rows.Next() {
 		var l ShipmentLine
-		var planned, picked, packed, shipped, closed string
-		if err := rows.Scan(&l.ID, &l.OrderLineID, &l.ProductID, &l.Unit, &planned, &picked, &packed, &shipped, &l.PickConfirmed, &l.Zone, &closed, &l.ShortPickReason, &l.TrackingRequired, &l.Partial); err != nil {
+		var planned, picked, packed, shipped, closed, overPct string
+		if err := rows.Scan(&l.ID, &l.OrderLineID, &l.ProductID, &l.Unit, &planned, &picked, &packed, &shipped, &l.PickConfirmed, &l.Zone, &closed, &l.ShortPickReason, &l.TrackingRequired, &l.Partial, &overPct); err != nil {
 			rows.Close()
 			return sh, err
 		}
 		l.Planned, l.Picked, l.Packed, l.Shipped, l.Closed = dec(planned), dec(picked), dec(packed), dec(shipped), dec(closed)
+		l.OverTolerancePct = dec(overPct)
 		l.Tracking = []TrackingEntry{}
 		sh.Lines = append(sh.Lines, l)
 	}
@@ -1028,9 +1036,26 @@ func confirmPickTx(ctx context.Context, tx pgx.Tx, tenantID, waveID string, sh *
 		if !ValidShortPickReason(pk.Reason) {
 			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeValidation, "unknown short pick reason "+pk.Reason)
 		}
-		next, backorder, err := domain.ConfirmPick(lineQty(sh.Lines[idx]), pk.Picked)
+		// A pick above the planned quantity needs the over-delivery tolerance of
+		// the product and customer (BR-28.7); only then is it looked up.
+		tolerance := decimal.Zero
+		if pk.Picked.GreaterThan(sh.Lines[idx].Planned) {
+			t, terr := resolveTolerance(ctx, tx, sh.Lines[idx].ProductID, sh.CustomerID)
+			if terr != nil {
+				return terr
+			}
+			tolerance = t
+		}
+		next, backorder, err := domain.ConfirmPickWithin(lineQty(sh.Lines[idx]), pk.Picked, tolerance)
 		if err != nil {
 			return mapDomain(err)
+		}
+		// The tolerance never takes the order line beyond what sales kept when it
+		// cancelled the remainder (FUL-0066): such a pick could never post.
+		if next.Picked.GreaterThan(sh.Lines[idx].Planned) {
+			if err := checkOverPickKept(ctx, tx, sh.Lines[idx], next.Picked); err != nil {
+				return err
+			}
 		}
 		// A re-pick cannot drop below the batch and serial entries already
 		// captured for the line (FUL-0035); the entries are corrected first.
@@ -1044,20 +1069,23 @@ func confirmPickTx(ctx context.Context, tx pgx.Tx, tenantID, waveID string, sh *
 		// A pick below the planned quantity opens a backorder; the first
 		// short pick dates it for the short-pick report (FR-28.2, backorders.go)
 		// and a reason, when given, is kept (the last one wins).
-		if _, err := tx.Exec(ctx, `update shipment_line set qty_picked = $3, pick_confirmed = true,
+		if _, err := tx.Exec(ctx, `update shipment_line set qty_picked = $3, pick_confirmed = true, over_tolerance_pct = $6,
 				short_picked_at = case when $4::boolean then coalesce(short_picked_at, now()) else short_picked_at end,
 				short_pick_reason = case when $5::text <> '' then $5::text else short_pick_reason end
 			where tenant_id = $1 and id = $2`,
-			tenantID, l.ID, next.Picked, backorder.IsPositive(), pk.Reason); err != nil {
+			tenantID, l.ID, next.Picked, backorder.IsPositive(), pk.Reason, tolerance); err != nil {
 			return err
 		}
-		l.Picked, l.PickConfirmed = next.Picked, true
+		l.Picked, l.PickConfirmed, l.OverTolerancePct = next.Picked, true, tolerance
 		if pk.Reason != "" {
 			r := pk.Reason
 			l.ShortPickReason = &r
 		}
 		sh.Lines[idx] = l
 		ref := fulevents.PickLine{OrderLineID: l.OrderLineID, Qty: next.Picked.String(), Backordered: backorder.String()}
+		if over := next.Picked.Sub(l.Planned); over.IsPositive() {
+			ref.OverPicked = over.String()
+		}
 		if pk.Reason != "" {
 			ref.ShortReason = pk.Reason
 		}
@@ -1241,7 +1269,7 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 			if err != nil {
 				return PackingSlip{}, err
 			}
-			if err := moveBalances(ctx, tx, p.TenantID, sh.CustomerID, returnables, 1); err != nil {
+			if err := moveBalances(ctx, tx, p.TenantID, sh.CustomerID, returnables, 1, slip.ID); err != nil {
 				return PackingSlip{}, err
 			}
 			for _, pl := range slip.Lines {
@@ -1365,7 +1393,7 @@ func (s *Postgres) CancelPackingSlip(ctx context.Context, slipID string, idem Id
 			if err != nil {
 				return PackingSlip{}, err
 			}
-			if err := moveBalances(ctx, tx, p.TenantID, sh.CustomerID, returnables, -1); err != nil {
+			if err := moveBalances(ctx, tx, p.TenantID, sh.CustomerID, returnables, -1, orig.ID); err != nil {
 				return PackingSlip{}, err
 			}
 			if _, err := tx.Exec(ctx, `update packing_slip set status = 'CANCELLED' where tenant_id = $1 and id = $2`, p.TenantID, orig.ID); err != nil {

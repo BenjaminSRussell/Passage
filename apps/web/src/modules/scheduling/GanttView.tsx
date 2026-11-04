@@ -24,6 +24,8 @@ export interface GanttViewProps {
   /** jobId → message; those bars get a danger outline and the message as tooltip (FR-23.7). */
   violations?: Record<string, string>;
   onSelect?(bar: GanttBar): void;
+  /** Drag grid in minutes; defaults to 5 (the scheduling parameter dragSnapMinutes). */
+  snapMinutes?: number;
   /** Called with the snapped new start after a horizontal drag. */
   onDrop?(bar: GanttBar, newStart: string): void;
 }
@@ -52,7 +54,7 @@ function dayLabel(ms: number): string {
  * pointer surface only: the page's jobs table offers the same actions from the
  * keyboard.
  */
-export function GanttView({ bars, resources, from, days, selectedJobId, violations = {}, onSelect, onDrop }: GanttViewProps) {
+export function GanttView({ bars, resources, from, days, selectedJobId, violations = {}, snapMinutes = SNAP_MINUTES, onSelect, onDrop }: GanttViewProps) {
   const [drag, setDrag] = useState<Drag | null>(null);
   const moved = useRef(false);
   const start = Date.parse(from);
@@ -85,11 +87,11 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
     if (!current) return;
     const dx = event.clientX - current.originX;
     const minutes = current.trackPx > 0 ? (dx / current.trackPx) * windowMinutes : 0;
-    if (!moved.current || Math.abs(minutes) < SNAP_MINUTES) {
+    if (!moved.current || Math.abs(minutes) < snapMinutes) {
       onSelect?.(current.bar);
       return;
     }
-    onDrop?.(current.bar, draggedStart(current.bar, dx, current.trackPx, windowMinutes));
+    onDrop?.(current.bar, draggedStart(current.bar, dx, current.trackPx, windowMinutes, snapMinutes));
   }
 
   return (
@@ -127,6 +129,9 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                 const violation = violations[bar.jobId];
                 // AC-23.7: a booked job a later downtime overlaps is outlined like a violation.
                 const outside = bar.outsideCapacity ? ", outside open capacity (SCHED-0002)" : "";
+                // BR-23.15: a booked job in time a capacity block now keeps from it is dotted, not outlined as a violation.
+                const breach = bar.blockBreach && !bar.outsideCapacity;
+                const blocked = breach ? ", inside a capacity block it does not match (BR-23.15)" : "";
                 const dragging = drag?.bar.jobId === bar.jobId;
                 const shift = dragging && drag.trackPx > 0 ? (drag.dx / drag.trackPx) * VIEW_WIDTH : 0;
                 const late = bar.lateMinutes > 0 ? `, late by ${bar.lateMinutes} min` : "";
@@ -159,6 +164,7 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                         bar.lateMinutes > 0 && styles.late,
                         bar.firmed && styles.firmed,
                         (violation || bar.outsideCapacity) && styles.violation,
+                        breach && !violation && styles.breach,
                         selectedJobId === bar.jobId && styles.selected,
                         dragging && styles.dragging,
                       )}
@@ -169,7 +175,7 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                     >
                       <title>
                         {violation ??
-                          `Order ${bar.orderId.slice(0, 8)} operation ${bar.operNumber}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}${setup}${tools}${late}${bar.firmed ? ", firmed" : ""}${outside}`}
+                          `Order ${bar.orderId.slice(0, 8)} operation ${bar.operNumber}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}${setup}${tools}${late}${bar.firmed ? ", firmed" : ""}${outside}${blocked}`}
                       </title>
                     </rect>
                     {changeoverPos ? (

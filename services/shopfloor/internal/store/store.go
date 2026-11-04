@@ -339,10 +339,11 @@ func lockBundle(ctx context.Context, tx pgx.Tx, tenantID, bundleID string) error
 }
 
 // lockWorker takes a row lock on the worker so calculation and approval for one
-// worker serialize, and reports SF-0101 when the worker is unknown or inactive.
+// worker serialize, and reports SF-0101 when the worker is unknown. A deactivated worker is
+// still locked: the days worked before leaving are calculated, approved and revised as usual.
 // It returns the worker's sign-in user id ("" when none is linked).
 func lockWorker(ctx context.Context, tx pgx.Tx, tenantID, workerID string) (userID string, err error) {
-	err = tx.QueryRow(ctx, `select coalesce(user_id, '') from worker where tenant_id = $1 and id = $2 and active for update`,
+	err = tx.QueryRow(ctx, `select coalesce(user_id, '') from worker where tenant_id = $1 and id = $2 for update`,
 		tenantID, workerID).Scan(&userID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", workerNotFound()
@@ -358,7 +359,7 @@ func (s *Postgres) LoadPunches(ctx context.Context, workerID string, start, end 
 	var in PunchInput
 	var rate string
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `select cost_rate::text, currency from worker where tenant_id = $1 and id = $2 and active`,
+		err := tx.QueryRow(ctx, `select cost_rate::text, currency from worker where tenant_id = $1 and id = $2`,
 			p.TenantID, workerID).Scan(&rate, &in.Currency)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return workerNotFound()
@@ -475,8 +476,10 @@ type ApproveResult struct {
 // then emits dev.passage.shopfloor.payday.approved.v1 per newly approved day.
 // Days already approved are returned unchanged, so a replay is a no-op. The
 // whole approval fails when any day has an open flag (SF-0006), when clock
-// registrations for a calculated day arrived after its calculation (SF-0104,
-// recalculate first) or when the approver is the worker (SF-0106).
+// registrations for a calculated day arrived after its calculation or the dated
+// cost rate that prices the day was added after it (SF-0104, recalculate first),
+// or when the approver is the worker (SF-0106). Approved days are never stale:
+// a rate added later reprices them only through an explicit pay:revise.
 func (s *Postgres) ApprovePay(ctx context.Context, workerID, fromDate, toDate, approvedBy string, idem Idem) (ApproveResult, error) {
 	p, _ := tenant.FromContext(ctx)
 	out := ApproveResult{WorkerID: workerID, From: fromDate, To: toDate, Days: []ApprovedDay{}}
@@ -507,6 +510,10 @@ func (s *Postgres) ApprovePay(ctx context.Context, workerID, fromDate, toDate, a
 					where c.tenant_id = d.tenant_id and c.worker_id = d.worker_id and r.kind in ('clock-in', 'clock-out', 'absence') and c.corrected_at > d.calculated_at
 					  and ((c.old_started_at >= (d.work_date::timestamp at time zone d.time_zone) and c.old_started_at < ((d.work_date + 1)::timestamp at time zone d.time_zone))
 					    or (c.new_started_at >= (d.work_date::timestamp at time zone d.time_zone) and c.new_started_at < ((d.work_date + 1)::timestamp at time zone d.time_zone)))))
+					or (d.status = 'calculated' and coalesce((
+					select cr.created_at > d.calculated_at from worker_cost_rate cr
+					where cr.tenant_id = d.tenant_id and cr.worker_id = d.worker_id and cr.effective_from <= d.work_date
+					order by cr.effective_from desc limit 1), false))
 			from worker_day d
 			where d.tenant_id = $1 and d.worker_id = $2 and d.work_date between $3::date and $4::date
 			order by d.work_date for update of d`,
@@ -542,7 +549,7 @@ func (s *Postgres) ApprovePay(ctx context.Context, workerID, fromDate, toDate, a
 		}
 		if len(stale) > 0 {
 			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeDayStale,
-				fmt.Sprintf("registrations arrived after calculation on %s; recalculate before approving", strings.Join(stale, ", ")))
+				fmt.Sprintf("registrations or the dated cost rate changed after calculation on %s; recalculate before approving", strings.Join(stale, ", ")))
 		}
 		for _, r := range rowsIn {
 			day := ApprovedDay{WorkDate: r.date, Status: r.status, PayLines: []PayLine{}}

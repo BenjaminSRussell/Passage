@@ -33,6 +33,66 @@ type leaseModifyRequest struct {
 	IBRRate         *string `json:"ibrRate"`
 }
 
+type leaseTerminateRequest struct {
+	AfterPeriod        int     `json:"afterPeriod"`
+	TerminationPayment *string `json:"terminationPayment"`
+	Reason             string  `json:"reason"`
+}
+
+// maxTerminationReason matches lease_termination.reason.
+const maxTerminationReason = 500
+
+// terminateLease ends a lease early at the end of period afterPeriod (D4c): the liability and the
+// ROU asset are derecognized with the termination payment and the gain or loss.
+func (a *API) terminateLease(w http.ResponseWriter, r *http.Request) {
+	key, ok := requireKey(w, r)
+	if !ok {
+		return
+	}
+	version, ok := ifMatch(w, r)
+	if !ok {
+		return
+	}
+	id, ok := leaseID(w, r)
+	if !ok {
+		return
+	}
+	var req leaseTerminateRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if req.AfterPeriod < 1 {
+		fields["afterPeriod"] = "must be the last schedule period (1 or later) the lease stays in force"
+	}
+	payment := decimal.Zero
+	if req.TerminationPayment != nil {
+		v, err := decimal.NewFromString(*req.TerminationPayment)
+		if err != nil || v.IsNegative() {
+			fields["terminationPayment"] = "must be a decimal of 0 or more"
+		} else {
+			payment = v
+		}
+	}
+	reason := strings.TrimSpace(req.Reason)
+	if len(reason) > maxTerminationReason {
+		fields["reason"] = "must be at most 500 characters"
+	}
+	if len(fields) > 0 {
+		writeValidation(w, r, fields)
+		return
+	}
+	res, err := a.store.TerminateLease(r.Context(), id, store.LeaseTerminationInput{Version: version, AfterPeriod: req.AfterPeriod, Payment: payment, Reason: reason}, key)
+	if err != nil {
+		writeDomain(w, r, err)
+		return
+	}
+	a.terminated.Add(1)
+	setETag(w, res.Lease.Version)
+	httpx.JSON(w, http.StatusCreated, res)
+}
+
 func leaseID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id := chi.URLParam(r, "id")
 	if !ids.Valid(id) {

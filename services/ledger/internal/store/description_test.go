@@ -34,7 +34,7 @@ func putTemplate(t *testing.T, e env, in DescriptionTemplate) DescriptionTemplat
 	if in.Language == "" {
 		in.Language = "en"
 	}
-	out, _, err := e.store.PutDescriptionTemplate(e.ctx, ids.New(), in)
+	out, _, err := e.store.PutDescriptionTemplate(e.ctx, ids.New(), 0, in)
 	if err != nil {
 		t.Fatalf("put template %+v: %v", in, err)
 	}
@@ -55,12 +55,12 @@ func TestPostgres_DescriptionTemplateCRUD(t *testing.T) {
 	id := ids.New()
 	in := DescriptionTemplate{Scope: ScopeTenant, SourceType: "manual_journal", Language: "en", Template: "Journal %1",
 		FieldBindings: map[string]string{"1": "voucher"}}
-	created, isNew, err := e.store.PutDescriptionTemplate(e.ctx, id, in)
+	created, isNew, err := e.store.PutDescriptionTemplate(e.ctx, id, 0, in)
 	if err != nil || !isNew || created.ID != id || created.FieldBindings["1"] != "voucher" || created.LegalEntityID != nil {
 		t.Fatalf("create: %+v new=%v err=%v", created, isNew, err)
 	}
 	in.Template = "Manual journal %1"
-	replaced, isNew, err := e.store.PutDescriptionTemplate(e.ctx, id, in)
+	replaced, isNew, err := e.store.PutDescriptionTemplate(e.ctx, id, created.LockVersion, in)
 	if err != nil || isNew || replaced.Template != "Manual journal %1" {
 		t.Fatalf("replace: %+v new=%v err=%v", replaced, isNew, err)
 	}
@@ -84,7 +84,7 @@ func TestPostgres_DescriptionTemplateScopeIsUnique(t *testing.T) {
 	first := DescriptionTemplate{Scope: ScopeTenant, SourceType: "vendor_invoice", Language: "en", Template: "A %1",
 		FieldBindings: map[string]string{"1": "source_id"}}
 	putTemplate(t, e, first)
-	_, _, err := e.store.PutDescriptionTemplate(e.ctx, ids.New(), first)
+	_, _, err := e.store.PutDescriptionTemplate(e.ctx, ids.New(), 0, first)
 	if status, code := problemStatus(err); status != http.StatusConflict || code != "LEDGER_DESCRIPTION_TEMPLATE_DUPLICATE" {
 		t.Fatalf("a second tenant template for the same key must conflict, got %v", err)
 	}
@@ -92,7 +92,7 @@ func TestPostgres_DescriptionTemplateScopeIsUnique(t *testing.T) {
 	putTemplate(t, e, DescriptionTemplate{Scope: ScopeTenant, SourceType: "vendor_invoice", Language: "de", Template: "B"})
 	le := e.ledger.LegalEntityID
 	putTemplate(t, e, DescriptionTemplate{Scope: ScopeLegalEntity, LegalEntityID: &le, SourceType: "vendor_invoice", Template: "C"})
-	_, _, err = e.store.PutDescriptionTemplate(e.ctx, ids.New(), DescriptionTemplate{Scope: ScopeLegalEntity, LegalEntityID: &le,
+	_, _, err = e.store.PutDescriptionTemplate(e.ctx, ids.New(), 0, DescriptionTemplate{Scope: ScopeLegalEntity, LegalEntityID: &le,
 		SourceType: "vendor_invoice", Language: "en", Template: "D"})
 	if status, code := problemStatus(err); status != http.StatusConflict || code != "LEDGER_DESCRIPTION_TEMPLATE_DUPLICATE" {
 		t.Fatalf("a second legal entity template for the same key must conflict, got %v", err)
@@ -261,7 +261,7 @@ func TestPostgres_DescriptionTemplateLegalEntityScope(t *testing.T) {
 			SourceType: "ap_payment", Language: "en", Template: "X"}},
 	}
 	for _, tc := range forbidden {
-		_, _, err := e.store.PutDescriptionTemplate(e.ctx, tc.id, tc.in)
+		_, _, err := e.store.PutDescriptionTemplate(e.ctx, tc.id, 0, tc.in)
 		if status, code := problemStatus(err); status != http.StatusForbidden || code != "AUTH-0003" {
 			t.Fatalf("%s: want 403 AUTH-0003, got %v", tc.name, err)
 		}
@@ -292,7 +292,7 @@ func TestPostgres_DescriptionTemplateTenantWritesNeedTenantAdmin(t *testing.T) {
 		{"no claim with tenant.administer", tenant.Principal{TenantID: e.tenant, UserID: "test-user", Duties: map[string]struct{}{tenant.DutyTenantAdmin: {}}}, true},
 	}
 	for _, c := range callers {
-		_, _, err := e.store.PutDescriptionTemplate(tenant.With(e.ctx, c.principal), ids.New(), tenantTpl)
+		_, _, err := e.store.PutDescriptionTemplate(tenant.With(e.ctx, c.principal), ids.New(), 0, tenantTpl)
 		status, code := problemStatus(err)
 		if c.wantOK && err != nil {
 			t.Fatalf("%s: %v", c.name, err)
@@ -303,7 +303,7 @@ func TestPostgres_DescriptionTemplateTenantWritesNeedTenantAdmin(t *testing.T) {
 		tenantTpl.SourceType += "x"
 	}
 	noAdmin := tenant.With(e.ctx, callers[0].principal)
-	_, _, err := e.store.PutDescriptionTemplate(noAdmin, ids.New(), DescriptionTemplate{Scope: ScopeLegalEntity, LegalEntityID: &le,
+	_, _, err := e.store.PutDescriptionTemplate(noAdmin, ids.New(), 0, DescriptionTemplate{Scope: ScopeLegalEntity, LegalEntityID: &le,
 		SourceType: "vendor_invoice", Language: "en", Template: "X"})
 	if status, code := problemStatus(err); status != http.StatusForbidden || code != "AUTH-0003" {
 		t.Fatalf("legal-entity template without scope: want 403 AUTH-0003, got %v", err)

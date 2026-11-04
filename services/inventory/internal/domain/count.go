@@ -125,7 +125,10 @@ type CountPlan struct {
 	// MinDaysSinceCount selects only rows whose last posted count is at least this
 	// many days old, or that were never counted; zero means no age filter.
 	MinDaysSinceCount int
-	CreatedAt         time.Time
+	// IncludeVendorOwned adds vendor-owned (consignment) rows to the sheets; their
+	// variance posts quantity only, with no value and no GL entry (BR-16.14).
+	IncludeVendorOwned bool
+	CreatedAt          time.Time
 }
 
 // ValidatePlan checks a count plan definition.

@@ -38,6 +38,13 @@ type QuotaOutcome struct {
 	UnassignedOrders []string
 }
 
+// ActionNoQuotaSource is the PLAN-0009 message: a planned order of an item with a
+// quota arrangement valid on its delivery day that no source of the arrangement
+// could take (FR-22.17). The order stays as planned, without a source. SupplyRef is
+// the order, DemandRef the arrangement id, SuggestedDate the delivery day (the
+// period the arrangement had no usable source in) and Qty the order quantity.
+const ActionNoQuotaSource = "no-quota-source"
+
 // sourceOrderType maps a quota source type to the planned order type it supplies.
 var sourceOrderType = map[string]string{SourceVendor: OrderPurchase, SourceProduction: OrderProduction, SourceTransfer: OrderTransfer}
 
@@ -57,10 +64,11 @@ var sourceOrderType = map[string]string{SourceVendor: OrderPurchase, SourceProdu
 // bom-line demand reference), the pegging of the order is divided over them in
 // order, and the bom-line demand a split production order drives is divided
 // over the parts in proportion to their quantities. An order no source can take stays as
-// planned, without a source (PLAN-0009 in the outcome).
+// planned, without a source, and raises one PLAN-0009 message (ActionNoQuotaSource).
 //
-// The plan hash is recomputed when an order was allocated, so it identifies
-// the orders as stored (as the scope filter does); it is unchanged otherwise.
+// The plan hash is recomputed when an order was allocated or a message raised, so
+// it identifies the orders and messages as stored (as the scope filter does); it
+// is unchanged otherwise.
 func ApplyQuota(asOf time.Time, res Result, quotas []RunQuota) (Result, QuotaOutcome, error) {
 	var out QuotaOutcome
 	if len(quotas) == 0 || len(res.Orders) == 0 {
@@ -94,6 +102,7 @@ func ApplyQuota(asOf time.Time, res Result, quotas []RunQuota) (Result, QuotaOut
 		return compareStrings(res.Orders[a].Number, res.Orders[b].Number)
 	})
 	assigned := map[int][]quotaShare{}
+	var unassigned []Message
 	for _, i := range order {
 		o := res.Orders[i]
 		day := asOf.AddDate(0, 0, o.DeliveryDate)
@@ -112,6 +121,8 @@ func ApplyQuota(asOf time.Time, res Result, quotas []RunQuota) (Result, QuotaOut
 			} else {
 				out.Unassigned++
 				out.UnassignedOrders = append(out.UnassignedOrders, o.Number)
+				unassigned = append(unassigned, Message{Action: ActionNoQuotaSource, ItemID: o.ItemID, SupplyRef: o.Number,
+					DemandRef: st.ArrangementID, SuggestedDate: o.DeliveryDate, Qty: o.Qty})
 			}
 			break
 		}
@@ -143,7 +154,20 @@ func ApplyQuota(asOf time.Time, res Result, quotas []RunQuota) (Result, QuotaOut
 		}
 		next.Pegging = pegs
 	}
-	if out.Allocated > 0 {
+	if len(unassigned) > 0 {
+		msgs := append(slices.Clone(res.Messages), unassigned...)
+		slices.SortStableFunc(msgs, func(a, b Message) int {
+			switch {
+			case msgLess(a, b):
+				return -1
+			case msgLess(b, a):
+				return 1
+			}
+			return 0
+		})
+		next.Messages = dedupeMessages(msgs)
+	}
+	if out.Allocated > 0 || len(unassigned) > 0 {
 		next.Hash = hashQuotaResult(next)
 	}
 	return next, out, nil

@@ -571,3 +571,27 @@ export function parsePostings(text: string, entities: readonly string[]): { post
   });
   return { postings, errors };
 }
+
+/** The total name that sets a pack's tolerance for every money total without its own. */
+export const ANY_TOTAL = "*";
+
+/**
+ * The money totals a tolerance can be set for, per pack (the service's list). Each is an amount in one
+ * currency and the tolerance is the absolute delta allowed in that currency. Counts, quantities and the
+ * project_wip measures always compare at 0.00, so those packs have no entry.
+ */
+export const TOLERANCE_TOTALS: Partial<Record<Pack, readonly string[]>> = {
+  open_items: ["open_items.amount", "open_items.amount_by_account"],
+  gl_balances: ["gl_balances.balance", "gl_balances.trial_balance", "gl_balances.control_account"],
+  onhand: ["onhand.value", "onhand.value_entity", "onhand.inventory_account"],
+  open_orders: ["open_orders.open_value"],
+  bank_balances: ["bank_balances.balance", "bank_balances.balance_entity"],
+};
+
+/** The packs that have money totals a tolerance applies to. */
+export const TOLERANCE_PACKS = PACKS.filter((p) => TOLERANCE_TOTALS[p] !== undefined);
+
+/** True for a tolerance amount of zero, which is an exact comparison. */
+export function isExact(amount: string): boolean {
+  return Number(amount) === 0;
+}

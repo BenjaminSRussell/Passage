@@ -3,14 +3,18 @@
 // Configuration is read from the environment (12-factor):
 //
 //	DATABASE_URL       required, Postgres URL for the passage_reporting database
-//	MIGRATE_ON_START   "true" applies migrations at startup (dev only)
+//	MIGRATE_ON_START   "true" applies migrations at startup (dev only; not in consume mode)
+//	LEDGER_URL, PASSAGE_SERVICE_*   balance verification when serving, and the consumer; KAFKA_* consume mode only
 //	HTTP_ADDR          listen address, default :8080
 //	REPORTING_*        tunables, validated at startup (see internal/config)
+//
+// `finreport lag-check TENANT_ID...` runs the lag alert once (the chart's CronJob).
 package main
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -19,10 +23,13 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/api"
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/config"
+	"github.com/BenjaminSRussell/passage/services/finreport/internal/ledgerbalances"
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/store"
+	"github.com/BenjaminSRussell/passage/services/finreport/internal/verify"
 	"github.com/BenjaminSRussell/passage/services/finreport/migrations"
 )
 
@@ -30,13 +37,28 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "finreport"))
-	if err := run(ctx, os.Getenv); err != nil {
+	var err error
+	switch {
+	case len(os.Args) > 1 && os.Args[1] == "consume":
+		err = runWith(ctx, os.Getenv, true)
+	case len(os.Args) > 1 && os.Args[1] == lagCheckCommand:
+		err = lagCheck(ctx, os.Getenv, os.Args[2:])
+	case len(os.Args) > 1:
+		err = fmt.Errorf("unknown command %q (use no argument to serve, \"consume\" to run the ledger journal consumer or \"lag-check TENANT_ID...\" to raise lag.exceeded)", os.Args[1])
+	default:
+		err = run(ctx, os.Getenv)
+	}
+	if err != nil {
 		slog.Error("finreport stopped", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, getenv func(string) string) error {
+func run(ctx context.Context, getenv func(string) string) error { return runWith(ctx, getenv, false) }
+
+// runWith serves the API, or with consume runs the Kafka consumer of the
+// ledger journal (the same image, args: [consume]).
+func runWith(ctx context.Context, getenv func(string) string, consume bool) error {
 	// Reporting tunables are validated before any connection is made, so an
 	// out-of-range REPORTING_* value stops the pod at startup (PRD §2.15.13).
 	cfg, err := config.FromEnv(getenv)
@@ -53,22 +75,57 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	defer pool.Close()
-	if getenv("MIGRATE_ON_START") == "true" {
+	if getenv("MIGRATE_ON_START") == "true" && !consume {
 		if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 			return err
 		}
+	}
+	if consume {
+		return runConsumer(ctx, getenv, pool)
 	}
 	addr := getenv("HTTP_ADDR")
 	if addr == "" {
 		addr = ":8080"
 	}
-	return httpx.Serve(ctx, addr, newHandler(store.New(pool), cfg))
+	st := store.New(pool)
+	return httpx.Serve(ctx, addr, newHandler(st, cfg, withVerifier(verifier(getenv, st))))
+}
+
+// verifier builds the balance verification service when the ledger can be read
+// (LEDGER_URL and a service signing key); without them the verification routes
+// answer 503 and the rest of the API is unaffected.
+func verifier(getenv func(string) string, st *store.Postgres) api.Verifier {
+	if getenv("LEDGER_URL") == "" {
+		slog.Info("balance verification disabled: LEDGER_URL is not set")
+		return nil
+	}
+	signer, err := tenant.ServiceSignerFromEnv(getenv)
+	if err == nil {
+		var c *ledgerbalances.Client
+		if c, err = ledgerbalances.New(getenv("LEDGER_URL"), signer, nil); err == nil {
+			return &verify.Service{Store: st, Ledger: c}
+		}
+	}
+	slog.Warn("balance verification disabled", "error", err)
+	return nil
+}
+
+func withVerifier(v api.Verifier) func(*api.API) {
+	return func(a *api.API) {
+		if v != nil {
+			a.WithVerifier(v)
+		}
+	}
 }
 
 // newHandler mounts the reporting API on the platform router, which already
 // installs the tenant middleware and the health endpoints.
-func newHandler(st api.Store, cfg config.Reporting) http.Handler {
+func newHandler(st api.Store, cfg config.Reporting, opts ...func(*api.API)) http.Handler {
 	router := httpx.NewRouter()
-	api.New(st).WithConfig(cfg).Register(router)
+	a := api.New(st).WithConfig(cfg)
+	for _, o := range opts {
+		o(a)
+	}
+	a.Register(router)
 	return router
 }

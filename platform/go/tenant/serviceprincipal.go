@@ -18,8 +18,11 @@ var ErrUnknownServicePrincipal = errors.New("unknown service principal")
 // duties listed. policies/authz/data.json "service_principals" mirrors it and a
 // test keeps them equal.
 var servicePrincipals = map[string][]string{
+	"finreport-ledger":        {"ledger.entry.lookup"},
+	"purchasing-inbound":      {"purchasing.inbound.apply"},
 	"fulfillment-order":       {"fulfillment.order.sync"},
 	"integration-hub":         {"migration.outbound.render", "migration.xref.record"},
+	"pricing-cache":           {"pricing.cache.invalidate"},
 	"migration-loader":        {"party.import.write", "product.import.write", "receivables.import.write"},
 	"production-planning":     {"production.planned.intake"},
 	"receiving-erasure":       {"compliance.legal_hold.check"},
@@ -34,8 +37,11 @@ var servicePrincipals = map[string][]string{
 // as any registered principal (iss "integration-hub" with act
 // "service:migration-loader"), borrowing duties its own grant lacks.
 var servicePrincipalIssuers = map[string][]string{
+	"finreport-ledger":        {"finreport"},
+	"purchasing-inbound":      {"purchasing"},
 	"fulfillment-order":       {"fulfillment"},
 	"integration-hub":         {"integration-hub"},
+	"pricing-cache":           {"pricing"},
 	"migration-loader":        {"migration", "migration-factory"},
 	"production-planning":     {"production"},
 	"receiving-erasure":       {"receiving"},

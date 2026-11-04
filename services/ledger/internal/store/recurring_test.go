@@ -209,7 +209,7 @@ func TestPostgres_RecurringJournalRules(t *testing.T) {
 
 	// A caller scoped to another legal entity sees nothing.
 	foreign := principalCtx(e.tenant, ids.New())
-	if list, err := e.store.ListRecurring(foreign, ""); err != nil || len(list) != 0 {
+	if list, err := e.store.ListRecurring(foreign, "", Page{}); err != nil || len(list) != 0 {
 		t.Fatalf("foreign scope list: %+v err=%v", list, err)
 	}
 	if _, err := e.store.GetRecurring(foreign, id); !isProblem(err, 404, CodeRecurringNotFound) {
@@ -225,7 +225,7 @@ func TestPostgres_RecurringJournalRules(t *testing.T) {
 	if _, _, err := e.store.PutRecurring(foreign, id, 0, recurringOf(e, "GJ")); err == nil {
 		t.Fatal("a caller outside the template's legal entity must not write it")
 	}
-	if list, err := e.store.ListRecurring(e.ctx, RecurringPaused); err != nil || len(list) != 0 {
+	if list, err := e.store.ListRecurring(e.ctx, RecurringPaused, Page{}); err != nil || len(list) != 0 {
 		t.Fatalf("paused filter: %+v err=%v", list, err)
 	}
 }

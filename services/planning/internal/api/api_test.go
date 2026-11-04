@@ -29,6 +29,7 @@ type fakeStore struct {
 	inputs     map[string]string
 	last       store.RunRequest
 	runErr     error
+	groupErr   error
 	pingErr    error
 	lastWindow int
 	orderID    string
@@ -356,14 +357,32 @@ func TestRun_RejectsInvalidLines(t *testing.T) {
 	}
 }
 
-func TestRun_MapsEngineErrorsTo422(t *testing.T) {
+// PLAN-0004: a cyclic BOM is planned with the cycle-closing line skipped, and the
+// store receives one bom-cycle warning.
+func TestRun_CyclicBOMIsPlannedWithAWarning(t *testing.T) {
 	cycle := `{"asOf":"2026-11-02","siteId":"` + siteID + `","items":[
  {"itemId":"` + fgID + `","coverage":{"code":"requirement"},"orderType":"production","components":[{"itemId":"` + siteID + `","qty":"1"}]},
  {"itemId":"` + siteID + `","coverage":{"code":"requirement"},"orderType":"production","components":[{"itemId":"` + fgID + `","qty":"1"}]}]}`
+	st := &fakeStore{}
+	rec := do(t, st, http.MethodPost, "/v1/planning/plans/MAIN:run", cycle, "planning.run", true, "k")
+	if rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+		t.Fatalf("status %d body %s; want the run accepted", rec.Code, rec.Body.String())
+	}
+	var got []domain.Message
+	for _, m := range st.last.Result.Messages {
+		if m.Action == domain.ActionBOMCycle {
+			got = append(got, m)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("bom-cycle messages %+v; want one", st.last.Result.Messages)
+	}
+}
+
+func TestRun_MapsEngineErrorsTo422(t *testing.T) {
 	dup := strings.Replace(runBody, `"components":[]}]}`, `"components":[]},{"itemId":"`+fgID+`","coverage":{"code":"requirement"},"orderType":"purchase"}]}`, 1)
 	badCoverage := strings.Replace(runBody, `"code":"requirement"`, `"code":"lot-for-lot"`, 1)
 	for name, c := range map[string]struct{ body, code string }{
-		"cycle":          {cycle, "PLAN-0004"},
 		"duplicate item": {dup, codeInput},
 		"bad coverage":   {badCoverage, codeInput},
 	} {

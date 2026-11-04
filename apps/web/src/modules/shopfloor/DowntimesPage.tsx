@@ -30,7 +30,7 @@ export function DowntimesPage() {
     { key: "resourceId", header: "Resource", mono: true },
     { key: "startedAt", header: "Started", render: (row) => formatDateTime(row.startedAt) },
     { key: "duration", header: "Duration", align: "end", render: (row) => durationMinutes(row.startedAt, row.endedAt) },
-    { key: "state", header: "State", render: (row) => (row.endedAt ? <Badge tone="neutral">Ended</Badge> : <Badge tone="danger">Down</Badge>) },
+    { key: "state", header: "State", render: (row) => (row.endedAt ? <Badge tone="neutral">Ended</Badge> : row.cause === "idle" ? <Badge tone="warning">Idle</Badge> : <Badge tone="danger">Down</Badge>) },
     { key: "reasonCode", header: "Reason", mono: true, render: (row) => row.reasonCode ?? <Badge tone="warning">Not coded</Badge> },
     { key: "category", header: "Category", render: (row) => (row.category === "planned" ? "Planned" : "Unplanned") },
     { key: "andonRaised", header: "Andon", render: (row) => (row.andonRaised ? <Badge tone="warning">Raised</Badge> : dash) },

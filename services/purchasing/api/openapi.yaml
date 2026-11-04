@@ -260,6 +260,57 @@ components:
         vendorId: { type: string, format: uuid, description: "Required for a VENDOR debit (which then needs a LEDGER credit); optional for a VENDOR credit, which is payable to this vendor instead of the PO vendor; refused when neither side is VENDOR." }
         allocationRule: { type: string, enum: [QTY, AMOUNT, LINES], default: AMOUNT }
         status: { type: string, enum: [ACTIVE, INACTIVE], default: ACTIVE }
+    InboundChange:
+      type: object
+      description: >-
+        One change another service asked of a purchase order (slice 18): a planning message a planner applied, or the closed
+        remainder or cancellation of a drop-ship. APPLIED means the line moved (as version versionNo, waiting for re-approval when
+        reapprovalRequired); REFUSED means a purchasing rule stopped it and reason says which, for a buyer to settle (slice 19:
+        acknowledge it, or retry it once the cause is fixed); IGNORED means there was nothing to change.
+      required: [id, legalEntityId, source, sourceKey, eventId, action, status, reapprovalRequired, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        source: { type: string, enum: [PLANNING_MESSAGE, DROPSHIP_CLOSED, DROPSHIP_CANCELLED] }
+        sourceKey: { type: string, description: 'The planning message id; the drop-ship id and its running closed total (<drop-ship id>:<qty_closed>) for a closing; the drop-ship id for a cancellation. The idempotency key.' }
+        eventId: { type: string, description: Id of the event that carried the request. }
+        action: { type: string, description: 'postpone, advance, cancel, decrease or increase for a planning message; close-remainder for a closed drop-ship; cancel-dropship for a cancelled one.' }
+        purchaseOrderId: { type: string, format: uuid }
+        poNumber: { type: string, example: PO-00000001 }
+        lineNo: { type: integer, minimum: 1 }
+        lineId: { type: string, format: uuid, description: The id of the PO line. }
+        productId: { type: string, format: uuid }
+        status: { type: string, enum: [APPLIED, REFUSED, IGNORED] }
+        reasonCode: { type: string, description: 'Why the change was refused or ignored: a PRC-PO-* or PRC-AGR-* code of the PO edit, or PRC-INB-001 to PRC-INB-007 (not applicable, no line, ambiguous line, quantity, date, order state, no change).' }
+        reason: { type: string }
+        requestedQty: { $ref: '#/components/schemas/Money', description: 'The message quantity of a planning message; for a closed drop-ship, the quantity this closing adds to the closings already recorded; for a cancelled one, the ordered quantity less what was confirmed or closed before.' }
+        requestedDate: { type: string, format: date }
+        qtyBefore: { $ref: '#/components/schemas/Money' }
+        qtyAfter: { $ref: '#/components/schemas/Money' }
+        dateBefore: { type: string, format: date }
+        dateAfter: { type: string, format: date }
+        versionNo: { type: integer, minimum: 1, description: The PO version the change went into. }
+        reapprovalRequired: { type: boolean }
+        requestedBy: { type: string, description: The planner who applied the message. }
+        note: { type: string, description: "The planner's reason, or the drop-ship number." }
+        createdAt: { type: string, format: date-time }
+        warehouseId: { type: string, format: uuid, description: The planning scope of a planning message; kept so a retry plans the same lines. }
+        attempts: { type: integer, minimum: 1, description: "The runs of the request so far, the consumer's first run and every retry." }
+        resolution: { type: string, enum: [ACKNOWLEDGED, RETRIED], description: 'How a refused change was settled; absent while it waits. A retried change shows the retry''s outcome in status.' }
+        resolvedBy: { type: string, description: The user who acknowledged or retried the change. }
+        resolvedAt: { type: string, format: date-time }
+        resolutionNote: { type: string, description: "The buyer's note, at most 1000 characters." }
+    InboundChangeDecision:
+      type: object
+      additionalProperties: false
+      properties:
+        note: { type: string, maxLength: 1000, description: "Why the buyer acknowledged the change, or what was fixed before the retry." }
+    InboundChangePage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/InboundChange' } }
+        nextCursor: { type: string, format: uuid }
     ChargeCodePage:
       type: object
       required: [items]
@@ -401,6 +452,17 @@ components:
         purchaseOrderId: { type: string, format: uuid, description: "Set when CONSOLIDATED: the PO that orders the line." }
         purchaseOrderLineNo: { type: integer, description: "Set when CONSOLIDATED: the PO line that orders the line." }
         catalogEntryId: { type: string, format: uuid, description: "The catalog entry the line was picked from; absent on a non-catalog line." }
+        splitFromLineId: { type: string, format: uuid, description: "The line this one was cut out of by a split (FR-17.3); absent on a line as entered." }
+    RequisitionLineSplitInput:
+      type: object
+      required: [quantities]
+      properties:
+        quantities:
+          type: array
+          minItems: 1
+          maxItems: 20
+          description: "One new line per quantity, each above zero with at most 6 decimals; together they must leave a quantity above zero on the original line."
+          items: { type: string, description: "Decimal quantity string in the line's unit, never a float.", pattern: '^[0-9]+(\.[0-9]{1,6})?$', example: "40" }
     Requisition:
       type: object
       properties:
@@ -501,6 +563,7 @@ components:
     PurchaseOrderLine:
       type: object
       properties:
+        id: { type: string, format: uuid, description: "The line's stable id (slice 18): the purchase_order_line_id a drop-ship names. Set by the service; ignored on a write." }
         lineNo: { type: integer }
         productId: { type: string, format: uuid }
         description: { type: string }
@@ -666,6 +729,7 @@ components:
             requisitionStatus: { type: string }
             legalEntityId: { type: string, format: uuid }
             currency: { type: string }
+            requisitionVersion: { type: integer, description: "The requisition's version, the If-Match value of a split." }
     OpenOrderLine:
       type: object
       description: "Open supply: a line of a CONFIRMED purchase order with quantity still to receive."
@@ -692,6 +756,66 @@ components:
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/OpenOrderLine' } }
         nextCursor: { type: string, description: "Opaque cursor of the last row, '<date>|<po id>|<line no>'; pass it back as cursor." }
+    VendorOpenOrders:
+      type: object
+      description: "Open CONFIRMED purchase orders of one vendor in one currency."
+      required: [vendorId, currency, orderCount, lineCount, openValue, overdueLines, overdueValue, earliestDue]
+      properties:
+        vendorId: { type: string, format: uuid }
+        currency: { type: string, example: USD }
+        orderCount: { type: integer, description: Purchase orders with an open line }
+        lineCount: { type: integer, description: Open lines }
+        openValue: { type: string, description: "Line amount pro rata to the quantity still to receive, in the order currency, the sum rounded half to even to the currency's minor units", example: "1250.00" }
+        overdueLines: { type: integer, description: Open lines with a due date before asOf }
+        overdueValue: { type: string, description: "Open value of the overdue lines, rounded like openValue", example: "300.00" }
+        earliestDue: { $ref: '#/components/schemas/Day', description: "Earliest due date of the open lines (the vendor-confirmed date, else the requested date)" }
+    VendorOpenOrdersPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/VendorOpenOrders' } }
+        nextCursor: { type: string, description: "Opaque cursor, '<vendor id>|<currency>'; pass it back as cursor." }
+    OverdueLine:
+      description: "An open line past its due date: every OpenOrderLine field (deliveryDate is the requested date; confirmedDate is the vendor's confirmed date of the schedule row the line waits on) plus due date, currency, days late and open value."
+      allOf:
+        - { $ref: '#/components/schemas/OpenOrderLine' }
+        - type: object
+          required: [dueDate, currency, daysLate, openValue]
+          properties:
+            dueDate: { $ref: '#/components/schemas/Day', description: "The date the line is due: with a delivery schedule, the first row the received quantity does not cover, at its vendor-confirmed date or else its own date; without one, the line's delivery date" }
+            currency: { type: string, example: USD }
+            daysLate: { type: integer, description: Days between the due date and asOf }
+            openValue: { type: string, description: "Line amount pro rata to the open quantity, rounded half to even to the currency's minor units", example: "300.00" }
+    OverdueLinePage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/OverdueLine' } }
+        nextCursor: { type: string, description: "Opaque cursor, '<due date>|<po id>|<line no>'; pass it back as cursor." }
+    PriceHistoryEntry:
+      type: object
+      description: "A priced line of an approved purchase order for one product."
+      required: [purchaseOrderId, number, lineNo, orderDate, vendorId, currency, unit, qty, unitPrice, priceUnit, discountPct, priceSource]
+      properties:
+        purchaseOrderId: { type: string, format: uuid }
+        number: { type: string, example: "PO-00000001" }
+        lineNo: { type: integer }
+        orderDate: { $ref: '#/components/schemas/Day' }
+        vendorId: { type: string, format: uuid }
+        currency: { type: string, example: USD }
+        unit: { type: string, example: EA }
+        qty: { type: string, example: "100" }
+        unitPrice: { type: string, example: "9.50" }
+        priceUnit: { type: string, description: Quantity the unit price is quoted for, example: "1" }
+        discountPct: { type: string, example: "0" }
+        priceSource: { type: string, description: "Where the price came from (for example TRADE_AGREEMENT, AGREEMENT, MANUAL)" }
+        agreementLineId: { type: string, format: uuid, description: "Purchase agreement line the quantity was drawn against, when any" }
+    PriceHistoryPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/PriceHistoryEntry' } }
+        nextCursor: { type: string, description: "Opaque cursor, '<created at>|<po id>|<line no>'; pass it back as cursor." }
     SourcingLinePage:
       type: object
       required: [items]
@@ -1074,6 +1198,23 @@ components:
               name: { type: string, minLength: 1, maxLength: 100 }
               weight: { $ref: '#/components/schemas/Money' }
         lines: { type: array, minItems: 1, maxItems: 500, items: { $ref: '#/components/schemas/RFQLineInput' } }
+    RFQFromRequisitionsInput:
+      type: object
+      required: [requisitionLineIds, replyDeadline]
+      properties:
+        requisitionLineIds: { type: array, minItems: 1, maxItems: 500, items: { type: string, format: uuid }, description: OPEN lines of APPROVED requisitions of one legal entity }
+        replyDeadline: { type: string, format: date-time, description: Must lie in the future. }
+        rankingRule: { type: string, enum: [LOWEST_PRICE, LEAD_TIME, WEIGHTED_SCORE], default: LOWEST_PRICE, description: WEIGHTED_SCORE needs criteria. }
+        sealed: { type: boolean, default: false }
+        criteria:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            required: [name, weight]
+            properties:
+              name: { type: string, minLength: 1, maxLength: 100 }
+              weight: { $ref: '#/components/schemas/Money' }
     ScoringCriterion:
       type: object
       properties:
@@ -1099,7 +1240,7 @@ components:
             type: object
             required: [criterionId, score]
             properties:
-              criterionId: { type: string, format: uuid, description: A criterion of this RFQ, at most once }
+              criterionId: { type: string, format: uuid, description: "A criterion of this RFQ, at most once" }
               score: { type: integer, minimum: 1, maximum: 10 }
     RFQLine:
       type: object
@@ -1111,6 +1252,7 @@ components:
         qty: { $ref: '#/components/schemas/Money' }
         unit: { type: string }
         requiredDate: { $ref: '#/components/schemas/Day' }
+        requisitionLineId: { type: string, format: uuid, description: The requisition line the RFQ line was raised for; an award orders it. }
     RFQInvitation:
       type: object
       properties:
@@ -1145,7 +1287,7 @@ components:
         rankingRule: { type: string, enum: [LOWEST_PRICE, LEAD_TIME, WEIGHTED_SCORE] }
         sealed: { type: boolean }
         repliesSealed: { type: boolean, description: True while a sealed RFQ is before its deadline; replies and scores are then empty (BR-17.16). }
-        replyCount: { type: integer, description: Reply lines recorded, counted even while sealed }
+        replyCount: { type: integer, description: "Reply lines recorded, counted even while sealed" }
         openedAt: { type: string, format: date-time, description: When the sealed replies were first shown after the deadline (AC-17.14) }
         openedBy: { type: string, format: uuid, description: Who they were first shown to }
         version: { type: integer, minimum: 1 }
@@ -1211,7 +1353,7 @@ components:
       required: [lineId, replyId]
       properties:
         lineId: { type: string, format: uuid }
-        replyId: { type: string, format: uuid, description: A reply to that line, valid on the award day }
+        replyId: { type: string, format: uuid, description: "A reply to that line, valid on the award day" }
         overrideReason: { type: string, description: Required to award a late reply (BR-17.11) }
     RFQAwardResult:
       type: object
@@ -1319,7 +1461,7 @@ components:
         purchaseOrderId: { type: string, format: uuid }
         lineNo: { type: integer }
         unit: { type: string }
-        lineQty: { type: string, description: Decimal string, the line quantity }
+        lineQty: { type: string, description: "Decimal string, the line quantity" }
         rows:
           type: array
           items:
@@ -1329,7 +1471,7 @@ components:
               seq: { type: integer, minimum: 1 }
               qty: { type: string, description: Decimal string }
               deliveryDate: { type: string, format: date, description: The date the PO asks for. }
-              confirmedDate: { type: string, format: date, description: The date the vendor confirmed, when it has. }
+              confirmedDate: { type: string, format: date, description: "The date the vendor confirmed, when it has." }
               confirmedBy: { type: string, format: uuid }
               confirmedAt: { type: string, format: date-time }
     OutlineRow:
@@ -1359,9 +1501,9 @@ components:
         kind: { type: string, enum: [LEVEL, ITEM] }
         description: { type: string, maxLength: 500 }
         productId: { type: string, format: uuid }
-        qty: { type: string, description: Decimal string, positive, at most six decimal places. }
+        qty: { type: string, description: "Decimal string, positive, at most six decimal places." }
         unit: { type: string, maxLength: 20 }
-        unitPrice: { type: string, description: Decimal string, not negative, at most six decimal places. }
+        unitPrice: { type: string, description: "Decimal string, not negative, at most six decimal places." }
         total: { type: string, description: Decimal string. The amount the caller expects a LEVEL to add up to. }
         children:
           type: array
@@ -1374,7 +1516,7 @@ components:
         purchaseOrderId: { type: string, format: uuid }
         lineNo: { type: integer }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
-        lineAmount: { type: string, description: Decimal string, the PO line amount. }
+        lineAmount: { type: string, description: "Decimal string, the PO line amount." }
         valueLimit: { type: string, description: Decimal string. The limit for unplanned services. }
         expectedValue: { type: string, description: Decimal string. The value of unplanned services expected. }
         plannedTotal: { type: string, description: Decimal string. The sum of the top-level outline amounts; never above lineAmount. }
@@ -1403,9 +1545,9 @@ components:
       required: [valueLimit]
       additionalProperties: false
       properties:
-        valueLimit: { type: string, description: Decimal string, not negative. The limit for unplanned services; 0 allows none. }
-        expectedValue: { type: string, description: Decimal string, not above valueLimit. Defaults to 0. }
-        contractAgreementLineId: { type: string, format: uuid, description: An agreement line of an EFFECTIVE agreement of the same legal entity, vendor and currency whose remaining value also bounds unplanned services. }
+        valueLimit: { type: string, description: "Decimal string, not negative. The limit for unplanned services; 0 allows none." }
+        expectedValue: { type: string, description: "Decimal string, not above valueLimit. Defaults to 0." }
+        contractAgreementLineId: { type: string, format: uuid, description: "An agreement line of an EFFECTIVE agreement of the same legal entity, vendor and currency whose remaining value also bounds unplanned services." }
         modelId: { type: string, format: uuid }
         outline:
           type: array
@@ -1418,7 +1560,7 @@ components:
         lineNo: { type: integer, minimum: 1 }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         valueLimit: { type: string, description: Decimal string. }
-        contractRemaining: { type: string, description: Decimal string. The remaining value of the contract line, when the specification names one. }
+        contractRemaining: { type: string, description: "Decimal string. The remaining value of the contract line, when the specification names one." }
         unplannedEntered: { type: string, description: Decimal string. What is already entered. }
         entry: { type: string, description: Decimal string. The entry checked. }
         valueRemaining: { type: string, description: 'Decimal string. valueLimit minus unplannedEntered, never negative.' }
@@ -1477,7 +1619,7 @@ components:
             required: [qty, deliveryDate]
             additionalProperties: false
             properties:
-              qty: { type: string, description: Decimal string, positive, at most six decimal places }
+              qty: { type: string, description: "Decimal string, positive, at most six decimal places" }
               deliveryDate: { type: string, format: date }
     DeliveryScheduleResult:
       allOf:
@@ -1831,6 +1973,44 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/SourcingLinePage' }
         '422': { $ref: '#/components/responses/Problem' }
+  /v1/procurement/requisition-lines/{id}:split:
+    post:
+      operationId: splitRequisitionLine
+      x-passage-duty: PurchaseOrderMaintain
+      summary: Split an OPEN requisition line into several lines so the parts can be ordered separately (FR-17.3; duty PurchaseOrderMaintain)
+      description: >-
+        Cuts one new OPEN line out of the line for each quantity in the body; the original keeps what is left, which must stay
+        above zero. The new lines are numbered after the requisition's last line and keep the original's product, category,
+        unit, estimated unit price, vendor, site, warehouse, requested date and catalog entry; each carries splitFromLineId.
+        Line amounts are shares of the original amount (half to even to the currency's minor units, by cumulative share), so
+        quantities and amounts add up exactly and the requisition total does not change. Only an OPEN line of an APPROVED
+        requisition can be split, and not while a running RFQ holds it (PRC-REQ-006). If-Match is the requisition version, which
+        moves on with the split; requisition.split.v1 is written in the same transaction. A replayed Idempotency-Key returns the
+        requisition as it is now, with the same new lines. A consolidation or RFQ built from the line as it was before the split
+        is refused with PRC-REQ-STATE; reload the queue and retry.
+      parameters:
+        - { name: id, in: path, required: true, description: Requisition line id, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RequisitionLineSplitInput' }
+      responses:
+        '200':
+          description: The requisition with the original and the new lines
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Requisition' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Requisition line not found (PRC-REQ-LINE-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: "Requisition version changed or the requisition is being ordered at the same time (PRC-VERSION-CONFLICT), line not OPEN on an APPROVED requisition (PRC-REQ-STATE) or held by a running RFQ (PRC-REQ-006)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation (COM-0001): no quantity, more than 20, not above zero, more than 6 decimals; quantities that leave nothing on the original line (PRC-REQ-007); or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/purchase-order-lines:
     get:
       operationId: listOpenOrderLines
@@ -1859,6 +2039,84 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '403': { description: Missing duty or legalEntityId outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { $ref: '#/components/responses/Problem' }
+  /v1/procurement/inquiries/open-orders-by-vendor:
+    get:
+      operationId: listOpenOrdersByVendor
+      x-passage-duty: PurchaseOrderInquire
+      summary: Open orders by vendor and currency - count, open value and overdue share of CONFIRMED purchase orders (PRD 3.17.14; duty PurchaseOrderInquire)
+      description: |
+        One row per vendor and currency over the lines of CONFIRMED purchase orders that are OPEN and not
+        fully received. Open value is the line amount pro rata to the quantity still to receive; amounts of
+        different currencies are never added. A line is due on the vendor-confirmed date when there is one,
+        else the requested date (with a delivery schedule, on the first row the received quantity does not
+        cover); it is overdue when that date is before asOf.
+      parameters:
+        - { name: legalEntityId, in: query, required: false, description: Legal entity of the PO; must be in the caller's scope, schema: { type: string, format: uuid } }
+        - { name: vendorId, in: query, required: false, description: Only this vendor, schema: { type: string, format: uuid } }
+        - { name: asOf, in: query, required: false, description: Date overdue is measured against (default today UTC), schema: { $ref: '#/components/schemas/Day' } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of vendor rows
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorOpenOrdersPage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { description: Missing duty or legalEntityId outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/procurement/inquiries/overdue-lines:
+    get:
+      operationId: listOverdueLines
+      x-passage-duty: PurchaseOrderInquire
+      summary: Overdue purchase order lines - open lines of CONFIRMED orders past their due date, oldest due first (PRD 3.17.14; duty PurchaseOrderInquire)
+      description: |
+        Lines of CONFIRMED purchase orders that are OPEN with quantity still to receive and a due date before
+        asOf, with the days late and the open value. The due date is the vendor-confirmed date when there is
+        one, else the requested date; for a line with a delivery schedule the received quantity covers the
+        rows in order and the line is due on the first row not covered.
+      parameters:
+        - { name: legalEntityId, in: query, required: false, description: Legal entity of the PO; must be in the caller's scope, schema: { type: string, format: uuid } }
+        - { name: vendorId, in: query, required: false, description: Only this vendor, schema: { type: string, format: uuid } }
+        - { name: productId, in: query, required: false, description: Only this product, schema: { type: string, format: uuid } }
+        - { name: asOf, in: query, required: false, description: Date overdue is measured against (default today UTC), schema: { $ref: '#/components/schemas/Day' } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of overdue lines
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OverdueLinePage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { description: Missing duty or legalEntityId outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/procurement/inquiries/price-history:
+    get:
+      operationId: listPriceHistory
+      x-passage-duty: PurchaseOrderInquire
+      summary: Order price history of a product - priced lines of approved purchase orders, newest first (PRD 3.17.14; duty PurchaseOrderInquire)
+      description: |
+        The lines of one product on purchase orders that reached approval (APPROVED, CONFIRMED, FINALIZED),
+        cancelled lines left out, with vendor, currency, unit price, price unit, discount, price source and
+        the agreement line behind it. The order date is the day the order was created (UTC).
+      parameters:
+        - { name: productId, in: query, required: true, description: Product, schema: { type: string, format: uuid } }
+        - { name: legalEntityId, in: query, required: false, description: Legal entity of the PO; must be in the caller's scope, schema: { type: string, format: uuid } }
+        - { name: vendorId, in: query, required: false, description: Only this vendor, schema: { type: string, format: uuid } }
+        - { name: from, in: query, required: false, description: Earliest order date (inclusive), schema: { $ref: '#/components/schemas/Day' } }
+        - { name: to, in: query, required: false, description: Latest order date (inclusive), schema: { $ref: '#/components/schemas/Day' } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of priced lines
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PriceHistoryPage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { description: Missing duty or legalEntityId outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/procurement/requisitions:consolidate:
     post:
       operationId: consolidateRequisitions
@@ -1879,7 +2137,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '403': { description: Missing duty or a line's legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Requisition line not found (PRC-REQ-LINE-NOT-FOUND) or agreement line not found (PRC-AGR-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: A line is not OPEN on an APPROVED requisition (PRC-REQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: "A line is not OPEN on an APPROVED requisition, or was split since it was read (PRC-REQ-STATE)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: "Validation, no vendor for a line (PRC-CONS-002), window outside 1-60 (PRC-CONS-001), agreement rules (PRC-AGR-003/005/006/007/008), a vendor not assigned to a restricted category under HARD (PRC-CAT-002) or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/purchase-orders:reprice:
     post:
@@ -1935,9 +2193,9 @@ paths:
               schema: { $ref: '#/components/schemas/PurchaseOrder' }
         '400': { $ref: '#/components/responses/Problem' }
         '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '404': { description: Requisition line (PRC-REQ-LINE-NOT-FOUND), agreement line (PRC-AGR-NOT-FOUND) or charge code (PRC-CHG-NOT-FOUND) not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: "Requisition line (PRC-REQ-LINE-NOT-FOUND), agreement line (PRC-AGR-NOT-FOUND) or charge code (PRC-CHG-NOT-FOUND) not found", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: A requisition line is not OPEN on an APPROVED requisition (PRC-REQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: "Validation, missing price (PRC-PRICE-001), requisition of another legal entity (PRC-REQ-005), agreement rules (PRC-AGR-003 HARD limit, PRC-AGR-005 validity, PRC-AGR-006 party, PRC-AGR-007 not EFFECTIVE, PRC-AGR-008 product or unit), vendor not assigned to (or BLOCKED for) the category of a line under HARD category access (PRC-CAT-002), a category that differs from the requisition line's (COM-0001), a charge code that is inactive or of another legal entity (PRC-CHG-004) or a charge calc that differs from its code's (PRC-CHG-005)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation, missing price (PRC-PRICE-001), requisition of another legal entity (PRC-REQ-005), a PO line whose quantity or unit differs from the requisition line it names (PRC-REQ-008), agreement rules (PRC-AGR-003 HARD limit, PRC-AGR-005 validity, PRC-AGR-006 party, PRC-AGR-007 not EFFECTIVE, PRC-AGR-008 product or unit), vendor not assigned to (or BLOCKED for) the category of a line under HARD category access (PRC-CAT-002), a category that differs from the requisition line's (COM-0001), a charge code that is inactive or of another legal entity (PRC-CHG-004) or a charge calc that differs from its code's (PRC-CHG-005)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     get:
       operationId: listPurchaseOrders
       x-passage-duty: PurchaseOrderInquire
@@ -2011,7 +2269,7 @@ paths:
         '403': { description: Legal entity outside the caller's scope, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Not found (PRC-PO-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: If-Match is not the current row version (PRC-PO-009), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: Validation (COM-0001), PRC-PO-STATE (status does not allow edits or the line is cancelled), PRC-PO-007 (below received or invoiced), PRC-PO-010 (requisition or agreement link changed, or an agreement line's quantity or amount changed), PRC-AGR-005, PRC-PRICE-001, PRC-CAT-002 (an added line's category does not admit the vendor under HARD), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation (COM-0001), PRC-PO-STATE (status does not allow edits or the line is cancelled), PRC-PO-007 (below received or invoiced), PRC-PO-010 (requisition or agreement link changed, or an agreement line's quantity or amount changed), PRC-AGR-005, PRC-PRICE-001, PRC-CAT-002 (an added line's category does not admit the vendor under HARD)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/purchase-orders/{id}:submit:
     post:
@@ -2122,7 +2380,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PurchaseOrder' }
         '400': { description: Idempotency-Key missing (PRC-IDEM-001) or If-Match not a number (PRC-IFMATCH-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: Received or invoiced quantity exists, or FINALIZED or CANCELLED (PRC-PO-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Received or invoiced quantity exists, or FINALIZED or CANCELLED (PRC-PO-STATE)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Purchase order not found (PRC-PO-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: If-Match is not the current row version (PRC-PO-009), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
@@ -2171,11 +2429,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RepriceResult' }
-        '400': { description: Malformed body (COM-0001), Idempotency-Key missing on apply (PRC-IDEM-001) or If-Match not a number (PRC-IFMATCH-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '403': { description: Missing PurchaseOrderInquire (preview) or PurchaseOrderConfirm (apply), or the PO's legal entity is outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '400': { description: "Malformed body (COM-0001), Idempotency-Key missing on apply (PRC-IDEM-001) or If-Match not a number (PRC-IFMATCH-002)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: "Missing PurchaseOrderInquire (preview) or PurchaseOrderConfirm (apply), or the PO's legal entity is outside the caller's scope (AUTH-0003)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Purchase order not found (PRC-PO-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: If-Match is not the current row version (PRC-PO-009); preview again, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: Not CONFIRMED (PRC-PO-STATE), idempotency_key_reuse, or a PO edit rule, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Not CONFIRMED (PRC-PO-STATE), idempotency_key_reuse, or a PO edit rule", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent on apply (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/purchase-orders/{id}/versions:
     get:
@@ -2298,7 +2556,7 @@ paths:
           description: Removed; the ETag is the new PO row version
           headers:
             ETag: { schema: { type: string } }
-        '404': { description: Purchase order, line or plan not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: "Purchase order, line or plan not found", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: If-Match is not the current PO row version (PRC-PO-009), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: The plan has invoiced rows (PRC-IP-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
@@ -2328,7 +2586,7 @@ paths:
               additionalProperties: false
               properties:
                 settlementRef: { type: string, maxLength: 255, description: The receiving settlement id }
-                amount: { type: string, description: Decimal string, the amount receiving settled }
+                amount: { type: string, description: "Decimal string, the amount receiving settled" }
       responses:
         '200':
           description: The row is INVOICED
@@ -2346,7 +2604,7 @@ paths:
                   replayed: { type: boolean }
         '403': { description: Not called by the receiving service (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Purchase order (PRC-PO-NOT-FOUND) or plan row (PRC-IP-NOT-FOUND) not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: The row is settled under another reference or amount, or the line cannot absorb the settled amount (PRC-IP-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: "The row is settled under another reference or amount, or the line cannot absorb the settled amount (PRC-IP-004)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: Validation (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/purchase-orders/{id}/delivery-schedules:
     get:
@@ -2428,7 +2686,7 @@ paths:
           description: Removed; the ETag is the new PO row version
           headers:
             ETag: { schema: { type: string } }
-        '404': { description: Purchase order, line or schedule not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: "Purchase order, line or schedule not found", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: If-Match is not the current PO row version (PRC-PO-009), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'Bad id or line number (COM-0001), PO not DRAFT or REJECTED or line cancelled (PRC-DS-002)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
@@ -2464,7 +2722,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DeliveryScheduleResult' }
-        '404': { description: Purchase order (PRC-PO-NOT-FOUND), line or schedule row (PRC-DS-NOT-FOUND) not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: "Purchase order (PRC-PO-NOT-FOUND), line or schedule row (PRC-DS-NOT-FOUND) not found", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: If-Match is not the current PO row version (PRC-PO-009), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'Validation (COM-0001), PO not CONFIRMED or line cancelled (PRC-DS-002)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
@@ -2561,7 +2819,7 @@ paths:
               schema: { $ref: '#/components/schemas/PurchaseAgreement' }
         '400': { $ref: '#/components/responses/Problem' }
         '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: Validation, more than 500 lines (PRC-AGR-002) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation, more than 500 lines (PRC-AGR-002) or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     get:
       operationId: listPurchaseAgreements
       x-passage-duty: AgreementMaintain
@@ -2830,6 +3088,35 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RFQPage' }
         '422': { $ref: '#/components/responses/Problem' }
+  /v1/procurement/rfqs:from-requisitions:
+    post:
+      operationId: createRFQFromRequisitions
+      x-passage-duty: RFQMaintain
+      summary: Start a DRAFT request for quotation from approved requisition lines that need sourcing (FR-17.3, FR-17.4; duty RFQMaintain)
+      description: >-
+        Each requisition line becomes one RFQ line with its product, description, quantity, unit and requested date; the
+        RFQ takes the legal entity of the requisitions. While the RFQ is DRAFT, SENT, REPLIES_OPEN or CLOSED its
+        requisition lines leave the consolidation queue and cannot be consolidated (PRC-REQ-006); cancelling the RFQ
+        returns them, and awarding a line orders its requisition line through the PO line.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RFQFromRequisitionsInput' }
+      responses:
+        '201':
+          description: Created as DRAFT, each line carrying requisitionLineId
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RFQ' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Requisition line not found (PRC-REQ-LINE-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: "A line is not OPEN on an APPROVED requisition or was split since it was read (PRC-REQ-STATE), or is already on a running RFQ (PRC-REQ-006)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation (COM-0001): deadline not in the future, bad ranking rule or criteria, no lines or more than 500, lines of different legal entities (PRC-REQ-005); or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/rfqs/{id}:
     get:
       operationId: getRFQ
@@ -2960,8 +3247,8 @@ paths:
         '400': { description: Missing Idempotency-Key (PRC-IDEM-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: RFQ not found (PRC-RFQ-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: Version changed (PRC-VERSION-CONFLICT) or the RFQ is not REPLIES_OPEN or CLOSED (PRC-RFQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '403': { description: Missing duty RFQAward (AUTH-0003), or a sealed RFQ before its deadline (PRC-RFQ-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: Late reply without override reason (PRC-RFQ-003), award rule (PRC-RFQ-005) or validation (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: "Missing duty RFQAward (AUTH-0003), or a sealed RFQ before its deadline (PRC-RFQ-004)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Late reply without override reason (PRC-RFQ-003), award rule (PRC-RFQ-005) or validation (COM-0001)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/rfqs/{id}/replies:
     post:
@@ -2993,7 +3280,7 @@ paths:
         '400': { description: Missing Idempotency-Key (PRC-IDEM-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: RFQ not found (PRC-RFQ-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: The RFQ does not take replies in its status (PRC-RFQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: Validation (COM-0001), vendor not invited (PRC-RFQ-002), late revision of an on-time reply (PRC-RFQ-006), late reply to a sealed RFQ (PRC-RFQ-007) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation (COM-0001), vendor not invited (PRC-RFQ-002), late revision of an on-time reply (PRC-RFQ-006), late reply to a sealed RFQ (PRC-RFQ-007) or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/rfqs/{id}/compare:
     get:
       operationId: compareRFQ
@@ -3013,7 +3300,7 @@ paths:
               schema: { $ref: '#/components/schemas/RFQComparison' }
         '403': { description: A sealed RFQ before its deadline (PRC-RFQ-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: RFQ not found (PRC-RFQ-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: Unknown rule, or WEIGHTED_SCORE on an RFQ without criteria (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Unknown rule, or WEIGHTED_SCORE on an RFQ without criteria (COM-0001)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/rfqs/{id}/scores/{vendorId}:
     put:
       operationId: scoreRFQVendor
@@ -3039,10 +3326,10 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RFQ' }
-        '403': { description: Missing duty RFQAward (AUTH-0003), or a sealed RFQ before its deadline (PRC-RFQ-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: "Missing duty RFQAward (AUTH-0003), or a sealed RFQ before its deadline (PRC-RFQ-004)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: RFQ not found (PRC-RFQ-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: Version changed (PRC-VERSION-CONFLICT) or the RFQ cannot be scored in its status (PRC-RFQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: Validation, unknown or repeated criterion, RFQ without criteria (COM-0001), or vendor not invited (PRC-RFQ-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation, unknown or repeated criterion, RFQ without criteria (COM-0001), or vendor not invited (PRC-RFQ-002)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/purchasing-policies:
     get:
@@ -3130,7 +3417,7 @@ paths:
               schema: { $ref: '#/components/schemas/Catalog' }
         '400': { $ref: '#/components/responses/Problem' }
         '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: Validation (COM-0001), too many entries (PRC-CAT-007) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation (COM-0001), too many entries (PRC-CAT-007) or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     get:
       operationId: listCatalogs
       x-passage-duty: CatalogMaintain or PurchaseOrderInquire
@@ -3251,7 +3538,7 @@ paths:
         '403': { description: Missing duty CatalogMaintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Catalog not found (PRC-CAT-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: Version changed (PRC-VERSION-CONFLICT) or the catalog is not a draft (PRC-CAT-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: Validation (COM-0001), too many entries (PRC-CAT-007) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation (COM-0001), too many entries (PRC-CAT-007) or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/catalogs/{id}/entries/{entryId}:
     delete:
@@ -3329,9 +3616,9 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '403': { description: Missing duty CatalogMaintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Catalog not found (PRC-CAT-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: The catalog is retired (PRC-CAT-STATE), or the same vendor file is already staged or committed for the catalog (PRC-CAT-IMPORT-DUPLICATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: "The catalog is retired (PRC-CAT-STATE), or the same vendor file is already staged or committed for the catalog (PRC-CAT-IMPORT-DUPLICATE)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '413': { description: Request body over the size limit (COM-0413), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: Validation (COM-0001), the file has no header, lacks a required column or has no rows (PRC-CAT-005), more than 50,000 rows (PRC-CAT-008) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation (COM-0001), the file has no header, lacks a required column or has no rows (PRC-CAT-005), more than 50,000 rows (PRC-CAT-008) or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/catalog-imports:
     get:
       operationId: listCatalogImports
@@ -3414,7 +3701,7 @@ paths:
         '403': { description: Missing duty CatalogMaintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Import (PRC-CAT-IMPORT-NOT-FOUND) or row (PRC-CAT-IMPORT-ROW-NOT-FOUND) not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: Version changed (PRC-VERSION-CONFLICT) or the import is not staged (PRC-CAT-IMPORT-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: Validation (COM-0001), an ERROR row named in accept (PRC-CAT-005) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation (COM-0001), an ERROR row named in accept (PRC-CAT-005) or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/catalog-imports/{id}:commit:
     post:
@@ -3437,8 +3724,8 @@ paths:
               schema: { $ref: '#/components/schemas/CatalogImport' }
         '403': { description: Missing duty CatalogMaintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Import not found (PRC-CAT-IMPORT-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: Version changed (PRC-VERSION-CONFLICT), the import is not staged (PRC-CAT-IMPORT-STATE) or the catalog is retired (PRC-CAT-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: No row is accepted (PRC-CAT-009), the catalog would hold more than 50,000 entries (PRC-CAT-007), or an accepted row's vendor part number reached the catalog after staging (PRC-CAT-005), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: "Version changed (PRC-VERSION-CONFLICT), the import is not staged (PRC-CAT-IMPORT-STATE) or the catalog is retired (PRC-CAT-STATE)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "No row is accepted (PRC-CAT-009), the catalog would hold more than 50,000 entries (PRC-CAT-007), or an accepted row's vendor part number reached the catalog after staging (PRC-CAT-005)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/catalog-imports/{id}:cancel:
     post:
@@ -3492,7 +3779,7 @@ paths:
         '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '403': { description: Missing duty CategoryMaintain or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: The vendor already has an assignment for the category (PRC-CAT-011), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: Validation - status, window, category or ids (COM-0001) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation - status, window, category or ids (COM-0001) or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     get:
       operationId: listCategoryVendorAssignments
       x-passage-duty: CategoryMaintain or PurchaseOrderInquire
@@ -3559,6 +3846,102 @@ paths:
         '412': { description: If-Match is not the stored version (PRC-CAT-013), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: Validation - status or window (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/inbound-changes:
+    get:
+      operationId: listInboundChanges
+      x-passage-duty: PurchaseOrderInquire
+      summary: List the changes other services asked of purchase orders, newest first (slice 18)
+      description: >-
+        One row per planning message a planner applied to a purchase order (message.applied.v1) and per closed drop-ship remainder
+        (dropship.closed.v1) or cancelled drop-ship (dropship.cancelled.v1) the purchasing consumer handled, applied or not.
+        Filter by source, status, resolution (status REFUSED with resolution NONE is the buyer's queue), purchase order and legal entity.
+      parameters:
+        - { name: source, in: query, required: false, schema: { type: string, enum: [PLANNING_MESSAGE, DROPSHIP_CLOSED, DROPSHIP_CANCELLED] } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [APPLIED, REFUSED, IGNORED] } }
+        - { name: resolution, in: query, required: false, description: 'NONE lists changes nobody has settled.', schema: { type: string, enum: [NONE, ACKNOWLEDGED, RETRIED] } }
+        - { name: purchaseOrderId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InboundChangePage' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty PurchaseOrderInquire (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: A filter is malformed (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/inbound-changes/{id}:
+    get:
+      operationId: getInboundChange
+      x-passage-duty: PurchaseOrderInquire
+      summary: Read one change another service asked of a purchase order (slice 18)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: The change
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InboundChange' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty PurchaseOrderInquire (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Change not found (PRC-INB-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: id is not a UUID (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/inbound-changes/{id}:acknowledge:
+    post:
+      operationId: acknowledgeInboundChange
+      x-passage-duty: PurchaseOrderMaintain
+      summary: Acknowledge a refused inbound change the buyer dealt with by hand (slice 19)
+      description: >-
+        Settles a REFUSED change nobody has settled as ACKNOWLEDGED, with an optional note, so it leaves the buyer's queue. The purchase order is not touched and the status stays REFUSED. Writes inboundchange.resolved.v1. 409 PRC-INB-008 for a change that is not REFUSED or already settled. A replayed Idempotency-Key returns the change as it is now.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InboundChangeDecision' }
+      responses:
+        '200':
+          description: The change as it is now
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InboundChange' }
+        '400': { description: Idempotency-Key missing (PRC-IDEM-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty PurchaseOrderMaintain or the change's legal entity is outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Change not found (PRC-INB-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: The change is not a refused one waiting for a buyer (PRC-INB-008), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "id is not a UUID, the note is too long or idempotency_key_reuse (COM-0001)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/inbound-changes/{id}:retry:
+    post:
+      operationId: retryInboundChange
+      x-passage-duty: PurchaseOrderMaintain
+      summary: Run a refused inbound change again against the purchase order as it is now (slice 19)
+      description: >-
+        Plans the original request again (the message, or the drop-ship quantity) against the current order and applies it through the PO change management path as the caller, who needs PurchaseOrderMaintain. The change keeps its row and idempotency key: it becomes APPLIED or IGNORED and RETRIED (inboundchange.resolved.v1, with the order's own po.confirmed.v1 and poversion.created.v1 when a line moved), or stays REFUSED with the new reason and one more attempt. 409 PRC-INB-008 for a change that is not REFUSED or already settled. A replayed Idempotency-Key returns the change as it is now.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InboundChangeDecision' }
+      responses:
+        '200':
+          description: The change as it is now
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InboundChange' }
+        '400': { description: Idempotency-Key missing (PRC-IDEM-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty PurchaseOrderMaintain or the change's legal entity is outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Change not found (PRC-INB-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: The change is not a refused one waiting for a buyer (PRC-INB-008), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "id is not a UUID, the note is too long or idempotency_key_reuse (COM-0001)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/charge-codes:
     post:
       operationId: createChargeCode
@@ -3586,7 +3969,7 @@ paths:
         '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '403': { description: Missing duty ProcurementPolicyMaintain or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: The legal entity already has a charge code with this code (PRC-CHG-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: Validation - code, calc, value, sides or ids (COM-0001) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation - code, calc, value, sides or ids (COM-0001) or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     get:
       operationId: listChargeCodes
       x-passage-duty: ProcurementPolicyMaintain or PurchaseOrderInquire
@@ -3684,7 +4067,7 @@ paths:
         '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '403': { description: Missing duty ProcurementPolicyMaintain or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Charge code not found (PRC-CHG-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: Validation (COM-0001), the charge code is inactive or of another legal entity (PRC-CHG-004), or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation (COM-0001), the charge code is inactive or of another legal entity (PRC-CHG-004), or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     get:
       operationId: listAutoCharges
       x-passage-duty: ProcurementPolicyMaintain or PurchaseOrderInquire
@@ -3832,7 +4215,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '403': { description: Missing duty RequisitionCreate or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: Validation - ids, document type, currency or limits (COM-0001) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation - ids, document type, currency or limits (COM-0001) or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     get:
       operationId: listSigningLimitRequests
       x-passage-duty: SigningLimitApprove or PurchaseOrderInquire
@@ -3896,7 +4279,7 @@ paths:
               schema: { $ref: '#/components/schemas/SigningLimitRequest' }
         '400': { description: Idempotency-Key missing (PRC-IDEM-001) or If-Match not a number (PRC-IFMATCH-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '403': { description: Missing duty SigningLimitApprove or legal entity outside the caller's scope (AUTH-0003), or the caller made the request or is the worker (PRC-SL-003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: "Missing duty SigningLimitApprove or legal entity outside the caller's scope (AUTH-0003), or the caller made the request or is the worker (PRC-SL-003)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Not found (PRC-SL-REQUEST-NOT-FOUND or PRC-SL-LIMIT-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: The request was already decided (PRC-SL-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: If-Match is not the stored version (PRC-SL-005), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
@@ -3928,7 +4311,7 @@ paths:
               schema: { $ref: '#/components/schemas/SigningLimitRequest' }
         '400': { description: Idempotency-Key missing (PRC-IDEM-001) or If-Match not a number (PRC-IFMATCH-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '403': { description: Missing duty SigningLimitApprove or legal entity outside the caller's scope (AUTH-0003), or the caller made the request or is the worker (PRC-SL-003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: "Missing duty SigningLimitApprove or legal entity outside the caller's scope (AUTH-0003), or the caller made the request or is the worker (PRC-SL-003)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Not found (PRC-SL-REQUEST-NOT-FOUND or PRC-SL-LIMIT-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: The request was already decided (PRC-SL-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: If-Match is not the stored version (PRC-SL-005), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
@@ -4016,7 +4399,7 @@ paths:
               schema: { $ref: '#/components/schemas/SigningLimit' }
         '400': { description: Idempotency-Key missing (PRC-IDEM-001) or If-Match not a number (PRC-IFMATCH-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '403': { description: Missing duty SigningLimitApprove or legal entity outside the caller's scope (AUTH-0003), or the caller is the worker (PRC-SL-003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: "Missing duty SigningLimitApprove or legal entity outside the caller's scope (AUTH-0003), or the caller is the worker (PRC-SL-003)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Not found (PRC-SL-REQUEST-NOT-FOUND or PRC-SL-LIMIT-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: If-Match is not the stored version (PRC-SL-005), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: id is not a UUID (COM-0001) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
@@ -4084,7 +4467,7 @@ paths:
               schema: { $ref: '#/components/schemas/ServiceSpecResult' }
         '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '403': { description: Missing duty PurchaseOrderMaintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '404': { description: Purchase order (PRC-PO-NOT-FOUND), line (PRC-PO-LINE-NOT-FOUND), model (PRC-SRV-MODEL-NOT-FOUND) or contract agreement line not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: "Purchase order (PRC-PO-NOT-FOUND), line (PRC-PO-LINE-NOT-FOUND), model (PRC-SRV-MODEL-NOT-FOUND) or contract agreement line not found", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: If-Match is not the current PO row version (PRC-PO-009), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'Validation (COM-0001), PO not DRAFT or REJECTED or line cancelled (PRC-SRV-001), planned outline above the line amount, expected value above the limit or unusable contract line (PRC-SRV-002), outline total mismatch (PRC-SRV-004), model inactive, of another legal entity or currency (PRC-SRV-005)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
@@ -4103,7 +4486,7 @@ paths:
             ETag: { schema: { type: string } }
         '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '403': { description: Missing duty PurchaseOrderMaintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '404': { description: Purchase order, line or specification not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: "Purchase order, line or specification not found", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: If-Match is not the current PO row version (PRC-PO-009), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'Bad id or line number (COM-0001), PO not DRAFT or REJECTED or line cancelled (PRC-SRV-001)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
@@ -4122,8 +4505,8 @@ paths:
       parameters:
         - { $ref: '#/components/parameters/Id' }
         - { $ref: '#/components/parameters/LineNo' }
-        - { name: unplanned, in: query, required: false, description: Decimal string, the unplanned amount already entered (default 0), schema: { type: string } }
-        - { name: entry, in: query, required: true, description: Decimal string, the unplanned amount of the entry to check, schema: { type: string } }
+        - { name: unplanned, in: query, required: false, description: "Decimal string, the unplanned amount already entered (default 0)", schema: { type: string } }
+        - { name: entry, in: query, required: true, description: "Decimal string, the unplanned amount of the entry to check", schema: { type: string } }
       responses:
         '200':
           description: The answer; allowed false with code PRC-SRV-003 when the entry exceeds the value limit or the contract limit
@@ -4160,7 +4543,7 @@ paths:
         '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '403': { description: Missing duty ProcurementPolicyMaintain or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: The legal entity already has a model with this code (PRC-SRV-006), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: Validation - code, currency, outline (COM-0001), outline total mismatch (PRC-SRV-004) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation - code, currency, outline (COM-0001), outline total mismatch (PRC-SRV-004) or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     get:
       operationId: listModelServiceSpecs
       x-passage-duty: ProcurementPolicyMaintain or PurchaseOrderInquire

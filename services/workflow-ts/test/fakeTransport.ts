@@ -25,6 +25,7 @@ export class FakeTransport {
   skewMs = 0;
   frozenSweeps = false;
   readOutage = false;
+  lookups = 0;
   duringNextRead?: () => Promise<void>;
   startKey?: string;
 
@@ -69,8 +70,22 @@ export class FakeTransport {
       await hook?.();
       return snapshot;
     }
+    if (method === "GET" && url.pathname === "/v1/transport/tenders" && url.searchParams.get("loadId") === LOAD_ID) {
+      this.lookups += 1;
+      const items = this.startKey === undefined ? [] : [await this.reply(200).json()];
+      return new Response(JSON.stringify({ items }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
     return problem(404, "unknown route");
   };
+
+  /** A tender a planner or an earlier run of the workflow opened under another key. */
+  openEarlier(key: string, timeoutMin: number): void {
+    this.startKey = key;
+    this.starts += 1;
+    this.carriers = [...CARRIERS];
+    this.timeoutMs = timeoutMin * 60_000;
+    this.offerNext(this.now());
+  }
 
   respond(carrierId: string, accept: boolean): void {
     this.tick(this.now());

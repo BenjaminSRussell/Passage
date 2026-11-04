@@ -40,10 +40,11 @@ describe("tender workflow", () => {
 
   type Handle = WorkflowHandle<typeof tenderWorkflow>;
 
-  async function run(fake: FakeTransport, drive: (handle: Handle) => Promise<void>, override: Partial<TenderInput> = {}) {
+  async function run(fake: FakeTransport, drive: (handle: Handle) => Promise<void>, override: Partial<TenderInput> = {}, prepare?: (fake: FakeTransport) => void) {
     sequence += 1;
     const taskQueue = `tender-${sequence}`;
     fake.skewMs = (await environment.currentTimeMs()) - Date.now();
+    prepare?.(fake);
     const worker = await Worker.create({
       connection: environment.nativeConnection,
       taskQueue,
@@ -177,15 +178,17 @@ describe("tender workflow", () => {
     expect(result).toMatchObject({ status: "accepted", acceptedCarrierId: CARRIERS[0] });
   }, 60_000);
 
-  it("stalls after transport stays unreachable across repeated activity windows", async () => {
+  it("adopts the open tender of its load instead of failing on TMS-0114", async () => {
     const fake = new FakeTransport();
     const result = await run(fake, async (handle) => {
       await until(handle, (state) => state.pendingCarrierId === CARRIERS[0]);
-      fake.readOutage = true;
+      fake.respond(CARRIERS[0]!, true);
       await handle.signal(tenderResponseSignal);
-    });
-    expect(result).toMatchObject({ status: "stalled", attempted: [CARRIERS[0]] });
-  }, 120_000);
+    }, {}, (f) => f.openEarlier("a-planner-or-earlier-run", TIMEOUT_MIN));
+    expect(result).toMatchObject({ status: "accepted", acceptedCarrierId: CARRIERS[0] });
+    expect(fake.starts).toBe(1);
+    expect(fake.lookups).toBe(1);
+  }, 60_000);
 
   it("stalls instead of sweeping forever when the sweep never advances an overdue attempt", async () => {
     const fake = new FakeTransport();

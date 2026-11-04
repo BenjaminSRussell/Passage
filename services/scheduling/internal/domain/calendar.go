@@ -23,7 +23,8 @@ type Interval struct {
 
 // OpenIntervals materializes the open UTC intervals of shifts for `days`
 // local days beginning with the local day of from. Calendar days are built in
-// the site time zone so a DST day yields 23 or 25 hours of capacity (BR-23.7).
+// the site time zone so a DST day yields 23 or 25 hours of capacity (BR-23.7);
+// shift ends inside a DST gap or overlap are resolved as DispatchWindow does.
 func OpenIntervals(loc *time.Location, shifts []Shift, from time.Time, days int) []Interval {
 	if loc == nil {
 		loc = time.UTC
@@ -36,9 +37,16 @@ func OpenIntervals(loc *time.Location, shifts []Shift, from time.Time, days int)
 			if s.Weekday != weekday || s.StartMinute < 0 || s.EndMinute > 1440 || s.EndMinute <= s.StartMinute {
 				continue
 			}
-			start := time.Date(y, m, d+n, 0, s.StartMinute, 0, 0, loc)
-			end := time.Date(y, m, d+n, 0, s.EndMinute, 0, 0, loc)
-			out = append(out, Interval{Start: start.UTC(), End: end.UTC()})
+			// Wall-clock ends as the dispatch list reads them (firstInstantAt):
+			// a time skipped by a spring-forward gap is the instant of the
+			// change, a repeated one its first occurrence. A shift that lies
+			// wholly inside a gap holds no time and is dropped.
+			start := firstInstantAt(loc, y, m, d+n, s.StartMinute).UTC()
+			end := firstInstantAt(loc, y, m, d+n, s.EndMinute).UTC()
+			if !end.After(start) {
+				continue
+			}
+			out = append(out, Interval{Start: start, End: end})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Start.Before(out[j].Start) })

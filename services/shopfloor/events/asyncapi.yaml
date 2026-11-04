@@ -56,6 +56,18 @@ channels:
     messages:
       workerAssigned:
         $ref: "#/components/messages/WorkerAssigned"
+  workerSaved:
+    address: passage.shopfloor.worker
+    description: A worker was edited, deactivated or reactivated (D2a'). Not in the PRD event table.
+    messages:
+      workerSaved:
+        $ref: "#/components/messages/WorkerSaved"
+  workerCostRateSet:
+    address: passage.shopfloor.worker
+    description: A dated cost rate was added to a worker (D2a'). Not in the PRD event table.
+    messages:
+      workerCostRateSet:
+        $ref: "#/components/messages/WorkerCostRateSet"
   absenceCodeSaved:
     address: passage.shopfloor.absencecode
     description: An absence code was created or changed (FR-25.2). Not in the PRD event table.
@@ -289,6 +301,22 @@ operations:
       $ref: "#/channels/workerAssigned"
     messages:
       - $ref: "#/channels/workerAssigned/messages/workerAssigned"
+  publishWorkerSaved:
+    action: send
+    summary: Worker saved
+    description: Sends the worker saved event through the outbox.
+    channel:
+      $ref: "#/channels/workerSaved"
+    messages:
+      - $ref: "#/channels/workerSaved/messages/workerSaved"
+  publishWorkerCostRateSet:
+    action: send
+    summary: Worker cost rate set
+    description: Sends the worker cost rate set event through the outbox.
+    channel:
+      $ref: "#/channels/workerCostRateSet"
+    messages:
+      - $ref: "#/channels/workerCostRateSet/messages/workerCostRateSet"
   publishAbsenceCodeSaved:
     action: send
     summary: Absence code saved
@@ -431,6 +459,20 @@ components:
       description: Published when a worker's profile, agreement or home resource link changes; a null id means the defaults apply. Days already calculated keep their pay lines until recalculated.
       payload:
         $ref: "#/components/schemas/WorkerAssignedData"
+    WorkerSaved:
+      name: dev.passage.shopfloor.worker.saved.v1
+      contentType: application/cloudevents+json
+      summary: Worker edited, deactivated or reactivated
+      description: Published when a worker's name, sign-in user, cost rate or currency changes, or when the worker is deactivated or reactivated. The badge is not published. No pay line changes with it; days already calculated or approved keep the rate they were calculated with until a supervisor recalculates or revises them.
+      payload:
+        $ref: "#/components/schemas/WorkerSavedData"
+    WorkerCostRateSet:
+      name: dev.passage.shopfloor.workercostrate.set.v1
+      contentType: application/cloudevents+json
+      summary: Dated worker cost rate added
+      description: Published when a dated hourly cost rate is added to a worker. The rate holds for days from `effectiveFrom` until the next dated rate. No pay line changes with it; days already calculated or approved keep the rate they were calculated with until a supervisor recalculates or revises them.
+      payload:
+        $ref: "#/components/schemas/WorkerCostRateSetData"
     PaydayRevised:
       name: dev.passage.shopfloor.payday.revised.v1
       contentType: application/cloudevents+json
@@ -1123,6 +1165,58 @@ components:
         previousVersion:
           type: [integer, "null"]
           minimum: 1
+    WorkerSavedData:
+      type: object
+      required: [workerId, name, userId, costRate, currency, active, version, change, reason, savedBy]
+      additionalProperties: false
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        userId:
+          type: [string, "null"]
+          description: Identity-provider user the worker signs in as; null when none.
+        costRate:
+          type: string
+          description: Decimal string, per hour.
+        currency:
+          type: string
+        active:
+          type: boolean
+        version:
+          type: integer
+          minimum: 1
+        change:
+          type: string
+          enum: [updated, deactivated, reactivated]
+        reason:
+          type: [string, "null"]
+          description: The deactivation reason; null for other changes.
+        savedBy:
+          type: string
+    WorkerCostRateSetData:
+      type: object
+      required: [workerId, costRateId, effectiveFrom, costRate, currency, setBy]
+      additionalProperties: false
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        costRateId:
+          type: string
+          format: uuid
+        effectiveFrom:
+          type: string
+          format: date
+        costRate:
+          type: string
+          description: Decimal string, per hour.
+        currency:
+          type: string
+        setBy:
+          type: string
     WorkerAssignedData:
       type: object
       required: [workerId, profileId, payAgreementId, defaultResourceId, assignedBy]

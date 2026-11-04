@@ -64,6 +64,6 @@ describe("scoped list pages", () => {
     renderAt("/org/sites");
     expect(await screen.findByText("SITE-1")).toBeInTheDocument();
     expect(screen.getByText("Scope: LE1")).toBeInTheDocument();
-    expect(screen.queryByText("Read-only, all entities")).not.toBeInTheDocument();
+    expect(screen.queryByText("Viewing all entities")).not.toBeInTheDocument();
   });
 });

@@ -151,6 +151,8 @@ describe("Order pegs", () => {
     secondaryResourceIds: [],
     setupGroup: null,
     setupMinutes: 0,
+    queueBeforeMinutes: 0,
+    queueAfterMinutes: 0,
     attributes: {},
     networkId: null,
     status: "scheduled",

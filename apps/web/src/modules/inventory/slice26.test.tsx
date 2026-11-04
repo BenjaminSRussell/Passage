@@ -344,7 +344,7 @@ describe("On-hand drill-down and export", () => {
     handler = () => json(200, { items: [row], truncated: false });
     renderAt("/inventory/onhand");
     const link = await screen.findByRole("link", { name: "Transactions" });
-    expect(link).toHaveAttribute("href", `/inventory/transactions?product=${PRODUCT_ID}`);
+    expect(link).toHaveAttribute("href", `/inventory/transactions?product=${PRODUCT_ID}&site=S1`);
   });
 
   it("opens the transaction inquiry on the linked product", async () => {

@@ -8,7 +8,9 @@ info:
     activities on any record, the knowledge base (wave 45, slices 1 to 3) and generic
     case management: case processes, the case category tree and cases in any
     non-service category with stages, associations and a log (slice 4), supplier warranty
-    claims with vendor recovery, case mailboxes and email-to-case intake (slice 5).
+    claims with vendor recovery, case mailboxes and email-to-case intake (slice 5), technicians, work-order
+    scheduling data, manual assignment under the BR-45.3 hard constraints, the dispatch board and publishing a
+    territory-day (slice 7).
     Service routes are mounted under /v1/service and generic case routes under
     /v1/cases, /v1/case-categories, /v1/case-processes, /v1/case-mailboxes and
     /v1/inbound-messages (PRD 8.45.5); the browser
@@ -515,7 +517,12 @@ paths:
   /v1/service/work-orders/{id}:transition:
     post:
       operationId: transitionWorkOrder
-      summary: Move a work order along the BR-45.5 status machine
+      summary: Move a work order along the BR-45.5 status machine by hand
+      description: |
+        The office override for the technician's own actions. SCHEDULED is reached only through `:assign` and
+        DISPATCHED only by publishing the territory-day, so neither is accepted here. Completing needs the
+        customer's signature unless the work order is `signatureExempt` (SVC-WO-001) and writes
+        dev.passage.service.workorder.completed.v1 (without working minutes when no action log exists).
       x-passage-duty: SvcWoMaintain
       parameters:
         - $ref: "#/components/parameters/Id"
@@ -531,7 +538,7 @@ paths:
               properties:
                 to:
                   type: string
-                  enum: [SCHEDULED, DISPATCHED, TRAVELING, IN_PROGRESS, ON_HOLD, COMPLETED, CANCELED]
+                  enum: [TRAVELING, IN_PROGRESS, ON_HOLD, COMPLETED, CANCELED]
       responses:
         "200":
           description: Transitioned (a request for the current status is a no-op)
@@ -596,6 +603,334 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/work-orders/{id}/scheduling:
+    put:
+      operationId: updateWorkOrderScheduling
+      summary: Set the skills, customer window, address, position and estimate of an UNSCHEDULED work order
+      description: A scheduled order is unassigned first, so assignment checks never run against data that changed afterwards.
+      x-passage-duty: SvcWoMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SchedulingRequest" }
+      responses:
+        "200":
+          description: The work order with its new scheduling data
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkOrder" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/work-orders/{id}:assign:
+    post:
+      operationId: assignWorkOrder
+      summary: Give a work order to a technician at a start time and make it SCHEDULED (FR-45.7, BR-45.3)
+      description: |
+        The end follows from the estimated duration. Every broken hard constraint is returned together in
+        `errors`, keyed by code (SVC-DSP-003 skills, 004 technician not eligible, 005 customer window,
+        006 shift, 007 overlap or buffer, 008 daily load); `code` is the first of them. An UNSCHEDULED or
+        SCHEDULED order can be assigned or moved; a dispatched one cannot. Writes
+        dev.passage.service.assignment.changed.v1.
+      x-passage-duty: SvcDispatch
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssignRequest" }
+      responses:
+        "200":
+          description: The work order, SCHEDULED, with technicianId, assignedStart and assignedEnd
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkOrder" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/work-orders/{id}:unassign:
+    post:
+      operationId: unassignWorkOrder
+      summary: Take a SCHEDULED work order off the schedule; it is UNSCHEDULED again
+      description: A pinned assignment is released too; the pin protects it from the optimizer, not from the dispatcher. Writes dev.passage.service.assignment.changed.v1.
+      x-passage-duty: SvcDispatch
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: The UNSCHEDULED work order
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkOrder" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/work-orders/{id}/actions:
+    post:
+      operationId: recordWorkOrderActions
+      summary: Merge a batch of the technician's offline actions into a work order (BR-45.6, FR-45.8)
+      description: |
+        Actions are append-only with client-generated UUIDs and device timestamps; the server orders them by
+        (deviceTime, position in the batch). Each action is judged on its own: APPLIED, SUPERSEDED (a status move
+        behind the furthest state already reached, or a note or signature older than the stored one) or REJECTED
+        with a code (SVC-WO-001 signature required to complete, SVC-SYNC-002 status, 003 not this technician's
+        order, 004 part line or quantity, 006 device time before the work order was created). Only the
+        technician's own worker (the caller's user id equals the technician's workerId) or office staff holding
+        SvcWoMaintain may post for a technician; anyone else gets 403 SVC-SYNC-003 and nothing is stored. A device
+        time more than 5 minutes ahead of the server is a 400. An action id seen before returns its stored outcome
+        with `duplicate: true` and applies nothing, so a retried batch is safe; an id reused for anything else
+        (another work order, technician, kind, device time or payload) is refused with 422 SVC-SYNC-005.
+        PART_USED is idempotent per action id and cannot exceed the PART line quantity; a part action that
+        arrives after the work order completed is REJECTED (SVC-SYNC-002). A COMPLETE completes the work order
+        (dated no later than the server clock and no earlier than the last applied status move) and writes
+        dev.passage.service.workorder.completed.v1 once; the work order is locked, so concurrent batches merge in
+        turn. `message` carries SVC-SYNC-001 when conflicts were resolved.
+      x-passage-duty: SvcTechnician
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActionBatch" }
+      responses:
+        "200":
+          description: The outcome of every action and the work order after the merge
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActionSyncResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403":
+          description: The caller lacks SvcTechnician, or is neither the technician's worker nor office staff with SvcWoMaintain (SVC-SYNC-003)
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listWorkOrderActions
+      summary: Read the action log of a work order in merge order
+      description: The timeline a dispatcher reviews, ordered by device time then receipt order, with each action's outcome.
+      x-passage-duty: SvcInquire
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The logged actions, oldest device time first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/WorkOrderAction" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/service/technicians:
+    post:
+      operationId: createTechnician
+      summary: Register a field technician with territories, skills, shift, home position and daily maximum
+      x-passage-duty: SvcDispatch
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TechnicianRequest" }
+      responses:
+        "201":
+          description: Created
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Technician" }
+        "200": { $ref: "#/components/responses/Replayed" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409":
+          description: A technician with this code exists (SVC-TECH-001)
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listTechnicians
+      summary: List technicians newest first inside the caller's legal-entity scope
+      x-passage-duty: SvcInquire
+      parameters:
+        - { name: territoryId, in: query, description: Only technicians who cover this territory., schema: { type: string, format: uuid } }
+        - { name: active, in: query, schema: { type: string, enum: ["true", "false"] } }
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TechnicianPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/service/technicians/{id}:
+    get:
+      operationId: getTechnician
+      summary: Read a technician
+      x-passage-duty: SvcInquire
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The technician
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Technician" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: updateTechnician
+      summary: Replace a technician's editable fields; the code and legal entity do not change
+      description: A technician with work orders still ahead of them cannot be deactivated (SVC-TECH-003). An edit that would put a SCHEDULED visit of the technician in breach of the BR-45.3 hard constraints is refused with SVC-TECH-005, listing each broken work order by number in errors.
+      x-passage-duty: SvcDispatch
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TechnicianFields" }
+      responses:
+        "200":
+          description: The updated technician
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Technician" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/dispatch/board:
+    get:
+      operationId: getDispatchBoard
+      summary: Read the dispatch board of a territory and local day (FR-45.7)
+      description: The active technicians who cover the territory with their assignments of the local day and booked minutes, and the territory's unscheduled work orders (at most 200 of each).
+      x-passage-duty: SvcInquire
+      parameters:
+        - { name: territoryId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: date, in: query, required: true, description: The local calendar day., schema: { type: string, format: date } }
+        - { name: timeZone, in: query, description: IANA zone the day is read in; UTC when absent., schema: { type: string, example: America/Chicago } }
+      responses:
+        "200":
+          description: The board
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DispatchBoard" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/service/dispatch/publish:
+    post:
+      operationId: publishDispatch
+      summary: Dispatch the SCHEDULED work orders of a territory-day to their technicians (FR-45.7)
+      description: |
+        Moves every SCHEDULED work order with a technician that starts on the local day in the territory and
+        legal entity to DISPATCHED (which stops the response clock of its case), records the run with the
+        route order per technician and writes dev.passage.service.dispatch.published.v1. Nothing to dispatch
+        is SVC-DSP-009.
+      x-passage-duty: SvcDispatch
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PublishRequest" }
+      responses:
+        "201":
+          description: The published run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DispatchRun" }
+        "200": { $ref: "#/components/responses/Replayed" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/service/dispatch/runs:
+    get:
+      operationId: listDispatchRuns
+      summary: List published dispatch runs newest first
+      x-passage-duty: SvcInquire
+      parameters:
+        - { name: territoryId, in: query, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DispatchRunPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/service/dispatch/runs/{id}:
+    get:
+      operationId: getDispatchRun
+      summary: Read a published dispatch run with its assignments
+      x-passage-duty: SvcInquire
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DispatchRun" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
   /v1/service/service-objects:
     post:
       operationId: createServiceObject
@@ -2013,6 +2348,13 @@ components:
           type: array
           maxItems: 200
           items: { $ref: "#/components/schemas/WorkLine" }
+        requiredSkills: { type: array, maxItems: 30, items: { type: string }, description: See SchedulingFields. }
+        windowStart: { type: [string, "null"], format: date-time }
+        windowEnd: { type: [string, "null"], format: date-time }
+        address: { type: string, maxLength: 500 }
+        latitude: { type: [number, "null"] }
+        longitude: { type: [number, "null"] }
+        signatureExempt: { type: boolean, description: "The incident type's rule waives the customer signature at completion (SVC-WO-001)." }
     WorkOrder:
       type: object
       properties:
@@ -2036,7 +2378,80 @@ components:
         followUpOf: { type: [string, "null"], format: uuid, description: the finished order this one follows up (BR-45.5) }
         completedAt: { type: [string, "null"], format: date-time }
         firstTimeFix: { type: [boolean, "null"], description: set true at completion, false once a follow-up exists }
+        requiredSkills: { type: array, items: { type: string } }
+        windowStart: { type: [string, "null"], format: date-time }
+        windowEnd: { type: [string, "null"], format: date-time }
+        address: { type: string }
+        latitude: { type: [number, "null"] }
+        longitude: { type: [number, "null"] }
+        technicianId: { type: [string, "null"], format: uuid }
+        assignedStart: { type: [string, "null"], format: date-time }
+        assignedEnd: { type: [string, "null"], format: date-time }
+        assignmentPinned: { type: boolean }
+        signatureExempt: { type: boolean }
+        signedBy: { type: [string, "null"] }
+        signedAt: { type: [string, "null"], format: date-time }
+        signatureRef: { type: [string, "null"], description: Object-store reference of the signature PNG. }
+        technicianNote: { type: string, description: Free text from the device; the latest device time wins. }
         version: { type: integer }
+    ActionBatch:
+      type: object
+      required: [technicianId, actions]
+      additionalProperties: false
+      properties:
+        technicianId: { type: string, format: uuid, description: Must be the technician the work order is assigned to; other actions are REJECTED (SVC-SYNC-003). }
+        actions:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items: { $ref: "#/components/schemas/ActionInput" }
+    ActionInput:
+      type: object
+      required: [id, kind, deviceTime]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid, description: Client-generated; makes the action idempotent. }
+        kind: { type: string, enum: [TRAVEL_START, WORK_START, HOLD, RESUME, PART_USED, SIGNATURE, NOTE, COMPLETE] }
+        deviceTime: { type: string, format: date-time, description: The device clock; not more than 5 minutes ahead of the server. }
+        lineId: { type: string, format: uuid, description: PART_USED, a PART line of the work order. }
+        qty: { type: string, description: "PART_USED, a positive decimal string with at most 6 decimals." }
+        signedBy: { type: string, maxLength: 120, description: SIGNATURE. }
+        signatureRef: { type: string, maxLength: 500, description: SIGNATURE, the object-store reference of the signature PNG. }
+        text: { type: string, maxLength: 4000, description: NOTE. }
+    ActionResult:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string }
+        outcome: { type: string, enum: [APPLIED, SUPERSEDED, REJECTED] }
+        code: { type: string, description: Present when REJECTED. }
+        reason: { type: string }
+        duplicate: { type: boolean, description: The id was recorded before; the stored outcome is returned. }
+    ActionSyncResult:
+      type: object
+      properties:
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/ActionResult" }
+        applied: { type: integer }
+        duplicates: { type: integer }
+        superseded: { type: integer }
+        rejected: { type: integer }
+        message: { type: string, description: SVC-SYNC-001 when status conflicts were resolved. }
+        workOrder: { $ref: "#/components/schemas/WorkOrder" }
+    WorkOrderAction:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        workOrderId: { type: string, format: uuid }
+        technicianId: { type: string, format: uuid }
+        kind: { type: string, enum: [TRAVEL_START, WORK_START, HOLD, RESUME, PART_USED, SIGNATURE, NOTE, COMPLETE] }
+        deviceTime: { type: string, format: date-time }
+        receivedAt: { type: string, format: date-time }
+        payload: { type: object, additionalProperties: true }
+        outcome: { type: string, enum: [APPLIED, SUPERSEDED, REJECTED] }
+        reasonCode: { type: string }
+        reason: { type: string }
     Kpis:
       type: object
       description: |
@@ -2519,3 +2934,138 @@ components:
               properties:
                 code: { type: string, example: CASE-MAIL-001 }
                 text: { type: string }
+    SchedulingFields:
+      type: object
+      description: Scheduling data of a work order (PRD 8.45.4).
+      properties:
+        requiredSkills:
+          type: array
+          maxItems: 30
+          description: Skill codes (upper-cased, 1 to 40 of A-Z, 0-9, _, . or -) the visit needs; the technician must hold all of them (SVC-DSP-003).
+          items: { type: string }
+        windowStart: { type: [string, "null"], format: date-time, description: Start of the customer-promised window; comes with windowEnd. }
+        windowEnd: { type: [string, "null"], format: date-time }
+        address: { type: string, maxLength: 500 }
+        latitude: { type: [number, "null"], minimum: -90, maximum: 90, description: Comes with longitude. }
+        longitude: { type: [number, "null"], minimum: -180, maximum: 180 }
+    SchedulingRequest:
+      allOf:
+        - $ref: "#/components/schemas/SchedulingFields"
+        - type: object
+          required: [estDurationMinutes]
+          properties:
+            estDurationMinutes: { type: integer, minimum: 1, maximum: 1440 }
+    AssignRequest:
+      type: object
+      required: [technicianId, start]
+      additionalProperties: false
+      properties:
+        technicianId: { type: string, format: uuid }
+        start: { type: string, format: date-time, description: The visit starts here and ends after the work order's estimated duration. }
+        pinned: { type: boolean, default: false, description: A pinned assignment survives re-optimization. }
+    TechnicianFields:
+      type: object
+      required: [name, legalEntityId, territoryIds, timeZone]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        workerId: { type: [string, "null"], format: uuid, description: The wave-42 worker; not checked yet. }
+        legalEntityId: { type: string, format: uuid }
+        territoryIds: { type: array, minItems: 1, maxItems: 50, items: { type: string, format: uuid } }
+        skills: { type: array, maxItems: 40, items: { type: string } }
+        timeZone: { type: string, example: America/Chicago, description: The zone the shift is read in. }
+        shiftDays: { type: array, items: { type: integer, minimum: 1, maximum: 7 }, description: ISO weekdays worked, Monday 1; Monday to Friday when absent. }
+        shiftStartMinute: { type: integer, minimum: 0, maximum: 1439, default: 480 }
+        shiftEndMinute: { type: integer, minimum: 1, maximum: 1440, default: 1020 }
+        homeLatitude: { type: [number, "null"], minimum: -90, maximum: 90 }
+        homeLongitude: { type: [number, "null"], minimum: -180, maximum: 180 }
+        truckLocationId: { type: [string, "null"], format: uuid, description: The wave-16 TRUCK location; not checked yet. }
+        maxDailyMinutes: { type: integer, minimum: 60, maximum: 1440, default: 480 }
+        overtimeAllowed: { type: boolean, default: false, description: Adds up to 120 minutes to the shift end and the daily maximum (BR-45.3). }
+        active: { type: boolean, default: true }
+    TechnicianRequest:
+      allOf:
+        - $ref: "#/components/schemas/TechnicianFields"
+        - type: object
+          required: [code]
+          properties:
+            code: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{1,19}$" }
+    Technician:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        workerId: { type: [string, "null"], format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        territoryIds: { type: array, items: { type: string, format: uuid } }
+        skills: { type: array, items: { type: string } }
+        timeZone: { type: string }
+        shiftDays: { type: array, items: { type: integer } }
+        shiftStartMinute: { type: integer }
+        shiftEndMinute: { type: integer }
+        homeLatitude: { type: [number, "null"] }
+        homeLongitude: { type: [number, "null"] }
+        truckLocationId: { type: [string, "null"], format: uuid }
+        maxDailyMinutes: { type: integer }
+        overtimeAllowed: { type: boolean }
+        active: { type: boolean }
+        version: { type: integer }
+    TechnicianPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Technician" } }
+        nextCursor: { type: string, format: uuid }
+    DispatchBoard:
+      type: object
+      properties:
+        territoryId: { type: string, format: uuid }
+        date: { type: string, format: date }
+        timeZone: { type: string }
+        technicians:
+          type: array
+          items:
+            type: object
+            properties:
+              technician: { $ref: "#/components/schemas/Technician" }
+              assignments: { type: array, items: { $ref: "#/components/schemas/WorkOrder" } }
+              bookedMinutes: { type: integer, description: Estimated minutes of the day's assignments, without buffers. }
+        unscheduled: { type: array, items: { $ref: "#/components/schemas/WorkOrder" } }
+    PublishRequest:
+      type: object
+      required: [legalEntityId, territoryId, date]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        territoryId: { type: string, format: uuid }
+        date: { type: string, format: date, description: The local calendar day. }
+        timeZone: { type: string, example: America/Chicago, description: UTC when absent. }
+    DispatchedOrder:
+      type: object
+      properties:
+        workOrderId: { type: string, format: uuid }
+        number: { type: string, example: SWO-000001 }
+        technicianId: { type: string, format: uuid }
+        sequence: { type: integer, minimum: 1, description: Route order of the technician's day. }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+    DispatchRun:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        territoryId: { type: string, format: uuid }
+        date: { type: string, format: date }
+        timeZone: { type: string }
+        status: { type: string, enum: [PUBLISHED] }
+        assignments: { type: array, items: { $ref: "#/components/schemas/DispatchedOrder" } }
+        dispatchedCount: { type: integer }
+        publishedBy: { type: string }
+        publishedAt: { type: string, format: date-time }
+    DispatchRunPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/DispatchRun" } }
+        nextCursor: { type: string, format: uuid }

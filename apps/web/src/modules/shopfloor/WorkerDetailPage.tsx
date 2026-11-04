@@ -30,7 +30,9 @@ import { addDays, browserZone, dash, daysBetween, fixed, formatDateTime, formatH
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { dayColumns } from "./dayColumns";
+import { WorkerCostRates } from "./WorkerCostRates";
 import { WorkerHomeResource } from "./WorkerHomeResource";
+import { WorkerMaintenance } from "./WorkerMaintenance";
 import { WorkerPaySetup } from "./WorkerPaySetup";
 
 /** Longest range GET registrations accepts, in days. */
@@ -190,6 +192,8 @@ export function WorkerDetailPage() {
           </div>
         </dl>
       </Card>
+      <WorkerMaintenance key={`edit-${worker.id}`} worker={worker} onSaved={state.reload} />
+      <WorkerCostRates key={`rates-${worker.id}`} worker={worker} />
       <WorkerPaySetup key={worker.id} worker={worker} onSaved={state.reload} />
       <WorkerHomeResource key={`home-${worker.id}`} worker={worker} onSaved={state.reload} />
       <div className={styles.toolbar}>

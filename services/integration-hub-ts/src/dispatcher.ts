@@ -22,6 +22,8 @@ export interface HubEvent extends ReplayCandidate {
   data: unknown;
   /** The CloudEvents `legalentityid` extension, when the event carries one. */
   legalEntityId?: string;
+  /** The CloudEvents `source` attribute, for subscription filters (not stored). */
+  source?: string;
   /** The CloudEvents `actor` extension: who caused the event. Not stored; used for echo suppression at enqueue. */
   actor?: string;
 }
@@ -30,6 +32,8 @@ export interface Subscription {
   id: string;
   url: string;
   secret: string;
+  /** The secret before a rotation, while its grace period runs: deliveries are signed with both. */
+  previousSecret?: string;
 }
 
 export interface PendingDelivery {
@@ -325,7 +329,7 @@ export class Dispatcher {
     const headers: Record<string, string> = {
       "content-type": "application/cloudevents+json",
       "idempotency-key": e.eventId,
-      "passage-signature": sign(this.#o.subscription.secret, now, body),
+      "passage-signature": sign(this.#o.subscription.secret, now, body, this.#o.subscription.previousSecret),
       ...(delivery.replay ? replayHeaders() : {}),
     };
     return { body, headers };

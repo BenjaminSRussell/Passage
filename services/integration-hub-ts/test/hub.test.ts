@@ -409,7 +409,8 @@ describe.skipIf(ownerUrl === undefined)("integration hub on Postgres", () => {
       `select policyname, roles::text[] as roles from pg_policies where schemaname = $1 and policyname like '%owner_scan'`,
       [fx.schema],
     );
-    expect(policies.rows).toHaveLength(2);
+    // hub_delivery and hub_subscription (0001), hub_client_usage for the retention purge (0006).
+    expect(policies.rows).toHaveLength(3);
     for (const p of policies.rows) expect(p.roles).not.toContain("passage_app");
   });
 

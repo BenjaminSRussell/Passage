@@ -2,9 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Badge, Card, DataTable, FormField, Input, PageHeader, Button, type DataTableColumn } from "../../shell/ui";
-import { fetchEntry, fetchTrialBalance, LedgerApiError, type Entry, type TrialBalance, type TrialBalanceQuery } from "./api/client";
+import { exportTrialBalanceCsv, fetchEntry, fetchTrialBalance, LedgerApiError, type Entry, type TrialBalance, type TrialBalanceQuery } from "./api/client";
 import { EntryAttachmentsCard } from "./BatchAttachments";
 import { parseDimensionFilter } from "./BatchLinesEditor";
+import { ExportButton } from "./ExportButton";
 import styles from "./pages.module.css";
 import { ReverseEntryForm } from "./ReverseEntryForm";
 
@@ -187,6 +188,7 @@ export function TrialBalanceScreen() {
             empty={{ title: "No balances", description: "Nothing has been posted to this ledger for the selected periods, accounts and dimensions." }}
             onRowOpen={(row) => query && navigate(transactionsLink(query, row.account, row.dimensions))}
           />
+          {result.data ? <ExportButton label="Export trial balance (CSV)" run={() => exportTrialBalanceCsv(query)} /> : null}
           <p className={styles.note}>Open an account to see its posted lines.</p>
         </>
       )}

@@ -187,7 +187,7 @@ describe("Campaign detail", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Kill campaign" }));
     expect(await screen.findByRole("button", { name: "Restore campaign" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("leave the next price resolution");
+    expect(screen.getAllByRole("status").some((s) => /leave the next price resolution/.test(s.textContent ?? ""))).toBe(true);
     expect(screen.getByText("Killed")).toBeInTheDocument();
     const kill = server.calls.find((c) => c.method === "POST")!;
     expect(kill.body).toEqual({ version: 1 });

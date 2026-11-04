@@ -84,7 +84,7 @@ export function parseEvent(message: KafkaMessageInput): { tenantId: string; even
   if (e["specversion"] !== "1.0") {
     return { reason: "specversion is not 1.0" };
   }
-  const { id, type, tenantid: tenantId, subject, time, actor, legalentityid } = e;
+  const { id, type, tenantid: tenantId, subject, time, actor, legalentityid, source } = e;
   if (typeof id !== "string" || id === "") {
     return { reason: "missing id" };
   }
@@ -117,6 +117,7 @@ export function parseEvent(message: KafkaMessageInput): { tenantId: string; even
       occurredAt,
       data: e["data"] ?? null,
       ...(typeof actor === "string" && actor !== "" ? { actor } : {}),
+      ...(typeof source === "string" && source !== "" ? { source } : {}),
       ...(typeof legalentityid === "string" && UUID.test(legalentityid) ? { legalEntityId: legalentityid.toLowerCase() } : {}),
     },
   };

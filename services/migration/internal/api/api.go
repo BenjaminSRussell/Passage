@@ -43,6 +43,7 @@ const (
 	CodeSpecUnknown     = "MIG-SPEC-UNKNOWN"
 	CodeTemplateUnknown = "MIG-TEMPLATE-UNKNOWN"
 	CodeProjectUnknown  = "MIG-PROJECT-UNKNOWN"
+	CodeSpecProject     = "MIG-SPEC-PROJECT"
 	CodeProjectType     = "MIG-PROJECT-NOT-MIGRATE"
 	codeKeyReuse        = "idempotency_key_reuse"
 )
@@ -90,6 +91,8 @@ type createRunRequest struct {
 
 type publishSpecRequest struct {
 	Mapping json.RawMessage `json:"mapping"`
+	// ProjectID scopes the spec to a migrate project; empty publishes a tenant-wide spec.
+	ProjectID string `json:"projectId"`
 }
 
 type specView struct {
@@ -99,6 +102,8 @@ type specView struct {
 	Checksum   string          `json:"checksum"`
 	FieldCount int             `json:"fieldCount"`
 	TestCount  int             `json:"testCount"`
+	ProjectID  string          `json:"projectId,omitempty"`
+	NaturalKey []string        `json:"naturalKey"`
 	CreatedAt  time.Time       `json:"createdAt"`
 	Mapping    json.RawMessage `json:"mapping,omitempty"`
 }
@@ -168,6 +173,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerSync(r)
 	a.registerOutbound(r)
 	a.registerLookup(r)
+	a.registerSettings(r)
 }
 
 func (a *API) Metrics() http.Handler {
@@ -229,6 +235,16 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		raw, specID = spec.Spec, spec.ID
+		switch {
+		case spec.ProjectID == "":
+		case req.ProjectID == "":
+			req.ProjectID = spec.ProjectID // the spec's project owns the run, so its claim and lineage apply
+		case req.ProjectID != spec.ProjectID:
+			p := httpx.NewProblem(http.StatusUnprocessableEntity, CodeSpecProject, "the mapping spec belongs to another migration project")
+			p.Errors = map[string]string{"projectId": "must be the spec's project, " + spec.ProjectID}
+			fail(w, r, p)
+			return
+		}
 	}
 	mapping, err := domain.ParseMapping(raw)
 	if err != nil {
@@ -519,8 +535,12 @@ func (a *API) publishSpec(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, problemFrom(&domain.Error{Code: domain.CodeMapInvalid, Detail: "mapping JSON: " + err.Error()}))
 		return
 	}
+	if req.ProjectID != "" && !a.checkSpecProject(w, r, req.ProjectID) {
+		return
+	}
 	saved, created, err := a.store.SaveMappingSpec(r.Context(), store.MappingSpec{
 		Entity: mapping.Entity, Version: mapping.Version, Checksum: sum, FieldCount: len(mapping.Fields), TestCount: len(mapping.Tests), Spec: canonical,
+		ProjectID: req.ProjectID, NaturalKey: mapping.NaturalKey,
 	}, r.Header.Get(idempotencyHeader))
 	if err != nil {
 		a.logFailure(r, "publish mapping spec failed", err)
@@ -533,6 +553,37 @@ func (a *API) publishSpec(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", specsPath+"/"+saved.ID)
 	}
 	httpx.JSON(w, status, specToView(saved, false))
+}
+
+// checkSpecProject answers false after writing the problem when the project cannot take a mapping spec: malformed id
+// (400), unknown (422), not a migrate project (422) or archived (409).
+func (a *API) checkSpecProject(w http.ResponseWriter, r *http.Request, projectID string) bool {
+	if !ids.Valid(projectID) {
+		fail(w, r, validation(map[string]string{"projectId": "must be a UUID"}))
+		return false
+	}
+	pr, err := a.store.GetProject(r.Context(), projectID)
+	if err != nil {
+		var p *httpx.Problem
+		if errors.As(err, &p) && p.Status == http.StatusNotFound {
+			p = httpx.NewProblem(http.StatusUnprocessableEntity, CodeProjectUnknown, "projectId names no migration project")
+			p.Errors = map[string]string{"projectId": "no migration project has this id"}
+			err = p
+		} else {
+			a.logFailure(r, "load project for mapping spec failed", err)
+		}
+		fail(w, r, err)
+		return false
+	}
+	switch {
+	case pr.Type != domain.ProjectMigrate:
+		fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeProjectType, "only a migrate project has mapping specs"))
+	case pr.Status == domain.ProjectArchived:
+		fail(w, r, store.ProjectArchived())
+	default:
+		return true
+	}
+	return false
 }
 
 func (a *API) listSpecs(w http.ResponseWriter, r *http.Request) {
@@ -550,7 +601,17 @@ func (a *API) listSpecs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	specs, err := a.store.ListMappingSpecs(r.Context(), r.URL.Query().Get("entity"), after, limit+1)
+	var scope store.SpecScope
+	switch pid := r.URL.Query().Get("projectId"); {
+	case pid == "none":
+		scope.TenantWide = true
+	case pid != "" && !ids.Valid(pid):
+		fail(w, r, validation(map[string]string{"projectId": "must be a UUID, or none for tenant-wide specs"}))
+		return
+	default:
+		scope.ProjectID = pid
+	}
+	specs, err := a.store.ListMappingSpecsIn(r.Context(), scope, r.URL.Query().Get("entity"), after, limit+1)
 	if err != nil {
 		a.logFailure(r, "list mapping specs failed", err)
 		fail(w, r, err)
@@ -563,7 +624,7 @@ func (a *API) listSpecs(w http.ResponseWriter, r *http.Request) {
 	}
 	body := map[string]any{"items": items}
 	if more {
-		body["nextCursor"] = encodePageCursor(store.SpecCursor{Entity: specs[limit-1].Entity, Version: specs[limit-1].Version})
+		body["nextCursor"] = encodePageCursor(store.SpecCursor{Entity: specs[limit-1].Entity, Version: specs[limit-1].Version, ID: specs[limit-1].ID})
 	}
 	httpx.JSON(w, http.StatusOK, body)
 }
@@ -582,7 +643,7 @@ func (a *API) getSpec(w http.ResponseWriter, r *http.Request) {
 }
 
 func specToView(s store.MappingSpec, withMapping bool) specView {
-	v := specView{ID: s.ID, Entity: s.Entity, Version: s.Version, Checksum: s.Checksum, FieldCount: s.FieldCount, TestCount: s.TestCount, CreatedAt: s.CreatedAt}
+	v := specView{ID: s.ID, Entity: s.Entity, Version: s.Version, Checksum: s.Checksum, FieldCount: s.FieldCount, TestCount: s.TestCount, ProjectID: s.ProjectID, NaturalKey: s.NaturalKey, CreatedAt: s.CreatedAt}
 	if withMapping {
 		v.Mapping = s.Spec
 	}

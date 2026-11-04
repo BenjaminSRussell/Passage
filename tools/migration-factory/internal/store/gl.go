@@ -109,6 +109,9 @@ func runGLBalances(ctx context.Context, tx pgx.Tx, in GLBalancesRun) (domain.Pac
 	for _, g := range toLoad {
 		held[g.LegacyID] = g
 	}
+	if run.Tolerances, err = loadTolerances(ctx, tx); err != nil {
+		return domain.PackRun{}, err
+	}
 	if err := domain.ReconcileGL(&run, in.Balances, in.Accepted, len(toLoad), held, openItems); err != nil {
 		return domain.PackRun{}, err
 	}

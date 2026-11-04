@@ -11,6 +11,7 @@ import {
   type LeaseLine,
   type LeaseModification,
   type LeaseModificationResult,
+  type LeaseTermination,
   type LeasePostings,
   type ModifyLeaseInput,
   type Problem,
@@ -90,8 +91,12 @@ function LedgerCard({ lease }: { lease: Lease }) {
   }
   const postings: LeasePostings = state.data;
   const rows: PostingRow[] = [
-    { key: "0", label: "Recognition", date: lease.commencementDate, journalId: postings.recognitionJournalId },
+    // A lease under an election is never recognized, so it has no recognition journal to wait for.
+    ...(isExempt(lease) ? [] : [{ key: "0", label: "Recognition", date: lease.commencementDate, journalId: postings.recognitionJournalId }]),
     ...postings.periods.map((p) => ({ key: String(p.periodNo), label: `Period ${p.periodNo}`, date: p.periodEnd, journalId: p.postedJournalId })),
+    ...(lease.termination
+      ? [{ key: "termination", label: "Termination", date: lease.termination.terminationDate, journalId: postings.terminationJournalId ?? null }]
+      : []),
   ];
   const booked = rows.filter((r) => r.journalId).length;
   return (
@@ -104,7 +109,30 @@ function LedgerCard({ lease }: { lease: Lease }) {
   );
 }
 
-export const canModify = (lease: Lease) => lease.status === "Active" || lease.status === "Modified";
+/** The early termination of a lease and what it derecognized (D4c). */
+function TerminationCard({ lease, termination }: { lease: Lease; termination: LeaseTermination }) {
+  const gain = !termination.gainLoss.startsWith("-");
+  return (
+    <Card title="Termination">
+      <div className={styles.stack}>
+        <dl className={styles.details}>
+          <Detail term="Terminated on">{termination.terminationDate} (after period {termination.afterPeriod})</Detail>
+          <Detail term="Liability derecognized">{money(termination.liabilityDerecognized, lease.currency)}</Detail>
+          <Detail term="ROU asset derecognized">{money(termination.rouCarrying, lease.currency)} carrying ({money(termination.rouGross, lease.currency)} cost less {money(termination.rouAccumulated, lease.currency)} depreciation)</Detail>
+          <Detail term="Termination payment">{money(termination.terminationPayment, lease.currency)}</Detail>
+          <Detail term={gain ? "Gain" : "Loss"}>{money(gain ? termination.gainLoss : termination.gainLoss.slice(1), lease.currency)}</Detail>
+          {termination.reason ? <Detail term="Reason">{termination.reason}</Detail> : null}
+        </dl>
+        <p className={styles.note}>{termination.journalId ? "The termination journal is in the ledger." : "The termination journal is booked with the lease postings, after every period up to the termination."}</p>
+      </div>
+    </Card>
+  );
+}
+
+/** A lease under a short-term or low-value election has nothing to remeasure or derecognize (AST-0037). */
+export const isExempt = (lease: Lease) => lease.election === "ShortTerm" || lease.election === "LowValue";
+
+export const canModify = (lease: Lease) => (lease.status === "Active" || lease.status === "Modified") && !isExempt(lease);
 
 /** Lease detail: recognized liability and ROU asset, the schedule in force and its remeasurements (FR-37.10). */
 export function LeaseDetailPage() {
@@ -146,12 +174,22 @@ export function LeaseDetailPage() {
         meta={<StatusBadge status={lease.status} />}
         actions={
           canModify(lease) ? (
-            <Link className={buttonClassName("primary")} to={`/assets/leases/${lease.id}/modify`}>
-              Modify lease
-            </Link>
+            <>
+              <Link className={buttonClassName("primary")} to={`/assets/leases/${lease.id}/modify`}>
+                Modify lease
+              </Link>
+              <Link className={buttonClassName("ghost")} to={`/assets/leases/${lease.id}/terminate`}>
+                Terminate lease
+              </Link>
+            </>
           ) : undefined
         }
       />
+      {isExempt(lease) ? (
+        <Alert tone="info" title="Not recognized on the balance sheet">
+          This lease is under a {lease.election === "ShortTerm" ? "short-term" : "low-value"} election (IFRS 16.5-8): it has no liability or right-of-use asset, and each payment is expensed when its period is posted. It cannot be modified or terminated.
+        </Alert>
+      ) : null}
       <StatGroup label="Lease balances">
         <StatTile label="Recognized liability" value={money(lease.liability, lease.currency)} />
         <StatTile label="Recognized ROU asset" value={money(lease.rouAsset, lease.currency)} />
@@ -167,6 +205,12 @@ export function LeaseDetailPage() {
           <Detail term="Timing">{lease.paymentTiming === "advance" ? "In advance" : "In arrears"}</Detail>
           <Detail term="Incremental borrowing rate">{percent(lease.ibrRate)}</Detail>
           <Detail term="Periodic rate">{lease.rateMethod === "Effective" ? "Effective (compounds to the annual rate)" : "Nominal (annual rate / payments per year)"}</Detail>
+          {isExempt(lease) ? (
+            <Detail term="Recognition exemption">
+              {lease.election === "ShortTerm" ? "Short-term lease" : `Low-value asset (${money(lease.underlyingAssetValue ?? "0", lease.underlyingAssetCurrency ?? lease.currency)} when new)`}
+            </Detail>
+          ) : null}
+          {lease.purchaseOption ? <Detail term="Purchase option">The lease contains a purchase option</Detail> : null}
           <Detail term="Legal entity">
             <span className={styles.mono}>{lease.legalEntityId}</span>
           </Detail>
@@ -177,6 +221,7 @@ export function LeaseDetailPage() {
           <DataTable label="Remeasurements" columns={modificationColumns(lease.currency)} rows={modifications} getRowKey={(m) => m.id} empty={{ title: "No remeasurements" }} />
         </Card>
       ) : null}
+      {lease.termination ? <TerminationCard lease={lease} termination={lease.termination} /> : null}
       <LedgerCard lease={lease} />
       <Card title="Liability and ROU schedule">
         <div className={styles.stack}>
@@ -324,7 +369,9 @@ export function ModifyLeasePage() {
       <div className={styles.stack}>
         <PageHeader title={`Modify lease ${lease.leaseNumber}`} meta={<StatusBadge status={lease.status} />} />
         <Alert tone="warning" title="This lease cannot be modified">
-          Only an active or modified lease can be remeasured.
+          {isExempt(lease)
+            ? "A lease under a short-term or low-value election has no liability to remeasure; record a change of its payments or term as a new lease."
+            : "Only an active or modified lease can be remeasured."}
         </Alert>
         <Link className={buttonClassName("ghost")} to={back}>
           Back to the lease

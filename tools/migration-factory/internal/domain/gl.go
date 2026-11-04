@@ -179,6 +179,9 @@ func ReconcileGL(r *PackRun, source, accepted []GLBalance, loaded int, held map[
 		return err
 	}
 	r.Totals = append(totals, controls...)
+	if err := r.applyTolerances(); err != nil {
+		return err
+	}
 	if !r.HasMismatch() {
 		return r.Advance(StatusReconciled)
 	}

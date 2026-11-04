@@ -107,7 +107,7 @@ func TestPostgres_AC124TwentyThreeDocumentsKeepEveryLedgerBalancedWithExpectedBa
 	} {
 		for number, a := range accounts {
 			a.Postable = true
-			if _, _, err := e.store.PutAccount(e.ctx, ledgerCode, number, a); err != nil {
+			if _, _, err := e.store.PutAccount(e.ctx, ledgerCode, number, 0, a); err != nil {
 				t.Fatalf("put account %s/%s: %v", ledgerCode, number, err)
 			}
 		}

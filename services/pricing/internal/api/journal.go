@@ -187,6 +187,24 @@ func (a *API) submitJournal(w http.ResponseWriter, r *http.Request, req journalR
 	case len(req.Lines) > domain.MaxJournalLines:
 		fields["lines"] = fmt.Sprintf("a journal holds at most %d lines", domain.MaxJournalLines)
 	}
+	// A CREATE line that leaves searchNext out takes the legal entity's price_search_mode.
+	var searchNext *bool
+	for i := range req.Lines {
+		dto := &req.Lines[i]
+		if dto.Op != string(domain.OpCreate) || dto.Record == nil || dto.Record.SearchNext != nil || !ids.Valid(req.LegalEntityID) {
+			continue
+		}
+		if searchNext == nil {
+			next, err := a.searchNextDefault(r, req.LegalEntityID)
+			if err != nil {
+				slog.Error("get pricing parameters failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+				httpx.Fail(w, r, err)
+				return
+			}
+			searchNext = &next
+		}
+		dto.Record.SearchNext = searchNext
+	}
 	lines := make([]domain.JournalLine, 0, len(req.Lines))
 	for i, dto := range req.Lines {
 		line, lf, p := toJournalLine(dto, i)

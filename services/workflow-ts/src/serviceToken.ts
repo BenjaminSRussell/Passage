@@ -14,6 +14,8 @@ export const QUALITY_AUDIENCE = "quality";
 export const QUALITY_GRANT = ["quality.capa.execute"] as const;
 export const TRANSPORT_AUDIENCE = "transport";
 export const TRANSPORT_GRANT = ["transport.tender.execute"] as const;
+export const PARTY_AUDIENCE = "party";
+export const PARTY_GRANT = ["party.approve"] as const;
 
 export interface TokenSubject {
   tenantId: string;
@@ -32,6 +34,7 @@ export interface ServiceTokenSigner {
   mintForEngineering(subject: TokenSubject): string;
   mintForQuality(subject: TokenSubject): string;
   mintForTransport(subject: TokenSubject): string;
+  mintForParty(subject: TokenSubject): string;
 }
 
 export interface SignerOptions {
@@ -72,6 +75,7 @@ export function createServiceTokenSigner(options: SignerOptions): ServiceTokenSi
     mintForEngineering: (subject) => mint(ENGINEERING_AUDIENCE, ENGINEERING_GRANT, subject, true),
     mintForQuality: (subject) => mint(QUALITY_AUDIENCE, QUALITY_GRANT, subject, true),
     mintForTransport: (subject) => mint(TRANSPORT_AUDIENCE, TRANSPORT_GRANT, subject, true),
+    mintForParty: (subject) => mint(PARTY_AUDIENCE, PARTY_GRANT, subject, true),
   };
 }
 

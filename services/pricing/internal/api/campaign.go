@@ -19,6 +19,7 @@ const (
 	campaignPath        = "/v1/pricing/campaigns/{id}"
 	campaignKillPath    = "/v1/pricing/campaigns/{id}:kill"
 	campaignRestorePath = "/v1/pricing/campaigns/{id}:restore"
+	campaignRevisePath  = "/v1/pricing/campaigns/{id}:revise"
 )
 
 type campaignRequest struct {
@@ -57,6 +58,7 @@ func (a *API) registerCampaignRoutes(r chi.Router) {
 	r.With(authz.RequireDuty(dutyMaintain)).Post(campaignsPath, a.createCampaign)
 	r.With(authz.RequireDuty(dutyView)).Get(campaignsPath, a.listCampaigns)
 	r.With(authz.RequireDuty(dutyView)).Get(campaignPath, a.getCampaign)
+	r.With(authz.RequireDuty(dutyMaintain)).Post(campaignRevisePath, a.reviseCampaign)
 	r.With(authz.RequireDuty(dutyMaintain)).Post(campaignKillPath, a.campaignSwitch(true))
 	r.With(authz.RequireDuty(dutyMaintain)).Post(campaignRestorePath, a.campaignSwitch(false))
 }
@@ -166,4 +168,72 @@ func (a *API) campaignSwitch(kill bool) http.HandlerFunc {
 		}
 		httpx.JSON(w, http.StatusOK, campaignResponse(c))
 	}
+}
+
+// campaignReviseRequest changes a campaign at the version the caller read; an omitted field
+// stays as it is. An empty targetCustomerGroup means every customer.
+type campaignReviseRequest struct {
+	Version             int     `json:"version"`
+	Name                *string `json:"name"`
+	ValidFrom           *string `json:"validFrom"`
+	ValidTo             *string `json:"validTo"`
+	TargetCustomerGroup *string `json:"targetCustomerGroup"`
+	Budget              *string `json:"budget"`
+}
+
+// reviseCampaign edits a campaign's terms (FR-26.10). The merged campaign is validated as on
+// create; the change takes effect on the next resolve.
+func (a *API) reviseCampaign(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, ok := uuidParam(w, r, domain.CodeCampaignNotFound, "campaign")
+	if !ok {
+		return
+	}
+	var req campaignReviseRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if req.Version < 1 {
+		fields["version"] = "is required and must be at least 1"
+	}
+	rev := domain.CampaignRevision{ID: id, Version: req.Version, Name: req.Name, TargetCustomerGroup: req.TargetCustomerGroup}
+	for _, d := range []struct {
+		name string
+		raw  *string
+		into **time.Time
+	}{{"validFrom", req.ValidFrom, &rev.ValidFrom}, {"validTo", req.ValidTo, &rev.ValidTo}} {
+		if d.raw == nil {
+			continue
+		}
+		day, err := time.Parse(dateLayout, *d.raw)
+		if err != nil {
+			fields[d.name] = "must be a date in YYYY-MM-DD form"
+			continue
+		}
+		*d.into = &day
+	}
+	if req.Budget != nil {
+		budget, err := decimal.NewFromString(*req.Budget)
+		if err != nil {
+			fields["budget"] = "must be a decimal"
+		}
+		rev.Budget = &budget
+	}
+	if rev.Name == nil && rev.ValidFrom == nil && rev.ValidTo == nil && rev.TargetCustomerGroup == nil && rev.Budget == nil {
+		fields["body"] = "change at least one of name, validFrom, validTo, targetCustomerGroup or budget"
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	out, err := a.store.ReviseCampaign(r.Context(), rev, r.Header.Get(idempotencyKey))
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, campaignResponse(out))
 }

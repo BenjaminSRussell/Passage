@@ -319,3 +319,196 @@ func TestAndonQualityFail_LongDetailIsClipped(t *testing.T) {
 		t.Fatalf("open = %+v", open)
 	}
 }
+
+// FR-25.11, BR-25.6: a RUNNING machine that stops counting gets an idle DowntimeRecord from the
+// sweep, starting at its last count, once; its andon follows after 10 minutes; the next count
+// ends the record. A machine that is DOWN, or still counting, gets none.
+func TestAndonSweep_IdleMachineOpensDowntime(t *testing.T) {
+	s, app, _ := setup(t)
+	tenantID := testkit.TenantID(230)
+	ctx := testkit.Ctx(tenantID)
+	mustMachine(t, s, ctx, "M-301", ids.New())
+	mustMachine(t, s, ctx, "M-302", ids.New()) // keeps counting
+	mustMachine(t, s, ctx, "M-303", ids.New()) // DOWN
+	t0 := time.Date(2026, 10, 21, 8, 0, 0, 0, time.UTC)
+	at := func(min int) time.Time { return t0.Add(time.Duration(min) * time.Minute) }
+	count := func(code string, seq int64, when time.Time) MachineEventIn {
+		return MachineEventIn{MachineCode: code, Event: domain.MachineEvent{Seq: seq, Kind: "count", At: when, GoodCount: 3}}
+	}
+	if _, err := s.IngestMachineEvents(ctx, at(3), []MachineEventIn{
+		floorEvent("M-301", 1, "state", at(0), domain.MachineRunning), count("M-301", 2, at(2)),
+		floorEvent("M-302", 1, "state", at(0), domain.MachineRunning), count("M-302", 2, at(2)),
+		floorEvent("M-303", 1, "state", at(0), domain.MachineDown),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The default threshold is 5 minutes: exactly 5 minutes after the last count is not idle yet.
+	if res, err := s.SweepAndon(ctx, at(7)); err != nil || res.IdleOpened != 0 {
+		t.Fatalf("sweep at the threshold = %+v, %v", res, err)
+	}
+	if _, err := s.IngestMachineEvents(ctx, at(8), []MachineEventIn{count("M-302", 3, at(7))}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.SweepAndon(ctx, at(8))
+	if err != nil || res.IdleOpened != 1 {
+		t.Fatalf("sweep past the threshold = %+v, %v", res, err)
+	}
+	if res, err := s.SweepAndon(ctx, at(9)); err != nil || res.IdleOpened != 0 {
+		t.Fatalf("repeat sweep = %+v, %v", res, err)
+	}
+	downs, err := s.ListDowntimes(ctx, DowntimeFilter{OpenOnly: true, Limit: 10})
+	if err != nil || len(downs) != 2 {
+		t.Fatalf("open downtimes = %+v, %v", downs, err)
+	}
+	var idle Downtime
+	for _, d := range downs {
+		switch d.Cause {
+		case domain.DowntimeCauseIdle:
+			idle = d
+		case domain.DowntimeCauseDown:
+		default:
+			t.Fatalf("cause %q", d.Cause)
+		}
+	}
+	if idle.ID == "" || !idle.StartedAt.Equal(at(2)) || idle.Category != "unplanned" {
+		t.Fatalf("idle downtime = %+v", idle)
+	}
+
+	// Idle for more than 10 minutes raises the downtime alert from the sweep.
+	if _, err := s.IngestMachineEvents(ctx, at(12), []MachineEventIn{count("M-302", 4, at(12))}); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := s.SweepAndon(ctx, at(13)); err != nil || res.DowntimeRaised != 2 {
+		// the DOWN machine's downtime (since 0) and the idle one (since 2) are both over 10 minutes
+		t.Fatalf("sweep at 13 = %+v, %v", res, err)
+	}
+	if n := countEvents(t, app, tenantID, sfevents.AndonRaised); n != 2 {
+		t.Fatalf("andon.raised rows = %d, want 2", n)
+	}
+
+	// An alarm does not end idle time; a count does, at the count's time.
+	if _, err := s.IngestMachineEvents(ctx, at(14), []MachineEventIn{floorEvent("M-301", 3, "alarm", at(14), "")}); err != nil {
+		t.Fatal(err)
+	}
+	if downs, _ := s.ListDowntimes(ctx, DowntimeFilter{OpenOnly: true, Limit: 10}); len(downs) != 2 {
+		t.Fatalf("alarm ended idle: %+v", downs)
+	}
+	if _, err := s.IngestMachineEvents(ctx, at(15), []MachineEventIn{count("M-301", 4, at(15))}); err != nil {
+		t.Fatal(err)
+	}
+	downs, _ = s.ListDowntimes(ctx, DowntimeFilter{Limit: 10})
+	ended := false
+	for _, d := range downs {
+		if d.ID == idle.ID {
+			ended = d.EndedAt != nil && d.EndedAt.Equal(at(15))
+		}
+	}
+	if !ended {
+		t.Fatalf("idle downtime not ended at the count: %+v", downs)
+	}
+}
+
+// BR-25.6: a machine that reports DOWN while idle ends the idle record and opens a downtime of
+// its own; one explicit IDLE report keeps the record open.
+func TestAndonSweep_DownEndsIdleDowntime(t *testing.T) {
+	s, _, _ := setup(t)
+	tenantID := testkit.TenantID(231)
+	ctx := testkit.Ctx(tenantID)
+	mustMachine(t, s, ctx, "M-311", ids.New())
+	t0 := time.Date(2026, 10, 21, 8, 0, 0, 0, time.UTC)
+	at := func(min int) time.Time { return t0.Add(time.Duration(min) * time.Minute) }
+	if _, err := s.IngestMachineEvents(ctx, at(1), []MachineEventIn{floorEvent("M-311", 1, "state", at(0), domain.MachineRunning)}); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := s.SweepAndon(ctx, at(6)); err != nil || res.IdleOpened != 1 {
+		t.Fatalf("sweep = %+v, %v", res, err)
+	}
+	if _, err := s.IngestMachineEvents(ctx, at(7), []MachineEventIn{floorEvent("M-311", 2, "state", at(7), domain.MachineIdle)}); err != nil {
+		t.Fatal(err)
+	}
+	if downs, _ := s.ListDowntimes(ctx, DowntimeFilter{OpenOnly: true, Limit: 10}); len(downs) != 1 || downs[0].Cause != domain.DowntimeCauseIdle {
+		t.Fatalf("IDLE report: %+v", downs)
+	}
+	if _, err := s.IngestMachineEvents(ctx, at(9), []MachineEventIn{floorEvent("M-311", 3, "state", at(9), domain.MachineDown)}); err != nil {
+		t.Fatal(err)
+	}
+	downs, _ := s.ListDowntimes(ctx, DowntimeFilter{Limit: 10})
+	if len(downs) != 2 {
+		t.Fatalf("downtimes = %+v", downs)
+	}
+	for _, d := range downs {
+		switch d.Cause {
+		case domain.DowntimeCauseIdle:
+			if d.EndedAt == nil || !d.EndedAt.Equal(at(9)) {
+				t.Fatalf("idle record = %+v", d)
+			}
+		case domain.DowntimeCauseDown:
+			if d.EndedAt != nil || !d.StartedAt.Equal(at(9)) {
+				t.Fatalf("down record = %+v", d)
+			}
+		}
+	}
+	// A DOWN machine is never idle.
+	if res, err := s.SweepAndon(ctx, at(30)); err != nil || res.IdleOpened != 0 {
+		t.Fatalf("sweep while DOWN = %+v, %v", res, err)
+	}
+}
+
+// BR-25.6: a repeated RUNNING report is not a count, so it leaves the idle record open. Ending it
+// there would let the next sweep open a second idle record from the same last count, over the
+// same gap.
+func TestAndonSweep_RunningHeartbeatKeepsIdleOpen(t *testing.T) {
+	s, _, _ := setup(t)
+	tenantID := testkit.TenantID(232)
+	ctx := testkit.Ctx(tenantID)
+	mustMachine(t, s, ctx, "M-321", ids.New())
+	t0 := time.Date(2026, 10, 21, 8, 0, 0, 0, time.UTC)
+	at := func(min int) time.Time { return t0.Add(time.Duration(min) * time.Minute) }
+	if _, err := s.IngestMachineEvents(ctx, at(1), []MachineEventIn{floorEvent("M-321", 1, "state", at(0), domain.MachineRunning)}); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := s.SweepAndon(ctx, at(6)); err != nil || res.IdleOpened != 1 {
+		t.Fatalf("sweep = %+v, %v", res, err)
+	}
+	if _, err := s.IngestMachineEvents(ctx, at(7), []MachineEventIn{floorEvent("M-321", 2, "state", at(7), domain.MachineRunning)}); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := s.SweepAndon(ctx, at(13)); err != nil || res.IdleOpened != 0 {
+		t.Fatalf("sweep after the heartbeat = %+v, %v", res, err)
+	}
+	downs, err := s.ListDowntimes(ctx, DowntimeFilter{Limit: 10})
+	if err != nil || len(downs) != 1 || downs[0].EndedAt != nil || !downs[0].StartedAt.Equal(at(0)) {
+		t.Fatalf("downtimes = %+v, %v", downs, err)
+	}
+}
+
+// A machine whose events are being ingested (its row locked, as IngestMachineEvents locks it) is
+// skipped by the idle sweep rather than waited on; the next sweep, after that ingest, opens the
+// record. The idle sweep and ingest never both decide for one machine at once.
+func TestAndonSweep_IdleSkipsMachineBeingIngested(t *testing.T) {
+	s, _, admin := setup(t)
+	tenantID := testkit.TenantID(233)
+	ctx := testkit.Ctx(tenantID)
+	mustMachine(t, s, ctx, "M-331", ids.New())
+	t0 := time.Date(2026, 10, 21, 8, 0, 0, 0, time.UTC)
+	if _, err := s.IngestMachineEvents(ctx, t0, []MachineEventIn{floorEvent("M-331", 1, "state", t0, domain.MachineRunning)}); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := admin.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Rollback(context.Background()) }()
+	if _, err := lock.Exec(context.Background(), `select 1 from machine where tenant_id = $1 and code = 'M-331' for update`, tenantID); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := s.SweepAndon(ctx, t0.Add(10*time.Minute)); err != nil || res.IdleOpened != 0 {
+		t.Fatalf("sweep while ingesting = %+v, %v", res, err)
+	}
+	if err := lock.Rollback(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := s.SweepAndon(ctx, t0.Add(11*time.Minute)); err != nil || res.IdleOpened != 1 {
+		t.Fatalf("sweep after the ingest = %+v, %v", res, err)
+	}
+}

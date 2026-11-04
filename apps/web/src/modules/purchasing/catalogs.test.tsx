@@ -327,4 +327,30 @@ describe("requisition detail", () => {
     expect(within(rows[1]).getByText("Catalog")).toBeInTheDocument();
     expect(within(rows[2]).getByText("Non-catalog")).toBeInTheDocument();
   });
+
+  it("says which line a split line was cut from", async () => {
+    const line = { description: "Bolts", category: "MRO", qty: "10", unit: "EA", estimatedUnitPrice: "1", amount: "10", requestedDate: "2026-11-02", status: "OPEN" };
+    const requisition = {
+      id: "r1",
+      number: "PR-1",
+      legalEntityId: LE,
+      requesterId: VENDOR,
+      status: "APPROVED",
+      currency: "USD",
+      total: "20",
+      approverChain: [],
+      version: 2,
+      lines: [
+        { ...line, id: "l1", lineNo: 1 },
+        { ...line, id: "l2", lineNo: 2, splitFromLineId: "l1" },
+      ],
+      createdAt: "2026-10-26T10:00:00Z",
+      updatedAt: "2026-10-26T10:00:00Z",
+    };
+    stubFetch(() => json(requisition, 200, { ETag: '"2"' }));
+    renderAt("/purchasing/requisitions/r1");
+    const rows = within(await findTable({ name: "Requisition lines" })).getAllByRole("row");
+    expect(within(rows[1]).queryByText(/split from/)).not.toBeInTheDocument();
+    expect(within(rows[2]).getByText("(split from line 1)")).toBeInTheDocument();
+  });
 });

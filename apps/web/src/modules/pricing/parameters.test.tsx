@@ -39,9 +39,84 @@ describe("Pricing parameters", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save parameters" }));
     expect(await screen.findByText("Parameters saved")).toBeInTheDocument();
     const put = server.calls.find((c) => c.method === "PUT")!;
-    expect(put.body).toEqual({ legalEntityId: LE, journalFourEyes: true, version: 0 });
+    expect(put.body).toEqual({
+      legalEntityId: LE,
+      journalFourEyes: true,
+      pricingDateBasis: "SHIP_DATE",
+      totalDiscountBasis: "AFTER_LINE_DISC",
+      smartRoundingBands: [{ upTo: "10", ending: "0.99" }, { upTo: "100", ending: "0.95" }, { ending: "0" }],
+      priceSearchMode: "FIRST_MATCH",
+      smallOrderThresholds: {},
+      version: 0,
+    });
     expect(idempotencyKey(put)).toBeTruthy();
     expect(screen.getByText("Version 1, saved by ana")).toBeInTheDocument();
+  });
+
+  it("saves the date basis, total discount basis and an edited rounding table", async () => {
+    server.handler = (url, init) => {
+      if (!url.pathname.endsWith("/parameters")) return undefined;
+      if (init.method === "PUT") return json(200, { ...(init.body ? JSON.parse(String(init.body)) : {}), version: 5 });
+      return json(200, {
+        legalEntityId: LE,
+        journalFourEyes: false,
+        pricingDateBasis: "ORDER_DATE",
+        totalDiscountBasis: "GROSS",
+        smartRoundingBands: [{ upTo: "20", ending: "0.5" }, { ending: "0" }],
+        version: 4,
+      });
+    };
+    const { container } = renderAt("/pricing/parameters", ADMIN);
+    load();
+    expect(await screen.findByLabelText("Pricing date basis")).toHaveValue("ORDER_DATE");
+    expect(screen.getByLabelText("Total discount basis")).toHaveValue("GROSS");
+    expect(screen.getByLabelText("Band 1: below")).toHaveValue("20");
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.change(screen.getByLabelText("Pricing date basis"), { target: { value: "DELIVERY_DATE" } });
+    fireEvent.change(screen.getByLabelText("Total discount basis"), { target: { value: "AFTER_LINE_DISC" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add band" }));
+    fireEvent.change(screen.getByLabelText("Band 2: below"), { target: { value: "50" } });
+    fireEvent.change(screen.getByLabelText("Band 2: ending"), { target: { value: "0.95" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save parameters" }));
+    expect(await screen.findByText("Parameters saved")).toBeInTheDocument();
+    const put = server.calls.find((c) => c.method === "PUT")!;
+    expect(put.body).toEqual({
+      legalEntityId: LE,
+      journalFourEyes: false,
+      pricingDateBasis: "DELIVERY_DATE",
+      totalDiscountBasis: "AFTER_LINE_DISC",
+      smartRoundingBands: [{ upTo: "20", ending: "0.5" }, { upTo: "50", ending: "0.95" }, { ending: "0" }],
+      priceSearchMode: "FIRST_MATCH",
+      smallOrderThresholds: {},
+      version: 4,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Remove band 2" }));
+    expect(screen.queryByLabelText("Band 3: below")).toBeNull();
+  });
+
+  it("shows a refused band on its own field", async () => {
+    server.handler = (url, init) => {
+      if (!url.pathname.endsWith("/parameters")) return undefined;
+      if (init.method === "PUT")
+        return json(422, { code: "COM-0001", detail: "validation failed", errors: { "smartRoundingBands[1].upTo": "must be greater than the band before" } });
+      return json(200, { legalEntityId: LE, journalFourEyes: false, pricingDateBasis: "SHIP_DATE", totalDiscountBasis: "AFTER_LINE_DISC", smartRoundingBands: [{ upTo: "10", ending: "0.99" }, { upTo: "100", ending: "0.95" }, { ending: "0" }], version: 2 });
+    };
+    renderAt("/pricing/parameters", ADMIN);
+    load();
+    fireEvent.change(await screen.findByLabelText("Band 2: below"), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save parameters" }));
+    expect(await screen.findByText("must be greater than the band before")).toBeInTheDocument();
+    expect(screen.getByLabelText("Band 2: below")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Band 1: below")).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("shows the rounding table read-only without pricing.admin", async () => {
+    server.handler = () => json(200, { legalEntityId: LE, journalFourEyes: false, pricingDateBasis: "SHIP_DATE", totalDiscountBasis: "GROSS", smartRoundingBands: [{ ending: "0" }], version: 1 });
+    renderAt("/pricing/parameters", ["pricing.view"]);
+    load();
+    expect(await screen.findByLabelText("Band 1: ending")).toBeDisabled();
+    expect(screen.getByLabelText("Total discount basis")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Add band" })).toBeNull();
   });
 
   it("reads without pricing.admin but offers no save", async () => {
@@ -91,5 +166,70 @@ describe("Pricing parameters", () => {
     renderAt("/pricing/parameters");
     load();
     expect(await findAlert()).toHaveTextContent("internal error (COM-0500)");
+  });
+  it("saves the price search mode and the small order thresholds", async () => {
+    server.handler = (url, init) => {
+      if (!url.pathname.endsWith("/parameters")) return undefined;
+      if (init.method === "PUT") return json(200, { ...(init.body ? JSON.parse(String(init.body)) : {}), version: 3 });
+      return json(200, { legalEntityId: LE, journalFourEyes: false, pricingDateBasis: "SHIP_DATE", totalDiscountBasis: "AFTER_LINE_DISC", smartRoundingBands: [{ ending: "0" }], priceSearchMode: "SEARCH_NEXT", smallOrderThresholds: { USD: "100", EUR: "0" }, version: 2 });
+    };
+    const { container } = renderAt("/pricing/parameters", ADMIN);
+    load();
+    expect(await screen.findByLabelText("Price search mode")).toHaveValue("SEARCH_NEXT");
+    expect(screen.getByLabelText("Threshold 1: currency")).toHaveValue("EUR");
+    expect(screen.getByLabelText("Threshold 2: amount")).toHaveValue("100");
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.change(screen.getByLabelText("Price search mode"), { target: { value: "FIRST_MATCH" } });
+    fireEvent.change(screen.getByLabelText("Threshold 2: amount"), { target: { value: "150.50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Remove threshold 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add threshold" }));
+    fireEvent.change(screen.getByLabelText("Threshold 2: currency"), { target: { value: "gbp" } });
+    fireEvent.change(screen.getByLabelText("Threshold 2: amount"), { target: { value: "75" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save parameters" }));
+    expect(await screen.findByText("Parameters saved")).toBeInTheDocument();
+    const put = server.calls.find((c) => c.method === "PUT")!;
+    expect(put.body).toMatchObject({ priceSearchMode: "FIRST_MATCH", smallOrderThresholds: { USD: "150.50", GBP: "75" }, version: 2 });
+  });
+
+  it("shows a refused threshold on its own currency, and no threshold controls without pricing.admin", async () => {
+    server.handler = (url, init) => {
+      if (!url.pathname.endsWith("/parameters")) return undefined;
+      if (init.method === "PUT")
+        return json(422, { code: "COM-0001", detail: "validation failed", errors: { "smallOrderThresholds[USD]": "must be a decimal of at least 0" } });
+      return json(200, { legalEntityId: LE, journalFourEyes: false, smartRoundingBands: [{ ending: "0" }], smallOrderThresholds: { USD: "-5" }, version: 1 });
+    };
+    renderAt("/pricing/parameters", ADMIN);
+    load();
+    await screen.findByLabelText("Threshold 1: currency");
+    fireEvent.click(screen.getByRole("button", { name: "Save parameters" }));
+    expect(await screen.findByText("must be a decimal of at least 0")).toBeInTheDocument();
+    expect(screen.getByLabelText("Threshold 1: currency")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("refuses two thresholds of one currency before sending anything", async () => {
+    server.handler = (url) => {
+      if (!url.pathname.endsWith("/parameters")) return undefined;
+      return json(200, { legalEntityId: LE, journalFourEyes: false, smartRoundingBands: [{ ending: "0" }], smallOrderThresholds: { USD: "100" }, version: 1 });
+    };
+    renderAt("/pricing/parameters", ADMIN);
+    load();
+    await screen.findByLabelText("Threshold 1: currency");
+    fireEvent.click(screen.getByRole("button", { name: "Add threshold" }));
+    fireEvent.change(screen.getByLabelText("Threshold 2: currency"), { target: { value: "usd" } });
+    fireEvent.change(screen.getByLabelText("Threshold 2: amount"), { target: { value: "50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save parameters" }));
+    expect(await findAlert()).toHaveTextContent("The currency USD has more than one small order threshold.");
+    expect(screen.getByLabelText("Threshold 2: currency")).toHaveAttribute("aria-invalid", "true");
+    expect(server.calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
+  it("reads the thresholds without pricing.admin and offers no edit", async () => {
+    server.handler = () => json(200, { legalEntityId: LE, journalFourEyes: false, smartRoundingBands: [{ ending: "0" }], priceSearchMode: "SEARCH_NEXT", smallOrderThresholds: { USD: "100" }, version: 1 });
+    renderAt("/pricing/parameters", ["pricing.view"]);
+    load();
+    expect(await screen.findByLabelText("Threshold 1: amount")).toBeDisabled();
+    expect(screen.getByLabelText("Price search mode")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Add threshold" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove threshold 1" })).toBeNull();
   });
 });

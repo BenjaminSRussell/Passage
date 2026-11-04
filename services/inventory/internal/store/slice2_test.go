@@ -483,6 +483,76 @@ func TestProjectionReconcilesAfterSlice2Operations(t *testing.T) {
 	}
 }
 
+func TestTransactionInquiryDimensionDrillDown(t *testing.T) {
+	s, _, _ := setup(t)
+	ctx := entityCtx(1, ids.New())
+	product := ids.New()
+	post(t, ctx, s, domain.JournalOpeningBalance,
+		line(product, "1", "1", dims()),
+		line(product, "2", "1", dims("batch", "B")),
+		line(product, "3", "1", dims("batch", "C", "location", "L1", "inventory_status", "BLOCKED")))
+	count := func(f store.TransactionFilter) int {
+		t.Helper()
+		f.ProductID, f.Limit = product, 10
+		rows, err := s.ListTransactions(ctx, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(rows)
+	}
+	for name, tc := range map[string]struct {
+		dims map[string]string
+		want int
+	}{
+		"site":               {map[string]string{"site": "S1"}, 3},
+		"batch":              {map[string]string{"batch": "B"}, 1},
+		"site and batch":     {map[string]string{"site": "S1", "batch": "C"}, 1},
+		"batch and location": {map[string]string{"batch": "C", "location": "L1"}, 1},
+		"wrong site":         {map[string]string{"site": "S2"}, 0},
+		"location mismatch":  {map[string]string{"batch": "B", "location": "L1"}, 0},
+		"inventory status":   {map[string]string{"inventory_status": "BLOCKED"}, 1},
+		"empty map":          {map[string]string{}, 3},
+	} {
+		if got := count(store.TransactionFilter{Dims: tc.dims}); got != tc.want {
+			t.Errorf("%s: %d rows, want %d", name, got, tc.want)
+		}
+	}
+	if got := count(store.TransactionFilter{LegalEntityID: legalEntity(ctx), Dims: map[string]string{"site": "S1"}}); got != 3 {
+		t.Errorf("own legal entity: %d rows, want 3", got)
+	}
+	if got := count(store.TransactionFilter{LegalEntityID: ids.New()}); got != 0 {
+		t.Errorf("other legal entity: %d rows", got)
+	}
+}
+
+// The legal-entity filter only narrows: a caller scoped to one legal entity
+// who names another, which holds stock of the same product, still gets none
+// of its rows (row-level security on the application role).
+func TestTransactionInquiryLegalEntityFilterDoesNotWidenScope(t *testing.T) {
+	s, _, _ := setup(t)
+	own, other := ids.New(), ids.New()
+	product := ids.New()
+	post(t, entityCtx(1, own), s, domain.JournalOpeningBalance, line(product, "1", "1", dims()))
+	post(t, entityCtx(1, other), s, domain.JournalOpeningBalance, line(product, "2", "1", dims()), line(product, "3", "1", dims()))
+	list := func(ctx context.Context, entity string) []store.TransactionRow {
+		t.Helper()
+		rows, err := s.ListTransactions(ctx, store.TransactionFilter{ProductID: product, LegalEntityID: entity, Dims: map[string]string{"site": "S1"}, Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rows
+	}
+	if rows := list(entityCtx(1, own), other); len(rows) != 0 {
+		t.Fatalf("caller of %s naming %s saw %d rows", own, other, len(rows))
+	}
+	if rows := list(entityCtx(1, own), ""); len(rows) != 1 || rows[0].LegalEntityID != own {
+		t.Fatalf("own scope: %+v", rows)
+	}
+	if rows := list(tenantWideCtx(1), other); len(rows) != 2 || rows[0].LegalEntityID != other || rows[1].LegalEntityID != other {
+		t.Fatalf("tenant-wide caller naming %s: %+v", other, rows)
+	}
+}
+
 func TestTransactionInquiryPages(t *testing.T) {
 	s, _, _ := setup(t)
 	ctx := entityCtx(1, ids.New())

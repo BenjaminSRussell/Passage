@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -100,9 +101,19 @@ func TestLeaseGL_PostingsOfALeaseAndTheProfile(t *testing.T) {
 	if rec.Code != http.StatusCreated || stub.profile.Liability != "2450" || stub.profileIf != 0 || rec.Header().Get("ETag") != `"1"` {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body)
 	}
+	if stub.profile.TerminationGainLoss != "7150" || stub.profile.ExemptLeaseExpense != "6850" {
+		t.Fatalf("omitted accounts default to the remeasurement gain and depreciation expense accounts: %+v", stub.profile)
+	}
 	rec = do(h, req{method: http.MethodPut, path: "/v1/leases/posting-profile", body: profile, duties: "AssetConfigure", headers: map[string]string{"If-Match": `"1"`}})
 	if rec.Code != http.StatusOK || stub.profileIf != 1 {
 		t.Fatalf("replace: %d %s", rec.Code, rec.Body)
+	}
+	explicit := strings.Replace(profile, `"remeasurementGainAccount":"7150"`, `"remeasurementGainAccount":"7150","terminationGainLossAccount":"7160","exemptLeaseExpenseAccount":"6860"`, 1)
+	if rec := call(h, http.MethodPut, "/v1/leases/posting-profile", explicit, "AssetConfigure", false); rec.Code != http.StatusCreated || stub.profile.TerminationGainLoss != "7160" || stub.profile.ExemptLeaseExpense != "6860" {
+		t.Fatalf("explicit accounts: %d %s %+v", rec.Code, rec.Body, stub.profile)
+	}
+	if rec := call(h, http.MethodPut, "/v1/leases/posting-profile", strings.Replace(explicit, `"7160"`, `"a b"`, 1), "AssetConfigure", false); rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid termination account: %d", rec.Code)
 	}
 	if bad := call(h, http.MethodPut, "/v1/leases/posting-profile", `{"legalEntityId":"`+testLE+`","liabilityAccount":"a b"}`, "AssetConfigure", false); bad.Code != http.StatusBadRequest {
 		t.Fatalf("invalid accounts: %d", bad.Code)

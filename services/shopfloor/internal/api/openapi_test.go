@@ -128,6 +128,11 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"/v1/shopfloor/edge-nodes/{id}:heartbeat post":                             DutyEdgeConnect,
 		"/v1/shopfloor/workers/{id}:assign-setup post":                             DutySetup,
 		"/v1/shopfloor/workers/{id}:assign-resource post":                          DutySetup,
+		"/v1/shopfloor/workers/{id} put":                                           DutySetup,
+		"/v1/shopfloor/workers/{id}/cost-rates post":                               DutySetup,
+		"/v1/shopfloor/workers/{id}/cost-rates get":                                DutyView,
+		"/v1/shopfloor/workers/{id}:deactivate post":                               DutySetup,
+		"/v1/shopfloor/workers/{id}:reactivate post":                               DutySetup,
 		"/v1/shopfloor/jobs/{id}:reopen post":                                      DutyJobReopen,
 		"/v1/shopfloor/jobs/{id}/reopenings get":                                   DutyView,
 	}
@@ -153,6 +158,10 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"/v1/shopfloor/edge-nodes/{id}/config-versions post":                       true,
 		"/v1/shopfloor/workers/{id}:assign-setup post":                             true,
 		"/v1/shopfloor/workers/{id}:assign-resource post":                          true,
+		"/v1/shopfloor/workers/{id} put":                                           true,
+		"/v1/shopfloor/workers/{id}/cost-rates post":                               true,
+		"/v1/shopfloor/workers/{id}:deactivate post":                               true,
+		"/v1/shopfloor/workers/{id}:reactivate post":                               true,
 		"/v1/shopfloor/jobs/{id}:reopen post":                                      true,
 	}
 	for op := range served {

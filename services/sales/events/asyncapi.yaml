@@ -47,6 +47,11 @@ channels:
     messages:
       orderCancelled:
         $ref: "#/components/messages/OrderCancelled"
+  orderClosed:
+    address: passage.sales.order
+    messages:
+      orderClosed:
+        $ref: "#/components/messages/OrderClosed"
   orderRemainderCancelled:
     address: passage.sales.order
     messages:
@@ -303,10 +308,16 @@ operations:
     summary: An order was cancelled; its open lines are CANCELLED and its active holds CLEARED. Consumers - fulfillment, planning, portal.
     messages:
       - {$ref: "#/channels/orderCancelled/messages/orderCancelled"}
+  publishOrderClosed:
+    action: send
+    channel: {$ref: "#/channels/orderClosed"}
+    summary: An INVOICED order unchanged for the grace period was closed by the nightly auto-close (BR-27.5); no further delivery, invoice, change or cancel is accepted. Consumers - customer portal, analytics.
+    messages:
+      - {$ref: "#/channels/orderClosed/messages/orderClosed"}
   publishOrderRemainderCancelled:
     action: send
     channel: {$ref: "#/channels/orderRemainderCancelled"}
-    summary: The undelivered remainder of a partly shipped order, or of one of its lines (/lines/{lineNo}:cancel-remainder), was closed; the closed lines are CANCELLED or cut to what was delivered and the net total falls. After a one-line close the order stays PARTIALLY_SHIPPED while another line has quantity to deliver, and lines lists only the closed line. Holds are not changed. Consumers - fulfillment (cancel the open shipment and pick quantity beyond kept_qty and release its reservation; a slip already posted for it is refused by sales with SLS-0058), billing, credit exposure, portal.
+    summary: The undelivered remainder of a partly shipped order, or of one of its lines (/lines/{lineNo}:cancel-remainder), was closed; the closed lines are CANCELLED or cut to what was delivered and the net total falls. After a one-line close the order stays PARTIALLY_SHIPPED while another line has quantity to deliver, and lines lists only the closed line. Holds are not changed. A PATCH of a CONFIRMED order (FR-27.9) also emits it, after order.changed and with the same version (status CONFIRMED), for every line whose quantity ceiling moved - removed lines and supplementary lines cancelled with or below their parent (kept_qty 0), lines whose quantity was lowered (kept_qty the new quantity), and lines whose quantity was raised or that were reopened (kept_qty the new quantity, cancelled_qty 0, so a ceiling stored by an earlier cut rises again) - and a :cancel of a CONFIRMED order (direct or through an approved CANCEL request) emits it after order.cancelled with the same version (status CANCELLED, every cancelled line kept_qty 0), so fulfillment cuts what it released for them. kept_qty is always the line's whole current ceiling; a consumer keeps the newest version per line. Consumers - fulfillment (cancel the open shipment and pick quantity beyond kept_qty and release its reservation; a slip already posted for it is refused by sales with SLS-0058), billing, credit exposure, portal.
     messages:
       - {$ref: "#/channels/orderRemainderCancelled/messages/orderRemainderCancelled"}
   publishOrderConfirmed:
@@ -552,9 +563,17 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/OrderCancelledData"
+    OrderClosed:
+      name: dev.passage.sales.order.closed.v1
+      title: Sales order closed
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/OrderClosedData"
     OrderRemainderCancelled:
       name: dev.passage.sales.order.remaindercancelled.v1
-      title: Remainder of a partly shipped order cancelled
+      title: Remainder of a partly shipped order cancelled, or line quantities of a confirmed order changed or cancelled
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
@@ -737,11 +756,14 @@ components:
         applied_version: {type: integer, description: order version the approval produced; absent on a rejection or a withdrawal}
     ChangePolicyChangedData:
       type: object
-      required: [legal_entity_id, customer_id, approval_required, actor, version]
+      required: [legal_entity_id, customer_id, approval_required, approver_ids, actor, version]
       properties:
         legal_entity_id: {type: string, format: uuid}
         customer_id: {type: string, format: uuid}
         approval_required: {type: boolean}
+        approval_threshold: {type: string, description: changes applied without approval may together move an order by less than this; absent when every change needs approval}
+        threshold_currency: {type: string, pattern: "^[A-Z]{3}$"}
+        approver_ids: {type: array, items: {type: string, format: uuid}, description: the only users who may decide the customer's requests or change its confirmed orders directly; empty when anyone holding sales.order.approve may}
         actor: {type: string}
         version: {type: integer, description: version after the change}
     ParametersChangedData:
@@ -894,7 +916,11 @@ components:
             parent line also lists the follow-on changes of its supplementary
             lines (BR-27.14): quantity, requested and confirmed ship date, and
             lineStatus OPEN to CANCELLED when the parent drops below the rule's
-            base quantity.
+            base quantity. A line added by the change is listed with a lineAdded
+            entry (new is the product id) followed by lineId, unit, siteId,
+            warehouseId, quantity, unitPrice, discPct, requestedShipDate and, on
+            a confirmed order, confirmedShipDate, each with an empty old; a line
+            the change removed is listed as lineStatus OPEN to CANCELLED.
           items:
             type: object
             required: [line_no, field, old, new]
@@ -905,7 +931,7 @@ components:
               new: {type: string}
         repromised_lines:
           type: array
-          description: line numbers whose confirmed ship date was re-promised (quantity or date changed on a confirmed order), including supplementary lines that moved with their parent
+          description: line numbers whose confirmed ship date was re-promised (quantity or date changed on a confirmed order), including supplementary lines that moved with their parent and lines the change added
           items: {type: integer}
     OrderCancelledData:
       type: object
@@ -919,6 +945,16 @@ components:
           items: {type: string, format: uuid}
         reason: {type: string, maxLength: 500}
         actor: {type: string}
+    OrderClosedData:
+      type: object
+      required: [order_id, legal_entity_id, version, previous_status, grace_days, actor]
+      properties:
+        order_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        version: {type: integer, description: the order version the close produced}
+        previous_status: {type: string, enum: [INVOICED]}
+        grace_days: {type: integer, description: "the grace period the run applied: the order had been unchanged for at least this many days"}
+        actor: {type: string, description: the principal that ran the job}
     OrderRemainderCancelledData:
       type: object
       required: [order_id, legal_entity_id, version, status, lines, reason, actor]
@@ -926,10 +962,10 @@ components:
         order_id: {type: string, format: uuid}
         legal_entity_id: {type: string, format: uuid}
         version: {type: integer}
-        status: {type: string, enum: [PARTIALLY_SHIPPED, SHIPPED, INVOICED], description: the order status after the remainder was closed; PARTIALLY_SHIPPED after a one-line close while another line has quantity to deliver}
+        status: {type: string, enum: [CONFIRMED, CANCELLED, PARTIALLY_SHIPPED, SHIPPED, INVOICED], description: the order status after the remainder was closed; PARTIALLY_SHIPPED after a one-line close while another line has quantity to deliver; CONFIRMED when a PATCH removed, lowered, raised or reopened lines of a confirmed order; CANCELLED when a confirmed order was cancelled as a whole (every line goes out with kept_qty 0)}
         lines:
           type: array
-          description: the lines that gave up quantity (only the named line for a one-line close)
+          description: the lines that gave up quantity (only the named line for a one-line close; the removed lines and their cancelled supplementary lines, and the lines whose quantity was lowered, raised or reopened, for a PATCH; every cancelled line for a whole-order cancel)
           items:
             type: object
             required: [line_id, line_no, product_id, cancelled_qty, kept_qty, line_status]
@@ -937,9 +973,9 @@ components:
               line_id: {type: string, format: uuid}
               line_no: {type: integer}
               product_id: {type: string, format: uuid}
-              cancelled_qty: {type: string, description: decimal quantity the line gave up}
+              cancelled_qty: {type: string, description: decimal quantity the line gave up, 0 for a raised or reopened line}
               kept_qty: {type: string, description: decimal quantity the line keeps, 0 when the line was cancelled}
-              line_status: {type: string, enum: [CANCELLED, DELIVERED, INVOICED]}
+              line_status: {type: string, enum: [OPEN, RESERVED, CANCELLED, DELIVERED, INVOICED], description: the line status after the close; OPEN or RESERVED for a line a PATCH lowered, raised or reopened}
         reason: {type: string, maxLength: 500}
         actor: {type: string}
     OrderHoldData:
@@ -1103,7 +1139,7 @@ components:
         legal_entity_id: {type: string, format: uuid}
         channel: {type: string}
         external_ref: {type: string}
-        request_hash: {type: string, description: hash of the refused payload; the payload is never carried}
+        request_hash: {type: string, description: "fingerprint of the refused payload; keyed (hmac:<key id>:<hex>) when the request carries a one-time buyer, so the buyer cannot be confirmed against it"}
         error_code: {type: string, description: problem code of the refusal}
         attempts: {type: integer, minimum: 1}
         actor: {type: string, description: the resolving user; absent on recorded}

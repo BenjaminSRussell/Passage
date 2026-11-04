@@ -56,11 +56,26 @@ channels:
     messages:
       exceptionResolved:
         $ref: "#/components/messages/ExceptionResolved"
+  returnablePackagingReturned:
+    address: passage.fulfillment.returnablepackaging
+    messages:
+      returnablePackagingReturned:
+        $ref: "#/components/messages/ReturnablePackagingReturned"
+  returnablePackagingAdjusted:
+    address: passage.fulfillment.returnablepackaging
+    messages:
+      returnablePackagingAdjusted:
+        $ref: "#/components/messages/ReturnablePackagingAdjusted"
   warehouseReleaseRuleChanged:
     address: passage.fulfillment.warehousereleaserule
     messages:
       warehouseReleaseRuleChanged:
         $ref: "#/components/messages/WarehouseReleaseRuleChanged"
+  deliveryToleranceChanged:
+    address: passage.fulfillment.deliverytolerance
+    messages:
+      deliveryToleranceChanged:
+        $ref: "#/components/messages/DeliveryToleranceChanged"
   legalEntitySettingChanged:
     address: passage.fulfillment.legalentitysetting
     messages:
@@ -229,11 +244,26 @@ operations:
     channel: { $ref: "#/channels/exceptionResolved" }
     messages:
       - $ref: "#/channels/exceptionResolved/messages/exceptionResolved"
+  publishReturnablePackagingReturned:
+    action: send
+    channel: { $ref: "#/channels/returnablePackagingReturned" }
+    messages:
+      - $ref: "#/channels/returnablePackagingReturned/messages/returnablePackagingReturned"
+  publishReturnablePackagingAdjusted:
+    action: send
+    channel: { $ref: "#/channels/returnablePackagingAdjusted" }
+    messages:
+      - $ref: "#/channels/returnablePackagingAdjusted/messages/returnablePackagingAdjusted"
   publishWarehouseReleaseRuleChanged:
     action: send
     channel: { $ref: "#/channels/warehouseReleaseRuleChanged" }
     messages:
       - $ref: "#/channels/warehouseReleaseRuleChanged/messages/warehouseReleaseRuleChanged"
+  publishDeliveryToleranceChanged:
+    action: send
+    channel: { $ref: "#/channels/deliveryToleranceChanged" }
+    messages:
+      - $ref: "#/channels/deliveryToleranceChanged/messages/deliveryToleranceChanged"
   publishLegalEntitySettingChanged:
     action: send
     channel: { $ref: "#/channels/legalEntitySettingChanged" }
@@ -377,6 +407,7 @@ components:
                 order_line_id: { type: string, format: uuid }
                 qty: { type: string }
                 backordered: { type: string }
+                over_picked: { type: string, description: "Quantity picked above the planned one, allowed by the over-delivery tolerance (BR-28.7); present only for such a pick, when backordered is 0." }
                 short_reason: { type: string, enum: [OUT_OF_STOCK, DAMAGED, NOT_FOUND, QUALITY_HOLD, OTHER], description: "Reason of the short pick, present when one was given." }
     PackingSlipPosted:
       name: dev.passage.fulfillment.packingslip.posted.v1
@@ -546,6 +577,40 @@ components:
           order_line_id: { type: string, format: uuid }
           note: { type: string }
           resolved_by: { type: string }
+    ReturnablePackagingReturned:
+      name: dev.passage.fulfillment.returnablepackaging.returned.v1
+      title: Returnable packaging returned
+      summary: A customer's return receipt lowered a returnable packaging balance (BR-28.13).
+      contentType: application/json
+      payload:
+        type: object
+        required: [movement_id, customer_id, container_type, kind, qty, balance_after]
+        properties:
+          movement_id: { type: string, format: uuid }
+          customer_id: { type: string, format: uuid }
+          container_type: { type: string }
+          kind: { type: string, enum: [RETURNED] }
+          qty: { type: string, description: "Signed whole number of containers; negative lowers the balance." }
+          balance_after: { type: string }
+          reference: { type: string, description: "The caller's own reference; omitted when none." }
+          reason: { type: string, description: "Why the balance was corrected; omitted on a return receipt." }
+    ReturnablePackagingAdjusted:
+      name: dev.passage.fulfillment.returnablepackaging.adjusted.v1
+      title: Returnable packaging balance adjusted
+      summary: A logistics admin corrected a returnable packaging balance by hand, with a reason (FR-28.16).
+      contentType: application/json
+      payload:
+        type: object
+        required: [movement_id, customer_id, container_type, kind, qty, balance_after]
+        properties:
+          movement_id: { type: string, format: uuid }
+          customer_id: { type: string, format: uuid }
+          container_type: { type: string }
+          kind: { type: string, enum: [ADJUSTED] }
+          qty: { type: string, description: "Signed whole number of containers; negative lowers the balance." }
+          balance_after: { type: string }
+          reference: { type: string, description: "The caller's own reference; omitted when none." }
+          reason: { type: string, description: "Why the balance was corrected; omitted on a return receipt." }
     WarehouseReleaseRuleChanged:
       name: dev.passage.fulfillment.warehousereleaserule.changed.v1
       title: Warehouse release rule changed
@@ -568,6 +633,24 @@ components:
           previous_release_requires_full_atp: { type: boolean }
           previous_wave_max_lines: { type: integer, minimum: 1, maximum: 2000 }
           previous_wave_max_orders: { type: integer, minimum: 1, maximum: 500 }
+          version: { type: integer, minimum: 1 }
+    DeliveryToleranceChanged:
+      name: dev.passage.fulfillment.deliverytolerance.changed.v1
+      title: Delivery tolerance changed
+      summary: >
+        The over-delivery tolerance of a product and customer scope was saved (BR-28.7): the
+        percentage of the planned quantity a pick may exceed, with the value it replaces (absent
+        for a new scope). A scope that names no product or no customer applies to every one.
+      contentType: application/json
+      payload:
+        type: object
+        required: [tolerance_id, overdelivery_pct, version]
+        properties:
+          tolerance_id: { type: string, format: uuid }
+          product_id: { type: string, format: uuid, description: "Absent when the tolerance applies to every product." }
+          customer_id: { type: string, format: uuid, description: "Absent when the tolerance applies to every customer." }
+          overdelivery_pct: { type: string, description: "0 to 100, at most 4 decimals." }
+          previous_overdelivery_pct: { type: string, description: "The value replaced; absent for a new scope." }
           version: { type: integer, minimum: 1 }
     LegalEntitySettingChanged:
       name: dev.passage.fulfillment.legalentitysetting.changed.v1

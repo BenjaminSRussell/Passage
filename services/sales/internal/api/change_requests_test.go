@@ -58,7 +58,7 @@ func (s *requestStore) ListChangeRequests(_ context.Context, f store.ChangeReque
 }
 
 func (s *requestStore) GetChangePolicy(_ context.Context, le, customer string) (store.ChangePolicy, error) {
-	return store.ChangePolicy{LegalEntityID: le, CustomerID: customer}, nil
+	return store.ChangePolicy{LegalEntityID: le, CustomerID: customer, ApproverIDs: []string{}}, nil
 }
 
 func (s *requestStore) PutChangePolicy(_ context.Context, in store.ChangePolicy, version int, actor string) (store.ChangePolicy, error) {
@@ -181,5 +181,57 @@ func TestCancelOrder_PendingCancelIs202AndApproverIsPassed(t *testing.T) {
 	c = &changeStore{}
 	if rec := serveBody(t, c, http.MethodPost, orders+"/"+id+":cancel", "", principal(dutyConfirm, dutyOrderApprove), h); rec.Code != http.StatusOK || !c.cancelApprover {
 		t.Fatalf("an approver: %d approver=%v", rec.Code, c.cancelApprover)
+	}
+}
+
+func TestChangePolicy_PutThresholdAndApprovers(t *testing.T) {
+	customer := ids.New()
+	path := "/v1/sales/customers/" + customer + "/change-policy?legalEntityId=" + testLE
+	s := &requestStore{}
+	h := map[string]string{"If-Match": `"0"`}
+	mgrA, mgrB := "0190a3c4-0000-7000-8000-00000000000a", "0190a3c4-0000-7000-8000-00000000000b"
+	body := `{"approvalRequired":true,"approvalThreshold":"250.50","thresholdCurrency":"USD","approverIds":["` + mgrB + `","` + strings.ToUpper(mgrA) + `","` + mgrA + `"]}`
+	rec := serveBody(t, s, http.MethodPut, path, body, principal(dutyOrderApprove), h)
+	if rec.Code != http.StatusOK || s.policy.ApprovalThreshold == nil || s.policy.ApprovalThreshold.String() != "250.5" || s.policy.ThresholdCurrency != "USD" ||
+		strings.Join(s.policy.ApproverIDs, ",") != mgrA+","+mgrB || s.policy.KeepThreshold || s.policy.KeepApprovers ||
+		!strings.Contains(rec.Body.String(), `"approvalThreshold":"250.5"`) {
+		t.Fatalf("put: %d %s %+v", rec.Code, rec.Body.String(), s.policy)
+	}
+	for name, bad := range map[string]string{
+		"approvalThreshold": `{"approvalRequired":true,"approvalThreshold":"0","thresholdCurrency":"USD"}`,
+		"thresholdCurrency": `{"approvalRequired":true,"approvalThreshold":"5"}`,
+		"approverIds":       `{"approvalRequired":true,"approverIds":["mgr-a"]}`,
+	} {
+		rec := serveBody(t, s, http.MethodPut, path, bad, principal(dutyOrderApprove), h)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), name) {
+			t.Fatalf("%s: %d %s", name, rec.Code, rec.Body.String())
+		}
+	}
+	// A GET of a customer that never saved a policy shows an empty group, not null.
+	rec = serve(t, s, http.MethodGet, path, principal(dutyRead), nil)
+	if !strings.Contains(rec.Body.String(), `"approverIds"`) {
+		t.Fatalf("get: %s", rec.Body.String())
+	}
+}
+
+// TestChangePolicy_PutLeavesOutMembersItDoesNotName: the slice 13 body
+// {"approvalRequired": ...} keeps a stored threshold and group, while null and
+// [] clear them.
+func TestChangePolicy_PutLeavesOutMembersItDoesNotName(t *testing.T) {
+	path := "/v1/sales/customers/" + ids.New() + "/change-policy?legalEntityId=" + testLE
+	h := map[string]string{"If-Match": `"3"`}
+	s := &requestStore{}
+	rec := serveBody(t, s, http.MethodPut, path, `{"approvalRequired":false}`, principal(dutyOrderApprove), h)
+	if rec.Code != http.StatusOK || !s.policy.KeepThreshold || !s.policy.KeepApprovers {
+		t.Fatalf("old body must keep threshold and group: %d %+v", rec.Code, s.policy)
+	}
+	rec = serveBody(t, s, http.MethodPut, path, `{"approvalRequired":true,"approvalThreshold":null,"thresholdCurrency":null,"approverIds":[]}`, principal(dutyOrderApprove), h)
+	if rec.Code != http.StatusOK || s.policy.KeepThreshold || s.policy.KeepApprovers || s.policy.ApprovalThreshold != nil || len(s.policy.ApproverIDs) != 0 {
+		t.Fatalf("null and [] must clear: %d %+v", rec.Code, s.policy)
+	}
+	// Naming only the currency replaces the pair, so the missing threshold is an error.
+	rec = serveBody(t, s, http.MethodPut, path, `{"approvalRequired":true,"thresholdCurrency":"USD"}`, principal(dutyOrderApprove), h)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "approvalThreshold") {
+		t.Fatalf("currency alone: %d %s", rec.Code, rec.Body.String())
 	}
 }

@@ -100,6 +100,8 @@ type Line struct {
 	// quantity per base, kept so a parent change recomputes the line.
 	suppBase    decimal.Decimal
 	suppPerBase decimal.Decimal
+	// added marks a line a change adds in memory, still to be inserted.
+	added bool
 }
 
 // Notice is a non-blocking message returned with a result, such as the
@@ -343,6 +345,11 @@ type Store interface {
 	ListIntakeErrors(ctx context.Context, f IntakeErrorFilter) ([]IntakeError, error)
 	GetIntakeError(ctx context.Context, id string) (IntakeError, error)
 	ResolveIntakeError(ctx context.Context, id string, version int, note, actor string, now time.Time) (IntakeError, error)
+	GetIntakeReplay(ctx context.Context, id string) (IntakeReplay, error)
+	ListIntakeReplays(ctx context.Context, f IntakeErrorFilter) ([]IntakeReplay, int, error)
+	AutoCloseOrders(ctx context.Context, f AutoCloseFilter, actor string, now time.Time) (AutoCloseResult, error)
+	RecordReplayFailure(ctx context.Context, id, code, message string, now time.Time) (IntakeError, error)
+	ResolveReplayed(ctx context.Context, id, orderID, orderNumber, actor string, now time.Time) (IntakeError, error)
 	GetParameters(ctx context.Context, legalEntityID string) (SalesParameters, error)
 	PutParameters(ctx context.Context, in SalesParameters, version int, actor string) (SalesParameters, error)
 	Ping(ctx context.Context) error

@@ -227,3 +227,35 @@ func TestCancelRemainder_DutyAndBody(t *testing.T) {
 		t.Fatalf("a 501 character reason: %d", rec.Code)
 	}
 }
+
+// TestPatchOrder_AddsAndRemovesLines: addLines arrive as store lines (same
+// field rules as an order line), removeLines as numbers, and the override
+// reason with the approve duty; a bad added line is a 400 with field paths and
+// a line cannot carry a configuration through a change.
+func TestPatchOrder_AddsAndRemovesLines(t *testing.T) {
+	c := &changeStore{}
+	product, site, wh := ids.New(), ids.New(), ids.New()
+	body := `{"reason":"add","addLines":[{"productId":"` + product + `","quantity":"3","unit":"EA","siteId":"` + site + `","warehouseId":"` + wh +
+		`","unitPrice":"4.50","requestedShipDate":"2027-03-09"}],"removeLines":[2],"listingOverrideReason":"key account"}`
+	rec := serveBody(t, c, http.MethodPatch, orders+"/"+ids.New(), body, principal(dutyWrite, dutyOrderApprove), map[string]string{"If-Match": `"3"`})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(c.change.AddLines) != 1 || c.change.AddLines[0].ProductID != product || !c.change.AddLines[0].Quantity.Equal(decimal.NewFromInt(3)) ||
+		!c.change.AddLines[0].UnitPrice.Equal(decimal.RequireFromString("4.5")) || !c.change.AddLines[0].DiscPct.IsZero() ||
+		len(c.change.RemoveLines) != 1 || c.change.RemoveLines[0] != 2 || c.change.ListingOverrideReason != "key account" || !c.change.Approver {
+		t.Fatalf("change = %+v", c.change)
+	}
+
+	bad := `{"addLines":[{"productId":"x","quantity":"0","unit":"","siteId":"` + site + `","warehouseId":"` + wh +
+		`","unitPrice":"1","requestedShipDate":"soon","configurationId":"` + ids.New() + `"}],"removeLines":[0]}`
+	rec = serveBody(t, &changeStore{}, http.MethodPatch, orders+"/"+ids.New(), bad, principal(dutyWrite), map[string]string{"If-Match": `"3"`})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{"addLines[0].productId", "addLines[0].unit", "addLines[0].requestedShipDate", "addLines[0].configurationId", "removeLines[0]"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("missing field error %q in %s", want, rec.Body.String())
+		}
+	}
+}

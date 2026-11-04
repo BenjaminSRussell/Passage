@@ -281,6 +281,9 @@ func ReconcileOpenOrders(r *PackRun, source, accepted []OpenOrderLine, loaded in
 		}
 	}
 	r.Totals = totals
+	if err := r.applyTolerances(); err != nil {
+		return err
+	}
 	if !r.HasMismatch() {
 		return r.Advance(StatusReconciled)
 	}

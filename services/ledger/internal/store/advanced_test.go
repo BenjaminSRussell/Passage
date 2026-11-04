@@ -32,11 +32,11 @@ func TestPostgres_AC11_18_AdvancedRule(t *testing.T) {
 	pl := plStructure(domain.StructureDraft)
 	pl.Segments = []string{"DEPT", "CC"}
 	plID := ids.New()
-	if _, _, err := e.store.PutStructure(e.ctx, l.ID, plID, pl); err != nil {
+	if _, _, err := e.store.PutStructure(e.ctx, l.ID, plID, 0, pl); err != nil {
 		t.Fatal(err)
 	}
 	bs := bsStructure()
-	if _, _, err := e.store.PutStructure(e.ctx, l.ID, ids.New(), bs); err != nil {
+	if _, _, err := e.store.PutStructure(e.ctx, l.ID, ids.New(), 0, bs); err != nil {
 		t.Fatal(err)
 	}
 
@@ -103,7 +103,7 @@ func TestPostgres_AC11_18_AdvancedRule(t *testing.T) {
 	// Activate the structure with its rule (draft -> active shares the activation step).
 	active := pl
 	active.Status = domain.StructureActive
-	if _, _, err := e.store.PutStructure(e.ctx, l.ID, plID, active); err != nil {
+	if _, _, err := e.store.PutStructure(e.ctx, l.ID, plID, structTag(e, l.ID, plID), active); err != nil {
 		t.Fatalf("activate: %v", err)
 	}
 	// Rules of an active version are locked.
@@ -153,7 +153,7 @@ func TestPostgres_AdvancedRulesAreTenantAndLegalEntityScoped(t *testing.T) {
 	draft := domain.Structure{Name: "PL", Version: 1, EffectiveFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		Status: domain.StructureDraft, Segments: []string{"DEPT"}, AccountFilter: []string{"6000..6999"}}
 	id := ids.New()
-	if _, _, err := e.store.PutStructure(e.ctx, e.ledger.ID, id, draft); err != nil {
+	if _, _, err := e.store.PutStructure(e.ctx, e.ledger.ID, id, 0, draft); err != nil {
 		t.Fatal(err)
 	}
 	r := projectRule(id)
@@ -223,7 +223,7 @@ func TestPostgres_AdvancedRuleRepeatedPutAndMove(t *testing.T) {
 
 	active := pl
 	active.Status = domain.StructureActive
-	if _, _, err := e.store.PutStructure(e.ctx, e.ledger.ID, plID, active); err != nil {
+	if _, _, err := e.store.PutStructure(e.ctx, e.ledger.ID, plID, structTag(e, e.ledger.ID, plID), active); err != nil {
 		t.Fatalf("activate: %v", err)
 	}
 	if got, _, err := e.store.PutAdvancedRule(e.ctx, e.ledger.ID, id, 0, r); err != nil || got.LockVersion != 1 || advancedEvents(t, e, id) != 1 {
@@ -253,7 +253,7 @@ func TestPostgres_AdvancedRuleGovernsTheRealignmentNewSide(t *testing.T) {
 		t.Fatal(err)
 	}
 	pl.Status = domain.StructureActive
-	if _, _, err := e.store.PutStructure(e.ctx, e.ledger.ID, plID, pl); err != nil {
+	if _, _, err := e.store.PutStructure(e.ctx, e.ledger.ID, plID, structTag(e, e.ledger.ID, plID), pl); err != nil {
 		t.Fatalf("activate: %v", err)
 	}
 	run, _, err := e.store.CreateRealignment(e.ctx, realignRequest(e, "ADV-RA"))

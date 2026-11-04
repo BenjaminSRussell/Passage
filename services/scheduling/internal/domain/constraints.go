@@ -149,6 +149,23 @@ func fillSlot(c capacity, iv []Interval, op Operation, bs []Busy, t time.Time, e
 	return out, nil
 }
 
+// forceSlot lays op at exactly t as one continuous span, closed time and
+// blocks ignored, for a move committed over a constraint violation. The span
+// holds the changeover from the group before it and the process minutes; it
+// is still refused when it overlaps a booked job (SCHED-0001).
+func forceSlot(c capacity, op Operation, bs []Busy, t time.Time, seq bool) (slot, *Conflict) {
+	start := ceilMinute(t)
+	total := BookedMinutes(op.Minutes, c.res.EfficiencyPct)
+	if seq {
+		co, _ := c.need(groupBefore(c, bs, start), op.SetupGroup, op.SetupMinutes)
+		total += co
+	}
+	if total < 1 {
+		total = 1
+	}
+	return fillSlot(c, []Interval{{Start: start, End: start.Add(time.Duration(total) * time.Minute)}}, op, bs, start, true, seq)
+}
+
 // nextOpen is the start of the first open interval that begins at or after t.
 func nextOpen(iv []Interval, t time.Time) (time.Time, bool) {
 	i := sort.Search(len(iv), func(k int) bool { return !iv[k].Start.Before(t) })
@@ -328,6 +345,11 @@ func (e *engine) placeChain(chain []Operation, fixed []Placement, start, seed ti
 	}
 }
 
+// maxOverlapRetries bounds the re-placements that keep an overlapped
+// operation from ending before its predecessor; past it the operation starts
+// at the predecessor's end plus the queue.
+const maxOverlapRetries = 8
+
 // attempt places a chain in operation order, booking each placement as it
 // goes so the caller can unbook a failed attempt. Each operation starts after
 // every fixed predecessor and the previous placed one, at or after its ready
@@ -347,17 +369,22 @@ func (e *engine) attempt(chain []Operation, fixed []Placement, start time.Time, 
 			if f.OperNumber >= op.OperNumber {
 				continue
 			}
-			ready = latest(ready, f.End)
+			ready = latest(ready, f.Release())
 			if prev == nil || f.OperNumber > prev.OperNumber {
 				prev, frozen = &fixed[i], true
 			}
 		}
 		if k > 0 {
 			p := &pls[k-1]
-			ready = latest(ready, p.End)
+			ready = latest(ready, p.Release())
 			if prev == nil || p.OperNumber > prev.OperNumber {
 				prev, frozen = p, false
 			}
+		}
+		if prev != nil {
+			// The wait between the operation right before (placed now or
+			// fixed) and this one (FR-23.3).
+			ready = latest(ready, prev.Release().Add(queueWait(prev, op)))
 		}
 		var net *ResourceNetwork
 		if op.Network != "" && prev != nil {
@@ -369,6 +396,23 @@ func (e *engine) attempt(chain []Operation, fixed []Placement, start time.Time, 
 			net = &n
 		}
 		pl, w, st := e.placeOp(op, ready, prev, frozen, net)
+		if prev != nil && prev.OverlapBP > 0 {
+			// An overlapped operation may start inside its predecessor but
+			// never ends before the predecessor's last units are through it
+			// and their queue (BR-23.5, FR-23.3). Start later by the shortfall,
+			// counted from the slot found (a ready time inside closed time
+			// would keep the same slot), and if that does not settle, start
+			// at the floor itself, which cannot end before it.
+			floor := prev.End.Add(queueWait(prev, op))
+			for try := 0; st == nil && pl.End.Before(floor) && try < maxOverlapRetries; try++ {
+				ready = latest(ready, pl.Start.Add(floor.Sub(pl.End)))
+				pl, w, st = e.placeOp(op, ready, prev, frozen, net)
+			}
+			if st == nil && pl.End.Before(floor) {
+				ready = latest(ready, floor)
+				pl, w, st = e.placeOp(op, ready, prev, frozen, net)
+			}
+		}
 		if st != nil {
 			st.idx = k
 			return pls, ws, st
@@ -394,6 +438,11 @@ func (e *engine) placeOp(op Operation, ready time.Time, prev *Placement, frozen 
 	var overEdge NetworkEdge
 	shortest := time.Duration(-1)
 	var secondary *Conflict
+	var queue time.Duration
+	queueOver := false
+	if prev != nil {
+		queue = queueWait(prev, op)
+	}
 	for _, rid := range op.Candidates {
 		c, ok := e.caps[rid]
 		if !ok {
@@ -417,7 +466,11 @@ func (e *engine) placeOp(op Operation, ready time.Time, prev *Placement, frozen 
 		}
 		cand := newPlacement(op, rid, s.segs).withSlot(s)
 		if net != nil && !edge.WaitOK(prev.End, cand.Start) {
-			if late := cand.Start.Sub(prev.End) - minutes(*edge.MaxWaitMinutes); shortest < 0 || late < shortest {
+			// A queue longer than the edge's maximum wait breaks it however
+			// late the predecessor runs, so it asks for no delay (FR-23.3).
+			if queue > minutes(*edge.MaxWaitMinutes) {
+				queueOver = true
+			} else if late := cand.Start.Sub(prev.End) - minutes(*edge.MaxWaitMinutes); shortest < 0 || late < shortest {
 				shortest = late
 			}
 			if !overFound || betterCandidate(cand, rid, over, over.ResourceID, e.caps, e.booked) {
@@ -441,6 +494,10 @@ func (e *engine) placeOp(op Operation, ready time.Time, prev *Placement, frozen 
 			ws = append(ws, Warning{Code: CodeNetworkWait, OperationID: op.ID,
 				Detail: fmt.Sprintf("wait %d min exceeds network %s maximum %d min; the predecessor is frozen, move it later",
 					minutesBetween(prev.End, over.Start), net.Code, *overEdge.MaxWaitMinutes)})
+		case overFound && shortest < 0 && queueOver:
+			return Placement{}, nil, &stop{network: true,
+				reason: fmt.Sprintf("%s %s: queue time %d min between the operations is longer than the maximum wait of network %s for operation %s",
+					CodeNetworkInfeasible, FlagNetworkInfeasible, int(queue/time.Minute), net.Code, op.ID)}
 		case overFound:
 			step := shortest
 			if step < networkStep {

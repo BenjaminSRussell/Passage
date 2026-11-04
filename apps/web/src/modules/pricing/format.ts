@@ -1,4 +1,4 @@
-import type { ConditionRecord, ConditionType } from "./api/client";
+import type { ConditionRecord, ConditionType, NetPriceRow } from "./api/client";
 
 export const TYPE_LABELS: Record<ConditionType, string> = {
   PRICE: "Price",
@@ -76,4 +76,63 @@ export function sumDecimals(values: string[]): string {
   const digits = (negative ? -total : total).toString().padStart(SCALE + 1, "0");
   const fraction = digits.slice(-SCALE).replace(/0+$/, "");
   return `${negative ? "-" : ""}${digits.slice(0, -SCALE)}${fraction ? `.${fraction}` : ""}`;
+}
+
+/** One row of the net price table: a quantity break of a product row. */
+export interface NetPriceLine {
+  key: string;
+  product: string;
+  unit: string;
+  quantity: string;
+  unitPrice: string;
+  netUnitPrice: string;
+  lineNet: string;
+  priceRecordId: string;
+  errorCode: string;
+}
+
+/** Flattens the rows of a net price response to one line per product and quantity break. */
+export function netPriceLines(rows: NetPriceRow[]): NetPriceLine[] {
+  return rows.flatMap((row) =>
+    row.breaks.map((b) => ({
+      key: `${row.productKind}|${row.productKey}|${row.variant}|${row.unit}|${b.quantity}`,
+      product: describeProduct(row),
+      unit: row.unit,
+      quantity: b.quantity,
+      unitPrice: b.unitPrice,
+      netUnitPrice: b.netUnitPrice,
+      lineNet: b.lineNet,
+      priceRecordId: b.priceRecordId ?? "",
+      errorCode: b.errorCode ?? "",
+    })),
+  );
+}
+
+/** The quantities at which each record set or changed the net price, by record id (the winning-price marker); statistical steps change nothing and are left out. */
+export function winningQuantities(rows: NetPriceRow[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const row of rows) {
+    for (const b of row.breaks) {
+      for (const a of b.applied) {
+        if (a.statistical) continue;
+        out.set(a.recordId, [...(out.get(a.recordId) ?? []), b.quantity]);
+      }
+    }
+  }
+  return out;
+}
+
+function csvCell(value: string): string {
+  // A cell that starts with =, +, -, @, a tab or a carriage return can run as a formula in a
+  // spreadsheet (OWASP CSV injection), so it is prefixed with ' and shown as text; a plain negative
+  // number is left as it is.
+  const safe = /^[=+\-@\t\r]/.test(value) && !/^-\d+(\.\d+)?$/.test(value) ? `'${value}` : value;
+  return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+}
+
+/** The net price table as CSV (RFC 4180, CRLF), amounts as the service sent them. */
+export function netPricesCsv(lines: NetPriceLine[], currency: string): string {
+  const head = ["Product", "Unit", "From quantity", `List price ${currency}`, `Net unit price ${currency}`, `Line net ${currency}`, "Winning price record", "Error"];
+  const body = lines.map((l) => [l.product, l.unit, l.quantity, l.unitPrice, l.netUnitPrice, l.lineNet, l.priceRecordId, l.errorCode]);
+  return [head, ...body].map((r) => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }

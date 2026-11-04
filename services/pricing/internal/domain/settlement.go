@@ -57,6 +57,18 @@ func SettlementCSV(target, from, to string, rows []SettlementRow) ([]byte, error
 	return buf.Bytes(), w.Error()
 }
 
+// CSVCell guards one exported CSV cell against spreadsheet formula injection (OWASP CSV
+// injection): a value that starts with = + - @, a tab or a carriage return gets a leading
+// apostrophe, unless the whole value is a decimal number (a negative amount stays a number).
+func CSVCell(v string) string {
+	if v != "" && strings.ContainsRune("+-", rune(v[0])) {
+		if _, err := decimal.NewFromString(v); err == nil && !strings.ContainsAny(v, "eE") {
+			return v
+		}
+	}
+	return safeCell(v)
+}
+
 // safeCell neutralises spreadsheet formula injection in a free-text cell (OWASP CSV injection).
 func safeCell(v string) string {
 	if v != "" && strings.ContainsRune("=+-@\t\r", rune(v[0])) {

@@ -110,8 +110,10 @@ func TestPostgres_ChangeNeedsApproval(t *testing.T) {
 	if _, err := s.ApproveChangeRequest(ctx, req.ID, res.Request.Version, "", "manager", now); problemCode(t, err) != CodeChangeDecided {
 		t.Fatalf("approve twice: %v", err)
 	}
+	// The approved raise (5 to 8) restates fulfillment's kept quantity right
+	// after order.changed, as a direct PATCH does; the credit re-check follows.
 	types := outboxTypes(t, pool, order.ID)
-	if types[len(types)-2] != salesevents.OrderChanged {
+	if types[len(types)-3] != salesevents.OrderChanged || types[len(types)-2] != salesevents.OrderRemainderCancelled {
 		t.Fatalf("outbox tail %v", types)
 	}
 	if n := countWhere(t, pool, `select count(*) from outbox where aggregate_id = $1`, req.ID); n != 2 {

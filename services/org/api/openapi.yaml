@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: org
-  version: 0.14.0
-  description: Organization service. Covers legal entities, operating units, sites, warehouses, locations, postal addresses with purposes, fiscal calendars with idempotent year generation and the period read, hierarchy types and draft hierarchy versions with validated node sets (error codes ORG-HIER-CYCLE, ORG-HIER-MULTI-ROOT, ORG-HIER-DUPLICATE-NODE, ORG-HIER-PARENT-UNKNOWN, ORG-HIER-DEPTH, ORG-HIER-SIZE, ORG-HIER-NODE-UNKNOWN, ORG-HIER-TYPE-NOT-FOUND, ORG-HIER-TYPE-CODE-DUPLICATE, ORG-HIER-VERSION-NOT-FOUND, ORG-HIER-DRAFT-EXISTS, ORG-HIER-VERSION-IMMUTABLE, ORG-HIER-OVERLAP, ORG-HIER-BACKDATE-DUTY, ORG-HIER-NO-VERSION, ORG-HIER-NODE-ABSENT, ORG-HIER-MAKER-CHECKER) with the version list, publish, supersede, the closure table, the as-of query and the version comparison, unit-of-measure conversion, the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation, currency rounding rules with the round route and the rule delete (error codes ORG-CUR-ROUNDING-UNIT, ORG-CUR-ROUNDING-NOT-FOUND), name translations per owner with the base-name fallback route (error codes ORG-TRANSLATION-LANGUAGE-INVALID, ORG-TRANSLATION-NOT-FOUND), and the unit conversions report with tenant-owned conversions (error codes ORG-UOM-CLASS-MISMATCH, ORG-UOM-CONVERSION-DUPLICATE, ORG-UOM-UNIT-INACTIVE).
+  version: 0.15.0
+  description: Organization service. Covers legal entities, operating units, sites, warehouses, locations, postal addresses with purposes, fiscal calendars with idempotent year generation and the period read, hierarchy types and draft hierarchy versions with validated node sets (error codes ORG-HIER-CYCLE, ORG-HIER-MULTI-ROOT, ORG-HIER-DUPLICATE-NODE, ORG-HIER-PARENT-UNKNOWN, ORG-HIER-DEPTH, ORG-HIER-SIZE, ORG-HIER-NODE-UNKNOWN, ORG-HIER-TYPE-NOT-FOUND, ORG-HIER-TYPE-CODE-DUPLICATE, ORG-HIER-VERSION-NOT-FOUND, ORG-HIER-DRAFT-EXISTS, ORG-HIER-VERSION-IMMUTABLE, ORG-HIER-OVERLAP, ORG-HIER-BACKDATE-DUTY, ORG-HIER-NO-VERSION, ORG-HIER-NODE-ABSENT, ORG-HIER-MAKER-CHECKER) with the version list, publish, supersede, the closure table, the as-of query and the version comparison, unit-of-measure conversion, the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation, currency rounding rules with the round route and the rule delete (error codes ORG-CUR-ROUNDING-UNIT, ORG-CUR-ROUNDING-NOT-FOUND), name translations per owner with the base-name fallback route (error codes ORG-TRANSLATION-LANGUAGE-INVALID, ORG-TRANSLATION-NOT-FOUND), the organization model package export and import (error codes ORG-PKG-VERSION-UNSUPPORTED, ORG-PKG-INVALID, ORG-PKG-TOO-LARGE), and the unit conversions report with tenant-owned conversions (error codes ORG-UOM-CLASS-MISMATCH, ORG-UOM-CONVERSION-DUPLICATE, ORG-UOM-UNIT-INACTIVE).
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -1318,6 +1318,39 @@ paths:
           description: The language with its new status for the caller's tenant; repeating the current status changes nothing. Rejected for legal-entity-scoped callers.
           content: { application/json: { schema: { $ref: '#/components/schemas/Language' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/org/export:
+    post:
+      operationId: exportOrgPackage
+      summary: Export the organization model as a package
+      description: Reads every legal entity, operating unit, site with its warehouses and locations, hierarchy type, team type and team of the caller's tenant into one versioned JSON package whose records name each other by code. A POST because the export is an administrative action; it changes nothing. Each hierarchy type carries its published and superseded versions (a draft is not exported) and the package carries the fiscal calendars with their generated years. Addresses, translations, calendar assignments and team members are not part of the package.
+      x-passage-duty: org.package.manage
+      responses:
+        '200':
+          description: The package, sent as an attachment named org-package.json. The default warehouse of every site is listed first. 403 AUTH-0003 unless the caller holds tenant.administer and has no legal-entity claim. 422 ORG-PKG-TOO-LARGE when a kind has more than 10000 rows.
+          content: { application/json: { schema: { $ref: '#/components/schemas/OrgPackageExport' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/import:
+    post:
+      operationId: importOrgPackage
+      summary: Import an organization model package
+      description: Creates the records of the package that the tenant does not have yet, matched by natural code (legal entity code; operating unit type and code; legal entity and site, warehouse or location code; hierarchy type, team type and team code; hierarchy version by type code and effectiveFrom; fiscal calendar by code; fiscal year by calendar code and year). Existing records are never updated or deleted; their differing names are listed. Before the first write the package is validated, every code reference resolved and every rule the creates apply checked against the tenant's rows (active parent records, active country, currency and language, the legal entity and team limits, warehouse codes unique per legal entity), so a package that fails any of them imports nothing. A hierarchy version is created as a draft of its type, given its nodes and published with its effectiveFrom, oldest first, each published before the next is drafted, so each must be later than the latest version the type already has and the tree must fit the configured depth and node limits. A date before today is a backdate (the org.hierarchy.backdate duty and a type with backdateAllowed) only when the type already holds a version that no package import made; loading a history into an empty type, or finishing one an earlier import started, changes no as-of answer anyone else wrote, and the publish keeps the reason 'Imported from an organization package'. A type with an open draft takes no new version, except the draft an earlier run of the same import left open (its key is orgpkg:hier-draft:<type>/<effectiveFrom>), which the import fills and publishes. New versions of a security-purpose type are not imported (publishing needs a second person) and each is listed under skipped. A fiscal year is generated for its calendar from the calendar's settings (a custom calendar from the listed periods). Each record is then created in its own transaction and raises its own event through the outbox. A change someone else commits after that check can still fail a create; the records created before it stay, and importing the package again creates only what is missing. A second import of the same package reports no creates. The exportedAt field of an exported file is accepted and ignored.
+      x-passage-duty: org.package.manage
+      parameters:
+        - { name: dryRun, in: query, schema: { type: boolean, default: false }, description: When true nothing is written and the report shows what a real import would create. }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/OrgPackage' } } }
+      responses:
+        '200':
+          description: The import report with created and unchanged counts per kind. 400 COM-0001 for a malformed body or dryRun. 403 AUTH-0003 unless the caller holds tenant.administer and has no legal-entity claim. A store error part-way (409 or 422 with the store's code) leaves the earlier records created; importing again resumes.
+          content: { application/json: { schema: { $ref: '#/components/schemas/OrgImportReport' } } }
+        '422':
+          description: ORG-PKG-VERSION-UNSUPPORTED when schemaVersion is not 1. ORG-PKG-INVALID with a path-to-message errors map (at most 50 entries) for a field error, a duplicate code in the package, an unknown or inactive referenced record, a version tree with a cycle, several roots, too many levels or nodes, a version dated at or before the type's latest, an open draft the import did not make, a backdated version without the duty or on a type without backdateAllowed, a fiscal year that does not generate or belongs to an existing calendar with other settings, inactive reference data, a warehouse code already used at another site of the legal entity, or a tenant limit. ORG-PKG-TOO-LARGE when the package or the tenant holds more than 10000 rows of one kind.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '413':
+          description: COM-0413 when the body exceeds 8 MiB; the limit applies while the body is read.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/org/uom/convert:
     get:
       operationId: convertUnit
@@ -1875,6 +1908,202 @@ components:
       type: object
       required: [type, title, status]
       properties: { type: { type: string }, title: { type: string }, status: { type: integer }, detail: { type: string }, instance: { type: string }, code: { type: string }, traceId: { type: string }, errors: { type: object, additionalProperties: { type: string } } }
+    OrgPackage:
+      type: object
+      required: [schemaVersion]
+      properties:
+        schemaVersion: { type: integer, enum: [1] }
+        legalEntities:
+          type: array
+          items:
+            type: object
+            required: [code, name, country, currency, timeZone]
+            properties:
+              code: { type: string, pattern: '^[A-Z0-9]{2,8}$' }
+              name: { type: string, maxLength: 120 }
+              country: { type: string, pattern: '^[A-Z]{2}$' }
+              currency: { type: string, pattern: '^[A-Z]{3}$' }
+              timeZone: { type: string }
+              defaultLanguage: { type: string }
+              registrationNumber: { type: string, maxLength: 40 }
+        operatingUnits:
+          type: array
+          items:
+            type: object
+            required: [type, code, name]
+            properties:
+              type: { type: string, enum: [department, cost_center, business_unit, value_stream] }
+              code: { type: string }
+              name: { type: string, maxLength: 120 }
+              legalEntity: { type: string, description: Code of the default legal entity; it must be in the package or already exist. }
+        sites:
+          type: array
+          items:
+            type: object
+            required: [legalEntity, code, name, warehouses]
+            properties:
+              legalEntity: { type: string }
+              code: { type: string }
+              name: { type: string }
+              timeZone: { type: string }
+              warehouses:
+                type: array
+                minItems: 1
+                description: The first warehouse becomes the default warehouse of a site created by the import.
+                items:
+                  type: object
+                  required: [code, name]
+                  properties:
+                    code: { type: string }
+                    name: { type: string }
+                    type: { type: string, enum: [standard, transit, quarantine, subcontractor] }
+                    timeZone: { type: string }
+                    locations:
+                      type: array
+                      items:
+                        type: object
+                        required: [code, name]
+                        properties:
+                          code: { type: string }
+                          name: { type: string }
+                          type: { type: string, enum: [storage, receiving, shipping, quarantine] }
+        hierarchyTypes:
+          type: array
+          items:
+            type: object
+            required: [code, name, purposes]
+            properties:
+              code: { type: string }
+              name: { type: string }
+              purposes: { type: array, minItems: 1, items: { type: string, enum: [reporting, procurement, expenditure, security, centralized_payments, custom] } }
+              backdateAllowed: { type: boolean }
+              versions:
+                type: array
+                description: Published versions, oldest first. The effectiveFrom of a version is its key within the type.
+                items:
+                  type: object
+                  required: [effectiveFrom, nodes]
+                  properties:
+                    effectiveFrom: { type: string, format: date }
+                    nodes:
+                      type: array
+                      description: One node per org unit; exactly one has no parent.
+                      items:
+                        type: object
+                        required: [unit]
+                        properties:
+                          unit: { $ref: '#/components/schemas/OrgPackageNodeRef' }
+                          parent: { $ref: '#/components/schemas/OrgPackageNodeRef' }
+                          sortOrder: { type: integer, minimum: 0 }
+        fiscalCalendars:
+          type: array
+          items:
+            type: object
+            required: [code, name, pattern]
+            properties:
+              code: { type: string }
+              name: { type: string }
+              pattern: { type: string, enum: [calendar, 4-4-5, 4-5-4, 5-4-4, 13-period, custom] }
+              startMonth: { type: integer, minimum: 1, maximum: 12, description: Defaults to 1. }
+              weekStart: { type: string, description: 'Lower-case day name; defaults to monday.' }
+              openingClosing: { type: boolean, description: Defaults to true. }
+              specialPeriods: { type: integer, minimum: 0, maximum: 4 }
+              years:
+                type: array
+                items:
+                  type: object
+                  required: [fiscalYear]
+                  properties:
+                    fiscalYear: { type: integer, minimum: 1900, maximum: 2999 }
+                    periods:
+                      type: array
+                      description: The operating period ranges of a custom calendar's year; required for a custom calendar and refused for every other pattern.
+                      items:
+                        type: object
+                        required: [start, end]
+                        properties:
+                          start: { type: string, format: date }
+                          end: { type: string, format: date }
+        teamTypes:
+          type: array
+          items:
+            type: object
+            required: [code, name, memberKinds]
+            properties:
+              code: { type: string }
+              name: { type: string, maxLength: 60 }
+              memberKinds: { type: array, minItems: 1, items: { type: string, enum: [user, party] } }
+        teams:
+          type: array
+          items:
+            type: object
+            required: [code, name, teamType, effectiveFrom]
+            properties:
+              code: { type: string }
+              name: { type: string, maxLength: 60 }
+              description: { type: string, maxLength: 500 }
+              teamType: { type: string, description: Code of a team type in the package or already in the tenant. }
+              operatingUnit:
+                type: object
+                required: [type, code]
+                properties:
+                  type: { type: string, enum: [department, cost_center, business_unit, value_stream] }
+                  code: { type: string }
+              effectiveFrom: { type: string, format: date }
+              effectiveTo: { type: string, format: date }
+        exportedAt: { type: string, format: date-time, description: Written by export; ignored by import. }
+    OrgPackageNodeRef:
+      type: object
+      required: [kind, code]
+      description: An org unit named by code; it must be in the package or already exist.
+      properties:
+        kind: { type: string, enum: [legalEntity, operatingUnit] }
+        type: { type: string, enum: [department, cost_center, business_unit, value_stream], description: Required for an operating unit. }
+        code: { type: string }
+    OrgPackageExport:
+      allOf:
+        - $ref: '#/components/schemas/OrgPackage'
+        - type: object
+          required: [exportedAt]
+          properties:
+            exportedAt: { type: string, format: date-time }
+    OrgImportCounts:
+      type: object
+      required: [created, unchanged]
+      properties:
+        created: { type: integer }
+        unchanged: { type: integer }
+    OrgImportReport:
+      type: object
+      required: [dryRun, created, unchanged, kinds, differences, skipped]
+      properties:
+        dryRun: { type: boolean }
+        created: { type: integer, description: Records created, or that a dry run would create. }
+        unchanged: { type: integer, description: Records that already existed. }
+        kinds:
+          type: object
+          description: Counts per kind (legalEntities, operatingUnits, sites, warehouses, locations, hierarchyTypes, hierarchyVersions, fiscalCalendars, fiscalYears, teamTypes, teams).
+          additionalProperties: { $ref: '#/components/schemas/OrgImportCounts' }
+        differences:
+          type: array
+          description: Existing records of any kind whose name (or, for a fiscal calendar, pattern or settings; for a hierarchy version, node set) differs from the package; they are left as they are. The code is the record's natural key (for example USMF, department/FIN, USMF/DET, USMF/DET-MAIN/RCV-01, REPORTING/2026-01-01 for a version).
+          items:
+            type: object
+            required: [kind, code, field]
+            properties:
+              kind: { type: string }
+              code: { type: string }
+              field: { type: string }
+        skipped:
+          type: array
+          description: Records left alone on purpose, for example each new version (code <type>/<effectiveFrom>) of a security-purpose hierarchy type, which needs a second person to publish.
+          items:
+            type: object
+            required: [kind, code, reason]
+            properties:
+              kind: { type: string }
+              code: { type: string }
+              reason: { type: string }
   responses:
     Problem:
       description: RFC 9457 problem details.

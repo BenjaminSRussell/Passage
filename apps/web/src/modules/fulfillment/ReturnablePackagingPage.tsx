@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
-import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
+import { Link } from "react-router-dom";
+import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, listContainerTypes, listReturnableBalances, returnPackaging, type ContainerType, type Problem, type ReturnableBalance } from "./api/client";
 import { formatDateTime, shortId, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
@@ -81,6 +82,11 @@ export function ReturnablePackagingPage() {
       <PageHeader
         title="Returnable packaging"
         description="Returnable pallets and crates each customer holds. Posting a packing slip adds its returnable containers; a return receipt takes them off."
+        actions={
+          <Link className={buttonClassName("secondary")} to="/fulfillment/returnable-movements">
+            Movements and corrections
+          </Link>
+        }
       />
       <div className={styles.toolbar}>
         <FormField id="rtp-filter" label="Customer id" hint="Show one customer's balances." optional>

@@ -10,7 +10,10 @@ import (
 const (
 	CodePostpone   = "PLAN-0006"
 	CodeDelay      = "PLAN-0007"
+	CodeBOMCycle   = "PLAN-0004"
+	CodeLotSplit   = "PLAN-0005"
 	CodeNoVendor   = "PLAN-0008"
+	CodeNoQuotaSrc = "PLAN-0009"
 	CodeRedZone    = "PLAN-0010"
 	CodeSalesOnTop = "PLAN-0015"
 )
@@ -35,8 +38,14 @@ func CatalogCode(action string) string {
 		return CodePostpone
 	case ActionDelay:
 		return CodeDelay
+	case ActionBOMCycle:
+		return CodeBOMCycle
+	case ActionLotSplit:
+		return CodeLotSplit
 	case ActionNoVendor:
 		return CodeNoVendor
+	case ActionNoQuotaSource:
+		return CodeNoQuotaSrc
 	case ActionRedZone:
 		return CodeRedZone
 	case ActionSalesOnTop:
@@ -60,8 +69,14 @@ func CatalogText(m MessageView) string {
 			ref = m.SupplyRef
 		}
 		return fmt.Sprintf("Demand %s will be delayed %d days (expected %s).", ref, m.Days, m.Date)
+	case ActionBOMCycle:
+		return fmt.Sprintf("BOM cycle detected for %s; low-level codes not updated.", m.ItemID)
+	case ActionLotSplit:
+		return fmt.Sprintf("Requirement for %s splits into %d orders (max %s).", m.ItemID, m.Days, qtyText(m.Qty))
 	case ActionNoVendor:
 		return fmt.Sprintf("No vendor for planned purchase of %s; using none.", m.ItemID)
+	case ActionNoQuotaSource:
+		return fmt.Sprintf("Quota arrangement %s has no usable source in %s.", m.DemandRef, m.Date)
 	case ActionRedZone:
 		pct := "0"
 		if p, err := decimal.NewFromString(m.Priority); err == nil {
@@ -76,4 +91,13 @@ func CatalogText(m MessageView) string {
 		return fmt.Sprintf("Sales demand %s exceeds consumable forecast by %s; added on top.", m.DemandRef, qty)
 	}
 	return ""
+}
+
+// qtyText writes a decimal string without trailing zeros; text that is not a
+// decimal is returned as it is.
+func qtyText(s string) string {
+	if q, err := decimal.NewFromString(s); err == nil {
+		return q.String()
+	}
+	return s
 }
