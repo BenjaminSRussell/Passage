@@ -71,6 +71,11 @@ func TestGL_PartialRAFEndReconcilesToTheLedgerWIPAccount(t *testing.T) {
 	if err := pool.QueryRow(context.Background(), `select count(*) from production_journal where order_id = $1 and posted and journal_entry_id is not null`, st.orderID).Scan(&linked); err != nil || linked != len(res.Booked) {
 		t.Fatalf("journals linked to their entries: %d of %d %v", linked, len(res.Booked), err)
 	}
+	for _, e := range fake.Entries() {
+		if !ids.Valid(e.DocumentID) || e.Lines[0].Text == "" {
+			t.Fatalf("the ledger takes a UUID document id and the journal number as line text: %+v", e.Entry)
+		}
+	}
 	entries := len(fake.Entries())
 	if again, err := s.PostToGL(ctx, fake, GLPostRequest{LegalEntityID: le, LedgerID: ledgerID}); err != nil || len(again.Booked) != 0 || len(fake.Entries()) != entries {
 		t.Fatalf("a second run books nothing: %+v %v", again, err)

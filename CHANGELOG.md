@@ -10,6 +10,11 @@ release may change public APIs.
 
 ### Added
 
+- Production orders against the real ledger (#478, W21 AC4): `internal/ledgertest` builds and runs the ledger service
+  on a throwaway schema and production books and reconciles WIP through the real `ledgerclient` with signed service
+  tokens (skipped without `PASSAGE_TEST_DATABASE_URL` or under `-short`). A demo-plant seed (`go run ./cmd/demoplant`
+  in `services/production`) writes five orders across the lifecycle and can book them in a ledger; see the
+  production README.
 - Local ledger performance benchmark as a proxy for wave 11 AC4 (#476): `make bench-ledger` posts balanced
   entries and reads trial balances against a throwaway Postgres 16 cluster and reports lines/s and p50/p95/p99;
   results and the hardware caveat are in `services/ledger/README.md`. It does not meet or replace AC4.
@@ -44,6 +49,8 @@ release may change public APIs.
 
 ### Fixed
 
+- Production GL posting sent the journal number as the ledger `documentId`, which the ledger refuses (it must be a
+  UUID); it now sends the journal id (the order id for a settlement) and carries the number as line text (#478).
 - Ledger posting no longer deadlocks (`40P01`) when two ledgers of one tenant post the same new dimension
   combinations at once: each new combination is inserted once, in id order (found by the #476 benchmark).
 

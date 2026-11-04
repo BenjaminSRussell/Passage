@@ -71,13 +71,19 @@ type glGroup struct {
 }
 
 func (g *glGroup) entry(in GLPostRequest) ledgerclient.Entry {
-	e := ledgerclient.Entry{LegalEntityID: in.LegalEntityID, LedgerID: in.LedgerID, DocumentID: g.document, PostingDate: g.postingDate,
+	// The ledger takes a UUID document id: the journal, or the order for a settlement. The journal or order number
+	// rides on each line's text so the GL still shows it.
+	doc := g.journalID
+	if doc == "" {
+		doc = g.orderID
+	}
+	e := ledgerclient.Entry{LegalEntityID: in.LegalEntityID, LedgerID: in.LedgerID, DocumentID: doc, PostingDate: g.postingDate,
 		Currency: g.currency, IdempotencyKey: g.key, SourceType: g.sourceType}
 	for _, r := range g.rows {
 		if r.cr.IsPositive() {
-			e.Lines = append(e.Lines, ledgerclient.Line{Account: r.account, Credit: true, Amount: r.cr})
+			e.Lines = append(e.Lines, ledgerclient.Line{Account: r.account, Credit: true, Amount: r.cr, Text: g.document})
 		} else {
-			e.Lines = append(e.Lines, ledgerclient.Line{Account: r.account, Amount: r.dr})
+			e.Lines = append(e.Lines, ledgerclient.Line{Account: r.account, Amount: r.dr, Text: g.document})
 		}
 	}
 	return e
