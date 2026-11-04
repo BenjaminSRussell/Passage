@@ -100,6 +100,29 @@ func (f *fakeStore) GetJournal(_ context.Context, id string) (store.Journal, err
 	return *j, nil
 }
 
+// StreamJournal mirrors the Postgres read: the header to start, then each line; streamErr
+// (when set) fails the read after the first line, as a dropped database connection would.
+func (f *fakeStore) StreamJournal(ctx context.Context, id string, start func(store.Journal) error, line func(domain.JournalLine) error) error {
+	j, err := f.GetJournal(ctx, id)
+	if err != nil {
+		return err
+	}
+	lines := j.Lines
+	j.Lines = nil
+	if err := start(j); err != nil {
+		return err
+	}
+	for i, l := range lines {
+		if i == 1 && f.streamErr != nil {
+			return f.streamErr
+		}
+		if err := line(l); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (f *fakeStore) ValidateJournal(_ context.Context, id string) (store.Journal, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

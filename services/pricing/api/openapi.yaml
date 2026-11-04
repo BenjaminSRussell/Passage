@@ -555,6 +555,46 @@ paths:
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/journals/{id}/audit-extract:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getPriceJournalAuditExtract
+      summary: Audit extract of a posted or reversed price journal, header and every line with before and after values (§5.26.15).
+      description: >
+        The audit document of a journal, taken after it was posted or reversed: the journal header
+        (status, who created and posted it, when, the journal it reverses or was reversed by) and
+        every line with its operation and the key, price, discounts and validity of the condition
+        record before and after the change. An OPEN or VALIDATED journal has no extract (409
+        PRC-0064). The before and after values are the ones stored on the line when the journal
+        posted, not recomputed, so a later change to the record does not change the extract.
+        format=csv (default) streams every line, one row per line with the header repeated, and
+        text cells that could run as a spreadsheet formula are prefixed with an apostrophe
+        (numbers, negative ones too, are written as they are); if the read fails after the
+        download started the connection is aborted, so a client never keeps a short file that
+        looks complete. format=json returns the Journal with at most 5,000 lines and
+        linesTruncated=true when there are more. Read only: nothing is written and no event is raised.
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: format, in: query, required: false, schema: {type: string, enum: [csv, json], default: csv}}
+      responses:
+        "200":
+          description: >
+            The extract. The CSV header is journalId, journalName, journalStatus, legalEntityId,
+            createdBy, postedBy, postedAt, reversesJournalId, reversedByJournalId, lineNo, op,
+            recordId, expectedVersion, adjustPct, type, customerKind, customerKey, productKind,
+            productKey, variant, currency, unit, then before and after fromQuantity, amount,
+            discPct1, discPct2, validFrom, validTo, status, version.
+          content:
+            text/csv:
+              schema: {type: string}
+            application/json:
+              schema: {$ref: "#/components/schemas/Journal"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {description: "PRC-0064: the journal is not posted or reversed.", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+        "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/journals/{id}:validate:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -894,6 +934,44 @@ paths:
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/rebates/agreements/{id}/statement:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getRebateStatement
+      summary: Rebate agreement statement for one accrual period, with accrued, settled and open totals (§5.26.15).
+      description: >
+        The statement document of one period of a customer or vendor rebate agreement: the
+        header (agreement, party, period), one line per accrual row of the period (posted
+        invoice lines, replayed lines and retroactive deltas, in invoice order) and the footer.
+        The footer is exact whatever the line count: accruedAmount is the period's accrued total,
+        settledAmount the sum of the SETTLED rows (settlement is posted by w30; it is zero until
+        then), openAmount the difference. tier is the tier in force at the period's cumulative
+        basis and targetAmount what that tier owes on the whole period (BR-26.8: one rate on the
+        whole cumulative basis). reconciled says the accrual rows agree with it: targetAmount
+        equals accruedAmount, the rows (credits as negative rows, retroactive deltas included)
+        sum to it (linesAccruedAmount, over every row whatever the list limit), and the rows'
+        own basis sums to the period's cumulative basis. A period without accruals is a
+        statement with zero totals and no lines. At most 5,000 lines are listed
+        (linesTruncated=true when there are more). format=csv downloads the lines and the three
+        footer rows (rowType LINE, TOTAL_ACCRUED, TOTAL_SETTLED, OPEN; source INVOICE, REPLAYED
+        or RETRO_DELTA). Read only: nothing is written and no event is raised.
+      x-passage-duty: pricing.rebate.view
+      parameters:
+        - {name: period, in: query, required: true, description: "The accrual period key in the form the agreement accrues by: 2027-03 (MONTH), 2027-Q1 (QUARTER) or 2027 (YEAR).", schema: {type: string}}
+        - {name: format, in: query, required: false, schema: {type: string, enum: [json, csv], default: json}}
+      responses:
+        "200":
+          description: The statement.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RebateStatement"}
+            text/csv:
+              schema: {type: string}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/rebates/agreements/{id}:revise:
     post:
       operationId: reviseRebateAgreement
@@ -3494,7 +3572,7 @@ components:
           items: {$ref: "#/components/schemas/JournalLineError"}
         lines:
           type: array
-          description: Set on GET /journals/{id} only.
+          description: Set on GET /journals/{id} (at most 1,000) and on the JSON audit extract (at most 5,000).
           items: {$ref: "#/components/schemas/JournalLine"}
         linesTruncated: {type: boolean}
     JournalLine:
@@ -3518,6 +3596,48 @@ components:
         from: {type: string, description: "Threshold: cumulative basis value or quantity."}
         ratePct: {type: string, description: "NET_AMOUNT tiers: percent of net value."}
         amountPerUnit: {type: string, description: "QUANTITY tiers: amount per unit."}
+    RebateStatementLine:
+      type: object
+      required: [invoiceLineId, invoiceDate, amount, status, retroactive, source]
+      properties:
+        invoiceLineId: {type: string, description: "The invoice line; retro:<run>:<period> on a RETRO_DELTA row."}
+        invoiceDate: {type: string, format: date, description: "The invoice date; the recompute day on a RETRO_DELTA row."}
+        basisValue: {type: string, description: "The line's net value. Absent on a RETRO_DELTA row, which has no basis of its own."}
+        basisQuantity: {type: string, description: "The line's quantity. Absent on a RETRO_DELTA row."}
+        amount: {type: string, description: "Accrued on this row, with the currency's minor units; negative for a credit."}
+        status: {type: string, enum: [ACCRUED, ADJUSTED, SETTLED, REVERSED]}
+        retroactive: {type: boolean}
+        source:
+          type: string
+          enum: [INVOICE, REPLAYED, RETRO_DELTA]
+          description: "INVOICE: accrued from the invoice feed. REPLAYED: an invoice line a retroactive recompute added to the period basis (accrues nothing itself). RETRO_DELTA: the period delta the recompute posted."
+    RebateStatement:
+      type: object
+      required: [agreementId, name, partyRole, basis, currency, period, basisValue, basisQuantity, targetAmount, accruedAmount, linesAccruedAmount, settledAmount, openAmount, reconciled, lineCount, linesTruncated, lines]
+      properties:
+        agreementId: {type: string, format: uuid}
+        name: {type: string}
+        partyRole: {type: string, enum: [CUSTOMER, VENDOR]}
+        customerId: {type: string, format: uuid}
+        customerGroupId: {type: string, format: uuid}
+        vendorId: {type: string, format: uuid}
+        basis: {type: string, enum: [NET_AMOUNT, QUANTITY]}
+        currency: {type: string}
+        period: {type: string, description: "The period key asked for."}
+        tier: {$ref: "#/components/schemas/Tier"}
+        basisValue: {type: string, description: "Cumulative net value of the period."}
+        basisQuantity: {type: string, description: "Cumulative quantity of the period."}
+        targetAmount: {type: string, description: "What the tier in force owes on the whole period."}
+        accruedAmount: {type: string, description: "The period's accrued total."}
+        linesAccruedAmount: {type: string, description: "The sum of every accrual row of the period (not only the listed ones)."}
+        settledAmount: {type: string}
+        openAmount: {type: string, description: "accruedAmount less settledAmount."}
+        reconciled: {type: boolean, description: "targetAmount, accruedAmount and linesAccruedAmount are equal and the rows' own basis sums to basisValue and basisQuantity."}
+        lineCount: {type: integer, description: "Accrual rows of the period."}
+        linesTruncated: {type: boolean}
+        lines:
+          type: array
+          items: {$ref: "#/components/schemas/RebateStatementLine"}
     RebateAgreementInput:
       type: object
       required: [legalEntityId, name, basis, period, tiers, currency, validFrom, validTo]

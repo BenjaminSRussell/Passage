@@ -566,6 +566,76 @@ export function getRebateAgreement(id: string, signal?: AbortSignal): Promise<Re
   return send<RebateAgreement>(`/rebates/agreements/${encodeURIComponent(id)}`, {}, signal);
 }
 
+/** One accrual row of a rebate statement (OpenAPI RebateStatementLine). */
+export interface RebateStatementLine {
+  invoiceLineId: string;
+  invoiceDate: string;
+  /** Absent on a RETRO_DELTA row, which has no basis of its own. */
+  basisValue?: string;
+  basisQuantity?: string;
+  amount: string;
+  status: RebateAccrual["status"];
+  retroactive: boolean;
+  source: "INVOICE" | "REPLAYED" | "RETRO_DELTA";
+}
+
+/** GET /rebates/agreements/{id}/statement (PRD §5.26.15): one period's header, lines and footer. */
+export interface RebateStatement {
+  agreementId: string;
+  name: string;
+  partyRole: RebatePartyRole;
+  customerId?: string;
+  customerGroupId?: string;
+  vendorId?: string;
+  basis: "NET_AMOUNT" | "QUANTITY";
+  currency: string;
+  period: string;
+  /** The tier in force at the period's cumulative basis; absent below the first threshold. */
+  tier?: RebateTier;
+  basisValue: string;
+  basisQuantity: string;
+  targetAmount: string;
+  accruedAmount: string;
+  /** The sum of every accrual row of the period, listed or not. */
+  linesAccruedAmount: string;
+  settledAmount: string;
+  openAmount: string;
+  /** The tier's amount on the whole period, the accrued total and the sum of the rows agree, and the rows' basis adds up. */
+  reconciled: boolean;
+  lineCount: number;
+  linesTruncated: boolean;
+  lines: RebateStatementLine[];
+}
+
+export function getRebateStatement(id: string, period: string, signal?: AbortSignal): Promise<RebateStatement> {
+  return send<RebateStatement>(`/rebates/agreements/${encodeURIComponent(id)}/statement${query({ period })}`, {}, signal);
+}
+
+/** A CSV document as the service wrote it, with the file name it suggested. */
+export interface CsvDocument {
+  csv: string;
+  filename: string;
+  /** True when the service cut the document (X-Passage-Truncated). */
+  truncated: boolean;
+}
+
+async function csvDocument(path: string, fallbackName: string, signal?: AbortSignal): Promise<CsvDocument> {
+  const res = await sendRaw(path, { headers: { Accept: "text/csv" } }, signal);
+  const csv = await res.text();
+  const disposition = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "");
+  return { csv, filename: disposition?.[1] ?? fallbackName, truncated: res.headers.get("X-Passage-Truncated") === "true" };
+}
+
+/** GET /rebates/agreements/{id}/statement?format=csv - the statement lines and footer rows. */
+export function exportRebateStatement(id: string, period: string, signal?: AbortSignal): Promise<CsvDocument> {
+  return csvDocument(`/rebates/agreements/${encodeURIComponent(id)}/statement${query({ period, format: "csv" })}`, `rebate-statement-${id}-${period}.csv`, signal);
+}
+
+/** GET /journals/{id}/audit-extract - every line with before and after values; 409 PRC-0064 until the journal is posted. */
+export function exportJournalAudit(id: string, signal?: AbortSignal): Promise<CsvDocument> {
+  return csvDocument(`/journals/${encodeURIComponent(id)}/audit-extract${query({ format: "csv" })}`, `price-journal-${id}-audit.csv`, signal);
+}
+
 export function createRebateAgreement(body: RebateAgreementInput, key: string = newKey()): Promise<RebateAgreement> {
   return post<RebateAgreement>("/rebates/agreements", body, key);
 }

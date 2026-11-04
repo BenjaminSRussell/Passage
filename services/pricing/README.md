@@ -231,6 +231,7 @@ testdata/               fixtures
 | GET | `/v1/pricing/journals?legalEntityId=&status=&limit=` | pricing.view | price journal log, newest first, no lines |
 | POST | `/v1/pricing/journals` | pricing.journal.post | up to 100,000 CREATE / UPDATE / DELETE lines; creates OPEN; `Idempotency-Key` honoured |
 | GET | `/v1/pricing/journals/{id}` | pricing.view | with up to 1,000 lines (before / after) and every line error |
+| GET | `/v1/pricing/journals/{id}/audit-extract?format=` | pricing.view | audit extract of a POSTED or REVERSED journal (PRC-0064 otherwise): CSV (default, every line streamed, before and after values as stored at post; the connection is aborted if the read fails mid-file) or JSON (at most 5,000 lines); read only |
 | POST | `/v1/pricing/journals:import-csv?legalEntityId=&name=&smartRound=` | pricing.journal.post | `text/csv` body (≤ 32 MB, ≤ 100,000 rows, header row with op); same checks as `POST /journals`; row faults keyed `rows[n].column`; `Idempotency-Key` honoured |
 | POST | `/v1/pricing/journals/{id}:validate` | pricing.journal.post | VALIDATED when clean, else OPEN with line errors |
 | POST | `/v1/pricing/journals/{id}:post` | pricing.journal.post | all lines or none (PRC-0005); not by a commodity run's runner (PRC-0056); with `journalFourEyes` on, not by the journal's creator nor without a user (PRC-0057); records `postedBy`; `Idempotency-Key` honoured |
@@ -238,6 +239,7 @@ testdata/               fixtures
 | GET | `/v1/pricing/rebates/agreements?legalEntityId=&partyRole=` | pricing.rebate.view | |
 | POST | `/v1/pricing/rebates/agreements` | pricing.rebate.maintain | `Idempotency-Key` honoured; `partyRole` CUSTOMER (default) or VENDOR with `vendorId` |
 | GET | `/v1/pricing/rebates/agreements/{id}` | pricing.rebate.view | |
+| GET | `/v1/pricing/rebates/agreements/{id}/statement?period=&format=` | pricing.rebate.view | rebate statement of one accrual period (2027-03, 2027-Q1 or 2027 as the agreement accrues): header, lines (source INVOICE, REPLAYED or RETRO_DELTA), accrued / settled / open, tier in force and `reconciled` (the tier's amount on the whole period, the period total and the sum of every accrual row agree, and the rows' basis adds up); `format=csv` downloads it; at most 5,000 lines; read only |
 | POST | `/v1/pricing/rebates/agreements/{id}:reopen` | pricing.rebate.maintain | body `{version, validTo}`; CLOSED only (409 PRC-0031); `validTo` after the close date; booked accruals stay; `Idempotency-Key` honoured |
 | GET | `/v1/pricing/rebates/accruals?agreementId=&period=` | pricing.rebate.view | period such as 2027-03, 2027-Q1 or 2027 |
 | POST | `/v1/pricing/rebates/accruals` | pricing.rebate.maintain | one posted invoice line; 201 new, 200 already accrued (stand-in for the invoice.posted consumer) |
@@ -346,6 +348,7 @@ testdata/               fixtures
 | PRC-0061 | 409 | The broker contract or royalty agreement is closed and takes no new invoice lines |
 | PRC-0062 | 409 | A royalty period is claimed before it is closed |
 | PRC-0063 | 422 | The named or assigned procedure has no ACTIVE version |
+| PRC-0064 | 409 | The audit extract of a price journal that is neither POSTED nor REVERSED |
 | conflict_version | 412 | Body version does not match the stored version |
 | idempotency_key_reuse | 422 | Same `Idempotency-Key` with a different body, or an invoice line accrued again with a different date, value or quantity |
 | COM-0001 | 422 | Validation failure; `errors` maps each field to its message (percentages outside 0–100, a product-keyed TOTAL_DISC, bad dates, ...) |

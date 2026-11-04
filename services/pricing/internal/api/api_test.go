@@ -34,6 +34,7 @@ type fakeStore struct {
 	lastList     store.Filter
 	pingErr      error
 	exportErr    error // returned by ExportRecords before it starts
+	streamErr    error // returned by StreamJournal after the first line
 	journals     map[string]*store.Journal
 	agreements   map[string]domain.RebateAgreement
 	periods      map[string]*fakePeriod

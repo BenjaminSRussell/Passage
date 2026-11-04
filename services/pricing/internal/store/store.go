@@ -89,6 +89,7 @@ type Store interface {
 	CreateJournal(ctx context.Context, in JournalInput, idempotencyKey string) (Journal, error)
 	ListJournals(ctx context.Context, f JournalFilter) ([]Journal, error)
 	GetJournal(ctx context.Context, id string) (Journal, error)
+	StreamJournal(ctx context.Context, id string, start func(Journal) error, line func(domain.JournalLine) error) error
 	ValidateJournal(ctx context.Context, id string) (Journal, error)
 	PostJournal(ctx context.Context, id, idempotencyKey string) (Journal, error)
 	ReverseJournal(ctx context.Context, id, idempotencyKey string) (Journal, error)
@@ -101,6 +102,7 @@ type Store interface {
 	ListAgreements(ctx context.Context, f AgreementFilter) ([]domain.RebateAgreement, error)
 	AccrueInvoiceLine(ctx context.Context, in AccrualInput) (Accrual, bool, error)
 	ListAccruals(ctx context.Context, f AccrualFilter) ([]Accrual, error)
+	RebateStatementInput(ctx context.Context, agreementID, periodKey string) (domain.RebateAgreement, domain.StatementInput, error)
 	PreviewVendorClaim(ctx context.Context, agreementID, periodKey string) (VendorClaimPreview, error)
 	CreateVendorClaim(ctx context.Context, in VendorClaimInput, idempotencyKey string) (VendorClaim, error)
 	GetVendorClaim(ctx context.Context, id string) (VendorClaim, error)
