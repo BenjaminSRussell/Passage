@@ -21,6 +21,22 @@ import {
   type ApiClientPatch,
 } from "./clients.ts";
 import { parseEvent } from "./consumer.ts";
+import {
+  CATALOG_KINDS,
+  CatalogStateError,
+  CatalogStore,
+  CatalogVersionError,
+  IdempotencyKeyReuseError,
+  LIFECYCLES,
+  MAX_SPEC_BYTES,
+  MIN_DEPRECATION_MONTHS,
+  validateCatalogName,
+  validateOwnerService,
+  type CatalogFilter,
+  type CatalogKind,
+  type CatalogPatch,
+  type Lifecycle,
+} from "./catalog.ts";
 import { REPLAY_MAX_EVENTS } from "./dispatch.ts";
 import { validatePattern } from "./filter.ts";
 import type { Metrics } from "./metrics.ts";
@@ -44,7 +60,12 @@ export const DUTY_CLIENT_WRITE = "hub.client.write";
 /** Spend a client's quota: a service-only duty (never a person or role); no caller holds it until the edge quota check is built. */
 export const DUTY_CLIENT_CONSUME = "hub.client.consume";
 
+/** Publish, change, deprecate and retire catalog entries (new duty; enforced here, seeded by the main session). */
+export const DUTY_CATALOG_WRITE = "hub.catalog.write";
+
 export const MAX_BODY_BYTES = 64 * 1024;
+/** A catalog publish carries a whole OpenAPI or AsyncAPI document. */
+const MAX_CATALOG_BODY_BYTES = MAX_SPEC_BYTES + 16 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 const RFC3339 = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?(Z|[+-]\d\d:\d\d)$/i;
@@ -109,6 +130,10 @@ export interface HubApiDeps {
   guard?: GuardOptions;
   /** The API client registry; defaults to one over `store`. */
   clients?: ClientStore;
+  /** The API and event catalog; defaults to one over `store`. */
+  catalog?: CatalogStore;
+  /** api_deprecation_months: the least notice between a deprecation and its sunset; defaults to 12, never below 12. */
+  deprecationMonths?: number;
   /** Pushes rest-push subscriptions; without it creating one answers 501 HUB-0502. */
   rest?: RestPusher;
   /** Total events one replay may enqueue (BR-35.9); defaults to 1,000,000. */
@@ -117,14 +142,14 @@ export interface HubApiDeps {
   ping?: () => Promise<void>;
 }
 
-async function readBody(req: IncomingMessage): Promise<unknown> {
+async function readBody(req: IncomingMessage, maxBytes: number = MAX_BODY_BYTES): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     const buf = typeof chunk === "string" ? Buffer.from(chunk) : (chunk as Buffer);
     size += buf.length;
-    if (size > MAX_BODY_BYTES) {
-      throw new ApiError(413, "HUB-0413", "request body exceeds 64 KiB");
+    if (size > maxBytes) {
+      throw new ApiError(413, "HUB-0413", `request body exceeds ${maxBytes / 1024} KiB`);
     }
     chunks.push(buf);
   }
@@ -214,6 +239,28 @@ function scopesOf(v: unknown): string[] {
   return scopes;
 }
 
+function kindOf(v: unknown): CatalogKind {
+  if (typeof v !== "string" || !CATALOG_KINDS.includes(v as CatalogKind)) {
+    throw new ApiError(400, "HUB-0400", `kind must be one of ${CATALOG_KINDS.join(", ")}`);
+  }
+  return v as CatalogKind;
+}
+
+function optionalText(v: unknown, key: string, max: number): string {
+  if (typeof v !== "string" || v.length > max) {
+    throw new ApiError(400, "HUB-0400", `${key} must be a string of at most ${max} characters`);
+  }
+  return v.trim();
+}
+
+function versionOf(body: Record<string, unknown>): number {
+  const v = body["version"];
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 1) {
+    throw new ApiError(400, "HUB-0400", "version must be the entry's current version");
+  }
+  return v;
+}
+
 /** An optional integer field; RangeError (400) for anything else. */
 function intOf(body: Record<string, unknown>, key: string): number | undefined {
   const v = body[key];
@@ -251,11 +298,16 @@ const SUBSCRIPTIONS = "/v1/hub/subscriptions";
 const ONE = new RegExp(`^${SUBSCRIPTIONS}/([0-9a-fA-F-]{36})(?::(resume|replay|test))?$`);
 const CLIENTS = "/v1/hub/clients";
 const CLIENT_ONE = new RegExp(`^${CLIENTS}/([0-9a-fA-F-]{36})(?::(revoke)|/(usage))?$`);
+const CATALOG = "/v1/hub/catalog";
+const CATALOG_ONE = new RegExp(`^${CATALOG}/([0-9a-fA-F-]{36})(?::(deprecate|retire)|/(spec))?$`);
 const DELIVERY_REPLAY = /^\/v1\/hub\/deliveries\/([0-9a-fA-F-]{36}):replay$/;
 
 export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   const { store, metrics } = deps;
   const clients = deps.clients ?? new ClientStore(store);
+  const catalog = deps.catalog ?? new CatalogStore(store);
+  const configuredMonths = deps.deprecationMonths ?? MIN_DEPRECATION_MONTHS;
+  const deprecationMonths = Number.isInteger(configuredMonths) ? Math.max(configuredMonths, MIN_DEPRECATION_MONTHS) : MIN_DEPRECATION_MONTHS;
   const clock = deps.clock ?? (() => Date.now() / 1000);
 
   const checkUrl = async (url: string): Promise<void> => {
@@ -417,6 +469,124 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
           throw new ApiError(404, "HUB-0404", "no such API client");
         }
         return { name: "updateClient", status: 200, body: updated };
+      }
+      return allow("GET, PATCH");
+    }
+
+    if (path === CATALOG) {
+      if (method === "POST") {
+        const p = principalFromHeaders(req.headers);
+        requireDuty(p, DUTY_CATALOG_WRITE);
+        const key = header(req.headers, "idempotency-key")?.trim();
+        if (key !== undefined && key.length > 200) {
+          throw new ApiError(400, "HUB-0400", "Idempotency-Key must be at most 200 characters");
+        }
+        const body = object(await readBody(req, MAX_CATALOG_BODY_BYTES), ["kind", "name", "specVersion", "title", "summary", "ownerService", "spec"]);
+        const kind = kindOf(body["kind"]);
+        const name = requireString(body, "name", 100);
+        validateCatalogName(name);
+        const ownerService = requireString(body, "ownerService", 64);
+        validateOwnerService(ownerService);
+        const spec = body["spec"];
+        if (typeof spec !== "object" || spec === null || Array.isArray(spec)) {
+          throw new ApiError(400, "HUB-0400", "spec must be an OpenAPI or AsyncAPI document as a JSON object");
+        }
+        const { created, entry } = await catalog.publish(p.tenantId, {
+          kind, name, ownerService, specVersion: requireString(body, "specVersion", 20), title: requireString(body, "title", 200),
+          summary: body["summary"] === undefined ? "" : optionalText(body["summary"], "summary", 2000),
+          spec: spec as Record<string, unknown>, createdBy: p.userId, idempotencyKey: key === undefined || key === "" ? null : key,
+        });
+        return { name: "publishCatalogEntry", status: created ? 201 : 200, body: entry };
+      }
+      if (method === "GET") {
+        const p = principalFromHeaders(req.headers);
+        requireDuty(p, DUTY_DELIVERY_READ);
+        const q = url.searchParams;
+        const filter: CatalogFilter = {};
+        const kind = q.get("kind");
+        if (kind !== null) filter.kind = kindOf(kind);
+        const lifecycle = q.get("lifecycle");
+        if (lifecycle !== null) {
+          if (!LIFECYCLES.includes(lifecycle as Lifecycle)) {
+            throw new ApiError(400, "HUB-0400", `lifecycle must be one of ${LIFECYCLES.join(", ")}`);
+          }
+          filter.lifecycle = lifecycle as Lifecycle;
+        }
+        const name = q.get("name");
+        if (name !== null && name !== "") filter.name = name;
+        const text = q.get("q")?.trim();
+        if (text !== undefined && text !== "") {
+          if (text.length > 100) {
+            throw new ApiError(400, "HUB-0400", "q must be at most 100 characters");
+          }
+          filter.q = text;
+        }
+        return { name: "listCatalog", status: 200, body: await catalog.list(p.tenantId, filter, limitParam(q), q.get("cursor")) };
+      }
+      return allow("GET, POST");
+    }
+
+    const entryMatch = CATALOG_ONE.exec(path);
+    if (entryMatch !== null) {
+      const id = (entryMatch[1] as string).toLowerCase();
+      const missing = (): never => {
+        throw new ApiError(404, "HUB-0404", "no such catalog entry");
+      };
+      if (entryMatch[3] !== undefined) {
+        if (method !== "GET") {
+          return allow("GET");
+        }
+        const p = principalFromHeaders(req.headers);
+        requireDuty(p, DUTY_DELIVERY_READ);
+        const doc = await catalog.spec(p.tenantId, id);
+        return doc === null ? missing() : { name: "getCatalogSpec", status: 200, body: doc };
+      }
+      if (entryMatch[2] !== undefined) {
+        if (method !== "POST") {
+          return allow("POST");
+        }
+        const p = principalFromHeaders(req.headers);
+        requireDuty(p, DUTY_CATALOG_WRITE);
+        const nowDate = new Date(clock() * 1000);
+        if (entryMatch[2] === "deprecate") {
+          const body = object(await readBody(req), ["version", "sunsetAt", "replacedBy"]);
+          const sunset = body["sunsetAt"];
+          if (typeof sunset !== "string" || !RFC3339.test(sunset)) {
+            throw new ApiError(400, "HUB-0400", "sunsetAt must be an RFC 3339 timestamp");
+          }
+          const replacedBy = body["replacedBy"];
+          if (replacedBy !== undefined && replacedBy !== null && (typeof replacedBy !== "string" || !UUID.test(replacedBy))) {
+            throw new ApiError(400, "HUB-0400", "replacedBy must be the id of a catalog entry");
+          }
+          const out = await catalog.deprecate(
+            p.tenantId, id, { version: versionOf(body), sunsetAt: new Date(sunset), replacedBy: typeof replacedBy === "string" ? replacedBy.toLowerCase() : null },
+            deprecationMonths, nowDate, p.userId,
+          );
+          return out === null ? missing() : { name: "deprecateCatalogEntry", status: 200, body: out };
+        }
+        const body = object(await readBody(req), ["version"]);
+        const out = await catalog.retire(p.tenantId, id, versionOf(body), nowDate, p.userId);
+        return out === null ? missing() : { name: "retireCatalogEntry", status: 200, body: out };
+      }
+      if (method === "GET") {
+        const p = principalFromHeaders(req.headers);
+        requireDuty(p, DUTY_DELIVERY_READ);
+        const found = await catalog.get(p.tenantId, id);
+        return found === null ? missing() : { name: "getCatalogEntry", status: 200, body: found };
+      }
+      if (method === "PATCH") {
+        const p = principalFromHeaders(req.headers);
+        requireDuty(p, DUTY_CATALOG_WRITE);
+        const body = object(await readBody(req), ["version", "title", "summary", "ownerService"]);
+        const patch: CatalogPatch = { version: versionOf(body) };
+        if (body["title"] !== undefined) patch.title = requireString(body, "title", 200);
+        if (body["summary"] !== undefined) patch.summary = optionalText(body["summary"], "summary", 2000);
+        if (body["ownerService"] !== undefined) {
+          patch.ownerService = requireString(body, "ownerService", 64);
+          validateOwnerService(patch.ownerService);
+        }
+        const out = await catalog.patch(p.tenantId, id, patch, p.userId);
+        return out === null ? missing() : { name: "updateCatalogEntry", status: 200, body: out };
       }
       return allow("GET, PATCH");
     }
@@ -694,8 +864,10 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
       let apiErr: ApiError;
       if (err instanceof ApiError) {
         apiErr = err;
-      } else if (err instanceof VersionConflictError || err instanceof ClientIdTakenError || err instanceof ClientRevokedError) {
+      } else if (err instanceof VersionConflictError || err instanceof ClientIdTakenError || err instanceof ClientRevokedError || err instanceof CatalogVersionError || err instanceof CatalogStateError) {
         apiErr = new ApiError(409, "HUB-0409", err.message);
+      } else if (err instanceof IdempotencyKeyReuseError) {
+        apiErr = new ApiError(422, "HUB-0422", err.message);
       } else if (err instanceof RestConfigError || err instanceof WrongKindError) {
         apiErr = new ApiError(err instanceof WrongKindError ? 409 : 400, err instanceof WrongKindError ? "HUB-0409" : "HUB-0400", err.message);
       } else if (err instanceof FieldKeysMissingError) {

@@ -52,7 +52,7 @@ if (rest === undefined) {
   console.warn(JSON.stringify({ level: "warn", msg: "rest-push is off: set MIGRATION_URL and PASSAGE_SERVICE_SIGNING_KEY(_FILE)" }));
 }
 
-const api = createServer(createHubHandler({ store, metrics, ping, guard, ...(rest === undefined ? {} : { rest }) }));
+const api = createServer(createHubHandler({ store, metrics, ping, guard, deprecationMonths: Number(env["HUB_API_DEPRECATION_MONTHS"] ?? 12), ...(rest === undefined ? {} : { rest }) }));
 const admin = createAdminServer(metrics, ping);
 api.listen(8080);
 admin.listen(9090);

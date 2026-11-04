@@ -5,6 +5,8 @@ migrateOnStart: false
 # Several replicas are safe: the poller takes a per-subscription lease and the consumer group splits partitions.
 replicaCount: 2
 pollIntervalMs: 2000
+# api_deprecation_months (PRD 6.35.13): the least notice between deprecating a catalog entry and its sunset date. 12 or more; a lower value is raised to 12.
+apiDeprecationMonths: 12
 # Webhook signing secrets are sealed at rest (fieldcrypt envelope v1). Secret with the key
 # "keys" (comma- or newline-separated id=base64 32-byte master keys) and the id to seal with.
 # Empty: creating a subscription answers 501 and nothing can be signed.

@@ -60,6 +60,8 @@ spec:
               value: {{ .Values.migrateOnStart | quote }}
             - name: HUB_POLL_INTERVAL_MS
               value: {{ .Values.pollIntervalMs | quote }}
+            - name: HUB_API_DEPRECATION_MONTHS
+              value: {{ .Values.apiDeprecationMonths | quote }}
             - name: INTEGRATION_HUB_ALLOW_HTTP
               value: {{ ternary "1" "0" .Values.allowHttp | quote }}
 {{- if .Values.egressAllow }}

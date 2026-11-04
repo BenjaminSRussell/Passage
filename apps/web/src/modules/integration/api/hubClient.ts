@@ -278,3 +278,97 @@ export function revokeClient(id: string): Promise<ApiClient> {
 export function getClientUsage(id: string, minutes = 60, signal?: AbortSignal): Promise<{ minutes: UsageMinute[] }> {
   return hub<{ minutes: UsageMinute[] }>(`/clients/${encodeURIComponent(id)}/usage${query({ minutes })}`, {}, signal);
 }
+
+// API and event catalog (FR-35.8, §6.35.10): published OpenAPI and AsyncAPI documents the developer portal browses.
+
+/** New duty, enforced by the hub and by the page's actions only: no nav item or route is gated on it until it is seeded (hub NOT-IMPLEMENTED.md). */
+export const DUTY_HUB_CATALOG_WRITE = "hub.catalog.write";
+export type CatalogKind = "api" | "event";
+export type CatalogLifecycle = "active" | "deprecated" | "retired";
+export const CATALOG_KINDS: readonly { value: CatalogKind; label: string }[] = [
+  { value: "api", label: "API (OpenAPI)" },
+  { value: "event", label: "Events (AsyncAPI)" },
+];
+export const CATALOG_LIFECYCLES: readonly { value: CatalogLifecycle; label: string }[] = [
+  { value: "active", label: "Active" },
+  { value: "deprecated", label: "Deprecated" },
+  { value: "retired", label: "Retired" },
+];
+/** The least notice before a sunset (api_deprecation_months, PRD §6.35.13); the hub may be set higher. */
+export const MIN_DEPRECATION_MONTHS = 12;
+
+export interface CatalogEntry {
+  id: string;
+  kind: CatalogKind;
+  name: string;
+  specVersion: string;
+  title: string;
+  summary: string;
+  ownerService: string;
+  specFormat: "openapi" | "asyncapi";
+  specBytes: number;
+  operationCount: number;
+  lifecycle: CatalogLifecycle;
+  deprecatedAt: string | null;
+  sunsetAt: string | null;
+  replacedBy: string | null;
+  retiredAt: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CatalogOperation {
+  id: string | null;
+  method: string;
+  path: string;
+  summary: string | null;
+  duty: string | null;
+}
+
+export interface CatalogDetail extends CatalogEntry {
+  operations: CatalogOperation[];
+  issues: string[];
+}
+
+export interface NewCatalogEntry {
+  kind: CatalogKind;
+  name: string;
+  specVersion: string;
+  title: string;
+  summary?: string;
+  ownerService: string;
+  spec: Record<string, unknown>;
+}
+
+export interface CatalogFilter {
+  kind?: CatalogKind | "";
+  lifecycle?: CatalogLifecycle | "";
+  q?: string;
+  cursor?: string;
+}
+
+export function listCatalog(filter: CatalogFilter = {}, signal?: AbortSignal): Promise<Page<CatalogEntry>> {
+  return hub<Page<CatalogEntry>>(`/catalog${query({ limit: 50, kind: filter.kind, lifecycle: filter.lifecycle, q: filter.q?.trim(), cursor: filter.cursor })}`, {}, signal);
+}
+
+export function getCatalogEntry(id: string, signal?: AbortSignal): Promise<CatalogDetail> {
+  return hub<CatalogDetail>(`/catalog/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function getCatalogSpec(id: string, signal?: AbortSignal): Promise<unknown> {
+  return hub<unknown>(`/catalog/${encodeURIComponent(id)}/spec`, {}, signal);
+}
+
+/** Reuse one key per form so a retried submit cannot publish twice. */
+export function publishCatalogEntry(input: NewCatalogEntry, key: string = newKey()): Promise<CatalogEntry> {
+  return hub<CatalogEntry>("/catalog", json("POST", input, { "Idempotency-Key": key }));
+}
+
+export function deprecateCatalogEntry(id: string, body: { version: number; sunsetAt: string; replacedBy?: string }): Promise<CatalogEntry> {
+  return hub<CatalogEntry>(`/catalog/${encodeURIComponent(id)}:deprecate`, json("POST", body));
+}
+
+export function retireCatalogEntry(id: string, version: number): Promise<CatalogEntry> {
+  return hub<CatalogEntry>(`/catalog/${encodeURIComponent(id)}:retire`, json("POST", { version }));
+}

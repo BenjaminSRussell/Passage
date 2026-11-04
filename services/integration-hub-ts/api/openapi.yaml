@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Passage integration hub
-  version: 0.3.0
+  version: 0.4.0
   description: |
     Webhook and rest-push subscriptions, the delivery log, the dead-letter list, resume after a
     410 pause and replay (FR-35.9, FR-35.10). Callers reach these routes through the
@@ -506,8 +506,212 @@ paths:
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
+  /v1/hub/catalog:
+    post:
+      operationId: publishCatalogEntry
+      summary: Publish an API or event contract version to the catalog
+      description: |
+        Registers one version of an OpenAPI 3.x document (`kind` api) or an AsyncAPI 3.x document
+        (`kind` event) for the developer portal. The document is a JSON object of at most 2 MiB
+        nested at most 64 levels deep; the request body limit for this route is 2 MiB plus
+        16 KiB, not the 64 KiB of the other routes. The hub derives the operations (method,
+        path, operationId, summary, x-passage-duty) or messages and counts them.
+        `specVersion` is MAJOR.MINOR.PATCH, must equal the document's `info.version`, and must
+        be higher than the newest published version of the same major line (kind and name);
+        the first version of a new major line must be higher than every published major, so
+        version 1 can take additive versions while version 2 runs beside it. A published
+        version never changes. A version added to a major line whose newest version is
+        deprecated is published deprecated with the same sunset date and replacement; a major
+        line whose newest version is retired takes no new versions. A repeated Idempotency-Key
+        with the same kind, name, version and document returns the entry created first (200);
+        with anything different it is 422 HUB-0422. A version already published, lower than
+        its line's newest, or in a retired line is 409 HUB-0409.
+      x-passage-duty: hub.catalog.write
+      parameters:
+        - {$ref: "#/components/parameters/CatalogIdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/NewCatalogEntry"}
+      responses:
+        "201":
+          description: The version was published.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CatalogEntry"}
+        "200":
+          description: The Idempotency-Key was already used; the first entry is returned.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CatalogEntry"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "413": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    get:
+      operationId: listCatalog
+      summary: Browse the API and event catalog, newest first
+      description: |
+        Keyset-paged; pass `nextCursor` as `cursor` for the next page. The list leaves out the
+        documents; read one with `getCatalogSpec`. `q` matches the name, title, owner and
+        summary, ignoring case, as plain text.
+      x-passage-duty: hub.delivery.read
+      parameters:
+        - name: kind
+          in: query
+          required: false
+          description: Only APIs or only event contracts.
+          schema: {type: string, enum: [api, event]}
+        - name: lifecycle
+          in: query
+          required: false
+          description: Only entries in this lifecycle state.
+          schema: {type: string, enum: [active, deprecated, retired]}
+        - name: name
+          in: query
+          required: false
+          description: Only the versions of this contract name.
+          schema: {type: string}
+        - name: q
+          in: query
+          required: false
+          description: Search text, at most 100 characters.
+          schema: {type: string, maxLength: 100}
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+      responses:
+        "200":
+          description: One page of catalog entries.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CatalogPage"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/hub/catalog/{catalogEntryId}:
+    parameters:
+      - {$ref: "#/components/parameters/CatalogEntryId"}
+    get:
+      operationId: getCatalogEntry
+      summary: Read one catalog entry with its operations and documentation gaps
+      description: Another tenant's entry is reported as not found. `issues` lists operations without operationId, summary or x-passage-duty.
+      x-passage-duty: hub.delivery.read
+      responses:
+        "200":
+          description: The catalog entry.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CatalogDetail"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+    patch:
+      operationId: updateCatalogEntry
+      summary: Change an entry's title, summary or owner service
+      description: Optimistic - `version` must be the version last read, otherwise 409 HUB-0409. The published document and version never change. Writes `dev.passage.hub.catalogentry.updated.v1`.
+      x-passage-duty: hub.catalog.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CatalogPatch"}
+      responses:
+        "200":
+          description: The updated entry with its new version.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CatalogEntry"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+  /v1/hub/catalog/{catalogEntryId}/spec:
+    parameters:
+      - {$ref: "#/components/parameters/CatalogEntryId"}
+    get:
+      operationId: getCatalogSpec
+      summary: Read the published OpenAPI or AsyncAPI document of an entry
+      description: Returns the document exactly as published, as JSON, with its keys in the published order.
+      x-passage-duty: hub.delivery.read
+      responses:
+        "200":
+          description: The published document.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/hub/catalog/{catalogEntryId}:deprecate:
+    parameters:
+      - {$ref: "#/components/parameters/CatalogEntryId"}
+    post:
+      operationId: deprecateCatalogEntry
+      summary: Announce the end of an active entry with a sunset date
+      description: |
+        `sunsetAt` must be at least `api_deprecation_months` months (default 12, never below 12;
+        HUB_API_DEPRECATION_MONTHS) after now, otherwise 400. `replacedBy` names another active
+        entry of the same kind. Only an active entry can be deprecated (409), and `version` must
+        be current (409).
+      x-passage-duty: hub.catalog.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/DeprecateRequest"}
+      responses:
+        "200":
+          description: The entry, deprecated.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CatalogEntry"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+  /v1/hub/catalog/{catalogEntryId}:retire:
+    parameters:
+      - {$ref: "#/components/parameters/CatalogEntryId"}
+    post:
+      operationId: retireCatalogEntry
+      summary: Retire a deprecated entry once its sunset date has passed
+      description: Only a deprecated entry past its sunset date can be retired (409 otherwise). The entry and its document stay readable.
+      x-passage-duty: hub.catalog.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RetireRequest"}
+      responses:
+        "200":
+          description: The entry, retired.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CatalogEntry"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
 components:
   parameters:
+    CatalogEntryId:
+      name: catalogEntryId
+      in: path
+      required: true
+      description: The catalog entry's id.
+      schema: {type: string, format: uuid}
+    CatalogIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: A caller-chosen key; a repeat returns the entry published first.
+      schema: {type: string, maxLength: 200}
     SubscriptionId:
       name: subscriptionId
       in: path
@@ -546,7 +750,7 @@ components:
       schema: {type: string}
   responses:
     Problem:
-      description: An RFC 9457 problem with a stable `code` (HUB-0400 malformed, 0401 no identity, 0403 missing duty, 0404 not found, 0405 method, 0113 quota exceeded (429), 0409 stale version or a taken API client id or a revoked client, 0413 body too large, 0422 unsafe URL or a quota cost above the burst, 0500 unexpected, 0501 field encryption keys not configured, 0502 rest-push not configured).
+      description: An RFC 9457 problem with a stable `code` (HUB-0400 malformed, 0401 no identity, 0403 missing duty, 0404 not found, 0405 method, 0113 quota exceeded (429), 0409 stale version, a taken API client id, a revoked client, a catalog version already published or not higher, or a lifecycle change that is not allowed, 0413 body too large (64 KiB; 2 MiB for a catalog publish), 0422 unsafe URL, a quota cost above the burst, or a catalog Idempotency-Key reused for a different publish, 0500 unexpected, 0501 field encryption keys not configured, 0502 rest-push not configured).
       content:
         application/problem+json:
           schema: {$ref: "#/components/schemas/Problem"}
@@ -821,6 +1025,86 @@ components:
               minute: {type: string, format: date-time}
               allowed: {type: integer, minimum: 0, description: "Units admitted in the minute."}
               throttled: {type: integer, minimum: 0, description: "Units refused with 429 in the minute."}
+    CatalogOperation:
+      type: object
+      required: [id, method, path, summary, duty]
+      properties:
+        id: {type: [string, "null"], description: "operationId, or the message key of an event contract."}
+        method: {type: string, description: "HTTP method, or `event` for a message."}
+        path: {type: string, description: "The path, or the CloudEvents type of a message."}
+        summary: {type: [string, "null"]}
+        duty: {type: [string, "null"], description: "x-passage-duty; messages have none."}
+    NewCatalogEntry:
+      type: object
+      additionalProperties: false
+      required: [kind, name, specVersion, title, ownerService, spec]
+      properties:
+        kind: {type: string, enum: [api, event]}
+        name: {type: string, pattern: "^[a-z0-9][a-z0-9._-]{1,99}$"}
+        specVersion: {type: string, pattern: "^[0-9]{1,6}\\.[0-9]{1,6}\\.[0-9]{1,6}$", description: "MAJOR.MINOR.PATCH, equal to the document's info.version and higher than the newest published version of its major line."}
+        title: {type: string, minLength: 1, maxLength: 200}
+        summary: {type: string, maxLength: 2000}
+        ownerService: {type: string, pattern: "^[a-z0-9][a-z0-9._-]{1,63}$", description: "The service that owns the contract, such as sales."}
+        spec: {type: object, additionalProperties: true, description: "An OpenAPI 3.x (kind api) or AsyncAPI 3.x (kind event) document as JSON, at most 2 MiB and 64 levels deep; `info.version` equals `specVersion`."}
+    CatalogPatch:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: {type: integer, minimum: 1}
+        title: {type: string, minLength: 1, maxLength: 200}
+        summary: {type: string, maxLength: 2000}
+        ownerService: {type: string, pattern: "^[a-z0-9][a-z0-9._-]{1,63}$"}
+    DeprecateRequest:
+      type: object
+      additionalProperties: false
+      required: [version, sunsetAt]
+      properties:
+        version: {type: integer, minimum: 1}
+        sunsetAt: {type: string, format: date-time, description: "At least api_deprecation_months months from now."}
+        replacedBy: {type: [string, "null"], format: uuid, description: "Another active entry of the same kind."}
+    RetireRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: {type: integer, minimum: 1}
+    CatalogEntry:
+      type: object
+      required: [id, kind, name, specVersion, title, summary, ownerService, specFormat, specBytes, operationCount, lifecycle, deprecatedAt, sunsetAt, replacedBy, retiredAt, version, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [api, event]}
+        name: {type: string}
+        specVersion: {type: string}
+        title: {type: string}
+        summary: {type: string}
+        ownerService: {type: string}
+        specFormat: {type: string, enum: [openapi, asyncapi]}
+        specBytes: {type: integer}
+        operationCount: {type: integer, minimum: 0}
+        lifecycle: {type: string, enum: [active, deprecated, retired]}
+        deprecatedAt: {type: [string, "null"], format: date-time}
+        sunsetAt: {type: [string, "null"], format: date-time}
+        replacedBy: {type: [string, "null"], format: uuid}
+        retiredAt: {type: [string, "null"], format: date-time}
+        version: {type: integer}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    CatalogDetail:
+      allOf:
+        - {$ref: "#/components/schemas/CatalogEntry"}
+        - type: object
+          required: [operations, issues]
+          properties:
+            operations: {type: array, items: {$ref: "#/components/schemas/CatalogOperation"}}
+            issues: {type: array, items: {type: string}, description: "Operations without operationId, summary or x-passage-duty; empty when clean."}
+    CatalogPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/CatalogEntry"}}
+        nextCursor: {type: [string, "null"]}
     ConsumeRequest:
       type: object
       additionalProperties: false

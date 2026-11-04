@@ -149,10 +149,24 @@ A rejected URL is "no response". `test/ssrf.test.ts` covers each range with a st
   `hub.client.write` (register, change, revoke), `hub.client.consume` (service-only: never a
   person; no caller holds it until the edge quota check is built), reads under `hub.delivery.read`.
   Scopes are duty names in any catalogue style. The client secret stays in Keycloak.
+- `src/catalog.ts` and the `/v1/hub/catalog` routes (FR-35.8): the API and event catalog the developer
+  portal browses. `POST` publishes one version of an OpenAPI 3.x (kind `api`) or AsyncAPI 3.x (kind
+  `event`) JSON document (at most 2 MiB and 64 levels deep, checked by an iterative walk before
+  Postgres parses it; this route's body limit is 2 MiB, the others' 64 KiB); `specVersion` must equal
+  the document's `info.version`. The hub derives the operations or messages, and `GET {id}` reports
+  documentation gaps (no operationId, summary or `x-passage-duty`). The document is stored as `json`
+  so `GET {id}/spec` returns it with its keys in the published order. A published version never
+  changes; a new version must be higher than the newest of its major line, and a new major line
+  higher than every published major (v1 can take additive versions during v2's overlap). A version
+  added to a deprecated line is published deprecated with the same sunset; a retired line takes no
+  new versions. A repeated `Idempotency-Key` returns the first entry for the same publish and 422
+  HUB-0422 for a different one. `:deprecate` needs a sunset date at least `api_deprecation_months`
+  ahead (`HUB_API_DEPRECATION_MONTHS`, default and floor 12); `:retire` works only after the sunset date.
+  Duties: `hub.catalog.write` (publish, change, deprecate, retire), reads under `hub.delivery.read`.
 - `src/events.ts`: the hub's own CloudEvents (`events/asyncapi.yaml`) are inserted into the
   `outbox` table in the same transaction as the change: subscription created, updated, deleted,
   paused (410) and resumed, webhook delivered and dead-lettered, API client registered, updated and
-  revoked. The payload is the whole CloudEvent; URLs, secrets and credentials are never in it. The
+  revoked, catalog entry published, updated, deprecated and retired. The payload is the whole CloudEvent; URLs, secrets and credentials are never in it. The
   outbox `aggregate_type` is the type's entity, so the relay topic is `passage.hub.<entity>`
   (`events.Topic`). Delivering one of the hub's own `webhook.*` events writes no outcome event.
 - `charts/integration-hub`: deployment (numeric non-root user), service, DB URL secret,
