@@ -2,7 +2,8 @@ import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
 import { ALL, describeProblem, listLegalEntities, type LegalEntity, type Problem } from "./api/client";
 import { listCountries, listCurrencies } from "./api/reference";
-import { createLegalEntity, getLegalEntity, setLegalEntityStatus, withFreshRowOnConflict } from "./api/structure";
+import { createLegalEntity, getLegalEntity, setLegalEntityAddress, setLegalEntityStatus, withFreshRowOnConflict } from "./api/structure";
+import { AddressAction } from "./AddressAction";
 import { useLegalEntity } from "./legalEntityContext";
 import styles from "./pages.module.css";
 import { StatusAction, useRows } from "./referenceParts";
@@ -139,7 +140,7 @@ function CreateLegalEntityForm({ onCreated }: { onCreated(): void }) {
 }
 
 export function LegalEntitiesPage() {
-  const { canWriteLegalEntity, canAdministerTenant, reload: reloadSwitcher } = useLegalEntity();
+  const { canWriteLegalEntity, canWriteAddress, canAdministerTenant, reload: reloadSwitcher } = useLegalEntity();
   const state = useRows((signal) => listLegalEntities(ALL, { signal }).then((page) => page.items), "legal-entities");
   const columns: DataTableColumn<LegalEntity>[] = [
     { key: "code", header: "Code", mono: true },
@@ -154,20 +155,37 @@ export function LegalEntitiesPage() {
     columns.push({
       key: "actions",
       header: "Actions",
-      render: (row) => (
-        <StatusAction
-          subject={`legal entity ${row.code}`}
-          status={row.status}
-          apply={async (next) => {
-            await withFreshRowOnConflict(
-              () => setLegalEntityStatus(row.id, row.version, next),
-              () => getLegalEntity(row.id),
-              (fresh) => state.update((rows) => rows.map((item) => (item.id === row.id ? { ...item, ...fresh } : item))),
-            );
-            reloadSwitcher();
-          }}
-        />
-      ),
+      render: (row) => {
+        // Replace the row from the response (not merge): the service leaves a cleared field out of it.
+        const refresh = (write: () => Promise<LegalEntity>) =>
+          withFreshRowOnConflict(
+            write,
+            () => getLegalEntity(row.id),
+            (fresh) => state.update((rows) => rows.map((item) => (item.id === row.id ? fresh : item))),
+          );
+        return (
+          <div className={styles.rowActions}>
+            {canWriteAddress ? (
+              <AddressAction
+                subject={`legal entity ${row.code}`}
+                ownerType="legal_entity"
+                ownerId={row.id}
+                legalEntityId={row.id}
+                addressId={row.primaryAddressId}
+                setPointer={(addressId) => refresh(() => setLegalEntityAddress(row.id, row.version, addressId))}
+              />
+            ) : null}
+            <StatusAction
+              subject={`legal entity ${row.code}`}
+              status={row.status}
+              apply={async (next) => {
+                await refresh(() => setLegalEntityStatus(row.id, row.version, next));
+                reloadSwitcher();
+              }}
+            />
+          </div>
+        );
+      },
     });
   }
   return (

@@ -40,6 +40,7 @@ import { withFreshRowOnConflict } from "./api/structure";
 import { useLegalEntity } from "./legalEntityContext";
 import { ScopedListPage, type ListControls } from "./pages";
 import styles from "./pages.module.css";
+import { AddressAction } from "./AddressAction";
 import { EditAction } from "./RowEdit";
 import { StatusAction, useRows } from "./referenceParts";
 
@@ -241,6 +242,7 @@ function statusColumns<T extends { id: string; code: string; status: string; ver
   noun: string,
   write: { set(row: T, status: "active" | "inactive"): Promise<T>; get(row: T): Promise<T> },
   edit?: (row: T, save: (change: () => Promise<T>) => Promise<void>) => ReactNode,
+  address?: (row: T, save: (change: () => Promise<T>) => Promise<void>) => ReactNode,
 ): DataTableColumn<T>[] {
   const columns: DataTableColumn<T>[] = [{ key: "status", header: "Status", render: (row) => <StatusPill status={row.status} /> }];
   if (canWrite) {
@@ -259,6 +261,7 @@ function statusColumns<T extends { id: string; code: string; status: string; ver
         return (
           <div className={styles.rowActions}>
             {edit ? edit(row, apply) : null}
+            {address ? address(row, apply) : null}
             <StatusAction
               subject={`${noun} ${row.code}`}
               status={row.status as "active" | "inactive"}
@@ -382,7 +385,7 @@ export function OperatingUnitsPage() {
 
 export function SitesPage() {
   const entityCode = useEntityCode();
-  const { canWriteSite, scope } = useLegalEntity();
+  const { canWriteSite, canWriteAddress, scope } = useLegalEntity();
   // Warehouses in the selected scope, for the default-warehouse choice (ALL needs the all-scope duty).
   const warehouses = useRows(
     (signal) => (scope === "" || !canWriteSite ? Promise.resolve([]) : listWarehouses(scope, { signal }).then((page) => page.items)),
@@ -455,7 +458,16 @@ export function SitesPage() {
               );
             }}
           />
-        )),
+        ), canWriteAddress ? (row, save) => (
+          <AddressAction
+            subject={`site ${row.code}`}
+            ownerType="site"
+            ownerId={row.id}
+            legalEntityId={row.legalEntityId}
+            addressId={row.addressId}
+            setPointer={(addressId) => save(() => updateSite(row.legalEntityId, row.id, row.version, { addressId }))}
+          />
+        ) : undefined),
       ]}
       toolbar={({ reload }) =>
         canWriteSite ? (
@@ -507,7 +519,7 @@ function siteChoices(sites: Site[]): Site[] {
 }
 
 export function WarehousesPage() {
-  const { canWriteSite, scope } = useLegalEntity();
+  const { canWriteSite, canWriteAddress, scope } = useLegalEntity();
   // Sites in the selected scope: an ALL read needs the all-scope duty, so a caller without it would get no sites.
   const sites = useRows((signal) => (scope === "" ? Promise.resolve([]) : listSites(scope, { signal }).then((page) => page.items)), `sites:${scope}`);
   const siteOf = (id: string) => sites.rows.find((site) => site.id === id);
@@ -563,7 +575,16 @@ export function WarehousesPage() {
               </>
             )}
           />
-        )),
+        ), canWriteAddress ? (row, save) => (
+          <AddressAction
+            subject={`warehouse ${row.code}`}
+            ownerType="warehouse"
+            ownerId={row.id}
+            legalEntityId={row.legalEntityId}
+            addressId={row.addressId}
+            setPointer={(addressId) => save(() => updateWarehouse(row.legalEntityId, row.id, row.version, { addressId }))}
+          />
+        ) : undefined),
       ]}
       toolbar={({ reload }) =>
         canWriteSite ? (
@@ -634,7 +655,7 @@ export function WarehousesPage() {
 }
 
 export function LocationsPage() {
-  const { canWriteSite, scope } = useLegalEntity();
+  const { canWriteSite, canWriteAddress, scope } = useLegalEntity();
   // Warehouses in the selected scope, for the warehouse column and the form (ALL needs the all-scope duty).
   const warehouses = useRows(
     (signal) => (scope === "" ? Promise.resolve([]) : listWarehouses(scope, { signal }).then((page) => page.items)),
@@ -681,7 +702,16 @@ export function LocationsPage() {
               </>
             )}
           />
-        )),
+        ), canWriteAddress ? (row, save) => (
+          <AddressAction
+            subject={`location ${row.code}`}
+            ownerType="location"
+            ownerId={row.id}
+            legalEntityId={row.legalEntityId}
+            addressId={row.addressId}
+            setPointer={(addressId) => save(() => updateLocation(row.legalEntityId, row.id, row.version, { addressId }))}
+          />
+        ) : undefined),
       ]}
       toolbar={({ reload }) =>
         canWriteSite ? (

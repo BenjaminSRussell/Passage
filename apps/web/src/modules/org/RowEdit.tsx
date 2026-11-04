@@ -22,6 +22,13 @@ interface EditActionProps<V, K extends string> {
   // Service codes that belong to one field, shown on that field instead of in the form alert.
   fieldCodes?: Record<string, { field: K; message: string }>;
   fields(args: EditFieldArgs<V, K>): ReactNode;
+  // Text of the opening button (default "Edit"); its accessible name stays "Edit <subject>".
+  openLabel?: string;
+  // Open the form on first render, for a caller that has just loaded the data behind the form.
+  startOpen?: boolean;
+  // Call save even when no field changed, for a caller with a step still to finish (an address created but not yet
+  // linked to its owner).
+  saveUnchanged?: boolean;
 }
 
 const VERSION_CONFLICT = "ORG-VERSION-CONFLICT";
@@ -42,8 +49,8 @@ function changedFields<V>(values: V, base: V): Partial<V> {
 // fields the user changed are sent, so a save never overwrites what someone else changed in the other fields. On
 // ORG-VERSION-CONFLICT the page re-reads the row: the fields the user left alone take the fresh values, the user's
 // own edits are kept, and the alert says so; saving again sends them with the new version.
-export function EditAction<V, K extends string>({ subject, initial, validate, save, fieldCodes, fields }: EditActionProps<V, K>) {
-  const [open, setOpen] = useState(false);
+export function EditAction<V, K extends string>({ subject, initial, validate, save, fieldCodes, fields, openLabel = "Edit", startOpen = false, saveUnchanged = false }: EditActionProps<V, K>) {
+  const [open, setOpen] = useState(startOpen);
   const [values, setValues] = useState<V>(initial);
   const [base, setBase] = useState<V>(initial);
   const [errors, setErrors] = useState<EditErrors<K>>({});
@@ -51,7 +58,7 @@ export function EditAction<V, K extends string>({ subject, initial, validate, sa
   const [busy, setBusy] = useState(false);
   const opener = useRef<HTMLButtonElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
-  const opened = useRef(false);
+  const opened = useRef(startOpen);
   const fresh = JSON.stringify(initial);
 
   useEffect(() => {
@@ -98,7 +105,7 @@ export function EditAction<V, K extends string>({ subject, initial, validate, sa
       return;
     }
     const change = changedFields(values, base);
-    if (Object.keys(change).length === 0) {
+    if (Object.keys(change).length === 0 && !saveUnchanged) {
       setOpen(false);
       return;
     }
@@ -129,7 +136,7 @@ export function EditAction<V, K extends string>({ subject, initial, validate, sa
   if (!open) {
     return (
       <Button ref={opener} size="sm" aria-label={`Edit ${subject}`} onClick={begin}>
-        Edit
+        {openLabel}
       </Button>
     );
   }

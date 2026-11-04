@@ -50,6 +50,7 @@ export interface OperatingUnit {
 
 export interface Site {
   id: string;
+  addressId?: string;
   legalEntityId: string;
   code: string;
   name: string;
@@ -61,6 +62,7 @@ export interface Site {
 
 export interface Warehouse {
   id: string;
+  addressId?: string;
   legalEntityId: string;
   siteId: string;
   code: string;

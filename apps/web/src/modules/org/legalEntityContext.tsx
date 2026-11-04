@@ -8,6 +8,7 @@ const LEGAL_ENTITY_WRITE_DUTY = "org.legal-entity.write";
 const FISCAL_CALENDAR_WRITE_DUTY = "org.fiscal-calendar.write";
 const OPERATING_UNIT_WRITE_DUTY = "org.operating-unit.write";
 const SITE_WRITE_DUTY = "org.site.write";
+const ADDRESS_WRITE_DUTY = "org.address.write";
 // The org service refuses tenant-level writes (new legal entities, fiscal calendars and years, teams) unless the
 // caller also holds tenant.administer and carries no legal-entity claim (rejectScopedCaller in services/org).
 const TENANT_ADMIN_DUTY = "tenant.administer";
@@ -28,6 +29,7 @@ export interface LegalEntityContextValue {
   canWriteFiscalCalendar: boolean;
   canWriteOperatingUnit: boolean;
   canWriteSite: boolean;
+  canWriteAddress: boolean;
   canAdministerTenant: boolean;
   canWriteHierarchy: boolean;
   // Export and import of the organization model package: org.package.manage with tenant.administer.
@@ -71,6 +73,7 @@ export function LegalEntityProvider({ duties, children }: { duties?: readonly st
   const canWriteFiscalCalendar = Array.isArray(duties) && duties.includes(FISCAL_CALENDAR_WRITE_DUTY);
   const canWriteOperatingUnit = Array.isArray(duties) && duties.includes(OPERATING_UNIT_WRITE_DUTY);
   const canWriteSite = held(SITE_WRITE_DUTY);
+  const canWriteAddress = held(ADDRESS_WRITE_DUTY);
   const canWriteHierarchy = held(HIERARCHY_WRITE_DUTY) && canAdministerTenant;
   const canManagePackage = held(PACKAGE_DUTY) && canAdministerTenant;
   const canPublishHierarchy = held(HIERARCHY_PUBLISH_DUTY) && canAdministerTenant;
@@ -126,8 +129,8 @@ export function LegalEntityProvider({ duties, children }: { duties?: readonly st
   );
 
   const value = useMemo(
-    () => ({ entities, scope, setScope, reload, canAll, canWriteReference, canWriteLegalEntity, canWriteFiscalCalendar, canWriteOperatingUnit, canWriteSite, canAdministerTenant, canWriteHierarchy, canManagePackage, canPublishHierarchy, canBackdateHierarchy, loading, error }),
-    [entities, scope, setScope, reload, canAll, canWriteReference, canWriteLegalEntity, canWriteFiscalCalendar, canWriteOperatingUnit, canWriteSite, canAdministerTenant, canWriteHierarchy, canManagePackage, canPublishHierarchy, canBackdateHierarchy, loading, error],
+    () => ({ entities, scope, setScope, reload, canAll, canWriteReference, canWriteLegalEntity, canWriteFiscalCalendar, canWriteOperatingUnit, canWriteSite, canWriteAddress, canAdministerTenant, canWriteHierarchy, canManagePackage, canPublishHierarchy, canBackdateHierarchy, loading, error }),
+    [entities, scope, setScope, reload, canAll, canWriteReference, canWriteLegalEntity, canWriteFiscalCalendar, canWriteOperatingUnit, canWriteSite, canWriteAddress, canAdministerTenant, canWriteHierarchy, canManagePackage, canPublishHierarchy, canBackdateHierarchy, loading, error],
   );
   return <LegalEntityContext.Provider value={value}>{children}</LegalEntityContext.Provider>;
 }

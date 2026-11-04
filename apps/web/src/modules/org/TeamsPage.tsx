@@ -206,7 +206,7 @@ export function TeamsPage() {
                 withFreshRowOnConflict(
                   () => setTeamStatus(row.id, row.version, next),
                   () => getTeam(row.id),
-                  (fresh) => state.update((rows) => rows.map((item) => (item.id === row.id ? { ...item, ...fresh } : item))),
+                  (fresh) => state.update((rows) => rows.map((item) => (item.id === row.id ? fresh : item))),
                 )
               }
             />

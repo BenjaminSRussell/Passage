@@ -211,3 +211,7 @@ export async function withFreshRowOnConflict<T>(write: () => Promise<T>, reload:
     throw error;
   }
 }
+
+// The legal entity's primary address is set after the address is created with the entity as owner.
+export const setLegalEntityAddress = (id: string, version: number, primaryAddressId: string) =>
+  referenceFetch<LegalEntity>(`/legal-entities/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ version, primaryAddressId }) });

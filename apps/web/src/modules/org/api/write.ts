@@ -60,6 +60,7 @@ export const updateOperatingUnit = (id: string, version: number, change: Operati
   patch<OperatingUnit>("/operating-units", id, { version, ...change });
 
 export interface SitePatch {
+  addressId?: string; // "" clears it
   name?: string;
   timeZone?: string;
   defaultWarehouseId?: string; // "" clears it
@@ -68,6 +69,7 @@ export const updateSite = (legalEntityId: string, id: string, version: number, c
   scopedPatch<Site>(legalEntityId, "/sites", id, { version, ...change });
 
 export interface WarehousePatch {
+  addressId?: string; // "" clears it
   name?: string;
   type?: WarehouseType;
   timeZone?: string;
@@ -99,7 +101,7 @@ export interface CreateLocationInput {
 // legalEntityId is the chosen warehouse's legal entity; the service derives the location's own from the warehouse.
 export const createLocation = (legalEntityId: string, input: CreateLocationInput) => scopedPost<Location>(legalEntityId, "/locations", input);
 export const getLocation = (legalEntityId: string, id: string) => scopedGet<Location>(legalEntityId, "/locations", id);
-export const updateLocation = (legalEntityId: string, id: string, version: number, patch: { name?: string; type?: LocationType; status?: RowStatus }) =>
+export const updateLocation = (legalEntityId: string, id: string, version: number, patch: { name?: string; type?: LocationType; status?: RowStatus; addressId?: string }) =>
   scopedPatch<Location>(legalEntityId, "/locations", id, { version, ...patch });
 export const setLocationStatus = (legalEntityId: string, id: string, version: number, status: RowStatus) =>
   updateLocation(legalEntityId, id, version, { status });

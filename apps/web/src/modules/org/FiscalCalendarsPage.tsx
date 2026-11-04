@@ -321,7 +321,7 @@ export function FiscalCalendarsPage() {
                 withFreshRowOnConflict(
                   () => setFiscalCalendarStatus(row.id, row.version, next),
                   () => getFiscalCalendar(row.id),
-                  (fresh) => state.update((rows) => rows.map((item) => (item.id === row.id ? { ...item, ...fresh } : item))),
+                  (fresh) => state.update((rows) => rows.map((item) => (item.id === row.id ? fresh : item))),
                 )
               }
             />
@@ -345,7 +345,7 @@ export function FiscalCalendarsPage() {
           key={selected.id}
           calendar={selected}
           canWrite={canWrite}
-          onChanged={(fresh) => state.update((rows) => rows.map((item) => (item.id === fresh.id ? { ...item, ...fresh } : item)))}
+          onChanged={(fresh) => state.update((rows) => rows.map((item) => (item.id === fresh.id ? fresh : item)))}
           onGenerated={(fiscalYear) =>
             state.update((rows) =>
               rows.map((row) =>
