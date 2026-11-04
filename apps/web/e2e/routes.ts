@@ -28,5 +28,10 @@ export const ROUTES: readonly string[] = [
   "/admin/texts",
   "/tax",
   "/payables",
+  "/party",
+  "/party/new",
+  "/party/tax-registrations",
+  "/party/duplicates",
+  "/party/pending-changes",
   "/no-such-page",
 ];
