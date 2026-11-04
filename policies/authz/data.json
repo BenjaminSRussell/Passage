@@ -2890,7 +2890,10 @@
       {"resource": "/v1/shopfloor/downtime-reasons", "methods": ["POST"]},
       {"resource": "/v1/shopfloor/downtime-reasons/*", "methods": ["PUT"]},
       {"resource": "/v1/shopfloor/process-categories", "methods": ["POST"]},
-      {"resource": "/v1/shopfloor/process-categories/*", "methods": ["PUT"]}
+      {"resource": "/v1/shopfloor/process-categories/*", "methods": ["PUT"]},
+      {"resource": "/v1/shopfloor/workers/*", "methods": ["PUT"]},
+      {"resource": "/v1/shopfloor/workers/*:deactivate", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/workers/*:reactivate", "methods": ["POST"]}
     ]},
     "shopfloor.time.autoclockout": {"service_only": true, "permissions": [{"resource": "/v1/shopfloor/registrations:auto-clock-out", "methods": ["POST"]}]},
     "shopfloor.time.correct": {"permissions": [{"resource": "/v1/shopfloor/registrations/*:correct", "methods": ["POST"]}]},
