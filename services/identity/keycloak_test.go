@@ -435,13 +435,32 @@ func TestKeycloakLoginIsAcceptedByIdentityJWTVerifier(t *testing.T) {
 
 var formAction = regexp.MustCompile(`action="([^"]*)"`)
 
+// httpLocalJar stores cookies that Keycloak marks Secure even when the test
+// talks to start-dev over http://localhost, so AUTH_SESSION survives the login POST.
+type httpLocalJar struct{ http.CookieJar }
+
+func (j httpLocalJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
+	plain := make([]*http.Cookie, len(cookies))
+	for i, c := range cookies {
+		cp := *c
+		if u.Scheme == "http" {
+			cp.Secure = false
+			if cp.SameSite == http.SameSiteNoneMode {
+				cp.SameSite = http.SameSiteLaxMode
+			}
+		}
+		plain[i] = &cp
+	}
+	j.CookieJar.SetCookies(u, plain)
+}
+
 func browserPasswordLogin(t *testing.T, base, username, password string) *http.Response {
 	t.Helper()
-	jar, err := cookiejar.New(nil)
+	inner, err := cookiejar.New(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	noRedirect := &http.Client{Timeout: 15 * time.Second, Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	noRedirect := &http.Client{Timeout: 15 * time.Second, Jar: httpLocalJar{inner}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	query := url.Values{
 		"client_id": {"passage-web"}, "response_type": {"code"}, "scope": {"openid"}, "redirect_uri": {webCallbackURL},
 		"code_challenge": {"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"}, "code_challenge_method": {"S256"}, "state": {"s1"},
@@ -489,7 +508,9 @@ func TestKeycloakBrowserLoginEnrolsOTPForUserWithoutFactor(t *testing.T) {
 	resp := browserPasswordLogin(t, base, "ci-new-user", loginUserSecret)
 	location := resp.Header.Get("Location")
 	if resp.StatusCode != http.StatusFound || !strings.Contains(location, "required-action") || !strings.Contains(location, "execution=CONFIGURE_TOTP") {
-		t.Fatalf("new user after password: status %d location %q, want 302 to required-action CONFIGURE_TOTP", resp.StatusCode, location)
+		var got bytes.Buffer
+		_, _ = got.ReadFrom(resp.Body)
+		t.Fatalf("new user after password: status %d location %q body %q, want 302 to required-action CONFIGURE_TOTP", resp.StatusCode, location, got.String())
 	}
 }
 

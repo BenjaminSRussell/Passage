@@ -25,7 +25,9 @@ def main(crds_file, out_dir):
         spec = crd["spec"]
         for version in spec["versions"]:
             schema = to_json_schema(version["schema"]["openAPIV3Schema"])
-            name = f"{spec['names']['kind']}-{spec['group']}-{version['name']}.json"
+            # kubeconform v0.6.7 lowercases {{.ResourceKind}} when expanding
+            # -schema-location; PascalCase names pass on macOS and fail on GHA.
+            name = f"{spec['names']['kind'].lower()}-{spec['group']}-{version['name']}.json"
             (out / name).write_text(json.dumps(schema))
 
 

@@ -91,13 +91,14 @@ type prepared struct {
 	idx       int
 	day       int
 	hasDay    bool
+	amountKey string
 	reference string
 	alt       string
 	grams     map[string]struct{}
 }
 
 func prepare(id string, f Facts) *prepared {
-	p := &prepared{Facts: f, id: id, reference: normalizedReference(f.Reference), alt: normalizedReference(f.AltReference), grams: trigrams(f.Counterparty)}
+	p := &prepared{Facts: f, id: id, amountKey: f.Amount.String(), reference: normalizedReference(f.Reference), alt: normalizedReference(f.AltReference), grams: trigrams(f.Counterparty)}
 	if d, err := time.Parse("2006-01-02", f.ValueDate); err == nil {
 		p.day, p.hasDay = int(d.Unix()/86400), true
 	}
@@ -249,24 +250,22 @@ type Decision struct {
 	Rule   string      // name of the rule that produced Best, set by MatchLine
 }
 
-// Decide applies the thresholds. A line auto-matches only when its best
-// candidate scores at least Auto and leads the runner-up by TieMargin (BR-36.2);
-// otherwise a best candidate scoring at least Suggest is suggested.
-func Decide(cands []Candidate, t Thresholds) Decision {
-	var ranked []Candidate
-	for _, c := range cands {
-		pos := len(ranked)
-		for pos > 0 && (ranked[pos-1].Score < c.Score || ranked[pos-1].Score == c.Score && ranked[pos-1].ID > c.ID) {
-			pos--
-		}
-		if pos >= 3 {
-			continue
-		}
-		ranked = slices.Insert(ranked, pos, c)
-		if len(ranked) > 3 {
-			ranked = ranked[:3]
-		}
+func rankCandidate(ranked []Candidate, c Candidate) []Candidate {
+	pos := len(ranked)
+	for pos > 0 && (ranked[pos-1].Score < c.Score || ranked[pos-1].Score == c.Score && ranked[pos-1].ID > c.ID) {
+		pos--
 	}
+	if pos >= 3 {
+		return ranked
+	}
+	ranked = slices.Insert(ranked, pos, c)
+	if len(ranked) > 3 {
+		ranked = ranked[:3]
+	}
+	return ranked
+}
+
+func decisionFromRanked(ranked []Candidate, t Thresholds) Decision {
 	if len(ranked) == 0 || ranked[0].Score < t.Suggest {
 		return Decision{Status: StatusUnmatched, Ranked: ranked}
 	}
@@ -275,6 +274,17 @@ func Decide(cands []Candidate, t Thresholds) Decision {
 		return Decision{Status: StatusMatched, Best: &best, Ranked: ranked}
 	}
 	return Decision{Status: StatusSuggested, Best: &best, Ranked: ranked}
+}
+
+// Decide applies the thresholds. A line auto-matches only when its best
+// candidate scores at least Auto and leads the runner-up by TieMargin (BR-36.2);
+// otherwise a best candidate scoring at least Suggest is suggested.
+func Decide(cands []Candidate, t Thresholds) Decision {
+	var ranked []Candidate
+	for _, c := range cands {
+		ranked = rankCandidate(ranked, c)
+	}
+	return decisionFromRanked(ranked, t)
 }
 
 // MinStrictReferenceLen is the shortest normalized reference a strict rule
@@ -346,11 +356,15 @@ type matchIndex struct {
 	items    []*prepared
 	byID     map[string]*prepared
 	byRef    map[string][]*prepared
+	byRefLen map[int][]*prepared
+	byGram   map[string][]*prepared
 	refCount map[string]int
+	shareN   []int
+	hot      []bool
 }
 
 func newMatchIndex(cands map[string]Facts) *matchIndex {
-	ix := &matchIndex{refCount: map[string]int{}, byID: make(map[string]*prepared, len(cands)), byRef: map[string][]*prepared{}}
+	ix := &matchIndex{refCount: map[string]int{}, byID: make(map[string]*prepared, len(cands)), byRef: map[string][]*prepared{}, byRefLen: map[int][]*prepared{}, byGram: map[string][]*prepared{}}
 	for id, f := range cands {
 		p := prepare(id, f)
 		ix.items = append(ix.items, p)
@@ -358,6 +372,10 @@ func newMatchIndex(cands map[string]Facts) *matchIndex {
 		if p.reference != "" {
 			ix.refCount[p.reference]++
 			ix.byRef[p.reference] = append(ix.byRef[p.reference], p)
+			ix.byRefLen[len(p.reference)] = append(ix.byRefLen[len(p.reference)], p)
+		}
+		for g := range p.grams {
+			ix.byGram[g] = append(ix.byGram[g], p)
 		}
 	}
 	sort.Slice(ix.items, func(i, j int) bool {
@@ -427,18 +445,38 @@ func MatchLine(line Facts, cands map[string]Facts, rules []Rule, t Thresholds) D
 func (ix *matchIndex) matchLine(line *prepared, rules []Rule, t Thresholds, prefilter bool) Decision {
 	all := ix.items
 	best := Decision{Status: StatusUnmatched}
-	needRef, needSim := false, false
+	needRef, needContains, needSim := false, false, false
 	for _, r := range rules {
-		needRef = needRef || r.Weights.Reference > 0
+		// A strict rule auto-matches only on an exact reference, even when that
+		// rule's Reference weight is 0. Those items must be hot or decide
+		// returns before the cold loop and never sees them.
+		needRef = needRef || r.Weights.Reference > 0 || r.Strict
+		needContains = needContains || r.Weights.Reference > 0
 		needSim = needSim || r.Weights.Counterparty > 0
 	}
-	pairs := make([]pair, len(all))
-	known := make([]bool, len(all))
-	pairOf := func(c *prepared) pair {
-		if !known[c.idx] {
-			pairs[c.idx], known[c.idx] = newPair(line, c, needRef, needSim), true
+	n := len(all)
+	if cap(ix.shareN) < n {
+		ix.shareN = make([]int, n)
+		ix.hot = make([]bool, n)
+	} else {
+		ix.shareN = ix.shareN[:n]
+		ix.hot = ix.hot[:n]
+		clear(ix.shareN)
+		clear(ix.hot)
+	}
+	shareN, hot := ix.shareN, ix.hot
+	// Shared trigram counts are Jaccard numerators; items with 0 get sim 0
+	// without a per-candidate map walk.
+	if needSim {
+		for g := range line.grams {
+			for _, p := range ix.byGram[g] {
+				shareN[p.idx]++
+				hot[p.idx] = true
+			}
 		}
-		return pairs[c.idx]
+	}
+	if needRef {
+		ix.markRefHits(line, hot, needContains)
 	}
 	decided := map[ruleShape]Decision{}
 	for _, r := range rules {
@@ -449,9 +487,9 @@ func (ix *matchIndex) matchLine(line *prepared, rules []Rule, t Thresholds, pref
 			if prefilter {
 				cands, excluded = ix.near(line, r)
 			}
-			d = ix.decide(line, cands, r, t, pairOf)
+			d = ix.decide(line, cands, r, t, shareN, hot)
 			if excluded && !unchangedByExcluded(d, excludedBound(r), t) {
-				d = ix.decide(line, all, r, t, pairOf)
+				d = ix.decide(line, all, r, t, shareN, hot)
 			}
 			decided[key] = d
 		}
@@ -479,17 +517,89 @@ type ruleShape struct {
 	strict    bool
 }
 
-func (ix *matchIndex) decide(line *prepared, cands []*prepared, r Rule, t Thresholds, pairOf func(*prepared) pair) Decision {
-	scored := make([]Candidate, len(cands))
-	for i, c := range cands {
-		p := pairOf(c)
-		score := p.score(r.Tolerance, r.Weights)
-		if r.Strict && !strictEligible(line, c, r.Tolerance) {
-			score = 0
+func (ix *matchIndex) markRefHits(line *prepared, hot []bool, contains bool) {
+	for _, ref := range []string{line.reference, line.alt} {
+		if ref == "" || placeholderReference(ref) {
+			continue
 		}
-		scored[i] = Candidate{ID: c.id, Score: score}
+		for _, p := range ix.byRef[ref] {
+			hot[p.idx] = true
+		}
+		if !contains || len(ref) < 6 {
+			continue
+		}
+		// Equal-length contains is equality, already covered by byRef. Longer or
+		// shorter refs are the only ones that can still score 0.5. Skip this
+		// scan when no rule has Reference weight (strict rules only need equality).
+		for length, bucket := range ix.byRefLen {
+			if length == len(ref) {
+				continue
+			}
+			for _, p := range bucket {
+				if hot[p.idx] || placeholderReference(p.reference) {
+					continue
+				}
+				if (length > len(ref) && strings.Contains(p.reference, ref)) ||
+					(length >= 6 && strings.Contains(ref, p.reference)) {
+					hot[p.idx] = true
+				}
+			}
+		}
 	}
-	return Decide(scored, t)
+}
+
+func scoreIndexed(line, c *prepared, r Rule, shareN []int, hot bool) int {
+	if r.Strict && !strictEligible(line, c, r.Tolerance) {
+		return 0
+	}
+	amt := 1.0
+	if line.amountKey != c.amountKey {
+		amt = amountResult(line.Amount.Sub(c.Amount).Abs(), r.Tolerance.Amount)
+	}
+	days, ok := daysApart(line, c)
+	ref, sim := 0.0, 0.0
+	if hot {
+		if r.Weights.Reference > 0 {
+			ref = math.Max(referenceResult(line.reference, c.reference), referenceResult(line.alt, c.reference))
+		}
+		if n := shareN[c.idx]; n > 0 && r.Weights.Counterparty > 0 {
+			den := len(line.grams) + len(c.grams) - n
+			if den > 0 {
+				sim = float64(n) / float64(den)
+			}
+		}
+	}
+	w := r.Weights
+	return int(math.Round(float64(w.Amount)*amt + float64(w.Date)*dateResult(days, ok, r.Tolerance.DateWindowDays) + float64(w.Reference)*ref + float64(w.Counterparty)*sim))
+}
+
+func (ix *matchIndex) decide(line *prepared, cands []*prepared, r Rule, t Thresholds, shareN []int, hot []bool) Decision {
+	var ranked []Candidate
+	w := r.Weights
+	for _, c := range cands {
+		if hot[c.idx] {
+			ranked = rankCandidate(ranked, Candidate{ID: c.id, Score: scoreIndexed(line, c, r, shareN, true)})
+		}
+	}
+	// Cold items can score at most amount+date. Skip them once the top three
+	// cannot change, so equal-amount misses are not lines×items×rules.
+	maxCold := 0
+	if !r.Strict {
+		maxCold = w.Amount + w.Date
+	}
+	if len(ranked) == 3 && ranked[2].Score > maxCold {
+		return decisionFromRanked(ranked, t)
+	}
+	for _, c := range cands {
+		if hot[c.idx] {
+			continue
+		}
+		if len(ranked) == 3 && (ranked[2].Score > maxCold || ranked[2].Score == maxCold && c.id >= ranked[2].ID) {
+			continue
+		}
+		ranked = rankCandidate(ranked, Candidate{ID: c.id, Score: scoreIndexed(line, c, r, shareN, false)})
+	}
+	return decisionFromRanked(ranked, t)
 }
 
 func usableReference(n string) bool {

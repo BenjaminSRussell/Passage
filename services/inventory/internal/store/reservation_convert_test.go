@@ -370,7 +370,75 @@ func TestReleaseRacingReceiptConversion(t *testing.T) {
 	for err := range errs {
 		t.Fatal(err)
 	}
-	// Half released, the other half converted once all 40 arrived.
-	wantReserved(t, admin, p, "W2", "16", "0")
+	// All 40 arrived, so nothing is left ORDERED. Releases are per allocation (DELETE
+	// /reservations/{id}): a receipt of 10 against 4-unit reservations splits one, and when the
+	// release of that reservation lands after the split it frees only the ORDERED remainder, so
+	// the split-off PHYSICAL allocation of the same request stays held. Which one splits depends
+	// on the interleaving; what must hold for every interleaving is that each request still
+	// accounts for exactly its 4 units (released + active), the kept requests are wholly
+	// physical, and the on-hand row agrees with the active allocations.
+	var released, kept, splitHeld = dec("0"), dec("0"), dec("0")
+	for i := 0; i < n; i++ {
+		allocs := allocations(t, admin, p, fmt.Sprintf("race-%d", i))
+		total := dec("0")
+		for _, a := range allocs {
+			total = total.Add(dec(a.qty))
+			switch {
+			case a.status == "ACTIVE" && a.kind != "PHYSICAL":
+				t.Fatalf("race-%d allocation %d is %s %s after all 40 arrived: %+v", i, a.no, a.status, a.kind, allocs)
+			case i >= n/2 && a.status != "ACTIVE":
+				t.Fatalf("race-%d was never released, allocation %d is %s: %+v", i, a.no, a.status, allocs)
+			case i < n/2 && a.no == 1 && a.status != "RELEASED":
+				t.Fatalf("race-%d was released, allocation 1 is %s: %+v", i, a.status, allocs)
+			case i < n/2 && a.no > 1 && (a.status != "ACTIVE" || !a.converted):
+				t.Fatalf("race-%d allocation %d should be a split-off still held: %+v", i, a.no, allocs)
+			case i < n/2 && a.status == "RELEASED":
+				released = released.Add(dec(a.qty))
+			case i < n/2:
+				splitHeld = splitHeld.Add(dec(a.qty))
+			default:
+				kept = kept.Add(dec(a.qty))
+			}
+		}
+		if !total.Equal(dec("4")) {
+			t.Fatalf("race-%d allocations total %s, want 4: %+v", i, total, allocs)
+		}
+	}
+	if !kept.Equal(dec("16")) || !released.Add(splitHeld).Equal(dec("16")) {
+		t.Fatalf("kept %s, released %s + split-off %s, want 16 and 16", kept, released, splitHeld)
+	}
+	wantReserved(t, admin, p, "W2", kept.Add(splitHeld).String(), "0")
 	rebuildClean(t, s, ctx)
+	t.Logf("released %s, split-off still held %s", released, splitHeld)
+}
+
+type allocation struct {
+	no        int
+	status    string
+	kind      string
+	qty       string
+	converted bool
+}
+
+// allocations lists every allocation of one reserve request of a product, in allocation order.
+func allocations(t *testing.T, admin *pgxpool.Pool, product, key string) []allocation {
+	t.Helper()
+	rows, err := admin.Query(context.Background(), `select allocation_no, status, kind, qty::text, converted_at is not null
+		from inventory_reservation where product_id = $1 and idempotency_key = $2 order by allocation_no`, product, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []allocation
+	for rows.Next() {
+		var a allocation
+		if err := rows.Scan(&a.no, &a.status, &a.kind, &a.qty, &a.converted); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
 }

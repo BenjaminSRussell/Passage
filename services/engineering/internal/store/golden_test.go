@@ -16,7 +16,7 @@ import (
 // exploded; the flat list must equal the independent oracle's CSV and catalog
 // load plus explosion must stay under 500 ms at p95 over 100 runs.
 func TestPostgres_GoldenDAG_CatalogLoadAndExplodeMatchOracle(t *testing.T) {
-	s, _, ctx := newStore(t, 7)
+	s, pool, ctx := newStore(t, 7)
 	fx, err := golden.Load("../../testdata/bom-dag-7x2000.json")
 	if err != nil {
 		t.Fatal(err)
@@ -34,6 +34,13 @@ func TestPostgres_GoldenDAG_CatalogLoadAndExplodeMatchOracle(t *testing.T) {
 		if _, err := s.CreateBomVersion(ctx, v, store.Idem{}, noCheck); err != nil {
 			t.Fatalf("store %s: %v", v.ProductID, err)
 		}
+	}
+	// The tables were created and bulk-loaded a moment ago, so until autovacuum's next pass the
+	// planner has no statistics for them and estimates one row per scan: the recursive catalog
+	// query then nests loops over the reach set (hundreds of ms instead of ~10). A catalog in
+	// service has been analyzed; measure that, not the minute after a bulk load.
+	if _, err := pool.Exec(ctx, `analyze bom_version, bom_line`); err != nil {
+		t.Fatal(err)
 	}
 	req := domain.ExplodeRequest{ProductID: fx.Root, SiteID: fx.SiteID, AsOf: fx.AsOfDate(), Quantity: fx.Quantity, Levels: fx.Levels}
 	explode := func() (domain.Explosion, error) {
