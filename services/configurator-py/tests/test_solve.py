@@ -46,11 +46,9 @@ def test_fifty_constraint_fixture():
 
 
 def _solve_bound() -> float:
-    # AC-8.2 holds CP-SAT to < 200 ms. The fallback backtracker is ~1 ms mean
-    # locally and can exceed 200 ms on GitHub-hosted runners (observed ~230 ms).
-    if os.environ.get("CONFIGURATOR_REQUIRE_ORTOOLS") == "1":
+    if os.environ.get("CONFIGURATOR_REQUIRE_ORTOOLS") == "1" or solve_module.cp_model is not None:
         return 0.2
-    return 2.0
+    return 0.5
 
 
 def test_fixture_file_exists():

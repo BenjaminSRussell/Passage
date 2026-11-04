@@ -16,11 +16,11 @@ func allowReason(v violation) (string, bool) {
 }
 
 var allowlist = map[string]string{
-	"eam.asset:" + problemNoEntityPol:                 "tracked: legal_entity_id is nullable until PUT /v1/eam/assets/{id}/legal-entity; tenant policy still binds",
-	"eam.work_order:" + problemNoEntityPol:            "tracked: legal_entity_id is copied from the asset and may be null for legacy orders; tenant policy still binds",
-	"eam.eam_gl_posting:" + problemNoEntityPol:        "tracked: tenant policy binds; legal-entity scope is enforced on eam_pending_booking before the subledger row is written",
-	"eam.eam_posting_profile:" + problemNoEntityPol:   "tracked: tenant policy binds; profile rows are keyed by legal_entity_id in the primary key",
-	"edi.partner_trade_profile:" + problemNoEntityPol: "tracked: tenant policy binds; legal_entity_id is a required column, not a caller scope filter",
+	"eam.asset:" + problemNoEntityPol:                 "tracked: #486; legal_entity_id is nullable until PUT /v1/eam/assets/{id}/legal-entity; tenant policy still binds",
+	"eam.work_order:" + problemNoEntityPol:            "tracked: #486; legal_entity_id is copied from the asset and may be null for legacy orders; tenant policy still binds",
+	"eam.eam_gl_posting:" + problemNoEntityPol:        "tracked: #486; tenant policy binds; legal-entity scope is enforced on eam_pending_booking before the subledger row is written",
+	"eam.eam_posting_profile:" + problemNoEntityPol:   "tracked: #486; tenant policy binds; profile rows are keyed by legal_entity_id in the primary key",
+	"edi.partner_trade_profile:" + problemNoEntityPol: "tracked: #486; tenant policy binds; legal_entity_id is a required column, not a caller scope filter",
 	// Per the #398 review decision: identity 0008_policy_bundle_read adds operator-gated permissive SELECT policies so the policy compiler can read users and role assignments; the gate is passage.policy_compile plus a visible identity_operator row.
 	"identity.identity_users:" + problemExtraPolicy:            "permanent: SELECT-only policy gated on passage.policy_compile and identity_operator (0008_policy_bundle_read, #398 review decision)",
 	"identity.identity_role_assignments:" + problemExtraPolicy: "permanent: SELECT-only policy gated on passage.policy_compile and identity_operator (0008_policy_bundle_read, #398 review decision)",
