@@ -72,6 +72,13 @@ func TestRegistrationPosted_PunchCarriesNoCostRateAndRateKeepsWorkerCurrency(t *
 	if err != nil {
 		t.Fatal(err)
 	}
+	if res := register(t, s, ctx, Registration{ID: ids.New(), WorkerID: w.ID, Kind: KindJobStart, JobID: &job.ID, StartedAt: day(8, 0)}); res[0].Status != StatusAccepted {
+		t.Fatalf("start = %+v", res[0])
+	}
+	lastEventData(t, admin, tenantID, sfevents.RegistrationPosted, &posted)
+	if posted.Kind != KindJobStart || posted.CostRate != nil {
+		t.Fatalf("a job-start carries the pay rate: %+v", posted)
+	}
 	stopAt := day(10, 0)
 	h := domain.ElapsedHours(day(8, 0), stopAt)
 	stop := Registration{ID: ids.New(), WorkerID: w.ID, Kind: KindJobStop, JobID: &job.ID, StartedAt: day(8, 0), StoppedAt: &stopAt, Hours: &h}

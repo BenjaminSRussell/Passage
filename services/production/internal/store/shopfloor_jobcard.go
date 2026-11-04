@@ -86,7 +86,7 @@ func (s *Postgres) PostShopfloorJobCard(ctx context.Context, in ShopfloorJobCard
 	j, _, err := s.CreateJournal(ctx, NewJournal{
 		OrderID: orderID, Type: domain.JournalJobCard, Proposal: domain.ProposeNone, AutoStart: true,
 		Hours: []HoursInput{{JobID: jobID, Hours: hours, LaborRate: rate}},
-		Actor: actor, IdempotencyKey: key, RequestHash: key,
+		Actor: actor, IdempotencyKey: key, RequestHash: key, AllowFinished: true,
 	})
 	if err != nil {
 		return Journal{}, false, refusal(err)
@@ -96,8 +96,13 @@ func (s *Postgres) PostShopfloorJobCard(ctx context.Context, in ShopfloorJobCard
 	}
 	posted, replayed, err := s.PostJournal(ctx, PostRequest{
 		JournalID: j.ID, AutoStart: true, Actor: actor,
-		TraceID: in.TraceID, IdempotencyKey: shopfloorJobCardPostKey + in.RegistrationID,
+		TraceID: in.TraceID, IdempotencyKey: shopfloorJobCardPostKey + in.RegistrationID, AllowFinished: true,
 	})
+	var problem *httpx.Problem
+	if errors.As(err, &problem) && problem.Code == CodeJournalPosted {
+		done, gerr := s.GetJournal(ctx, j.ID)
+		return done, false, gerr
+	}
 	if err != nil {
 		return Journal{}, false, refusal(err)
 	}
@@ -108,7 +113,7 @@ func (s *Postgres) processJobID(ctx context.Context, orderID string, oper int) (
 	p, _ := tenant.FromContext(ctx)
 	var id string
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `select id::text from production_job where tenant_id = $1 and order_id = $2 and oper_number = $3 and job_type = $4 order by seq limit 1`,
+		return tx.QueryRow(ctx, `select id::text from production_job where tenant_id = $1 and order_id = $2 and oper_number = $3 and job_type = $4 order by (status = 'finished'), seq limit 1`,
 			p.TenantID, orderID, oper, string(domain.JobProcess)).Scan(&id)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -138,4 +143,93 @@ func positiveRate(r *decimal.Decimal) *decimal.Decimal {
 		return nil
 	}
 	return r
+}
+
+// AdjustShopfloorJobCard sets the hours a registration's job card books, for a
+// registration.corrected event (a server stop superseded by the kiosk's own stop
+// is corrected to 0 h; a supervisor correction changes the hours). It reverses the
+// live card and, for positive hours, posts a new one at the same rate. A registration
+// with no card is a no-op, as is one whose live card already has newHours. Reports
+// whether anything changed.
+func (s *Postgres) AdjustShopfloorJobCard(ctx context.Context, registrationID string, newHours decimal.Decimal, traceID string) (bool, error) {
+	newHours = newHours.Round(domain.HoursScale)
+	if newHours.IsNegative() {
+		return false, fmt.Errorf("%w: negative hours", ErrJobCardRefused)
+	}
+	card, err := s.latestShopfloorCard(ctx, registrationID)
+	if err != nil || card.journalID == "" {
+		return false, err
+	}
+	if card.reversed && newHours.IsZero() || !card.reversed && card.hours.Equal(newHours) {
+		return false, nil
+	}
+	if !card.reversed {
+		if err := s.reverseShopfloorCard(ctx, card, registrationID); err != nil {
+			return false, refusal(err)
+		}
+	}
+	if newHours.IsZero() {
+		return true, nil
+	}
+	jobID, err := s.processJobID(ctx, card.orderID, card.oper)
+	if err != nil || jobID == "" {
+		return false, fmt.Errorf("%w: order %s has no process job for operation %d", ErrJobCardRefused, card.orderID, card.oper)
+	}
+	key := fmt.Sprintf("%s%s:adj:%d", shopfloorJobCardKey, registrationID, card.revisions)
+	rate := card.rate
+	j, _, err := s.CreateJournal(ctx, NewJournal{
+		OrderID: card.orderID, Type: domain.JournalJobCard, Proposal: domain.ProposeNone, AutoStart: true,
+		Hours: []HoursInput{{JobID: jobID, Hours: newHours, LaborRate: &rate}},
+		Actor: shopfloorActor, IdempotencyKey: key, RequestHash: key, AllowFinished: true,
+	})
+	if err != nil {
+		return false, refusal(err)
+	}
+	if j.Posted {
+		return true, nil
+	}
+	_, _, err = s.PostJournal(ctx, PostRequest{JournalID: j.ID, AutoStart: true, Actor: shopfloorActor, TraceID: traceID,
+		IdempotencyKey: shopfloorJobCardPostKey + strings.TrimPrefix(key, shopfloorJobCardKey), AllowFinished: true})
+	return true, refusal(err)
+}
+
+type postedJobCard struct {
+	journalID, orderID string
+	oper, revisions    int
+	hours, rate        decimal.Decimal
+	reversed           bool
+}
+
+func (s *Postgres) latestShopfloorCard(ctx context.Context, registrationID string) (postedJobCard, error) {
+	p, _ := tenant.FromContext(ctx)
+	var c postedJobCard
+	var hours, rate string
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `select count(*) from production_journal where tenant_id = $1 and posted and reversal_of is null
+			and idempotency_key like $2`, p.TenantID, shopfloorJobCardKey+registrationID+"%").Scan(&c.revisions); err != nil || c.revisions == 0 {
+			return err
+		}
+		return tx.QueryRow(ctx, `select j.id::text, j.order_id::text, l.oper_number, l.qty::text, l.unit_cost::text,
+				exists (select 1 from production_journal r where r.tenant_id = j.tenant_id and r.reversal_of = j.id)
+			from production_journal j join production_journal_line l on l.tenant_id = j.tenant_id and l.journal_id = j.id and l.kind = 'hours'
+			where j.tenant_id = $1 and j.posted and j.reversal_of is null and j.idempotency_key like $2
+			order by j.posted_at desc, j.id desc limit 1`, p.TenantID, shopfloorJobCardKey+registrationID+"%").
+			Scan(&c.journalID, &c.orderID, &c.oper, &hours, &rate, &c.reversed)
+	})
+	if err != nil {
+		return postedJobCard{}, err
+	}
+	c.hours, c.rate = dec(hours), dec(rate)
+	return c, nil
+}
+
+func (s *Postgres) reverseShopfloorCard(ctx context.Context, c postedJobCard, registrationID string) error {
+	p, _ := tenant.FromContext(ctx)
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		h, err := lockOrder(ctx, tx, p.TenantID, c.orderID, 0)
+		if err != nil {
+			return err
+		}
+		return reverseJournal(ctx, tx, p.TenantID, &h, c.journalID, shopfloorActor, SystemKeyPrefix+"shopfloor-jobcard-reverse:"+registrationID, true)
+	})
 }

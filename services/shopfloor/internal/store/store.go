@@ -155,14 +155,16 @@ func enqueuePosted(ctx context.Context, tx pgx.Tx, tenantID string, data sfevent
 		if err == nil {
 			data.OrderRef, data.OperationRef = orderRef, opRef
 		}
-		var rate, currency string
-		err = tx.QueryRow(ctx, `select cost_rate::text, currency from worker where tenant_id = $1 and id = $2`, tenantID, data.WorkerID).Scan(&rate, &currency)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		if err == nil {
-			if r, perr := decimal.NewFromString(rate); perr == nil && r.IsPositive() {
-				data.CostRate, data.CostRateCurrency = &r, currency
+		if data.Kind == KindJobStop && data.Hours != nil {
+			var rate, currency string
+			err = tx.QueryRow(ctx, `select cost_rate::text, currency from worker where tenant_id = $1 and id = $2`, tenantID, data.WorkerID).Scan(&rate, &currency)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			if err == nil {
+				if r, perr := decimal.NewFromString(rate); perr == nil && r.IsPositive() {
+					data.CostRate, data.CostRateCurrency = &r, currency
+				}
 			}
 		}
 	}

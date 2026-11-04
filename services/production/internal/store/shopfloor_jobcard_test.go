@@ -184,3 +184,89 @@ func TestPostShopfloorJobCard_PostFailureAfterCreateKeepsWorkerRate(t *testing.T
 		t.Fatalf("labor %s, want 52 booked once", got)
 	}
 }
+
+func TestPostShopfloorJobCard_PostsHoursOnFinishedOperation(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(9409))
+	st := startedOrder(t, s, ctx, routedOrder(t, "key-sf-jobcard-fin", ids.New(), 10))
+	if _, res, err := st.operate(10, domain.OperFinish, "finish-10"); err != nil || !res.Changed {
+		t.Fatalf("finish: %+v %v", res, err)
+	}
+	j, posted, err := s.PostShopfloorJobCard(ctx, shopfloorCard(ids.New(), st.orderID, ShopfloorJobCard{}))
+	if err != nil || !posted || !j.Lines[0].Amount.Equal(d("52")) {
+		t.Fatalf("post on finished op: posted=%v journal=%+v err=%v", posted, j, err)
+	}
+	if got := sfLaborActual(st); !got.Equal(d("52")) {
+		t.Fatalf("labor %s, want 52", got)
+	}
+	if op := operation(st.refresh(), 10); op.Status != domain.OperFinished {
+		t.Fatalf("late hours reopened the operation: %s", op.Status)
+	}
+}
+
+func TestAdjustShopfloorJobCard_SupersededServerStopBooksLaborOnce(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(9410))
+	st := startedOrder(t, s, ctx, routedOrder(t, "key-sf-jobcard-adj", ids.New(), 10))
+	server, kiosk := ids.New(), ids.New()
+	for _, reg := range []string{server, kiosk} {
+		if _, posted, err := s.PostShopfloorJobCard(ctx, shopfloorCard(reg, st.orderID, ShopfloorJobCard{})); err != nil || !posted {
+			t.Fatalf("post %s: posted=%v err=%v", reg, posted, err)
+		}
+	}
+	if got := sfLaborActual(st); !got.Equal(d("104")) {
+		t.Fatalf("both stops cost %s, want 104 before the supersede correction", got)
+	}
+
+	if changed, err := s.AdjustShopfloorJobCard(ctx, server, decimal.Zero, "t1"); err != nil || !changed {
+		t.Fatalf("zero the server stop: changed=%v err=%v", changed, err)
+	}
+	if got := sfLaborActual(st); !got.Equal(d("52")) {
+		t.Fatalf("labor %s after supersede, want 52 booked once", got)
+	}
+	if changed, err := s.AdjustShopfloorJobCard(ctx, server, decimal.Zero, "t1"); err != nil || changed {
+		t.Fatalf("replay: changed=%v err=%v", changed, err)
+	}
+
+	if changed, err := s.AdjustShopfloorJobCard(ctx, kiosk, d("1.5"), "t2"); err != nil || !changed {
+		t.Fatalf("correct to 1.5 h: changed=%v err=%v", changed, err)
+	}
+	if got := sfLaborActual(st); !got.Equal(d("39")) {
+		t.Fatalf("labor %s after correction, want 39 (1.5 h at 26)", got)
+	}
+	if changed, err := s.AdjustShopfloorJobCard(ctx, kiosk, d("1.5"), "t2"); err != nil || changed {
+		t.Fatalf("replay correction: changed=%v err=%v", changed, err)
+	}
+	if changed, err := s.AdjustShopfloorJobCard(ctx, kiosk, d("2"), "t3"); err != nil || !changed {
+		t.Fatalf("correct back to 2 h: changed=%v err=%v", changed, err)
+	}
+	if got := sfLaborActual(st); !got.Equal(d("52")) {
+		t.Fatalf("labor %s after second correction, want 52", got)
+	}
+	if changed, err := s.AdjustShopfloorJobCard(ctx, ids.New(), d("1"), "t4"); err != nil || changed {
+		t.Fatalf("unknown registration: changed=%v err=%v", changed, err)
+	}
+}
+
+func TestAdjustShopfloorJobCard_KeepsFinishedOperationFinished(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(9411))
+	st := startedOrder(t, s, ctx, routedOrder(t, "key-sf-jobcard-adj-fin", ids.New(), 10))
+	reg := ids.New()
+	if _, _, err := s.PostShopfloorJobCard(ctx, shopfloorCard(reg, st.orderID, ShopfloorJobCard{})); err != nil {
+		t.Fatal(err)
+	}
+	st.refresh()
+	if _, _, err := st.operate(10, domain.OperFinish, "finish-10"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AdjustShopfloorJobCard(ctx, reg, d("1"), "t"); err != nil {
+		t.Fatal(err)
+	}
+	if got := sfLaborActual(st); !got.Equal(d("26")) {
+		t.Fatalf("labor %s, want 26", got)
+	}
+	if op := operation(st.refresh(), 10); op.Status != domain.OperFinished {
+		t.Fatalf("adjust reopened the finished operation: %s", op.Status)
+	}
+}
