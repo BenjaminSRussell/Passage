@@ -274,6 +274,19 @@ describe("change a purchase order", () => {
     expect(await screen.findByText(/Line 4: vendor is only provisionally assigned to category Docks \(PRC-CAT-010\)/)).toBeInTheDocument();
   });
 
+  it("keeps the quantity and unit of a line ordered from a requisition line", async () => {
+    const REQ_LINE = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const fromRequisition = { ...draft, lines: draft.lines.map((l) => (l.lineNo === 1 ? { ...l, requisitionLineId: REQ_LINE } : l)) };
+    serve(fromRequisition, []);
+    renderAt(`/purchasing/purchase-orders/${PO_ID}/edit`);
+    const line1 = await screen.findByRole("group", { name: "Line 1" });
+    expect(within(line1).getByLabelText("Quantity")).toHaveAttribute("readonly");
+    expect(within(line1).getByLabelText("Unit")).toHaveAttribute("readonly");
+    expect(within(line1).getByText(/Orders its whole requisition line/)).toBeInTheDocument();
+    const line2 = screen.getByRole("group", { name: "Line 2" });
+    expect(within(line2).getByLabelText("Quantity")).not.toHaveAttribute("readonly");
+  });
+
   it("does not offer an edit of an approved order", async () => {
     const fetchMock = serve({ ...draft, approvalStatus: "APPROVED" }, []);
     renderAt(`/purchasing/purchase-orders/${PO_ID}/edit`);

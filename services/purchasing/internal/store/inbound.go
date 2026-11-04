@@ -484,7 +484,7 @@ func applyPlan(ctx context.Context, tx pgx.Tx, cur PurchaseOrder, line PurchaseO
 	}
 	next.Subtotal, next.DiscountTotal, next.ChargesTotal, next.TaxTotal, next.Total =
 		doc.Totals.Subtotal, doc.Totals.DiscountTotal, doc.Totals.ChargesTotal, doc.Totals.TaxTotal, doc.Totals.Total
-	_, res, err := editLocked(ctx, tx, cur, cur.RowVersion, next)
+	_, res, err := editLocked(ctx, tx, cur, cur.RowVersion, next, true)
 	return res, err
 }
 

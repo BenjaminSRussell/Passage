@@ -60,7 +60,7 @@ func (s *Postgres) EditPurchaseOrder(ctx context.Context, id string, ifMatch int
 		if err != nil {
 			return err
 		}
-		out, _, err = editLocked(ctx, tx, cur, ifMatch, next)
+		out, _, err = editLocked(ctx, tx, cur, ifMatch, next, false)
 		return err
 	})
 	return out, err
@@ -76,7 +76,11 @@ type editResult struct {
 
 // editLocked is the body of EditPurchaseOrder for cur, which the caller has
 // locked and loaded inside tx. It returns the PO as stored afterwards.
-func editLocked(ctx context.Context, tx pgx.Tx, cur PurchaseOrder, ifMatch int, next PurchaseOrder) (PurchaseOrder, editResult, error) {
+//
+// planned is true only for a change that comes from inbound planning (a postpone or a quantity message applied by
+// the inbound consumer or its retry): that is the one writer that may move the quantity of a line ordered from a
+// requisition line. A buyer's edit and a reprice may not.
+func editLocked(ctx context.Context, tx pgx.Tx, cur PurchaseOrder, ifMatch int, next PurchaseOrder, planned bool) (PurchaseOrder, editResult, error) {
 	id := cur.ID
 	actor, _ := tenant.FromContext(ctx)
 	if err := checkRowVersion(cur, ifMatch); err != nil {
@@ -92,7 +96,7 @@ func editLocked(ctx context.Context, tx pgx.Tx, cur PurchaseOrder, ifMatch int, 
 	if err != nil {
 		return PurchaseOrder{}, editResult{}, err
 	}
-	removed, err := checkLineChanges(cur.Lines, next.Lines, pol.AllowInvoiceBeforeReceipt)
+	removed, err := checkLineChanges(cur.Lines, next.Lines, pol.AllowInvoiceBeforeReceipt, planned)
 	if err != nil {
 		return PurchaseOrder{}, editResult{}, err
 	}
@@ -414,6 +418,11 @@ func releaseLines(ctx context.Context, tx pgx.Tx, poID string, lines []PurchaseO
 			return err
 		}
 	}
+	// The requisition lines below are written after the agreement lines are locked; that is safe because every
+	// writer of a requisition line holds its requisition first, and this transaction already holds them all.
+	if err := lockAgreementLinesOf(ctx, tx, lines); err != nil {
+		return err
+	}
 	for _, l := range lines {
 		if l.AgreementLineID != "" {
 			if _, err := tx.Exec(ctx, `update purchase_agreement_line
@@ -457,10 +466,11 @@ func checkHeaderUnchanged(cur, next PurchaseOrder) error {
 
 // checkLineChanges matches next to the current lines by number. It refuses
 // reopening a cancelled line, a new line with a requisition or agreement link,
-// a changed link, a changed product, unit, quantity or amount on a line drawn
+// a changed link, a changed unit or quantity on a line ordered from a requisition
+// line (unless planned), a changed product, unit, quantity or amount on a line drawn
 // against an agreement, and quantities below received or invoiced (PRC-PO-007). It
 // returns the live lines that next leaves out, which the edit cancels.
-func checkLineChanges(cur, next []PurchaseOrderLine, allowInvoiceBeforeReceipt bool) ([]PurchaseOrderLine, error) {
+func checkLineChanges(cur, next []PurchaseOrderLine, allowInvoiceBeforeReceipt, planned bool) ([]PurchaseOrderLine, error) {
 	byNo := make(map[int]PurchaseOrderLine, len(cur))
 	for _, l := range cur {
 		byNo[l.LineNo] = l
@@ -480,6 +490,13 @@ func checkLineChanges(cur, next []PurchaseOrderLine, allowInvoiceBeforeReceipt b
 		}
 		if c.RequisitionLineID != n.RequisitionLineID || c.AgreementLineID != n.AgreementLineID {
 			return nil, linkErr("line %d keeps its requisition and agreement line", n.LineNo)
+		}
+		if c.RequisitionLineID != "" && !planned && (!c.Qty.Equal(n.Qty) || c.Unit != n.Unit) {
+			// The line consumed its whole requisition line (PRC-REQ-008 at create), so another quantity or unit
+			// would leave the need and the order out of step. Cancel the line and order the rest from a split.
+			return nil, httpx.NewProblem(http.StatusUnprocessableEntity, CodeRequisitionQty, fmt.Sprintf(
+				"line %d orders %s %s of its requisition line; its quantity and unit cannot change (cancel the line, split the requisition line and order again)",
+				n.LineNo, c.Qty, c.Unit))
 		}
 		if c.AgreementLineID != "" && (!c.Qty.Equal(n.Qty) || !c.LineAmount.Equal(n.LineAmount) || c.ProductID != n.ProductID || c.Unit != n.Unit) {
 			return nil, linkErr("line %d draws on a purchase agreement; its product, unit, quantity and amount cannot change (cancel the line and order again)", n.LineNo)

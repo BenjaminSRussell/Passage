@@ -419,3 +419,59 @@ func TestDirectPO_MustOrderTheRequisitionLineQuantity(t *testing.T) {
 		t.Fatalf("a PO for the remainder's whole quantity = %v", err)
 	}
 }
+
+// A PO line ordered from a requisition line keeps that line's quantity and unit through a buyer's edit, as it had to
+// at create (PRC-REQ-008): another quantity or unit is refused on a DRAFT PO and the line stays as it was, while an
+// edit that leaves them alone goes through.
+func TestEditPurchaseOrder_RequisitionLinkedLineKeepsQuantityAndUnit(t *testing.T) {
+	s := store.New(migrated(t))
+	ctx := principalContext(31)
+	req := approvedBulk(t, s)
+	po, err := s.CreatePurchaseOrder(ctx, orderFor(t, ids.New(), req.Lines[0]), store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ qty, unit string }{{"60", "EA"}, {"150", "EA"}, {"100", "BOX"}} {
+		next := po
+		next.Lines = append([]store.PurchaseOrderLine(nil), po.Lines...)
+		next.Lines[0].Qty, next.Lines[0].Unit = dec(c.qty), c.unit
+		if _, err := s.EditPurchaseOrder(ctx, po.ID, po.RowVersion, next); problemCode(err) != store.CodeRequisitionQty {
+			t.Fatalf("edit to %s %s = %v, want %s", c.qty, c.unit, err, store.CodeRequisitionQty)
+		}
+	}
+	next := po
+	next.Lines = append([]store.PurchaseOrderLine(nil), po.Lines...)
+	next.Lines[0].Description = "Bolts, zinc"
+	got, err := s.EditPurchaseOrder(ctx, po.ID, po.RowVersion, next)
+	if err != nil || !got.Lines[0].Qty.Equal(dec("100")) || got.Lines[0].Unit != "EA" || got.Lines[0].Description != "Bolts, zinc" {
+		t.Fatalf("edit that keeps the quantity = %+v, %v", got.Lines, err)
+	}
+}
+
+// Inbound planning is the one writer that may move the quantity of a line ordered from a requisition line: a
+// planner's decrease of a confirmed PO applies where a buyer's edit of the same line is refused. The requisition
+// line stays CONSOLIDATED on the PO line; the part the planner took off is not put back in the queue.
+func TestInbound_PlanningMovesARequisitionLinkedQuantity(t *testing.T) {
+	pool := migrated(t)
+	s := store.New(pool)
+	ctx := principalContext(31)
+	req := approvedBulk(t, s)
+	in := orderFor(t, ids.New(), req.Lines[0])
+	in.Lines[0].ProductID = ids.New()
+	po := confirmedPO(t, ctx, s, in)
+
+	next := po
+	next.Lines = append([]store.PurchaseOrderLine(nil), po.Lines...)
+	next.Lines[0].Qty = dec("60")
+	if _, err := s.EditPurchaseOrder(ctx, po.ID, po.RowVersion, next); problemCode(err) != store.CodeRequisitionQty {
+		t.Fatalf("buyer's edit to 60 = %v, want %s", err, store.CodeRequisitionQty)
+	}
+	got, _ := applyMessage(t, pool, s, 31, message(po, domain.ActionDecrease, "40", ""))
+	if got.Status != domain.InboundApplied || got.QtyAfter == nil || !got.QtyAfter.Equal(dec("60")) {
+		t.Fatalf("planner's decrease of 40 = %+v", got)
+	}
+	r, err := s.GetRequisition(ctx, req.ID)
+	if err != nil || r.Lines[0].Status != "CONSOLIDATED" || r.Lines[0].PurchaseOrderID != po.ID || !r.Lines[0].Qty.Equal(dec("100")) {
+		t.Fatalf("requisition line after the decrease = %+v, %v", r.Lines[0], err)
+	}
+}

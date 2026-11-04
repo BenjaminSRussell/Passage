@@ -295,6 +295,26 @@ func loadAgreementLine(ctx context.Context, tx pgx.Tx, lineID string, lock bool)
 	return a, nil
 }
 
+// lockAgreementLinesOf locks, in one statement in id order, the agreement lines the PO lines draw on. It is the
+// last step of the lock order every writer of purchase documents follows: requisitions, requisition lines, then
+// agreement lines. Two POs that draw the same two agreement lines in opposite order would otherwise lock them in
+// their own line order and deadlock; the PO cancel and edit paths that give a release back use it too.
+func lockAgreementLinesOf(ctx context.Context, tx pgx.Tx, lines []PurchaseOrderLine) error {
+	var lineIDs []string
+	for _, l := range lines {
+		if l.AgreementLineID != "" {
+			lineIDs = append(lineIDs, l.AgreementLineID)
+		}
+	}
+	if len(lineIDs) == 0 {
+		return nil
+	}
+	p, _ := tenant.FromContext(ctx)
+	_, err := tx.Exec(ctx, `select 1 from purchase_agreement_line where tenant_id = $1 and id = any($2::uuid[]) order by id for update`,
+		p.TenantID, lineIDs)
+	return err
+}
+
 // drawAgreements releases each PO line that references an agreement line
 // against it (FR-17.5) inside the PO's transaction: the release must pass
 // domain.CheckRelease, a HARD overrun refuses the whole PO with PRC-AGR-003,
@@ -303,6 +323,9 @@ func loadAgreementLine(ctx context.Context, tx pgx.Tx, lineID string, lock bool)
 func drawAgreements(ctx context.Context, tx pgx.Tx, po PurchaseOrder) ([]Warning, error) {
 	p, _ := tenant.FromContext(ctx)
 	var warnings []Warning
+	if err := lockAgreementLinesOf(ctx, tx, po.Lines); err != nil {
+		return nil, err
+	}
 	for _, pl := range po.Lines {
 		if pl.AgreementLineID == "" {
 			continue

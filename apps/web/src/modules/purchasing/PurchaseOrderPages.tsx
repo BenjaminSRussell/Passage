@@ -167,6 +167,8 @@ interface LineDraft {
   keptSiteId?: string;
   keptWarehouseId?: string;
   agreementLineId: string;
+  /** The requisition line an existing line orders whole; its quantity and unit are then fixed (PRC-REQ-008). */
+  requisitionLineId?: string;
   /** Stored price and received quantity of an existing line, shown as hints. */
   keptPrice?: string;
   receivedQty?: string;
@@ -221,6 +223,7 @@ function draftOf(l: PurchaseOrderLine): LineDraft {
     keptSiteId: l.siteId ?? "",
     keptWarehouseId: l.warehouseId ?? "",
     agreementLineId: l.agreementLineId ?? "",
+    requisitionLineId: l.requisitionLineId,
     keptPrice: `${l.unitPrice} / ${l.priceUnit}`,
     receivedQty: l.receivedQty,
   };
@@ -324,6 +327,8 @@ function LinesCard({
         const existing = line.lineNo !== undefined;
         // A line with receipts keeps its site and warehouse (the service refuses a move).
         const received = Boolean(line.receivedQty && Number(line.receivedQty) > 0);
+        // A line ordered from a requisition line orders all of it, so its quantity and unit stay (PRC-REQ-008).
+        const fromRequisition = existing && Boolean(line.requisitionLineId);
         const destinationHint = received ? "Has receipts; the destination cannot change" : existing ? undefined : "Blank goes where the order does";
         const newCount = lines.slice(0, i + 1).filter((l) => l.lineNo === undefined).length;
         const title = existing ? `Line ${line.lineNo}` : editing ? `New line ${newCount}` : `Line ${i + 1}`;
@@ -356,13 +361,21 @@ function LinesCard({
               <FormField
                 id={id("qty")}
                 label="Quantity"
-                hint={line.receivedQty && Number(line.receivedQty) > 0 ? `${line.receivedQty} received; cannot go lower` : undefined}
+                hint={
+                  fromRequisition
+                    ? "Orders its whole requisition line; to order another quantity, cancel the line and split the requisition line"
+                    : line.receivedQty && Number(line.receivedQty) > 0
+                      ? `${line.receivedQty} received; cannot go lower`
+                      : undefined
+                }
                 error={err("qty")}
               >
-                {(c) => <Input {...c} inputMode="decimal" value={line.qty} onChange={(e) => update(i, { qty: e.target.value })} />}
+                {(c) => (
+                  <Input {...c} inputMode="decimal" value={line.qty} readOnly={fromRequisition} onChange={(e) => update(i, { qty: e.target.value })} />
+                )}
               </FormField>
               <FormField id={id("unit")} label="Unit" error={err("unit")}>
-                {(c) => <Input {...c} value={line.unit} onChange={(e) => update(i, { unit: e.target.value })} />}
+                {(c) => <Input {...c} value={line.unit} readOnly={fromRequisition} onChange={(e) => update(i, { unit: e.target.value })} />}
               </FormField>
               <FormField
                 id={id("price")}

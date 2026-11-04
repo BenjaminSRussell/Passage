@@ -102,7 +102,7 @@ func (s *Postgres) RepricePurchaseOrder(ctx context.Context, id string, ifMatch 
 		}
 		if len(plan.Changes) > 0 {
 			var res editResult
-			if out.Order, res, err = editLocked(ctx, tx, cur, ifMatch, next); err != nil {
+			if out.Order, res, err = editLocked(ctx, tx, cur, ifMatch, next, false); err != nil {
 				return err
 			}
 			if res.versionNo > 0 {

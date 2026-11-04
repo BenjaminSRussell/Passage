@@ -172,17 +172,25 @@ func (s *Postgres) ConsolidateRequisitionLines(ctx context.Context, orders []Pur
 // the same lines in id order.
 func lockRequisitionLines(ctx context.Context, tx pgx.Tx, orders []PurchaseOrder) ([]SourcingLine, error) {
 	var lineIDs []string
+	var all []PurchaseOrderLine
 	for _, o := range orders {
+		all = append(all, o.Lines...)
 		for _, l := range o.Lines {
 			if l.RequisitionLineID != "" {
 				lineIDs = append(lineIDs, l.RequisitionLineID)
 			}
 		}
 	}
-	if len(lineIDs) == 0 {
-		return nil, nil
+	var out []SourcingLine
+	if len(lineIDs) > 0 {
+		var err error
+		if out, err = loadSourcingLines(ctx, tx, lineIDs, true); err != nil {
+			return nil, err
+		}
 	}
-	return loadSourcingLines(ctx, tx, lineIDs, true)
+	// Then the agreement lines of every order together, in id order: the last step of the lock order, taken for
+	// all the POs before the first one is written so two multi-PO writers cannot lock them PO by PO.
+	return out, lockAgreementLinesOf(ctx, tx, all)
 }
 
 // sameQuantities refuses a consolidation built from lines read before a split (FR-17.3) changed them: each PO line
