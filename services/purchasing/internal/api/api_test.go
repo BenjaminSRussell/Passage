@@ -48,6 +48,7 @@ type fakeStore struct {
 	lastAgrFilter      store.AgreementFilter
 	lastSourcing       store.SourcingFilter
 	lastConsolidated   []string
+	lastSplit          splitCall
 	lastIdem           store.Idem
 
 	// PO lifecycle: stored orders by id, and what edits and actions received.
@@ -273,6 +274,21 @@ func (f *fakeStore) RequisitionLinesByID(_ context.Context, lineIDs []string) ([
 		}
 	}
 	return out, nil
+}
+
+// splitCall records what SplitRequisitionLine received.
+type splitCall struct {
+	lineID     string
+	version    int
+	quantities []decimal.Decimal
+	minor      int32
+	by         string
+	idem       store.Idem
+}
+
+func (f *fakeStore) SplitRequisitionLine(_ context.Context, lineID string, version int, quantities []decimal.Decimal, minor int32, by string, idem store.Idem) (store.Requisition, error) {
+	f.lastSplit = splitCall{lineID, version, quantities, minor, by, idem}
+	return store.Requisition{ID: ids.New(), Version: version + 1, Lines: []store.RequisitionLine{}}, nil
 }
 
 func (f *fakeStore) ConsolidateRequisitionLines(_ context.Context, orders []store.PurchaseOrder, lineIDs []string, idem store.Idem) ([]store.PurchaseOrder, error) {

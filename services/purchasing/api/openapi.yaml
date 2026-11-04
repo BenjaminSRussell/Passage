@@ -452,6 +452,17 @@ components:
         purchaseOrderId: { type: string, format: uuid, description: "Set when CONSOLIDATED: the PO that orders the line." }
         purchaseOrderLineNo: { type: integer, description: "Set when CONSOLIDATED: the PO line that orders the line." }
         catalogEntryId: { type: string, format: uuid, description: "The catalog entry the line was picked from; absent on a non-catalog line." }
+        splitFromLineId: { type: string, format: uuid, description: "The line this one was cut out of by a split (FR-17.3); absent on a line as entered." }
+    RequisitionLineSplitInput:
+      type: object
+      required: [quantities]
+      properties:
+        quantities:
+          type: array
+          minItems: 1
+          maxItems: 20
+          description: "One new line per quantity, each above zero with at most 6 decimals; together they must leave a quantity above zero on the original line."
+          items: { type: string, description: "Decimal quantity string in the line's unit, never a float.", pattern: '^[0-9]+(\.[0-9]{1,6})?$', example: "40" }
     Requisition:
       type: object
       properties:
@@ -718,6 +729,7 @@ components:
             requisitionStatus: { type: string }
             legalEntityId: { type: string, format: uuid }
             currency: { type: string }
+            requisitionVersion: { type: integer, description: "The requisition's version, the If-Match value of a split." }
     OpenOrderLine:
       type: object
       description: "Open supply: a line of a CONFIRMED purchase order with quantity still to receive."
@@ -1961,6 +1973,44 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/SourcingLinePage' }
         '422': { $ref: '#/components/responses/Problem' }
+  /v1/procurement/requisition-lines/{id}:split:
+    post:
+      operationId: splitRequisitionLine
+      x-passage-duty: PurchaseOrderMaintain
+      summary: Split an OPEN requisition line into several lines so the parts can be ordered separately (FR-17.3; duty PurchaseOrderMaintain)
+      description: >-
+        Cuts one new OPEN line out of the line for each quantity in the body; the original keeps what is left, which must stay
+        above zero. The new lines are numbered after the requisition's last line and keep the original's product, category,
+        unit, estimated unit price, vendor, site, warehouse, requested date and catalog entry; each carries splitFromLineId.
+        Line amounts are shares of the original amount (half to even to the currency's minor units, by cumulative share), so
+        quantities and amounts add up exactly and the requisition total does not change. Only an OPEN line of an APPROVED
+        requisition can be split, and not while a running RFQ holds it (PRC-REQ-006). If-Match is the requisition version, which
+        moves on with the split; requisition.split.v1 is written in the same transaction. A replayed Idempotency-Key returns the
+        requisition as it is now, with the same new lines. A consolidation or RFQ built from the line as it was before the split
+        is refused with PRC-REQ-STATE; reload the queue and retry.
+      parameters:
+        - { name: id, in: path, required: true, description: Requisition line id, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RequisitionLineSplitInput' }
+      responses:
+        '200':
+          description: The requisition with the original and the new lines
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Requisition' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Requisition line not found (PRC-REQ-LINE-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: "Requisition version changed or the requisition is being ordered at the same time (PRC-VERSION-CONFLICT), line not OPEN on an APPROVED requisition (PRC-REQ-STATE) or held by a running RFQ (PRC-REQ-006)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation (COM-0001): no quantity, more than 20, not above zero, more than 6 decimals; quantities that leave nothing on the original line (PRC-REQ-007); or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/purchase-order-lines:
     get:
       operationId: listOpenOrderLines
@@ -2087,7 +2137,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '403': { description: Missing duty or a line's legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Requisition line not found (PRC-REQ-LINE-NOT-FOUND) or agreement line not found (PRC-AGR-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: A line is not OPEN on an APPROVED requisition (PRC-REQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: "A line is not OPEN on an APPROVED requisition, or was split since it was read (PRC-REQ-STATE)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: "Validation, no vendor for a line (PRC-CONS-002), window outside 1-60 (PRC-CONS-001), agreement rules (PRC-AGR-003/005/006/007/008), a vendor not assigned to a restricted category under HARD (PRC-CAT-002) or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/purchase-orders:reprice:
     post:
@@ -3065,7 +3115,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Requisition line not found (PRC-REQ-LINE-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: A line is not OPEN on an APPROVED requisition (PRC-REQ-STATE) or is already on a running RFQ (PRC-REQ-006), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: "A line is not OPEN on an APPROVED requisition or was split since it was read (PRC-REQ-STATE), or is already on a running RFQ (PRC-REQ-006)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: "Validation (COM-0001): deadline not in the future, bad ranking rule or criteria, no lines or more than 500, lines of different legal entities (PRC-REQ-005); or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/rfqs/{id}:
     get:

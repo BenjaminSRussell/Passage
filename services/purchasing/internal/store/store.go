@@ -68,6 +68,7 @@ type Store interface {
 	ChangeAgreementStatus(ctx context.Context, id string, version int, action string, idem Idem) (AgreementDetail, error)
 	ListOpenRequisitionLines(ctx context.Context, f SourcingFilter, after string, limit int) (Page[SourcingLine], error)
 	RequisitionLinesByID(ctx context.Context, lineIDs []string) ([]SourcingLine, error)
+	SplitRequisitionLine(ctx context.Context, lineID string, version int, quantities []decimal.Decimal, minor int32, splitBy string, idem Idem) (Requisition, error)
 	ListOpenOrderLines(ctx context.Context, f OpenLineFilter, after string, limit int) (Page[OpenOrderLine], error)
 	ListOpenOrdersByVendor(ctx context.Context, f InquiryFilter, after string, limit int) (Page[VendorOpenOrders], error)
 	ListOverdueLines(ctx context.Context, f InquiryFilter, after string, limit int) (Page[OverdueLine], error)

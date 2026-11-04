@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -700,15 +701,15 @@ func liveRFQOf(ctx context.Context, tx pgx.Tx, requisitionLineID string) (string
 // APPROVED requisition of the RFQ's legal entity, listed once, and not held by another running RFQ (FR-17.3).
 func claimRFQRequisitionLines(ctx context.Context, tx pgx.Tx, in domain.RFQ) error {
 	var lineIDs []string
-	seen := map[string]bool{}
+	qty := map[string]decimal.Decimal{}
 	for _, l := range in.Lines {
 		if l.RequisitionLineID == "" {
 			continue
 		}
-		if seen[l.RequisitionLineID] {
+		if _, dup := qty[l.RequisitionLineID]; dup {
 			return &domain.Error{Code: domain.CodeValidation, Detail: "requisition line " + l.RequisitionLineID + " is listed twice"}
 		}
-		seen[l.RequisitionLineID] = true
+		qty[l.RequisitionLineID] = l.Qty
 		lineIDs = append(lineIDs, l.RequisitionLineID)
 	}
 	if len(lineIDs) == 0 {
@@ -741,6 +742,10 @@ func claimRFQRequisitionLines(ctx context.Context, tx pgx.Tx, in domain.RFQ) err
 		} else if held {
 			return httpx.NewProblem(http.StatusConflict, CodeRequisitionOnRFQ, fmt.Sprintf(
 				"requisition %s line %d is already being sourced on %s", s.RequisitionNumber, s.LineNo, number))
+		}
+		// The RFQ line asks for the quantity the API read unlocked; a split since then leaves it asking for too much.
+		if !s.Qty.Equal(qty[id]) {
+			return requisitionLineChanged(s)
 		}
 	}
 	return nil

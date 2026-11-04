@@ -28,6 +28,8 @@ type SourcingLine struct {
 	RequisitionStatus string `json:"requisitionStatus"`
 	LegalEntityID     string `json:"legalEntityId"`
 	Currency          string `json:"currency"`
+	// RequisitionVersion is the requisition's row version, the If-Match value of a split.
+	RequisitionVersion int `json:"requisitionVersion"`
 }
 
 // SourcingFilter narrows ListOpenRequisitionLines; empty fields do not filter.
@@ -39,14 +41,14 @@ type SourcingFilter struct {
 const sourcingColumns = `l.id, l.line_no, coalesce(l.product_id::text, ''), l.description, l.category, l.qty, l.unit,
 	l.estimated_unit_price, l.amount, l.requested_date, coalesce(l.site_id::text, ''), coalesce(l.preferred_vendor_id::text, ''),
 	l.status, r.id, r.number, r.status, r.legal_entity_id, r.currency, coalesce(l.purchase_order_id::text, ''),
-	coalesce(l.purchase_order_line_no, 0), coalesce(l.warehouse_id::text, '')`
+	coalesce(l.purchase_order_line_no, 0), coalesce(l.warehouse_id::text, ''), r.version, coalesce(l.split_from_line_id::text, '')`
 
 func scanSourcingLine(row pgx.CollectableRow) (SourcingLine, error) {
 	var s SourcingLine
 	var requested time.Time
 	err := row.Scan(&s.ID, &s.LineNo, &s.ProductID, &s.Description, &s.Category, &s.Qty, &s.Unit, &s.EstimatedUnitPrice, &s.Amount,
 		&requested, &s.SiteID, &s.PreferredVendorID, &s.Status, &s.RequisitionID, &s.RequisitionNumber, &s.RequisitionStatus,
-		&s.LegalEntityID, &s.Currency, &s.PurchaseOrderID, &s.PurchaseOrderLineNo, &s.WarehouseID)
+		&s.LegalEntityID, &s.Currency, &s.PurchaseOrderID, &s.PurchaseOrderLineNo, &s.WarehouseID, &s.RequisitionVersion, &s.SplitFromLineID)
 	s.RequestedDate = day(requested)
 	return s, err
 }
@@ -127,7 +129,11 @@ func (s *Postgres) ConsolidateRequisitionLines(ctx context.Context, orders []Pur
 			out, err = loadLinkedOrders(ctx, tx, lineIDs)
 			return err
 		}
-		if _, err := lockRequisitionLines(ctx, tx, orders); err != nil {
+		locked, err := lockRequisitionLines(ctx, tx, orders)
+		if err != nil {
+			return err
+		}
+		if err := sameQuantities(orders, locked); err != nil {
 			return err
 		}
 		for _, o := range orders {
@@ -160,6 +166,31 @@ func lockRequisitionLines(ctx context.Context, tx pgx.Tx, orders []PurchaseOrder
 		return nil, nil
 	}
 	return loadSourcingLines(ctx, tx, lineIDs, true)
+}
+
+// sameQuantities refuses a consolidation built from lines read before a split (FR-17.3) changed them: each PO line
+// orders its requisition line's quantity as the API read it, unlocked, so a split committed in between would have
+// the PO order the whole old quantity while the parts cut from it stay OPEN to be ordered again.
+func sameQuantities(orders []PurchaseOrder, locked []SourcingLine) error {
+	byID := make(map[string]SourcingLine, len(locked))
+	for _, s := range locked {
+		byID[s.ID] = s
+	}
+	for _, o := range orders {
+		for _, l := range o.Lines {
+			if s, ok := byID[l.RequisitionLineID]; ok && !s.Qty.Equal(l.Qty) {
+				return requisitionLineChanged(s)
+			}
+		}
+	}
+	return nil
+}
+
+// requisitionLineChanged is the 409 for a requisition line whose quantity moved (a split) since the caller read it.
+func requisitionLineChanged(s SourcingLine) error {
+	return httpx.NewProblem(http.StatusConflict, CodeRequisitionState, fmt.Sprintf(
+		"requisition %s line %d now has %s %s (it was split since it was read); reload and retry",
+		s.RequisitionNumber, s.LineNo, s.Qty, s.Unit))
 }
 
 // claimRequisitionLines locks the requisition lines a PO references and checks

@@ -72,6 +72,8 @@ export interface RequisitionLine {
   preferredVendorId?: string;
   /** The procurement catalog entry the line was picked from; absent on a non-catalog line. */
   catalogEntryId?: string;
+  /** The line this one was cut out of by a split (FR-17.3); absent on a line as entered. */
+  splitFromLineId?: string;
   status: string;
   /** Set when CONSOLIDATED: the purchase order line that orders this line. */
   purchaseOrderId?: string;
@@ -444,6 +446,8 @@ export interface SourcingLine extends RequisitionLine {
   requisitionStatus: RequisitionStatus;
   legalEntityId: string;
   currency: string;
+  /** The requisition's version: the If-Match value of a split. */
+  requisitionVersion: number;
 }
 
 export interface ConsolidationInput {
@@ -615,6 +619,17 @@ export function changePurchaseAgreement(id: string, action: AgreementAction, ver
 
 export function listOpenRequisitionLines(filters: { sourcing?: SourcingFilter | ""; vendorId?: string } = {}, options: ListOptions = {}) {
   return list<SourcingLine>("/requisition-lines", { sourcing: filters.sourcing || undefined, vendorId: filters.vendorId }, options);
+}
+
+/**
+ * Cuts one new OPEN line out of a requisition line for each quantity (FR-17.3). The original keeps what is left;
+ * requisitionVersion is the If-Match value. Returns the requisition with all its lines.
+ */
+export function splitRequisitionLine(lineId: string, requisitionVersion: number, quantities: string[], idempotencyKey = newIdempotencyKey()) {
+  return send<Requisition>("POST", `/requisition-lines/${encodeURIComponent(lineId)}:split`, {
+    body: { quantities },
+    headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${requisitionVersion}"` },
+  });
 }
 
 /** Creates one DRAFT purchase order per vendor, currency, site, warehouse and delivery window. */

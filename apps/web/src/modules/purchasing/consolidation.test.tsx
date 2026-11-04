@@ -2,7 +2,7 @@ import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SourcingLine } from "./api/client";
-import { validateSourcing } from "./ConsolidationPage";
+import { validateSourcing, validateSplit } from "./ConsolidationPage";
 import { json, pageViolations, problem, renderAt, stubFetch } from "./testHarness";
 
 const LE = "11111111-1111-4111-8111-111111111111";
@@ -29,6 +29,7 @@ const line = (id: string, n: number, preferredVendorId?: string) => ({
   requisitionStatus: "APPROVED",
   legalEntityId: LE,
   currency: "USD",
+  requisitionVersion: 3,
 });
 
 const L1 = "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1";
@@ -181,5 +182,61 @@ describe("consolidation board", () => {
       "Select lines of one legal entity: an RFQ belongs to one.",
     );
     expect(validateSourcing(rows, new Set([L1]), "2099-01-15T17:00", now)).toEqual({});
+  });
+  describe("splitting a line (FR-17.3)", () => {
+    const big = { items: [{ ...line(L1, 1, VENDOR), qty: "100", amount: "1000" }, line(L2, 2)] };
+
+    it("checks the quantities before the round trip", () => {
+      const l = big.items[0] as unknown as SourcingLine;
+      expect(validateSplit(undefined, "10")).toBe("Select exactly one line to split.");
+      expect(validateSplit(l, " , ")).toBe("Enter the quantity of each new line, separated by commas.");
+      expect(validateSplit(l, "40, abc")).toBe('"abc" is not a quantity above zero with at most 6 decimals.');
+      expect(validateSplit(l, "0")).toBe('"0" is not a quantity above zero with at most 6 decimals.');
+      expect(validateSplit(l, "1.1234567")).toMatch(/at most 6 decimals/);
+      expect(validateSplit(l, "60, 40")).toBe("The new lines must leave some of the 100 EA on PR-00000007 line 1.");
+      expect(validateSplit(l, "99.999999")).toBeNull();
+      expect(validateSplit(l, "40, 35")).toBeNull();
+      expect(validateSplit(l, Array(21).fill("1").join(","))).toBe("Split into at most 20 new lines at a time.");
+    });
+
+    it("splits the selected line with the requisition version and reloads the queue", async () => {
+      const fetchMock = stubFetch((_url, init) => (init.method === "POST" ? json({ id: "r1", lines: [] }) : json(big)));
+      const { container } = renderAt("/purchasing/consolidation");
+      fireEvent.click(await screen.findByRole("button", { name: "Split line" }));
+      expect(await screen.findByText("Select exactly one line to split.")).toBeInTheDocument();
+      fireEvent.click(screen.getByLabelText("Select PR-00000007 line 1"));
+      expect(screen.getByText(/has 100 EA; separate quantities with commas/)).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText("Quantities of the new lines"), { target: { value: "40, 35" } });
+      fireEvent.click(screen.getByRole("button", { name: "Split line" }));
+      expect(await screen.findByText("PR-00000007 line 1 was split into 3 lines.")).toBeInTheDocument();
+      const post = fetchMock.mock.calls.find(([, init]) => (init as RequestInit).method === "POST") as [string, RequestInit];
+      expect(post[0]).toBe(`/api/v1/procurement/requisition-lines/${L1}:split`);
+      expect((post[1].headers as Record<string, string>)["If-Match"]).toBe('"3"');
+      expect((post[1].headers as Record<string, string>)["Idempotency-Key"]).toBeTruthy();
+      expect(JSON.parse(String(post[1].body))).toEqual({ quantities: ["40", "35"] });
+      await waitFor(() => expect(screen.getByText("0 lines selected")).toBeInTheDocument());
+      expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit).method !== "POST")).toHaveLength(2);
+      expect(pageViolations(container)).toEqual([]);
+    });
+
+    it("sends nothing when two lines are selected or the quantities are too large, and shows a refusal", async () => {
+      const fetchMock = stubFetch((_url, init) =>
+        init.method === "POST" ? problem(409, "PRC-REQ-006", "requisition PR-00000007 line 1 is being sourced on RFQ-00000002") : json(big),
+      );
+      renderAt("/purchasing/consolidation");
+      fireEvent.click(await screen.findByLabelText("Select PR-00000007 line 1"));
+      fireEvent.click(screen.getByLabelText("Select PR-00000007 line 2"));
+      fireEvent.change(screen.getByLabelText("Quantities of the new lines"), { target: { value: "1" } });
+      fireEvent.click(screen.getByRole("button", { name: "Split line" }));
+      expect(await screen.findByText("Select exactly one line to split.")).toBeInTheDocument();
+      fireEvent.click(screen.getByLabelText("Select PR-00000007 line 2"));
+      fireEvent.change(screen.getByLabelText("Quantities of the new lines"), { target: { value: "100" } });
+      fireEvent.click(screen.getByRole("button", { name: "Split line" }));
+      expect(await screen.findByText(/must leave some of the 100 EA/)).toBeInTheDocument();
+      expect(fetchMock.mock.calls.every(([, init]) => (init as RequestInit | undefined)?.method !== "POST")).toBe(true);
+      fireEvent.change(screen.getByLabelText("Quantities of the new lines"), { target: { value: "10" } });
+      fireEvent.click(screen.getByRole("button", { name: "Split line" }));
+      expect(await screen.findByText(/being sourced on RFQ-00000002 \(PRC-REQ-006\)/)).toBeInTheDocument();
+    });
   });
 });

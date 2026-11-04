@@ -108,6 +108,7 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | POST `/model-service-specs`, GET `/model-service-specs`, GET `/model-service-specs/{id}`, PUT `/model-service-specs/{id}` | ProcurementPolicyMaintain (reads also PurchaseOrderInquire) | Model service specifications (FR-17.23, SAP ML10-ML12): a reusable outline in one currency per legal entity; POST needs an Idempotency-Key (409 PRC-SRV-006 for a duplicate code), PUT needs If-Match (412 PRC-SRV-007); writes `modelservicespec.created.v1` and `modelservicespec.changed.v1` |
 | PUT `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan/rows/{seq}/settlement` | `procurement.invoicing-plan.settle` | Receiving's service token only (#289; 403 for a person, and identity refuses to assign the service-only duty). Body `settlementRef` and `amount`; flips an OPEN row to INVOICED at the settled amount (a reprice in between is absorbed by the other OPEN rows), idempotent per row and reference, records who settled it in `purchase_invoicing_plan_row_settlement`; bumps the PO row version |
 | GET `/requisition-lines` | PurchaseOrderMaintain | Consolidation queue: OPEN lines of APPROVED requisitions; `sourcing` = NEEDS_SOURCING (no preferred vendor) or HAS_VENDOR, `vendorId`, `limit`, `cursor` |
+| POST `/requisition-lines/{id}:split` | PurchaseOrderMaintain | Idempotency-Key and If-Match (the requisition version) required; body `{"quantities": [...]}` cuts one new OPEN line per quantity out of an OPEN line of an APPROVED requisition, the original keeps the rest (FR-17.3); `requisition.split.v1` |
 | POST `/requisitions:consolidate` | PurchaseOrderMaintain | Idempotency-Key required; one DRAFT PO per legal entity × vendor × currency × site × delivery window (`windowDays`, default 7, 1–60); `vendorId` per line overrides the preferred vendor |
 | POST `/agreements` | AgreementMaintain | Idempotency-Key required; purchase agreement, EFFECTIVE unless `status` = DRAFT; max 500 lines |
 | GET `/agreements` | AgreementMaintain | Newest first; `status`, `vendorId`, `limit`, `cursor`; each row carries `maxPctReleased` |
@@ -539,6 +540,8 @@ store codes are returned as the `code` field.
 | PRC-ACTION-001 | 404 | Unknown custom action on a requisition, purchase order, agreement, scheduling agreement or RFQ |
 | PRC-REQ-005 | 422 | A PO line names a requisition line of another legal entity |
 | PRC-REQ-LINE-NOT-FOUND | 404 | Requisition line not found |
+| PRC-REQ-006 | 409 | A requisition line is held by a running RFQ (DRAFT, SENT, REPLIES_OPEN, CLOSED): it cannot be ordered, put on a second RFQ or split |
+| PRC-REQ-007 | 422 | A split asks for quantities the line cannot give up: they must leave a quantity above zero on the original line |
 | PRC-CONS-001 | 422 | Consolidation window outside 1–60 days |
 | PRC-CONS-002 | 422 | A consolidation line has no vendor (needs sourcing) |
 | PRC-AGR-NOT-FOUND | 404 | Purchase agreement or agreement line not found |

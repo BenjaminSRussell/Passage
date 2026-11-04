@@ -7,6 +7,7 @@ import {
   describeProblem,
   listOpenRequisitionLines,
   newIdempotencyKey,
+  splitRequisitionLine,
   type ConsolidationInput,
   type PurchaseOrder,
   type SourcingFilter,
@@ -62,6 +63,43 @@ export function validateSourcing(rows: SourcingLine[], selected: Set<string>, de
   return errors;
 }
 
+const QTY_SCALE = 6;
+const MAX_SPLIT_PARTS = 20;
+
+/** A non-negative decimal string as an integer count of millionths, or null when it is not one (at most 6 decimals). */
+function toMicros(raw: string): bigint | null {
+  const m = /^(\d+)(?:\.(\d{1,6}))?$/.exec(raw.trim());
+  if (!m) return null;
+  return BigInt(m[1]) * 10n ** BigInt(QTY_SCALE) + BigInt((m[2] ?? "").padEnd(QTY_SCALE, "0") || "0");
+}
+
+/** The quantities typed for a split, comma separated; empty entries are ignored. */
+export const splitQuantities = (raw: string) =>
+  raw
+    .split(",")
+    .map((q) => q.trim())
+    .filter((q) => q !== "");
+
+/**
+ * Checks a split before the round trip (FR-17.3): at least one quantity and at most 20, each above zero with at
+ * most 6 decimals, and together less than the line so that it keeps a quantity.
+ */
+export function validateSplit(line: SourcingLine | undefined, raw: string): string | null {
+  if (!line) return "Select exactly one line to split.";
+  const parts = splitQuantities(raw);
+  if (parts.length === 0) return "Enter the quantity of each new line, separated by commas.";
+  if (parts.length > MAX_SPLIT_PARTS) return `Split into at most ${MAX_SPLIT_PARTS} new lines at a time.`;
+  let total = 0n;
+  for (const part of parts) {
+    const micros = toMicros(part);
+    if (micros === null || micros === 0n) return `"${part}" is not a quantity above zero with at most ${QTY_SCALE} decimals.`;
+    total += micros;
+  }
+  const have = toMicros(line.qty);
+  if (have !== null && total >= have) return `The new lines must leave some of the ${line.qty} ${line.unit} on ${lineLabel(line)}.`;
+  return null;
+}
+
 /**
  * Consolidation board (FR-17.3, 3.17.6): approved requisition lines waiting to
  * be ordered. The buyer selects lines, may override the vendor per line, and
@@ -83,6 +121,9 @@ export function ConsolidationPage() {
   const [created, setCreated] = useState<PurchaseOrder[]>([]);
   const [warnings, setWarnings] = useState<Warning[]>([]);
   const [busy, setBusy] = useState(false);
+  const [splitText, setSplitText] = useState("");
+  const [splitError, setSplitError] = useState<string | null>(null);
+  const [splitDone, setSplitDone] = useState<string | null>(null);
   const page = useResource(
     async (signal) => {
       const result = await listOpenRequisitionLines({ sourcing }, { cursor, signal });
@@ -94,6 +135,9 @@ export function ConsolidationPage() {
   const key = useMemo(() => newIdempotencyKey(), [selected, vendors, windowDays]);
   // One key per selection and deadline, so a retry after a lost response returns the RFQ already started.
   const rfqKey = useMemo(() => newIdempotencyKey(), [selected, deadline]);
+  // One key per line and quantities, so a retry after a lost response does not split the line twice.
+  const splitKey = useMemo(() => newIdempotencyKey(), [selected, splitText]);
+  const chosen = rows.filter((l) => selected.has(l.id));
 
   const toggle = (id: string, on: boolean) =>
     setSelected((s) => {
@@ -155,6 +199,28 @@ export function ConsolidationPage() {
     }
   }
 
+  async function split() {
+    const line = chosen.length === 1 ? chosen[0] : undefined;
+    const found = validateSplit(line, splitText);
+    setSplitError(found);
+    setSplitDone(null);
+    setFailure(null);
+    if (found !== null || !line) return;
+    setBusy(true);
+    try {
+      await splitRequisitionLine(line.id, line.requisitionVersion, splitQuantities(splitText), splitKey);
+      setSplitDone(`${lineLabel(line)} was split into ${splitQuantities(splitText).length + 1} lines.`);
+      setSplitText("");
+      setSelected(new Set());
+      setCursor(undefined);
+      setTick((n) => n + 1);
+    } catch (error) {
+      setFailure(describeProblem(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const columns: DataTableColumn<SourcingLine>[] = [
     {
       key: "select",
@@ -178,7 +244,16 @@ export function ConsolidationPage() {
       ),
     },
     { key: "lineNo", header: "Line", align: "end" },
-    { key: "item", header: "Item", render: (l) => l.description || <ShortId id={l.productId} /> },
+    {
+      key: "item",
+      header: "Item",
+      render: (l) => (
+        <>
+          {l.description || <ShortId id={l.productId} />}
+          {l.splitFromLineId ? <span className={styles.muted}> (split)</span> : null}
+        </>
+      ),
+    },
     { key: "qty", header: "Quantity", align: "end", render: (l) => `${l.qty} ${l.unit}` },
     { key: "amount", header: "Estimate", align: "end", render: (l) => money(l.amount, l.currency) },
     { key: "requestedDate", header: "Requested", mono: true },
@@ -278,6 +353,30 @@ export function ConsolidationPage() {
         </Button>
         <p className={styles.muted}>{selected.size === 1 ? "1 line selected" : `${selected.size} lines selected`}</p>
       </div>
+      <Card title="Split a line">
+        <p className={styles.muted}>
+          Order part of a line from one vendor and the rest from another: select one line, enter the quantities of the new lines, and the
+          line keeps what is left. A line on a running RFQ cannot be split.
+        </p>
+        <div className={styles.filter}>
+          <FormField
+            id="cons-split"
+            label="Quantities of the new lines"
+            hint={chosen.length === 1 ? `${lineLabel(chosen[0])} has ${chosen[0].qty} ${chosen[0].unit}; separate quantities with commas` : "Select one line first"}
+            error={splitError ?? undefined}
+          >
+            {(c) => <Input {...c} inputMode="decimal" placeholder="40, 35" value={splitText} onChange={(e) => setSplitText(e.target.value)} />}
+          </FormField>
+        </div>
+        <div className={styles.actions}>
+          <Button loading={busy} onClick={() => void split()}>
+            Split line
+          </Button>
+        </div>
+        <Alert tone="success" live="status">
+          {splitDone}
+        </Alert>
+      </Card>
       {warnings.length > 0 ? (
         <Alert tone="warning" title="Check the vendors against their categories">
           <ul className={styles.cardLinks}>

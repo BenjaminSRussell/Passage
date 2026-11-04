@@ -89,6 +89,7 @@ type API struct {
 
 	requisitionsCreated   atomic.Int64
 	requisitionsSubmitted atomic.Int64
+	requisitionLinesSplit atomic.Int64
 	ordersCreated         atomic.Int64
 	agreementsCreated     atomic.Int64
 	priceLookups          atomic.Int64
@@ -159,6 +160,8 @@ func (a *API) Register(r chi.Router) {
 		// The consolidation queue and :consolidate (FR-17.3).
 		maintain.Get("/requisition-lines", a.listOpenRequisitionLines)
 		maintain.Post("/requisitions:consolidate", a.consolidateRequisitions)
+		// ":split" arrives as one path segment; see requisitionLineAction.
+		maintain.Post("/requisition-lines/{id}", a.requisitionLineAction)
 		r.With(authz.RequireDuty(dutyPurchaseOrderInquire)).Get("/purchase-orders", a.listOrders)
 		inquire := r.With(authz.RequireDuty(dutyPurchaseOrderInquire))
 		lookup := r.With(authz.RequireAnyDuty(dutyPurchaseOrderInquire, dutyPurchaseOrderLookup))
@@ -287,6 +290,7 @@ func (a *API) Metrics() http.Handler {
 		}{
 			{"purchasing_requisitions_created_total", "Requisitions created; idempotent replays are counted.", a.requisitionsCreated.Load()},
 			{"purchasing_requisitions_submitted_total", "Requisitions submitted for approval.", a.requisitionsSubmitted.Load()},
+			{"purchasing_requisition_lines_split_total", "Requisition lines split into several lines (FR-17.3).", a.requisitionLinesSplit.Load()},
 			{"purchasing_purchase_orders_created_total", "Purchase orders created.", a.ordersCreated.Load()},
 			{"purchasing_trade_agreements_created_total", "Trade agreement rows created.", a.agreementsCreated.Load()},
 			{"purchasing_price_lookups_total", "Trade agreement price lookups answered.", a.priceLookups.Load()},

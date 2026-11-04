@@ -13,6 +13,7 @@ import (
 var allTypes = map[string]string{
 	events.RequisitionSubmitted:      "requisition",
 	events.RequisitionApproved:       "requisition",
+	events.RequisitionSplit:          "requisition",
 	events.AgreementThreshold:        "agreement",
 	events.POConfirmed:               "po",
 	events.POVersionCreated:          "poversion",
@@ -85,6 +86,7 @@ func TestPayloadFieldsAreInTheAsyncAPI(t *testing.T) {
 	// fields are checked too.
 	for _, v := range []any{
 		events.POConfirmedData{SiteID: "s", WarehouseID: "w", Lines: []events.POLineData{{ProductID: "p", Description: "d", Schedule: []events.POScheduleRow{{ConfirmedDate: "2027-01-01"}}}}},
+		events.RequisitionSplitData{SplitBy: "u", NewLines: []events.RequisitionSplitLine{{}}},
 		events.POVersionCreatedData{Patch: []any{}},
 		events.POCancelledData{Lines: []events.POCancelledLine{{ProductID: "p"}}},
 		events.PORepricedData{Lines: []events.PORepricedLine{{}}, InvoicedLines: []events.PORepricedLine{{}}},
