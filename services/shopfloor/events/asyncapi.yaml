@@ -56,6 +56,18 @@ channels:
     messages:
       workerAssigned:
         $ref: "#/components/messages/WorkerAssigned"
+  workerSaved:
+    address: passage.shopfloor.worker
+    description: A worker was edited, deactivated or reactivated (D2a'). Not in the PRD event table.
+    messages:
+      workerSaved:
+        $ref: "#/components/messages/WorkerSaved"
+  workerCostRateSet:
+    address: passage.shopfloor.worker
+    description: A dated cost rate was added to a worker (D2a'). Not in the PRD event table.
+    messages:
+      workerCostRateSet:
+        $ref: "#/components/messages/WorkerCostRateSet"
   absenceCodeSaved:
     address: passage.shopfloor.absencecode
     description: An absence code was created or changed (FR-25.2). Not in the PRD event table.
@@ -68,6 +80,12 @@ channels:
     messages:
       downtimeReasonSaved:
         $ref: "#/components/messages/DowntimeReasonSaved"
+  processCategorySaved:
+    address: passage.shopfloor.processcategory
+    description: A process message category was created or changed (FR-25.17). Not in the PRD event table.
+    messages:
+      processCategorySaved:
+        $ref: "#/components/messages/ProcessCategorySaved"
   productionOperation:
     address: passage.production.operation
     description: |
@@ -163,6 +181,12 @@ operations:
       $ref: "#/channels/downtimeReasonSaved"
     messages:
       - $ref: "#/channels/downtimeReasonSaved/messages/downtimeReasonSaved"
+  publishProcessCategorySaved:
+    action: send
+    channel:
+      $ref: "#/channels/processCategorySaved"
+    messages:
+      - $ref: "#/channels/processCategorySaved/messages/processCategorySaved"
   publishJobReopened:
     action: send
     channel:
@@ -277,6 +301,22 @@ operations:
       $ref: "#/channels/workerAssigned"
     messages:
       - $ref: "#/channels/workerAssigned/messages/workerAssigned"
+  publishWorkerSaved:
+    action: send
+    summary: Worker saved
+    description: Sends the worker saved event through the outbox.
+    channel:
+      $ref: "#/channels/workerSaved"
+    messages:
+      - $ref: "#/channels/workerSaved/messages/workerSaved"
+  publishWorkerCostRateSet:
+    action: send
+    summary: Worker cost rate set
+    description: Sends the worker cost rate set event through the outbox.
+    channel:
+      $ref: "#/channels/workerCostRateSet"
+    messages:
+      - $ref: "#/channels/workerCostRateSet/messages/workerCostRateSet"
   publishAbsenceCodeSaved:
     action: send
     summary: Absence code saved
@@ -377,6 +417,13 @@ components:
       description: Published in the transaction that creates or replaces a downtime reason code; the Kafka key is the reason id.
       payload:
         $ref: "#/components/schemas/DowntimeReasonSavedData"
+    ProcessCategorySaved:
+      name: dev.passage.shopfloor.processcategory.saved.v1
+      contentType: application/cloudevents+json
+      summary: Process message category created or changed
+      description: Published in the transaction that creates or replaces a process message category; the Kafka key is the category id.
+      payload:
+        $ref: "#/components/schemas/ProcessCategorySavedData"
     OperationStatusChanged:
       x-passage-type: dev.passage.production.operation.statuschanged.v1
       contentType: application/cloudevents+json
@@ -412,6 +459,20 @@ components:
       description: Published when a worker's profile, agreement or home resource link changes; a null id means the defaults apply. Days already calculated keep their pay lines until recalculated.
       payload:
         $ref: "#/components/schemas/WorkerAssignedData"
+    WorkerSaved:
+      name: dev.passage.shopfloor.worker.saved.v1
+      contentType: application/cloudevents+json
+      summary: Worker edited, deactivated or reactivated
+      description: Published when a worker's name, sign-in user, cost rate or currency changes, or when the worker is deactivated or reactivated. The badge is not published. No pay line changes with it; days already calculated or approved keep the rate they were calculated with until a supervisor recalculates or revises them.
+      payload:
+        $ref: "#/components/schemas/WorkerSavedData"
+    WorkerCostRateSet:
+      name: dev.passage.shopfloor.workercostrate.set.v1
+      contentType: application/cloudevents+json
+      summary: Dated worker cost rate added
+      description: Published when a dated hourly cost rate is added to a worker. The rate holds for days from `effectiveFrom` until the next dated rate. No pay line changes with it; days already calculated or approved keep the rate they were calculated with until a supervisor recalculates or revises them.
+      payload:
+        $ref: "#/components/schemas/WorkerCostRateSetData"
     PaydayRevised:
       name: dev.passage.shopfloor.payday.revised.v1
       contentType: application/cloudevents+json
@@ -473,7 +534,9 @@ components:
           type: string
         categoryCode:
           type: string
-          enum: [phase-start, phase-end, consumption, yield, process-data, quality-result, deviation, order-status, custom]
+          pattern: "^[a-z0-9][a-z0-9-]*$"
+          maxLength: 32
+          description: A built-in category (phase-start through custom) or a code of the tenant's category master.
         orderId:
           type: string
           format: uuid
@@ -939,6 +1002,52 @@ components:
           minimum: 1
         savedBy:
           type: string
+    ProcessCategorySavedData:
+      type: object
+      required: [categoryId, code, name, destinations, rejectOutOfLimit, characteristics, active, version, savedBy]
+      additionalProperties: false
+      properties:
+        categoryId:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        destinations:
+          type: array
+          items:
+            type: string
+            enum: [ebr, journal, quality, kafka, webhook]
+        rejectOutOfLimit:
+          type: boolean
+        characteristics:
+          type: array
+          items:
+            type: object
+            required: [name, type, required]
+            additionalProperties: false
+            properties:
+              name:
+                type: string
+              type:
+                type: string
+                enum: [numeric, text, boolean]
+              unit:
+                type: string
+              min:
+                type: string
+              max:
+                type: string
+              required:
+                type: boolean
+        active:
+          type: boolean
+        version:
+          type: integer
+          minimum: 1
+        savedBy:
+          type: string
     OperationStatusChangedData:
       type: object
       description: The part of production's payload the shop floor reads.
@@ -1056,6 +1165,58 @@ components:
         previousVersion:
           type: [integer, "null"]
           minimum: 1
+    WorkerSavedData:
+      type: object
+      required: [workerId, name, userId, costRate, currency, active, version, change, reason, savedBy]
+      additionalProperties: false
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        userId:
+          type: [string, "null"]
+          description: Identity-provider user the worker signs in as; null when none.
+        costRate:
+          type: string
+          description: Decimal string, per hour.
+        currency:
+          type: string
+        active:
+          type: boolean
+        version:
+          type: integer
+          minimum: 1
+        change:
+          type: string
+          enum: [updated, deactivated, reactivated]
+        reason:
+          type: [string, "null"]
+          description: The deactivation reason; null for other changes.
+        savedBy:
+          type: string
+    WorkerCostRateSetData:
+      type: object
+      required: [workerId, costRateId, effectiveFrom, costRate, currency, setBy]
+      additionalProperties: false
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        costRateId:
+          type: string
+          format: uuid
+        effectiveFrom:
+          type: string
+          format: date
+        costRate:
+          type: string
+          description: Decimal string, per hour.
+        currency:
+          type: string
+        setBy:
+          type: string
     WorkerAssignedData:
       type: object
       required: [workerId, profileId, payAgreementId, defaultResourceId, assignedBy]

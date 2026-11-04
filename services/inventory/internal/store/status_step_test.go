@@ -276,6 +276,21 @@ func TestStatusStepGuards(t *testing.T) {
 	wantCode(t, "unknown transaction", err, http.StatusNotFound, domain.CodeTransactionNotFound)
 }
 
+// A transaction id that is not a UUID is not found (the lookup compares as uuid).
+func TestGetTransactionWithAMalformedIDIsNotFound(t *testing.T) {
+	s, _, _ := setup(t)
+	ctx := entityCtx(1, ids.New())
+	created, err := register(ctx, s, "PURCH_LINE", ids.New(), "2", "1", domain.StatusOrdered, dims())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = s.GetTransaction(ctx, "not-a-uuid")
+	wantCode(t, "malformed id", err, http.StatusNotFound, domain.CodeTransactionNotFound)
+	if txn, _, err := s.GetTransaction(ctx, created.TransactionID); err != nil || txn.ID != created.TransactionID {
+		t.Fatalf("lookup by uuid: %v %+v", err, txn)
+	}
+}
+
 // Status changes are tenant and legal-entity scoped: another tenant or legal
 // entity cannot read or move the transaction.
 func TestStatusStepsAreTenantIsolated(t *testing.T) {

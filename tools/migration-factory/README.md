@@ -31,7 +31,9 @@ Built and tested:
   BR-49.9 abort state (CUT-1604), rollback once with two distinct approvers (CUT-1603), and a plan
   version bumped on every change. A step can be started (once, under the same go/no-go gate) so
   the runbook shows elapsed against planned, amber at 110 % and red at 125 % with CUT-1602; a
-  completion without a duration is measured from the start.
+  completion without a duration is measured from the start. With `expandByEntity` the pack loads
+  become a freeze, extract, load and reconcile chain per legal entity with a sign-off and hypercare
+  check, ordered by CUT-1609 (D5a, the 84-step `fx-cutover-plan` golden file in `internal/domain/testdata`).
 - **Rollback plan** (`rollback.go`, FR-49.9): generated from the plan, starting with the decision
   point at the abort deadline, then stop Passage access, restore legacy write access, resume the
   coexistence adapters, export the postings since T-0 and re-key them.
@@ -205,6 +207,7 @@ Message codes raised inside detail text:
 - CUT-1601 go/no-go item open (step sequencing)
 - CUT-1603 rollback needs two different authenticated approvers (approve, then confirm)
 - CUT-1604 abort deadline approaching with go/no-go items open (returned in `abortWarning`)
+- CUT-1609 a step of a per-entity runbook waits for its prerequisites (the entity's freeze and extract before a load, the load before its reconcile, every pack reconcile before the entity reconciliation, then the sign-off and hypercare check; every entity's sign-off before a plan-wide go/no-go step)
 
 ## Dependencies
 

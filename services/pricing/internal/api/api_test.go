@@ -27,25 +27,28 @@ const (
 // fakeStore mirrors the Postgres store's rules (overlap via domain.Conflict, state, version).
 // Journal and rebate behaviour lives in fake_journal_test.go.
 type fakeStore struct {
-	mu         sync.Mutex
-	records    map[string]store.Entry
-	seq        int
-	keys       []string // Idempotency-Key values received by lifecycle commands
-	lastList   store.Filter
-	pingErr    error
-	journals   map[string]*store.Journal
-	agreements map[string]domain.RebateAgreement
-	periods    map[string]*fakePeriod
-	accruals   map[string]store.Accrual
-	comm       commissionState
-	fund       fundState
-	camp       campaignState
-	claims     []store.VendorClaim
-	free       freeGoodsState
-	comd       commodityState
-	params     map[string]store.Parameters
-	assigns    map[string]store.ProcedureAssignment
-	brk        brokerState
+	mu           sync.Mutex
+	records      map[string]store.Entry
+	seq          int
+	keys         []string // Idempotency-Key values received by lifecycle commands
+	lastList     store.Filter
+	pingErr      error
+	exportErr    error // returned by ExportRecords before it starts
+	streamErr    error // returned by StreamJournal after the first line
+	journals     map[string]*store.Journal
+	agreements   map[string]domain.RebateAgreement
+	periods      map[string]*fakePeriod
+	accruals     map[string]store.Accrual
+	comm         commissionState
+	fund         fundState
+	camp         campaignState
+	claims       []store.VendorClaim
+	free         freeGoodsState
+	comd         commodityState
+	params       map[string]store.Parameters
+	tenantParams *store.TenantParameters
+	assigns      map[string]store.ProcedureAssignment
+	brk          brokerState
 }
 
 func newFake() *fakeStore {
@@ -87,6 +90,25 @@ func (f *fakeStore) ListRecords(_ context.Context, filter store.Filter) ([]store
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
+}
+
+func (f *fakeStore) ExportRecords(ctx context.Context, filter store.Filter, maxRows int, start func(bool) error, row func(store.Entry) error) error {
+	if f.exportErr != nil {
+		return f.exportErr
+	}
+	all, _ := f.ListRecords(ctx, filter)
+	if err := start(len(all) > maxRows); err != nil {
+		return err
+	}
+	for i, e := range all {
+		if i == maxRows {
+			break
+		}
+		if err := row(e); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (f *fakeStore) ActiveRecords(_ context.Context, q store.ActiveQuery) ([]domain.Record, error) {

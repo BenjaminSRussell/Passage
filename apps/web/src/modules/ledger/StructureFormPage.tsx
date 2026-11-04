@@ -182,9 +182,11 @@ interface FormProps {
   structureId: string;
   initial: StructureDraft;
   status: Structure["status"] | "new";
+  /** Entity tag of the stored version, sent as If-Match when saving over it. */
+  lockVersion?: number;
 }
 
-function StructureForm({ ledgerId, structureId, initial, status }: FormProps) {
+function StructureForm({ ledgerId, structureId, initial, status, lockVersion }: FormProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const ledger = useQuery({ queryKey: ["ledger", "ledger", ledgerId], queryFn: () => fetchLedger(ledgerId) });
@@ -213,7 +215,7 @@ function StructureForm({ ledgerId, structureId, initial, status }: FormProps) {
     if (Object.keys(found).length > 0) return;
     setBusy(target);
     try {
-      await putStructure(ledgerId, structureId, toStructureInput(values, target));
+      await putStructure(ledgerId, structureId, toStructureInput(values, target), lockVersion);
       await queryClient.invalidateQueries({ queryKey: ["ledger", "structures"] });
       navigate(`/ledger/structures${query}`);
     } catch (error) {
@@ -480,7 +482,7 @@ export function EditStructurePage() {
       ) : result.isPending ? (
         <Loading label="Loading the account structure…" />
       ) : (
-        <StructureForm key={`${result.data.id}-${result.data.status}`} ledgerId={ledgerId} structureId={id} initial={toStructureDraft(result.data)} status={result.data.status} />
+        <StructureForm key={`${result.data.id}-${result.data.status}`} ledgerId={ledgerId} structureId={id} initial={toStructureDraft(result.data)} status={result.data.status} lockVersion={result.data.lockVersion} />
       )}
     </div>
   );

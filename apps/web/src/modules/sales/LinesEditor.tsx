@@ -13,20 +13,28 @@ export interface LinesEditorProps {
   onChange(lines: LineValues[]): void;
   /** Offers the per-line delivery date control (orders only; a quotation line has none). */
   withDeliveryControl?: boolean;
+  /** Legend and id prefixes, so a second editor on the same page does not repeat the first one's names. */
+  legend?: string;
+  idPrefix?: string;
+  /** Lets the last line be removed (the change page starts with none). */
+  allowEmpty?: boolean;
+  addLabel?: string;
 }
 
 /** The line grid shared by the order and quotation forms: one fieldset per line. */
-export function LinesEditor({ lines, errors, newLineDate, onChange, withDeliveryControl }: LinesEditorProps) {
+export function LinesEditor({ lines, errors, newLineDate, onChange, withDeliveryControl, legend = "Line", idPrefix = "line", allowEmpty, addLabel = "Add line" }: LinesEditorProps) {
   const updateLine = (i: number, patch: Partial<LineValues>) => onChange(lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
   return (
     <div className={`${styles.formActions} ${styles.lines}`}>
       {lines.map((line, i) => (
         <fieldset key={i} className={styles.lineCard}>
-          <legend className={styles.lineLegend}>Line {i + 1}</legend>
+          <legend className={styles.lineLegend}>
+            {legend} {i + 1}
+          </legend>
           {lineFields.map((f) => {
             const path = `lines[${i}].${f.name}`;
             return (
-              <FormField key={f.name} id={`line-${i}-${f.name}`} label={f.label} error={errors[path]}>
+              <FormField key={f.name} id={`${idPrefix}-${i}-${f.name}`} label={f.label} error={errors[path]}>
                 {(control) => (
                   <Input
                     {...control}
@@ -43,7 +51,7 @@ export function LinesEditor({ lines, errors, newLineDate, onChange, withDelivery
           })}
           {withDeliveryControl ? (
             <FormField
-              id={`line-${i}-deliveryDateControl`}
+              id={`${idPrefix}-${i}-deliveryDateControl`}
               label="Delivery date control"
               hint="None keeps the requested date; sales lead time confirms no earlier than today plus the lead time."
               error={errors[`lines[${i}].deliveryDateControl`]}
@@ -61,10 +69,10 @@ export function LinesEditor({ lines, errors, newLineDate, onChange, withDelivery
               )}
             </FormField>
           ) : null}
-          {lines.length > 1 ? (
+          {lines.length > 1 || allowEmpty ? (
             <div className={styles.formActions}>
               <Button size="sm" variant="ghost" onClick={() => onChange(lines.filter((_, idx) => idx !== i))}>
-                Remove line {i + 1}
+                Remove {legend.toLowerCase()} {i + 1}
               </Button>
             </div>
           ) : null}
@@ -77,7 +85,7 @@ export function LinesEditor({ lines, errors, newLineDate, onChange, withDelivery
       ) : null}
       <div>
         <Button icon="box" onClick={() => onChange([...lines, emptyLine(newLineDate)])}>
-          Add line
+          {addLabel}
         </Button>
       </div>
     </div>

@@ -51,7 +51,20 @@ function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function ValueForm({ ledgerId, attributes, draft, onDraft }: { ledgerId: string; attributes: string[]; draft: ValueDraft; onDraft: (d: ValueDraft) => void }) {
+function ValueForm({
+  ledgerId,
+  attributes,
+  draft,
+  onDraft,
+  existing,
+}: {
+  ledgerId: string;
+  attributes: string[];
+  draft: ValueDraft;
+  onDraft: (d: ValueDraft) => void;
+  /** The registered values as last read: the matching one's lockVersion is sent as If-Match. */
+  existing: DimensionValue[];
+}) {
   const queryClient = useQueryClient();
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<string | null>(null);
@@ -68,12 +81,20 @@ function ValueForm({ ledgerId, attributes, draft, onDraft }: { ledgerId: string;
     if (Object.keys(found).length > 0) return;
     setBusy(true);
     try {
-      const v = await putDimensionValue(ledgerId, draft.attribute, draft.value, toValueInput(draft));
+      const v = await putDimensionValue(
+        ledgerId,
+        draft.attribute,
+        draft.value,
+        toValueInput(draft),
+        existing.find((x) => x.attribute === draft.attribute && x.value === draft.value)?.lockVersion,
+      );
       await queryClient.invalidateQueries({ queryKey: ["ledger", "dimension-values", ledgerId] });
       setSaved(`Saved ${v.attribute} ${v.value}.`);
       onDraft({ ...emptyValue, attribute: draft.attribute });
     } catch (error) {
       setFailure(error instanceof LedgerApiError ? `${error.message} (${error.code})` : (error as Error).message);
+      // A stale or missing tag means the list is out of date: reload it so the next save sends the current tag.
+      void queryClient.invalidateQueries({ queryKey: ["ledger", "dimension-values", ledgerId] });
     } finally {
       setBusy(false);
     }
@@ -180,7 +201,7 @@ export function DimensionValuesPage() {
         <>
           {ledger.data ? (
             ledger.data.dimensionAttributes.length > 0 ? (
-              <ValueForm ledgerId={ledgerId} attributes={ledger.data.dimensionAttributes} draft={draft} onDraft={setDraft} />
+              <ValueForm ledgerId={ledgerId} attributes={ledger.data.dimensionAttributes} draft={draft} onDraft={setDraft} existing={values.data ?? []} />
             ) : (
               <Alert tone="info" title="This ledger has no dimensions">
                 Dimensions are set when the ledger is created.

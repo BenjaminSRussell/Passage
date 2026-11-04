@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -62,4 +63,77 @@ func (s *Postgres) ApplyHold(ctx context.Context, orderID string, version int, i
 		return err
 	})
 	return out, err
+}
+
+// RejectHold rejects the ACTIVE CREDIT hold of an unconfirmed order with a
+// comment and cancels the order, all in one transaction under the order's row
+// lock (slice 26, PRD §5.27.6): the hold becomes REJECTED with who, when and
+// why, the order's other ACTIVE holds are CLEARED, lines, allocation and
+// agreement draw are returned as for :cancel, the order gets a version whose
+// reason is the comment, and orderhold.rejected.v1 and order.cancelled.v1 are
+// queued. As for a release, the user who applied the hold may not decide it.
+// A stale version is 412 SLS-0006, a hold that is not ACTIVE 422 SLS-0022, a
+// hold of another type or an order that is no longer awaiting confirmation 422
+// SLS-0062.
+func (s *Postgres) RejectHold(ctx context.Context, orderID, holdID string, version int, comment, actor string, now time.Time) (Order, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out Order
+	err := s.orderTx(ctx, p.TenantID, &out, func(tx pgx.Tx) error {
+		o, err := loadOrder(ctx, tx, p.TenantID, orderID, true)
+		if err != nil {
+			return err
+		}
+		if o.Version != version {
+			return versionConflict()
+		}
+		var hold *Hold
+		for i := range o.Holds {
+			if o.Holds[i].ID == holdID {
+				hold = &o.Holds[i]
+			}
+		}
+		if hold == nil {
+			return problem(http.StatusNotFound, CodeHoldNotFound, "hold not found")
+		}
+		if hold.Status != domain.HoldActive {
+			return problem(http.StatusUnprocessableEntity, CodeHoldNotActive, "hold is not active")
+		}
+		if !domain.CanRejectHold(hold.HoldType, hold.Status, o.Status) {
+			return problem(http.StatusUnprocessableEntity, CodeHoldNotRejectable,
+				fmt.Sprintf("only a CREDIT hold of an order awaiting confirmation can be rejected; this is a %s hold on a %s order", hold.HoldType, o.Status))
+		}
+		if hold.AppliedBy == actor {
+			return problem(http.StatusForbidden, "AUTH-0003", "the user who applied a hold may not reject it")
+		}
+		if _, err := tx.Exec(ctx, `update order_hold set status = 'REJECTED', rejected_by = $3, rejected_at = $4, rejection_comment = $5
+			where tenant_id = $1 and id = $2`, p.TenantID, holdID, actor, now, comment); err != nil {
+			return err
+		}
+		// The cancellation is :cancel's own (cancelOrderTx): it clears the
+		// other ACTIVE holds, returns quota, schedule and agreement draw, and
+		// writes the version and order.cancelled with the comment as reason.
+		cancelled, err := cancelOrderTx(ctx, tx, p.TenantID, o, rejectionReason(comment), actor, now)
+		if err != nil {
+			return err
+		}
+		if err := enqueue(ctx, tx, "order", o.ID, salesevents.OrderHoldRejected, p.TenantID, salesevents.OrderHoldRejectedData{
+			OrderID: o.ID, HoldID: holdID, HoldType: hold.HoldType, ReasonCode: hold.ReasonCode, Comment: comment, Actor: actor, Version: cancelled.Version}); err != nil {
+			return err
+		}
+		out = cancelled
+		return nil
+	})
+	return out, err
+}
+
+// rejectionReason is the cancellation reason of a rejected order: the comment
+// behind a fixed prefix, cut to the 500 characters a cancel reason may have
+// (order.cancelled.v1 reason maxLength). The whole comment stays on the hold
+// and in orderhold.rejected.v1.
+func rejectionReason(comment string) string {
+	r := []rune("Credit hold rejected: " + comment)
+	if len(r) > changeReasonMaxSize {
+		r = r[:changeReasonMaxSize]
+	}
+	return string(r)
 }

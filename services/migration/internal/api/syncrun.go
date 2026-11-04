@@ -44,7 +44,7 @@ func (r syncRunner) Run(ctx context.Context, st store.SyncState, runID string) (
 	if err != nil {
 		return syncer.Result{}, err
 	}
-	raw, specID, err := a.syncMapping(ctx, binding)
+	raw, specID, err := a.syncMapping(ctx, binding, project.ID)
 	if err != nil {
 		return syncer.Result{}, err
 	}
@@ -105,15 +105,35 @@ func (r syncRunner) Run(ctx context.Context, st store.SyncState, runID string) (
 	return syncer.Result{RunID: runID, Report: run.Report, BindingVersion: binding.Version, FullRead: since == ""}, nil
 }
 
-// syncMapping is the mapping a scheduled run applies: the binding's own spec, else the newest published spec of its entity.
-func (a *API) syncMapping(ctx context.Context, b store.EntityBinding) (raw []byte, specID string, err error) {
+// syncMapping is the mapping a scheduled run applies: the binding's own spec, else the newest published spec of its
+// entity in the schedule's project, else the newest tenant-wide one. A binding belongs to a connection profile that
+// several projects can share, so a spec the binding names that belongs to another project fails the run rather than
+// load under this project.
+func (a *API) syncMapping(ctx context.Context, b store.EntityBinding, projectID string) (raw []byte, specID string, err error) {
 	if b.MappingSpecID != "" {
 		spec, err := a.store.GetMappingSpec(ctx, b.MappingSpecID)
-		return spec.Spec, spec.ID, err
+		if err != nil {
+			return nil, "", err
+		}
+		if spec.ProjectID != "" && spec.ProjectID != projectID {
+			return nil, "", fmt.Errorf("%s: mapping spec %s of binding %s belongs to migration project %s, not to the scheduled project %s",
+				CodeSpecProject, spec.ID, b.ID, spec.ProjectID, projectID)
+		}
+		return spec.Spec, spec.ID, nil
 	}
-	specs, err := a.store.ListMappingSpecs(ctx, b.Entity, nil, 1)
-	if err != nil {
-		return nil, "", err
+	// The newest spec of the schedule's project wins; without one the newest tenant-wide spec applies. Another
+	// project's spec never does.
+	var specs []store.MappingSpec
+	for _, scope := range []store.SpecScope{{ProjectID: projectID}, {TenantWide: true}} {
+		if scope.ProjectID == "" && !scope.TenantWide {
+			continue
+		}
+		if specs, err = a.store.ListMappingSpecsIn(ctx, scope, b.Entity, nil, 1); err != nil {
+			return nil, "", err
+		}
+		if len(specs) > 0 {
+			break
+		}
 	}
 	if len(specs) == 0 {
 		return nil, "", fmt.Errorf("no published mapping spec for %s: name one on the entity binding or publish one", b.Entity)

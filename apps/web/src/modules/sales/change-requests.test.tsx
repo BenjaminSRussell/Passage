@@ -228,7 +228,63 @@ describe("Customer change approval", () => {
     expect(await screen.findByText(/now need approval/)).toBeInTheDocument();
     const put = calls.find((c) => c.method === "PUT");
     expect(put?.headers.get("If-Match")).toBe('"0"');
-    expect(put?.body).toEqual({ approvalRequired: true });
+    expect(put?.body).toEqual({ approvalRequired: true, approvalThreshold: null, thresholdCurrency: null, approverIds: [] });
+  });
+
+  it("saves a threshold with its currency and a named approver group, and loads them back", async () => {
+    const mgrA = "0190a3c4-0000-7000-8000-00000000000a";
+    const mgrB = "0190a3c4-0000-7000-8000-00000000000b";
+    handler = (_u, init) =>
+      init.method === "PUT"
+        ? { status: 200, body: { ...policy, approvalRequired: true, approvalThreshold: "250.5", thresholdCurrency: "USD", approverIds: [mgrA, mgrB], version: 3 }, etag: '"3"' }
+        : { status: 200, body: { ...policy, approvalRequired: true, approvalThreshold: "100", thresholdCurrency: "EUR", approverIds: [mgrA], version: 2 }, etag: '"2"' };
+    renderAt("/sales/change-policy");
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: CUSTOMER } });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await screen.findByRole("form", { name: "Change approval" });
+    expect(screen.getByLabelText("Approval threshold")).toHaveValue("100");
+    expect(screen.getByLabelText("Threshold currency")).toHaveValue("EUR");
+    expect(screen.getByLabelText("Named approvers")).toHaveValue(mgrA);
+    fireEvent.change(screen.getByLabelText("Approval threshold"), { target: { value: "250.5" } });
+    fireEvent.change(screen.getByLabelText("Threshold currency"), { target: { value: "usd" } });
+    fireEvent.change(screen.getByLabelText("Named approvers"), { target: { value: `${mgrB}, ${mgrA.toUpperCase()}\n${mgrA}\n` } });
+    fireEvent.click(screen.getByRole("button", { name: "Save setting" }));
+    expect(await screen.findByText(/now need approval/)).toBeInTheDocument();
+    const put = calls.find((c) => c.method === "PUT");
+    expect(put?.headers.get("If-Match")).toBe('"2"');
+    expect(put?.body).toEqual({ approvalRequired: true, approvalThreshold: "250.5", thresholdCurrency: "USD", approverIds: [mgrB, mgrA] });
+  });
+
+  it("refuses an invalid threshold or a threshold without a currency before calling the service", async () => {
+    handler = () => ({ status: 200, body: policy, etag: '"0"' });
+    renderAt("/sales/change-policy");
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: CUSTOMER } });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await screen.findByRole("form", { name: "Change approval" });
+    fireEvent.click(screen.getByLabelText(/need approval/));
+    fireEvent.change(screen.getByLabelText("Approval threshold"), { target: { value: "0" } });
+    expect(screen.getByText(/amount above 0/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Approval threshold"), { target: { value: "50" } });
+    expect(screen.getByText(/three-letter currency/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Threshold currency"), { target: { value: "USD" } });
+    fireEvent.change(screen.getByLabelText("Named approvers"), { target: { value: "mgr-a" } });
+    expect(screen.getByText(/user id \(UUID\)/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save setting" }));
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
+  it("shows the service's refusal of a policy", async () => {
+    handler = (_u, init) => (init.method === "PUT" ? { status: 400, body: { code: "SLS-0001", detail: "approvalThreshold must be greater than 0" } } : { status: 200, body: policy, etag: '"0"' });
+    renderAt("/sales/change-policy");
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: CUSTOMER } });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await screen.findByRole("form", { name: "Change approval" });
+    fireEvent.click(screen.getByLabelText(/need approval/));
+    fireEvent.click(screen.getByRole("button", { name: "Save setting" }));
+    expect(await screen.findByText(/must be greater than 0 \(SLS-0001\)/)).toBeInTheDocument();
   });
 
   it("is read only without the approve duty and reports a load error", async () => {

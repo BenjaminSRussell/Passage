@@ -55,6 +55,9 @@ type PurchaseOrder struct {
 // "TRADE_AGREEMENT:<id>", "AGREEMENT:<agreement line id>" or
 // "REQUISITION_ESTIMATE" so the price can be explained later.
 type PurchaseOrderLine struct {
+	// ID is the line's stable id (slice 18), the purchase_order_line_id a drop-ship names; set by the
+	// database, ignored on a write.
+	ID          string `json:"id,omitempty"`
 	LineNo      int    `json:"lineNo"`
 	ProductID   string `json:"productId,omitempty"`
 	Description string `json:"description,omitempty"`
@@ -228,7 +231,7 @@ func loadPurchaseOrder(ctx context.Context, tx pgx.Tx, id string) (PurchaseOrder
 	if err != nil {
 		return PurchaseOrder{}, notFound(err, CodePurchaseOrderNotFound, "purchase order not found")
 	}
-	lines, err := tx.Query(ctx, `select line_no, coalesce(product_id::text, ''), description, qty, unit, unit_price, price_unit,
+	lines, err := tx.Query(ctx, `select id::text, line_no, coalesce(product_id::text, ''), description, qty, unit, unit_price, price_unit,
 		discount_pct, gross_amount, discount_amount, line_amount, tax_amount, delivery_date, price_source,
 		coalesce(requisition_line_id::text, ''), coalesce(agreement_line_id::text, ''), received_qty, invoiced_qty, status,
 		coalesce(invoiced_reprice_source, ''), category, coalesce(site_id::text, ''), coalesce(warehouse_id::text, '')
@@ -241,7 +244,7 @@ func loadPurchaseOrder(ctx context.Context, tx pgx.Tx, id string) (PurchaseOrder
 	for lines.Next() {
 		var l PurchaseOrderLine
 		var due time.Time
-		if err := lines.Scan(&l.LineNo, &l.ProductID, &l.Description, &l.Qty, &l.Unit, &l.UnitPrice, &l.PriceUnit, &l.DiscountPct,
+		if err := lines.Scan(&l.ID, &l.LineNo, &l.ProductID, &l.Description, &l.Qty, &l.Unit, &l.UnitPrice, &l.PriceUnit, &l.DiscountPct,
 			&l.GrossAmount, &l.DiscountAmount, &l.LineAmount, &l.TaxAmount, &due, &l.PriceSource, &l.RequisitionLineID,
 			&l.AgreementLineID, &l.ReceivedQty, &l.InvoicedQty, &l.Status, &l.InvoicedRepriceSource, &l.Category, &l.SiteID, &l.WarehouseID); err != nil {
 			return PurchaseOrder{}, err

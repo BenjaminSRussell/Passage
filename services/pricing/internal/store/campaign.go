@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
@@ -195,6 +196,68 @@ func (s *Postgres) SetCampaignKilled(ctx context.Context, id string, version int
 		}
 		if err := enqueueEvent(ctx, tx, "campaign", out.ID, typ, pevents.CampaignStatusData{CampaignID: out.ID,
 			LegalEntityID: out.LegalEntityID, Killed: out.Killed, Version: out.Version}); err != nil {
+			return err
+		}
+		return rememberJSON(ctx, tx, p.TenantID, idempotencyKey, hash, out)
+	})
+	return out, err
+}
+
+// ReviseCampaign changes a campaign's name, validity, target customer group or budget at the
+// expected version (412 conflict_version otherwise). The merged campaign is validated as on
+// create, and a revise may not change how a day before today priced (domain.CampaignPastChanges),
+// both 422 COM-0001 with field errors; a killed campaign may be revised too. The change takes effect on the next
+// resolve and is announced as campaign.revised in the same transaction. A repeated
+// Idempotency-Key replays the first response.
+func (s *Postgres) ReviseCampaign(ctx context.Context, rev domain.CampaignRevision, idempotencyKey string) (domain.Campaign, error) {
+	p, _ := tenant.FromContext(ctx)
+	budget := "-"
+	if rev.Budget != nil {
+		budget = rev.Budget.String()
+	}
+	var out domain.Campaign
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		cur, err := scanCampaign(tx.QueryRow(ctx, `select `+campaignColumns+` from campaign where id = $1 for update`, rev.ID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return campaignNotFound(rev.ID)
+		}
+		if err != nil {
+			return err
+		}
+		hash := commandHash("campaign-revise", rev.ID, strconv.Itoa(rev.Version), ptrStr(rev.Name), ptrDay(rev.ValidFrom),
+			ptrDay(rev.ValidTo), ptrStr(rev.TargetCustomerGroup), budget)
+		if ok, err := replayJSON(ctx, tx, p.TenantID, idempotencyKey, hash, &out); err != nil || ok {
+			return err
+		}
+		if cur.Version != rev.Version {
+			return httpx.NewProblem(http.StatusPreconditionFailed, CodeVersionConflict, "campaign version does not match")
+		}
+		next := rev.Apply(cur)
+		var today time.Time
+		if err := tx.QueryRow(ctx, `select current_date`).Scan(&today); err != nil {
+			return err
+		}
+		fields := domain.ValidateCampaign(next)
+		for k, v := range domain.CampaignPastChanges(cur, next, today) {
+			if _, ok := fields[k]; !ok {
+				fields[k] = v
+			}
+		}
+		if len(fields) > 0 {
+			problem := httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, "request is invalid")
+			problem.Errors = fields
+			return problem
+		}
+		out, err = scanCampaign(tx.QueryRow(ctx, `update campaign set name = $2, valid_from = $3, valid_to = $4,
+			target_customer_group = $5, budget = $6::numeric, version = version + 1 where id = $1 returning `+campaignColumns,
+			rev.ID, next.Name, dayStr(next.ValidFrom), dayStr(next.ValidTo), next.TargetCustomerGroup, next.Budget.String()))
+		if err != nil {
+			return err
+		}
+		if err := enqueueEvent(ctx, tx, "campaign", out.ID, pevents.CampaignRevised, pevents.CampaignRevisedData{
+			CampaignID: out.ID, LegalEntityID: out.LegalEntityID, Name: out.Name, ValidFrom: dayStr(out.ValidFrom),
+			ValidTo: dayStr(out.ValidTo), TargetCustomerGroup: out.TargetCustomerGroup, Budget: out.Budget.String(),
+			Currency: out.Currency, Killed: out.Killed, Version: out.Version}); err != nil {
 			return err
 		}
 		return rememberJSON(ctx, tx, p.TenantID, idempotencyKey, hash, out)

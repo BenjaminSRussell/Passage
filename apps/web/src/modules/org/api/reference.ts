@@ -100,6 +100,9 @@ export async function referenceFetch<T>(path: string, init: RequestInit = {}): P
   if (!res.ok) {
     throw await toError(res);
   }
+  if (res.status === 204) {
+    return undefined as T;
+  }
   return (await res.json()) as T;
 }
 

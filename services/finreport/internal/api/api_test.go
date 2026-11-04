@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 
+	"github.com/BenjaminSRussell/passage/services/finreport/internal/config"
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/store"
 )
@@ -149,7 +150,7 @@ func TestCreateRun(t *testing.T) {
 		{"bad currency type", runBody(`currencyType="eur"`), key, []string{DutyRun}, false, http.StatusUnprocessableEntity, "COM-0002"},
 		{"calendar quarter out of range", runBody(`calendar=[{"year":2026,"no":3,"quarter":5}]`), key, []string{DutyRun}, false, http.StatusUnprocessableEntity, "COM-0002"},
 		{"empty calendar", runBody(`calendar=[]`), key, []string{DutyRun}, false, http.StatusUnprocessableEntity, "COM-0002"},
-		{"unknown field", runBody(`allowStale=true`), key, []string{DutyRun}, false, http.StatusBadRequest, "COM-0002"},
+		{"unknown field", runBody(`bogus=true`), key, []string{DutyRun}, false, http.StatusBadRequest, "COM-0002"},
 		{"created", runBody(""), key, []string{DutyRun}, false, http.StatusCreated, ""},
 		{"replayed", runBody(""), key, []string{DutyRun}, true, http.StatusOK, ""},
 	}
@@ -382,4 +383,47 @@ func TestImportDefinition(t *testing.T) {
 			t.Fatal("the overwrite flag must be part of the request hash")
 		}
 	})
+}
+
+func TestCreateRun_LagGate(t *testing.T) {
+	key := map[string]string{"Idempotency-Key": "k1"}
+	f := &fakeStore{}
+	if w := call(router(f), http.MethodPost, "/v1/reporting/runs", runBody(`allowStale=true`), key, DutyRun); w.Code != http.StatusCreated {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	if !f.runSpec.AllowStale || f.runSpec.MaxLagSeconds != 30 {
+		t.Fatalf("spec = %+v, want allowStale and the default 30 s gate", f.runSpec)
+	}
+	f = &fakeStore{}
+	r := chi.NewRouter()
+	New(f).WithConfig(config.Reporting{MaxLagSeconds: 5, LagAlertSeconds: 7}).Register(r)
+	if w := call(r, http.MethodPost, "/v1/reporting/runs", runBody(""), key, DutyRun); w.Code != http.StatusCreated {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	if f.runSpec.AllowStale || f.runSpec.MaxLagSeconds != 5 {
+		t.Fatalf("spec = %+v, want the configured 5 s gate and no allowStale", f.runSpec)
+	}
+	f.runErr = httpx.NewProblem(http.StatusConflict, domain.CodeStale, "Read model is 90 s behind")
+	w := call(r, http.MethodPost, "/v1/reporting/runs", runBody(""), key, DutyRun)
+	if w.Code != http.StatusConflict || problemCode(t, w) != "REPORT-0004" {
+		t.Fatalf("stale refusal = %d %s", w.Code, w.Body.String())
+	}
+}
+
+// TestLag_ReportsTheGate returns the configured gate with the lag rows; the
+// lag check is a job (finreport lag-check), not a route a user can call.
+func TestLag_ReportsTheGate(t *testing.T) {
+	f := &fakeStore{}
+	r := chi.NewRouter()
+	New(f).WithConfig(config.Reporting{MaxLagSeconds: 5, LagAlertSeconds: 7}).Register(r)
+	w := call(r, http.MethodGet, "/v1/reporting/lag", "", nil, DutyView)
+	var body struct {
+		MaxLagSeconds int `json:"maxLagSeconds"`
+	}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &body) != nil || body.MaxLagSeconds != 5 {
+		t.Fatalf("lag = %d %s", w.Code, w.Body.String())
+	}
+	if w := call(r, http.MethodPost, "/v1/reporting/lag:check", "", nil, DutyRun); w.Code != http.StatusNotFound && w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("lag:check = %d, want no such route", w.Code)
+	}
 }

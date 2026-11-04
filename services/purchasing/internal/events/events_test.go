@@ -13,6 +13,7 @@ import (
 var allTypes = map[string]string{
 	events.RequisitionSubmitted:      "requisition",
 	events.RequisitionApproved:       "requisition",
+	events.RequisitionSplit:          "requisition",
 	events.AgreementThreshold:        "agreement",
 	events.POConfirmed:               "po",
 	events.POVersionCreated:          "poversion",
@@ -38,6 +39,9 @@ var allTypes = map[string]string{
 	events.ServiceSpecChanged:        "servicespec",
 	events.ModelServiceSpecCreated:   "modelservicespec",
 	events.ModelServiceSpecChanged:   "modelservicespec",
+	events.InboundChangeRecorded:     "inboundchange",
+	events.InboundChangeRefused:      "inboundchange",
+	events.InboundChangeResolved:     "inboundchange",
 }
 
 func TestEventTypesFollowTheNamingRule(t *testing.T) {
@@ -82,6 +86,7 @@ func TestPayloadFieldsAreInTheAsyncAPI(t *testing.T) {
 	// fields are checked too.
 	for _, v := range []any{
 		events.POConfirmedData{SiteID: "s", WarehouseID: "w", Lines: []events.POLineData{{ProductID: "p", Description: "d", Schedule: []events.POScheduleRow{{ConfirmedDate: "2027-01-01"}}}}},
+		events.RequisitionSplitData{SplitBy: "u", NewLines: []events.RequisitionSplitLine{{}}},
 		events.POVersionCreatedData{Patch: []any{}},
 		events.POCancelledData{Lines: []events.POCancelledLine{{ProductID: "p"}}},
 		events.PORepricedData{Lines: []events.PORepricedLine{{}}, InvoicedLines: []events.PORepricedLine{{}}},
@@ -99,6 +104,8 @@ func TestPayloadFieldsAreInTheAsyncAPI(t *testing.T) {
 		events.DeliveryScheduleConfirmedData{ProductID: "p", PreviousConfirmedDate: "2027-01-01", ConfirmedBy: "u"},
 		events.ServiceSpecData{ContractAgreementLineID: "a", ModelID: "m", ChangedBy: "u"},
 		events.ModelServiceSpecData{ChangedBy: "u"},
+		events.InboundChangeData{POID: "p", Number: "n", LineNo: 1, ReasonCode: "c", Reason: "r", QtyBefore: "1", QtyAfter: "1", DateBefore: "2027-01-01", DateAfter: "2027-01-01", VersionNo: 2, Attempts: 2, BuyerID: "b"},
+		events.InboundChangeResolvedData{POID: "p", Number: "n", LineNo: 1, ReasonCode: "c", ResolvedBy: "u", ResolvedAt: "2027-01-01T00:00:00Z", Note: "n", VersionNo: 2},
 	} {
 		keys = append(keys, jsonKeys(t, v)...)
 	}

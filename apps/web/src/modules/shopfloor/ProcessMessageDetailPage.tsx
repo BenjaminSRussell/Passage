@@ -14,7 +14,7 @@ import {
 } from "./api/client";
 import { dash, formatDateTime } from "./format";
 import styles from "./pages.module.css";
-import { CATEGORY_LABELS, DESTINATION_LABELS, DeliveryStatus, MessageStatus, limits } from "./processLabels";
+import { categoryLabel, DESTINATION_LABELS, DeliveryStatus, MessageStatus, limits } from "./processLabels";
 import { useLoad } from "./useLoad";
 
 const valueColumns: DataTableColumn<Characteristic>[] = [
@@ -126,7 +126,7 @@ export function ProcessMessageDetailPage() {
               </div>
               <div className={styles.entry}>
                 <dt className={styles.term}>Category</dt>
-                <dd className={styles.value}>{CATEGORY_LABELS[message.categoryCode] ?? message.categoryCode}</dd>
+                <dd className={styles.value}>{categoryLabel(message.categoryCode)}</dd>
               </div>
               <div className={styles.entry}>
                 <dt className={styles.term}>Order</dt>

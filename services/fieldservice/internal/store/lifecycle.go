@@ -225,7 +225,8 @@ func (s *Postgres) ScanSLA(ctx context.Context, now time.Time, limit int) (ScanR
 
 // CreateFollowUp opens the follow-up of a finished work order (BR-45.5). The new
 // order is UNSCHEDULED, links the parent by follow_up_of and keeps its case,
-// agreement, customer, legal entity, territory, incident type and estimate; it
+// agreement, customer, legal entity, territory, incident type, estimate, required skills
+// and site address and position (not the window or the assignment); it
 // starts without lines. The parent's first_time_fix becomes false. A replay
 // with the same Idempotency-Key returns the order created earlier.
 func (s *Postgres) CreateFollowUp(ctx context.Context, parentID string, version int, key, requestHash string) (WorkOrder, bool, error) {
@@ -258,11 +259,12 @@ func (s *Postgres) CreateFollowUp(ctx context.Context, parentID string, version 
 		}
 		childID := ids.New()
 		if _, err := tx.Exec(ctx, `insert into service_work_order (tenant_id, id, number, case_id, agreement_id, customer_party_id, legal_entity_id,
-			territory_id, incident_type_id, est_duration_minutes, currency, status, lines, version, follow_up_of, idempotency_key, request_hash)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, '[]', 1, $13, $14, $15)`,
+			territory_id, incident_type_id, est_duration_minutes, currency, status, lines, version, follow_up_of, idempotency_key, request_hash,
+			required_skills, address, geo_lat, geo_lon)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, '[]', 1, $13, $14, $15, $16, $17, $18, $19)`,
 			tid, childID, number, parent.CaseID, parent.AgreementID, parent.CustomerPartyID, parent.LegalEntityID, parent.TerritoryID,
 			parent.IncidentTypeID, parent.EstDurationMinutes, parent.Currency, string(domain.WOUnscheduled),
-			parentID, nullable(key), requestHash); err != nil {
+			parentID, nullable(key), requestHash, parent.RequiredSkills, parent.Address, parent.Latitude, parent.Longitude); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `update service_work_order set first_time_fix = false, version = version + 1, updated_at = now()

@@ -49,6 +49,7 @@ func (a *API) listLines(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	fields := map[string]string{}
+	format := exportFormat(q, fields)
 	f := store.LineFilter{
 		LedgerID: q.Get("ledger"), AccountFrom: q.Get("account_from"), AccountTo: q.Get("account_to"),
 		DateFrom: q.Get("date_from"), DateTo: q.Get("date_to"), Voucher: q.Get("voucher"),
@@ -115,6 +116,10 @@ func (a *API) listLines(w http.ResponseWriter, r *http.Request) {
 	f.After = after
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
+		return
+	}
+	if format == formatCSV {
+		a.exportLines(w, r, f)
 		return
 	}
 	page, err := a.store.ListLines(r.Context(), f)

@@ -184,7 +184,16 @@ export function OrderDetailPage() {
     { key: "status", header: "Status", render: (h) => <StatusPill status={h.status} /> },
     { key: "orderAmount", header: "Amount held", align: "end", render: (h) => money(h.orderAmount, order.currency) },
     { key: "appliedAt", header: "Applied", render: (h) => `${formatDateTime(h.appliedAt)} by ${h.appliedBy}` },
-    { key: "releasedUntil", header: "Release valid until", render: (h) => (h.releasedUntil ? formatDateTime(h.releasedUntil) : dash) },
+    {
+      key: "releasedUntil",
+      header: "Decision",
+      render: (h) =>
+        h.status === "REJECTED"
+          ? `Rejected by ${h.rejectedBy ?? dash}${h.rejectionComment ? `: ${h.rejectionComment}` : ""}`
+          : h.releasedUntil
+            ? `Release valid until ${formatDateTime(h.releasedUntil)}`
+            : dash,
+    },
     {
       key: "actions",
       header: "Action",

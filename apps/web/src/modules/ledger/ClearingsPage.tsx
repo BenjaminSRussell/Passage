@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
-import { fetchClearings, type ClearingDocument } from "./api/client";
+import { fetchClearingPage, type ClearingDocument } from "./api/client";
 import { LedgerPicker, ledgerQuery, useLedgerParam } from "./LedgerPicker";
 import { errorText } from "./OpenItemsPage";
 import styles from "./pages.module.css";
@@ -27,7 +27,14 @@ export function ClearingsPage() {
   const [ledgerId] = useLedgerParam();
   const [params, setParams] = useSearchParams();
   const status = params.get("status") ?? "";
-  const result = useQuery({ queryKey: ["ledger", "clearings", ledgerId, status], queryFn: () => fetchClearings(ledgerId, status), enabled: ledgerId !== "" });
+  const result = useInfiniteQuery({
+    queryKey: ["ledger", "clearings", ledgerId, status],
+    queryFn: ({ pageParam }) => fetchClearingPage(ledgerId, status, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor,
+    enabled: ledgerId !== "",
+  });
+  const rows = result.data?.pages.flatMap((page) => page.items) ?? [];
   const query = ledgerQuery(ledgerId);
 
   return (
@@ -59,7 +66,7 @@ export function ClearingsPage() {
             <DataTable
               label="Clearing documents"
               columns={columns}
-              rows={result.data ?? []}
+              rows={rows}
               getRowKey={(d) => d.id}
               loading={result.isPending}
               empty={
@@ -70,6 +77,13 @@ export function ClearingsPage() {
               onRowOpen={(d) => navigate(`/ledger/clearings/${d.id}${query}`)}
             />
           )}
+          {result.hasNextPage ? (
+            <div className={styles.formActions}>
+              <Button onClick={() => void result.fetchNextPage()} loading={result.isFetchingNextPage}>
+                Load more
+              </Button>
+            </div>
+          ) : null}
           <p className={styles.note}>
             <Link to={`/ledger/open-items${query}`}>Open items</Link>
           </p>

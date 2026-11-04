@@ -208,3 +208,55 @@ func TestScrapRateExceeded(t *testing.T) {
 		}
 	}
 }
+
+// BR-25.6: idle starts at the last count or at the start of RUNNING and only once the gap is
+// longer than the threshold; threshold 0 turns detection off.
+func TestIdleSince(t *testing.T) {
+	t0 := time.Date(2026, 10, 21, 8, 0, 0, 0, time.UTC)
+	count := t0.Add(2 * time.Minute)
+	thr := 5 * time.Minute
+	cases := []struct {
+		name      string
+		running   *time.Time
+		last      *time.Time
+		threshold time.Duration
+		now       time.Time
+		want      time.Time
+		wantIdle  bool
+	}{
+		{"no count, exactly the threshold", &t0, nil, thr, t0.Add(thr), time.Time{}, false},
+		{"no count, past the threshold starts at RUNNING", &t0, nil, thr, t0.Add(thr + time.Second), t0, true},
+		{"count after RUNNING moves the start", &t0, &count, thr, count.Add(thr + time.Second), count, true},
+		{"recent count is not idle", &t0, &count, thr, count.Add(thr), time.Time{}, false},
+		{"count before RUNNING is ignored", &count, &t0, thr, count.Add(thr + time.Second), count, true},
+		{"detection off", &t0, nil, 0, t0.Add(time.Hour), time.Time{}, false},
+		{"never running", nil, nil, thr, t0.Add(time.Hour), time.Time{}, false},
+	}
+	for _, c := range cases {
+		got, ok := IdleSince(c.running, c.last, c.threshold, c.now)
+		if ok != c.wantIdle || !got.Equal(c.want) {
+			t.Errorf("%s: IdleSince = %v, %v; want %v, %v", c.name, got, ok, c.want, c.wantIdle)
+		}
+	}
+}
+
+func TestEndsIdle(t *testing.T) {
+	cases := []struct {
+		e    MachineEvent
+		want bool
+	}{
+		{MachineEvent{Kind: EventCount}, true},
+		{MachineEvent{Kind: EventState, State: MachineRunning}, false},
+		{MachineEvent{Kind: EventState, State: MachineDown}, true},
+		{MachineEvent{Kind: EventState, State: MachineSetup}, true},
+		{MachineEvent{Kind: EventState, State: MachineOff}, true},
+		{MachineEvent{Kind: EventState, State: MachineIdle}, false},
+		{MachineEvent{Kind: EventAlarm}, false},
+		{MachineEvent{Kind: EventMeasurement}, false},
+	}
+	for _, c := range cases {
+		if got := EndsIdle(c.e); got != c.want {
+			t.Errorf("EndsIdle(%+v) = %v, want %v", c.e, got, c.want)
+		}
+	}
+}

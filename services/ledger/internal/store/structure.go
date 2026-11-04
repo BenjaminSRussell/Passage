@@ -14,9 +14,9 @@ import (
 	"github.com/BenjaminSRussell/passage/services/ledger/internal/domain"
 )
 
-const structureColumns = `id::text, name, version, priority, effective_from::text, status, segments, account_filter, constraints`
+const structureColumns = `id::text, name, version, priority, effective_from::text, status, segments, account_filter, constraints, lock_version`
 
-const dimValueColumns = `attribute, value, name, active_from::text, active_to::text, suspended`
+const dimValueColumns = `attribute, value, name, active_from::text, active_to::text, suspended, lock_version`
 
 // scanStructure reads one account_structure row; extra destinations follow the
 // standard columns.
@@ -24,7 +24,7 @@ func scanStructure(row pgx.Row, extra ...any) (domain.Structure, error) {
 	var s domain.Structure
 	var from string
 	var raw []byte
-	dest := append([]any{&s.ID, &s.Name, &s.Version, &s.Priority, &from, &s.Status, &s.Segments, &s.AccountFilter, &raw}, extra...)
+	dest := append([]any{&s.ID, &s.Name, &s.Version, &s.Priority, &from, &s.Status, &s.Segments, &s.AccountFilter, &raw, &s.LockVersion}, extra...)
 	if err := row.Scan(dest...); err != nil {
 		return domain.Structure{}, err
 	}
@@ -128,7 +128,7 @@ func (s *Postgres) GetStructure(ctx context.Context, ledgerID, id string) (domai
 // may only be retired, and a retired one is final, because postings were
 // validated and their combinations hashed under it (FR-11.4). created reports
 // whether the id is new, so the API can answer 201 or 200.
-func (s *Postgres) PutStructure(ctx context.Context, ledgerID, id string, in domain.Structure) (domain.Structure, bool, error) {
+func (s *Postgres) PutStructure(ctx context.Context, ledgerID, id string, ifMatch int, in domain.Structure) (domain.Structure, bool, error) {
 	p, err := principalOf(ctx)
 	if err != nil {
 		return domain.Structure{}, false, err
@@ -165,7 +165,9 @@ func (s *Postgres) PutStructure(ctx context.Context, ledgerID, id string, in dom
 		if found && owner != ledgerID {
 			return httpx.NewProblem(http.StatusNotFound, domain.CodeStructureNotFound, "account structure not found")
 		}
-		created = !found
+		if err := checkLock(found, prev.LockVersion, ifMatch, "account structure version"); err != nil {
+			return err
+		}
 		if found && !domain.StructureEditAllowed(prev, in) {
 			return httpx.NewProblem(http.StatusConflict, domain.CodeStructureLocked,
 				"an active or retired structure version is immutable; create a new version (an active one may only be retired)")
@@ -176,16 +178,19 @@ func (s *Postgres) PutStructure(ctx context.Context, ledgerID, id string, in dom
 			on conflict (tenant_id, id) do update set name = excluded.name, version = excluded.version,
 				priority = excluded.priority, effective_from = excluded.effective_from, status = excluded.status,
 				segments = excluded.segments, account_filter = excluded.account_filter,
-				constraints = excluded.constraints, updated_at = now()
-			returning `+structureColumns,
+				constraints = excluded.constraints,
+				`+lockedUpdate("account_structure", 12, "name", "version", "priority", "effective_from", "status", "segments",
+			"account_filter", "constraints")+`
+				and account_structure.ledger_id = excluded.ledger_id
+			returning `+structureColumns+`, (xmax = 0)`,
 			p.TenantID, id, ledgerID, in.Name, in.Version, in.Priority, in.EffectiveFrom, in.Status, in.Segments,
-			in.AccountFilter, string(raw))
-		out, err = scanStructure(row)
+			in.AccountFilter, string(raw), ifMatch)
+		out, err = scanStructure(row, &created)
 		if isUnique(err) {
 			return httpx.NewProblem(http.StatusConflict, domain.CodeStructureVersionExists,
 				"this structure name and version already exist on the ledger")
 		}
-		return err
+		return lockLost(err, ifMatch, "account structure version")
 	})
 	if err != nil {
 		return domain.Structure{}, false, err
@@ -196,7 +201,7 @@ func (s *Postgres) PutStructure(ctx context.Context, ledgerID, id string, in dom
 func scanDimValue(row pgx.Row, extra ...any) (domain.DimensionValue, error) {
 	var v domain.DimensionValue
 	var from, to *string
-	dest := append([]any{&v.Attribute, &v.Value, &v.Name, &from, &to, &v.Suspended}, extra...)
+	dest := append([]any{&v.Attribute, &v.Value, &v.Name, &from, &to, &v.Suspended, &v.LockVersion}, extra...)
 	if err := row.Scan(dest...); err != nil {
 		return domain.DimensionValue{}, err
 	}
@@ -258,7 +263,7 @@ func (s *Postgres) ListDimensionValues(ctx context.Context, ledgerID string) ([]
 
 // PutDimensionValue creates or replaces a registered value. created reports
 // whether the value is new.
-func (s *Postgres) PutDimensionValue(ctx context.Context, ledgerID string, in domain.DimensionValue) (domain.DimensionValue, bool, error) {
+func (s *Postgres) PutDimensionValue(ctx context.Context, ledgerID string, ifMatch int, in domain.DimensionValue) (domain.DimensionValue, bool, error) {
 	p, err := principalOf(ctx)
 	if err != nil {
 		return domain.DimensionValue{}, false, err
@@ -273,16 +278,25 @@ func (s *Postgres) PutDimensionValue(ctx context.Context, ledgerID string, in do
 		if vs := domain.ValidateDimensionValue(in, l.DimensionAttributes); len(vs) > 0 {
 			return &domain.RejectedError{Violations: vs}
 		}
+		var current int
+		err = tx.QueryRow(ctx, `select lock_version from dimension_value where tenant_id = $1 and ledger_id = $2 and attribute = $3 and value = $4 for update`,
+			p.TenantID, ledgerID, in.Attribute, in.Value).Scan(&current)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err := checkLock(err == nil, current, ifMatch, "dimension value"); err != nil {
+			return err
+		}
 		row := tx.QueryRow(ctx, `insert into dimension_value (tenant_id, ledger_id, attribute, value, name, active_from, active_to, suspended)
 			values ($1, $2, $3, $4, $5, $6, $7, $8)
 			on conflict (tenant_id, ledger_id, attribute, value) do update set name = excluded.name,
 				active_from = excluded.active_from, active_to = excluded.active_to, suspended = excluded.suspended,
-				updated_at = now()
+				`+lockedUpdate("dimension_value", 9, "name", "active_from", "active_to", "suspended")+`
 			returning `+dimValueColumns+`, (xmax = 0)`,
-			p.TenantID, ledgerID, in.Attribute, in.Value, in.Name, in.ActiveFrom, in.ActiveTo, in.Suspended)
+			p.TenantID, ledgerID, in.Attribute, in.Value, in.Name, in.ActiveFrom, in.ActiveTo, in.Suspended, ifMatch)
 		var scanErr error
 		out, scanErr = scanDimValue(row, &created)
-		return scanErr
+		return lockLost(scanErr, ifMatch, "dimension value")
 	})
 	if err != nil {
 		return domain.DimensionValue{}, false, err

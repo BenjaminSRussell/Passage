@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
-import { createLease, describeProblem, listLeases, newKey, PAYMENTS_PER_YEAR, RATE_METHODS, type Lease, type NewLease, type Problem, type RateMethod } from "./api/client";
+import { createLease, describeProblem, LEASE_ELECTIONS, listLeases, LOW_VALUE_THRESHOLDS, newKey, PAYMENTS_PER_YEAR, RATE_METHODS, type Lease, type NewLease, type LeaseElection, type LowValueCurrency, type Problem, type RateMethod } from "./api/client";
 import { StatusBadge } from "./badges";
 import { DATE, DECIMAL, money, percent, today, UUID } from "./format";
 import styles from "./pages.module.css";
@@ -16,6 +16,7 @@ const columns: DataTableColumn<Lease>[] = [
   { key: "paymentAmount", header: "Payment", align: "end", render: (l) => `${money(l.paymentAmount, l.currency)} ${frequency[l.paymentsPerYear]?.toLowerCase() ?? ""}` },
   { key: "ibrRate", header: "IBR", align: "end", render: (l) => percent(l.ibrRate) },
   { key: "liability", header: "Liability", align: "end", render: (l) => money(l.liability, l.currency) },
+  { key: "election", header: "Exemption", render: (l) => (l.election === "ShortTerm" ? "Short-term" : l.election === "LowValue" ? "Low-value" : "None") },
   { key: "status", header: "Status", render: (l) => <StatusBadge status={l.status} /> },
 ];
 
@@ -102,7 +103,14 @@ export interface LeaseValues {
   ibrRate: string;
   rateMethod?: RateMethod;
   currency: string;
+  election?: LeaseElection;
+  purchaseOption?: boolean;
+  underlyingAssetValue?: string;
+  underlyingAssetCurrency?: LowValueCurrency;
 }
+
+const LOW_VALUE_CURRENCIES = Object.keys(LOW_VALUE_THRESHOLDS) as LowValueCurrency[];
+export const ELECTION_LABELS: Record<LeaseElection, string> = { None: "None: recognize the lease", ShortTerm: "Short-term (12 months or less)", LowValue: "Low-value asset" };
 
 type Errors = Partial<Record<keyof LeaseValues, string>>;
 
@@ -124,6 +132,16 @@ export function validateLease(values: LeaseValues): { errors: Errors; input?: Ne
     errors.ibrRate = "Enter the annual rate as a decimal above 0 and at most 0.5, such as 0.05 for 5%.";
   }
   if (!/^[A-Z]{3}$/.test(values.currency)) errors.currency = "Enter a three-letter ISO currency code, such as USD.";
+  const election = values.election ?? "None";
+  if (election === "ShortTerm" && /^\d+$/.test(values.termMonths) && term > 12) errors.election = "A short-term lease has a term of 12 months or less.";
+  else if (election === "ShortTerm" && values.purchaseOption) errors.election = "A lease that contains a purchase option is not a short-term lease.";
+  const underlying = values.underlyingAssetValue ?? "";
+  const valueCurrency = values.underlyingAssetCurrency ?? "USD";
+  if (election === "LowValue") {
+    const limit = LOW_VALUE_THRESHOLDS[valueCurrency];
+    if (!DECIMAL.test(underlying) || /^0+(\.0+)?$/.test(underlying)) errors.underlyingAssetValue = "Enter the value of the underlying asset when new, such as 4200.00.";
+    else if (Number(underlying) > limit) errors.underlyingAssetValue = `A low-value asset is worth at most ${valueCurrency} ${limit} when new.`;
+  }
   if (Object.keys(errors).length > 0) return { errors };
   return {
     errors,
@@ -138,6 +156,9 @@ export function validateLease(values: LeaseValues): { errors: Errors; input?: Ne
       ibrRate: values.ibrRate,
       rateMethod: values.rateMethod ?? "Nominal",
       currency: values.currency,
+      ...(election === "None" ? {} : { election }),
+      ...(values.purchaseOption ? { purchaseOption: true } : {}),
+      ...(election === "LowValue" ? { underlyingAssetValue: underlying, underlyingAssetCurrency: valueCurrency } : {}),
     },
   };
 }
@@ -156,6 +177,10 @@ export function NewLeasePage() {
     ibrRate: "0.05",
     rateMethod: "Nominal",
     currency: "USD",
+    election: "None",
+    purchaseOption: false,
+    underlyingAssetValue: "",
+    underlyingAssetCurrency: "USD",
   }));
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -187,7 +212,7 @@ export function NewLeasePage() {
     }
   }
 
-  const text = (name: Exclude<keyof LeaseValues, "paymentTiming" | "paymentsPerYear" | "rateMethod">, label: string, hint?: string, extra: { type?: string; mono?: boolean; upper?: boolean } = {}) => (
+  const text = (name: Exclude<keyof LeaseValues, "paymentTiming" | "paymentsPerYear" | "rateMethod" | "election" | "purchaseOption" | "underlyingAssetCurrency">, label: string, hint?: string, extra: { type?: string; mono?: boolean; upper?: boolean } = {}) => (
     <FormField id={`lease-${name}`} label={label} hint={hint} error={errors[name]}>
       {(control) => (
         <Input
@@ -244,6 +269,39 @@ export function NewLeasePage() {
               </Select>
             )}
           </FormField>
+          <FormField id="lease-election" label="Recognition exemption" hint="A short-term or low-value lease is not recognized: no liability and no ROU asset, and each payment is expensed." error={errors.election}>
+            {(control) => (
+              <Select {...control} value={values.election} onChange={(e) => update({ election: e.target.value as LeaseElection })}>
+                {LEASE_ELECTIONS.map((e) => (
+                  <option key={e} value={e}>
+                    {ELECTION_LABELS[e]}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+          <div className={styles.formActions}>
+            <span className={styles.check}>
+              <Input id="lease-purchaseOption" type="checkbox" checked={Boolean(values.purchaseOption)} onChange={(e) => update({ purchaseOption: e.target.checked })} />
+              <label htmlFor="lease-purchaseOption">The lease contains a purchase option (it cannot then be short-term)</label>
+            </span>
+          </div>
+          {values.election === "LowValue" ? (
+            <>
+              {text("underlyingAssetValue", "Underlying asset value when new", `Assessed on the asset when new, whatever its age: at most ${LOW_VALUE_THRESHOLDS[values.underlyingAssetCurrency ?? "USD"]} in the currency below.`)}
+              <FormField id="lease-underlyingAssetCurrency" label="Value stated in" hint="The low-value threshold is set in USD and EUR; convert a value known in another currency at the date of the assessment.">
+                {(control) => (
+                  <Select {...control} value={values.underlyingAssetCurrency} onChange={(e) => update({ underlyingAssetCurrency: e.target.value as LowValueCurrency })}>
+                    {LOW_VALUE_CURRENCIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </FormField>
+            </>
+          ) : null}
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "AST-0007" ? "That lease number is taken" : "Could not recognize the lease"} live="alert">

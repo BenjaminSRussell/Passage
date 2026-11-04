@@ -87,6 +87,11 @@ type fakeStore struct {
 	transferMissing bool
 	transferApprove bool
 	reverseReplay   bool
+	copyReplay      bool
+	copySource      string
+	copyDate        time.Time
+	copyKey         string
+	copyConsignment bool
 	reverseDate     time.Time
 	repair          bool
 
@@ -661,8 +666,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		served[route+" "+strings.ToLower(method)] = true
 		return nil
 	})
-	if len(served) != 85 {
-		t.Fatalf("router walk yielded %d operations, want 85: %v", len(served), served)
+	if len(served) != 86 {
+		t.Fatalf("router walk yielded %d operations, want 86: %v", len(served), served)
 	}
 	declared := declaredOperations(string(spec))
 	for op := range served {

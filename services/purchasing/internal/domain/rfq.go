@@ -80,6 +80,9 @@ type RFQLine struct {
 	Qty          decimal.Decimal `json:"qty"`
 	Unit         string          `json:"unit"`
 	RequiredDate *Day            `json:"requiredDate,omitempty"`
+	// RequisitionLineID names the approved requisition line the RFQ line was raised for (FR-17.3); an award
+	// orders that requisition line through the PO line.
+	RequisitionLineID string `json:"requisitionLineId,omitempty"`
 }
 
 // RFQInvitation records that a vendor was asked to reply.

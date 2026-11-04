@@ -1,10 +1,15 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Badge, Button, DataTable, FormField, Input, PageHeader, Select, type BadgeTone, type DataTableColumn } from "../../shell/ui";
-import { INTAKE_ERROR_STATUSES, listIntakeErrors, type IntakeError, type IntakeErrorFilter, type IntakeErrorStatus } from "./api/client";
+import { holdsDuty } from "../../shell/dutyGate";
+import { usePrincipalDuties } from "../../shell/principal";
+import { describeProblem, INTAKE_ERROR_STATUSES, listIntakeErrors, replayIntakeErrors, type IntakeReplayBatch, type Problem, type IntakeError, type IntakeErrorFilter, type IntakeErrorStatus } from "./api/client";
 import { formatDateTime, sentence, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+
+/** Replaying needs this duty (SalesOrderMaintain); the service enforces it. */
+const DUTY_ORDER_WRITE = "sales.order.write";
 
 const tone: Record<IntakeErrorStatus, BadgeTone> = { OPEN: "warning", RESOLVED: "success" };
 
@@ -32,6 +37,24 @@ export function IntakeErrorsPage() {
   const [filter, setFilter] = useState<IntakeErrorFilter>({ status: "OPEN" });
   const invalid = draft.legalEntityId.trim() && !UUID.test(draft.legalEntityId.trim()) ? "Enter a legal entity UUID." : undefined;
   const state = useLoad((signal) => listIntakeErrors(filter, signal), JSON.stringify(filter));
+  const canReplay = holdsDuty(usePrincipalDuties(), DUTY_ORDER_WRITE);
+  const [replaying, setReplaying] = useState(false);
+  const [batch, setBatch] = useState<IntakeReplayBatch | null>(null);
+  const [replayProblem, setReplayProblem] = useState<Problem | null>(null);
+
+  async function replayAll() {
+    setBatch(null);
+    setReplayProblem(null);
+    setReplaying(true);
+    try {
+      setBatch(await replayIntakeErrors({ legalEntityId: filter.legalEntityId, channel: filter.channel, errorCode: filter.errorCode }));
+      state.reload();
+    } catch (failure) {
+      setReplayProblem(describeProblem(failure));
+    } finally {
+      setReplaying(false);
+    }
+  }
 
   return (
     <div className={styles.stack}>
@@ -74,7 +97,22 @@ export function IntakeErrorsPage() {
           )}
         </FormField>
         <Button type="submit">Filter</Button>
+        {canReplay ? (
+          <Button variant="secondary" loading={replaying} onClick={() => void replayAll()}>
+            Replay open errors
+          </Button>
+        ) : null}
       </form>
+      {replayProblem ? (
+        <Alert tone="danger" title="The replay could not run" live="alert">
+          {replayProblem.message} ({replayProblem.code})
+        </Alert>
+      ) : null}
+      <Alert tone={batch && batch.failed > 0 ? "warning" : "success"} live="status">
+        {batch
+          ? `Replayed ${batch.replayed} of ${batch.attempted} orders; ${batch.failed} refused again; ${batch.skipped} dead letters left for an operator (10 or more attempts).`
+          : null}
+      </Alert>
       {state.error ? (
         <Alert tone="danger" title="Could not load the intake errors" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
           {state.error.message} ({state.error.code})

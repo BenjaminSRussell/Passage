@@ -9,7 +9,8 @@ import { Poller } from "../src/poller.ts";
 import { api, fixture, guard, loopbackValidate, ownerUrl, receiver, type Api, type Fixture } from "./pgHelper.ts";
 
 const T0 = 1_800_000_000;
-const ADMIN = ["hub.client.write", "hub.delivery.read", "hub.subscription.write"];
+// The administrator holds the duties the tests grant to clients: a client can be granted only what its granter holds.
+const ADMIN = ["hub.client.write", "hub.delivery.read", "hub.subscription.write", "sales.order.read", "sales.order.write", "VendorInvoicePost", "Maintain users"];
 const EDGE = ["hub.client.consume"];
 
 describe("API client rules", () => {
@@ -125,6 +126,27 @@ describe.skipIf(ownerUrl === undefined)("API clients on Postgres", () => {
     expect((await hub.call("PATCH", `/v1/hub/clients/${c.id}`, { tenant: t, duties: ADMIN }, { version: 2, burst: 0 })).status).toBe(400);
     expect((await events(t)).map((e) => e.type)).toEqual(["dev.passage.hub.apiclient.registered.v1", "dev.passage.hub.apiclient.updated.v1"]);
     expect((await hub.call("PATCH", `/v1/hub/clients/${randomUUID()}`, { tenant: t, duties: ADMIN }, { version: 1 })).status).toBe(404);
+  });
+
+  test("a caller grants only duties they hold: on register, and for the scopes a PATCH adds", async () => {
+    const t = randomUUID();
+    const clerk = ["hub.client.write", "hub.delivery.read", "sales.order.read"];
+    const denied = await hub.call("POST", "/v1/hub/clients", { tenant: t, duties: clerk }, {
+      clientId: `acme-${randomUUID().slice(0, 8)}`, name: "Acme", scopes: ["sales.order.read", "ledger.journal.post", "Maintain users"], ownerContact: "it@acme.example",
+    });
+    expect(denied.status).toBe(403);
+    expect(denied.body.detail).toContain("ledger.journal.post, Maintain users");
+    expect(denied.body.detail).not.toContain("sales.order.read,");
+    expect((await events(t)).length).toBe(0);
+    // Registered by an administrator with more duties; the clerk may keep and drop scopes, not add one.
+    const c = (await register(t, { scopes: ["sales.order.read", "sales.order.write"] })).body;
+    const patch = (scopes: string[], version: number) => hub.call("PATCH", `/v1/hub/clients/${c.id}`, { tenant: t, duties: clerk }, { version, scopes });
+    expect((await patch(["sales.order.read", "sales.order.write", "VendorInvoicePost"], 1)).status).toBe(403);
+    expect((await patch(["sales.order.read", "sales.order.write"], 1)).status).toBe(200);
+    expect((await patch(["sales.order.write"], 2)).body.scopes).toEqual(["sales.order.write"]);
+    // Other fields never need the scopes: a clerk without them can still change the quota.
+    expect((await hub.call("PATCH", `/v1/hub/clients/${c.id}`, { tenant: t, duties: ["hub.client.write"] }, { version: 3, quotaPerMin: 700 })).status).toBe(200);
+    expect((await hub.call("PATCH", `/v1/hub/clients/${randomUUID()}`, { tenant: t, duties: clerk }, { version: 1, scopes: ["sales.order.read"] })).status).toBe(404);
   });
 
   test("revoke is idempotent, writes one event, blocks changes and quota", async () => {

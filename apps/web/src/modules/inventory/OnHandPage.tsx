@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { fetchOnHand, ON_HAND_GROUPS, type OnHandGroup, type OnHandRow } from "./api/client";
+import { onHandCsv, downloadText } from "./csvExport";
 import { dash, isIsoDate, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -49,6 +51,31 @@ const amountColumns: DataTableColumn<OnHandRow>[] = [
   },
 ];
 
+/** The on-hand groups the transaction inquiry can be narrowed to, with the query parameter each one fills. */
+const DRILL_PARAMS: Partial<Record<OnHandGroup, string>> = {
+  product: "product",
+  legal_entity: "legalEntity",
+  site: "site",
+  warehouse: "warehouse",
+  location: "location",
+  batch: "batch",
+  serial: "serial",
+  inventory_status: "inventoryStatus",
+  owner: "owner",
+  segment: "segment",
+};
+
+/** The transaction inquiry link for one on-hand row: every dimension the row is grouped by narrows it. */
+function drillLink(row: OnHandRow): string | null {
+  const params = new URLSearchParams();
+  for (const [group, name] of Object.entries(DRILL_PARAMS)) {
+    const value = row.group[group as OnHandGroup];
+    if (value) params.set(name, value);
+  }
+  const qs = params.toString();
+  return qs ? `/inventory/transactions?${qs}` : null;
+}
+
 /** On-hand inquiry (FR-16.3): group by any subset of dimensions, filter, flag negative stock in text. */
 export function OnHandPage() {
   const [groupBy, setGroupBy] = useState<OnHandGroup[]>(["product", "site"]);
@@ -94,18 +121,44 @@ export function OnHandPage() {
       mono: group === "product" || group === "legal_entity",
       render: (row: OnHandRow) => row.group[group] || dash,
     })),
+    ...(shown.some((g) => g in DRILL_PARAMS)
+      ? [
+          {
+            key: "drill",
+            header: "History",
+            render: (row: OnHandRow) => {
+              const to = drillLink(row);
+              return to ? <Link to={to}>Transactions</Link> : dash;
+            },
+          } satisfies DataTableColumn<OnHandRow>,
+        ]
+      : []),
     physicalColumn,
     ...(filters.asOf ? [] : availabilityColumns),
     ...amountColumns,
   ];
   const rows = state.data?.items ?? [];
+  const [exportNote, setExportNote] = useState("");
+  function exportCsv() {
+    const csv = onHandCsv(rows, groupBy, Boolean(filters.asOf), GROUP_LABELS);
+    const done = downloadText(`on-hand-${filters.asOf || new Date().toISOString().slice(0, 10)}.csv`, csv);
+    setExportNote(done ? `Exported ${rows.length} ${rows.length === 1 ? "row" : "rows"}.` : "This browser cannot save the file.");
+  }
 
   return (
     <div className={styles.stack}>
       <PageHeader
         title="On-hand inquiry"
         description="Physical and available stock by any combination of dimensions, now or on a past date, straight from the posting ledger."
+        actions={
+          <Button onClick={exportCsv} disabled={state.loading || rows.length === 0}>
+            Export CSV
+          </Button>
+        }
       />
+      <Alert tone="info" live="status">
+        {exportNote}
+      </Alert>
       <Card title="Filter and group">
         <form onSubmit={apply} noValidate className={styles.form}>
           <FormField id="onhand-asof" label="As of date" optional error={dateError} hint="Stock and value at the end of that day. Leave empty for now.">

@@ -203,7 +203,7 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 			}
 		}
 		if vendorOwned {
-			if err := checkVendorOwned(r); err != nil {
+			if err := checkVendorOwned(r, j.Type == domain.JournalCount); err != nil {
 				return err
 			}
 		} else {
@@ -247,7 +247,12 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 		}
 		bucket, delta := invevents.BucketPosted, r.oh.PostedQty.Sub(r.before.PostedQty)
 		if domain.VendorOwned(r.dims) {
+			// Vendor-owned rows move only physical buckets: DEDUCTED by an
+			// ownership change or a count loss, RECEIVED by a count gain.
 			bucket, delta = invevents.BucketDeducted, r.oh.Deducted.Sub(r.before.Deducted)
+			if received := r.oh.Received.Sub(r.before.Received); !received.IsZero() {
+				bucket, delta = invevents.BucketReceived, received
+			}
 		}
 		if err := enqueueOnHand(ctx, tx, tenantID, j.LegalEntityID, r, bucket, delta); err != nil {
 			return err
@@ -299,13 +304,26 @@ func valueTransfer(ctx context.Context, tx pgx.Tx, tenantID string, j domain.Jou
 }
 
 // checkVendorOwned enforces BR-16.14 on a vendor-owned row after its deltas:
-// it never carries posted quantity or value, and an ownership change cannot
-// take more than its available physical quantity (INV-OWN-002), whatever the
-// negative policy says, because the stock is not the company's.
-func checkVendorOwned(r *row) error {
+// it never carries posted quantity or value, and, whatever the negative policy
+// says (the stock is not the company's), an ownership change cannot take more
+// than its available physical quantity (INV-OWN-002).
+//
+// count marks a COUNT journal: a count sets the physical quantity to what was
+// found, so a loss may take reserved or held quantity too, but no COUNT line
+// (the reversal of an earlier count gain included) may leave the vendor with
+// less than nothing.
+func checkVendorOwned(r *row, count bool) error {
 	if !r.oh.PostedQty.IsZero() || !r.oh.PostedValue.IsZero() {
 		return problem(http.StatusUnprocessableEntity, domain.CodeOwnershipValue,
 			fmt.Sprintf("vendor-owned stock of product %s at %s cannot be valued or financially posted", r.product, describeDims(r.dims)))
+	}
+	if count {
+		if phys := r.oh.PhysicalInvent(); phys.Sign() < 0 && phys.LessThan(r.before.PhysicalInvent()) {
+			have := decimal.Max(r.before.PhysicalInvent(), decimal.Zero)
+			return problem(http.StatusUnprocessableEntity, domain.CodeOwnershipExceeds,
+				fmt.Sprintf("count of %s exceeds vendor-owned quantity %s at %s", r.before.PhysicalInvent().Sub(r.oh.PhysicalInvent()), have, describeDims(r.dims)))
+		}
+		return nil
 	}
 	if avail := r.oh.AvailPhysical(); avail.Sign() < 0 && avail.LessThan(r.before.AvailPhysical()) {
 		have := decimal.Max(r.before.AvailPhysical(), decimal.Zero)

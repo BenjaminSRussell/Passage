@@ -15,7 +15,8 @@ info:
     FR-25.5). Slice 11: time profiles, pay agreements and the worker links the pay
     calculation reads (FR-25.7); a replace takes `If-Match` with the version read.
     Slice 14: the edge fleet (FR-25.19): edge nodes, versioned configuration documents and
-    the connector heartbeat.
+    the connector heartbeat. Slice 22: worker maintenance (edit, deactivate with a reason,
+    reactivate).
     Commands that change state
     (except the registration batch, idempotent per item id, process message
     creation, idempotent per source and sourceMessageId, job plans keyed by job id,
@@ -114,6 +115,60 @@ paths:
         "403":
           $ref: "#/components/responses/Problem"
         "404":
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: updateWorker
+      summary: Edit a worker's name, badge, sign-in user, cost rate and currency
+      description: |
+        Replaces the editable fields of a worker (D2a'); the party link never changes. `If-Match`
+        carries the worker version you read (SF-0143, 412). A badge held by another worker is SF-0105
+        (409); `badgeId` null removes the badge. An inactive worker can be edited. The worker's own
+        sign-in user cannot edit the worker (SF-0106, 403). The currency cannot change once a day of
+        the worker is approved (SF-0169, 422). The edit rewrites no pay line: days already calculated
+        keep the cost rate they were calculated with until a supervisor recalculates them, and
+        approved days keep theirs (a later `pay:revise` of an approved day prices it at the rate then
+        current). Publishes `dev.passage.shopfloor.worker.saved.v1` (change `updated`).
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorker"
+      responses:
+        "200":
+          description: The worker with its new version (or the stored outcome of a repeated key).
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Worker"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
           $ref: "#/components/responses/Problem"
   /v1/shopfloor/registrations:
     get:
@@ -297,7 +352,8 @@ paths:
       description: |
         Approves every calculated day in the range. Days already approved are
         returned unchanged. Any open flag fails the request (SF-0006); a day whose
-        registrations changed after calculation fails with SF-0104; approving
+        registrations changed after calculation, or that is priced by a dated cost
+        rate added after its calculation, fails with SF-0104; approving
         your own day fails with SF-0106. Newly approved days emit
         dev.passage.shopfloor.payday.approved.v1.
       parameters:
@@ -814,7 +870,10 @@ paths:
         which no person role holds).
         Raising and clearing a downtime alert otherwise happen only when the machine sends events,
         so a machine that went DOWN and then fell silent would never raise one. The sweep, in one
-        transaction, raises a downtime alert for every downtime open for more than 10 minutes,
+        transaction, opens an idle downtime (`cause` idle, BR-25.6) for every machine whose latest
+        state is RUNNING and that has sent no count for its idle threshold, starting at its last count
+        and unless the machine has a downtime open (the next count or a state that leaves RUNNING ends it),
+        raises a downtime alert for every downtime open for more than 10 minutes (an idle one too),
         clears the downtime alerts whose downtime ended at least 5 minutes ago, and reads the
         latest completed stored OEE bucket of each resource: more than 5 % scrap in a bucket of at
         least 10 pieces raises a `scrap-rate` alert, and the alert clears once the latest completed
@@ -1127,11 +1186,15 @@ paths:
       operationId: createProcessMessage
       summary: Record a process message (FR-25.17, BR-25.13)
       description: |
-        From a kiosk PI sheet, the edge connector or manual entry. The category decides the
-        destinations. Numeric values outside their limits are flagged (`outOfLimit`) and
-        accepted, unless the category rejects out-of-limit values (SF-0114). Idempotent by
-        (source, sourceMessageId): a replay answers 200 with the stored message and
-        `duplicate: true`, so no Idempotency-Key is needed.
+        From a kiosk PI sheet, the edge connector or manual entry. The category (the tenant's
+        master row of that code, else the built-in default) decides the destinations; a code that
+        is neither is SF-0164 and an inactive row SF-0165. The category's characteristic
+        definitions govern the unit and limits of the values they name; a different type or a
+        missing required value is SF-0115. Numeric values outside their limits are flagged
+        (`outOfLimit`) and accepted, unless the category rejects out-of-limit values (SF-0114).
+        Idempotent by (source, sourceMessageId): a replay answers 200 with the stored message and
+        `duplicate: true`, so no Idempotency-Key is needed; that holds even when the category was
+        changed or deactivated after the message was stored.
       x-passage-duty: shopfloor.process.create
       requestBody:
         required: true
@@ -1177,7 +1240,7 @@ paths:
         - name: category
           in: query
           schema:
-            $ref: "#/components/schemas/ProcessCategory"
+            $ref: "#/components/schemas/ProcessCategoryCode"
         - name: destination
           in: query
           description: Messages that route to this destination.
@@ -2297,6 +2360,158 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
+  /v1/shopfloor/process-categories:
+    post:
+      operationId: createProcessCategory
+      summary: Create a process message category
+      description: |
+        Process message category master data (FR-25.17, BR-25.13). A row overrides the built-in
+        default of the same code from then on, or adds a code of its own. It names the
+        destinations a message of the category is delivered to, whether an out-of-limit value is
+        refused (`rejectOutOfLimit`, SF-0114 on a message) and the characteristic definitions
+        (type, unit, limits, required) that govern the values it names. Publishes
+        `dev.passage.shopfloor.processcategory.saved.v1`. A code already used is SF-0142.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewProcessCategory"
+      responses:
+        "201":
+          description: Created (or the stored outcome of a repeated key).
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcessCategory"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: listProcessCategories
+      summary: List process message categories by code
+      description: |
+        The tenant's categories by code, followed by the built-in defaults that no row overrides
+        (`builtIn` true, no `id` or `version`).
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: active
+          in: query
+          description: With true, only active rows.
+          schema:
+            type: boolean
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Process message categories.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ProcessCategory"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/process-categories/{id}:
+    get:
+      operationId: getProcessCategory
+      summary: Get one process message category
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The category with its version as ETag.
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcessCategory"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: updateProcessCategory
+      summary: Replace the editable fields of a process message category
+      description: |
+        Replaces the name, destinations, reject flag, characteristic definitions and status (the
+        code does not change) and bumps the version. `If-Match` carries the version you read;
+        another change in between is SF-0143 (412). Messages already stored keep the routing they
+        were received with. A message of an inactive category is refused (SF-0165).
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProcessCategory"
+      responses:
+        "200":
+          description: Updated; the new version is in the ETag header.
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcessCategory"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
   /v1/shopfloor/edge-nodes:
     post:
       operationId: createEdgeNode
@@ -2605,6 +2820,171 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
+  /v1/shopfloor/workers/{id}/cost-rates:
+    get:
+      operationId: listWorkerCostRates
+      summary: List a worker's dated cost rates
+      description: |
+        The worker's dated hourly cost rates (D2a'), newest effective date first. A day is priced at the
+        latest rate effective on or before its date; days before the first dated rate are priced at the
+        worker's own `costRate`. The list is empty for a worker who has never had a dated rate.
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The worker's dated cost rates.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CostRateList"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: addWorkerCostRate
+      summary: Set a worker's cost rate from a date
+      description: |
+        Records that the worker costs `costRate` an hour (in the worker's currency) from `effectiveFrom`
+        until the next dated rate. Rates are append-only: a second rate for the same date is SF-0170 (409),
+        so a change takes effect on a later date. A past date is allowed and rewrites no pay line: a
+        calculated day that the new rate prices is stale for approval (SF-0104) until it is recalculated,
+        and an approved day keeps its lines and stays approved until a supervisor revises it
+        (`pay:revise` prices each day at the rate effective on its own date). The worker's own sign-in user
+        cannot set the rate (SF-0106, 403). Publishes `dev.passage.shopfloor.workercostrate.set.v1`.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CostRateInput"
+      responses:
+        "201":
+          description: The stored rate (or the stored outcome of a repeated key).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CostRate"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/workers/{id}:deactivate:
+    post:
+      operationId: deactivateWorker
+      summary: Deactivate a worker who left, with a reason
+      description: |
+        Marks the worker inactive (D2a') and records who, when and why. The badge no longer signs in
+        (SF-0001) and no new time can be registered for the worker (SF-0101), while the pay of the days
+        already worked is still calculated, approved, revised and exported. A worker who is clocked in
+        or has an open job start is SF-0166 (409): close the open time first. A worker who is already
+        inactive is SF-0167 (409). `If-Match` carries the worker version you read (SF-0143, 412).
+        Publishes `dev.passage.shopfloor.worker.saved.v1` (change `deactivated`).
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeactivateWorker"
+      responses:
+        "200":
+          description: The worker with its new state and version (or the stored outcome of a repeated key).
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Worker"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/workers/{id}:reactivate:
+    post:
+      operationId: reactivateWorker
+      summary: Reactivate a deactivated worker
+      description: |
+        Makes an inactive worker active again and clears the deactivation record. A worker who is
+        already active is SF-0168 (409). `If-Match` carries the worker version you read (SF-0143, 412).
+        Publishes `dev.passage.shopfloor.worker.saved.v1` (change `reactivated`). The request has no body.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: The worker with its new state and version (or the stored outcome of a repeated key).
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Worker"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
   /v1/shopfloor/workers/{id}:assign-setup:
     post:
       operationId: assignWorkerSetup
@@ -2797,7 +3177,7 @@ components:
           pattern: "^[A-Z]{3}$"
     Worker:
       type: object
-      required: [id, partyId, name, badgeId, userId, costRate, currency, active, version, createdAt, profileId, payAgreementId, defaultResourceId]
+      required: [id, partyId, name, badgeId, userId, costRate, currency, active, version, createdAt, profileId, payAgreementId, defaultResourceId, deactivatedAt, deactivatedBy, deactivationReason]
       properties:
         id:
           type: string
@@ -2834,6 +3214,16 @@ components:
           type: [string, "null"]
           format: uuid
           description: Home resource whose jobs make up the worker's dispatch list; null means every job.
+        deactivatedAt:
+          type: [string, "null"]
+          format: date-time
+          description: When the worker was last deactivated; null while active.
+        deactivatedBy:
+          type: [string, "null"]
+          description: The user who deactivated the worker; null while active.
+        deactivationReason:
+          type: [string, "null"]
+          description: The reason given at deactivation; null while active.
     BreakWindow:
       type: object
       required: [from, to]
@@ -3174,6 +3564,125 @@ components:
         updatedAt:
           type: string
           format: date-time
+    CharacteristicDefinition:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        type:
+          type: string
+          enum: [numeric, text, boolean]
+        unit:
+          type: string
+          maxLength: 16
+        min:
+          type: string
+          description: Lower limit as a decimal string; numeric only.
+        max:
+          type: string
+          description: Upper limit as a decimal string; numeric only.
+        required:
+          type: boolean
+          default: false
+          description: A message of the category without a value of this name is SF-0115.
+    NewProcessCategory:
+      type: object
+      required: [code, name, destinations]
+      properties:
+        code:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9-]*$"
+          maxLength: 32
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        destinations:
+          type: array
+          minItems: 1
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            enum: [ebr, journal, quality, kafka, webhook]
+        rejectOutOfLimit:
+          type: boolean
+          default: false
+        characteristics:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/CharacteristicDefinition"
+        active:
+          type: boolean
+          default: true
+    UpdateProcessCategory:
+      type: object
+      required: [name, destinations]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        destinations:
+          type: array
+          minItems: 1
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            enum: [ebr, journal, quality, kafka, webhook]
+        rejectOutOfLimit:
+          type: boolean
+          default: false
+        characteristics:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/CharacteristicDefinition"
+        active:
+          type: boolean
+          default: true
+    ProcessCategory:
+      type: object
+      required: [code, name, destinations, rejectOutOfLimit, characteristics, active, builtIn]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Absent on a built-in default that no row overrides.
+        code:
+          type: string
+        name:
+          type: string
+        destinations:
+          type: array
+          items:
+            type: string
+            enum: [ebr, journal, quality, kafka, webhook]
+        rejectOutOfLimit:
+          type: boolean
+        characteristics:
+          type: array
+          items:
+            $ref: "#/components/schemas/CharacteristicDefinition"
+        active:
+          type: boolean
+        builtIn:
+          type: boolean
+        version:
+          type: integer
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     NewEdgeNode:
       type: object
       required: [name, platform]
@@ -3387,6 +3896,39 @@ components:
         premium:
           type: string
           description: Decimal string above 0 and up to 2 with up to 4 decimals; 0.15 pays 15% of the worker's rate extra.
+    UpdateWorker:
+      type: object
+      required: [name, badgeId, userId, costRate, currency]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        badgeId:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 64
+          description: Badge printed or encoded for the kiosk; null removes it.
+        userId:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 200
+          description: Identity-provider user the worker signs in as; null removes the link.
+        costRate:
+          type: string
+          description: Non-negative decimal string, per hour.
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+    DeactivateWorker:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Why the worker is deactivated; kept on the worker and published.
     AssignWorkerResource:
       type: object
       required: [resourceId]
@@ -3984,7 +4526,7 @@ components:
           type: integer
     Downtime:
       type: object
-      required: [id, machineId, resourceId, startedAt, endedAt, reasonCode, category, andonRaised]
+      required: [id, machineId, resourceId, startedAt, endedAt, reasonCode, category, cause, andonRaised]
       properties:
         id:
           type: string
@@ -4006,8 +4548,62 @@ components:
         category:
           type: string
           enum: [planned, unplanned]
+        cause:
+          type: string
+          enum: [down, idle]
+          description: >-
+            down for a downtime the machine reported (state DOWN); idle for idle time the andon sweep
+            found on a RUNNING machine with no count for its idle threshold (BR-25.6). A count or a
+            state that leaves RUNNING (DOWN, SETUP, OFF) ends an idle record.
         andonRaised:
           type: boolean
+    CostRate:
+      type: object
+      required: [id, workerId, effectiveFrom, costRate, note, createdBy, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workerId:
+          type: string
+          format: uuid
+        effectiveFrom:
+          type: string
+          format: date
+          description: The first day priced at this rate.
+        costRate:
+          type: string
+          description: Decimal string, per hour, in the worker's currency.
+        note:
+          type: [string, "null"]
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    CostRateList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CostRate"
+    CostRateInput:
+      type: object
+      required: [effectiveFrom, costRate]
+      properties:
+        effectiveFrom:
+          type: string
+          format: date
+          description: Between 2000-01-01 and 2099-12-31.
+        costRate:
+          type: string
+          description: Non-negative decimal string with at most 6 decimals, per hour.
+        note:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 500
     DowntimeCode:
       type: object
       required: [reasonCode]
@@ -4064,8 +4660,11 @@ components:
           maxLength: 500
     AndonSweepResult:
       type: object
-      required: [downtimeRaised, scrapRateRaised, cleared]
+      required: [idleOpened, downtimeRaised, scrapRateRaised, cleared]
       properties:
+        idleOpened:
+          type: integer
+          description: Idle downtime records opened for RUNNING machines with no count for their idle threshold.
         downtimeRaised:
           type: integer
           description: Downtime alerts raised for downtimes open over 10 minutes.
@@ -4544,9 +5143,14 @@ components:
           description: |
             Present on create and on get. Header batchId,workerId,workDate,payType,hours,multiplier,amount,currency;
             decimals keep their stored scale.
-    ProcessCategory:
+    ProcessCategoryCode:
       type: string
-      enum: [phase-start, phase-end, consumption, yield, process-data, quality-result, deviation, order-status, custom]
+      pattern: "^[a-z0-9][a-z0-9-]*$"
+      maxLength: 32
+      description: |
+        A built-in category (phase-start, phase-end, consumption, yield, process-data, quality-result,
+        deviation, order-status, custom) or a code of the tenant's category master. A message naming a
+        code that is neither is SF-0164; an inactive master row is SF-0165.
     ProcessDestination:
       type: string
       enum: [ebr, journal, quality, kafka, webhook]
@@ -4593,7 +5197,7 @@ components:
           maxLength: 128
           description: Unique per source; a replay returns the stored message.
         categoryCode:
-          $ref: "#/components/schemas/ProcessCategory"
+          $ref: "#/components/schemas/ProcessCategoryCode"
         orderId:
           type: string
           format: uuid
@@ -4643,7 +5247,7 @@ components:
         sourceMessageId:
           type: string
         categoryCode:
-          $ref: "#/components/schemas/ProcessCategory"
+          $ref: "#/components/schemas/ProcessCategoryCode"
         orderId:
           type: string
           format: uuid

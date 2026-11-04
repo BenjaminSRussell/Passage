@@ -98,6 +98,10 @@ type API struct {
 
 	roundingChanged atomic.Int64
 
+	packageExported       atomic.Int64
+	packageImported       atomic.Int64
+	packageRecordsCreated atomic.Int64
+
 	translationsPut     atomic.Int64
 	translationsDeleted atomic.Int64
 }
@@ -180,6 +184,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerHierarchies(r)
 	a.registerCurrencyRounding(r)
 	a.registerTranslations(r)
+	a.registerPackage(r)
 	r.Get("/v1/org/uom/convert", a.convert)
 	a.registerUnits(r)
 	for _, c := range referenceCollections {
@@ -228,6 +233,9 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP org_hierarchy_as_of_queries_total Hierarchy as-of queries answered.\n# TYPE org_hierarchy_as_of_queries_total counter\norg_hierarchy_as_of_queries_total %d\n", a.hierarchyAsOfQueries.Load())
 		fmt.Fprintf(w, "# HELP org_hierarchy_publish_maker_checker_refused_total Security-purpose hierarchy publishes refused because the publisher was the last editor.\n# TYPE org_hierarchy_publish_maker_checker_refused_total counter\norg_hierarchy_publish_maker_checker_refused_total %d\n", a.hierarchyMakerCheckerRefused.Load())
 		fmt.Fprintf(w, "# HELP org_currency_rounding_rules_changed_total Currency rounding rule puts that created or changed a row; identical repeats are not counted.\n# TYPE org_currency_rounding_rules_changed_total counter\norg_currency_rounding_rules_changed_total %d\n", a.roundingChanged.Load())
+		fmt.Fprintf(w, "# HELP org_package_exports_total Organization model packages exported.\n# TYPE org_package_exports_total counter\norg_package_exports_total %d\n", a.packageExported.Load())
+		fmt.Fprintf(w, "# HELP org_package_imports_total Organization model package imports applied (dry runs are not counted).\n# TYPE org_package_imports_total counter\norg_package_imports_total %d\n", a.packageImported.Load())
+		fmt.Fprintf(w, "# HELP org_package_records_created_total Records created by package imports.\n# TYPE org_package_records_created_total counter\norg_package_records_created_total %d\n", a.packageRecordsCreated.Load())
 		fmt.Fprintf(w, "# HELP org_name_translations_put_total Name translation puts that created or changed a row; identical repeats are not counted.\n# TYPE org_name_translations_put_total counter\norg_name_translations_put_total %d\n", a.translationsPut.Load())
 		fmt.Fprintf(w, "# HELP org_name_translations_deleted_total Name translations deleted.\n# TYPE org_name_translations_deleted_total counter\norg_name_translations_deleted_total %d\n", a.translationsDeleted.Load())
 	})

@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Button, buttonClassName, Card, FormField, PageHeader, Skeleton, Textarea } from "../../shell/ui";
-import { describeProblem, getIntakeError, resolveIntakeError, type Problem } from "./api/client";
+import { describeProblem, getIntakeError, replayIntakeError, resolveIntakeError, type IntakeReplayResult, type Problem } from "./api/client";
 import { formatDateTime } from "./format";
 import { IntakeErrorStatusBadge } from "./IntakeErrorsPage";
 import styles from "./pages.module.css";
@@ -23,6 +23,8 @@ export function IntakeErrorDetailPage() {
   const [problem, setProblem] = useState<Problem | null>(null);
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [replaying, setReplaying] = useState(false);
+  const [replay, setReplay] = useState<IntakeReplayResult | null>(null);
 
   if (state.error && !state.data) {
     return (
@@ -67,6 +69,20 @@ export function IntakeErrorDetailPage() {
     }
   }
 
+  async function replayOrder() {
+    setProblem(null);
+    setReplay(null);
+    setReplaying(true);
+    try {
+      setReplay(await replayIntakeError(e.id));
+      state.reload();
+    } catch (failure) {
+      setProblem(describeProblem(failure));
+    } finally {
+      setReplaying(false);
+    }
+  }
+
   const facts: [string, string][] = [
     ["Channel", e.channel],
     ["External reference", e.externalRef ?? "—"],
@@ -75,6 +91,7 @@ export function IntakeErrorDetailPage() {
     ["Attempts", String(e.attempts)],
     ["First seen", formatDateTime(e.firstSeenAt)],
     ["Last seen", formatDateTime(e.lastSeenAt)],
+    ["Replays tried", String(e.replayCount)],
     ["Payload hash", e.requestHash],
     ...(e.resolvedAt ? ([["Closed", `${formatDateTime(e.resolvedAt)} by ${e.resolvedBy ?? "—"}`]] as [string, string][]) : []),
     ...(e.resolutionNote ? ([["Note", e.resolutionNote]] as [string, string][]) : []),
@@ -94,7 +111,15 @@ export function IntakeErrorDetailPage() {
       {problem ? (
         <Alert
           tone="danger"
-          title={problem.code === "SLS-0006" ? "The intake error was changed by someone else" : problem.code === "SLS-0116" ? "Already closed" : "The error could not be closed"}
+          title={
+            problem.code === "SLS-0006"
+              ? "The intake error was changed by someone else"
+              : problem.code === "SLS-0116"
+                ? "Already closed"
+                : problem.code === "SLS-0118"
+                  ? "This error cannot be replayed"
+                  : "The request could not be completed"
+          }
           live="alert"
           action={problem.code === "SLS-0006" || problem.code === "SLS-0116" ? <Button size="sm" onClick={() => { setProblem(null); state.reload(); }}>Reload</Button> : undefined}
         >
@@ -102,8 +127,13 @@ export function IntakeErrorDetailPage() {
         </Alert>
       ) : null}
       <Alert tone="success" live="status">
-        {done ? "Closed. A retry of the same payload would open it again." : null}
+        {done ? "Closed. A retry of the same payload would open it again." : replay?.replayed ? `Replayed as order ${replay.orderNumber ?? ""}. The error is closed.` : null}
       </Alert>
+      {replay && !replay.replayed && replay.failure ? (
+        <Alert tone="warning" title="Intake refused the order again" live="alert">
+          {replay.failure.message} ({replay.failure.code})
+        </Alert>
+      ) : null}
       <Card>
         <dl className={styles.details}>
           {facts.map(([term, value]) => (
@@ -114,6 +144,30 @@ export function IntakeErrorDetailPage() {
           ))}
         </dl>
       </Card>
+      {e.replayedOrderId ? (
+        <p>
+          <Link to={`/sales/orders/${e.replayedOrderId}`}>Open the order this error was replayed as</Link>
+        </p>
+      ) : null}
+      {e.status === "OPEN" && e.replayable ? (
+        <Card title="Replay the order">
+          {canResolve ? (
+            <>
+              <p className={styles.muted}>Send the refused order through intake again, once the cause is fixed. If it is stored, this error is closed with the order number.</p>
+              <div className={styles.formActions}>
+                <Button variant="primary" loading={replaying} onClick={() => void replayOrder()}>
+                  Replay order
+                </Button>
+              </div>
+            </>
+          ) : (
+            <p className={styles.muted}>Replaying an order needs the {DUTY_ORDER_WRITE} duty.</p>
+          )}
+        </Card>
+      ) : null}
+      {e.status === "OPEN" && !e.replayable ? (
+        <p className={styles.muted}>The refused request was not kept for this error, so it cannot be replayed; ask the sender to send it again.</p>
+      ) : null}
       {e.status === "OPEN" ? (
         <Card title="Close this error">
           {canResolve ? (

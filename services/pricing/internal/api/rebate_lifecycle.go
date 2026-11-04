@@ -15,6 +15,7 @@ import (
 const (
 	agreementRevisePath = rebateAgreementsPath + "/{id}:revise"
 	agreementClosePath  = rebateAgreementsPath + "/{id}:close"
+	agreementReopenPath = rebateAgreementsPath + "/{id}:reopen"
 )
 
 // agreementReviseRequest changes an ACTIVE agreement at the version the caller read; an
@@ -34,6 +35,7 @@ type agreementCloseRequest struct {
 func (a *API) registerAgreementLifecycleRoutes(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRebateMaintain)).Post(agreementRevisePath, a.reviseAgreement)
 	r.With(authz.RequireDuty(dutyRebateMaintain)).Post(agreementClosePath, a.closeAgreement)
+	r.With(authz.RequireDuty(dutyRebateMaintain)).Post(agreementReopenPath, a.reopenAgreement)
 }
 
 func (a *API) reviseAgreement(w http.ResponseWriter, r *http.Request) {
@@ -120,6 +122,45 @@ func (a *API) closeAgreement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.store.CloseAgreement(r.Context(), id, req.Version, day, r.Header.Get(idempotencyKey))
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, agreementResponse(out))
+}
+
+type agreementReopenRequest struct {
+	Version int    `json:"version"`
+	ValidTo string `json:"validTo"`
+}
+
+// reopenAgreement makes a CLOSED agreement ACTIVE again with a later last day (BR-26.8).
+func (a *API) reopenAgreement(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, ok := uuidParam(w, r, store.CodeAgreementNotFound, "rebate agreement")
+	if !ok {
+		return
+	}
+	var req agreementReopenRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if req.Version < 1 {
+		fields["version"] = "is required and must be at least 1"
+	}
+	day, err := time.Parse(dateLayout, req.ValidTo)
+	if err != nil {
+		fields["validTo"] = "must be a date in YYYY-MM-DD form"
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	out, err := a.store.ReopenAgreement(r.Context(), id, req.Version, day, r.Header.Get(idempotencyKey))
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return

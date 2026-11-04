@@ -85,6 +85,8 @@ const placeholder = {
   depreciationExpenseAccount: "6820",
   paymentClearingAccount: "2110",
   remeasurementGainAccount: "7120",
+  terminationGainLossAccount: "7130",
+  exemptLeaseExpenseAccount: "6830",
   placeholder: true,
 };
 
@@ -95,7 +97,7 @@ describe("lease ledger posting", () => {
     expect(validatePost({ ...base, leaseId: LEASE }).input?.leaseId).toBe(LEASE);
     expect(Object.keys(validatePost({ legalEntityId: "x", ledgerId: "", postThrough: "31/12/2026", leaseId: "y" }).errors).sort()).toEqual(["leaseId", "ledgerId", "legalEntityId", "postThrough"]);
     expect(validatePost({ ...base, postThrough: "2026-13-45" }).errors.postThrough).toBeDefined();
-    const ok = Object.fromEntries(["rouAssetAccount", "rouAccumulatedDepreciationAccount", "liabilityAccount", "interestExpenseAccount", "depreciationExpenseAccount", "paymentClearingAccount", "remeasurementGainAccount"].map((k) => [k, "1700"]));
+    const ok = Object.fromEntries(["rouAssetAccount", "rouAccumulatedDepreciationAccount", "liabilityAccount", "interestExpenseAccount", "depreciationExpenseAccount", "paymentClearingAccount", "remeasurementGainAccount", "terminationGainLossAccount", "exemptLeaseExpenseAccount"].map((k) => [k, "1700"]));
     expect(validateProfile(ok as never)).toEqual({});
     expect(Object.keys(validateProfile({ ...ok, liabilityAccount: "a b" } as never))).toEqual(["liabilityAccount"]);
   });

@@ -60,6 +60,12 @@ spec:
               value: {{ .Values.migrateOnStart | quote }}
             - name: HUB_POLL_INTERVAL_MS
               value: {{ .Values.pollIntervalMs | quote }}
+            - name: HUB_API_DEPRECATION_MONTHS
+              value: {{ .Values.apiDeprecationMonths | quote }}
+            - name: HUB_USAGE_RETENTION_DAYS
+              value: {{ .Values.usageRetentionDays | quote }}
+            - name: HUB_MAINTENANCE_INTERVAL_MS
+              value: {{ .Values.maintenanceIntervalMs | quote }}
             - name: INTEGRATION_HUB_ALLOW_HTTP
               value: {{ ternary "1" "0" .Values.allowHttp | quote }}
 {{- if .Values.egressAllow }}

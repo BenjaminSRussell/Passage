@@ -206,8 +206,9 @@ func ValidateLine(l JournalLine, maxScale int32) error {
 // quantity on the same side, a non-negative cost, known dimensions with a site
 // (FR-16.5), ±1 for a serial (BR-16.9), and the owner rule: an
 // OWNERSHIP_CHANGE line names vendor-owned stock and a positive quantity (the
-// quantity moved to the legal entity); any other line is refused on
-// vendor-owned stock, which never carries value (INV-OWN-001, BR-16.14).
+// quantity moved to the legal entity); any other line but a COUNT line (a
+// quantity-only variance) is refused on vendor-owned stock, which never carries
+// value (INV-OWN-001, BR-16.14).
 func ValidateLineFor(t JournalType, l JournalLine, maxScale int32) error {
 	if l.ProductID == "" {
 		return fail(CodeInvalid, "line %d has no product", l.LineNo)
@@ -233,7 +234,7 @@ func ValidateLineFor(t JournalType, l JournalLine, maxScale int32) error {
 		return fail(CodeInvalid, "line %d: an ownership change line names the vendor-owned stock it moves (dimension owner)", l.LineNo)
 	case t == JournalOwnershipChange && l.Qty.Sign() < 0:
 		return fail(CodeInvalid, "line %d: an ownership change quantity is the positive quantity moved to the legal entity", l.LineNo)
-	case t != JournalOwnershipChange && VendorOwned(dims):
+	case t != JournalOwnershipChange && t != JournalCount && VendorOwned(dims):
 		return fail(CodeOwnershipValue, "line %d: vendor-owned stock cannot be valued or financially posted; post an ownership change first", l.LineNo)
 	}
 	if dims[DimLicensePlate] != "" {
@@ -403,6 +404,13 @@ func PlanPosting(j Journal) []PostedLine {
 		if l.Qty.Sign() > 0 {
 			st = StatusPurchased
 		}
+		if j.Type == JournalCount && VendorOwned(l.Dims) {
+			// A vendor-owned variance moves quantity only: RECEIVED or DEDUCTED, no value.
+			st = StatusDeducted
+			if l.Qty.Sign() > 0 {
+				st = StatusReceived
+			}
+		}
 		out = append(out, PostedLine{Line: l, Status: st})
 	}
 	return out
@@ -432,6 +440,30 @@ func ReverseJournal(orig Journal, newID string, postingDate time.Time) (Journal,
 	for _, l := range orig.Lines {
 		out.Lines = append(out.Lines, JournalLine{LineNo: l.LineNo, ReversesLineID: l.ID, ProductID: l.ProductID, Dims: l.Dims,
 			Qty: l.Qty.Neg(), EnteredQty: l.EnteredQty.Neg(), EnteredUnit: l.EnteredUnit, CostPrice: l.CostPrice})
+	}
+	return out, nil
+}
+
+// CopyJournal builds a new DRAFT journal with the header and the lines of src
+// (AX copy journal): same legal entity, type, offset account, journal name and
+// currency, the given posting date, every line copied with its quantities,
+// unit, cost price and dimensions, without client keys or reversal links. Any
+// status can be copied, so a posted journal is a template for the next one. A
+// COUNT journal belongs to its sheet and a reversal to the journal it
+// reverses (a copy would lose the link that values it at the original), so
+// neither can be copied.
+func CopyJournal(src Journal, newID string, postingDate time.Time) (Journal, error) {
+	if !slices.Contains(KeyedJournalTypes, src.Type) {
+		return Journal{}, fail(CodeJournalNotReady, "%s journals are created by their source document and cannot be copied", src.Type)
+	}
+	if src.ReversesJournalID != "" {
+		return Journal{}, fail(CodeJournalNotReady, "a reversal cannot be copied: it only makes sense against the journal it reverses")
+	}
+	out := Journal{ID: newID, LegalEntityID: src.LegalEntityID, Type: src.Type, Status: JournalDraft, PostingDate: postingDate,
+		OffsetAccountID: src.OffsetAccountID, Currency: src.Currency, JournalNameID: src.JournalNameID, Version: 1}
+	for _, l := range src.Lines {
+		out.Lines = append(out.Lines, JournalLine{LineNo: l.LineNo, ProductID: l.ProductID, Dims: l.Dims, Qty: l.Qty, EnteredQty: l.EnteredQty,
+			EnteredUnit: l.EnteredUnit, CostPrice: l.CostPrice, ToDims: l.ToDims})
 	}
 	return out, nil
 }

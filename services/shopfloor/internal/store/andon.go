@@ -160,6 +160,7 @@ func carryQualityFail(ctx context.Context, tx pgx.Tx, tenantID, resourceID, clea
 
 // AndonSweepResult counts what one andon sweep did.
 type AndonSweepResult struct {
+	IdleOpened      int `json:"idleOpened"`
 	DowntimeRaised  int `json:"downtimeRaised"`
 	ScrapRateRaised int `json:"scrapRateRaised"`
 	Cleared         int `json:"cleared"`
@@ -168,7 +169,9 @@ type AndonSweepResult struct {
 // SweepAndon is the scheduled andon job (FR-25.11, BR-25.10). Raising and clearing a downtime
 // alert otherwise happen only when the machine sends events, so a machine that went silent
 // while DOWN would never raise one. The sweep, in one transaction under the caller's tenant:
-//   - raises a downtime alert for every downtime open for more than 10 minutes;
+//   - opens an idle downtime for every machine whose last state is RUNNING and that has counted
+//     nothing for its idle threshold (BR-25.6), from its last count, unless it has a downtime open;
+//   - raises a downtime alert for every downtime open for more than 10 minutes (an idle one too);
 //   - clears the downtime alerts whose downtime ended at least 5 minutes ago;
 //   - reads the latest completed stored OEE bucket of each resource and raises a scrap rate
 //     alert when more than 5 % of its pieces are scrap, or clears the open one once the latest
@@ -179,6 +182,10 @@ func (s *Postgres) SweepAndon(ctx context.Context, now time.Time) (AndonSweepRes
 	p, _ := tenant.FromContext(ctx)
 	var out AndonSweepResult
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		if out.IdleOpened, err = openIdleDowntimes(ctx, tx, p.TenantID, now); err != nil {
+			return err
+		}
 		// The machine row is the lock ingest takes per machine. A machine whose events are being
 		// ingested right now is skipped: that ingest raises its alert itself if it is due, and
 		// waiting on it could deadlock on the downtime and andon rows both transactions write.
@@ -333,4 +340,99 @@ func (s *Postgres) ClearAndon(ctx context.Context, id, reason, clearedBy string,
 		return remember(ctx, tx, idem, http.StatusOK, out)
 	})
 	return out, err
+}
+
+// idleCandidates finds the machines that are RUNNING by their latest state report, have had no
+// count for longer than their idle threshold and have no downtime open. last is the latest state
+// report; st is the start of that RUNNING stretch, the first RUNNING report after the latest other
+// state; c is the last count within it. $1 is the tenant, $2 the sweep time.
+const idleCandidates = `select m.id::text, m.resource_id::text, m.idle_threshold_s, st.ts, c.ts
+	from machine m
+	cross join lateral (select e.state from machine_event e
+		where e.tenant_id = m.tenant_id and e.machine_id = m.id and e.state is not null
+		order by e.ts desc, e.seq desc limit 1) last
+	cross join lateral (select min(e.ts) as ts from machine_event e
+		where e.tenant_id = m.tenant_id and e.machine_id = m.id and e.state = 'RUNNING'
+		and e.ts > coalesce((select max(x.ts) from machine_event x
+			where x.tenant_id = m.tenant_id and x.machine_id = m.id and x.state is not null and x.state <> 'RUNNING'), '-infinity')) st
+	left join lateral (select e.ts from machine_event e
+		where e.tenant_id = m.tenant_id and e.machine_id = m.id and e.kind = 'count' and e.ts >= st.ts
+		order by e.ts desc limit 1) c on true
+	where m.tenant_id = $1 and last.state = 'RUNNING' and st.ts is not null
+	and greatest(st.ts, coalesce(c.ts, st.ts)) < $2::timestamptz - make_interval(secs => m.idle_threshold_s)
+	and not exists (select 1 from downtime_record d where d.tenant_id = m.tenant_id and d.machine_id = m.id and d.ended_at is null)`
+
+// openIdleDowntimes opens the idle DowntimeRecord of every machine that is RUNNING by its latest
+// state report and has had no count for its idle threshold (FR-25.11, BR-25.6; the threshold is
+// the machine's idle_threshold_s, default 300 s, the one OEE uses), starting at its last count or
+// at the start of RUNNING. A machine with a downtime already open is left alone (at most one open
+// downtime per machine), and so is a machine whose events are being ingested right now: that
+// ingest ends or keeps the record itself. It returns how many records it opened; the next count or
+// state report that leaves RUNNING ends one (IngestMachineEvents).
+//
+// The machine row is the lock ingest takes. The candidates are locked first (skip locked) and then
+// read again in a second statement: under read committed that statement sees every ingest that
+// committed before the lock was taken, so a count that arrived between the first read and the lock
+// cannot be missed and open a spurious idle record. A machine that turned idle in between is found
+// by the next sweep.
+func openIdleDowntimes(ctx context.Context, tx pgx.Tx, tenantID string, now time.Time) (int, error) {
+	rows, err := tx.Query(ctx, idleCandidates+` order by m.created_at, m.id for update of m skip locked`, tenantID, now)
+	if err != nil {
+		return 0, err
+	}
+	var locked []string
+	for rows.Next() {
+		var machineID, resourceID string
+		var thresholdS int
+		var runningSince, lastCount *time.Time
+		if err := rows.Scan(&machineID, &resourceID, &thresholdS, &runningSince, &lastCount); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		locked = append(locked, machineID)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if len(locked) == 0 {
+		return 0, nil
+	}
+	type idle struct {
+		machineID, resourceID string
+		since                 time.Time
+	}
+	var found []idle
+	rows, err = tx.Query(ctx, idleCandidates+` and m.id = any($3::uuid[]) order by m.created_at, m.id`, tenantID, now, locked)
+	if err != nil {
+		return 0, err
+	}
+	for rows.Next() {
+		var machineID, resourceID string
+		var thresholdS int
+		var runningSince, lastCount *time.Time
+		if err := rows.Scan(&machineID, &resourceID, &thresholdS, &runningSince, &lastCount); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if since, ok := domain.IdleSince(runningSince, lastCount, time.Duration(thresholdS)*time.Second, now); ok {
+			found = append(found, idle{machineID, resourceID, since})
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	opened := 0
+	for _, f := range found {
+		tag, err := tx.Exec(ctx, `insert into downtime_record (tenant_id, id, machine_id, resource_id, started_at, cause)
+			values ($1, $2, $3, $4, $5, 'idle')
+			on conflict (tenant_id, machine_id) where ended_at is null do nothing`,
+			tenantID, ids.New(), f.machineID, f.resourceID, f.since)
+		if err != nil {
+			return 0, err
+		}
+		opened += int(tag.RowsAffected())
+	}
+	return opened, nil
 }

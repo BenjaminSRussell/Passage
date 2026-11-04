@@ -19,6 +19,8 @@ type RFQLineData struct {
 	Qty          string `json:"qty"`
 	Unit         string `json:"unit"`
 	RequiredDate string `json:"required_date,omitempty"`
+	// RequisitionLineID is the requisition line the RFQ line was raised for, when it was.
+	RequisitionLineID string `json:"requisition_line_id,omitempty"`
 }
 
 // RFQSentData is the data member of rfq.sent.v1: the vendors invited to reply
@@ -35,16 +37,18 @@ type RFQSentData struct {
 // RFQAwardedLine is one awarded line: the reply that won it, its vendor and
 // price, and the purchase order created from it.
 type RFQAwardedLine struct {
-	LineNo          int    `json:"line_no"`
-	LineID          string `json:"line_id"`
-	ReplyID         string `json:"reply_id"`
-	VendorID        string `json:"vendor_id"`
-	UnitPrice       string `json:"unit_price"`
-	PriceUnit       string `json:"price_unit"`
-	Currency        string `json:"currency"`
-	LeadTimeDays    int    `json:"lead_time_days"`
-	PurchaseOrderID string `json:"purchase_order_id"`
-	OverrideReason  string `json:"override_reason,omitempty"`
+	LineNo   int    `json:"line_no"`
+	LineID   string `json:"line_id"`
+	ReplyID  string `json:"reply_id"`
+	VendorID string `json:"vendor_id"`
+	// RequisitionLineID is the requisition line the awarded RFQ line was raised for, when it was.
+	RequisitionLineID string `json:"requisition_line_id,omitempty"`
+	UnitPrice         string `json:"unit_price"`
+	PriceUnit         string `json:"price_unit"`
+	Currency          string `json:"currency"`
+	LeadTimeDays      int    `json:"lead_time_days"`
+	PurchaseOrderID   string `json:"purchase_order_id"`
+	OverrideReason    string `json:"override_reason,omitempty"`
 }
 
 // RFQAwardedData is the data member of rfq.awarded.v1.

@@ -101,6 +101,8 @@ export interface RunSummary {
   checks?: RunCheck[];
   /** Set when the rows of the run are the nodes of a hierarchy version. */
   hierarchy?: { code: string; version: number };
+  /** Set when the run is limited to a unit of a reporting tree; unit is empty for the whole tree. */
+  tree?: { code: string; unit: string; revision: number };
 }
 
 export interface CellSummary {
@@ -179,6 +181,55 @@ export interface LagRow {
   ledgerId: string;
   postingSequence: number;
   updatedAt: string;
+  /** Journal entries the ledger consumer has applied; absent from older services. */
+  entriesApplied?: number;
+  /** Entries that arrived ahead of the mark and wait for an earlier one; absent from older services. */
+  entriesPending?: number;
+  /** Seconds the oldest waiting entry has waited; 0 when nothing waits. Absent from older services. */
+  lagSeconds?: number;
+  /** Highest posting sequence seen for the ledger, applied or waiting. */
+  hwmLedger?: number;
+}
+
+/** The lag rows and the gate (reporting.max_lag_seconds) a run is refused above. */
+export interface LagStatus {
+  items: LagRow[];
+  /** Absent from older services. */
+  maxLagSeconds?: number;
+}
+
+export const VERIFICATION_STATUSES = ["matched", "differs", "inconclusive"] as const;
+export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
+
+/** One account whose net differs between the read model and the ledger (readModel minus ledger). */
+export interface VerificationDiff {
+  account: string;
+  readModel: string;
+  ledger: string;
+  difference: string;
+}
+
+/** A stored comparison of a ledger's read model with its trial balance (FR-15.1), as the list serves it. */
+export interface VerificationSummary {
+  id: string;
+  ledgerId: string;
+  legalEntityId?: string;
+  status: VerificationStatus;
+  hwmBefore: number;
+  hwmAfter: number;
+  /** Entries seen waiting ahead of the read model's mark (they make the check inconclusive). */
+  entriesPending: number;
+  accountsCompared: number;
+  /** Accounts that differ; diffs holds the first 500. */
+  diffCount: number;
+  requestedBy: string;
+  verifiedAt: string;
+}
+
+/** One stored check with its differing accounts; they are withheld from a user without ledger.balance.read. */
+export interface Verification extends VerificationSummary {
+  diffs: VerificationDiff[];
+  diffsWithheld?: boolean;
 }
 
 export interface CalendarPeriod {
@@ -196,8 +247,17 @@ export interface RunRequest {
   period: CalendarPeriod;
   calendar: CalendarPeriod[];
   includeAdjustmentPeriods?: boolean;
+  /** Accepts a read model behind the lag gate: the run completes with a REPORT-0004 warning instead of being refused. */
+  allowStale?: boolean;
   /** Takes the rows from a published hierarchy; the definition supplies the columns. */
   hierarchy?: HierarchyRunRequest;
+  /** Limits the run to the balances of one unit of a reporting tree, rolled up; no unit means the whole tree. */
+  tree?: TreeRunRequest;
+}
+
+export interface TreeRunRequest {
+  code: string;
+  unit?: string;
 }
 
 export interface HierarchyRunRequest {
@@ -350,8 +410,22 @@ export function drillLines(
   return get<LinePage>(`/runs/${seg(runId)}/cells/${seg(row)}/${seg(column)}/lines${qs ? `?${qs}` : ""}`, signal);
 }
 
-export async function getLag(signal?: AbortSignal): Promise<LagRow[]> {
-  return (await get<{ items: LagRow[] }>("/lag", signal)).items;
+export async function getLag(signal?: AbortSignal): Promise<LagStatus> {
+  return get<LagStatus>("/lag", signal);
+}
+
+export async function listVerifications(ledgerId: string, signal?: AbortSignal): Promise<VerificationSummary[]> {
+  const query = ledgerId ? `?ledgerId=${seg(ledgerId)}` : "";
+  return (await get<{ items: VerificationSummary[] }>(`/balance-verifications${query}`, signal)).items;
+}
+
+export function getVerification(id: string, signal?: AbortSignal): Promise<Verification> {
+  return get<Verification>(`/balance-verifications/${seg(id)}`, signal);
+}
+
+/** Checks one ledger. The key makes a retried click return the same check. */
+export async function createVerification(ledgerId: string, key: string): Promise<Verification> {
+  return (await send<Verification>("/balance-verifications", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify({ ledgerId }) })).body;
 }
 
 /** Starts a run. The key makes a retried click return the same run. */
@@ -528,6 +602,101 @@ export async function saveSchedule(schedule: ScheduleInput, etag: string | null)
   if (etag) headers["If-Match"] = etag;
   const sent = await send<Schedule>(`/schedules/${seg(schedule.code)}`, { method: "PUT", headers, body: JSON.stringify(schedule) });
   return { schedule: sent.body, etag: sent.etag };
+}
+
+// --- designer parts (FR-15.2, FR-15.3) -------------------------------------
+
+/** A reusable list of report rows. */
+export interface RowSet {
+  code: string;
+  name: string;
+  rows: DefinitionRow[];
+  /** Read-only: the user who saved the set last. */
+  updatedBy?: string;
+}
+
+/** A reusable list of report columns; templates are column sets the service ships. */
+export interface ColumnSet {
+  code: string;
+  name: string;
+  description?: string;
+  columns: DefinitionColumn[];
+  updatedBy?: string;
+}
+
+export async function listRowSets(signal?: AbortSignal): Promise<RowSet[]> {
+  return (await get<{ items: RowSet[] }>("/row-sets", signal)).items;
+}
+
+export async function getRowSet(code: string, signal?: AbortSignal): Promise<{ part: RowSet; etag: string | null }> {
+  const sent = await send<RowSet>(`/row-sets/${seg(code)}`, {}, signal);
+  return { part: sent.body, etag: sent.etag };
+}
+
+/** Creates (etag null) or replaces a row set. A stale etag answers 412 conflict_version. */
+export async function saveRowSet(set: RowSet, etag: string | null): Promise<{ part: RowSet; etag: string | null }> {
+  const headers: Record<string, string> = {};
+  if (etag) headers["If-Match"] = etag;
+  const sent = await send<RowSet>(`/row-sets/${seg(set.code)}`, { method: "PUT", headers, body: JSON.stringify(set) });
+  return { part: sent.body, etag: sent.etag };
+}
+
+export async function listColumnSets(signal?: AbortSignal): Promise<ColumnSet[]> {
+  return (await get<{ items: ColumnSet[] }>("/column-sets", signal)).items;
+}
+
+export async function getColumnSet(code: string, signal?: AbortSignal): Promise<{ part: ColumnSet; etag: string | null }> {
+  const sent = await send<ColumnSet>(`/column-sets/${seg(code)}`, {}, signal);
+  return { part: sent.body, etag: sent.etag };
+}
+
+export async function saveColumnSet(set: ColumnSet, etag: string | null): Promise<{ part: ColumnSet; etag: string | null }> {
+  const headers: Record<string, string> = {};
+  if (etag) headers["If-Match"] = etag;
+  const sent = await send<ColumnSet>(`/column-sets/${seg(set.code)}`, { method: "PUT", headers, body: JSON.stringify(set) });
+  return { part: sent.body, etag: sent.etag };
+}
+
+/** The comparative column sets the service ships (actual against prior year, and so on). */
+export async function listColumnTemplates(signal?: AbortSignal): Promise<ColumnSet[]> {
+  return (await get<{ items: ColumnSet[] }>("/column-set-templates", signal)).items;
+}
+
+// --- reporting trees (FR-15.4) ---------------------------------------------
+
+/** A reporting unit: values of the tree's dimension attribute, grouped under a parent for roll-up. */
+export interface TreeUnit {
+  code: string;
+  name: string;
+  parent?: string;
+  /** Values that belong to the unit itself; the unit also covers the values of the units below it. */
+  values?: string[];
+}
+
+export interface Tree {
+  code: string;
+  name: string;
+  /** The dimension attribute the units group, such as profit_center. */
+  attribute: string;
+  units: TreeUnit[];
+  updatedBy?: string;
+}
+
+export async function listTrees(signal?: AbortSignal): Promise<Tree[]> {
+  return (await get<{ items: Tree[] }>("/trees", signal)).items;
+}
+
+export async function getTree(code: string, signal?: AbortSignal): Promise<{ part: Tree; etag: string | null }> {
+  const sent = await send<Tree>(`/trees/${seg(code)}`, {}, signal);
+  return { part: sent.body, etag: sent.etag };
+}
+
+/** Creates (etag null) or replaces a tree. A stale etag answers 412 conflict_version. */
+export async function saveTree(tree: Tree, etag: string | null): Promise<{ part: Tree; etag: string | null }> {
+  const headers: Record<string, string> = {};
+  if (etag) headers["If-Match"] = etag;
+  const sent = await send<Tree>(`/trees/${seg(tree.code)}`, { method: "PUT", headers, body: JSON.stringify(tree) });
+  return { part: sent.body, etag: sent.etag };
 }
 
 // --- audit trail (FR-15.10) ------------------------------------------------

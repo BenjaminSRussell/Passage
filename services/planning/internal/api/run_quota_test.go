@@ -62,11 +62,24 @@ func TestRun_QuotaSplitCreatesOneOrderPerSource(t *testing.T) {
 	}
 }
 
+// A vendor-only arrangement cannot take a production order: the order stays as
+// planned and the run stores one PLAN-0009 no-quota-source message naming the
+// order and the arrangement.
 func TestRun_QuotaIgnoresOtherOrderTypes(t *testing.T) {
 	st := &fakeStore{runQuotas: []domain.RunQuota{purchaseQuota(false)}}
 	_, req := runVersion(t, st, runBody, "k-prod")
-	if o := onlyOrder(t, req); o.QuotaSourceID != "" || o.VendorID != "" {
+	o := onlyOrder(t, req)
+	if o.QuotaSourceID != "" || o.VendorID != "" {
 		t.Fatalf("a vendor source must not take a production order: %+v", o)
+	}
+	var got []domain.Message
+	for _, m := range req.Result.Messages {
+		if m.Action == domain.ActionNoQuotaSource {
+			got = append(got, m)
+		}
+	}
+	if len(got) != 1 || got[0].SupplyRef != o.Number || got[0].DemandRef != "arr-1" || got[0].ItemID != fgID || !got[0].Qty.Equal(o.Qty) {
+		t.Fatalf("no-quota-source messages %+v; want one for %s under arr-1", got, o.Number)
 	}
 }
 

@@ -32,7 +32,7 @@ func setupLedgerSet(t *testing.T) setEnv {
 		"7010": {Name: "Local freight expense", Type: "expense", Postable: true},
 		"2100": {Name: "Vendor payable", Type: "liability", Postable: true},
 	} {
-		if _, _, err := e.store.PutAccount(e.ctx, "LOC", num, a); err != nil {
+		if _, _, err := e.store.PutAccount(e.ctx, "LOC", num, 0, a); err != nil {
 			t.Fatalf("put local account %s: %v", num, err)
 		}
 	}
@@ -317,7 +317,7 @@ func TestPostgres_LedgerSetCodeIsUniquePerLegalEntity(t *testing.T) {
 
 func TestPostgres_AccountMappingTargetMustBePostableInTheLedgerChart(t *testing.T) {
 	e := setupLedgerSet(t)
-	if _, _, err := e.store.PutAccount(e.ctx, "LOC", "7999", Account{Name: "Total", Type: "reporting", Postable: false}); err != nil {
+	if _, _, err := e.store.PutAccount(e.ctx, "LOC", "7999", 0, Account{Name: "Total", Type: "reporting", Postable: false}); err != nil {
 		t.Fatal(err)
 	}
 	for target, code := range map[string]string{"9999": "LEDGER_ACCOUNT_NOT_FOUND", "7999": "LEDGER_ACCOUNT_NOT_POSTABLE", "2110": "LEDGER_ACCOUNT_NOT_FOUND"} {

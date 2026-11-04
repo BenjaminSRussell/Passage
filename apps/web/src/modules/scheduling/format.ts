@@ -22,6 +22,22 @@ export function formatDateTime(iso?: string | null): string {
   return Number.isNaN(date.getTime()) ? iso : `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
+/** "2026-10-26 10:00" on the clock of an IANA zone; the UTC form when the zone is unknown. */
+export function formatInZone(iso: string, timeZone: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  try {
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en-GB", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+        .formatToParts(date)
+        .map((p) => [p.type, p.value]),
+    );
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
+  } catch {
+    return formatDateTime(iso);
+  }
+}
+
 /** 150 → "2 h 30 min"; 45 → "45 min"; 120 → "2 h". */
 export function formatMinutes(minutes: number): string {
   const h = Math.floor(minutes / 60);

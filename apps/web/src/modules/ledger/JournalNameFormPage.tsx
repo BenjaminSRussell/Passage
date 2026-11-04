@@ -71,7 +71,7 @@ const flags: { key: Flag; label: string; note: string }[] = [
   { key: "active", label: "Active", note: "Inactive names keep their batches but can't be used for new or submitted batches." },
 ];
 
-function JournalNameForm({ initial, existing }: { initial: JournalNameDraft; existing: boolean }) {
+function JournalNameForm({ initial, existing, lockVersion }: { initial: JournalNameDraft; existing: boolean; lockVersion?: number }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [values, setValues] = useState<JournalNameDraft>(initial);
@@ -89,7 +89,7 @@ function JournalNameForm({ initial, existing }: { initial: JournalNameDraft; exi
     if (Object.keys(found).length > 0) return;
     setBusy(true);
     try {
-      await putJournalName(values.code, toJournalNameInput(values));
+      await putJournalName(values.code, toJournalNameInput(values), lockVersion);
       await queryClient.invalidateQueries({ queryKey: ["ledger", "journal-names"] });
       navigate("/ledger/journal-names");
     } catch (error) {
@@ -210,7 +210,7 @@ export function EditJournalNamePage() {
           </div>
         </Card>
       ) : (
-        <JournalNameForm initial={toDraft(result.data)} existing />
+        <JournalNameForm initial={toDraft(result.data)} existing lockVersion={result.data.lockVersion} />
       )}
     </div>
   );

@@ -52,6 +52,12 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   `source_system` and `dim.{ATTRIBUTE}=value` (all pairs must match). Keyset pages of
   up to 1,000 lines (default 100): pass `nextCursor` back as `cursor`. Migration 0010
   indexes the date and account access paths.
+- CSV exports (slice 23): `format=csv` on `GET /charts/{chart}/accounts`, `GET /balances`
+  and `GET /journal-lines` returns one streamed UTF-8 CSV file (byte order mark) of the whole
+  result under the same duty, filters and legal-entity scope, up to 50,000 rows
+  (`X-Passage-Export-Truncated`, `X-Passage-Export-Next-Cursor` when cut). Cells starting with
+  `=`, `+`, `-`, `@`, tab or carriage return get an apostrophe unless they are plain numbers.
+  `GET /charts/{chart}/accounts/{number}` reads one account with its `ETag`.
 - Events through the outbox (same transaction): `dev.passage.ledger.journal.posted.v1`,
   `dev.passage.ledger.journal.reversed.v1`, `dev.passage.ledger.balance.rebuilt.v1`.
 - Database guarantees (FR-11.6, BR-11.1): every table has `tenant_id` with ENABLE and
@@ -233,7 +239,7 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 |---|---|
 | `ledger.ledger.write` | `POST /ledgers` |
 | `ledger.account.write` | `PUT /charts/{chart}/accounts/{number}`, `PUT /ledgers/{ledger}/open-item-accounts/{account}` |
-| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts` (also `ledger.account.lookup`, the service duty close signs to read the chart), `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]`, `GET /journal-names[/{code}]`, `GET /journal-batches[/{id}]`, `GET /journal-lines`, `GET /recurring-journals[/{id}[/runs]]`, `GET /ledgers/{ledger}/open-item-accounts`, `GET /ledgers/{ledger}/open-item-activations`, `GET /ledgers/{ledger}/tolerance-groups[/{code}]`, `GET /open-items`, `GET /clearings[/{id}]`, `GET /ledgers/{ledger}/auto-clearing-rules[/{id}]`, `GET /auto-clearing-runs[/{id}]` |
+| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts[/{number}]` (also `ledger.account.lookup`, the service duty close signs to read the chart), `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]`, `GET /journal-names[/{code}]`, `GET /journal-batches[/{id}]`, `GET /journal-lines`, `GET /recurring-journals[/{id}[/runs]]`, `GET /ledgers/{ledger}/open-item-accounts`, `GET /ledgers/{ledger}/open-item-activations`, `GET /ledgers/{ledger}/tolerance-groups[/{code}]`, `GET /open-items`, `GET /clearings[/{id}]`, `GET /ledgers/{ledger}/auto-clearing-rules[/{id}]`, `GET /auto-clearing-runs[/{id}]` |
 | `ledger.journal.post` | Umbrella: `POST /journal-entries`, `POST /validate`, `POST /journal-batches/{id}/post`, `POST /ledger-sets/{setId}/journal-entries` (PRD "Post ledger journals"). Each route also accepts its own narrow duty: `ledger.entry.post` (service only), `ledger.entry.validate`, `ledger.batch.post`, `ledger.set.post` |
 | `ledger.entry.lookup`, `ledger.ledger.lookup` | Service-only narrow reads, accepted beside `ledger.journal.read` on `GET /journal-lines` (which filters by `documentId`, the posting document's UUID) and `GET /ledgers/{id}` |
 | `ledger.journal.postledger` | Flag duty checked with `ledger.journal.post` on `POST /journal-entries` and `POST /journal-batches/{id}/post` when the entry's ledger is a non-leading member of a ledger set (FB50L, PRD "Post to ledger-specific ledger"); without it the post is refused 403 `AUTH-0003` |
@@ -312,7 +318,7 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
   code (`LEDGER_REASON_REQUIRED` otherwise): items become `reset_open`, the
   difference entry is reversed with the given reason code (the ledger's reversal rules apply) and its
   two items are voided, an open residual item is voided (`LEDGER_CLEARING_RESIDUAL_USED` if it was
-  cleared since). `GET /clearings[/{id}]` reads documents (the list returns the newest 200).
+  cleared since). `GET /clearings[/{id}]` reads documents (the list pages by keyset cursor, newest first).
 - `POST /journal-entries/{id}/reverse` refuses an entry with an item in an active clearing, including a
   clearing's own difference entry (409 `LEDGER_OPEN_ITEM_ALREADY_CLEARED`): reset the clearing first.
 - `PUT/GET /ledgers/{ledger}/tolerance-groups[/{code}]` maintain the groups (`ETag`, optional `If-Match`).
@@ -422,6 +428,7 @@ today:
 | `LEDGER_BATCH_APPROVAL_REQUIRED` | 409: posting a validated batch whose journal name now requires approval; submit it for approval |
 | `LEDGER_SELF_APPROVAL` | 403: the submitter approves a batch of a journal name that does not allow self-approval |
 | `LEDGER_VERSION_CONFLICT` | 412: `If-Match` names an older batch version |
+| `LEDGER_PRECONDITION_REQUIRED` | 428: a PUT changes an existing account, account structure version, dimension value, description template or journal name without `If-Match` (send the row's `lockVersion` as the entity tag); repeating the stored content needs none |
 | `LEDGER_OI_ACCOUNT_INVALID` | 422: account cannot be open-item managed (BR-11.18) |
 | `LEDGER_OI_ACTIVATION_BALANCE` | 422: account has a balance; an activation run is needed (FR-11.19, LEDGER-0023) |
 | `LEDGER_OI_OPEN_ITEMS_EXIST` | 409: switching off an account that still has open items |
@@ -451,3 +458,19 @@ are not raised yet and are tracked in NOT-IMPLEMENTED.md.
 
 Only the platform module and its existing dependencies (chi, pgx/v5,
 shopspring/decimal, google/uuid) are used.
+
+## Concurrency and paging (slice 22)
+
+- Accounts, account structure versions, dimension values, description templates and journal names carry
+  `lockVersion` (migration 0031), returned in the body and as `ETag`. Changing an existing row with `PUT`
+  needs `If-Match: "<lockVersion>"` (428 `LEDGER_PRECONDITION_REQUIRED` without, 412 `LEDGER_VERSION_CONFLICT`
+  when stale or sent for a row that does not exist); creating needs none, and a `PUT` that repeats the stored
+  content is an idempotent 200 without a tag (a retried create, a re-run seed or migration load). The tag
+  increases only when the content changes. Two concurrent creates of one row: one wins, the other gets 428.
+- Keyset cursors are base64url JSON arrays of the sort keys (no secret: a cursor only positions a read the
+  caller may make anyway); each key is type-checked and normalized before it reaches SQL, and an altered
+  cursor is 400. Orders are total: batches and clearings by `created_at` then `id` (both descending),
+  recurring journals by next run date (none last), name, then `id`.
+- `GET /journal-batches`, `/recurring-journals` and `/clearings` page by keyset: `limit` (1 to 200, default 100)
+  and the opaque `cursor` from `nextCursor`, which is absent on the last page.
+- `dev.passage.ledger.journal.posted.v1` carries `legalEntityId` (also the CloudEvent `legalentityid` extension).

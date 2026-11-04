@@ -88,7 +88,63 @@ func (s *Postgres) ListLines(ctx context.Context, f LineFilter) (LinePage, error
 	if f.Limit < 1 || f.Limit > MaxPageSize {
 		f.Limit = MaxPageSize
 	}
-	args := []any{p.TenantID, f.LedgerID}
+	where, args := lineWhere(p.TenantID, f)
+	args = append(args, f.Limit+1)
+	limit := "$" + strconv.Itoa(len(args))
+
+	out := LinePage{Items: []JournalLine{}}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		ledger, err := loadLedger(ctx, tx, p.TenantID, f.LedgerID, false)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `select l.id::text, e.id::text, e.voucher, e.posting_sequence, e.posting_date::text, l.line_number,
+				m.account_number, d.display_name, d.dimensions, l.debit_credit::text, l.amount_txn::text, l.amount_acct::text, l.currency_txn::text,
+				l.negative_posting, coalesce(l.line_text, ''), coalesce(e.description, ''), e.source_system, e.source_type, e.source_id,
+				coalesce(e.source_uri, ''), coalesce(l.source_line_ref, ''), coalesce(e.reversal_of_entry_id::text, ''), e.is_realignment, e.trace_id,
+				coalesce(l.quantity::text, ''), coalesce(l.unit, '')
+			from `+lineFrom+`
+			where `+where+`
+			order by e.posting_sequence, l.line_number
+			limit `+limit, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var j JournalLine
+			if err := rows.Scan(&j.ID, &j.EntryID, &j.Voucher, &j.PostingSequence, &j.PostingDate, &j.LineNumber,
+				&j.Account, &j.DisplayName, &j.Dimensions, &j.DebitCredit, &j.Amount, &j.AmountAcct, &j.Currency,
+				&j.NegativePosting, &j.Text, &j.Description, &j.SourceSystem, &j.SourceType, &j.SourceID,
+				&j.SourceURI, &j.SourceLineRef, &j.ReversalOfEntry, &j.IsRealignment, &j.TraceID, &j.Quantity, &j.Unit); err != nil {
+				return err
+			}
+			j.Amount = fmtMoney(j.Amount, j.Currency)
+			j.AmountAcct = fmtMoney(j.AmountAcct, ledger.Currency)
+			out.Items = append(out.Items, j)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return LinePage{}, err
+	}
+	if len(out.Items) > f.Limit {
+		out.Items = out.Items[:f.Limit]
+		last := out.Items[len(out.Items)-1]
+		out.Next = &LineCursor{PostingSequence: last.PostingSequence, LineNumber: last.LineNumber}
+	}
+	return out, nil
+}
+
+// lineFrom joins a posted line to its entry, account and dimension combination (aliases e, l, m, d).
+const lineFrom = `journal_entry e
+			join journal_line l on l.tenant_id = e.tenant_id and l.entry_id = e.id
+			join main_account m on m.tenant_id = l.tenant_id and m.id = l.main_account_id
+			join dimension_combination d on d.tenant_id = l.tenant_id and d.id = l.dimension_combination_id`
+
+// lineWhere renders the filter (all values as bind parameters) over lineFrom.
+func lineWhere(tenantID string, f LineFilter) (string, []any) {
+	args := []any{tenantID, f.LedgerID}
 	arg := func(v any) string {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
@@ -124,51 +180,53 @@ func (s *Postgres) ListLines(ctx context.Context, f LineFilter) (LinePage, error
 	if f.After != nil {
 		where += " and (e.posting_sequence, l.line_number) > (" + arg(f.After.PostingSequence) + "::bigint, " + arg(f.After.LineNumber) + "::int)"
 	}
-	limit := arg(f.Limit + 1)
+	return where, args
+}
 
-	out := LinePage{Items: []JournalLine{}}
+// LineExportPlan is what a capped export of the lines needs before its first byte: the ledger's
+// dimension attributes (the file's dimension columns; every posted line's combination uses only
+// these, since attributes are only ever added) and Boundary, the keyset position of the last line
+// the file may hold, nil when the whole result fits.
+type LineExportPlan struct {
+	DimensionAttributes []string
+	Boundary            *LineCursor
+}
+
+// PlanLineExport finds the ledger's dimension attributes and the n-th line matching f (from
+// f.After) when another follows it. It checks the ledger and the caller's legal-entity scope as
+// ListLines does (404 LEDGER_NOT_FOUND).
+func (s *Postgres) PlanLineExport(ctx context.Context, f LineFilter, n int) (LineExportPlan, error) {
+	p, err := principalOf(ctx)
+	if err != nil {
+		return LineExportPlan{}, err
+	}
+	where, args := lineWhere(p.TenantID, f)
+	args = append(args, n-1)
+	var out LineExportPlan
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		ledger, err := loadLedger(ctx, tx, p.TenantID, f.LedgerID, false)
 		if err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `select l.id::text, e.id::text, e.voucher, e.posting_sequence, e.posting_date::text, l.line_number,
-				m.account_number, d.display_name, d.dimensions, l.debit_credit::text, l.amount_txn::text, l.amount_acct::text, l.currency_txn::text,
-				l.negative_posting, coalesce(l.line_text, ''), coalesce(e.description, ''), e.source_system, e.source_type, e.source_id,
-				coalesce(e.source_uri, ''), coalesce(l.source_line_ref, ''), coalesce(e.reversal_of_entry_id::text, ''), e.is_realignment, e.trace_id,
-				coalesce(l.quantity::text, ''), coalesce(l.unit, '')
-			from journal_entry e
-			join journal_line l on l.tenant_id = e.tenant_id and l.entry_id = e.id
-			join main_account m on m.tenant_id = l.tenant_id and m.id = l.main_account_id
-			join dimension_combination d on d.tenant_id = l.tenant_id and d.id = l.dimension_combination_id
-			where `+where+`
-			order by e.posting_sequence, l.line_number
-			limit `+limit, args...)
+		out.DimensionAttributes = ledger.DimensionAttributes
+		rows, err := tx.Query(ctx, `select e.posting_sequence, l.line_number from `+lineFrom+`
+			where `+where+` order by e.posting_sequence, l.line_number offset $`+strconv.Itoa(len(args))+`::bigint limit 2`, args...)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
+		var found []LineCursor
 		for rows.Next() {
-			var j JournalLine
-			if err := rows.Scan(&j.ID, &j.EntryID, &j.Voucher, &j.PostingSequence, &j.PostingDate, &j.LineNumber,
-				&j.Account, &j.DisplayName, &j.Dimensions, &j.DebitCredit, &j.Amount, &j.AmountAcct, &j.Currency,
-				&j.NegativePosting, &j.Text, &j.Description, &j.SourceSystem, &j.SourceType, &j.SourceID,
-				&j.SourceURI, &j.SourceLineRef, &j.ReversalOfEntry, &j.IsRealignment, &j.TraceID, &j.Quantity, &j.Unit); err != nil {
+			var c LineCursor
+			if err := rows.Scan(&c.PostingSequence, &c.LineNumber); err != nil {
 				return err
 			}
-			j.Amount = fmtMoney(j.Amount, j.Currency)
-			j.AmountAcct = fmtMoney(j.AmountAcct, ledger.Currency)
-			out.Items = append(out.Items, j)
+			found = append(found, c)
+		}
+		if len(found) == 2 {
+			out.Boundary = &found[0]
 		}
 		return rows.Err()
 	})
-	if err != nil {
-		return LinePage{}, err
-	}
-	if len(out.Items) > f.Limit {
-		out.Items = out.Items[:f.Limit]
-		last := out.Items[len(out.Items)-1]
-		out.Next = &LineCursor{PostingSequence: last.PostingSequence, LineNumber: last.LineNumber}
-	}
-	return out, nil
+	return out, err
 }

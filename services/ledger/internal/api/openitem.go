@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -457,12 +458,19 @@ func (a *API) listClearings(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	items, err := a.store.ListClearings(r.Context(), ledgerID, status)
+	page, ok := pageParams(w, r, cursorTimestamp, cursorUUID)
+	if !ok {
+		return
+	}
+	items, err := a.store.ListClearings(r.Context(), ledgerID, status, page)
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+	items, next := trimPage(items, page.Limit, func(d store.ClearingDocument) []string {
+		return []string{d.CreatedAt.UTC().Format(time.RFC3339Nano), d.ID}
+	})
+	httpx.JSON(w, http.StatusOK, pageBody(items, next))
 }
 
 func clearingID(w http.ResponseWriter, r *http.Request) (string, bool) {

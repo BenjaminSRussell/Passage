@@ -268,4 +268,12 @@ func TestPostgres_ProcedureVersions(t *testing.T) {
 	if _, err := s.GetProcedure(principal(2, ""), v1.ID); problemCode(err) != domain.CodeProcedureNotFound {
 		t.Fatalf("another tenant must not see the procedure: %v", err)
 	}
+	// Compare (FR-26.13) reads versions by id: a caller scoped to another legal entity of the same
+	// tenant must not reach this one's draft or active versions.
+	if _, err := s.GetProcedure(principal(1, otherLegalEntity), v1.ID); problemCode(err) != domain.CodeProcedureNotFound {
+		t.Fatalf("a caller scoped to another legal entity must not see the procedure: %v", err)
+	}
+	if got, err := s.GetProcedure(principal(1, legalEntity), v1.ID); err != nil || got.ID != v1.ID {
+		t.Fatalf("a caller scoped to the procedure's legal entity reads it: %+v err %v", got, err)
+	}
 }

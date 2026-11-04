@@ -159,3 +159,50 @@ func (s *Postgres) CloseAgreement(ctx context.Context, id string, version int, c
 	})
 	return out, err
 }
+
+// ReopenAgreement makes a CLOSED agreement ACTIVE again with validTo as its new last day
+// (BR-26.8 reversed): the end date must be later than the close date it carries now (422
+// COM-0001), so invoices dated after the old close date accrue again up to validTo. The
+// accruals already booked stay as they are. 409 PRC-0031 when the agreement is not CLOSED; 412
+// on a stale version; writes rebateagreement.reopened in the same transaction; a repeated
+// Idempotency-Key replays the first response.
+func (s *Postgres) ReopenAgreement(ctx context.Context, id string, version int, validTo time.Time, idempotencyKey string) (domain.RebateAgreement, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out domain.RebateAgreement
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		cur, _, err := lockAgreement(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		hash := commandHash("agreement-reopen", id, strconv.Itoa(version), dayStr(validTo))
+		if ok, err := replayJSON(ctx, tx, p.TenantID, idempotencyKey, hash, &out); err != nil || ok {
+			return err
+		}
+		if cur.Version != version {
+			return httpx.NewProblem(http.StatusPreconditionFailed, CodeVersionConflict, "rebate agreement version does not match")
+		}
+		if cur.Status != domain.AgreementClosed {
+			return httpx.NewProblem(http.StatusConflict, CodeStateInvalid, "rebate agreement "+cur.ID+" is "+cur.Status+"; only a CLOSED agreement can be reopened")
+		}
+		if dayStr(validTo) <= dayStr(cur.ValidTo) {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation,
+				"validTo must be after the close date "+dayStr(cur.ValidTo))
+		}
+		next := cur
+		next.Status, next.ValidTo = domain.AgreementActive, validTo
+		if e := domain.ValidateAgreement(next); e != nil {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, e.Code, e.Detail)
+		}
+		if _, err := tx.Exec(ctx, `update rebate_agreement set status = 'ACTIVE', valid_to = $2, closed_at = null, version = version + 1 where id = $1`,
+			id, validTo); err != nil {
+			return err
+		}
+		next.Version = cur.Version + 1
+		out = next
+		if err := enqueueEvent(ctx, tx, "rebateagreement", out.ID, pevents.RebateAgreementReopened, agreementEventData(out)); err != nil {
+			return err
+		}
+		return rememberJSON(ctx, tx, p.TenantID, idempotencyKey, hash, out)
+	})
+	return out, err
+}

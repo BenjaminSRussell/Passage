@@ -25,6 +25,7 @@ export function CountPlansPage() {
           row.abcClass ? `Class ${row.abcClass}` : "",
           row.samplePct ? `${row.samplePct} % sample` : "",
           row.minDaysSinceCount ? `Not counted for ${row.minDaysSinceCount} days` : "",
+          row.includeVendorOwned ? "Includes vendor-owned stock" : "",
         ]
           .filter(Boolean)
           .join(" · ") || "Everything",

@@ -25,7 +25,7 @@ func putName(t *testing.T, e env, code string, in JournalName) {
 	if in.LinesLimit == 0 {
 		in.LinesLimit = domain.DefaultBatchLinesLimit
 	}
-	if _, _, err := e.store.PutJournalName(e.ctx, code, in); err != nil {
+	if _, _, err := e.store.PutJournalName(e.ctx, code, nameTag(e, code), in); err != nil {
 		t.Fatalf("put journal name %s: %v", code, err)
 	}
 }
@@ -305,7 +305,7 @@ func TestPostgres_BatchPostFailureKeepsStateAndError(t *testing.T) {
 		t.Fatal(err)
 	}
 	suspended := "2026-01-01"
-	if _, _, err := e.store.PutAccount(e.ctx, "STD", "6010", Account{Name: "Freight expense", Type: "expense", Postable: true, SuspendedFrom: &suspended}); err != nil {
+	if _, _, err := e.store.PutAccount(e.ctx, "STD", "6010", accountTag(e, "STD", "6010"), Account{Name: "Freight expense", Type: "expense", Postable: true, SuspendedFrom: &suspended}); err != nil {
 		t.Fatal(err)
 	}
 	_, err = postBatch(e, e.ctx, b, "FAIL-1", false)
@@ -321,7 +321,7 @@ func TestPostgres_BatchPostFailureKeepsStateAndError(t *testing.T) {
 		t.Fatalf("a failed post must write nothing: %+v", tb.Rows)
 	}
 	// Lift the suspension and retry with the same key: it posts and clears the error.
-	if _, _, err := e.store.PutAccount(e.ctx, "STD", "6010", Account{Name: "Freight expense", Type: "expense", Postable: true}); err != nil {
+	if _, _, err := e.store.PutAccount(e.ctx, "STD", "6010", accountTag(e, "STD", "6010"), Account{Name: "Freight expense", Type: "expense", Postable: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := postBatch(e, e.ctx, after, "FAIL-1", false); err != nil {
@@ -482,11 +482,11 @@ func TestPostgres_BatchIsolationAndList(t *testing.T) {
 
 func TestPostgres_JournalNameCRUD(t *testing.T) {
 	e, _ := setup(t)
-	created, isNew, err := e.store.PutJournalName(e.ctx, "GJ", JournalName{Name: "General", RequiresApproval: true, LinesLimit: 50, Active: true})
+	created, isNew, err := e.store.PutJournalName(e.ctx, "GJ", 0, JournalName{Name: "General", RequiresApproval: true, LinesLimit: 50, Active: true})
 	if err != nil || !isNew || created.Code != "GJ" || !created.RequiresApproval || created.LinesLimit != 50 {
 		t.Fatalf("create: %+v %v %v", created, isNew, err)
 	}
-	replaced, isNew, err := e.store.PutJournalName(e.ctx, "GJ", JournalName{Name: "General journal", LinesLimit: 10, Active: false})
+	replaced, isNew, err := e.store.PutJournalName(e.ctx, "GJ", created.LockVersion, JournalName{Name: "General journal", LinesLimit: 10, Active: false})
 	if err != nil || isNew || replaced.Name != "General journal" || replaced.RequiresApproval || replaced.Active {
 		t.Fatalf("replace: %+v %v %v", replaced, isNew, err)
 	}

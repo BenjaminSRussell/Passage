@@ -500,7 +500,7 @@ func writeEntry(ctx context.Context, tx pgx.Tx, tenantID string, ne newEntry) (E
 	}
 	entry.Totals = totals(l.Currency, entry.Lines)
 	if err := enqueue(ctx, tx, entryID, ledgerevents.JournalPosted, tenantID, ledgerevents.JournalPostedData{
-		EntryID: entryID, LedgerID: l.ID, DocumentID: ne.documentID, Voucher: voucher, PostingSequence: seq,
+		EntryID: entryID, LedgerID: l.ID, LegalEntityID: l.LegalEntityID, DocumentID: ne.documentID, Voucher: voucher, PostingSequence: seq,
 		PostingDate: postingDate, PeriodKey: period, LineCount: len(ne.lines), Totals: entry.Totals,
 		Source: ne.source, TraceID: ne.traceID,
 	}); err != nil {

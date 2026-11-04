@@ -145,8 +145,11 @@ type Amounts struct {
 
 // JournalPostedData is the payload of dev.passage.ledger.journal.posted.v1.
 type JournalPostedData struct {
-	EntryID         string  `json:"entryId"`
-	LedgerID        string  `json:"ledgerId"`
+	EntryID  string `json:"entryId"`
+	LedgerID string `json:"ledgerId"`
+	// LegalEntityID is the ledger's legal entity; the platform copies it to the CloudEvent
+	// `legalentityid` extension, which the reporting consumer requires.
+	LegalEntityID   string  `json:"legalEntityId"`
 	DocumentID      string  `json:"documentId"`
 	Voucher         string  `json:"voucher"`
 	PostingSequence int64   `json:"postingSequence"`

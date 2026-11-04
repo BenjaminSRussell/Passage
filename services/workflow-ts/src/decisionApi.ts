@@ -1,6 +1,9 @@
 import type { IncomingMessage, RequestListener, ServerResponse } from "node:http";
 import { WorkflowNotFoundError, type Client } from "@temporalio/client";
 import {
+  approvalDecisionSignal,
+  approvalStateQuery,
+  approvalWorkflowId,
   capaEffectivenessSignal,
   capaStateQuery,
   capaStepDoneSignal,
@@ -13,12 +16,14 @@ import { inLegalEntityScope } from "./serviceToken.js";
 
 export const ECO_DECIDE_DUTY = "engineering.eco.approve";
 export const CAPA_DECIDE_DUTY = "QM_CAPA_MAINTAIN";
+export const PARTY_DECIDE_DUTY = "party.approve";
 
 const MAX_BODY_BYTES = 8192;
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ECO_ROUTE = /^\/v1\/workflows\/eco-approvals\/([^/:]+):(approve|reject)$/;
 const CAPA_ROUTE = /^\/v1\/workflows\/capa\/([^/:]+):(step-done|effectiveness)$/;
+const PARTY_ROUTE = /^\/v1\/workflows\/party-changes\/([^/:]+):(approve|reject|delegate)$/;
 
 interface Principal {
   tenantId: string;
@@ -48,12 +53,14 @@ async function handle(client: Pick<Client, "workflow">, request: IncomingMessage
   if (path === "/healthz" || path === "/readyz") return void response.writeHead(200).end();
   const eco = ECO_ROUTE.exec(path);
   const capa = CAPA_ROUTE.exec(path);
-  if (!eco && !capa) return reply(response, new Refusal(404, "COM-0404", "no such route"));
+  const party = PARTY_ROUTE.exec(path);
+  if (!eco && !capa && !party) return reply(response, new Refusal(404, "COM-0404", "no such route"));
   if (request.method !== "POST") return reply(response, new Refusal(405, "COM-0405", "POST only"));
   try {
     const principal = principalOf(request);
     const body = await readJson(request);
-    if (eco) await decideEco(client, principal, eco[1]!, eco[2] as "approve" | "reject", body);
+    if (party) await decidePartyChange(client, principal, party[1]!, party[2] as "approve" | "reject" | "delegate", body);
+    else if (eco) await decideEco(client, principal, eco[1]!, eco[2] as "approve" | "reject", body);
     else await advanceCapa(client, principal, capa![1]!, capa![2] as "step-done" | "effectiveness", body);
     response.writeHead(202, { "Content-Type": "application/json" }).end(JSON.stringify({ accepted: true }));
   } catch (error) {
@@ -145,6 +152,30 @@ async function advanceCapa(client: Pick<Client, "workflow">, principal: Principa
   if (state.status !== "awaiting_effectiveness") throw new Refusal(409, "WF-0409", `the effectiveness check is not open (${state.status})`);
   if (!state.implementer || state.implementer === principal.userId) throw new Refusal(403, "QM-0175", "the effectiveness check must be made by a user other than the one who completed D7");
   await handle.signal(capaEffectivenessSignal, { result, note, actor: principal.userId, scope: principal.scope });
+}
+
+async function decidePartyChange(
+  client: Pick<Client, "workflow">,
+  principal: Principal,
+  changeId: string,
+  action: "approve" | "reject" | "delegate",
+  body: Record<string, unknown>,
+): Promise<void> {
+  requireDuty(principal, PARTY_DECIDE_DUTY);
+  const delegate = action === "delegate" ? text(body, "delegate", 200, true) : undefined;
+  const handle = client.workflow.getHandle(approvalWorkflowId(changeId));
+  const state = await stateOf(async () => {
+    const read = await handle.query(approvalStateQuery);
+    if (!read.tenantId || !read.legalEntityId) throw new Refusal(404, "WF-0404", "no party change approval is running for this record");
+    return { ...read, tenantId: read.tenantId, legalEntityId: read.legalEntityId };
+  }, principal);
+  if (state.status !== "pending") throw new Refusal(409, "WF-0409", `the party change approval is ${state.status}`);
+  if (state.requester === principal.userId) throw new Refusal(403, "PTY-PENDING-SELF-APPROVAL", "the user who requested the change cannot decide it");
+  if (state.approver !== principal.userId) throw new Refusal(403, "WF-0403", "only the current approver of this level can decide it");
+  if (delegate !== undefined && (delegate === principal.userId || delegate === state.requester)) {
+    throw new Refusal(400, "COM-0001", "delegate to someone other than yourself and the requester");
+  }
+  await handle.signal(approvalDecisionSignal, { action, actor: principal.userId, scope: principal.scope, ...(delegate ? { delegate } : {}) });
 }
 
 function reply(response: ServerResponse, refusal: Refusal): void {

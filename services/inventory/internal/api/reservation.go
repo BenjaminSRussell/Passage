@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
@@ -372,15 +373,48 @@ func (a *API) putBatchExpiry(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"productId": productID, "batchId": batchID, "expiryDate": raw})
 }
 
+// transactionDimensionFilters pairs each dimension query parameter of the
+// transaction inquiry with the dimension it matches: the drill-down from an
+// on-hand row carries every dimension the row is grouped by.
+// maxDimensionFilterLen bounds a value in characters.
+var transactionDimensionFilters = [][2]string{
+	{"site", domain.DimSite}, {"warehouse", domain.DimWarehouse}, {"location", domain.DimLocation},
+	{"batch", domain.DimBatch}, {"serial", domain.DimSerial}, {"inventoryStatus", domain.DimStatus},
+	{"owner", domain.DimOwner}, {"segment", domain.DimSegment},
+}
+
+const maxDimensionFilterLen = 100
+
 // listTransactions is the transaction inquiry (FR-16.13): filter by product,
-// status, origin type and physical date; newest first with cursor paging.
+// legal entity, dimension values, status, origin type and physical date;
+// newest first with cursor paging. The legal-entity filter only narrows:
+// row-level security still limits the rows to the caller's scope.
 func (a *API) listTransactions(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
 	q := r.URL.Query()
-	f := store.TransactionFilter{ProductID: q.Get("product"), Status: domain.Status(q.Get("status")), SourceType: q.Get("sourceType"), Cursor: q.Get("cursor")}
+	f := store.TransactionFilter{ProductID: q.Get("product"), Status: domain.Status(q.Get("status")), SourceType: q.Get("sourceType"),
+		LegalEntityID: q.Get("legalEntity"), Cursor: q.Get("cursor")}
 	fields := map[string]string{}
+	if f.LegalEntityID != "" && !ids.Valid(f.LegalEntityID) {
+		fields["legalEntity"] = "must be a UUID"
+	}
+	for _, pair := range transactionDimensionFilters {
+		param, dim := pair[0], pair[1]
+		v := q.Get(param)
+		if v == "" {
+			continue
+		}
+		if utf8.RuneCountInString(v) > maxDimensionFilterLen {
+			fields[param] = fmt.Sprintf("must be at most %d characters", maxDimensionFilterLen)
+			continue
+		}
+		if f.Dims == nil {
+			f.Dims = map[string]string{}
+		}
+		f.Dims[dim] = v
+	}
 	if f.ProductID != "" && !ids.Valid(f.ProductID) {
 		fields["product"] = "must be a UUID"
 	}

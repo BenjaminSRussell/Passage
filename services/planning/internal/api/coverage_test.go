@@ -20,6 +20,9 @@ func (f *fakeStore) ListCoverageGroups(_ context.Context, limit int) ([]store.Co
 }
 
 func (f *fakeStore) GetCoverageGroup(_ context.Context, code string) (store.CoverageGroup, error) {
+	if f.groupErr != nil {
+		return store.CoverageGroup{}, f.groupErr
+	}
 	for _, g := range f.groups {
 		if g.Spec.Code == code {
 			return g, nil

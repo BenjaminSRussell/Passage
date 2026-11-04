@@ -1063,6 +1063,11 @@ export function PurchaseOrderDetailPage() {
                   Update prices
                 </Link>
               ) : null}
+              {po.versionNo > 0 ? (
+                <Link className={buttonClassName("secondary")} to={`/purchasing/inbound-changes?purchaseOrderId=${po.id}`}>
+                  Changes from planning and fulfillment
+                </Link>
+              ) : null}
               {actions.map((a) => (
                 <Button
                   key={a.action}

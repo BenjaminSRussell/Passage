@@ -354,7 +354,7 @@ describe("Worker pay setup", () => {
       if (url.pathname.endsWith("/time-profiles")) return json(200, { items: [profile] });
       if (url.pathname.endsWith("/pay-agreements")) return json(200, { items: [agreement] });
       if (url.pathname.endsWith("/machines")) return json(200, { items: [machine] });
-      if (url.pathname.endsWith("/registrations") || url.pathname.endsWith("/worker-days")) return json(200, { items: [] });
+      if (url.pathname.endsWith("/registrations") || url.pathname.endsWith("/worker-days") || url.pathname.endsWith("/cost-rates")) return json(200, { items: [] });
       return undefined;
     };
   }
@@ -419,7 +419,7 @@ describe("Worker home resource", () => {
       const custom = extra?.(url, init);
       if (custom) return custom;
       if (url.pathname.endsWith(`/workers/${ANA}`)) return json(200, w);
-      if (url.pathname.endsWith("/time-profiles") || url.pathname.endsWith("/pay-agreements") || url.pathname.endsWith("/registrations") || url.pathname.endsWith("/worker-days")) return json(200, { items: [] });
+      if (url.pathname.endsWith("/time-profiles") || url.pathname.endsWith("/pay-agreements") || url.pathname.endsWith("/registrations") || url.pathname.endsWith("/worker-days") || url.pathname.endsWith("/cost-rates")) return json(200, { items: [] });
       if (url.pathname.endsWith("/machines")) return json(200, { items: [machine, { ...machine, id: "m2", machineId: "PRESS-2" }] });
       if (url.pathname.endsWith("/jobs")) return json(200, { items: [cellJob, { ...cellJob, id: "j2", resourceId: RESOURCE }] });
       return undefined;

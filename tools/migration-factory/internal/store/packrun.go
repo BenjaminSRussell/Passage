@@ -91,6 +91,9 @@ func runOpenItems(ctx context.Context, tx pgx.Tx, in OpenItemsRun) (domain.PackR
 	for _, r := range plan.ToLoad {
 		present[domain.OpenItemKey(r.Side(), r.LegacyID)] = r.Amount
 	}
+	if run.Tolerances, err = loadTolerances(ctx, tx); err != nil {
+		return domain.PackRun{}, err
+	}
 	if err := domain.ReconcileOpenItems(&run, in.Records, in.Accepted, len(plan.ToLoad), present); err != nil {
 		return domain.PackRun{}, err
 	}

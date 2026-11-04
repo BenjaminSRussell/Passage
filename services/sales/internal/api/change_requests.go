@@ -1,14 +1,17 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/sales/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/sales/internal/store"
 )
 
@@ -25,8 +28,33 @@ type decisionRequest struct {
 	Comment string `json:"comment"`
 }
 
+// changePolicyRequest is the PUT body. A member it names replaces the stored
+// value (null or [] clears it); a member it leaves out keeps the stored value,
+// so a client that only knows {"approvalRequired": ...} (slice 13) does not
+// wipe a threshold or group a newer client set. The threshold and its
+// currency go together: naming either replaces both.
 type changePolicyRequest struct {
-	ApprovalRequired *bool `json:"approvalRequired"`
+	ApprovalRequired  *bool                     `json:"approvalRequired"`
+	ApprovalThreshold optional[decimal.Decimal] `json:"approvalThreshold"`
+	ThresholdCurrency optional[string]          `json:"thresholdCurrency"`
+	ApproverIDs       optional[[]string]        `json:"approverIds"`
+}
+
+// optional records whether a JSON member was present at all; null is present
+// with the zero value.
+type optional[T any] struct {
+	Set   bool
+	Null  bool
+	Value T
+}
+
+func (o *optional[T]) UnmarshalJSON(b []byte) error {
+	o.Set = true
+	if string(b) == "null" {
+		o.Null = true
+		return nil
+	}
+	return json.Unmarshal(b, &o.Value)
 }
 
 func changeRequestRoute(next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
@@ -205,7 +233,7 @@ func (a *API) getChangePolicy(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, pol)
 }
 
-// putChangePolicy creates or replaces the switch. If-Match carries the current
+// putChangePolicy creates or replaces the policy. If-Match carries the current
 // ETag, or "0" to create.
 func (a *API) putChangePolicy(w http.ResponseWriter, r *http.Request) {
 	le, customer, ok := customerRoute(w, r)
@@ -221,12 +249,29 @@ func (a *API) putChangePolicy(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, map[string]string{"approvalRequired": "is required"})
 		return
 	}
+	in := store.ChangePolicy{LegalEntityID: le, CustomerID: customer, ApprovalRequired: *req.ApprovalRequired,
+		KeepThreshold: !req.ApprovalThreshold.Set && !req.ThresholdCurrency.Set, KeepApprovers: !req.ApproverIDs.Set}
+	if req.ApprovalThreshold.Set && !req.ApprovalThreshold.Null {
+		t := req.ApprovalThreshold.Value
+		in.ApprovalThreshold = &t
+	}
+	in.ThresholdCurrency = req.ThresholdCurrency.Value
+	approvers, invalid := domain.NormalizeApprovers(req.ApproverIDs.Value)
+	in.ApproverIDs = approvers
+	f := domain.ValidateApprovalPolicy(in.Approval())
+	if len(invalid) > 0 {
+		f["approverIds"] = "each must be a user id (UUID)"
+	}
+	if len(f) > 0 {
+		validationFailed(w, r, f)
+		return
+	}
 	version, ok := ifMatch(w, r)
 	if !ok {
 		return
 	}
 	p, _ := tenant.FromContext(r.Context())
-	saved, err := a.store.PutChangePolicy(r.Context(), store.ChangePolicy{LegalEntityID: le, CustomerID: customer, ApprovalRequired: *req.ApprovalRequired}, version, p.UserID)
+	saved, err := a.store.PutChangePolicy(r.Context(), in, version, p.UserID)
 	if err != nil {
 		a.fail(w, r, "put change policy", err)
 		return

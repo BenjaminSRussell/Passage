@@ -92,12 +92,23 @@ func (a *API) listRecurring(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, map[string]string{"status": "must be active or paused"})
 		return
 	}
-	items, err := a.store.ListRecurring(r.Context(), status)
+	page, ok := pageParams(w, r, cursorDateOrInfinity, cursorText, cursorUUID)
+	if !ok {
+		return
+	}
+	items, err := a.store.ListRecurring(r.Context(), status, page)
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+	items, next := trimPage(items, page.Limit, func(rj store.RecurringJournal) []string {
+		due := "infinity"
+		if rj.NextRunDate != nil {
+			due = *rj.NextRunDate
+		}
+		return []string{due, rj.Name, rj.ID}
+	})
+	httpx.JSON(w, http.StatusOK, pageBody(items, next))
 }
 
 func (a *API) getRecurring(w http.ResponseWriter, r *http.Request) {

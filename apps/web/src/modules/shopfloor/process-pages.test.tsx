@@ -29,6 +29,8 @@ beforeEach(() => {
     "fetch",
     vi.fn(async (input: string, init: RequestInit = {}) => {
       const url = new URL(input, "http://localhost");
+      // The category options of the forms are not what these tests count (process-category-pages.test.tsx covers them).
+      if (url.pathname.endsWith("/process-categories")) return new Response("{}", { status: 404, headers: { "Content-Type": "application/json" } });
       calls.push({ method: init.method ?? "GET", url, init, body: init.body ? JSON.parse(String(init.body)) : undefined });
       const reply = handler(url, init) ?? json(404, { code: "TEST-404", detail: `no fake for ${init.method ?? "GET"} ${url.pathname}` });
       return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { "Content-Type": "application/json" } });

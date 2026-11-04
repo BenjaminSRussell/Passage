@@ -375,6 +375,13 @@ export interface Lease {
   paymentTiming: "arrears" | "advance";
   ibrRate: Decimal;
   rateMethod?: RateMethod;
+  /** Recognition exemption; a lease under an election has a liability and ROU asset of 0. */
+  election?: LeaseElection;
+  /** The lease contains a purchase option, which rules out the short-term election. */
+  purchaseOption?: boolean;
+  /** Value of the underlying asset when new, for a low-value election, in underlyingAssetCurrency. */
+  underlyingAssetValue?: Decimal;
+  underlyingAssetCurrency?: LowValueCurrency;
   currency: string;
   /** Liability at initial recognition. */
   liability: Decimal;
@@ -385,12 +392,47 @@ export interface Lease {
   createdAt: string;
   schedule?: LeaseLine[];
   modifications?: LeaseModification[];
+  /** Set once the lease was terminated early (D4c). */
+  termination?: LeaseTermination;
+}
+
+/** The derecognition of an early-terminated lease; gainLoss is positive for a gain. journalId is null until booked. */
+export interface LeaseTermination {
+  id: string;
+  leaseId: string;
+  afterPeriod: number;
+  terminationDate: string;
+  reason: string;
+  currency: string;
+  liabilityDerecognized: Decimal;
+  rouGross: Decimal;
+  rouAccumulated: Decimal;
+  rouCarrying: Decimal;
+  terminationPayment: Decimal;
+  gainLoss: Decimal;
+  journalId: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface TerminateLeaseInput {
+  afterPeriod: number;
+  terminationPayment?: Decimal;
+  reason?: string;
+}
+
+export interface LeaseTerminationResult {
+  termination: LeaseTermination;
+  lease: Lease;
+  /** The AST-0036 info message. */
+  messages: string[];
 }
 
 /** Which journals of a lease are in the general ledger (D4d); null means not booked yet. */
 export interface LeasePostings {
   leaseId: string;
   recognitionJournalId: string | null;
+  terminationJournalId?: string | null;
   periods: { periodNo: number; periodEnd: string; postedJournalId: string | null }[];
 }
 
@@ -418,9 +460,21 @@ export interface LeasePostingProfile {
   depreciationExpenseAccount: string;
   paymentClearingAccount: string;
   remeasurementGainAccount: string;
+  /** Gain (credit) or loss (debit) of an early termination. */
+  terminationGainLossAccount: string;
+  /** Debited with each payment of a lease under a short-term or low-value election. */
+  exemptLeaseExpenseAccount: string;
   version?: number;
   placeholder?: boolean;
 }
+
+/** IFRS 16.5-8 recognition exemptions: None recognizes the lease, the others expense its payments. */
+export const LEASE_ELECTIONS = ["None", "ShortTerm", "LowValue"] as const;
+export type LeaseElection = (typeof LEASE_ELECTIONS)[number];
+
+/** lease.lowValueThreshold (domain.LowValueThresholds): the most an underlying asset may be worth when new, by the currency that value is stated in. */
+export const LOW_VALUE_THRESHOLDS = { USD: 5000, EUR: 5000 } as const;
+export type LowValueCurrency = keyof typeof LOW_VALUE_THRESHOLDS;
 
 export const RATE_METHODS = ["Nominal", "Effective"] as const;
 export type RateMethod = (typeof RATE_METHODS)[number];
@@ -566,6 +620,10 @@ export interface NewLease {
   ibrRate: Decimal;
   rateMethod?: RateMethod;
   currency: string;
+  election?: LeaseElection;
+  purchaseOption?: boolean;
+  underlyingAssetValue?: string;
+  underlyingAssetCurrency?: LowValueCurrency;
 }
 
 /** A value read together with the ETag that If-Match must echo back. */
@@ -797,6 +855,10 @@ export async function getLease(leaseId: string, signal?: AbortSignal): Promise<V
 
 export function modifyLease(leaseId: string, etag: string, input: ModifyLeaseInput, key: string = newKey()): Promise<LeaseModificationResult> {
   return post(`/leases/${id(leaseId)}/modify`, input, key, { "If-Match": etag });
+}
+
+export function terminateLease(leaseId: string, etag: string, input: TerminateLeaseInput, key: string = newKey()): Promise<LeaseTerminationResult> {
+  return post(`/leases/${id(leaseId)}/terminate`, input, key, { "If-Match": etag });
 }
 
 export function getLeasePostings(leaseId: string, signal?: AbortSignal): Promise<LeasePostings> {

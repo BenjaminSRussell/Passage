@@ -3,7 +3,7 @@ info:
   title: Passage Field Service events
   version: 0.1.0
   description: |
-    Events published by the fieldservice service (wave 45, slices 1 to 5). Every event is
+    Events published by the fieldservice service (wave 45, slices 1 to 7). Every event is
     written to the service outbox in the same transaction as the state change and
     relayed by Debezium to Kafka. Envelope: CloudEvents 1.0 (source /passage/service/fieldservice).
 defaultContentType: application/json
@@ -18,6 +18,11 @@ channels:
     messages:
       workOrderPosted:
         $ref: "#/components/messages/WorkOrderPosted"
+  workOrderCompleted:
+    address: passage.service.workorder.completed
+    messages:
+      workOrderCompleted:
+        $ref: "#/components/messages/WorkOrderCompleted"
   slaAlerts:
     address: passage.service.sla
     messages:
@@ -50,6 +55,16 @@ channels:
     messages:
       agreementVisitRecorded:
         $ref: "#/components/messages/AgreementVisitRecorded"
+  assignmentChanged:
+    address: passage.service.assignment
+    messages:
+      assignmentChanged:
+        $ref: "#/components/messages/AssignmentChanged"
+  dispatchPublished:
+    address: passage.service.dispatch
+    messages:
+      dispatchPublished:
+        $ref: "#/components/messages/DispatchPublished"
 operations:
   publishCaseOpened:
     action: send
@@ -63,6 +78,12 @@ operations:
     summary: A completed service work order was posted to billing and warranty cost.
     messages:
       - $ref: "#/channels/workOrderPosted/messages/workOrderPosted"
+  publishWorkOrderCompleted:
+    action: send
+    channel: { $ref: "#/channels/workOrderCompleted" }
+    summary: A work order was completed by the technician's complete action or by hand; inventory issues the consumed parts from the truck (BR-45.6).
+    messages:
+      - $ref: "#/channels/workOrderCompleted/messages/workOrderCompleted"
   publishSLAWarning:
     action: send
     channel: { $ref: "#/channels/slaAlerts" }
@@ -105,6 +126,18 @@ operations:
     summary: An included visit of an agreement line was consumed (FR-45.3); wave 29 bills PER_VISIT agreements from it.
     messages:
       - $ref: "#/channels/agreementVisitRecorded/messages/agreementVisitRecorded"
+  publishAssignmentChanged:
+    action: send
+    channel: { $ref: "#/channels/assignmentChanged" }
+    summary: A work order was assigned to a technician at a time, moved, or taken off the schedule (FR-45.7).
+    messages:
+      - $ref: "#/channels/assignmentChanged/messages/assignmentChanged"
+  publishDispatchPublished:
+    action: send
+    channel: { $ref: "#/channels/dispatchPublished" }
+    summary: The SCHEDULED work orders of a territory-day were dispatched to their technicians (FR-45.7).
+    messages:
+      - $ref: "#/channels/dispatchPublished/messages/dispatchPublished"
 components:
   messages:
     CaseOpened:
@@ -123,6 +156,40 @@ components:
           agreementId: { type: [string, "null"], format: uuid }
           responseDue: { type: string, format: date-time }
           resolutionDue: { type: string, format: date-time }
+    WorkOrderCompleted:
+      name: dev.passage.service.workorder.completed.v1
+      contentType: application/cloudevents+json
+      summary: A work order reached COMPLETED.
+      description: |
+        Written in the transaction that completes the work order: the merge of a COMPLETE action, or a manual
+        transition. `consumedQty` is the sum of the technician's applied PART_USED actions per line; inventory
+        issues it from the truck once per work order. `durationMinutes` is the time IN_PROGRESS by device time
+        (0 for a manual completion without an action log).
+      payload:
+        type: object
+        required: [workOrderId, number, customerId, legalEntityId, caseId, technicianId, firstTimeFix, durationMinutes, completedAt, lines]
+        additionalProperties: false
+        properties:
+          workOrderId: { type: string, format: uuid }
+          number: { type: string, example: SWO-000001 }
+          customerId: { type: string, format: uuid }
+          legalEntityId: { type: string, format: uuid }
+          caseId: { type: [string, "null"], format: uuid }
+          technicianId: { type: [string, "null"], format: uuid }
+          firstTimeFix: { type: boolean }
+          durationMinutes: { type: integer, minimum: 0 }
+          completedAt: { type: string, format: date-time }
+          lines:
+            type: array
+            items:
+              type: object
+              required: [lineId, kind, qty, consumedQty]
+              additionalProperties: false
+              properties:
+                lineId: { type: string, format: uuid }
+                kind: { type: string, enum: [LABOR, PART, TRAVEL, FEE] }
+                qty: { type: string, description: Planned quantity as a decimal string. }
+                consumedQty: { type: string, description: Reported consumption as a decimal string; "0" when none. }
     WorkOrderPosted:
       name: dev.passage.service.workorder.posted.v1
       contentType: application/cloudevents+json
@@ -307,3 +374,61 @@ components:
           visitDate: { type: string, format: date }
           workOrderId: { type: [string, "null"], format: uuid }
           visitsLeft: { type: integer, minimum: 0 }
+    AssignmentChanged:
+      name: dev.passage.service.assignment.changed.v1
+      contentType: application/cloudevents+json
+      summary: A work order was assigned to a technician, moved or unassigned.
+      description: |
+        Written in the transaction of the assign or unassign call. ASSIGNED also covers a move to another
+        technician or time, with previousTechnicianId set when the technician changed. For UNASSIGNED the
+        technician and times are the ones the order lost.
+      payload:
+        type: object
+        required: [workOrderId, number, legalEntityId, territoryId, action, technicianId, previousTechnicianId, start, end, pinned, at, actor]
+        additionalProperties: false
+        properties:
+          workOrderId: { type: string, format: uuid }
+          number: { type: string, example: SWO-000001 }
+          legalEntityId: { type: string, format: uuid }
+          territoryId: { type: string, format: uuid }
+          action: { type: string, enum: [ASSIGNED, UNASSIGNED] }
+          technicianId: { type: [string, "null"], format: uuid }
+          previousTechnicianId: { type: [string, "null"], format: uuid }
+          start: { type: [string, "null"], format: date-time }
+          end: { type: [string, "null"], format: date-time }
+          pinned: { type: boolean, description: A pinned assignment survives re-optimization (BR-45.3). }
+          at: { type: string, format: date-time }
+          actor: { type: string, description: User id of the dispatcher; empty when the caller has no user. }
+    DispatchPublished:
+      name: dev.passage.service.dispatch.published.v1
+      contentType: application/cloudevents+json
+      summary: The SCHEDULED work orders of a territory-day were dispatched.
+      description: |
+        Written in the transaction that moves the work orders from SCHEDULED to DISPATCHED. Assignments are
+        listed per technician in route order (sequence from 1). The technician apps and customer
+        notifications consume it.
+      payload:
+        type: object
+        required: [runId, legalEntityId, territoryId, date, timeZone, publishedAt, actor, assignments]
+        additionalProperties: false
+        properties:
+          runId: { type: string, format: uuid }
+          legalEntityId: { type: string, format: uuid }
+          territoryId: { type: string, format: uuid }
+          date: { type: string, format: date, description: The local calendar day in timeZone. }
+          timeZone: { type: string, example: America/Chicago }
+          publishedAt: { type: string, format: date-time }
+          actor: { type: string }
+          assignments:
+            type: array
+            items:
+              type: object
+              required: [workOrderId, number, technicianId, sequence, start, end]
+              additionalProperties: false
+              properties:
+                workOrderId: { type: string, format: uuid }
+                number: { type: string, example: SWO-000001 }
+                technicianId: { type: string, format: uuid }
+                sequence: { type: integer, minimum: 1 }
+                start: { type: string, format: date-time }
+                end: { type: string, format: date-time }

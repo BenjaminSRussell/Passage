@@ -68,6 +68,10 @@ export interface MappingSpec {
   checksum: string;
   fieldCount: number;
   testCount: number;
+  /** The migration project the spec belongs to; absent for a tenant-wide spec. */
+  projectId?: string;
+  /** The mapped columns that identify a record. */
+  naturalKey: string[];
   createdAt: string;
   mapping?: unknown;
 }
@@ -174,6 +178,8 @@ export const PICKER_LIMIT = 200;
 
 export interface ListFilter {
   entity?: string;
+  /** A project id, or "none" for the tenant-wide specs. */
+  projectId?: string;
   cursor?: string;
   limit?: number;
 }
@@ -184,8 +190,22 @@ export const listSpecsPage = (filter: ListFilter, signal?: AbortSignal) => page<
 
 export const getSpec = (id: string, signal?: AbortSignal) => send<MappingSpec>(`/mapping-specs/${encodeURIComponent(id)}`, {}, signal);
 
-export const publishSpec = (mapping: unknown, key: string = newKey()) =>
-  send<MappingSpec>("/mapping-specs", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify({ mapping }) });
+export const publishSpec = (mapping: unknown, key: string = newKey(), projectId?: string) =>
+  send<MappingSpec>("/mapping-specs", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(projectId ? { mapping, projectId } : { mapping }) });
+
+/** The tenant's migration settings; version 0 and the defaults until a tenant saves them. */
+export interface MigrationSettings {
+  /** mig.recurring.min_interval_min: the shortest gap, in minutes, between two scheduled runs. */
+  recurringMinIntervalMin: number;
+  version: number;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export const getSettings = (signal?: AbortSignal) => send<MigrationSettings>("/migration-settings", {}, signal);
+
+export const putSettings = (version: number, recurringMinIntervalMin: number) =>
+  send<MigrationSettings>("/migration-settings", { method: "PUT", body: JSON.stringify({ version, recurringMinIntervalMin }) });
 
 export const listTemplatesPage = (filter: ListFilter, signal?: AbortSignal) => page<DataTemplate>(`/data-templates${listQuery(filter)}`, signal);
 

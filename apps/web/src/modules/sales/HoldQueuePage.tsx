@@ -1,10 +1,17 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Alert, Badge, Button, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
-import { describeProblem, etagOf, HOLD_TYPES, listHolds, releaseHold, type HoldQueueFilter, type HoldQueueItem, type HoldType, type Problem } from "./api/client";
+import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, Textarea, type DataTableColumn } from "../../shell/ui";
+import { describeProblem, etagOf, HOLD_TYPES, listHolds, rejectHold, releaseHold, type HoldQueueFilter, type HoldQueueItem, type HoldType, type Problem } from "./api/client";
 import { dash, formatDateTime, money, sentence, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+
+const COMMENT_MAX = 500;
+
+/** Only a CREDIT hold of an order still awaiting confirmation can be rejected (the rejection cancels it). */
+function canReject(item: HoldQueueItem): boolean {
+  return item.holdType === "CREDIT" && (item.orderStatus === "DRAFT" || item.orderStatus === "OPEN");
+}
 
 /** "3 d 4 h", "5 h", "12 min": how long a hold has waited. */
 export function holdAge(appliedAt: string, now: Date = new Date()): string {
@@ -37,13 +44,17 @@ function ruleText(item: HoldQueueItem): ReactNode {
 /**
  * Credit release queue (PRD §5.27.6): ACTIVE holds oldest first with the order,
  * amount, the failed rule against its threshold, the credit limit and the age.
- * A credit manager releases a CREDIT hold here; the release confirms the order.
+ * A credit manager releases a CREDIT hold here (the release confirms the order)
+ * or rejects it with a comment (the unconfirmed order is cancelled).
  */
 export function HoldQueuePage() {
   const [draft, setDraft] = useState<{ legalEntityId: string; holdType: HoldType | "" }>({ legalEntityId: "", holdType: "CREDIT" });
   const [filter, setFilter] = useState<HoldQueueFilter>({ holdType: "CREDIT" });
   const [busy, setBusy] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<{ tone: "success" | "warning"; text: ReactNode } | { tone: "danger"; problem: Problem } | null>(null);
+  const [rejecting, setRejecting] = useState<HoldQueueItem | null>(null);
+  const [comment, setComment] = useState("");
+  const [commentError, setCommentError] = useState<string | undefined>();
   const invalid = draft.legalEntityId.trim() && !UUID.test(draft.legalEntityId.trim()) ? "Enter a legal entity UUID." : undefined;
   const state = useLoad((signal) => listHolds(filter, signal), JSON.stringify(filter));
 
@@ -72,6 +83,38 @@ export function HoldQueuePage() {
     }
   }
 
+  async function reject(item: HoldQueueItem) {
+    const text = comment.trim();
+    if (!text) {
+      setCommentError("Say why the hold is rejected.");
+      return;
+    }
+    if (text.length > COMMENT_MAX) {
+      setCommentError(`Keep the comment to ${COMMENT_MAX} characters.`);
+      return;
+    }
+    setBusy(item.holdId);
+    setOutcome(null);
+    try {
+      const res = await rejectHold(item.orderId, item.holdId, etagOf(item.orderVersion), text);
+      setOutcome({
+        tone: "success",
+        text: (
+          <>
+            Credit hold on <Link to={`/sales/orders/${res.value.id}`}>{res.value.orderNumber}</Link> rejected and the order cancelled.
+          </>
+        ),
+      });
+      setRejecting(null);
+      setComment("");
+      state.reload();
+    } catch (error) {
+      setOutcome({ tone: "danger", problem: describeProblem(error) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const columns: DataTableColumn<HoldQueueItem>[] = [
     { key: "orderNumber", header: "Order", mono: true, render: (h) => <Link to={`/sales/orders/${h.orderId}`}>{h.orderNumber}</Link> },
     { key: "customerId", header: "Customer", mono: true, render: (h) => shortId(h.customerId) },
@@ -92,9 +135,27 @@ export function HoldQueuePage() {
       key: "release",
       header: "Action",
       render: (h) => (
-        <Button size="sm" loading={busy === h.holdId} disabled={busy !== null && busy !== h.holdId} onClick={() => void release(h)} aria-label={`Release ${sentence(h.holdType)} hold on ${h.orderNumber}`}>
-          Release
-        </Button>
+        <span className={styles.rowActions}>
+          <Button size="sm" loading={busy === h.holdId} disabled={busy !== null && busy !== h.holdId} onClick={() => void release(h)} aria-label={`Release ${sentence(h.holdType)} hold on ${h.orderNumber}`}>
+            Release
+          </Button>
+          {canReject(h) ? (
+            <Button
+              size="sm"
+              variant="danger"
+              disabled={busy !== null}
+              onClick={() => {
+                setRejecting(h);
+                setComment("");
+                setCommentError(undefined);
+                setOutcome(null);
+              }}
+              aria-label={`Reject Credit hold on ${h.orderNumber}`}
+            >
+              Reject
+            </Button>
+          ) : null}
+        </span>
       ),
     },
   ];
@@ -103,7 +164,7 @@ export function HoldQueuePage() {
     <div className={styles.stack}>
       <PageHeader
         title="Credit release queue"
-        description="Orders on hold, oldest first, with the rule that failed against its threshold. Releasing a credit hold confirms the order when nothing else blocks it."
+        description="Orders on hold, oldest first, with the rule that failed against its threshold. Releasing a credit hold confirms the order when nothing else blocks it; rejecting it cancels the order."
       />
       <form
         className={styles.toolbar}
@@ -130,13 +191,33 @@ export function HoldQueuePage() {
         <Button type="submit">Filter</Button>
       </form>
       {outcome?.tone === "danger" ? (
-        <Alert tone="danger" title="Could not release the hold" live="alert">
+        <Alert tone="danger" title="Could not decide the hold" live="alert">
           {outcome.problem.message} ({outcome.problem.code})
         </Alert>
       ) : null}
       <Alert tone={outcome?.tone === "warning" ? "warning" : "success"} live="status">
         {outcome && outcome.tone !== "danger" ? outcome.text : null}
       </Alert>
+      {rejecting ? (
+        <Card title={`Reject the credit hold on ${rejecting.orderNumber}`}>
+          <div className={styles.form}>
+            <p className={styles.note}>
+              Rejecting cancels the order: its lines, allocation quota and agreement quantity are returned and its other holds are cleared. This cannot be undone; the customer can be quoted again on a new order.
+            </p>
+            <FormField id="reject-comment" label="Comment" error={commentError} hint="Kept on the hold and in the order's history.">
+              {(control) => <Textarea {...control} rows={3} maxLength={COMMENT_MAX} value={comment} onChange={(e) => setComment(e.target.value)} invalid={Boolean(commentError)} />}
+            </FormField>
+            <div className={styles.formActions}>
+              <Button variant="danger" loading={busy === rejecting.holdId} onClick={() => void reject(rejecting)}>
+                Reject hold and cancel order
+              </Button>
+              <Button variant="secondary" disabled={busy !== null} onClick={() => setRejecting(null)}>
+                Keep the hold
+              </Button>
+            </div>
+          </div>
+        </Card>
+      ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load the release queue" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
           {state.error.message} ({state.error.code})

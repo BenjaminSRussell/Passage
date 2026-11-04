@@ -61,6 +61,8 @@ function intakeError(overrides: Partial<IntakeError> = {}): IntakeError {
     attempts: 3,
     firstSeenAt: "2027-03-01T09:00:00Z",
     lastSeenAt: "2027-03-01T11:00:00Z",
+    replayable: true,
+    replayCount: 0,
     version: 3,
     ...overrides,
   };
@@ -136,7 +138,7 @@ describe("Intake error detail", () => {
     expect(await screen.findByText("The intake error was changed by someone else")).toBeInTheDocument();
     unmount();
     renderAt(`/sales/intake-errors/${ERROR_ID}`, ["sales.order.read"]);
-    expect(await screen.findByText(/needs the sales.order.write duty/)).toBeInTheDocument();
+    expect(await screen.findByText(/Closing an intake error needs the sales.order.write duty/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Close error" })).toBeNull();
   });
 
@@ -149,5 +151,85 @@ describe("Intake error detail", () => {
     handler = () => ({ status: 404, body: { code: "SLS-0115", detail: "intake error not found" } });
     renderAt(`/sales/intake-errors/${ERROR_ID}`);
     expect(await screen.findByText(/intake error not found \(SLS-0115\)/)).toBeInTheDocument();
+  });
+});
+
+describe("Replaying refused orders", () => {
+  const ORDER_ID = "66666666-0000-4000-8000-000000000006";
+
+  it("replays one error and shows the order it became", async () => {
+    handler = (_u, init) =>
+      init.method === "POST"
+        ? { status: 200, body: { intakeError: intakeError({ status: "RESOLVED", replayedOrderId: ORDER_ID, replayable: false, version: 4 }), replayed: true, orderId: ORDER_ID, orderNumber: "SO-0042" }, etag: '"4"' }
+        : { status: 200, body: intakeError(), etag: '"3"' };
+    const { container } = renderAt(`/sales/intake-errors/${ERROR_ID}`, ["sales.order.read", "sales.order.write"]);
+    await screen.findByText("Intake error from EDI");
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Replay order" }));
+    expect(await screen.findByText("Replayed as order SO-0042. The error is closed.")).toBeInTheDocument();
+    const post = calls.find((c) => c.method === "POST");
+    expect(post?.url.pathname).toBe(`/api/v1/sales/intake-errors/${ERROR_ID}:replay`);
+  });
+
+  it("says why intake refused the order again", async () => {
+    handler = (_u, init) =>
+      init.method === "POST"
+        ? { status: 200, body: { intakeError: intakeError({ attempts: 4, replayCount: 1, version: 4 }), replayed: false, failure: { code: "SLS-0011", message: "product is still not listed" } } }
+        : { status: 200, body: intakeError(), etag: '"3"' };
+    renderAt(`/sales/intake-errors/${ERROR_ID}`, ["sales.order.read", "sales.order.write"]);
+    await screen.findByText("Intake error from EDI");
+    fireEvent.click(screen.getByRole("button", { name: "Replay order" }));
+    expect(await screen.findByText("Intake refused the order again")).toBeInTheDocument();
+    expect(screen.getByText(/product is still not listed \(SLS-0011\)/)).toBeInTheDocument();
+  });
+
+  it("explains a replay the service rejects, hides the button without the duty or a kept request", async () => {
+    handler = (_u, init) =>
+      init.method === "POST"
+        ? { status: 409, body: { code: "SLS-0118", detail: "the refused request was not kept" } }
+        : { status: 200, body: intakeError(), etag: '"3"' };
+    const { unmount } = renderAt(`/sales/intake-errors/${ERROR_ID}`, ["sales.order.read", "sales.order.write"]);
+    await screen.findByText("Intake error from EDI");
+    fireEvent.click(screen.getByRole("button", { name: "Replay order" }));
+    expect(await screen.findByText("This error cannot be replayed")).toBeInTheDocument();
+    unmount();
+    const second = renderAt(`/sales/intake-errors/${ERROR_ID}`, ["sales.order.read"]);
+    expect(await screen.findByText(/Replaying an order needs the sales.order.write duty/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Replay order" })).toBeNull();
+    second.unmount();
+    handler = () => ({ status: 200, body: intakeError({ replayable: false }), etag: '"3"' });
+    renderAt(`/sales/intake-errors/${ERROR_ID}`, ["sales.order.read", "sales.order.write"]);
+    expect(await screen.findByText(/was not kept for this error/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Replay order" })).toBeNull();
+  });
+
+  it("replays the open errors of the list filter and reports the counts", async () => {
+    handler = (_u, init) =>
+      init.method === "POST"
+        ? { status: 200, body: { attempted: 3, replayed: 2, failed: 1, skipped: 4, items: [] } }
+        : { status: 200, body: { items: [intakeError()] } };
+    renderAt("/sales/intake-errors", ["sales.order.read", "sales.order.write"]);
+    await screen.findByRole("link", { name: "EDI" });
+    fireEvent.change(screen.getByLabelText(/Channel/), { target: { value: "EDI" } });
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
+    fireEvent.click(screen.getByRole("button", { name: "Replay open errors" }));
+    expect(await screen.findByText(/Replayed 2 of 3 orders; 1 refused again; 4 dead letters/)).toBeInTheDocument();
+    const post = calls.find((c) => c.method === "POST");
+    expect(post?.url.pathname).toBe("/api/v1/sales/intake-errors:replay");
+    expect(post?.url.searchParams.get("channel")).toBe("EDI");
+  });
+
+  it("shows a failed bulk replay and hides the button without the duty", async () => {
+    handler = (_u, init) =>
+      init.method === "POST" ? { status: 500, body: { code: "COM-0500", detail: "down" } } : { status: 200, body: { items: [intakeError()] } };
+    const { unmount } = renderAt("/sales/intake-errors", ["sales.order.read", "sales.order.write"]);
+    await screen.findByRole("link", { name: "EDI" });
+    fireEvent.click(screen.getByRole("button", { name: "Replay open errors" }));
+    expect(await screen.findByText("The replay could not run")).toBeInTheDocument();
+    unmount();
+    renderAt("/sales/intake-errors", ["sales.order.read"]);
+    await screen.findByRole("link", { name: "EDI" });
+    expect(screen.queryByRole("button", { name: "Replay open errors" })).toBeNull();
   });
 });

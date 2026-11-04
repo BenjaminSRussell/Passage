@@ -36,7 +36,7 @@ func TestPostgres_JournalNameControlsDefaultsAndRoundTrip(t *testing.T) {
 	if err != nil || n.PostingRestriction != "own_journals_only" || n.DescriptionLanguage != "user" {
 		t.Fatalf("round trip = %+v (%v)", n, err)
 	}
-	if _, _, err := e.store.PutJournalName(e.ctx, "BAD", JournalName{Name: "Bad", LinesLimit: 10, Active: true, PostingRestriction: "by_user_group"}); err == nil {
+	if _, _, err := e.store.PutJournalName(e.ctx, "BAD", 0, JournalName{Name: "Bad", LinesLimit: 10, Active: true, PostingRestriction: "by_user_group"}); err == nil {
 		t.Fatal("an unknown posting restriction must be refused by the database check")
 	}
 }

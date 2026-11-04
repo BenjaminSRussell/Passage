@@ -78,7 +78,7 @@ func TestStore_CaseResolvesAgreementAndPostsBilling(t *testing.T) {
 	}
 	version := wo.Version
 	for _, to := range []domain.WOStatus{domain.WOScheduled, domain.WODispatched, domain.WOTraveling, domain.WOInProgress, domain.WOCompleted} {
-		if wo, err = s.TransitionWorkOrder(ctx, wo.ID, version, to); err != nil {
+		if wo, err = s.moveWorkOrder(ctx, wo.ID, version, to); err != nil {
 			t.Fatalf("transition to %s: %v", to, err)
 		}
 		version = wo.Version
@@ -141,7 +141,7 @@ func (f fixture) completedOrder(t *testing.T, wo WorkOrder) WorkOrder {
 		t.Fatal(err)
 	}
 	for _, to := range []domain.WOStatus{domain.WOScheduled, domain.WODispatched, domain.WOTraveling, domain.WOInProgress, domain.WOCompleted} {
-		if created, err = f.s.TransitionWorkOrder(f.ctx, created.ID, created.Version, to); err != nil {
+		if created, err = f.s.moveWorkOrder(f.ctx, created.ID, created.Version, to); err != nil {
 			t.Fatalf("transition to %s: %v", to, err)
 		}
 	}
@@ -319,13 +319,13 @@ func TestStore_StaleVersionIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.TransitionWorkOrder(f.ctx, wo.ID, wo.Version, domain.WOScheduled); err != nil {
+	if _, err := f.s.moveWorkOrder(f.ctx, wo.ID, wo.Version, domain.WOScheduled); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.TransitionWorkOrder(f.ctx, wo.ID, wo.Version, domain.WOCanceled); problemCode(err) != CodeVersionConflict {
+	if _, err := f.s.moveWorkOrder(f.ctx, wo.ID, wo.Version, domain.WOCanceled); problemCode(err) != CodeVersionConflict {
 		t.Fatalf("stale version: err %v, want %s", err, CodeVersionConflict)
 	}
-	if _, err := f.s.TransitionWorkOrder(f.ctx, wo.ID, wo.Version+1, domain.WOPosted); problemCode(err) != CodeWOInvalid {
+	if _, err := f.s.moveWorkOrder(f.ctx, wo.ID, wo.Version+1, domain.WOPosted); problemCode(err) != CodeWOInvalid {
 		t.Fatalf("SCHEDULED to POSTED: err %v, want %s", err, CodeWOInvalid)
 	}
 }
@@ -342,7 +342,7 @@ func TestStore_ListsPageNewestFirst(t *testing.T) {
 		}
 		created = append(created, wo.ID)
 	}
-	if _, err := f.s.TransitionWorkOrder(f.ctx, created[0], 1, domain.WOScheduled); err != nil {
+	if _, err := f.s.moveWorkOrder(f.ctx, created[0], 1, domain.WOScheduled); err != nil {
 		t.Fatal(err)
 	}
 	var seen []string

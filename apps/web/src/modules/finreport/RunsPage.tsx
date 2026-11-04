@@ -70,18 +70,33 @@ export function LagPanel() {
         <div aria-busy="true">
           <Skeleton width="3/4" />
         </div>
-      ) : (lag.data ?? []).length === 0 ? (
+      ) : (lag.data?.items ?? []).length === 0 ? (
         <EmptyState compact title="No postings yet" description="The read model has not received any journal events." />
       ) : (
         <ul className={styles.lagList} aria-label="Read-model lag">
-          {(lag.data ?? []).map((r) => (
+          {(lag.data?.items ?? []).map((r) => {
+            const gate = lag.data?.maxLagSeconds;
+            const stale = gate !== undefined && (r.lagSeconds ?? 0) > gate;
+            return (
             <li key={r.ledgerId} className={styles.lagItem}>
               <span className={styles.mono}>Ledger {r.ledgerId}</span>
               <span>
-                As of sequence <span className={styles.mono}>{r.postingSequence}</span>, updated <time dateTime={r.updatedAt}>{r.updatedAt}</time>
+                As of sequence <span className={styles.mono}>{r.postingSequence}</span>
+                {r.entriesApplied !== undefined ? <>, {r.entriesApplied} {r.entriesApplied === 1 ? "entry" : "entries"} applied</> : null}, updated <time dateTime={r.updatedAt}>{r.updatedAt}</time>
               </span>
+              {r.entriesPending ? (
+                <span>
+                  {r.entriesPending} later {r.entriesPending === 1 ? "entry waits" : "entries wait"} for sequence <span className={styles.mono}>{r.postingSequence + 1}</span>
+                </span>
+              ) : null}
+              {stale ? (
+                <Alert tone="warning" title="Statements are stale for this ledger">
+                  The read model is at least {r.lagSeconds} s behind the ledger (limit {gate} s). A run is refused with REPORT-0004 until it catches up, unless it accepts stale results.
+                </Alert>
+              ) : null}
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </Card>

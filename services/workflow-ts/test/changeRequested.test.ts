@@ -4,7 +4,9 @@ import { bundleWorkflowCode, Worker, type WorkflowBundle } from "@temporalio/wor
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { createActivities, type PartyClient, type PartyDecision } from "../src/activities.js";
 import { changeRequestedType, handleChangeRequested, toApprovalInput, type ChangeRequestedEvent } from "../src/changeRequested.js";
-import { approvalStateQuery, approvalWorkflow, approveSignal, delegateSignal, rejectSignal, type ApprovalLevel } from "../src/workflows.js";
+import { approvalDecisionSignal, approvalStateQuery, approvalWorkflow, type ApprovalDecision, type ApprovalLevel } from "../src/workflows.js";
+
+const as = (action: ApprovalDecision["action"], actor: string, delegate?: string): ApprovalDecision => ({ action, actor, scope: ["le-1"], ...(delegate ? { delegate } : {}) });
 
 const levels: ApprovalLevel[] = [
   { id: "finance", approver: "alice", escalationApprover: "cfo", slaMs: 3_600_000 },
@@ -67,7 +69,7 @@ describe("change.requested consumer", () => {
       const second = await handleChangeRequested(environment.client, "dup-queue", levels, event("c-dup"));
       expect(first).toEqual({ workflowId: "approval:c-dup", started: true });
       expect(second).toEqual({ workflowId: "approval:c-dup", started: false });
-      await environment.client.workflow.getHandle("approval:c-dup").signal(approveSignal, "alice");
+      await environment.client.workflow.getHandle("approval:c-dup").signal(approvalDecisionSignal, as("approve", "alice"));
       await environment.client.workflow.getHandle("approval:c-dup").result();
       const third = await handleChangeRequested(environment.client, "dup-queue", levels, event("c-dup"));
       expect(third.started).toBe(false);
@@ -79,11 +81,11 @@ describe("change.requested consumer", () => {
     await run("approve-queue", async () => {
       await handleChangeRequested(environment.client, "approve-queue", levels, event("c-ok"));
       const handle = environment.client.workflow.getHandle("approval:c-ok");
-      await handle.signal(approveSignal, "alice");
+      await handle.signal(approvalDecisionSignal, as("approve", "alice"));
       const result = await handle.result();
       expect(result.status).toBe("approved");
       expect(decisions).toEqual([
-        { changeId: "c-ok", tenantId: "tenant-1", legalEntityId: "le-1", decision: "approved", decidedBy: "alice" },
+        { changeId: "c-ok", tenantId: "tenant-1", legalEntityId: "le-1", decision: "approved", decidedBy: "alice", scope: ["le-1"] },
       ]);
     });
   }, 60_000);
@@ -92,10 +94,10 @@ describe("change.requested consumer", () => {
     await run("reject-queue", async () => {
       await handleChangeRequested(environment.client, "reject-queue", levels, event("c-no"));
       const handle = environment.client.workflow.getHandle("approval:c-no");
-      await handle.signal(rejectSignal, "alice");
+      await handle.signal(approvalDecisionSignal, as("reject", "alice"));
       expect((await handle.result()).status).toBe("rejected");
       expect(decisions).toEqual([
-        { changeId: "c-no", tenantId: "tenant-1", legalEntityId: "le-1", decision: "rejected", decidedBy: "alice" },
+        { changeId: "c-no", tenantId: "tenant-1", legalEntityId: "le-1", decision: "rejected", decidedBy: "alice", scope: ["le-1"] },
       ]);
     });
   }, 60_000);
@@ -104,12 +106,12 @@ describe("change.requested consumer", () => {
     await run("self-queue", async () => {
       await handleChangeRequested(environment.client, "self-queue", levels, event("c-self"));
       const handle = environment.client.workflow.getHandle<typeof approvalWorkflow>("approval:c-self");
-      await handle.signal(approveSignal, "requester");
-      await handle.signal(delegateSignal, "alice", "requester");
+      await handle.signal(approvalDecisionSignal, as("approve", "requester"));
+      await handle.signal(approvalDecisionSignal, as("delegate", "alice", "requester"));
       const state = await handle.query(approvalStateQuery);
       expect(state.status).toBe("pending");
       expect(state.approver).toBe("alice");
-      await handle.signal(approveSignal, "alice");
+      await handle.signal(approvalDecisionSignal, as("approve", "alice"));
       const result = await handle.result();
       expect(result.history.map((entry) => entry.action)).toEqual(["approved"]);
       expect(decisions.map((d) => d.decidedBy)).toEqual(["alice"]);

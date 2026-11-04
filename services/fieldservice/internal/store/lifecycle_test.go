@@ -222,7 +222,7 @@ func TestStore_DispatchStopsTheResponseClock(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, to := range []domain.WOStatus{domain.WOScheduled, domain.WODispatched} {
-		if wo, err = l.s.TransitionWorkOrder(l.ctx, wo.ID, wo.Version, to); err != nil {
+		if wo, err = l.s.moveWorkOrder(l.ctx, wo.ID, wo.Version, to); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -295,7 +295,7 @@ func TestStore_FollowUpClearsFirstTimeFixAndFeedsKPIs(t *testing.T) {
 	}
 	// The follow-up completes too, but it is not a job of its own.
 	for _, to := range []domain.WOStatus{domain.WOScheduled, domain.WODispatched, domain.WOTraveling, domain.WOInProgress, domain.WOCompleted} {
-		if child, err = f.s.TransitionWorkOrder(f.ctx, child.ID, child.Version, to); err != nil {
+		if child, err = f.s.moveWorkOrder(f.ctx, child.ID, child.Version, to); err != nil {
 			t.Fatal(err)
 		}
 	}

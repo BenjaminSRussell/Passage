@@ -68,14 +68,17 @@ type IngestResult struct {
 
 // Downtime is one machine stop (FR-25.11).
 type Downtime struct {
-	ID          string     `json:"id"`
-	MachineID   string     `json:"machineId"`
-	ResourceID  string     `json:"resourceId"`
-	StartedAt   time.Time  `json:"startedAt"`
-	EndedAt     *time.Time `json:"endedAt"`
-	ReasonCode  *string    `json:"reasonCode"`
-	Category    string     `json:"category"`
-	AndonRaised bool       `json:"andonRaised"`
+	ID         string     `json:"id"`
+	MachineID  string     `json:"machineId"`
+	ResourceID string     `json:"resourceId"`
+	StartedAt  time.Time  `json:"startedAt"`
+	EndedAt    *time.Time `json:"endedAt"`
+	ReasonCode *string    `json:"reasonCode"`
+	Category   string     `json:"category"`
+	// Cause is "down" for a downtime the machine reported and "idle" for idle time found by the
+	// andon sweep (BR-25.6).
+	Cause       string `json:"cause"`
+	AndonRaised bool   `json:"andonRaised"`
 }
 
 // DowntimeFilter selects downtimes for the supervisor list.
@@ -209,6 +212,7 @@ type machineRow struct {
 type openDown struct {
 	id    string
 	start time.Time
+	cause string
 }
 
 func ingestMachine(ctx context.Context, tx pgx.Tx, tenantID string, now time.Time, code string, group []MachineEventIn) (IngestResult, error) {
@@ -260,8 +264,8 @@ func ingestMachine(ctx context.Context, tx pgx.Tx, tenantID string, now time.Tim
 
 	var open *openDown
 	var d openDown
-	err = tx.QueryRow(ctx, `select id::text, started_at from downtime_record
-		where tenant_id = $1 and machine_id = $2 and ended_at is null`, tenantID, m.id).Scan(&d.id, &d.start)
+	err = tx.QueryRow(ctx, `select id::text, started_at, cause from downtime_record
+		where tenant_id = $1 and machine_id = $2 and ended_at is null`, tenantID, m.id).Scan(&d.id, &d.start, &d.cause)
 	switch {
 	case err == nil:
 		open = &d
@@ -279,9 +283,26 @@ func ingestMachine(ctx context.Context, tx pgx.Tx, tenantID string, now time.Tim
 			return IngestResult{}, err
 		}
 		res.Accepted++
+		if open != nil && open.cause == domain.DowntimeCauseIdle {
+			// Idle time ends with the next count or a state that leaves RUNNING; a repeated
+			// RUNNING or an IDLE report leaves it open. A DOWN report then opens its own
+			// downtime below.
+			if !domain.EndsIdle(e) {
+				continue
+			}
+			end := e.At
+			if end.Before(open.start) {
+				end = open.start
+			}
+			if _, err := tx.Exec(ctx, `update downtime_record set ended_at = $3 where tenant_id = $1 and id = $2`,
+				tenantID, open.id, end); err != nil {
+				return IngestResult{}, err
+			}
+			open = nil
+		}
 		switch domain.DowntimeStepFor(open != nil, e.State) {
 		case domain.DowntimeStart:
-			nd := openDown{id: ids.New(), start: e.At}
+			nd := openDown{id: ids.New(), start: e.At, cause: domain.DowntimeCauseDown}
 			if _, err := tx.Exec(ctx, `insert into downtime_record (tenant_id, id, machine_id, resource_id, started_at, reason_code)
 				values ($1, $2, $3, $4, $5, $6)`, tenantID, nd.id, m.id, m.resourceID, e.At, it.ReasonCode); err != nil {
 				return IngestResult{}, err
@@ -354,11 +375,11 @@ func clearAndon(ctx context.Context, tx pgx.Tx, tenantID, resourceID string, now
 	return int(tag.RowsAffected()), err
 }
 
-const downtimeColumns = `id::text, machine_id::text, resource_id::text, started_at, ended_at, reason_code, category, andon_raised`
+const downtimeColumns = `id::text, machine_id::text, resource_id::text, started_at, ended_at, reason_code, category, cause, andon_raised`
 
 func scanDowntime(row pgx.Row) (Downtime, error) {
 	var d Downtime
-	err := row.Scan(&d.ID, &d.MachineID, &d.ResourceID, &d.StartedAt, &d.EndedAt, &d.ReasonCode, &d.Category, &d.AndonRaised)
+	err := row.Scan(&d.ID, &d.MachineID, &d.ResourceID, &d.StartedAt, &d.EndedAt, &d.ReasonCode, &d.Category, &d.Cause, &d.AndonRaised)
 	return d, err
 }
 

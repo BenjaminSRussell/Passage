@@ -55,6 +55,7 @@ var (
 // Each grant holds only the narrow duties its caller signs (#333, #341).
 // policies/authz/data.json "service_grants" mirrors it and a test keeps them equal.
 var serviceGrants = map[string]map[string][]string{
+	"finreport": {"ledger": {"ledger.entry.lookup", "ledger.balance.read"}},
 	"billing": {
 		"ledger": {"ledger.entry.post", "ledger.ledger.lookup"},
 		"revrec": {"revrec.allocation.read"},
@@ -134,6 +135,7 @@ var serviceGrants = map[string]map[string][]string{
 		"engineering": {"engineering.eco.workflow"},
 		"quality":     {"quality.capa.execute"},
 		"transport":   {"transport.tender.execute"},
+		"party":       {"party.approve"},
 	},
 	"party": {
 		"numbering": {"numbering.sequence.allocate"},
