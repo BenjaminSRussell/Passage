@@ -82,6 +82,7 @@ type API struct {
 	capex    atomic.Int64
 	// Slice 3: lease remeasurements and count sessions.
 	remeasured atomic.Int64
+	terminated atomic.Int64
 	counted    atomic.Int64
 	// Slice 4: capex decisions.
 	decided atomic.Int64
@@ -109,6 +110,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyLeaseMaintain)).Get("/v1/leases", a.listLeases)
 		r.With(authz.RequireDuty(DutyLeaseMaintain)).Get("/v1/leases/{id}", a.getLease)
 		r.With(authz.RequireDuty(DutyLeaseMaintain)).Post("/v1/leases/{id}/modify", a.modifyLease)
+		r.With(authz.RequireDuty(DutyLeaseMaintain)).Post("/v1/leases/{id}/terminate", a.terminateLease)
 		r.With(authz.RequireDuty(DutyPostJournal)).Post("/v1/leases/gl-postings", a.postLeasesToGL)
 		r.With(authz.RequireDuty(DutyLeaseMaintain)).Get("/v1/leases/{id}/gl-postings", a.getLeasePostings)
 		r.With(requireAny(DutyLeaseMaintain, DutyConfigure)).Get("/v1/leases/posting-profile", a.getLeasePostingProfile)
@@ -179,6 +181,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# TYPE assets_additions_total counter\nassets_additions_total %d\n", a.added.Load())
 		fmt.Fprintf(w, "# TYPE assets_depreciation_runs_posted_total counter\nassets_depreciation_runs_posted_total %d\n", a.runs.Load())
 		fmt.Fprintf(w, "# TYPE assets_capex_requests_total counter\nassets_capex_requests_total %d\n", a.capex.Load())
+		fmt.Fprintf(w, "# TYPE assets_leases_terminated_total counter\nassets_leases_terminated_total %d\n", a.terminated.Load())
 		fmt.Fprintf(w, "# TYPE assets_leases_remeasured_total counter\nassets_leases_remeasured_total %d\n", a.remeasured.Load())
 		fmt.Fprintf(w, "# TYPE assets_count_sessions_total counter\nassets_count_sessions_total %d\n", a.counted.Load())
 		fmt.Fprintf(w, "# TYPE assets_capex_decisions_total counter\nassets_capex_decisions_total %d\n", a.decided.Load())
@@ -254,6 +257,12 @@ type leaseRequest struct {
 	IBRRate          string `json:"ibrRate"`
 	RateMethod       string `json:"rateMethod"`
 	Currency         string `json:"currency"`
+	// Election is None (also when empty), ShortTerm or LowValue; UnderlyingAssetValue is required for LowValue,
+	// in UnderlyingAssetCurrency (USD or EUR; omitted, the lease currency). PurchaseOption rules out ShortTerm.
+	Election                string  `json:"election"`
+	PurchaseOption          bool    `json:"purchaseOption"`
+	UnderlyingAssetValue    *string `json:"underlyingAssetValue"`
+	UnderlyingAssetCurrency string  `json:"underlyingAssetCurrency"`
 }
 
 type scheduleLine struct {
@@ -613,6 +622,31 @@ func (a *API) createLease(w http.ResponseWriter, r *http.Request) {
 	if req.RateMethod != domain.RateNominal && req.RateMethod != domain.RateEffective {
 		fields["rateMethod"] = "must be Nominal or Effective"
 	}
+	var underlying *decimal.Decimal
+	if req.UnderlyingAssetValue != nil {
+		v, uerr := decimal.NewFromString(*req.UnderlyingAssetValue)
+		if uerr != nil || !v.IsPositive() {
+			fields["underlyingAssetValue"] = "must be a positive decimal"
+		} else {
+			underlying = &v
+		}
+	}
+	if req.UnderlyingAssetCurrency != "" && !currency.MatchString(req.UnderlyingAssetCurrency) {
+		fields["underlyingAssetCurrency"] = "must be an ISO 4217 code"
+	}
+	if req.Election == "" {
+		req.Election = domain.ElectionNone
+	}
+	if underlying != nil && req.UnderlyingAssetCurrency == "" {
+		req.UnderlyingAssetCurrency = req.Currency
+	}
+	if len(fields) == 0 {
+		if err := domain.ValidateElection(domain.ElectionInput{Election: req.Election, TermMonths: req.TermMonths, PurchaseOption: req.PurchaseOption,
+			UnderlyingValue: underlying, UnderlyingCurrency: req.UnderlyingAssetCurrency}); err != nil {
+			writeDomain(w, r, err)
+			return
+		}
+	}
 	if len(fields) > 0 {
 		writeValidation(w, r, fields)
 		return
@@ -621,7 +655,11 @@ func (a *API) createLease(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	payment = payment.Round(money.MinorUnits(req.Currency))
-	sched, err := domain.ComputeLease(domain.LeaseTerms{Payment: payment, PaymentsPerYear: req.PaymentsPerYear, TermMonths: req.TermMonths,
+	compute := domain.ComputeLease
+	if req.Election != domain.ElectionNone {
+		compute = domain.ComputeExemptLease
+	}
+	sched, err := compute(domain.LeaseTerms{Payment: payment, PaymentsPerYear: req.PaymentsPerYear, TermMonths: req.TermMonths,
 		Advance: req.PaymentTiming == "advance", AnnualRate: rate, Currency: req.Currency, RateMethod: req.RateMethod})
 	if err != nil {
 		writeDomain(w, r, err)
@@ -629,7 +667,8 @@ func (a *API) createLease(w http.ResponseWriter, r *http.Request) {
 	}
 	lease := store.Lease{LegalEntityID: req.LegalEntityID, LeaseNumber: strings.TrimSpace(req.LeaseNumber), CommencementDate: commencement,
 		TermMonths: req.TermMonths, PaymentsPerYear: req.PaymentsPerYear, PaymentAmount: payment, PaymentTiming: req.PaymentTiming,
-		IBRRate: rate, RateMethod: req.RateMethod, Currency: req.Currency, Liability: sched.Liability, ROUAsset: sched.ROUAsset, Schedule: toLeaseLines(sched.Lines)}
+		IBRRate: rate, RateMethod: req.RateMethod, Currency: req.Currency, Election: req.Election, PurchaseOption: req.PurchaseOption,
+		UnderlyingAssetValue: underlying, UnderlyingAssetCurrency: req.UnderlyingAssetCurrency, Liability: sched.Liability, ROUAsset: sched.ROUAsset, Schedule: toLeaseLines(sched.Lines)}
 	created, err := a.store.CreateLease(r.Context(), lease, key)
 	if err != nil {
 		httpx.Fail(w, r, err)

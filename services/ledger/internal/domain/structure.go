@@ -63,6 +63,8 @@ type Structure struct {
 	Segments      []string     `json:"segments"`
 	AccountFilter []string     `json:"accountFilter"`
 	Constraints   []Constraint `json:"constraints"`
+	// LockVersion is the entity tag of the row: PUT of an existing version sends it in If-Match.
+	LockVersion int `json:"lockVersion"`
 	// AdvancedRules are the rules of this version (FR-11.16); the store fills them when it
 	// loads the active structures for posting.
 	AdvancedRules []AdvancedRule `json:"-"`
@@ -88,6 +90,8 @@ type DimensionValue struct {
 	ActiveFrom *time.Time `json:"activeFrom,omitempty"`
 	ActiveTo   *time.Time `json:"activeTo,omitempty"`
 	Suspended  bool       `json:"suspended"`
+	// LockVersion is the entity tag of the row: PUT of an existing value sends it in If-Match.
+	LockVersion int `json:"lockVersion"`
 }
 
 // ValueKey is the map key of a dimension value.

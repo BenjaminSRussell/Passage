@@ -96,6 +96,9 @@ function newKey(): string {
   return c?.randomUUID ? c.randomUUID() : `cg-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+/** The code of the default coverage group: used for an item that has no coverage of its own (4.22.13). */
+const DEFAULT_GROUP = "REQ";
+
 const safetyLabel: Record<SafetyStockPolicy, string> = { today: "Today", "first-issue": "First issue" };
 const onOff = (on: boolean) => (on ? "On" : "Off");
 const fence = (days: number, zero: string) => (days === 0 ? zero : `${days} d`);
@@ -123,7 +126,7 @@ export function CoverageGroupsPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Coverage groups"
-        description="How items are covered: lot-for-lot, per period, min/max or manual, with the fences that decide planned orders, firming and messages."
+        description="How items are covered: lot-for-lot, per period, min/max or manual, with the fences that decide planned orders, firming and messages. The group REQ is the default for items with no coverage of their own."
         actions={
           <Link className={buttonClassName("primary")} to={`${LIST}/new`}>
             New coverage group
@@ -133,6 +136,11 @@ export function CoverageGroupsPage() {
       <Alert tone="danger" title={state.error ? "Could not load coverage groups" : undefined} live="alert">
         {state.error ? `${state.error.message} (${state.error.code})` : null}
       </Alert>
+      {state.data && !state.data.some((g) => g.code === DEFAULT_GROUP) ? (
+        <Alert tone="info" title="No default coverage group">
+          {`Items that have no item coverage and no coverage on the run are planned as requirement coverage with the defaults. Create a group with the code ${DEFAULT_GROUP} to change that.`}
+        </Alert>
+      ) : null}
       {state.error ? null : (
         <DataTable
           label="Coverage groups"

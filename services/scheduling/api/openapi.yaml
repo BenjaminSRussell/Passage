@@ -384,10 +384,11 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
     patch:
       operationId: updateOperation
-      summary: Change an operation's duration, dates, priority, setup minutes or candidate resources (FR-23.4)
+      summary: Change an operation's duration, dates, priority, setup minutes, queue times, quantities or candidate resources (FR-23.4)
       description: >
-        Send at least one of minutes, dueAt, readyAt, priority, setupMinutes or
-        resourceIds (the candidates, replacing the list, in priority order and
+        Send at least one of minutes, dueAt, readyAt, priority, setupMinutes,
+        queueBeforeMinutes, queueAfterMinutes, quantity, overlapQuantity (0 clears the overlap; an overlap
+        above the quantity, or without one, is 422 SCHED-0142) or resourceIds (the candidates, replacing the list, in priority order and
         none of them a secondary resource of the operation: 422 SCHED-0139).
         The order, operation number, secondary resources, setup group, network
         and attributes are fixed when the operation is created. A change to
@@ -548,11 +549,25 @@ paths:
         never split across closed time (BR-23.3): a start that would split it
         is SCHED-0002. With propagate, the orders pegged to the moved order
         (order-pegs) that would start before a parent ends are pushed forward
-        with their successors, parents first, up to 500 orders or 5 pegging
-        levels (BR-23.10); truncated reports a walk cut at a limit
+        with their successors, parents first, up to the propagation limits of
+        the scheduling parameters (BR-23.10; 500 orders or 5 pegging levels
+        until changed); truncated reports a walk cut at a limit
         (SCHED-0007), and a conflict in any dependent refuses the whole move.
         A move also needs each secondary resource of the operation (and of every
         job it pushes) free for the same segments, otherwise SCHED-0005.
+        With overrideConstraints (preview or commit) the moved job is placed at
+        the asked start although that start is outside open capacity or inside
+        a block it does not match (SCHED-0002), or a secondary resource is
+        closed (SCHED-0005); the job becomes one continuous span over the
+        closed time, the Gantt flags it outsideCapacity (or blockBreach), and
+        the response lists what was committed over in violations with
+        overridden true; a commit also writes the violations into the move
+        run's messages. The flag needs the scheduling.constraints.override duty
+        on top of this route's duty (403 SCHED-0141 without it). Double booking
+        (SCHED-0001), a secondary resource booked by another job (SCHED-0005),
+        a slot ending beyond the planning horizon, a firmed job, a resource that
+        is not a candidate, and conflicts of the jobs the move pushes are never
+        overridden.
       x-passage-duty: scheduling.schedule.write
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -573,6 +588,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/MoveResponse' }
         '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
@@ -742,6 +758,79 @@ paths:
                   truncated: { type: boolean }
         '400': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/dispatch-list:
+    get:
+      operationId: getDispatchList
+      summary: Dispatch list of a resource for a day or shift
+      description: >
+        The jobs booked on one resource in a window of its own local calendar
+        (PRD 4.23.15), in start order and numbered from 1. The window runs from
+        `startMinute` of `date` to `endMinute` of the last of `days` days, in the
+        resource's time zone, so a night shift is asked as `startMinute=1320`
+        and `endMinute=1800`. Both ends are wall-clock times: across a
+        daylight-saving change the window holds the hours the clock showed
+        (a 22:00 to 06:00 shift is 7 hours on the spring night, 9 on the
+        autumn night); a time skipped by the change maps to the instant of the
+        change, and a repeated time to its first occurrence. A window that lies
+        wholly inside a skipped hour is refused with 400. Start and end of each
+        line are UTC instants. Primary and secondary bookings (BR-23.4) are listed;
+        `minutesInWindow` is the part of each segment inside the window and
+        `totalMinutes` their sum. At most 1,000 lines (then `truncated` is true).
+      x-passage-duty: scheduling.read
+      parameters:
+        - name: resourceId
+          in: query
+          required: true
+          description: Resource UUID.
+          schema: { type: string, format: uuid }
+        - name: date
+          in: query
+          required: true
+          description: First local calendar date of the window, YYYY-MM-DD.
+          schema: { type: string, format: date }
+        - name: days
+          in: query
+          required: false
+          description: Number of local days covered.
+          schema: { type: integer, minimum: 1, maximum: 7, default: 1 }
+        - name: startMinute
+          in: query
+          required: false
+          description: Local minute of the day the window starts, on the first day.
+          schema: { type: integer, minimum: 0, maximum: 1439, default: 0 }
+        - name: endMinute
+          in: query
+          required: false
+          description: Local minute after midnight of the last day the window ends; above 1440 it runs into the next day. Must exceed `startMinute` for a one-day window.
+          schema: { type: integer, minimum: 1, maximum: 2880, default: 1440 }
+      responses:
+        '200':
+          description: The numbered dispatch lines of the window
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [resource, date, days, windowStart, windowEnd, totalMinutes, lines, truncated]
+                properties:
+                  resource:
+                    type: object
+                    required: [id, code, name, timeZone]
+                    properties:
+                      id: { type: string, format: uuid }
+                      code: { type: string }
+                      name: { type: string }
+                      timeZone: { type: string }
+                  date: { type: string, format: date }
+                  days: { type: integer }
+                  windowStart: { type: string, format: date-time }
+                  windowEnd: { type: string, format: date-time }
+                  totalMinutes: { type: integer }
+                  lines:
+                    type: array
+                    items: { $ref: '#/components/schemas/DispatchLine' }
+                  truncated: { type: boolean }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/runs/{id}/kpis:
     get:
       operationId: getRunKpis
@@ -765,6 +854,92 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RunKpis' }
         '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/runs/{id}/compare:
+    get:
+      operationId: compareRuns
+      summary: Compare the jobs two runs placed
+      description: >
+        Diffs the job snapshots of two schedule runs: the run in the path is the
+        base and `to` the other run. `added` lists jobs only the other run
+        placed, `removed` jobs only the base run placed, and `changed` jobs both
+        placed on another resource or at another time, with the start and end
+        shifts and the change of lateness in minutes (the other run minus the
+        base run). Each side carries its snapshot figures (jobs, orders, late
+        jobs, lateness, changeover, makespan) and its utilization: the minutes
+        it booked on its resources (primary and secondary) over their open
+        minutes between its first start and last end, calendars as they are
+        now. Two runs of a different scope or horizon are compared as they are,
+        so a job only one of them selected shows as added or removed; each side
+        carries its run. The counts are exact; each list is cut at 500 entries
+        and `truncated` is true when one was. A move run, or a run from before
+        snapshots, has no snapshot and is refused with SCHED-0143.
+      x-passage-duty: scheduling.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: to
+          in: query
+          required: true
+          description: The run to compare with; it must differ from the run in the path.
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The difference between the two runs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunComparison' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/runs/{id}:rollback:
+    post:
+      operationId: rollbackRun
+      summary: Roll the plan back to a previous run
+      description: >
+        Restores the jobs the run placed as the current plan, in one transaction,
+        under a new run of scope `rollback` that points back at it
+        (`rollbackOf`) and keeps its own snapshot. The current non-firmed jobs of
+        those operations are replaced. A job is skipped and listed in `skipped`
+        when it is firmed, its operation was deleted, or changed or re-imported
+        since the run (`operation_changed`: the placement is out of date), or a
+        resource it used no longer exists; operations the run did not place keep
+        their jobs. The plan the rest would leave is then checked as it is now,
+        and any break refuses the whole rollback with nothing changed: a
+        restored job that overlaps a booking made since (409 SCHED-0144), or
+        (409 SCHED-0146, `errors` maps each job to the first rule it breaks, at
+        most 50) a restored segment outside open capacity or in a capacity
+        block the job does not match, a restored job out of sequence with the
+        job of a neighbouring operation of its order (queue times and overlap
+        included), a peg to or from a restored order whose dependent would
+        start before its parent ends or behind an unplaced parent, or a
+        changeover that no longer covers the step into or out of a restored
+        job. SCHED-0145 means no job could be restored; SCHED-0143 means the
+        run kept no snapshot. The operations are locked in the same order as a
+        run, so a rollback and a concurrent run serialize. Order dates and
+        `job.scheduled` events follow like those of a run.
+      x-passage-duty: scheduling.run
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        '201':
+          description: The rollback run and what was restored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunRollback' }
+        '200':
+          description: 'A replay of the same Idempotency-Key; carries Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunRollback' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/late-orders:
     get:
       operationId: listLateOrders
@@ -1455,6 +1630,60 @@ paths:
       responses:
         '200': { description: Ready }
         '503': { description: Database unreachable }
+  /v1/scheduling/parameters:
+    get:
+      operationId: getParameters
+      summary: The tenant's scheduling parameters (PRD 4.23.13)
+      description: >
+        The defaults a run takes when its request leaves mode, direction or
+        finite out, the Gantt drag snap, and the BR-23.10 limits of a propagated
+        move. A tenant that never changed them gets the built-in defaults at
+        version 1 with a null updatedAt.
+      x-passage-duty: scheduling.read
+      responses:
+        '200':
+          description: 'The parameters, with ETag "<version>" for the If-Match of a change'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Parameters' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateParameters
+      summary: Change the scheduling parameters
+      description: >
+        Send at least one field; fields left out stay as they are. The change
+        needs the version in If-Match (the ETag of a read) so a stale screen
+        cannot overwrite another planner. It applies to runs and moves started
+        after it: jobs already placed are not re-planned. The first change
+        stores the row, so a tenant on the built-in defaults sends If-Match "1".
+        The duty is Maintain scheduling setup (PRD 4.23.17). Publishes
+        parameters.updated.
+      x-passage-duty: scheduling.setup.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: true
+          description: The parameters version from their ETag, for example "1". A stale version gets 412 SCHED-0140.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ParametersPatch' }
+      responses:
+        '200':
+          description: 'The changed parameters with ETag "<version>". A replay of the same Idempotency-Key returns the first answer with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Parameters' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
 components:
   parameters:
     Id:
@@ -1485,6 +1714,28 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Campaign' }
   schemas:
+    Parameters:
+      type: object
+      required: [defaultMode, defaultDirection, defaultFinite, dragSnapMinutes, propagationOrders, propagationLevels, version, updatedAt]
+      properties:
+        defaultMode: { type: string, enum: [jobs, operations] }
+        defaultDirection: { type: string, enum: [forward, backward] }
+        defaultFinite: { type: boolean }
+        dragSnapMinutes: { type: integer, minimum: 1, maximum: 60, description: Grid a Gantt drag snaps to, in minutes. }
+        propagationOrders: { type: integer, minimum: 1, maximum: 5000, description: 'Most dependent orders a propagated move re-plans (BR-23.10)' }
+        propagationLevels: { type: integer, minimum: 1, maximum: 20, description: 'Deepest peg level a propagated move reaches (BR-23.10)' }
+        version: { type: integer, minimum: 1 }
+        updatedAt: { type: [string, 'null'], format: date-time }
+    ParametersPatch:
+      type: object
+      minProperties: 1
+      properties:
+        defaultMode: { type: string, enum: [jobs, operations] }
+        defaultDirection: { type: string, enum: [forward, backward] }
+        defaultFinite: { type: boolean }
+        dragSnapMinutes: { type: integer, minimum: 1, maximum: 60 }
+        propagationOrders: { type: integer, minimum: 1, maximum: 5000 }
+        propagationLevels: { type: integer, minimum: 1, maximum: 20 }
     Problem:
       type: object
       required: [type, title, status, code]
@@ -1605,6 +1856,10 @@ components:
             are refused with SCHED-0107 (422).
         setupGroup: { type: string, minLength: 1, maxLength: 32, description: "Setup group that drives changeovers against the resource's setup matrix (FR-23.15)." }
         setupMinutes: { type: integer, minimum: 0, maximum: 10080, default: 0, description: 'Route setup time, used when the matrix has no entry for a pair (SCHED-0012).' }
+        queueBeforeMinutes: { type: integer, minimum: 0, maximum: 10080, default: 0, description: "Elapsed wait in front of the operation (FR-23.3). No resource is booked while it waits; the next operation of the order starts no earlier than this one's end plus its queue after plus the next one's queue before." }
+        queueAfterMinutes: { type: integer, minimum: 0, maximum: 10080, default: 0, description: "Elapsed wait behind the operation (FR-23.3). No resource is booked while it waits; the next operation of the order starts no earlier than this one's end plus its queue after plus the next one's queue before." }
+        quantity: { type: string, pattern: '^[0-9]+(\.[0-9]{1,4})?$', description: "Order quantity the operation works on, a decimal string with at most 4 decimals. Needed for an overlap." }
+        overlapQuantity: { type: string, pattern: '^[0-9]+(\.[0-9]{1,4})?$', description: "Part of the quantity that must be through this operation before the next operation of the order may start (BR-23.5): the next one starts once the changeover and that share of the process minutes are done, instead of at the end, plus the queue times, and never ends before this one's end plus the queue times (its last units wait them too). A network step still counts its transfer time from this operation's end. At most the quantity." }
         attributes:
           type: object
           maxProperties: 20
@@ -1629,6 +1884,10 @@ components:
           items: { type: string, format: uuid }
         setupGroup: { type: [string, 'null'] }
         setupMinutes: { type: integer }
+        queueBeforeMinutes: { type: integer, description: Elapsed wait in front of the operation, in minutes. }
+        queueAfterMinutes: { type: integer, description: Elapsed wait behind the operation, in minutes. }
+        quantity: { type: [string, 'null'], description: Order quantity the operation works on, a decimal string with 4 decimals; null when not set. }
+        overlapQuantity: { type: [string, 'null'], description: Part of the quantity that must be through before the next operation may start (BR-23.5); null when there is no overlap. }
         attributes:
           type: object
           additionalProperties: { type: string }
@@ -1646,6 +1905,10 @@ components:
         readyAt: { type: string, format: date-time }
         priority: { type: integer, minimum: 0, maximum: 1000 }
         setupMinutes: { type: integer, minimum: 0, maximum: 10080 }
+        queueBeforeMinutes: { type: integer, minimum: 0, maximum: 10080, description: Elapsed wait in front of the operation, in minutes. }
+        queueAfterMinutes: { type: integer, minimum: 0, maximum: 10080, description: Elapsed wait behind the operation, in minutes. }
+        quantity: { type: string, pattern: '^[0-9]+(\.[0-9]{1,4})?$', description: Order quantity the operation works on, a decimal string with at most 4 decimals; it cannot go below an existing overlap quantity. }
+        overlapQuantity: { type: string, pattern: '^[0-9]+(\.[0-9]{1,4})?$', description: Part of the quantity that must be through before the next operation may start (BR-23.5); 0 clears the overlap; above the quantity or without a quantity is 422 SCHED-0142. }
         resourceIds:
           type: array
           minItems: 1
@@ -1697,9 +1960,9 @@ components:
       required: [scope]
       properties:
         scope: { type: string, enum: [site, selection], description: 'site (every operation) or selection (operationIds)' }
-        mode: { type: string, enum: [operations, jobs], default: jobs, description: Recorded on the run; both modes place at minute granularity in this slice. }
-        finite: { type: boolean, default: true }
-        direction: { type: string, enum: [forward, backward], default: forward, description: 'backward schedules from each order''s due date (FR-23.2, BR-23.2)' }
+        mode: { type: string, enum: [operations, jobs], description: 'Recorded on the run; both modes place at minute granularity in this slice. Left out, it takes defaultMode of the scheduling parameters (jobs until changed).' }
+        finite: { type: boolean, description: 'Left out, it takes defaultFinite of the scheduling parameters (true until changed).' }
+        direction: { type: string, enum: [forward, backward], description: 'backward schedules from each order''s due date (FR-23.2, BR-23.2). Left out, it takes defaultDirection of the scheduling parameters (forward until changed).' }
         operationIds:
           type: array
           maxItems: 5000
@@ -1711,7 +1974,7 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
-        scope: { type: string, enum: [site, selection, order, move] }
+        scope: { type: string, enum: [site, selection, order, move, rollback] }
         mode: { type: string }
         direction: { type: string, enum: [forward, backward] }
         finite: { type: boolean }
@@ -1732,6 +1995,90 @@ components:
           description: Findings on placed operations (SCHED-0003, SCHED-0010, SCHED-0012, SCHED-0014).
           items: { $ref: '#/components/schemas/RunWarning' }
         createdAt: { type: string, format: date-time }
+        snapshot:
+          type: boolean
+          description: True when the run kept the jobs it placed, so it can be compared and rolled back to. Move runs and runs from before slice 29 have none.
+        rollbackOf:
+          type: [string, 'null']
+          format: uuid
+          description: The run a rollback restored; null for other runs.
+    RunCompareJob:
+      type: object
+      description: A job only one of the two runs placed.
+      properties:
+        jobId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        operNumber: { type: integer }
+        resourceId: { type: string, format: uuid }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        lateMinutes: { type: integer }
+    RunCompareChange:
+      type: object
+      description: A job both runs placed differently. From is the base run, to the other run.
+      properties:
+        jobId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        operNumber: { type: integer }
+        fromResourceId: { type: string, format: uuid }
+        toResourceId: { type: string, format: uuid }
+        fromStart: { type: string, format: date-time }
+        toStart: { type: string, format: date-time }
+        fromEnd: { type: string, format: date-time }
+        toEnd: { type: string, format: date-time }
+        startShiftMinutes: { type: integer, description: Other run minus base run; negative when earlier. }
+        endShiftMinutes: { type: integer }
+        lateDeltaMinutes: { type: integer, description: Lateness of the other run minus that of the base run. }
+    RunMeasures:
+      type: object
+      description: The figures of one run's snapshot.
+      properties:
+        jobs: { type: integer }
+        orders: { type: integer }
+        lateJobs: { type: integer }
+        totalLateMinutes: { type: integer }
+        maxLateMinutes: { type: integer }
+        changeoverMinutes: { type: integer }
+        makespanMinutes: { type: integer }
+        bookedMinutes: { type: integer, description: Minutes the run booked on its resources, primary and secondary. }
+        openMinutes: { type: integer, description: Open minutes of those resources between the run's first start and last end, calendars as they are now. }
+        utilizationPct: { type: number, description: Booked over open minutes in percent, one decimal; 0 without open minutes. }
+    RunSide:
+      type: object
+      properties:
+        run: { $ref: '#/components/schemas/Run' }
+        measures: { $ref: '#/components/schemas/RunMeasures' }
+    RunComparison:
+      type: object
+      properties:
+        base: { $ref: '#/components/schemas/RunSide' }
+        other: { $ref: '#/components/schemas/RunSide' }
+        addedCount: { type: integer }
+        removedCount: { type: integer }
+        changedCount: { type: integer }
+        unchangedCount: { type: integer }
+        added:
+          type: array
+          items: { $ref: '#/components/schemas/RunCompareJob' }
+        removed:
+          type: array
+          items: { $ref: '#/components/schemas/RunCompareJob' }
+        changed:
+          type: array
+          items: { $ref: '#/components/schemas/RunCompareChange' }
+        truncated: { type: boolean, description: True when a list was cut at 500 entries. }
+    RunRollback:
+      type: object
+      properties:
+        run: { $ref: '#/components/schemas/Run' }
+        restored: { type: integer, description: Jobs written back as the current plan. }
+        skipped:
+          type: array
+          items:
+            type: object
+            properties:
+              jobId: { type: string, format: uuid }
+              reason: { type: string, enum: [firmed, operation_missing, operation_changed, resource_missing] }
     RunWarning:
       type: object
       properties:
@@ -1762,6 +2109,7 @@ components:
         changeoverCurrency: { type: [string, 'null'], pattern: '^[A-Z]{3}$', description: 'ISO 4217 currency of changeoverCost (the setup matrix currency); null with it.' }
         cleaningSetId: { type: [string, 'null'], description: 'Cleaning standard operation set the matrix entry requires (recipe-dependent cleaning); null when none.' }
         outsideCapacity: { type: boolean, description: 'True when part of the segment lies outside the resource''s open capacity as it is now, calendar and overrides applied, such as inside a downtime added after the job was booked (SCHED-0002, AC-23.7). Also true when a secondary resource booked with the job is closed for the segment.' }
+        blockBreach: { type: boolean, description: 'True when the segment lies in open capacity but in time the resource''s active capacity blocks do not leave a job with the operation''s attributes (BR-23.15), for example after a block was added or its condition changed. The job stays where it is until the next run or move. Never true together with outsideCapacity, nor for infinite-run jobs.' }
         secondaryResourceIds:
           type: array
           items: { type: string, format: uuid }
@@ -1777,14 +2125,20 @@ components:
           type: boolean
           default: false
           description: Also push the orders pegged to the moved order forward behind their parents (FR-23.8, BR-23.10).
+        overrideConstraints:
+          type: boolean
+          default: false
+          description: Commit (or preview) the move over capacity violations of the moved job (SCHED-0002; SCHED-0005 for a closed secondary resource, never a booked one). Needs the scheduling.constraints.override duty (403 SCHED-0141 without it).
     MoveResponse:
       type: object
-      required: [dryRun, feasible, violations, changes, dependents, truncated]
+      required: [dryRun, feasible, overridden, violations, changes, dependents, truncated]
       properties:
         dryRun: { type: boolean }
         feasible: { type: boolean }
+        overridden: { type: boolean, description: 'True when overrideConstraints was set and the move went over at least one violation; violations then lists them.' }
         violations:
           type: array
+          description: Why a dry run is infeasible, or, with overridden true, what a feasible move went over.
           items:
             type: object
             required: [code, detail]
@@ -1820,7 +2174,7 @@ components:
               oldEnd: { type: string, format: date-time }
               newStart: { type: string, format: date-time }
               newEnd: { type: string, format: date-time }
-        truncated: { type: boolean, description: The dependent walk stopped at 500 orders or 5 levels (SCHED-0007). }
+        truncated: { type: boolean, description: 'The dependent walk stopped at the propagation limit of the scheduling parameters (SCHED-0007).' }
         run: { $ref: '#/components/schemas/Run' }
     PegRequest:
       type: object
@@ -1967,6 +2321,24 @@ components:
         start: { type: string, format: date-time }
         end: { type: string, format: date-time }
         minutesInRange: { type: integer }
+        finite: { type: boolean }
+        firmed: { type: boolean }
+        lateMinutes: { type: integer }
+    DispatchLine:
+      type: object
+      required: [sequence, jobId, orderId, operNumber, segment, role, start, end, minutesInWindow, changeoverMinutes, finite, firmed, lateMinutes]
+      properties:
+        sequence: { type: integer, minimum: 1 }
+        jobId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        operNumber: { type: integer }
+        segment: { type: integer }
+        role: { type: string, enum: [primary, secondary] }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        minutesInWindow: { type: integer }
+        setupGroup: { type: string, description: Setup group of the operation; absent on secondary bookings and when none is set. }
+        changeoverMinutes: { type: integer, description: Changeover laid in front of the job, on its first segment. }
         finite: { type: boolean }
         firmed: { type: boolean }
         lateMinutes: { type: integer }

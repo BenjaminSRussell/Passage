@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"sync/atomic"
@@ -25,14 +26,16 @@ import (
 )
 
 const (
-	dutyView         = "pricing.view"
-	dutyMaintain     = "pricing.maintain"
-	resolvePath      = "/v1/pricing/resolve"
-	simulatePath     = "/v1/pricing/simulate"
-	recordsPath      = "/v1/pricing/condition-records"
-	idempotencyKey   = "Idempotency-Key"
-	dateLayout       = "2006-01-02"
-	validationDetail = "request is invalid"
+	dutyView          = "pricing.view"
+	dutyMaintain      = "pricing.maintain"
+	resolvePath       = "/v1/pricing/resolve"
+	simulatePath      = "/v1/pricing/simulate"
+	comparePath       = "/v1/pricing/compare"
+	recordsPath       = "/v1/pricing/condition-records"
+	recordsExportPath = "/v1/pricing/condition-records:export"
+	idempotencyKey    = "Idempotency-Key"
+	dateLayout        = "2006-01-02"
+	validationDetail  = "request is invalid"
 	// DefaultMaxLines and DefaultExplainMaxBytes match PRICING_MAX_LINES and PRICING_EXPLAIN_MAX_BYTES.
 	DefaultMaxLines        = 500
 	DefaultExplainMaxBytes = 65536
@@ -85,8 +88,12 @@ func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyView)).Post(resolvePath, a.resolve)
 	r.With(authz.RequireDuty(dutyView)).Post(simulatePath, a.simulate)
+	r.With(authz.RequireDuty(dutyView)).Post(comparePath, a.compare)
+	r.With(authz.RequireDuty(dutyView)).Get(priceListPath, a.priceList)
+	r.With(authz.RequireDuty(dutyView)).Get(netPriceListPath, a.netPriceList)
 	r.With(authz.RequireDuty(dutyMaintain)).Post(recordsPath, a.createRecord)
 	r.With(authz.RequireDuty(dutyView)).Get(recordsPath, a.listRecords)
+	r.With(authz.RequireDuty(dutyView)).Get(recordsExportPath, a.exportRecords)
 	r.With(authz.RequireDuty(dutyView)).Get(recordsPath+"/{id}", a.getRecord)
 	r.With(authz.RequireDuty(dutyMaintain)).Post(recordsPath+"/{id}:activate", a.activateRecord)
 	r.With(authz.RequireDuty(dutyMaintain)).Post(recordsPath+"/{id}:withdraw", a.withdrawRecord)
@@ -103,6 +110,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerCommodityRoutes(r)
 	a.registerProcedureRoutes(r)
 	a.registerOpsRoutes(r)
+	a.registerStatementRoutes(r)
 }
 
 // Metrics serves the Prometheus text exposition of the service counters.
@@ -156,7 +164,12 @@ type resolveRequest struct {
 	CustomerID      string `json:"customerId"`
 	CustomerGroupID string `json:"customerGroupId"`
 	Currency        string `json:"currency"`
-	PricingDate     string `json:"pricingDate"`
+	// PricingDate wins when sent. Without it the pricing date is the document date the legal
+	// entity's pricing_date_basis names (BR-26.2).
+	PricingDate  string `json:"pricingDate"`
+	OrderDate    string `json:"orderDate"`
+	ShipDate     string `json:"shipDate"`
+	DeliveryDate string `json:"deliveryDate"`
 	// SalesChannel selects the channel's procedure assignment (PRD 5.26.13); Procedure names
 	// a procedure to price with instead of the assigned one.
 	SalesChannel string    `json:"salesChannel"`
@@ -184,10 +197,14 @@ type resolveResponse struct {
 	OrderNet      decimal.Decimal  `json:"orderNet"`
 	Applied       []domain.Applied `json:"applied"`
 	// Procedure names the procedure version the prices came from; absent under the reference order.
-	Procedure       *domain.ProcedureRef `json:"procedure,omitempty"`
-	ExplainRef      string               `json:"explainRef"`
-	ExplainTruncate bool                 `json:"explainTruncated,omitempty"`
-	Trace           []domain.TraceStep   `json:"trace,omitempty"`
+	Procedure *domain.ProcedureRef `json:"procedure,omitempty"`
+	// PricingDate is the date the document was priced on: the pricingDate sent, else the document
+	// date the legal entity's pricing date basis chose. A caller that stores it re-resolves the
+	// same document on the same date whatever the basis is later changed to.
+	PricingDate     string             `json:"pricingDate"`
+	ExplainRef      string             `json:"explainRef"`
+	ExplainTruncate bool               `json:"explainTruncated,omitempty"`
+	Trace           []domain.TraceStep `json:"trace,omitempty"`
 	// FreeGoods lists the zero-priced supplementary line proposals (FR-26.22) for w27.
 	FreeGoods []domain.FreeGoodsProposal `json:"freeGoods"`
 }
@@ -201,15 +218,25 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	header, lines, problem := a.buildInput(req)
 	if !ids.Valid(req.LegalEntityID) {
+		// Report the other faults of the body with it.
+		_, _, problem := a.buildInput(req)
 		if problem == nil {
 			problem = validation(map[string]string{})
 		}
 		if problem.Errors != nil {
 			problem.Errors["legalEntityId"] = "must be a UUID"
 		}
+		httpx.Fail(w, r, problem)
+		return
 	}
+	params, err := a.entityParameters(r, req.LegalEntityID)
+	if err != nil {
+		slog.Error("get pricing parameters failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	header, lines, problem := a.documentInput(req, params)
 	if problem != nil {
 		httpx.Fail(w, r, problem)
 		return
@@ -235,7 +262,8 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 	}
 	a.resolves.Add(1)
 	a.linesPriced.Add(int64(len(lines)))
-	in.Header, in.Lines, in.SmallOrderThreshold, in.Procedure = header, lines, domain.SmallOrderThreshold(header.Currency), proc
+	in.Header, in.Lines, in.SmallOrderThreshold, in.Procedure = header, lines, domain.ThresholdFor(params.SmallOrderThresholds, header.Currency), proc
+	in.TotalDiscountBasis = params.TotalDiscountBasis
 	res, free := domain.ResolveWithFreeGoods(in, rules)
 	a.respond(w, r, res, free, r.URL.Query().Get("explain") == "true")
 }
@@ -267,31 +295,33 @@ func (a *API) simulate(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	header, lines, problem := a.buildInput(req.resolveRequest)
-	if problem != nil {
-		httpx.Fail(w, r, problem)
-		return
-	}
-	records := make([]domain.Record, 0, len(req.Records))
-	for i, dto := range req.Records {
-		rec, p := toRecord(dto)
-		if p != nil {
-			httpx.Fail(w, r, p)
-			return
-		}
-		rec.Status = domain.StatusActive
-		if rec.ID == "" {
-			rec.ID = fmt.Sprintf("inline-%d", i+1)
-		}
-		records = append(records, rec)
-	}
-	// A simulation names a legal entity only to choose the procedure it prices with.
-	var proc *domain.Procedure
+	// A simulation names a legal entity to choose the procedure and to read its parameters (the
+	// pricing date basis and the total discount basis); without one the defaults apply.
+	params := store.DefaultParameters(req.LegalEntityID)
 	if req.LegalEntityID != "" || req.Procedure != "" {
 		if !ids.Valid(req.LegalEntityID) {
 			validationFailed(w, r, map[string]string{"legalEntityId": "must be a UUID"})
 			return
 		}
+		var err error
+		if params, err = a.entityParameters(r, req.LegalEntityID); err != nil {
+			slog.Error("get pricing parameters failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+			httpx.Fail(w, r, err)
+			return
+		}
+	}
+	header, lines, problem := a.documentInput(req.resolveRequest, params)
+	if problem != nil {
+		httpx.Fail(w, r, problem)
+		return
+	}
+	records, problem := inlineRecords(req.Records)
+	if problem != nil {
+		httpx.Fail(w, r, problem)
+		return
+	}
+	var proc *domain.Procedure
+	if req.LegalEntityID != "" || req.Procedure != "" {
 		var err error
 		if proc, err = a.store.DetermineProcedure(r.Context(), req.LegalEntityID, req.SalesChannel, req.Procedure); err != nil {
 			slog.Error("determine procedure failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
@@ -300,8 +330,34 @@ func (a *API) simulate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	res := domain.Resolve(domain.Input{Header: header, Lines: lines, Records: records, Procedure: proc,
-		SmallOrderThreshold: domain.SmallOrderThreshold(header.Currency)})
+		SmallOrderThreshold: domain.ThresholdFor(params.SmallOrderThresholds, header.Currency), TotalDiscountBasis: params.TotalDiscountBasis})
 	a.respond(w, r, res, nil, r.URL.Query().Get("explain") != "false")
+}
+
+// MaxInlineRecords caps the condition records a simulate or compare body may carry. The 4 MiB body
+// limit alone would let one request price 500 lines against tens of thousands of records (twice, for
+// a comparison), so the cap keeps a stateless what-if as cheap as a resolve.
+const MaxInlineRecords = 1000
+
+// inlineRecords validates the records of a simulate or compare body and makes them ACTIVE, naming
+// the ones without an id inline-1, inline-2, ...
+func inlineRecords(dtos []recordDTO) ([]domain.Record, *httpx.Problem) {
+	if len(dtos) > MaxInlineRecords {
+		return nil, validation(map[string]string{"records": fmt.Sprintf("must hold at most %d records", MaxInlineRecords)})
+	}
+	records := make([]domain.Record, 0, len(dtos))
+	for i, dto := range dtos {
+		rec, p := toRecord(dto)
+		if p != nil {
+			return nil, p
+		}
+		rec.Status = domain.StatusActive
+		if rec.ID == "" {
+			rec.ID = fmt.Sprintf("inline-%d", i+1)
+		}
+		records = append(records, rec)
+	}
+	return records, nil
 }
 
 // buildInput validates a resolve body. Too many lines is PRC-0009; other faults are 422 field errors.
@@ -352,13 +408,24 @@ func (a *API) buildInput(req resolveRequest) (domain.Header, []domain.Line, *htt
 }
 
 func (a *API) respond(w http.ResponseWriter, r *http.Request, res domain.Result, free []domain.FreeGoodsProposal, explain bool) {
-	body, ref, err := domain.ExplainTrace(res)
+	out, err := a.responseOf(res, free, explain)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+// responseOf builds the wire form of a priced document; the trace is left out when explain is false
+// or the explanation is larger than the configured limit.
+func (a *API) responseOf(res domain.Result, free []domain.FreeGoodsProposal, explain bool) (resolveResponse, error) {
+	body, ref, err := domain.ExplainTrace(res)
+	if err != nil {
+		return resolveResponse{}, err
+	}
 	out := resolveResponse{Currency: res.Currency, Lines: make([]lineView, len(res.Lines)), Subtotal: res.Subtotal,
-		TotalDiscount: res.TotalDiscount, Surcharge: res.Surcharge, OrderNet: res.OrderNet, Applied: res.Applied, Procedure: res.Procedure, ExplainRef: ref, FreeGoods: free}
+		TotalDiscount: res.TotalDiscount, Surcharge: res.Surcharge, OrderNet: res.OrderNet, Applied: res.Applied, Procedure: res.Procedure,
+		PricingDate: res.PricingDate, ExplainRef: ref, FreeGoods: free}
 	if out.FreeGoods == nil {
 		out.FreeGoods = []domain.FreeGoodsProposal{}
 	}
@@ -375,7 +442,7 @@ func (a *API) respond(w http.ResponseWriter, r *http.Request, res domain.Result,
 			out.Trace = res.Trace
 		}
 	}
-	httpx.JSON(w, http.StatusOK, out)
+	return out, nil
 }
 
 type recordDTO struct {
@@ -395,8 +462,9 @@ type recordDTO struct {
 	DiscPct2      string `json:"discPct2"`
 	ValidFrom     string `json:"validFrom"`
 	ValidTo       string `json:"validTo"`
-	SearchNext    bool   `json:"searchNext"`
-	Exclusive     bool   `json:"exclusive"`
+	// SearchNext left out takes the legal entity's price_search_mode (SEARCH_NEXT is true).
+	SearchNext *bool `json:"searchNext"`
+	Exclusive  bool  `json:"exclusive"`
 	// CampaignID optionally groups the record under a campaign (FR-26.2, FR-26.10).
 	CampaignID string `json:"campaignId"`
 }
@@ -459,7 +527,7 @@ func toRecord(dto recordDTO) (domain.Record, *httpx.Problem) {
 	rec := domain.Record{ID: dto.ID, Type: domain.ConditionType(dto.Type), CustomerKind: domain.CustomerKind(dto.CustomerKind), CustomerKey: dto.CustomerKey,
 		ProductKind: domain.ProductKind(dto.ProductKind), ProductKey: dto.ProductKey, Variant: dto.Variant, Currency: dto.Currency, Unit: dto.Unit,
 		FromQuantity: from, Amount: amount, DiscPct1: p1, DiscPct2: p2, ValidFrom: validFrom, ValidTo: validTo,
-		SearchNext: dto.SearchNext, Exclusive: dto.Exclusive, CampaignID: dto.CampaignID}
+		SearchNext: dto.SearchNext != nil && *dto.SearchNext, Exclusive: dto.Exclusive, CampaignID: dto.CampaignID}
 	if dto.CampaignID != "" && !ids.Valid(dto.CampaignID) {
 		fields["campaignId"] = "must be a UUID"
 	}
@@ -484,6 +552,15 @@ func (a *API) createRecord(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	if dto.SearchNext == nil {
+		next, err := a.searchNextDefault(r, dto.LegalEntityID)
+		if err != nil {
+			slog.Error("get pricing parameters failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+			httpx.Fail(w, r, err)
+			return
+		}
+		dto.SearchNext = &next
+	}
 	rec, problem := toRecord(dto)
 	if !ids.Valid(dto.LegalEntityID) {
 		if problem == nil {
@@ -507,11 +584,9 @@ func (a *API) createRecord(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, viewOf(e))
 }
 
-func (a *API) listRecords(w http.ResponseWriter, r *http.Request) {
-	if !validTenant(w, r) {
-		return
-	}
-	q := r.URL.Query()
+// recordFilter reads the condition record filters shared by the list and the CSV export.
+// The second result maps each invalid query parameter to its message; it is never nil.
+func recordFilter(q url.Values) (store.Filter, map[string]string) {
 	f := store.Filter{LegalEntityID: q.Get("legalEntityId"), Status: q.Get("status"), Type: q.Get("type"), Customer: q.Get("customer"),
 		Product: q.Get("product"), CampaignID: q.Get("campaignId")}
 	fields := map[string]string{}
@@ -551,7 +626,15 @@ func (a *API) listRecords(w http.ResponseWriter, r *http.Request) {
 	if f.ValidToFrom != nil && f.ValidToTo != nil && f.ValidToTo.Before(*f.ValidToFrom) {
 		fields["validToTo"] = "must not be before validToFrom"
 	}
-	if raw := q.Get("limit"); raw != "" {
+	return f, fields
+}
+
+func (a *API) listRecords(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	f, fields := recordFilter(r.URL.Query())
+	if raw := r.URL.Query().Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > store.MaxListLimit {
 			fields["limit"] = fmt.Sprintf("must be an integer from 1 to %d", store.MaxListLimit)

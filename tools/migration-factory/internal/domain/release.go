@@ -111,7 +111,9 @@ type totalMove struct {
 }
 
 // applyMoves books the moves into the run's totals. A move of zero on both sides is skipped, so a
-// correction that changes nothing for a total does not create it.
+// correction that changes nothing for a total does not create it. A total keeps its stored
+// tolerance and a new one takes the tolerance of the run's totals of the same name: a release
+// never reads the configured tolerances, which may have changed since the run reconciled.
 func applyMoves(r *PackRun, moves []totalMove) error {
 	for _, m := range moves {
 		if m.source.IsZero() && m.target.IsZero() {
@@ -134,7 +136,7 @@ func applyMoves(r *PackRun, moves []totalMove) error {
 		if found {
 			continue
 		}
-		t, err := NewControlTotal(m.name, m.key, m.source, m.target, Tolerance{})
+		t, err := NewControlTotal(m.name, m.key, m.source, m.target, r.storedTolerance(m.name))
 		if err != nil {
 			return err
 		}

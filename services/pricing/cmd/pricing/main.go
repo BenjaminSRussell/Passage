@@ -66,13 +66,15 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	router := httpx.NewRouter()
-	a := api.New(store.NewCache(store.New(pool), ttl), cfg)
+	cache := store.NewCache(store.New(pool), ttl)
+	a := api.New(cache, cfg)
 	a.Register(router)
 	admin := http.NewServeMux()
 	admin.Handle("/metrics", a.Metrics())
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	go runCacheConsumer(ctx, getenv, cache)
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()

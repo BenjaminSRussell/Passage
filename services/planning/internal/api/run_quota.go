@@ -12,7 +12,8 @@ import (
 // the planned orders of the run (FR-22.17, BR-22.12): an order of an item with
 // an arrangement valid on its delivery day goes to a source (a purchase order
 // also gets the source's vendor), ahead of any default vendor. Items without
-// an arrangement and orders no source can take are left as planned. A store
+// an arrangement and orders no source can take are left as planned (each with a
+// PLAN-0009 no-quota-source message). A store
 // error fails the run before anything is written.
 func (a *API) applyQuotaToRun(ctx context.Context, planCode string, req runRequest, asOf time.Time, res domain.Result) (domain.Result, error) {
 	if len(res.Orders) == 0 {
@@ -46,7 +47,8 @@ func (a *API) applyQuotaToRun(ctx context.Context, planCode string, req runReque
 		return res, err
 	}
 	if outcome.Unassigned > 0 {
-		// PLAN-0009: the orders stay as planned, without a source.
+		// PLAN-0009: the orders stay as planned, without a source; ApplyQuota raised
+		// one no-quota-source message per order, stored with the run.
 		slog.WarnContext(ctx, "planned orders no quota source could take", "code", "PLAN-0009", "plan", planCode,
 			"site", req.SiteID, "count", outcome.Unassigned, "orders", outcome.UnassignedOrders)
 	}

@@ -38,6 +38,10 @@ var ForecastPublished = events.Type(Context, "forecast", "published", 1)
 // cells into a model (FR-22.9), in the writing transaction.
 var ForecastGenerated = events.Type(Context, "forecast", "generated", 1)
 
+// ForecastAllocated is published when an aggregate forecast was split across
+// items by an allocation key into a model (FR-22.8), in the writing transaction.
+var ForecastAllocated = events.Type(Context, "forecast", "allocated", 1)
+
 // ScenarioSimulated is published when a simulation run finishes (FR-22.15,
 // BR-22.14). It is a separate type from plan.completed.v1 so that consumers of
 // the operational plan never see a simulation: no messages, firmed orders or
@@ -46,7 +50,7 @@ var ScenarioSimulated = events.Type(Context, "scenario", "simulated", 1)
 
 // All lists the event types this service publishes.
 func All() []string {
-	return []string{PlanStarted, PlanCompleted, PlannedOrderFirmed, MessageRaised, MessageApplied, MessageDismissed, ForecastPublished, ForecastGenerated, ScenarioSimulated}
+	return []string{PlanStarted, PlanCompleted, PlannedOrderFirmed, MessageRaised, MessageApplied, MessageDismissed, ForecastPublished, ForecastGenerated, ForecastAllocated, ScenarioSimulated}
 }
 
 // ScenarioSimulatedData is the data member of scenario.simulated.v1. The
@@ -96,6 +100,25 @@ type ForecastGeneratedData struct {
 	PeriodFrom   string `json:"period_from"`
 	PeriodTo     string `json:"period_to"`
 	GeneratedBy  string `json:"generated_by"`
+}
+
+// ForecastAllocatedData is the data member of forecast.allocated.v1. Cells are the
+// forecast cells written (items x periods); the quantities are in the items'
+// inventory unit, converted with the key's factors (BR-22.10).
+type ForecastAllocatedData struct {
+	ModelID      string `json:"model_id"`
+	ModelCode    string `json:"model_code"`
+	Version      int    `json:"version"`
+	KeyID        string `json:"key_id"`
+	KeyCode      string `json:"key_code"`
+	KeyVersion   int    `json:"key_version"`
+	SiteID       string `json:"site_id"`
+	Items        int    `json:"items"`
+	Periods      int    `json:"periods"`
+	CellsWritten int    `json:"cells_written"`
+	PeriodFrom   string `json:"period_from"`
+	PeriodTo     string `json:"period_to"`
+	AllocatedBy  string `json:"allocated_by"`
 }
 
 // PlanStartedData is the data member of plan.started.v1. Kind is static until

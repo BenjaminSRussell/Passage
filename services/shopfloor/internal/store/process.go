@@ -170,6 +170,23 @@ func (s *Postgres) IngestProcessMessage(ctx context.Context, in domain.NewMessag
 	return out, err
 }
 
+// StoredProcessMessage returns the message stored under (source, sourceMessageID), if any. The
+// handler asks for it when a message fails its category checks, so a replay of a message stored
+// before its category was deactivated or tightened still answers with the stored message.
+func (s *Postgres) StoredProcessMessage(ctx context.Context, source, sourceMessageID string) (ProcessMessage, bool, error) {
+	p, _ := tenant.FromContext(ctx)
+	var msgs []ProcessMessage
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		msgs, err = loadProcessMessages(ctx, tx, p.TenantID, "source = $2 and source_message_id = $3", []any{source, sourceMessageID}, 1)
+		return err
+	})
+	if err != nil || len(msgs) == 0 {
+		return ProcessMessage{}, false, err
+	}
+	return msgs[0], true, nil
+}
+
 // ListProcessMessages is the process message monitor (CO54 equivalent): newest
 // first, filtered by status, category, destination and order, without deleted
 // messages, one keyset page at a time.

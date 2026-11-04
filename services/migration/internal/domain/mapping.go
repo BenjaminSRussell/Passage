@@ -17,6 +17,8 @@ const (
 	CodeMapCoerce   = "MIG-MAP-COERCE"
 	CodeMapEnum     = "MIG-MAP-ENUM"
 	CodeMapRange    = "MIG-MAP-RANGE"
+	// CodeMapKey rejects a row whose natural key column came out empty (FR-10.3: loads are idempotent by natural key).
+	CodeMapKey = "MIG-MAP-KEY"
 )
 
 const (
@@ -32,6 +34,7 @@ const (
 	maxDecimalScale      = 6
 	maxDecimalExponent   = 14
 	maxDecimalScaleGuard = 64
+	maxNaturalKeyColumns = 8
 	dateLayout           = "2006-01-02"
 )
 
@@ -58,16 +61,21 @@ type FieldRule struct {
 	Default     *string           `json:"default,omitempty"`
 	Required    bool              `json:"required,omitempty"`
 	Format      string            `json:"format,omitempty"`
+	Expr        string            `json:"expr,omitempty"`
+	prog        *ExprProgram
 }
 
 type Mapping struct {
-	Entity         string        `json:"entity"`
-	Version        int           `json:"version"`
-	SourceTimezone string        `json:"sourceTimezone,omitempty"`
-	Fields         []FieldRule   `json:"fields"`
-	RejectWhen     []RejectWhen  `json:"rejectWhen,omitempty"`
-	Tests          []MappingTest `json:"tests,omitempty"`
-	loc            *time.Location
+	Entity         string `json:"entity"`
+	Version        int    `json:"version"`
+	SourceTimezone string `json:"sourceTimezone,omitempty"`
+	// NaturalKey names the mapped (target) columns that identify a record (FR-10.3). Each must be produced by a field
+	// rule; a row whose key column is missing or blank after mapping is rejected with MIG-MAP-KEY.
+	NaturalKey []string      `json:"naturalKey,omitempty"`
+	Fields     []FieldRule   `json:"fields"`
+	RejectWhen []RejectWhen  `json:"rejectWhen,omitempty"`
+	Tests      []MappingTest `json:"tests,omitempty"`
+	loc        *time.Location
 }
 
 type Reject struct {
@@ -92,9 +100,12 @@ func ParseMapping(data []byte) (Mapping, error) {
 	}
 	m.loc = loc
 	targets := map[string]bool{}
-	for _, f := range m.Fields {
+	for i, f := range m.Fields {
 		if e := f.check(); e != nil {
 			return Mapping{}, e
+		}
+		if f.Rule == RuleExpr {
+			m.Fields[i].prog, _ = ParseExpr(f.Expr)
 		}
 		if targets[f.Target] {
 			return Mapping{}, &Error{CodeMapInvalid, "duplicate target " + f.Target}
@@ -108,6 +119,9 @@ func ParseMapping(data []byte) (Mapping, error) {
 				return Mapping{}, &Error{CodeMapInvalid, "value for target " + f.Target + " does not satisfy its type"}
 			}
 		}
+	}
+	if e := m.checkNaturalKey(targets); e != nil {
+		return Mapping{}, e
 	}
 	if e := m.checkRejectWhen(targets); e != nil {
 		return Mapping{}, e
@@ -183,6 +197,14 @@ func (m Mapping) applyTemplated(row map[string]any, template map[string]string) 
 		}
 		out[f.Target] = v
 	}
+	for _, k := range m.NaturalKey {
+		if rejectsHave(rejects, k) {
+			continue
+		}
+		if v, ok := out[k]; !ok || v == nil || strings.TrimSpace(fmt.Sprint(v)) == "" {
+			rejects = append(rejects, Reject{k, CodeMapKey, "natural key column " + k + " is empty"})
+		}
+	}
 	if len(rejects) == 0 {
 		rejects = m.rejectConditions(out)
 	}
@@ -190,6 +212,36 @@ func (m Mapping) applyTemplated(row map[string]any, template map[string]string) 
 		return nil, nil, rejects, nil
 	}
 	return out, warnings, nil, fromTemplate
+}
+
+func rejectsHave(rejects []Reject, field string) bool {
+	for _, r := range rejects {
+		if r.Field == field {
+			return true
+		}
+	}
+	return false
+}
+
+// checkNaturalKey refuses a key that names no mapped column, repeats one, or is blank (PRD: natural keys not
+// produced by the rules).
+func (m Mapping) checkNaturalKey(targets map[string]bool) *Error {
+	if len(m.NaturalKey) > maxNaturalKeyColumns {
+		return &Error{CodeMapInvalid, "naturalKey names at most " + strconv.Itoa(maxNaturalKeyColumns) + " columns"}
+	}
+	seen := map[string]bool{}
+	for _, k := range m.NaturalKey {
+		switch {
+		case k == "":
+			return &Error{CodeMapInvalid, "naturalKey holds an empty column name"}
+		case !targets[k]:
+			return &Error{CodeMapInvalid, "naturalKey column " + k + " is not produced by any field rule"}
+		case seen[k]:
+			return &Error{CodeMapInvalid, "naturalKey names " + k + " twice"}
+		}
+		seen[k] = true
+	}
+	return nil
 }
 
 func (m Mapping) location() *time.Location {

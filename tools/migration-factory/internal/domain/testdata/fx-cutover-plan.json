@@ -1,0 +1,547 @@
+[
+  {
+    "seq": 1,
+    "offsetMin": -20160,
+    "name": "Freeze master-data changes in legacy; final pack dry run"
+  },
+  {
+    "seq": 2,
+    "offsetMin": -10080,
+    "name": "Second rehearsal; sign off variance report"
+  },
+  {
+    "seq": 3,
+    "offsetMin": -4320,
+    "name": "Freeze configuration in Passage"
+  },
+  {
+    "seq": 4,
+    "offsetMin": -360,
+    "name": "Legacy transaction freeze (18:00)"
+  },
+  {
+    "seq": 5,
+    "offsetMin": -360,
+    "name": "Final extracts of master and static reference data"
+  },
+  {
+    "seq": 6,
+    "offsetMin": -360,
+    "name": "Freeze legacy company USMF",
+    "entity": "USMF"
+  },
+  {
+    "seq": 7,
+    "offsetMin": -360,
+    "name": "Freeze legacy company DEMF",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 8,
+    "offsetMin": -360,
+    "name": "Freeze legacy company JPMF",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 9,
+    "offsetMin": 0,
+    "name": "Extract transactional packs"
+  },
+  {
+    "seq": 10,
+    "offsetMin": 0,
+    "name": "Extract entity USMF",
+    "entity": "USMF"
+  },
+  {
+    "seq": 11,
+    "offsetMin": 0,
+    "name": "Extract entity DEMF",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 12,
+    "offsetMin": 0,
+    "name": "Extract entity JPMF",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 13,
+    "offsetMin": 240,
+    "name": "Load and reconcile master data and balances"
+  },
+  {
+    "seq": 14,
+    "offsetMin": 240,
+    "name": "Load pack gl_balances for USMF",
+    "pack": "gl_balances",
+    "entity": "USMF"
+  },
+  {
+    "seq": 15,
+    "offsetMin": 240,
+    "name": "Load pack fixed_assets for USMF",
+    "pack": "fixed_assets",
+    "entity": "USMF"
+  },
+  {
+    "seq": 16,
+    "offsetMin": 240,
+    "name": "Load pack bank_balances for USMF",
+    "pack": "bank_balances",
+    "entity": "USMF"
+  },
+  {
+    "seq": 17,
+    "offsetMin": 240,
+    "name": "Load pack gl_balances for DEMF",
+    "pack": "gl_balances",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 18,
+    "offsetMin": 240,
+    "name": "Load pack fixed_assets for DEMF",
+    "pack": "fixed_assets",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 19,
+    "offsetMin": 240,
+    "name": "Load pack bank_balances for DEMF",
+    "pack": "bank_balances",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 20,
+    "offsetMin": 240,
+    "name": "Load pack gl_balances for JPMF",
+    "pack": "gl_balances",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 21,
+    "offsetMin": 240,
+    "name": "Load pack fixed_assets for JPMF",
+    "pack": "fixed_assets",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 22,
+    "offsetMin": 240,
+    "name": "Load pack bank_balances for JPMF",
+    "pack": "bank_balances",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 23,
+    "offsetMin": 720,
+    "name": "Load open items, orders, on-hand, WIP"
+  },
+  {
+    "seq": 24,
+    "offsetMin": 720,
+    "name": "Load pack open_items for USMF",
+    "pack": "open_items",
+    "entity": "USMF"
+  },
+  {
+    "seq": 25,
+    "offsetMin": 720,
+    "name": "Reconcile pack gl_balances for USMF",
+    "pack": "gl_balances",
+    "entity": "USMF"
+  },
+  {
+    "seq": 26,
+    "offsetMin": 720,
+    "name": "Load pack onhand for USMF",
+    "pack": "onhand",
+    "entity": "USMF"
+  },
+  {
+    "seq": 27,
+    "offsetMin": 720,
+    "name": "Load pack open_orders for USMF",
+    "pack": "open_orders",
+    "entity": "USMF"
+  },
+  {
+    "seq": 28,
+    "offsetMin": 720,
+    "name": "Load pack wip_prod for USMF",
+    "pack": "wip_prod",
+    "entity": "USMF"
+  },
+  {
+    "seq": 29,
+    "offsetMin": 720,
+    "name": "Reconcile pack fixed_assets for USMF",
+    "pack": "fixed_assets",
+    "entity": "USMF"
+  },
+  {
+    "seq": 30,
+    "offsetMin": 720,
+    "name": "Load pack project_wip for USMF",
+    "pack": "project_wip",
+    "entity": "USMF"
+  },
+  {
+    "seq": 31,
+    "offsetMin": 720,
+    "name": "Load pack payroll_ytd for USMF",
+    "pack": "payroll_ytd",
+    "entity": "USMF"
+  },
+  {
+    "seq": 32,
+    "offsetMin": 720,
+    "name": "Reconcile pack bank_balances for USMF",
+    "pack": "bank_balances",
+    "entity": "USMF"
+  },
+  {
+    "seq": 33,
+    "offsetMin": 720,
+    "name": "Load pack open_items for DEMF",
+    "pack": "open_items",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 34,
+    "offsetMin": 720,
+    "name": "Reconcile pack gl_balances for DEMF",
+    "pack": "gl_balances",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 35,
+    "offsetMin": 720,
+    "name": "Load pack onhand for DEMF",
+    "pack": "onhand",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 36,
+    "offsetMin": 720,
+    "name": "Load pack open_orders for DEMF",
+    "pack": "open_orders",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 37,
+    "offsetMin": 720,
+    "name": "Load pack wip_prod for DEMF",
+    "pack": "wip_prod",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 38,
+    "offsetMin": 720,
+    "name": "Reconcile pack fixed_assets for DEMF",
+    "pack": "fixed_assets",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 39,
+    "offsetMin": 720,
+    "name": "Load pack project_wip for DEMF",
+    "pack": "project_wip",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 40,
+    "offsetMin": 720,
+    "name": "Load pack payroll_ytd for DEMF",
+    "pack": "payroll_ytd",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 41,
+    "offsetMin": 720,
+    "name": "Reconcile pack bank_balances for DEMF",
+    "pack": "bank_balances",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 42,
+    "offsetMin": 720,
+    "name": "Load pack open_items for JPMF",
+    "pack": "open_items",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 43,
+    "offsetMin": 720,
+    "name": "Reconcile pack gl_balances for JPMF",
+    "pack": "gl_balances",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 44,
+    "offsetMin": 720,
+    "name": "Load pack onhand for JPMF",
+    "pack": "onhand",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 45,
+    "offsetMin": 720,
+    "name": "Load pack open_orders for JPMF",
+    "pack": "open_orders",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 46,
+    "offsetMin": 720,
+    "name": "Load pack wip_prod for JPMF",
+    "pack": "wip_prod",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 47,
+    "offsetMin": 720,
+    "name": "Reconcile pack fixed_assets for JPMF",
+    "pack": "fixed_assets",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 48,
+    "offsetMin": 720,
+    "name": "Load pack project_wip for JPMF",
+    "pack": "project_wip",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 49,
+    "offsetMin": 720,
+    "name": "Load pack payroll_ytd for JPMF",
+    "pack": "payroll_ytd",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 50,
+    "offsetMin": 720,
+    "name": "Reconcile pack bank_balances for JPMF",
+    "pack": "bank_balances",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 51,
+    "offsetMin": 1200,
+    "name": "Reconcile pack open_items for USMF",
+    "pack": "open_items",
+    "entity": "USMF"
+  },
+  {
+    "seq": 52,
+    "offsetMin": 1200,
+    "name": "Reconcile pack onhand for USMF",
+    "pack": "onhand",
+    "entity": "USMF"
+  },
+  {
+    "seq": 53,
+    "offsetMin": 1200,
+    "name": "Reconcile pack open_orders for USMF",
+    "pack": "open_orders",
+    "entity": "USMF"
+  },
+  {
+    "seq": 54,
+    "offsetMin": 1200,
+    "name": "Reconcile pack wip_prod for USMF",
+    "pack": "wip_prod",
+    "entity": "USMF"
+  },
+  {
+    "seq": 55,
+    "offsetMin": 1200,
+    "name": "Reconcile pack project_wip for USMF",
+    "pack": "project_wip",
+    "entity": "USMF"
+  },
+  {
+    "seq": 56,
+    "offsetMin": 1200,
+    "name": "Reconcile pack payroll_ytd for USMF",
+    "pack": "payroll_ytd",
+    "entity": "USMF"
+  },
+  {
+    "seq": 57,
+    "offsetMin": 1200,
+    "name": "Reconcile pack open_items for DEMF",
+    "pack": "open_items",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 58,
+    "offsetMin": 1200,
+    "name": "Reconcile pack onhand for DEMF",
+    "pack": "onhand",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 59,
+    "offsetMin": 1200,
+    "name": "Reconcile pack open_orders for DEMF",
+    "pack": "open_orders",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 60,
+    "offsetMin": 1200,
+    "name": "Reconcile pack wip_prod for DEMF",
+    "pack": "wip_prod",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 61,
+    "offsetMin": 1200,
+    "name": "Reconcile pack project_wip for DEMF",
+    "pack": "project_wip",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 62,
+    "offsetMin": 1200,
+    "name": "Reconcile pack payroll_ytd for DEMF",
+    "pack": "payroll_ytd",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 63,
+    "offsetMin": 1200,
+    "name": "Reconcile pack open_items for JPMF",
+    "pack": "open_items",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 64,
+    "offsetMin": 1200,
+    "name": "Reconcile pack onhand for JPMF",
+    "pack": "onhand",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 65,
+    "offsetMin": 1200,
+    "name": "Reconcile pack open_orders for JPMF",
+    "pack": "open_orders",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 66,
+    "offsetMin": 1200,
+    "name": "Reconcile pack wip_prod for JPMF",
+    "pack": "wip_prod",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 67,
+    "offsetMin": 1200,
+    "name": "Reconcile pack project_wip for JPMF",
+    "pack": "project_wip",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 68,
+    "offsetMin": 1200,
+    "name": "Reconcile pack payroll_ytd for JPMF",
+    "pack": "payroll_ytd",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 69,
+    "offsetMin": 1320,
+    "name": "Reconcile entity USMF",
+    "entity": "USMF"
+  },
+  {
+    "seq": 70,
+    "offsetMin": 1320,
+    "name": "Reconcile entity DEMF",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 71,
+    "offsetMin": 1320,
+    "name": "Reconcile entity JPMF",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 72,
+    "offsetMin": 1380,
+    "name": "Controller sign-off USMF",
+    "entity": "USMF"
+  },
+  {
+    "seq": 73,
+    "offsetMin": 1380,
+    "name": "Controller sign-off DEMF",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 74,
+    "offsetMin": 1380,
+    "name": "Controller sign-off JPMF",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 75,
+    "offsetMin": 1440,
+    "name": "Reconciliation complete",
+    "goNoGo": true
+  },
+  {
+    "seq": 76,
+    "offsetMin": 1440,
+    "name": "Go/no-go meeting",
+    "goNoGo": true
+  },
+  {
+    "seq": 77,
+    "offsetMin": 1800,
+    "name": "Open user access"
+  },
+  {
+    "seq": 78,
+    "offsetMin": 2160,
+    "name": "Abort deadline"
+  },
+  {
+    "seq": 79,
+    "offsetMin": 2880,
+    "name": "First postings; hypercare starts"
+  },
+  {
+    "seq": 80,
+    "offsetMin": 2880,
+    "name": "Hypercare check USMF",
+    "entity": "USMF"
+  },
+  {
+    "seq": 81,
+    "offsetMin": 2880,
+    "name": "Hypercare check DEMF",
+    "entity": "DEMF"
+  },
+  {
+    "seq": 82,
+    "offsetMin": 2880,
+    "name": "Hypercare check JPMF",
+    "entity": "JPMF"
+  },
+  {
+    "seq": 83,
+    "offsetMin": 10080,
+    "name": "First weekly reconciliation"
+  },
+  {
+    "seq": 84,
+    "offsetMin": 43200,
+    "name": "First month-end close; hypercare review"
+  }
+]

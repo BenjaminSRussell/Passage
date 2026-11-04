@@ -17,6 +17,10 @@ type gatedStore struct {
 	release chan struct{}
 }
 
+func (s *gatedStore) GetTenantParameters(context.Context) (TenantParameters, error) {
+	return DefaultTenantParameters(), nil
+}
+
 func (s *gatedStore) ActiveRecords(context.Context, ActiveQuery) ([]domain.Record, error) {
 	s.loads.Add(1)
 	<-s.release

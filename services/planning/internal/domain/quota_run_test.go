@@ -174,15 +174,36 @@ func TestApplyQuota_SplitCutsAShareToThePeriodRemainder(t *testing.T) {
 }
 
 // When every source is at its period maximum, the order keeps no source and is
-// reported (PLAN-0009) rather than given to a source beyond its maximum.
+// reported (PLAN-0009) rather than given to a source beyond its maximum: one
+// dismiss-only no-quota-source message per order, kept in message order, and a
+// plan hash that differs from the run without it.
 func TestApplyQuota_NoSourceLeftReportsTheOrder(t *testing.T) {
 	q := quotaSpec(true, capped(vendorSrc("A", "va", "50", "0"), "10", 30), capped(vendorSrc("B", "vb", "50", "0"), "20", 30))
-	res, out, err := ApplyQuota(quotaDay0, Result{Orders: []PlannedOrder{po("PLN-1", 5, "100")}}, []RunQuota{q})
+	delay := Message{Action: ActionDelay, ItemID: "item", DemandRef: "SO-1", SuggestedDate: 9, DelayDays: 2}
+	in := Result{Orders: []PlannedOrder{po("PLN-1", 5, "100")}, Messages: []Message{delay}, Hash: "engine"}
+	res, out, err := ApplyQuota(quotaDay0, in, []RunQuota{q})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(res.Orders) != 1 || res.Orders[0].QuotaSourceID != "" || out.Unassigned != 1 || len(out.UnassignedOrders) != 1 || out.UnassignedOrders[0] != "PLN-1" {
 		t.Fatalf("orders %+v outcome %+v", res.Orders, out)
+	}
+	want := Message{Action: ActionNoQuotaSource, ItemID: "item", SupplyRef: "PLN-1", DemandRef: "arr", SuggestedDate: 5, Qty: dq("100")}
+	if len(res.Messages) != 2 || res.Messages[0] != delay || res.Messages[1].SupplyRef != want.SupplyRef || res.Messages[1].DemandRef != "arr" ||
+		res.Messages[1].Action != want.Action || res.Messages[1].SuggestedDate != 5 || !res.Messages[1].Qty.Equal(want.Qty) {
+		t.Fatalf("messages %+v; want the delay then %+v", res.Messages, want)
+	}
+	if len(in.Messages) != 1 {
+		t.Fatal("ApplyQuota must not change the caller's messages")
+	}
+	if res.Hash == "engine" || res.Hash == "" {
+		t.Fatalf("hash %q; want it recomputed over the new message", res.Hash)
+	}
+	if CatalogCode(ActionNoQuotaSource) != "PLAN-0009" || MessageActionable(ActionNoQuotaSource) {
+		t.Fatal("no-quota-source is PLAN-0009 and can only be dismissed")
+	}
+	if text := CatalogText(MessageView{Action: ActionNoQuotaSource, DemandRef: "arr", Date: "2026-03-07"}); text != "Quota arrangement arr has no usable source in 2026-03-07." {
+		t.Fatalf("text %q", text)
 	}
 }
 

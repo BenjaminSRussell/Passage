@@ -35,6 +35,7 @@ type rebuildResponse struct {
 // registerOps mounts the journal reversal and the projection rebuild.
 func (a *API) registerOps(r chi.Router) {
 	r.With(authz.RequireDuty(dutyJournalWrite)).Post(journalsPath+"/{id}:reverse", journalRoute(a.reverseJournal))
+	r.With(authz.RequireDuty(dutyJournalWrite)).Post(journalsPath+"/{id}:copy", journalRoute(a.copyJournal))
 	r.With(authz.RequireDuty(dutyAdmin)).Post(rebuildPath, a.rebuildOnHand)
 	r.With(authz.RequireDuty(dutyAdmin)).Post(backfillSupplyPath, a.backfillTransferSupply)
 }

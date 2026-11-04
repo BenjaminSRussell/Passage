@@ -4,7 +4,9 @@ import { HierarchyDesignerPage } from "./HierarchyDesignerPage";
 import { ReferenceDataPage } from "./ReferenceDataPage";
 import { FiscalCalendarsPage } from "./FiscalCalendarsPage";
 import { LegalEntitiesPage } from "./LegalEntityAdmin";
-import { OperatingUnitsPage, OrgHome, OrgLayout, SitesPage, WarehousesPage } from "./pages";
+import { ModelPackagePage } from "./ModelPackagePage";
+import { OrgHome, OrgLayout } from "./pages";
+import { LocationsPage, OperatingUnitsPage, SitesPage, WarehousesPage } from "./StructurePages";
 import { TeamsPage } from "./TeamsPage";
 
 const org: PassageModule = {
@@ -20,10 +22,12 @@ const org: PassageModule = {
         { path: "/org/operating-units", element: createElement(OperatingUnitsPage) },
         { path: "/org/sites", element: createElement(SitesPage) },
         { path: "/org/warehouses", element: createElement(WarehousesPage) },
+        { path: "/org/locations", element: createElement(LocationsPage) },
         { path: "/org/fiscal-calendars", element: createElement(FiscalCalendarsPage) },
         { path: "/org/teams", element: createElement(TeamsPage) },
         { path: "/org/reference-data", element: createElement(ReferenceDataPage) },
         { path: "/org/hierarchy", element: createElement(HierarchyDesignerPage) },
+        { path: "/org/package", element: createElement(ModelPackagePage) },
       ],
     },
   ],
@@ -33,10 +37,12 @@ const org: PassageModule = {
     { label: "Operating units", to: "/org/operating-units", duty: "org.read" },
     { label: "Sites", to: "/org/sites", duty: "org.read" },
     { label: "Warehouses", to: "/org/warehouses", duty: "org.read" },
+    { label: "Locations", to: "/org/locations", duty: "org.read" },
     { label: "Fiscal calendars", to: "/org/fiscal-calendars", duty: "org.read" },
     { label: "Teams", to: "/org/teams", duty: "org.read" },
     { label: "Reference data", to: "/org/reference-data", duty: "org.read" },
     { label: "Hierarchies", to: "/org/hierarchy", duty: "org.read" },
+    { label: "Model package", to: "/org/package", duty: "org.read" },
   ],
 };
 

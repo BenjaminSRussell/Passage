@@ -10,6 +10,10 @@ const (
 	CodeNotPublished   = "REPORT-0001"
 	CodeExpression     = "REPORT-0002"
 	CodePeriodNotFound = "REPORT-0003"
+	// CodeStale is REPORT-0004: the read model is behind the ledger by more
+	// than reporting.max_lag_seconds. A run is refused with it unless the
+	// caller sets allowStale; an allowed run records it as a warning (FR-15.1).
+	CodeStale          = "REPORT-0004"
 	CodeUnclassified   = "REPORT-0009"
 	CodeCashFlow       = "REPORT-0008"
 	CodePYMissing      = "REPORT-0010"

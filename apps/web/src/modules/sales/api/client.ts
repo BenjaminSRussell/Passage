@@ -108,12 +108,16 @@ export interface Hold {
   id: string;
   holdType: HoldType;
   reasonCode: string;
-  status: "ACTIVE" | "RELEASED" | "CLEARED";
+  status: "ACTIVE" | "RELEASED" | "CLEARED" | "REJECTED";
   orderAmount: Decimal;
   appliedBy: string;
   releasedBy?: string;
   releasedUntil?: string;
   appliedAt: string;
+  /** Set when a credit manager rejected the hold (the order was cancelled with it). */
+  rejectedBy?: string;
+  rejectedAt?: string;
+  rejectionComment?: string;
 }
 
 export interface CreditRule {
@@ -377,11 +381,19 @@ export interface LineChangeInput {
   requestedShipDate?: string;
 }
 
-/** A PATCH body: send lines, requestedShipDate or both; absent fields keep their value. */
+/**
+ * A PATCH body: send lines, addLines, removeLines, requestedShipDate or any of
+ * them; absent fields keep their value. A removed line is cancelled and keeps
+ * its number; an added line is numbered after the order's highest.
+ */
 export interface ChangeOrderInput {
   reason?: string;
   requestedShipDate?: string;
   lines?: LineChangeInput[];
+  addLines?: NewOrderLine[];
+  removeLines?: number[];
+  /** Accepts an added line the product listing denies; only a caller with sales.order.approve. */
+  listingOverrideReason?: string;
 }
 
 export interface FieldChange {
@@ -574,6 +586,15 @@ export function confirmOrder(id: string, etag: string): Promise<Versioned<Confir
 export function releaseHold(orderId: string, holdId: string, etag: string): Promise<Versioned<ConfirmResult>> {
   return versioned<ConfirmResult>(`/orders/${encodeURIComponent(orderId)}/holds/${encodeURIComponent(holdId)}:release`, {
     method: "POST",
+    headers: { "If-Match": etag },
+  });
+}
+
+/** Rejects an ACTIVE CREDIT hold of an unconfirmed order with a comment; the order is cancelled with it. */
+export function rejectHold(orderId: string, holdId: string, etag: string, comment: string): Promise<Versioned<Order>> {
+  return versioned<Order>(`/orders/${encodeURIComponent(orderId)}/holds/${encodeURIComponent(holdId)}:reject`, {
+    method: "POST",
+    body: JSON.stringify({ comment }),
     headers: { "If-Match": etag },
   });
 }
@@ -880,6 +901,8 @@ export interface HoldQueueItem {
   orderNumber: string;
   /** The order's version; its ETag is what the release call must echo. */
   orderVersion: number;
+  /** The order's status: only a CREDIT hold of a DRAFT or OPEN order can be rejected. */
+  orderStatus: string;
   customerId: string;
   holdType: HoldType;
   reasonCode: string;
@@ -1644,20 +1667,33 @@ export interface ChangePolicy {
   legalEntityId: string;
   customerId: string;
   approvalRequired: boolean;
+  /** A change moving the order total by less applies at once; absent when every change needs approval. */
+  approvalThreshold?: string;
+  thresholdCurrency?: string;
+  /** The only users who may approve or reject the customer's requests; empty when any approver may. */
+  approverIds?: string[];
   version: number;
   updatedBy?: string;
   updatedAt?: string;
+}
+
+/** What a PUT replaces: a member it names (null / [] clears); a member left out keeps its stored value. */
+export interface ChangePolicyInput {
+  approvalRequired: boolean;
+  approvalThreshold?: string | null;
+  thresholdCurrency?: string | null;
+  approverIds?: string[];
 }
 
 export function getChangePolicy(legalEntityId: string, customerId: string, signal?: AbortSignal): Promise<Versioned<ChangePolicy>> {
   return versioned<ChangePolicy>(`/customers/${encodeURIComponent(customerId)}/change-policy${query({ legalEntityId })}`, {}, signal);
 }
 
-/** Creates (etag "0") or replaces the switch at the given ETag. */
-export function putChangePolicy(legalEntityId: string, customerId: string, approvalRequired: boolean, etag: string): Promise<Versioned<ChangePolicy>> {
+/** Creates (etag "0") or replaces the policy at the given ETag. */
+export function putChangePolicy(legalEntityId: string, customerId: string, policy: ChangePolicyInput, etag: string): Promise<Versioned<ChangePolicy>> {
   return versioned<ChangePolicy>(`/customers/${encodeURIComponent(customerId)}/change-policy${query({ legalEntityId })}`, {
     method: "PUT",
-    body: JSON.stringify({ approvalRequired }),
+    body: JSON.stringify(policy),
     headers: { "If-Match": etag },
   });
 }
@@ -1681,6 +1717,11 @@ export interface IntakeError {
   resolvedBy?: string;
   resolvedAt?: string;
   resolutionNote?: string;
+  /** True while the refused request is kept so the error can be replayed (never returned). */
+  replayable: boolean;
+  replayCount: number;
+  /** The order a successful replay stored or found. */
+  replayedOrderId?: string;
   version: number;
 }
 
@@ -1707,6 +1748,77 @@ export function getIntakeError(id: string, signal?: AbortSignal): Promise<Versio
 /** Closes an OPEN intake error at its ETag with a note (1 to 500 characters). */
 export function resolveIntakeError(id: string, etag: string, note: string): Promise<Versioned<IntakeError>> {
   return versioned<IntakeError>(`/intake-errors/${encodeURIComponent(id)}:resolve`, { method: "POST", body: JSON.stringify({ note }), headers: { "If-Match": etag } });
+}
+
+/** The outcome of replaying one refused order (PRD §5.27.10). */
+export interface IntakeReplayResult {
+  intakeError: IntakeError;
+  /** The order was stored and the intake error closed. */
+  replayed: boolean;
+  orderId?: string;
+  orderNumber?: string;
+  /** Why intake refused the order again; present when replayed is false. */
+  failure?: { code: string; message: string };
+}
+
+/** Replays one OPEN intake error through order intake again. Intake refusing it again is still a result, not an error. */
+export async function replayIntakeError(id: string): Promise<IntakeReplayResult> {
+  return (await versioned<IntakeReplayResult>(`/intake-errors/${encodeURIComponent(id)}:replay`, { method: "POST" })).value;
+}
+
+export interface IntakeReplayBatch {
+  attempted: number;
+  replayed: number;
+  failed: number;
+  /** Dead letters (10 or more attempts) left for an operator. */
+  skipped: number;
+  items: IntakeReplayResult[];
+}
+
+/** Replays the open intake errors of the filter, oldest first. */
+export function replayIntakeErrors(filter: Pick<IntakeErrorFilter, "legalEntityId" | "channel" | "errorCode"> = {}): Promise<IntakeReplayBatch> {
+  return json<IntakeReplayBatch>(
+    `/intake-errors:replay${query({ legalEntityId: filter.legalEntityId, channel: filter.channel, errorCode: filter.errorCode })}`,
+    { method: "POST" },
+  );
+}
+
+export type AutoCloseResultKind = "CLOSED" | "CANDIDATE" | "SKIPPED";
+
+/** An order the auto-close looked at. */
+export interface AutoCloseItem {
+  orderId: string;
+  orderNumber: string;
+  legalEntityId: string;
+  /** When the order last changed (the invoice that completed it, or a later change); the grace period runs from here. */
+  lastChangedAt: string;
+  version: number;
+  result: AutoCloseResultKind;
+}
+
+export interface AutoCloseRun {
+  closed: number;
+  /** Orders that changed between the listing and the close and were left alone. */
+  skipped: number;
+  /** More candidates are left than the limit allowed. A scheduler repeats while this is true and the run closed something. */
+  more: boolean;
+  items: AutoCloseItem[];
+}
+
+export interface AutoCloseRequest {
+  legalEntityId?: string;
+  graceDays: number;
+  limit: number;
+  dryRun: boolean;
+}
+
+/** Closes the INVOICED orders unchanged for graceDays (BR-27.5), or lists them with dryRun. Repeating it is harmless. */
+export function autoCloseOrders(request: AutoCloseRequest, signal?: AbortSignal): Promise<AutoCloseRun> {
+  return json<AutoCloseRun>(
+    `/orders:auto-close${query({ legalEntityId: request.legalEntityId, graceDays: String(request.graceDays), limit: String(request.limit), dryRun: String(request.dryRun) })}`,
+    { method: "POST" },
+    signal,
+  );
 }
 
 export const PROGRESS_KINDS = ["DELIVERED", "INVOICED"] as const;

@@ -5,7 +5,7 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | Route | Page | Calls |
 |---|---|---|
 | `/pricing` | Workspace: exact tiles (active, drafts, expiring in 30 days, journals to post, live campaigns, vendor claims to approve, customer and vendor rebates accrued this month per currency), the expiring list (active agreements ending in the next 30 days, soonest first), and the record expiry run (BR-26.9) for a legal entity and day | `GET /workspace`, `GET /condition-records?status=ACTIVE&validToFrom=&validToTo=`, `POST /condition-records:expire` |
-| `/pricing/agreements` | Trade agreements grid with status, type, customer, product, as-of and ends-between filters | `GET /condition-records` |
+| `/pricing/agreements` | Trade agreements grid with status, type, customer, product, as-of and ends-between filters, and Export CSV of every match | `GET /condition-records`, `GET /condition-records:export` |
 | `/pricing/agreements/new` | Create a DRAFT agreement, optionally in a campaign; `?copy=<id>` starts from an existing one, `?campaign=<id>` fills the campaign | `POST /condition-records` |
 | `/pricing/agreements/:id` | Detail with its campaign, activate (overlap 409 shown) and withdraw | `GET`, `:activate`, `:withdraw` |
 | `/pricing/free-goods` | Free goods rules (FR-26.22) with status | `GET /free-goods-rules` |
@@ -19,14 +19,14 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | `/pricing/commodity/calculations/:id` | Preview a run, run it (creates a VALIDATED price journal, link to review), run history, withdraw | `GET /commodity/calculations/{id}`, `:preview`, `:run`, `GET …/runs`, `:withdraw` |
 | `/pricing/campaigns` | Campaigns with target group, validity, budget and status (live, scheduled, ended, killed) | `GET /campaigns` |
 | `/pricing/campaigns/new` | Create a campaign: validity, target customer group, budget and currency | `POST /campaigns` |
-| `/pricing/campaigns/:id` | Terms, the campaign's agreements, kill and restore at the campaign version | `GET /campaigns/{id}`, `GET /condition-records?campaignId=`, `:kill`, `:restore` |
+| `/pricing/campaigns/:id` | Terms, the campaign's agreements, edit (name, validity, group, budget), kill and restore at the campaign version | `GET /campaigns/{id}`, `GET /condition-records?campaignId=`, `:revise`, `:kill`, `:restore` |
 | `/pricing/procedures` | Procedure designer: versions with status and step order | `GET /procedures` |
 | `/pricing/procedures/new` | Save a DRAFT version from the reference steps; `?from=<id>` copies a version into the next one | `POST /procedures` |
 | `/pricing/procedures/:id` | A DRAFT's step editor (step, type, CEL requirement, exclusion group and mode, statistical, account key), save at its revision and activate; other versions read-only (PRC-0008 shown) | `GET /procedures/{id}`, `:revise`, `:activate` |
 | `/pricing/journals` | Price journal log with a status filter | `GET /journals` |
 | `/pricing/journals/new` | Create an OPEN journal from pasted `UPDATE, id, version, percent` / `DELETE, id, version` rows | `POST /journals` |
 | `/pricing/journals/import` | Import a CSV file (header row, op first; up to 100,000 rows) as an OPEN journal; row faults listed by row number | `POST /journals:import-csv` |
-| `/pricing/journals/:id` | Lines with before and after values, who created and who posted it; validate, post (PRC-0005, PRC-0056 and the four-eyes PRC-0057 shown) and reverse | `GET`, `:validate`, `:post`, `:reverse` |
+| `/pricing/journals/:id` | Lines with before and after values, who created and who posted it; validate, post (PRC-0005, PRC-0056 and the four-eyes PRC-0057 shown) and reverse; Download audit extract (CSV of every line) once posted or reversed | `GET`, `:validate`, `:post`, `:reverse`, `GET …/audit-extract?format=csv` |
 | `/pricing/brokers` | Broker contracts (FR-26.16) with rate, scope, validity and status filter | `GET /broker-contracts` |
 | `/pricing/brokers/new` | Create a broker contract: broker vendor, customer and product scope, percentage of net or amount per unit, validity, accounts | `POST /broker-contracts` |
 | `/pricing/brokers/:id` | Terms, accruals (credit note lines reverse in proportion), period claim preview and BC- claim, close the contract | `GET /broker-contracts/{id}`, `GET …/accruals`, `GET …/claim-preview`, `POST /contract-claims`, `:close` |
@@ -37,7 +37,7 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | `/pricing/contract-claims/:id` | Claim detail and approval for AP (the creator cannot approve, PRC-0046) | `GET /contract-claims/{id}`, `:approve` |
 | `/pricing/rebates` | Customer and vendor rebate agreements with type, basis, period and tiers; type filter | `GET /rebates/agreements?partyRole=` |
 | `/pricing/rebates/new` | Create a tiered agreement for a customer, a customer group or (vendor rebate) a vendor; accounts follow the type (2150 / 4150 or 2160 / 5100) | `POST /rebates/agreements` |
-| `/pricing/rebates/:id` | Tiers, posting accounts, accruals by period with an exact total (retroactive rows marked), the retroactive recompute from pasted posted invoice lines, and for a vendor rebate the claims card: preview a period, claim it (credit note or payment deduction; PRC-0015 shown) and list its claims | `GET /rebates/agreements/{id}`, `GET /rebates/accruals`, `POST /rebates/agreements/{id}:retro-recompute`, `GET /rebates/agreements/{id}/claim-preview`, `GET`/`POST /rebates/vendor-claims` |
+| `/pricing/rebates/:id` | Tiers, posting accounts, accruals by period with an exact total (retroactive rows marked), the retroactive recompute from pasted posted invoice lines, and for a vendor rebate the claims card: preview a period, claim it (credit note or payment deduction; PRC-0015 shown) and list its claims | `GET /rebates/agreements/{id}`, `GET /rebates/accruals`, `GET …/statement`, `POST /rebates/agreements/{id}:retro-recompute`, `GET /rebates/agreements/{id}/claim-preview`, `GET`/`POST /rebates/vendor-claims` |
 | `/pricing/rebates/claims` | Vendor rebate claims inquiry by vendor, period and status, with exact totals per currency | `GET /rebates/vendor-claims` |
 | `/pricing/rebates/claims/:id` | One claim: accrued, claimed before, amount, settlement; approve at its version (PRC-0046 shown when the creator tries) | `GET /rebates/vendor-claims/{id}`, `:approve` |
 | `/pricing/commission/sales-groups` | Sales groups with their reps and shares | `GET /commission/sales-groups` |
@@ -53,6 +53,8 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | `/pricing/promotions/:id` | Plan, baseline weeks, actuals and effectiveness; record actuals | `GET /promotions/{id}`, `:actuals` |
 | `/pricing/parameters` | Pricing parameters of a legal entity: `journalFourEyes` (default off), saved at the version read; read with pricing.view, the save is offered only with pricing.admin | `GET`/`PUT /parameters` |
 | `/pricing/simulate` | Simulation / explain: price lines and read the access-by-access trace | `POST /resolve?explain=true` |
+| `/pricing/compare` | Compare procedure versions: one tuple under two versions, line by line | `GET /procedures`, `POST /compare` |
+| `/pricing/price-list` | Price list by customer: the active agreements that apply on a date, and the net price at each quantity break (by product, product group and sales channel; CSV export) | `GET /price-list`, `GET /price-list/net-prices` |
 
 - `api/client.ts` calls `/api/v1/pricing/...` (the BFF rewrites to `/v1/pricing/...`). Problem
   details surface as `PricingApiError` with the stable code and field errors. Commands send an

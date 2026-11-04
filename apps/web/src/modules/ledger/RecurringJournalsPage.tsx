@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
-import { fetchRecurringJournals, type RecurringJournal } from "./api/client";
+import { fetchRecurringJournalPage, type RecurringJournal } from "./api/client";
 import styles from "./pages.module.css";
 
 /** "Last day" for day 0, otherwise "day 15". */
@@ -28,7 +28,13 @@ export function RecurringJournalsPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const status = params.get("status") ?? "";
-  const result = useQuery({ queryKey: ["ledger", "recurring-journals", status], queryFn: () => fetchRecurringJournals(status) });
+  const result = useInfiniteQuery({
+    queryKey: ["ledger", "recurring-journals", status],
+    queryFn: ({ pageParam }) => fetchRecurringJournalPage(status, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor,
+  });
+  const rows = result.data?.pages.flatMap((page) => page.items) ?? [];
 
   return (
     <div className={styles.stack}>
@@ -62,7 +68,7 @@ export function RecurringJournalsPage() {
         <DataTable
           label="Recurring journals"
           columns={columns}
-          rows={result.data ?? []}
+          rows={rows}
           getRowKey={(r) => r.id}
           loading={result.isPending}
           empty={
@@ -73,6 +79,13 @@ export function RecurringJournalsPage() {
           onRowOpen={(r) => navigate(`/ledger/recurring-journals/${r.id}`)}
         />
       )}
+      {result.hasNextPage ? (
+        <div className={styles.formActions}>
+          <Button onClick={() => void result.fetchNextPage()} loading={result.isFetchingNextPage}>
+            Load more
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

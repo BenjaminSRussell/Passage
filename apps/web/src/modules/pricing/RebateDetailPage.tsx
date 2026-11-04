@@ -36,6 +36,7 @@ import styles from "./pages.module.css";
 import { basisLabel, describePosting, describeRebateCustomer, PARTY_LABELS, PERIOD_LABELS } from "./rebateFormat";
 import { useLoad } from "./useLoad";
 import { RebateLifecycleCard } from "./RebateLifecycleCard";
+import { RebateStatementCard } from "./RebateStatementCard";
 import { VendorClaimsCard } from "./VendorClaimsCard";
 
 const PERIOD = /^\d{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$/;
@@ -239,6 +240,7 @@ export function RebateDetailPage() {
           )}
         </div>
       </Card>
+      <RebateStatementCard key={`statement-${agreement.id}`} agreement={agreement} />
       <RebateLifecycleCard key={agreement.id} agreement={agreement} onChange={setChanged} />
       {vendor ? <VendorClaimsCard agreement={agreement} /> : null}
       <Card title="Retroactive recompute">

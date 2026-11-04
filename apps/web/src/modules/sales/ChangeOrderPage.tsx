@@ -16,6 +16,8 @@ import {
   type Versioned,
 } from "./api/client";
 import { DECIMAL, dash, money, sentence } from "./format";
+import { LinesEditor } from "./LinesEditor";
+import { validateLines, type LineValues } from "./lines";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -38,6 +40,11 @@ export interface ChangeValues {
   requestedShipDate: string;
   reason: string;
   lines: LineEdit[];
+  /** Numbers of the lines to remove (cancel). */
+  removed: number[];
+  /** Lines to add, entered like order lines. */
+  added: LineValues[];
+  listingOverrideReason: string;
 }
 
 /** The editable values of an order as it is now: header date and its OPEN or RESERVED lines. */
@@ -45,6 +52,9 @@ export function editsOf(order: Order): ChangeValues {
   return {
     requestedShipDate: order.requestedShipDate,
     reason: "",
+    removed: [],
+    added: [],
+    listingOverrideReason: "",
     lines: order.lines
       .filter((l) => CHANGEABLE_LINE_STATUSES.includes(l.lineStatus))
       .map((l) => ({
@@ -95,6 +105,7 @@ export function buildChange(order: Order, values: ChangeValues): { errors: Error
   for (const edit of values.lines) {
     const current = order.lines.find((l) => l.lineNo === edit.lineNo);
     if (!current) continue;
+    if (values.removed.includes(edit.lineNo)) continue; // a removed line is not also edited
     const at = (field: string) => `line-${edit.lineNo}.${field}`;
     if (!DECIMAL.test(edit.quantity.trim()) || Number(edit.quantity) <= 0) errors[at("quantity")] = "Enter a quantity above 0 with up to 6 decimals.";
     if (!DECIMAL.test(edit.unitPrice.trim())) errors[at("unitPrice")] = "Enter a price of 0 or more.";
@@ -117,6 +128,29 @@ export function buildChange(order: Order, values: ChangeValues): { errors: Error
     if (Object.keys(change).length > 1) lines.push(change);
   }
   if (lines.length > 0) input.lines = lines;
+  const removed = values.removed.filter((no) => order.lines.some((l) => l.lineNo === no && !l.supplementaryOf)).sort((a, b) => a - b);
+  for (const no of removed) diff.push({ lineNo: no, field: "lineStatus", old: order.lines.find((l) => l.lineNo === no)?.lineStatus ?? "OPEN", new: "CANCELLED" });
+  if (removed.length > 0) input.removeLines = removed;
+  if (values.added.length > 0) {
+    const addErrors: Errors = {};
+    const addLines = validateLines(values.added, addErrors);
+    Object.assign(errors, addErrors);
+    const last = order.lines.reduce((n, l) => Math.max(n, l.lineNo), 0);
+    addLines.forEach((l, i) => {
+      diff.push({ lineNo: last + i + 1, field: "lineAdded", old: "", new: l.productId });
+      diff.push({ lineNo: last + i + 1, field: "quantity", old: "", new: l.quantity });
+      diff.push({ lineNo: last + i + 1, field: "unitPrice", old: "", new: l.unitPrice });
+    });
+    input.addLines = addLines;
+    if (values.listingOverrideReason.trim() !== "") {
+      if (values.listingOverrideReason.length > REASON_MAX) errors.listingOverrideReason = `Keep the reason to ${REASON_MAX} characters.`;
+      else input.listingOverrideReason = values.listingOverrideReason.trim();
+    }
+  }
+  // An order keeps at least one line of its own (the service refuses an empty order: cancel it instead).
+  const kept = order.lines.filter((l) => CHANGEABLE_LINE_STATUSES.includes(l.lineStatus) && !l.supplementaryOf && !removed.includes(l.lineNo)).length;
+  const others = order.lines.filter((l) => !CHANGEABLE_LINE_STATUSES.includes(l.lineStatus) && l.lineStatus !== "CANCELLED").length;
+  if (removed.length > 0 && kept + others + values.added.length === 0) errors.removed = "An order needs at least one line. Cancel the order instead of removing every line.";
   if (values.reason.trim() !== "") input.reason = values.reason.trim();
   if (Object.keys(errors).length > 0 || diff.length === 0) return { errors, diff };
   return { errors, diff, input };
@@ -130,6 +164,11 @@ const fieldNames: Record<string, string> = {
   confirmedShipDate: "Confirmed ship date",
   status: "Status",
   lineStatus: "Line status",
+  lineAdded: "Line added (product)",
+  lineId: "Line id",
+  unit: "Unit",
+  siteId: "Site",
+  warehouseId: "Warehouse",
 };
 
 export const diffColumns: DataTableColumn<FieldChange>[] = [
@@ -204,7 +243,7 @@ export function ChangeOrderPage() {
       const newHold = res.value.holds.some((h) => h.holdType === "CREDIT" && h.status === "ACTIVE") && !order.holds.some((h) => h.holdType === "CREDIT" && h.status === "ACTIVE");
       setLatest(res);
       setValues(null);
-      const moved = (res.value.warnings ?? []).filter((w) => w.code === "SLS-0013").map((w) => w.message);
+      const moved = (res.value.warnings ?? []).filter((w) => w.code === "SLS-0013" || w.code === "SLS-0012").map((w) => w.message);
       const notes = [
         newHold ? "The higher total failed the credit check, so a credit hold was placed." : "",
         ...moved,
@@ -310,6 +349,17 @@ export function ChangeOrderPage() {
                       Line {l.lineNo}
                       {l.parentLineNo !== undefined ? ` · supplementary item for line ${l.parentLineNo}` : null}
                     </legend>
+                    {l.parentLineNo === undefined ? (
+                      <span className={styles.check}>
+                        <Input
+                          id={`remove-${l.lineNo}`}
+                          type="checkbox"
+                          checked={form.removed.includes(l.lineNo)}
+                          onChange={(e) => update({ removed: e.target.checked ? [...form.removed, l.lineNo] : form.removed.filter((no) => no !== l.lineNo) })}
+                        />
+                        <label htmlFor={`remove-${l.lineNo}`}>Remove line {l.lineNo} from the order</label>
+                      </span>
+                    ) : null}
                     {lineFields.map(([field, label]) => {
                       const key = `line-${l.lineNo}.${field}`;
                       const locked = l.parentLineNo !== undefined && followsParent(field);
@@ -327,6 +377,35 @@ export function ChangeOrderPage() {
                     })}
                   </fieldset>
                 ))}
+                {errors.removed ? (
+                  <p role="alert" className={styles.fieldError}>
+                    {errors.removed}
+                  </p>
+                ) : null}
+                <LinesEditor
+                  lines={form.added}
+                  errors={errors}
+                  newLineDate={form.requestedShipDate}
+                  onChange={(added) => update({ added })}
+                  legend="New line"
+                  idPrefix="new-line"
+                  addLabel="Add a line"
+                  allowEmpty
+                  withDeliveryControl
+                />
+                {form.added.length > 0 ? (
+                  <FormField
+                    id="change-override"
+                    label="Listing override reason"
+                    optional
+                    hint="Needed only to add a product the customer's listing denies, and only for a user who may approve."
+                    error={errors.listingOverrideReason}
+                  >
+                    {(control) => (
+                      <Input {...control} maxLength={REASON_MAX} value={form.listingOverrideReason} onChange={(e) => update({ listingOverrideReason: e.target.value })} invalid={Boolean(errors.listingOverrideReason)} />
+                    )}
+                  </FormField>
+                ) : null}
                 {lockedLines.length > 0 ? (
                   <p className={styles.note}>
                     {lockedLines.map((l) => `Line ${l.lineNo} is ${sentence(l.lineStatus).toLowerCase()}`).join("; ")} and cannot change.
@@ -344,7 +423,7 @@ export function ChangeOrderPage() {
               </div>
               {order.status === "CONFIRMED" ? (
                 <p className={`${styles.note} ${styles.formActions}`}>
-                  The order is confirmed: a new quantity or date re-promises that line, and a higher total runs the credit check again.
+                  The order is confirmed: a new quantity or date re-promises that line, an added line is promised at once, and a higher total runs the credit check again. A removed line keeps its number.
                 </p>
               ) : null}
               {form.lines.some((l) => l.parentLineNo !== undefined) ? (

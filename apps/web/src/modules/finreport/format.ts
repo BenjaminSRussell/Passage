@@ -80,3 +80,6 @@ export function parseReferences(text: string): string[] {
     .map((r) => r.trim())
     .filter((r) => r !== "");
 }
+
+export const VERIFICATION_LABELS = { matched: "Matched", differs: "Differs", inconclusive: "Inconclusive" } as const;
+export const VERIFICATION_TONES = { matched: "success", differs: "danger", inconclusive: "warning" } as const;

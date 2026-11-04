@@ -28,7 +28,7 @@ function serve(routes: Record<string, Reply>) {
 const callsTo = (fetchMock: ReturnType<typeof serve>, method: string, path: string) =>
   fetchMock.mock.calls.filter(([url, init]) => (init?.method ?? "GET") === method && String(url).includes(path));
 
-function renderPage(duties: string[] = ["org.read", "org.reference.write"]) {
+function renderPage(duties: string[] = ["org.read", "org.reference.write", "tenant.administer"]) {
   const router = createMemoryRouter(
     [{ element: createElement(OrgLayout, { duties }), children: [{ path: "/org/reference-data", element: createElement(ReferenceDataPage) }] }],
     { initialEntries: ["/org/reference-data"] },
@@ -155,6 +155,13 @@ describe("reference lists", () => {
   it("renders no action buttons without org.reference.write", async () => {
     serve({ "GET /countries": () => json({ items: countries }) });
     renderPage(["org.read"]);
+    await screen.findByText("United States");
+    expect(screen.queryByRole("button", { name: /activate|delete/i })).not.toBeInTheDocument();
+  });
+
+  it("renders no action buttons with org.reference.write but without tenant.administer", async () => {
+    serve({ "GET /countries": () => json({ items: countries }) });
+    renderPage(["org.read", "org.reference.write"]);
     await screen.findByText("United States");
     expect(screen.queryByRole("button", { name: /activate|delete/i })).not.toBeInTheDocument();
   });

@@ -38,6 +38,10 @@ type PackRun struct {
 	// Version counts the run's writes; a release bumps it (optimistic concurrency).
 	Version   int
 	CreatedAt time.Time
+	// Tolerances are the configured tolerances (FR-49.2) the run's money totals compare with. The
+	// store loads them before a run reconciles; they are not stored with the run, and a total keeps
+	// the tolerance it was stored with (a release never reads them again).
+	Tolerances ToleranceSet
 }
 
 // TableOpenItems names the open_items pack in legacy_xref; its rows are held under the source table of
@@ -173,6 +177,9 @@ func ReconcileOpenItems(r *PackRun, records, accepted []Record, loaded int, pres
 		return err
 	}
 	r.Totals = append(totals, n)
+	if err := r.applyTolerances(); err != nil {
+		return err
+	}
 	if !r.HasMismatch() {
 		return r.Advance(StatusReconciled)
 	}

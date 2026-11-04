@@ -1,17 +1,20 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import {
   consolidateRequisitions,
+  createRFQFromRequisitions,
   describeProblem,
   listOpenRequisitionLines,
   newIdempotencyKey,
+  splitRequisitionLine,
   type ConsolidationInput,
   type PurchaseOrder,
   type SourcingFilter,
   type SourcingLine,
   type Warning,
 } from "./api/client";
+import { defaultDeadline } from "./RfqPages";
 import { LoadError, ShortId, money, useResource, uuidPattern, type Failure } from "./parts";
 import styles from "./pages.module.css";
 
@@ -46,12 +49,66 @@ export function validateConsolidation(rows: SourcingLine[], selected: Set<string
 }
 
 /**
+ * Checks the selection before an RFQ is started: at least one line, all of one legal entity (the service
+ * refuses a mix with PRC-REQ-005), and a reply deadline in the future (FR-17.3, FR-17.4).
+ */
+export function validateSourcing(rows: SourcingLine[], selected: Set<string>, deadline: string, now = new Date()): Errors {
+  const errors: Errors = {};
+  const chosen = rows.filter((l) => selected.has(l.id));
+  if (chosen.length === 0) errors.lines = "Select at least one line.";
+  else if (new Set(chosen.map((l) => l.legalEntityId)).size > 1) errors.lines = "Select lines of one legal entity: an RFQ belongs to one.";
+  const when = new Date(deadline);
+  if (deadline === "" || Number.isNaN(when.getTime())) errors.replyDeadline = "Enter the reply deadline.";
+  else if (when <= now) errors.replyDeadline = "Choose a deadline in the future.";
+  return errors;
+}
+
+const QTY_SCALE = 6;
+const MAX_SPLIT_PARTS = 20;
+
+/** A non-negative decimal string as an integer count of millionths, or null when it is not one (at most 6 decimals). */
+function toMicros(raw: string): bigint | null {
+  const m = /^(\d+)(?:\.(\d{1,6}))?$/.exec(raw.trim());
+  if (!m) return null;
+  return BigInt(m[1]) * 10n ** BigInt(QTY_SCALE) + BigInt((m[2] ?? "").padEnd(QTY_SCALE, "0") || "0");
+}
+
+/** The quantities typed for a split, comma separated; empty entries are ignored. */
+export const splitQuantities = (raw: string) =>
+  raw
+    .split(",")
+    .map((q) => q.trim())
+    .filter((q) => q !== "");
+
+/**
+ * Checks a split before the round trip (FR-17.3): at least one quantity and at most 20, each above zero with at
+ * most 6 decimals, and together less than the line so that it keeps a quantity.
+ */
+export function validateSplit(line: SourcingLine | undefined, raw: string): string | null {
+  if (!line) return "Select exactly one line to split.";
+  const parts = splitQuantities(raw);
+  if (parts.length === 0) return "Enter the quantity of each new line, separated by commas.";
+  if (parts.length > MAX_SPLIT_PARTS) return `Split into at most ${MAX_SPLIT_PARTS} new lines at a time.`;
+  let total = 0n;
+  for (const part of parts) {
+    const micros = toMicros(part);
+    if (micros === null || micros === 0n) return `"${part}" is not a quantity above zero with at most ${QTY_SCALE} decimals.`;
+    total += micros;
+  }
+  const have = toMicros(line.qty);
+  if (have !== null && total >= have) return `The new lines must leave some of the ${line.qty} ${line.unit} on ${lineLabel(line)}.`;
+  return null;
+}
+
+/**
  * Consolidation board (FR-17.3, 3.17.6): approved requisition lines waiting to
  * be ordered. The buyer selects lines, may override the vendor per line, and
  * the service groups them into one purchase order per vendor, currency, site
  * and delivery window.
  */
 export function ConsolidationPage() {
+  const navigate = useNavigate();
+  const [deadline, setDeadline] = useState(() => defaultDeadline());
   const [sourcing, setSourcing] = useState<SourcingFilter | "">("");
   const [cursor, setCursor] = useState<string | undefined>();
   const [rows, setRows] = useState<SourcingLine[]>([]);
@@ -64,6 +121,9 @@ export function ConsolidationPage() {
   const [created, setCreated] = useState<PurchaseOrder[]>([]);
   const [warnings, setWarnings] = useState<Warning[]>([]);
   const [busy, setBusy] = useState(false);
+  const [splitText, setSplitText] = useState("");
+  const [splitError, setSplitError] = useState<string | null>(null);
+  const [splitDone, setSplitDone] = useState<string | null>(null);
   const page = useResource(
     async (signal) => {
       const result = await listOpenRequisitionLines({ sourcing }, { cursor, signal });
@@ -73,6 +133,11 @@ export function ConsolidationPage() {
     [sourcing, cursor, tick],
   );
   const key = useMemo(() => newIdempotencyKey(), [selected, vendors, windowDays]);
+  // One key per selection and deadline, so a retry after a lost response returns the RFQ already started.
+  const rfqKey = useMemo(() => newIdempotencyKey(), [selected, deadline]);
+  // One key per line and quantities, so a retry after a lost response does not split the line twice.
+  const splitKey = useMemo(() => newIdempotencyKey(), [selected, splitText]);
+  const chosen = rows.filter((l) => selected.has(l.id));
 
   const toggle = (id: string, on: boolean) =>
     setSelected((s) => {
@@ -111,6 +176,51 @@ export function ConsolidationPage() {
     }
   }
 
+  async function startRFQ() {
+    const found = validateSourcing(rows, selected, deadline);
+    setErrors(found);
+    setFailure(null);
+    setCreated([]);
+    setWarnings([]);
+    if (Object.keys(found).length > 0) return;
+    setBusy(true);
+    try {
+      const { body } = await createRFQFromRequisitions(
+        {
+          requisitionLineIds: rows.filter((l) => selected.has(l.id)).map((l) => l.id),
+          replyDeadline: new Date(deadline).toISOString(),
+        },
+        rfqKey,
+      );
+      navigate(`/purchasing/rfqs/${body.id}`);
+    } catch (error) {
+      setFailure(describeProblem(error));
+      setBusy(false);
+    }
+  }
+
+  async function split() {
+    const line = chosen.length === 1 ? chosen[0] : undefined;
+    const found = validateSplit(line, splitText);
+    setSplitError(found);
+    setSplitDone(null);
+    setFailure(null);
+    if (found !== null || !line) return;
+    setBusy(true);
+    try {
+      await splitRequisitionLine(line.id, line.requisitionVersion, splitQuantities(splitText), splitKey);
+      setSplitDone(`${lineLabel(line)} was split into ${splitQuantities(splitText).length + 1} lines.`);
+      setSplitText("");
+      setSelected(new Set());
+      setCursor(undefined);
+      setTick((n) => n + 1);
+    } catch (error) {
+      setFailure(describeProblem(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const columns: DataTableColumn<SourcingLine>[] = [
     {
       key: "select",
@@ -134,7 +244,16 @@ export function ConsolidationPage() {
       ),
     },
     { key: "lineNo", header: "Line", align: "end" },
-    { key: "item", header: "Item", render: (l) => l.description || <ShortId id={l.productId} /> },
+    {
+      key: "item",
+      header: "Item",
+      render: (l) => (
+        <>
+          {l.description || <ShortId id={l.productId} />}
+          {l.splitFromLineId ? <span className={styles.muted}> (split)</span> : null}
+        </>
+      ),
+    },
     { key: "qty", header: "Quantity", align: "end", render: (l) => `${l.qty} ${l.unit}` },
     { key: "amount", header: "Estimate", align: "end", render: (l) => money(l.amount, l.currency) },
     { key: "requestedDate", header: "Requested", mono: true },
@@ -156,12 +275,12 @@ export function ConsolidationPage() {
     },
   ];
 
-  const lineErrors = Object.entries(errors).filter(([k]) => k !== "windowDays");
+  const lineErrors = Object.entries(errors).filter(([k]) => k !== "windowDays" && k !== "replyDeadline");
   return (
     <div className={styles.stack}>
       <PageHeader
         title="Consolidation"
-        description="Approved requisition lines waiting to be ordered. Select lines and create purchase orders: one per vendor, currency, site, warehouse and delivery window."
+        description="Approved requisition lines waiting to be ordered. Select lines and create purchase orders: one per vendor, currency, site, warehouse and delivery window. Lines with no vendor can start an RFQ instead; they stay out of this list until the RFQ is awarded or cancelled."
       />
       <div className={styles.toolbar}>
         <div className={styles.filter}>
@@ -187,6 +306,11 @@ export function ConsolidationPage() {
         <div className={styles.filter}>
           <FormField id="cons-window" label="Delivery window (days)" hint="Lines requested within this many days share an order" error={errors.windowDays}>
             {(c) => <Input {...c} inputMode="numeric" value={windowDays} onChange={(e) => setWindowDays(e.target.value)} />}
+          </FormField>
+        </div>
+        <div className={styles.filter}>
+          <FormField id="cons-deadline" label="RFQ reply deadline" hint="Your local time; used by Start RFQ" error={errors.replyDeadline}>
+            {(c) => <Input {...c} type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} />}
           </FormField>
         </div>
       </div>
@@ -224,8 +348,35 @@ export function ConsolidationPage() {
         <Button variant="primary" loading={busy} onClick={() => void consolidate()}>
           Create purchase orders
         </Button>
+        <Button loading={busy} onClick={() => void startRFQ()}>
+          Start RFQ for selected lines
+        </Button>
         <p className={styles.muted}>{selected.size === 1 ? "1 line selected" : `${selected.size} lines selected`}</p>
       </div>
+      <Card title="Split a line">
+        <p className={styles.muted}>
+          Order part of a line from one vendor and the rest from another: select one line, enter the quantities of the new lines, and the
+          line keeps what is left. A line on a running RFQ cannot be split.
+        </p>
+        <div className={styles.filter}>
+          <FormField
+            id="cons-split"
+            label="Quantities of the new lines"
+            hint={chosen.length === 1 ? `${lineLabel(chosen[0])} has ${chosen[0].qty} ${chosen[0].unit}; separate quantities with commas` : "Select one line first"}
+            error={splitError ?? undefined}
+          >
+            {(c) => <Input {...c} inputMode="decimal" placeholder="40, 35" value={splitText} onChange={(e) => setSplitText(e.target.value)} />}
+          </FormField>
+        </div>
+        <div className={styles.actions}>
+          <Button loading={busy} onClick={() => void split()}>
+            Split line
+          </Button>
+        </div>
+        <Alert tone="success" live="status">
+          {splitDone}
+        </Alert>
+      </Card>
       {warnings.length > 0 ? (
         <Alert tone="warning" title="Check the vendors against their categories">
           <ul className={styles.cardLinks}>

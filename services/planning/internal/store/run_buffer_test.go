@@ -4,12 +4,14 @@ import (
 	"context"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/planning/internal/domain"
+	planevents "github.com/BenjaminSRussell/passage/services/planning/internal/events"
 	"github.com/BenjaminSRussell/passage/services/planning/internal/store"
 )
 
@@ -309,5 +311,126 @@ func TestRunPlan_StoresNoVendorMessageWithCatalogText(t *testing.T) {
 	orders, err := st.ListPlannedOrders(ctx, "MAIN", store.OrderFilter{ItemID: withVendor}, 10)
 	if err != nil || len(orders) != 1 || orders[0].VendorID == nil || *orders[0].VendorID != vendor {
 		t.Fatalf("orders = %+v, %v", orders, err)
+	}
+}
+
+// TestRunPlan_StoresLotSplitMessageWithCatalogText: the PLAN-0005 warning of a
+// requirement split over the item's maximum order quantity is stored (migration
+// 0028 admits the action) and read back with its code and rendered text. It can
+// only be dismissed (applying it is 422), and a rerun that raises it again
+// unchanged carries the dismissal (slice 30 identity) without a new message.raised.v1.
+func TestRunPlan_StoresLotSplitMessageWithCatalogText(t *testing.T) {
+	st, admin, _ := setup(t)
+	ctx := testkit.Ctx(testkit.TenantID(1), "planning.run", "planning.read", "planning.order.maintain")
+	item := ids.New()
+	res, err := domain.Run(0, []domain.Item{{ID: item, Coverage: domain.CoverageRequirement, OrderType: domain.OrderPurchase, LeadTimeDays: 2,
+		MaxOrderQty: decimal.NewFromInt(100), Demand: []domain.Requirement{{Ref: "SO-1", RefType: domain.RefSales, Date: 9, Qty: decimal.NewFromInt(250)}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.RunPlan(ctx, runRequest(res, "run-split", "in-split")); err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := st.ListMessages(ctx, "MAIN", domain.ActionLotSplit, "", "", 10)
+	if err != nil || len(msgs) != 1 || msgs[0].ItemID != item || msgs[0].Code != "PLAN-0005" || msgs[0].DelayDays != 3 ||
+		msgs[0].Text != "Requirement for "+item+" splits into 3 orders (max 100)." {
+		t.Fatalf("lot-split messages = %+v, %v", msgs, err)
+	}
+	split := msgs[0]
+	if _, _, err := st.DecideMessage(ctx, split.ID, split.Version, store.MessageDecision{Apply: true}); problemCode(err) != store.CodeMessageNotActionable {
+		t.Fatalf("apply a lot-split warning: %v; want %s", err, store.CodeMessageNotActionable)
+	}
+	if _, _, err := st.DecideMessage(ctx, split.ID, split.Version, store.MessageDecision{Note: "max is the truck size"}); err != nil {
+		t.Fatal(err)
+	}
+	raised := outboxCount(t, admin, planevents.MessageRaised)
+	if _, _, err := st.RunPlan(ctx, runRequest(res, "run-split-2", "in-split-2")); err != nil {
+		t.Fatal(err)
+	}
+	all, err := st.ListMessages(ctx, "MAIN", domain.ActionLotSplit, "all", "", 10)
+	if err != nil || len(all) != 1 || all[0].ID == split.ID || all[0].Status != "dismissed" || all[0].CarriedFrom == nil || *all[0].CarriedFrom != split.ID {
+		t.Fatalf("lot-split after an unchanged rerun = %+v, %v; want the dismissal carried", all, err)
+	}
+	if got := outboxCount(t, admin, planevents.MessageRaised); got != raised {
+		t.Fatalf("message.raised.v1 = %d after the rerun; want %d (a carried warning is not raised again)", got, raised)
+	}
+}
+
+// TestRunPlan_StoresBOMCycleMessageWithCatalogText: a cyclic BOM no longer refuses
+// the run (PLAN-0004); migration 0029 admits the bom-cycle action and the warning is
+// read back with its code and text. It can only be dismissed, and a rerun of the
+// same plan date that raises it again carries the dismissal without a new
+// message.raised.v1, like the other warnings.
+func TestRunPlan_StoresBOMCycleMessageWithCatalogText(t *testing.T) {
+	st, admin, _ := setup(t)
+	ctx := testkit.Ctx(testkit.TenantID(1), "planning.run", "planning.read", "planning.order.maintain")
+	a, b := ids.New(), ids.New()
+	res, err := domain.Run(0, []domain.Item{
+		{ID: a, Coverage: domain.CoverageRequirement, OrderType: domain.OrderProduction, LeadTimeDays: 1,
+			Demand:     []domain.Requirement{{Ref: "SO-1", RefType: domain.RefSales, Date: 9, Qty: decimal.NewFromInt(5)}},
+			Components: []domain.BOMLine{{ItemID: b, Qty: decimal.NewFromInt(2)}}},
+		{ID: b, Coverage: domain.CoverageRequirement, OrderType: domain.OrderProduction, LeadTimeDays: 1,
+			Components: []domain.BOMLine{{ItemID: a, Qty: decimal.NewFromInt(1)}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.RunPlan(ctx, runRequest(res, "run-cycle", "in-cycle")); err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := st.ListMessages(ctx, "MAIN", domain.ActionBOMCycle, "", "", 10)
+	if err != nil || len(msgs) != 1 || msgs[0].ItemID != b || msgs[0].Code != "PLAN-0004" ||
+		msgs[0].Text != "BOM cycle detected for "+b+"; low-level codes not updated." {
+		t.Fatalf("bom-cycle messages = %+v, %v", msgs, err)
+	}
+	if _, _, err := st.DecideMessage(ctx, msgs[0].ID, msgs[0].Version, store.MessageDecision{Apply: true}); problemCode(err) != store.CodeMessageNotActionable {
+		t.Fatalf("apply a bom-cycle warning: %v; want %s", err, store.CodeMessageNotActionable)
+	}
+	cycle := msgs[0]
+	if _, _, err := st.DecideMessage(ctx, cycle.ID, cycle.Version, store.MessageDecision{Note: "BOM fix requested"}); err != nil {
+		t.Fatal(err)
+	}
+	raised := outboxCount(t, admin, planevents.MessageRaised)
+	if _, _, err := st.RunPlan(ctx, runRequest(res, "run-cycle-2", "in-cycle-2")); err != nil {
+		t.Fatal(err)
+	}
+	all, err := st.ListMessages(ctx, "MAIN", domain.ActionBOMCycle, "all", "", 10)
+	if err != nil || len(all) != 1 || all[0].ID == cycle.ID || all[0].Status != "dismissed" || all[0].CarriedFrom == nil || *all[0].CarriedFrom != cycle.ID {
+		t.Fatalf("bom-cycle after an unchanged rerun = %+v, %v; want the dismissal carried", all, err)
+	}
+	if got := outboxCount(t, admin, planevents.MessageRaised); got != raised {
+		t.Fatalf("message.raised.v1 = %d after the rerun; want %d", got, raised)
+	}
+}
+
+// TestRunPlan_StoresNoQuotaSourceMessageWithCatalogText: an order no source of its
+// quota arrangement can take is stored as a PLAN-0009 message (migration 0029 admits
+// the action) read back with its code and text, and it can only be dismissed.
+func TestRunPlan_StoresNoQuotaSourceMessageWithCatalogText(t *testing.T) {
+	st, _, _ := setup(t)
+	ctx := testkit.Ctx(testkit.TenantID(1), "planning.run", "planning.read", "planning.order.maintain")
+	item, arrangement := ids.New(), ids.New()
+	res, err := domain.Run(0, []domain.Item{{ID: item, Coverage: domain.CoverageRequirement, OrderType: domain.OrderProduction, LeadTimeDays: 1,
+		Demand: []domain.Requirement{{Ref: "SO-1", RefType: domain.RefSales, Date: 9, Qty: decimal.NewFromInt(5)}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	asOf := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	res, out, err := domain.ApplyQuota(asOf, res, []domain.RunQuota{{ArrangementID: arrangement, Spec: domain.QuotaArrangementSpec{
+		ItemID: item, ValidFrom: asOf, ValidTo: asOf.AddDate(0, 0, 90),
+		Sources: []domain.QuotaSourceSpec{{ID: "src", Type: domain.SourceVendor, VendorID: ids.New(), Quota: decimal.NewFromInt(1)}}}}})
+	if err != nil || out.Unassigned != 1 {
+		t.Fatalf("outcome %+v err %v; want the production order unassigned", out, err)
+	}
+	if _, _, err := st.RunPlan(ctx, runRequest(res, "run-quota-none", "in-quota-none")); err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := st.ListMessages(ctx, "MAIN", domain.ActionNoQuotaSource, "", "", 10)
+	if err != nil || len(msgs) != 1 || msgs[0].ItemID != item || msgs[0].DemandRef != arrangement || msgs[0].Code != "PLAN-0009" ||
+		msgs[0].Text != "Quota arrangement "+arrangement+" has no usable source in 2026-11-11." {
+		t.Fatalf("no-quota-source messages = %+v, %v", msgs, err)
+	}
+	if _, _, err := st.DecideMessage(ctx, msgs[0].ID, msgs[0].Version, store.MessageDecision{Apply: true}); problemCode(err) != store.CodeMessageNotActionable {
+		t.Fatalf("apply a no-quota-source message: %v; want %s", err, store.CodeMessageNotActionable)
 	}
 }

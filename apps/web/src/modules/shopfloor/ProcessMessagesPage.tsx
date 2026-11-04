@@ -14,8 +14,8 @@ import {
 import { dash, formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import {
-  CATEGORIES,
-  CATEGORY_LABELS,
+  categoryLabel,
+  useCategoryOptions,
   DESTINATIONS,
   DESTINATION_LABELS,
   DeliveryStatus,
@@ -27,7 +27,7 @@ import { useLoad } from "./useLoad";
 
 const columns: DataTableColumn<ProcessMessage>[] = [
   { key: "receivedAt", header: "Received", render: (row) => formatDateTime(row.receivedAt) },
-  { key: "categoryCode", header: "Category", render: (row) => CATEGORY_LABELS[row.categoryCode] ?? row.categoryCode },
+  { key: "categoryCode", header: "Category", render: (row) => categoryLabel(row.categoryCode) },
   { key: "orderId", header: "Order", mono: true },
   { key: "phasePath", header: "Phase", mono: true, render: (row) => row.phasePath || dash },
   { key: "source", header: "Source", render: (row) => `${row.source} ${row.sourceMessageId}` },
@@ -76,6 +76,7 @@ interface MorePages {
  */
 export function ProcessMessagesPage() {
   const [params, setParams] = useSearchParams();
+  const categories = useCategoryOptions(false);
   const status = (params.get("status") ?? "") as ProcessStatus | "";
   const category = (params.get("category") ?? "") as ProcessCategory | "";
   const destination = (params.get("destination") ?? "") as ProcessDestination | "";
@@ -147,9 +148,9 @@ export function ProcessMessagesPage() {
           {(control) => (
             <Select {...control} value={category} onChange={(event) => setFilter("category", event.target.value)}>
               <option value="">All categories</option>
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {CATEGORY_LABELS[c]}
+              {categories.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.label}
                 </option>
               ))}
             </Select>

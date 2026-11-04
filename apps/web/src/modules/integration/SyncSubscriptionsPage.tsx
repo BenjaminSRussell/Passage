@@ -12,6 +12,7 @@ const columns: DataTableColumn<Subscription>[] = [
   { key: "kind", header: "Kind", render: (row) => (row.kind === "rest-push" ? <Badge tone="info">REST push</Badge> : <Badge tone="neutral">Webhook</Badge>) },
   { key: "url", header: "Endpoint", mono: true },
   { key: "patterns", header: "Event types", render: (row) => row.patterns.join(", ") },
+  { key: "filter", header: "Filter", mono: true, render: (row) => row.filter || "—" },
   { key: "status", header: "Status", render: (row) => <StatusPill status={row.status} /> },
   { key: "createdAt", header: "Created", render: (row) => formatDateTime(row.createdAt) },
 ];
@@ -28,9 +29,14 @@ export function SyncSubscriptionsPage() {
         description="Each subscription sends the events it matches to one endpoint. A REST push subscription renders the event through an outbound mapping and writes it into the existing ERP."
         actions={
           canWrite ? (
-            <Link className={buttonClassName("primary")} to="/integration/sync/new">
-              New REST push
-            </Link>
+            <>
+              <Link className={buttonClassName("secondary")} to="/integration/sync/new-webhook">
+                New webhook
+              </Link>
+              <Link className={buttonClassName("primary")} to="/integration/sync/new">
+                New REST push
+              </Link>
+            </>
           ) : undefined
         }
       />
@@ -46,7 +52,7 @@ export function SyncSubscriptionsPage() {
           getRowKey={(row) => row.id}
           loading={state.loading}
           onRowOpen={(row) => navigate(`/integration/sync/${row.id}`)}
-          empty={{ title: "No outbound sync yet", description: "Create a REST push subscription to send confirmed orders and other events to the ERP." }}
+          empty={{ title: "No outbound sync yet", description: "Create a webhook to send events to a receiver, or a REST push subscription to write confirmed orders and other events into the ERP." }}
         />
       )}
     </div>

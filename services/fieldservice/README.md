@@ -1,4 +1,4 @@
-# fieldservice (wave 45, slices 1 to 5)
+# fieldservice (wave 45, slices 1 to 7)
 
 Service management core of Passage: service agreements with SLA profiles, the
 entitlement resolver, SLA clocks on service cases with the case status machine,
@@ -10,7 +10,9 @@ knowledge base with versioned articles, review, publishing and suggestions, and
 generic case management: case processes with stage gates, a case category tree with
 per-category SLA profile, resolution codes and access duty, cases in any non-service
 category with associations to any record, a case log and reopen, supplier warranty
-claims with vendor recovery, and email-to-case intake through case mailboxes. It replaces AX
+claims with vendor recovery, email-to-case intake through case mailboxes, and dispatch: technicians,
+work-order scheduling data, manual assignment under the BR-45.3 hard constraints, the dispatch board
+and publishing a territory-day. It replaces AX
 service management (agreements, service orders, service objects), the AX/D365 case
 framework (CaseDetail, CaseCategory, CaseProcess) and SAP CS (service orders,
 installed base, warranty check, solution database, WTY warranty claims) for these slices.
@@ -40,7 +42,9 @@ migrations/             0001_init.sql (RLS, tenant_id first, money numeric(20,6)
                         0006_generic_cases.sql (case processes, categories, generic cases,
                         associations and the case log, with their passage_app grants),
                         0007 supplier claims and email intake, 0008_agreement_lifecycle_visits.sql
-                        (agreement version and status log, included-visit consumption)
+                        (agreement version and status log, included-visit consumption),
+                        0009_dispatch.sql (technicians, work-order scheduling and assignment columns,
+                        published dispatch runs, with their passage_app grants)
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml    AsyncAPI 3 for every event published
 charts/fieldservice     Helm chart (deployment, service, optional ServiceMonitor)
@@ -62,7 +66,7 @@ charts/fieldservice     Helm chart (deployment, service, optional ServiceMonitor
 | GET | `/v1/service/cases` (`status`, `slaState`, `customerPartyId`), `/v1/service/cases/{id}` | SvcInquire |
 | POST | `/v1/service/work-orders` | SvcWoMaintain |
 | GET | `/v1/service/work-orders` (`status`, `territoryId`, `caseId`, `customerPartyId`), `/v1/service/work-orders/{id}` | SvcInquire |
-| POST | `/v1/service/work-orders/{id}:transition` | SvcWoMaintain (If-Match) |
+| POST | `/v1/service/work-orders/{id}:transition` (not to SCHEDULED or DISPATCHED; completing needs the signature) | SvcWoMaintain (If-Match) |
 | POST | `/v1/service/work-orders/{id}:post` | SvcBillingPost (If-Match, Idempotency-Key) |
 | POST | `/v1/service/cases/{id}:transition` | SvcCaseMaintain (If-Match; Idempotency-Key optional) |
 | POST | `/v1/service/sla:scan` (`limit`, 1 to 5000, default 500) | SvcCaseMaintain |
@@ -97,6 +101,16 @@ charts/fieldservice     Helm chart (deployment, service, optional ServiceMonitor
 | POST | `/v1/inbound-messages` | CaseCreate (idempotent per Message-ID; and the default category's access duty for a new case) |
 | GET | `/v1/inbound-messages` (`mailbox`, `caseId`, `route`) | CaseMaintain (and BR-45.10 access) |
 
+| POST | `/v1/service/technicians` | SvcDispatch (Idempotency-Key) |
+| GET | `/v1/service/technicians` (`territoryId`, `active`), `/v1/service/technicians/{id}` (ETag) | SvcInquire |
+| PUT | `/v1/service/technicians/{id}` | SvcDispatch (If-Match) |
+| PUT | `/v1/service/work-orders/{id}/scheduling` (skills, customer window, address, position, estimate; UNSCHEDULED orders) | SvcWoMaintain (If-Match) |
+| POST | `/v1/service/work-orders/{id}:assign`, `:unassign` | SvcDispatch (If-Match) |
+| GET | `/v1/service/dispatch/board` (`territoryId`, `date`, `timeZone`) | SvcInquire |
+| POST | `/v1/service/dispatch/publish` | SvcDispatch (Idempotency-Key) |
+| POST | `/v1/service/work-orders/{id}/actions` (a batch of the technician's offline actions; each action id idempotent) | SvcTechnician |
+| GET | `/v1/service/work-orders/{id}/actions` (the log in merge order) | SvcInquire |
+| GET | `/v1/service/dispatch/runs` (`territoryId`), `/v1/service/dispatch/runs/{id}` | SvcInquire |
 Lists are newest first (activities: earliest due first, undated last) and page with `cursor` (the previous page's `nextCursor`)
 and `limit` (1 to 200, default 50); they see only the caller's legal entities.
 Work-order, case (service and generic), service-object and activity responses carry `ETag: "<version>"`, and
@@ -140,7 +154,13 @@ and the inbound email list with where each message landed, linking to its case).
 Slice 6 adds the agreement lifecycle on the agreement detail (activate, suspend and
 cancel with a reason, resume, the status history), the included visits of each line
 (consumed, listed and recorded with an optional work order) and the "Expire ended
-agreements" pass on the agreement list.
+agreements" pass on the agreement list. Slice 7 adds technicians (`/service/technicians`:
+list by status and territory, register, detail with edit), the dispatch board
+(`/service/dispatch`: pick a territory and day, see each technician's visits and booked
+minutes and the unscheduled work orders, assign with a start time and a pin, unassign,
+publish the day; a refused assignment lists every rule it broke) and a scheduling panel
+on the work-order detail (required skills, customer window, address, position, estimate,
+and the assignment). Times on these screens are UTC.
 
 ## Run
 
@@ -301,6 +321,24 @@ without `PASSAGE_TEST_DATABASE_URL`.
   `no`, or X-Autoreply): the response says `acknowledge` and the hub sends it. A
   case the caller may not access is never matched. The Message-ID is unique per
   tenant; a redelivery answers the stored result with `Idempotent-Replayed`.
+- Dispatch (FR-45.7, BR-45.3). A technician has territories, skill codes (free text until wave 42
+  owns skills), a time zone, working weekdays, a shift (minutes of the local day), a daily maximum
+  and an overtime flag. `:assign` places an UNSCHEDULED or SCHEDULED work order at a start time (the
+  end is start + the estimate) and makes it SCHEDULED, locking the technician's row so two
+  dispatchers cannot book the same time. It refuses with every broken hard constraint at once (422,
+  `code` the first, `errors` all): the technician must be active and of the order's legal entity
+  and territory (`SVC-DSP-004`), hold every required skill (`SVC-DSP-003`), keep the visit inside
+  the customer window (`SVC-DSP-005`) and inside one shift of their local day, overtime widening the
+  end by 120 minutes (`SVC-DSP-006`), keep a 5 minute buffer to every other booking
+  (`SVC-DSP-007`), and stay within the daily maximum counting work plus buffers
+  (`SVC-DSP-008`). Travel between visits is the fixed buffer until the matrix client exists.
+  `:unassign` releases a SCHEDULED order (pinned or not). `dispatch/publish` moves the
+  SCHEDULED orders that start on the territory's local day to DISPATCHED (which stops the response
+  clock of their case), records the run with a route sequence per technician and writes
+  `dispatch.published.v1`; with nothing to dispatch it answers `SVC-DSP-009`. Scheduling data of an
+  order cannot change once it is scheduled. Assigning and unassigning write
+  `assignment.changed.v1`. A work order moved by hand with `:transition` to SCHEDULED or
+  DISPATCHED has no technician; the board does not show it.
 - Money is decimal (`shopspring/decimal` at `numeric(20,6)`), never float.
 
 ## Error codes
@@ -330,6 +368,28 @@ Problem details use `application/problem+json`; `type` is `https://passage.dev/p
 | `SVC-AGR-010` | 422 | The line's included visits are all used |
 | `SVC-AGR-011` | 422 | The work order is unknown or belongs to another agreement |
 | `SVC-AGR-012` | 422 | The work order already consumed a visit |
+| `SVC-TECH-001` | 409 | Technician code already exists |
+| `SVC-TECH-002` | 404 | Technician not found |
+| `SVC-TECH-003` | 422 | The technician still has work orders ahead and cannot be deactivated |
+| `SVC-TECH-004` | 422 | The legal entity of a technician does not change |
+| `SVC-TECH-005` | 422 | The technician edit would put a SCHEDULED visit in breach of the dispatch rules (errors name each work order) |
+| `SVC-DSP-003` | 422 | The technician lacks a required skill |
+| `SVC-DSP-004` | 422 | The technician is inactive, of another legal entity or does not cover the territory |
+| `SVC-DSP-005` | 422 | The visit is outside the customer's window |
+| `SVC-DSP-006` | 422 | The visit is outside the technician's shift |
+| `SVC-DSP-007` | 422 | The visit overlaps another booking or leaves less than the 5 minute buffer |
+| `SVC-DSP-008` | 422 | The day would exceed the technician's daily maximum |
+| `SVC-WO-001` | 422 | Completing needs the customer's signature (unless the work order is `signatureExempt`); as an action it is REJECTED, not an HTTP error |
+| `SVC-WO-002` | 422 | Posting needs every PART line consumed (from the action log) |
+| `SVC-SYNC-001` | 200 | Message on an action batch: offline actions merged and status conflicts resolved |
+| `SVC-SYNC-002` | action | REJECTED: the status move cannot follow the work order's state, or it is not worked from the device |
+| `SVC-SYNC-003` | action | REJECTED: the work order is not assigned to this technician |
+| `SVC-SYNC-004` | action | REJECTED: not a PART line of the work order, or the quantity would exceed the line |
+| `SVC-SYNC-003` | 403 | The caller is neither the technician's worker (user id = `workerId`) nor office staff with `SvcWoMaintain`; the whole batch is refused |
+| `SVC-SYNC-005` | 422 | An action id was already used for another action (another work order, technician, kind, device time or payload) |
+| `SVC-SYNC-006` | action | REJECTED: the device time is more than 5 minutes before the work order was created (check the device clock) |
+| `SVC-DSP-009` | 422 | Nothing scheduled to dispatch on that territory-day (or an unreadable day) |
+| `SVC-DSP-010` | 404 | Dispatch run not found |
 | `SVC-ENT-001` | — | Info in the entitlement trace: no agreement matched, fallback profile applied |
 | `SVC-ENT-002` | 422 | No agreement matched and no fallback SLA profile supplied |
 | `SVC-CASE-001` | 404 / 422 | Service case not found (422 when a work order references it) |

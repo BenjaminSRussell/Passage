@@ -390,9 +390,21 @@ export function RequisitionCreatePage() {
   );
 }
 
-const lineColumns = (currency: string): DataTableColumn<RequisitionLine>[] => [
+const lineColumns = (currency: string, all: RequisitionLine[]): DataTableColumn<RequisitionLine>[] => [
   { key: "lineNo", header: "Line", align: "end" },
-  { key: "item", header: "Item", render: (l) => l.description || <ShortId id={l.productId} /> },
+  {
+    key: "item",
+    header: "Item",
+    render: (l) => {
+      const origin = l.splitFromLineId ? all.find((o) => o.id === l.splitFromLineId) : undefined;
+      return (
+        <>
+          {l.description || <ShortId id={l.productId} />}
+          {origin ? <span className={styles.muted}> (split from line {origin.lineNo})</span> : null}
+        </>
+      );
+    },
+  },
   { key: "category", header: "Category", render: (l) => l.category || "—" },
   { key: "source", header: "Source", render: (l) => (l.catalogEntryId ? "Catalog" : "Non-catalog") },
   { key: "qty", header: "Quantity", align: "end", render: (l) => `${l.qty} ${l.unit}` },
@@ -550,7 +562,7 @@ export function RequisitionDetailPage() {
           </ol>
         )}
       </Card>
-      <DataTable label="Requisition lines" columns={lineColumns(req.currency)} rows={req.lines} getRowKey={(l) => l.id || String(l.lineNo)} />
+      <DataTable label="Requisition lines" columns={lineColumns(req.currency, req.lines)} rows={req.lines} getRowKey={(l) => l.id || String(l.lineNo)} />
     </div>
   );
 }

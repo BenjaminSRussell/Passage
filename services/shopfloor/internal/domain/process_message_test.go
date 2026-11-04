@@ -49,7 +49,7 @@ func TestFieldErrors_TableDriven(t *testing.T) {
 		{"valid message", func(*NewMessage) {}, ""},
 		{"unknown source", func(m *NewMessage) { m.Source = "fax" }, "source"},
 		{"empty source message id", func(m *NewMessage) { m.SourceMessageID = "" }, "sourceMessageId"},
-		{"unknown category", func(m *NewMessage) { m.CategoryCode = "shrug" }, "categoryCode"},
+		{"malformed category", func(m *NewMessage) { m.CategoryCode = "Not A Code" }, "categoryCode"},
 		{"order not a uuid", func(m *NewMessage) { m.OrderID = "PO-1" }, "orderId"},
 		{"zero occurred at", func(m *NewMessage) { m.OccurredAt = time.Time{} }, "occurredAt"},
 		{"duplicate characteristic name", func(m *NewMessage) {

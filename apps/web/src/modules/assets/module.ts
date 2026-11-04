@@ -17,13 +17,14 @@ import { LeasesPage, NewLeasePage } from "./LeasesPage";
 import { MidQuarterPage } from "./MidQuarterPage";
 import { NewAssetPage } from "./NewAssetPage";
 import { RunDetailPage, RunsPage } from "./RunsPage";
+import { TerminateLeasePage } from "./TerminateLeasePage";
 import { TransferPage } from "./TransferPage";
 
 const assets: PassageModule = {
   id: "assets",
   title: "Fixed assets",
   description:
-    "Keep the asset register, add depreciation books and preview their schedules, post adjustments, impairments and additions, run and post depreciation, run the mid-quarter test, record insurance policies and review the insurance report, count assets on site, raise, approve and release capex requests, transfer or split assets, pool assets into group assets for tax depreciation, dispose of assets by sale or scrap, and recognize, remeasure and book IFRS 16 leases in the general ledger.",
+    "Keep the asset register, add depreciation books and preview their schedules, post adjustments, impairments and additions, run and post depreciation, run the mid-quarter test, record insurance policies and review the insurance report, count assets on site, raise, approve and release capex requests, transfer or split assets, pool assets into group assets for tax depreciation, dispose of assets by sale or scrap, and recognize, remeasure, terminate and book IFRS 16 leases in the general ledger.",
   routes: [
     { path: "/assets", element: createElement(AssetsPage), handle: { title: "Asset register" } },
     { path: "/assets/new", element: createElement(NewAssetPage), handle: { title: "New asset" } },
@@ -33,6 +34,7 @@ const assets: PassageModule = {
     { path: "/assets/leases/posting-profile", element: createElement(LeaseProfilePage), handle: { title: "Lease accounts" } },
     { path: "/assets/leases/:id", element: createElement(LeaseDetailPage), handle: { title: "Lease" } },
     { path: "/assets/leases/:id/modify", element: createElement(ModifyLeasePage), handle: { title: "Modify lease" } },
+    { path: "/assets/leases/:id/terminate", element: createElement(TerminateLeasePage), handle: { title: "Terminate lease" } },
     { path: "/assets/count-sessions", element: createElement(CountSessionsPage), handle: { title: "Count sessions" } },
     { path: "/assets/count-sessions/new", element: createElement(NewCountSessionPage), handle: { title: "New count session" } },
     { path: "/assets/count-sessions/:id", element: createElement(CountSessionDetailPage), handle: { title: "Count session" } },

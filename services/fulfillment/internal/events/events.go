@@ -29,11 +29,15 @@ var (
 	WarehouseSettingChanged     = events.Type(Context, "warehousesetting", "changed", 1)
 	LegalEntitySettingChanged   = events.Type(Context, "legalentitysetting", "changed", 1)
 	WarehouseReleaseRuleChanged = events.Type(Context, "warehousereleaserule", "changed", 1)
+	DeliveryToleranceChanged    = events.Type(Context, "deliverytolerance", "changed", 1)
 
 	DropShipCreated   = events.Type(Context, "dropship", "created", 1)
 	DropShipConfirmed = events.Type(Context, "dropship", "confirmed", 1)
 	DropShipCancelled = events.Type(Context, "dropship", "cancelled", 1)
 	DropShipClosed    = events.Type(Context, "dropship", "closed", 1)
+
+	ReturnableReturned = events.Type(Context, "returnablepackaging", "returned", 1)
+	ReturnableAdjusted = events.Type(Context, "returnablepackaging", "adjusted", 1)
 
 	ExceptionRaised   = events.Type(Context, "exception", "raised", 1)
 	ExceptionResolved = events.Type(Context, "exception", "resolved", 1)
@@ -43,8 +47,8 @@ var (
 func All() []string {
 	return []string{
 		ShipmentReleased, PickConfirmed, PackingSlipPosted, PackingSlipCancelled,
-		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, ContainerNested, ContainerUnnested, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked, WarehouseSettingChanged, LegalEntitySettingChanged, WarehouseReleaseRuleChanged,
-		DropShipCreated, DropShipConfirmed, DropShipCancelled, DropShipClosed, ExceptionRaised, ExceptionResolved,
+		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, ContainerNested, ContainerUnnested, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked, WarehouseSettingChanged, LegalEntitySettingChanged, WarehouseReleaseRuleChanged, DeliveryToleranceChanged,
+		DropShipCreated, DropShipConfirmed, DropShipCancelled, DropShipClosed, ExceptionRaised, ExceptionResolved, ReturnableReturned, ReturnableAdjusted,
 	}
 }
 
@@ -176,6 +180,19 @@ type WarehouseReleaseRuleChangedData struct {
 	Version                int    `json:"version"`
 }
 
+// DeliveryToleranceChangedData is published when an over-delivery tolerance is
+// saved for a product and customer scope (BR-28.7), with the value it replaces
+// (absent for a new scope). Sales (wave 27) may read it for its own
+// over-delivery check on agreements.
+type DeliveryToleranceChangedData struct {
+	ToleranceID     string  `json:"tolerance_id"`
+	ProductID       string  `json:"product_id,omitempty"`
+	CustomerID      string  `json:"customer_id,omitempty"`
+	OverdeliveryPct string  `json:"overdelivery_pct"`
+	PreviousPct     *string `json:"previous_overdelivery_pct,omitempty"`
+	Version         int     `json:"version"`
+}
+
 // WaveCreatedData is published for each wave the picking workbench creates
 // (FR-28.13); its shipments move to PICKING in the same transaction.
 type WaveCreatedData struct {
@@ -277,6 +294,9 @@ type PickLine struct {
 	OrderLineID string `json:"order_line_id"`
 	Qty         string `json:"qty"`
 	Backordered string `json:"backordered"`
+	// OverPicked is the quantity picked above the planned one, allowed by the
+	// over-delivery tolerance (BR-28.7); absent for a pick within the plan.
+	OverPicked string `json:"over_picked,omitempty"`
 	// ShortReason is the short pick reason code, when one was given.
 	ShortReason string `json:"short_reason,omitempty"`
 }
@@ -348,6 +368,21 @@ type PackagingFee struct {
 type ReturnableMove struct {
 	ContainerType string `json:"container_type"`
 	Qty           string `json:"qty"`
+}
+
+// ReturnableMovementData is published when a customer's returnable packaging balance
+// changes outside a packing slip: a return receipt (returnablepackaging.returned, qty
+// negative) or a manual correction (returnablepackaging.adjusted, qty signed, reason
+// required). Wave 30 reads them to credit packaging a customer sent back.
+type ReturnableMovementData struct {
+	MovementID    string `json:"movement_id"`
+	CustomerID    string `json:"customer_id"`
+	ContainerType string `json:"container_type"`
+	Kind          string `json:"kind"`
+	Qty           string `json:"qty"`
+	BalanceAfter  string `json:"balance_after"`
+	Reference     string `json:"reference,omitempty"`
+	Reason        string `json:"reason,omitempty"`
 }
 
 // PackingSlipPostedData carries the shipped lines at cost and the journal

@@ -16,8 +16,16 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        fsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
+{{- if .Values.serviceIdentity.signingKeySecret }}
+      volumes:
+        - name: service-identity
+          secret:
+            secretName: {{ .Values.serviceIdentity.signingKeySecret }}
+            defaultMode: 0440
+{{- end }}
       containers:
         - name: finreport
           image: {{ if .Values.image.digest }}{{ printf "%s@%s" .Values.image.repository .Values.image.digest | quote }}{{ else }}{{ printf "%s:%s" .Values.image.repository (.Values.image.tag | default "latest") | quote }}{{ end }}
@@ -55,6 +63,23 @@ spec:
               value: {{ .Values.reporting.opaCacheSeconds | quote }}
             - name: REPORTING_TRACE_URL
               value: {{ .Values.reporting.traceUrl | quote }}
+{{- if .Values.serviceIdentity.signingKeySecret }}
+            # Balance verification (FR-15.1) reads the ledger trial balance as the service.
+            - name: PASSAGE_SERVICE_NAME
+              value: finreport
+            - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
+              value: /var/run/passage/service-identity/signing-key
+{{- if .Values.serviceIdentity.keyId }}
+            - name: PASSAGE_SERVICE_KEY_ID
+              value: {{ .Values.serviceIdentity.keyId | quote }}
+{{- end }}
+            - name: LEDGER_URL
+              value: {{ .Values.serviceUrls.ledger | default (printf "http://ledger.%s.svc:8080" .Release.Namespace) | quote }}
+{{- end }}
+{{- if .Values.serviceIdentity.signingKeySecret }}
+          volumeMounts:
+            - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+{{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

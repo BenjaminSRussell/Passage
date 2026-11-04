@@ -95,11 +95,13 @@ func TestUpdateOperation_ValidatesAndNeedsKeyVersionAndDuty(t *testing.T) {
 		t.Fatalf("read duty only: %d", rec.Code)
 	}
 	bad := map[string]string{
-		"body":         `{}`,
-		"minutes":      `{"minutes":0}`,
-		"priority":     `{"priority":1001}`,
-		"setupMinutes": `{"setupMinutes":-1}`,
-		"resourceIds":  `{"resourceIds":["nope"]}`,
+		"body":               `{}`,
+		"minutes":            `{"minutes":0}`,
+		"priority":           `{"priority":1001}`,
+		"setupMinutes":       `{"setupMinutes":-1}`,
+		"queueBeforeMinutes": `{"queueBeforeMinutes":-1}`,
+		"queueAfterMinutes":  `{"queueAfterMinutes":10081}`,
+		"resourceIds":        `{"resourceIds":["nope"]}`,
 	}
 	for field, body := range bad {
 		rec := send(h, http.MethodPatch, opPath, body, allDuties, "k-"+field, `"1"`)
@@ -130,6 +132,15 @@ func TestUpdateOperation_ValidatesAndNeedsKeyVersionAndDuty(t *testing.T) {
 	}
 	if rec := send(h, http.MethodPatch, "/v1/scheduling/operations/nope", ok, allDuties, "k3", `"1"`); rec.Code != http.StatusNotFound {
 		t.Fatalf("bad id: %d", rec.Code)
+	}
+}
+
+func TestUpdateOperation_PassesQueueTimes(t *testing.T) {
+	f := &fakeStore{}
+	rec := send(newRouter(f), http.MethodPatch, opPath, `{"queueBeforeMinutes":15,"queueAfterMinutes":0}`, allDuties, "kq", `"3"`)
+	c := calls(f)
+	if rec.Code != http.StatusOK || c.patch.QueueBeforeMinutes == nil || *c.patch.QueueBeforeMinutes != 15 || c.patch.QueueAfterMinutes == nil || *c.patch.QueueAfterMinutes != 0 {
+		t.Fatalf("status %d patch %+v body %s", rec.Code, c.patch, rec.Body)
 	}
 }
 

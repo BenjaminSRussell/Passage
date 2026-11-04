@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Alert, Button, Card, ConfirmDialog, FormField, Input } from "../../shell/ui";
-import { closeRebateAgreement, describeProblem, newKey, PricingApiError, reviseRebateAgreement, type Problem, type RebateAgreement } from "./api/client";
+import { closeRebateAgreement, describeProblem, newKey, PricingApiError, reopenRebateAgreement, reviseRebateAgreement, type Problem, type RebateAgreement } from "./api/client";
 import { DAY } from "./format";
 import styles from "./pages.module.css";
 
@@ -13,10 +13,10 @@ function failureTitle(code: string): string {
   return "The change failed";
 }
 
-type Kind = "revise" | "close";
+type Kind = "revise" | "close" | "reopen";
 
 /**
- * Revise (name, end date) and close an ACTIVE rebate agreement (FR-26.11). Tiers cannot change
+ * Revise (name, end date), close an ACTIVE rebate agreement and reopen a CLOSED one (FR-26.11). Tiers cannot change
  * once invoices have accrued (PRC-0049); the service refuses, and the note says to create a new agreement.
  * Closing cannot be undone, so it is confirmed first.
  */
@@ -24,19 +24,41 @@ export function RebateLifecycleCard({ agreement, onChange }: { agreement: Rebate
   const [name, setName] = useState(agreement.name);
   const [validTo, setValidTo] = useState(agreement.validTo);
   const [closeDate, setCloseDate] = useState(agreement.validTo);
-  const [errors, setErrors] = useState<{ name?: string; validTo?: string; closeDate?: string }>({});
+  const [reopenTo, setReopenTo] = useState("");
+  const [errors, setErrors] = useState<{ name?: string; validTo?: string; closeDate?: string; reopenTo?: string }>({});
   const [busy, setBusy] = useState<Kind | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [failure, setFailure] = useState<Problem | null>(null);
   const [done, setDone] = useState("");
   // One key per command: a retried revise must not collide with a later close under the same key.
-  const keys = useRef<Record<Kind, string>>({ revise: newKey(), close: newKey() });
+  const keys = useRef<Record<Kind, string>>({ revise: newKey(), close: newKey(), reopen: newKey() });
   const version = agreement.version;
 
   if (agreement.status !== "ACTIVE") {
     return (
-      <Card title="Change or close">
-        <p className={styles.note}>This agreement is closed. Invoices dated after {agreement.validTo} no longer accrue; the accruals already booked stay.</p>
+      <Card title="Reopen">
+        <div className={styles.stack}>
+          <Alert tone="success" live="status">
+            {done}
+          </Alert>
+          {failure ? (
+            <Alert tone="danger" title={failureTitle(failure.code)} live="alert">
+              {failure.message} ({failure.code})
+            </Alert>
+          ) : null}
+          <p className={styles.note}>
+            This agreement is closed. Invoices dated after {agreement.validTo} no longer accrue; the accruals already booked stay. Reopening sets a
+            later last day, and invoices up to it accrue again.
+          </p>
+          <form className={styles.toolbar} onSubmit={submitReopen} noValidate>
+            <FormField id="rb-reopen-to" label="New valid to" hint={`Later than ${agreement.validTo}.`} error={errors.reopenTo}>
+              {(c) => <Input {...c} type="date" value={reopenTo} onChange={(e) => { setReopenTo(e.target.value); keys.current.reopen = newKey(); }} invalid={Boolean(errors.reopenTo)} />}
+            </FormField>
+            <Button type="submit" variant="secondary" loading={busy === "reopen"}>
+              Reopen agreement
+            </Button>
+          </form>
+        </div>
       </Card>
     );
   }
@@ -50,6 +72,9 @@ export function RebateLifecycleCard({ agreement, onChange }: { agreement: Rebate
       if (!DAY.test(validTo)) next.validTo = "Enter the end date as YYYY-MM-DD.";
       else if (validTo < agreement.validFrom) next.validTo = "The end date cannot be before the start date.";
       if (!next.name && !next.validTo && name.trim() === agreement.name && validTo === agreement.validTo) next.name = "Change the name or the end date.";
+    } else if (kind === "reopen") {
+      if (!DAY.test(reopenTo)) next.reopenTo = "Enter the new end date as YYYY-MM-DD.";
+      else if (reopenTo <= agreement.validTo) next.reopenTo = `Choose a day after ${agreement.validTo}.`;
     } else if (!DAY.test(closeDate)) {
       next.closeDate = "Enter the close date as YYYY-MM-DD.";
     } else if (closeDate < agreement.validFrom || closeDate > agreement.validTo) {
@@ -64,7 +89,9 @@ export function RebateLifecycleCard({ agreement, onChange }: { agreement: Rebate
     setBusy(kind);
     try {
       const changed =
-        kind === "revise"
+        kind === "reopen"
+          ? await reopenRebateAgreement(agreement.id, version, reopenTo, keys.current.reopen)
+          : kind === "revise"
           ? await reviseRebateAgreement(
               agreement.id,
               { version, name: name.trim() !== agreement.name ? name.trim() : undefined, validTo: validTo !== agreement.validTo ? validTo : undefined },
@@ -75,7 +102,14 @@ export function RebateLifecycleCard({ agreement, onChange }: { agreement: Rebate
       setName(changed.name);
       setValidTo(changed.validTo);
       setCloseDate(changed.validTo);
-      setDone(kind === "revise" ? "The agreement is updated." : `The agreement is closed; invoices dated after ${changed.validTo} no longer accrue.`);
+      if (kind === "reopen") setReopenTo("");
+      setDone(
+        kind === "revise"
+          ? "The agreement is updated."
+          : kind === "reopen"
+            ? `The agreement is open again; invoices up to ${changed.validTo} accrue.`
+            : `The agreement is closed; invoices dated after ${changed.validTo} no longer accrue.`,
+      );
       keys.current[kind] = newKey();
     } catch (error) {
       setFailure(describeProblem(error));
@@ -89,6 +123,11 @@ export function RebateLifecycleCard({ agreement, onChange }: { agreement: Rebate
   function submitRevise(event: FormEvent) {
     event.preventDefault();
     if (check("revise")) void run("revise");
+  }
+
+  function submitReopen(event: FormEvent) {
+    event.preventDefault();
+    if (check("reopen")) void run("reopen");
   }
 
   function submitClose(event: FormEvent) {
@@ -133,7 +172,7 @@ export function RebateLifecycleCard({ agreement, onChange }: { agreement: Rebate
       {confirming ? (
         <ConfirmDialog
           title="Close this rebate agreement?"
-          description={`Invoices dated after ${closeDate} will no longer accrue. The accruals already booked stay. A closed agreement cannot be reopened or changed.`}
+          description={`Invoices dated after ${closeDate} will no longer accrue. The accruals already booked stay. A closed agreement can be reopened with a later end date.`}
           confirmLabel={`Close on ${closeDate}`}
           cancelLabel="Keep it open"
           onConfirm={() => void run("close")}

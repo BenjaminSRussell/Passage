@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/money"
+	"github.com/shopspring/decimal"
 )
 
 // Conflict codes (message catalog SCHED-0001, -0002, -0004, -0008).
@@ -69,6 +70,47 @@ type Operation struct {
 	// Secondaries are resources booked for the same segments as the primary
 	// (tools, crews, BR-23.4). They are never candidates of the operation.
 	Secondaries []string
+	// QueueBefore and QueueAfter are the wait in front of and behind the
+	// operation, in elapsed minutes (FR-23.3). No resource is booked while it
+	// waits; the next operation of the order starts no earlier than this one's
+	// end plus its QueueAfter plus the next one's QueueBefore.
+	QueueBefore int
+	QueueAfter  int
+	// OverlapBP is the share of this operation's process time, in basis
+	// points of 10,000, after which the next operation of the order may start
+	// (BR-23.5): the overlap quantity over the operation's quantity, rounded
+	// up. 0 means no overlap, and a value of 10,000 or more is the same as
+	// none (the next one waits for the end).
+	OverlapBP int
+}
+
+// MaxOverlapBP is a full process: an overlap of that much is no overlap.
+const MaxOverlapBP = 10000
+
+// OverlapShareBP converts an overlap quantity over an operation quantity into
+// basis points of its process time, rounded up so the next operation never
+// starts before the overlap quantity is through. Zero or negative inputs give
+// 0 (no overlap).
+func OverlapShareBP(overlap, quantity decimal.Decimal) int {
+	if !overlap.IsPositive() || !quantity.IsPositive() {
+		return 0
+	}
+	if overlap.GreaterThanOrEqual(quantity) {
+		return MaxOverlapBP
+	}
+	return int(overlap.Mul(decimal.NewFromInt(MaxOverlapBP)).Div(quantity).Ceil().IntPart())
+}
+
+// queueGap is the wait between the end of prev and the start of next in the
+// same order: prev's queue after plus next's queue before.
+func queueGap(prev, next Operation) time.Duration {
+	return minutes(prev.QueueAfter + next.QueueBefore)
+}
+
+// queueWait is queueGap behind a placed predecessor, whose queue after rides
+// on the placement.
+func queueWait(prev *Placement, next Operation) time.Duration {
+	return minutes(prev.QueueAfter + next.QueueBefore)
 }
 
 // Busy is booked time on a resource held by one job. Group and Setup are the
@@ -116,6 +158,44 @@ type Placement struct {
 	CleaningSetID     string
 	// Secondaries are the resources booked with the primary (BR-23.4).
 	Secondaries []string
+	// QueueAfter is the operation's elapsed wait behind the job in minutes
+	// (FR-23.3), carried so the next operation of the order keeps it also
+	// when this job is fixed (firmed or outside the run's selection).
+	QueueAfter int
+	// OverlapBP carries the operation's overlap share (BR-23.5) for the same
+	// reason as QueueAfter.
+	OverlapBP int
+}
+
+// Release is the earliest instant the next operation of the order may start
+// before its queue (BR-23.5): the end of the job, or with an overlap share the
+// moment the changeover and that share of the process minutes are through,
+// counted over the job's working segments (closed time between them does not
+// count).
+func (p Placement) Release() time.Time {
+	if p.OverlapBP <= 0 || p.OverlapBP >= MaxOverlapBP || len(p.Segments) == 0 {
+		return p.End
+	}
+	total := 0
+	for _, s := range p.Segments {
+		total += int(s.End.Sub(s.Start) / time.Minute)
+	}
+	proc := total - p.ChangeoverMinutes
+	if proc <= 0 {
+		return p.End
+	}
+	need := p.ChangeoverMinutes + (proc*p.OverlapBP+MaxOverlapBP-1)/MaxOverlapBP
+	if need >= total {
+		return p.End
+	}
+	for _, s := range p.Segments {
+		d := int(s.End.Sub(s.Start) / time.Minute)
+		if need <= d {
+			return s.Start.Add(minutes(need))
+		}
+		need -= d
+	}
+	return p.End
 }
 
 // withSlot copies the changeover a slot was priced with onto the placement.
@@ -328,7 +408,7 @@ func startCandidates(busy []Busy, ready time.Time) []time.Time {
 
 func newPlacement(op Operation, resourceID string, segs []Segment) Placement {
 	pl := Placement{OperationID: op.ID, OrderID: op.OrderID, OperNumber: op.OperNumber, ResourceID: resourceID,
-		Segments: segs, Start: segs[0].Start, End: segs[len(segs)-1].End, Secondaries: op.Secondaries}
+		Segments: segs, Start: segs[0].Start, End: segs[len(segs)-1].End, Secondaries: op.Secondaries, QueueAfter: op.QueueAfter, OverlapBP: op.OverlapBP}
 	if !op.DueAt.IsZero() && pl.End.After(op.DueAt) {
 		pl.LateMinutes = minutesBetween(op.DueAt, pl.End)
 	}
@@ -512,6 +592,15 @@ type MoveInput struct {
 	// propagate beyond the moved order.
 	Dependents []Operation
 	Pegs       []Peg
+	// Override commits the moved job at the asked start although it breaks a
+	// capacity rule (SCHED-0002: outside open capacity, inside a block it does
+	// not match, a changeover that does not fit; SCHED-0005: a secondary
+	// resource is closed). The caller has checked the override duty. Double
+	// booking (SCHED-0001), a secondary resource booked by another job
+	// (SCHED-0005), a firmed job, a resource that is not a candidate, a slot
+	// that ends beyond the planning horizon, and conflicts of successors or
+	// dependents are never overridden.
+	Override bool
 }
 
 // MovePlan is the proposed change set. Conflict is set when the move is
@@ -523,6 +612,8 @@ type MovePlan struct {
 	Changes    []Placement
 	Dependents []string
 	Conflict   *Conflict
+	// Overridden lists the violations the move was committed over (in.Override).
+	Overridden []Conflict
 }
 
 // PlanMove plans a move (FR-23.8). The moved operation starts no earlier than
@@ -559,16 +650,39 @@ func PlanMove(in MoveInput) MovePlan {
 		return MovePlan{Conflict: &Conflict{Code: CodeNotCandidate, Detail: "resource is not a candidate for the operation"}}
 	}
 	at := in.At
-	for _, op := range in.Order {
+	var before *Operation
+	for i, op := range in.Order {
 		if op.OperNumber < mv.OperNumber {
-			if pl, ok := in.Current[op.ID]; ok && pl.End.After(at) {
-				at = pl.End
+			if before == nil || op.OperNumber > before.OperNumber {
+				before = &in.Order[i]
+			}
+			if pl, ok := in.Current[op.ID]; ok && pl.Release().After(at) {
+				at = pl.Release()
+			}
+		}
+	}
+	if before != nil {
+		// The wait between the operation before and the moved one (FR-23.3).
+		if pl, ok := in.Current[before.ID]; ok {
+			if t := pl.Release().Add(queueGap(*before, *mv)); t.After(at) {
+				at = t
+			}
+			// An overlapped successor still cannot end before the operation
+			// before it does plus the queue its last units wait (BR-23.5,
+			// FR-23.3): it needs at least its process minutes after that.
+			if t := pl.End.Add(queueGap(*before, *mv) - minutes(BookedMinutes(mv.Minutes, c.res.EfficiencyPct))); pl.OverlapBP > 0 && t.After(at) {
+				at = t
 			}
 		}
 	}
 	iv := c.usable(*mv)
+	var overridden []Conflict
 	if t := ceilMinute(at); insideAny(c.iv, t) && !insideAny(iv, t) {
-		return MovePlan{Conflict: &Conflict{Code: CodeOutsideCapacity, Detail: "start is inside a capacity block the job does not match (BR-23.15)"}}
+		blocked := Conflict{Code: CodeOutsideCapacity, Detail: "start is inside a capacity block the job does not match (BR-23.15)"}
+		if !in.Override {
+			return MovePlan{Conflict: &blocked}
+		}
+		overridden = append(overridden, blocked)
 	}
 	touched := map[string]time.Time{}
 	touch := func(rid string, t time.Time) {
@@ -586,12 +700,47 @@ func PlanMove(in MoveInput) MovePlan {
 		bs = busy[in.ResourceID]
 	}
 	s, conf := fillSlot(c, iv, *mv, bs, at, true, sequenced(c, *mv, false))
+	if conf != nil && in.Override && conf.Code == CodeOutsideCapacity {
+		// Commit the job at the asked start as one continuous span, over the
+		// closed time. It still may not overlap a booked job (SCHED-0001), and
+		// it must end inside the planning horizon: beyond it nothing says
+		// whether the time is open, so the move stays refused.
+		horizonEnd := in.Start.AddDate(0, 0, in.HorizonDays)
+		forced, forcedConf := forceSlot(c, *mv, bs, at, sequenced(c, *mv, false))
+		switch {
+		case forcedConf != nil:
+			conf = forcedConf
+		case forced.segs[len(forced.segs)-1].End.After(horizonEnd):
+			// conf stays the refusal of the exact slot.
+		default:
+			span := forced.segs[0]
+			switch {
+			case len(overridden) == 0:
+				overridden = append(overridden, *conf)
+			case OutsideOpen(c.iv, span.Start, span.End):
+				// The start is inside a block it does not match (listed) and the
+				// span also runs over closed time.
+				overridden = append(overridden, Conflict{Code: CodeOutsideCapacity, Detail: "the job runs over time outside the resource's open capacity"})
+			}
+			s, conf = forced, nil
+		}
+	}
 	if conf != nil {
 		return MovePlan{Conflict: conf}
 	}
 	if sec := secondaryChecker(caps, busy, *mv, false); sec != nil {
 		if shift, detail := sec(s.segs); shift > 0 {
-			return MovePlan{Conflict: &Conflict{Code: CodeSecondaryBusy, Detail: detail, JobID: mv.ID}}
+			busyConf := Conflict{Code: CodeSecondaryBusy, Detail: detail, JobID: mv.ID}
+			if !in.Override {
+				return MovePlan{Conflict: &busyConf}
+			}
+			// Only a closed secondary is overridden: one booked by another job
+			// would be double booked (the exclusion constraint on secondary
+			// bookings refuses it too), so that stays SCHED-0005.
+			if booked := secondaryBooked(caps, busy, *mv, s.segs); booked != nil {
+				return MovePlan{Conflict: booked}
+			}
+			overridden = append(overridden, busyConf)
 		}
 	}
 	moved := newPlacement(*mv, in.ResourceID, s.segs).withSlot(s)
@@ -605,13 +754,26 @@ func PlanMove(in MoveInput) MovePlan {
 	// number) on their resources so the first starts no earlier than pred and
 	// each later one no earlier than the one before it ends. Operations that
 	// already start late enough and keep their changeover stay as they are.
-	push := func(chain []Operation, pred time.Time, firmedDetail string) ([]Placement, *Conflict) {
+	push := func(chain []Operation, pred time.Time, predEnd time.Time, predOp *Operation, firmedDetail string) ([]Placement, *Conflict) {
 		var out []Placement
-		for _, op := range chain {
+		for i := range chain {
+			op := chain[i]
 			cur, ok := in.Current[op.ID]
 			if !ok {
 				continue
 			}
+			if predOp != nil {
+				gap := queueGap(*predOp, op)
+				pred = pred.Add(gap)
+				if predOp.OverlapBP > 0 {
+					// Overlapped: not before the predecessor's end plus the
+					// queue, less its own process minutes (BR-23.5).
+					if t := predEnd.Add(gap - minutes(BookedMinutes(op.Minutes, caps[cur.ResourceID].res.EfficiencyPct))); t.After(pred) {
+						pred = t
+					}
+				}
+			}
+			predOp = &chain[i]
 			ready := cur.Start
 			if pred.After(ready) {
 				ready = pred
@@ -620,7 +782,7 @@ func PlanMove(in MoveInput) MovePlan {
 				if ready.After(cur.Start) {
 					return nil, &Conflict{Code: CodeFirmed, Detail: firmedDetail, JobID: op.ID}
 				}
-				pred = cur.End
+				pred, predEnd = cur.Release(), cur.End
 				continue
 			}
 			cc := caps[cur.ResourceID]
@@ -642,13 +804,13 @@ func PlanMove(in MoveInput) MovePlan {
 				out = append(out, next)
 				touch(cur.ResourceID, cur.Start)
 			}
-			pred = next.End
+			pred, predEnd = next.Release(), next.End
 		}
 		return out, nil
 	}
 
 	successors := byOperNumber(slices.DeleteFunc(slices.Clone(in.Order), func(op Operation) bool { return op.OperNumber <= mv.OperNumber }))
-	pushed, conf := push(successors, moved.End, "move would push a firmed successor; unfirm it first")
+	pushed, conf := push(successors, moved.Release(), moved.End, mv, "move would push a firmed successor; unfirm it first")
 	if conf != nil {
 		return MovePlan{Conflict: conf}
 	}
@@ -679,7 +841,7 @@ func PlanMove(in MoveInput) MovePlan {
 					ready = e
 				}
 			}
-			dep, conf := push(chain, ready, "a firmed job would have to move; unfirm it first")
+			dep, conf := push(chain, ready, ready, nil, "a firmed job would have to move; unfirm it first")
 			if conf != nil {
 				conf.Detail = fmt.Sprintf("pegged order %s: %s", oid, conf.Detail)
 				return MovePlan{Conflict: conf}
@@ -713,7 +875,7 @@ func PlanMove(in MoveInput) MovePlan {
 			}
 		}
 	}
-	return MovePlan{Changes: changes, Dependents: dependents}
+	return MovePlan{Changes: changes, Dependents: dependents, Overridden: overridden}
 }
 
 // byOperNumber sorts operations by operation number in place and returns them.

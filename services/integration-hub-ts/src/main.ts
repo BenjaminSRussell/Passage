@@ -9,6 +9,7 @@ import { FieldKeys } from "./crypt.ts";
 import { consumerConfigFromEnv, startConsumer, type RunningConsumer } from "./consumer.ts";
 import { httpTransport } from "./dispatcher.ts";
 import { httpMigrationClient } from "./migrationClient.ts";
+import { Maintenance, usageRetentionDaysFromEnv } from "./maintenance.ts";
 import { Metrics } from "./metrics.ts";
 import { HubStore, MIGRATIONS_DIR, migrate } from "./pgStore.ts";
 import { Poller } from "./poller.ts";
@@ -52,7 +53,7 @@ if (rest === undefined) {
   console.warn(JSON.stringify({ level: "warn", msg: "rest-push is off: set MIGRATION_URL and PASSAGE_SERVICE_SIGNING_KEY(_FILE)" }));
 }
 
-const api = createServer(createHubHandler({ store, metrics, ping, guard, ...(rest === undefined ? {} : { rest }) }));
+const api = createServer(createHubHandler({ store, metrics, ping, guard, deprecationMonths: Number(env["HUB_API_DEPRECATION_MONTHS"] ?? 12), ...(rest === undefined ? {} : { rest }) }));
 const admin = createAdminServer(metrics, ping);
 api.listen(8080);
 admin.listen(9090);
@@ -66,6 +67,15 @@ const poller = new Poller({
 });
 poller.start(Number(env["HUB_POLL_INTERVAL_MS"] ?? 2000));
 
+// Re-seal after a master key rotation, drop rotated secrets past their grace period, purge old client usage.
+const maintenance = new Maintenance({
+  store,
+  metrics,
+  usageRetentionDays: usageRetentionDaysFromEnv(env),
+  onError: (err) => console.error(JSON.stringify({ level: "error", msg: "maintenance", error: (err as Error).message })),
+});
+maintenance.start(Number(env["HUB_MAINTENANCE_INTERVAL_MS"] ?? 300_000));
+
 let consumer: RunningConsumer | null = null;
 const consumerConfig = consumerConfigFromEnv(env);
 if (consumerConfig !== null) {
@@ -76,6 +86,7 @@ const shutdown = async () => {
   api.close();
   admin.close();
   await poller.stop();
+  await maintenance.stop();
   await consumer?.stop();
   await pool.end();
   process.exit(0);

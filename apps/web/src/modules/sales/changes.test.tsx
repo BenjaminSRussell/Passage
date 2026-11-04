@@ -103,6 +103,53 @@ describe("buildChange", () => {
     expect(input).toBeUndefined();
   });
 
+  it("removes lines and adds lines, with the diff and the PATCH body (FR-27.9)", () => {
+    const o = order();
+    const values = editsOf(o);
+    values.removed = [2];
+    values.added = [{ productId: "33333333-0000-4000-8000-000000000003", quantity: "3", unit: "EA", siteId: "44444444-0000-4000-8000-000000000004", warehouseId: "55555555-0000-4000-8000-000000000005", unitPrice: "4.50", discPct: "0", requestedShipDate: "2027-03-09" }];
+    values.listingOverrideReason = " key account ";
+    const { errors, diff, input } = buildChange(o, values);
+    expect(errors).toEqual({});
+    expect(diff).toEqual([
+      { lineNo: 2, field: "lineStatus", old: "OPEN", new: "CANCELLED" },
+      { lineNo: 3, field: "lineAdded", old: "", new: "33333333-0000-4000-8000-000000000003" },
+      { lineNo: 3, field: "quantity", old: "", new: "3" },
+      { lineNo: 3, field: "unitPrice", old: "", new: "4.50" },
+    ]);
+    expect(input?.removeLines).toEqual([2]);
+    expect(input?.addLines).toEqual([expect.objectContaining({ productId: "33333333-0000-4000-8000-000000000003", quantity: "3", unitPrice: "4.50" })]);
+    expect(input?.listingOverrideReason).toBe("key account");
+  });
+
+  it("checks an added line like an order line and refuses to remove every line", () => {
+    const o = order();
+    const values = editsOf(o);
+    values.added = [{ productId: "x", quantity: "0", unit: "", siteId: "", warehouseId: "", unitPrice: "", discPct: "0", requestedShipDate: "" }];
+    const bad = buildChange(o, values);
+    expect(Object.keys(bad.errors).sort()).toEqual(["lines[0].productId", "lines[0].quantity", "lines[0].requestedShipDate", "lines[0].siteId", "lines[0].unit", "lines[0].unitPrice", "lines[0].warehouseId"]);
+    expect(bad.input).toBeUndefined();
+
+    const empty = editsOf(o);
+    empty.removed = [1, 2];
+    const none = buildChange(o, empty);
+    expect(none.errors.removed).toMatch(/at least one line/);
+    expect(none.input).toBeUndefined();
+  });
+
+  it("does not offer to remove a supplementary line and ignores edits of a removed line", () => {
+    const o = order();
+    o.lines[1] = { ...o.lines[1], supplementaryOf: "l1", parentLineNo: 1 };
+    const values = editsOf(o);
+    values.removed = [2];
+    expect(buildChange(o, values).input).toBeUndefined();
+    const o2 = order();
+    const v2 = editsOf(o2);
+    v2.removed = [2];
+    v2.lines[1].quantity = "9";
+    expect(buildChange(o2, v2).input).toEqual({ removeLines: [2] });
+  });
+
   it("offers only OPEN and RESERVED lines for editing", () => {
     const o = order();
     o.lines[1].lineStatus = "PICKED";
@@ -143,6 +190,32 @@ describe("Change sales order page", () => {
     expect(patch?.url.pathname).toBe(`/api/v1/sales/orders/${ORDER_ID}`);
     expect(patch?.headers.get("If-Match")).toBe('"3"');
     expect(patch?.body).toEqual({ lines: [{ lineNo: 1, quantity: "8" }] });
+  });
+
+  it("removes a line and adds one from the change page", async () => {
+    const warnings = [{ code: "SLS-0012", lineNo: 4, message: "Mandatory supplementary item p9 added (2 EA)" }];
+    handler = (_url, init) =>
+      init.method === "PATCH" ? { status: 200, body: { ...order({ version: 4 }), warnings }, etag: '"4"' } : { status: 200, body: order(), etag: '"3"' };
+    const { container } = renderAt(`/sales/orders/${ORDER_ID}/change`);
+    fireEvent.click(await screen.findByLabelText("Remove line 2 from the order"));
+    fireEvent.click(screen.getByRole("button", { name: "Add a line" }));
+    const fresh = screen.getByRole("group", { name: "New line 1" });
+    const set = (label: string, value: string) => fireEvent.change(within(fresh).getByLabelText(label), { target: { value } });
+    set("Product", "33333333-0000-4000-8000-000000000003");
+    set("Unit price", "4.50");
+    set("Site", "44444444-0000-4000-8000-000000000004");
+    set("Warehouse", "55555555-0000-4000-8000-000000000005");
+    set("Requested ship date", "2027-03-09");
+    expect(pageViolations(container)).toEqual([]);
+    const diff = screen.getByRole("table", { name: "Changes to save" });
+    expect(within(diff).getByText("Line added (product)")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText(/Saved as version 4\. Mandatory supplementary item p9 added/)).toBeInTheDocument();
+    const patch = calls.find((c) => c.method === "PATCH");
+    expect(patch?.body).toEqual({
+      removeLines: [2],
+      addLines: [{ productId: "33333333-0000-4000-8000-000000000003", quantity: "1", unit: "EA", siteId: "44444444-0000-4000-8000-000000000004", warehouseId: "55555555-0000-4000-8000-000000000005", unitPrice: "4.50", discPct: "0", requestedShipDate: "2027-03-09" }],
+    });
   });
 
   it("says the change was sent for approval when the service stored it (202) and keeps the order as it was", async () => {

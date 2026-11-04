@@ -166,7 +166,10 @@ func journalRow(cell func(string) string, legalEntityID string) (journalLineDTO,
 		Variant: cell("variant"), Currency: cell("currency"), Unit: cell("unit"), FromQuantity: cell("fromQuantity"),
 		Amount: cell("amount"), DiscPct1: cell("discPct1"), DiscPct2: cell("discPct2"), ValidFrom: cell("validFrom"),
 		ValidTo: cell("validTo"), CampaignID: cell("campaignId")}
-	rec.SearchNext = boolCell(cell("searchNext"), "searchNext", fields)
+	if cell("searchNext") != "" { // empty takes the legal entity's price_search_mode
+		next := boolCell(cell("searchNext"), "searchNext", fields)
+		rec.SearchNext = &next
+	}
 	rec.Exclusive = boolCell(cell("exclusive"), "exclusive", fields)
 	dto.Record = rec
 	return dto, fields

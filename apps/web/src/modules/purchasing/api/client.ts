@@ -72,6 +72,8 @@ export interface RequisitionLine {
   preferredVendorId?: string;
   /** The procurement catalog entry the line was picked from; absent on a non-catalog line. */
   catalogEntryId?: string;
+  /** The line this one was cut out of by a split (FR-17.3); absent on a line as entered. */
+  splitFromLineId?: string;
   status: string;
   /** Set when CONSOLIDATED: the purchase order line that orders this line. */
   purchaseOrderId?: string;
@@ -132,6 +134,8 @@ export interface RequisitionInput {
 }
 
 export interface PurchaseOrderLine {
+  /** The line's stable id, the purchase_order_line_id a drop-ship names. Set by the service. */
+  id?: string;
   lineNo: number;
   productId?: string;
   description?: string;
@@ -442,6 +446,8 @@ export interface SourcingLine extends RequisitionLine {
   requisitionStatus: RequisitionStatus;
   legalEntityId: string;
   currency: string;
+  /** The requisition's version: the If-Match value of a split. */
+  requisitionVersion: number;
 }
 
 export interface ConsolidationInput {
@@ -615,6 +621,17 @@ export function listOpenRequisitionLines(filters: { sourcing?: SourcingFilter | 
   return list<SourcingLine>("/requisition-lines", { sourcing: filters.sourcing || undefined, vendorId: filters.vendorId }, options);
 }
 
+/**
+ * Cuts one new OPEN line out of a requisition line for each quantity (FR-17.3). The original keeps what is left;
+ * requisitionVersion is the If-Match value. Returns the requisition with all its lines.
+ */
+export function splitRequisitionLine(lineId: string, requisitionVersion: number, quantities: string[], idempotencyKey = newIdempotencyKey()) {
+  return send<Requisition>("POST", `/requisition-lines/${encodeURIComponent(lineId)}:split`, {
+    body: { quantities },
+    headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${requisitionVersion}"` },
+  });
+}
+
 /** Creates one DRAFT purchase order per vendor, currency, site, warehouse and delivery window. */
 export function consolidateRequisitions(input: ConsolidationInput, idempotencyKey = newIdempotencyKey()) {
   return send<{ purchaseOrders: PurchaseOrder[]; warnings?: Warning[] }>("POST", "/requisitions:consolidate", {
@@ -656,6 +673,69 @@ export function listOpenOrderLines(filters: OpenSupplyFilters = {}, options: Lis
   return list<OpenOrderLine>("/purchase-order-lines", { ...filters }, options);
 }
 
+// --- Inquiries (PRD 3.17.14) ---
+
+/** Open CONFIRMED purchase orders of one vendor in one currency. */
+export interface VendorOpenOrders {
+  vendorId: string;
+  currency: string;
+  orderCount: number;
+  lineCount: number;
+  openValue: string;
+  overdueLines: number;
+  overdueValue: string;
+  earliestDue: string;
+}
+
+/**
+ * An open line past its due date. `deliveryDate` is the requested date; `dueDate` is the vendor's
+ * confirmed date when there is one, else the requested date (with a delivery schedule, of the first
+ * row the received quantity does not cover); `confirmedDate` is that row's confirmed date.
+ */
+export interface OverdueLine extends OpenOrderLine {
+  dueDate: string;
+  currency: string;
+  daysLate: number;
+  openValue: string;
+}
+
+/** A priced line of an approved purchase order for one product. */
+export interface PriceHistoryEntry {
+  purchaseOrderId: string;
+  number: string;
+  lineNo: number;
+  orderDate: string;
+  vendorId: string;
+  currency: string;
+  unit: string;
+  qty: string;
+  unitPrice: string;
+  priceUnit: string;
+  discountPct: string;
+  priceSource: string;
+  agreementLineId?: string;
+}
+
+export interface InquiryFilters {
+  vendorId?: string;
+  productId?: string;
+  asOf?: string;
+  from?: string;
+  to?: string;
+}
+
+export function listOpenOrdersByVendor(filters: InquiryFilters = {}, options: ListOptions = {}) {
+  return list<VendorOpenOrders>("/inquiries/open-orders-by-vendor", { ...filters }, options);
+}
+
+export function listOverdueLines(filters: InquiryFilters = {}, options: ListOptions = {}) {
+  return list<OverdueLine>("/inquiries/overdue-lines", { ...filters }, options);
+}
+
+export function listPriceHistory(filters: InquiryFilters = {}, options: ListOptions = {}) {
+  return list<PriceHistoryEntry>("/inquiries/price-history", { ...filters }, options);
+}
+
 // --- Requests for quotation (FR-17.4, BR-17.11) ---
 
 export type RFQStatus = "DRAFT" | "SENT" | "REPLIES_OPEN" | "CLOSED" | "AWARDED" | "CANCELLED";
@@ -670,6 +750,8 @@ export interface RFQLine {
   qty: string;
   unit: string;
   requiredDate?: string;
+  /** The requisition line the RFQ line was raised for; an award orders it. */
+  requisitionLineId?: string;
 }
 
 export interface RFQInvitation {
@@ -816,6 +898,21 @@ export function getRFQ(id: string, signal?: AbortSignal) {
 
 export function createRFQ(input: RFQInput, idempotencyKey = newIdempotencyKey()) {
   return send<RFQ>("POST", "/rfqs", { body: input, headers: { "Idempotency-Key": idempotencyKey } });
+}
+
+/** Input of POST /rfqs:from-requisitions: OPEN lines of APPROVED requisitions of one legal entity (FR-17.3). */
+export interface RFQFromRequisitionsInput {
+  requisitionLineIds: string[];
+  /** RFC 3339 instant, in the future. */
+  replyDeadline: string;
+  rankingRule?: RankingRule;
+  sealed?: boolean;
+  criteria?: { name: string; weight: string }[];
+}
+
+/** Starts a DRAFT RFQ from requisition lines that need sourcing; the lines leave the consolidation queue. */
+export function createRFQFromRequisitions(input: RFQFromRequisitionsInput, idempotencyKey = newIdempotencyKey()) {
+  return send<RFQ>("POST", "/rfqs:from-requisitions", { body: input, headers: { "Idempotency-Key": idempotencyKey } });
 }
 
 /** Sends a DRAFT RFQ to vendors; version is the ETag read when it was loaded. */
@@ -1962,4 +2059,85 @@ export interface ServiceLimitCheck {
 /** Whether an entry of unplanned services fits the line's limits (BR-17.19); a refusal is allowed false with code PRC-SRV-003, not an error. Changes nothing. */
 export function checkServiceLimit(poId: string, lineNo: number, unplanned: string, entry: string, signal?: AbortSignal) {
   return send<ServiceLimitCheck>("GET", `${servicePath(poId, lineNo)}/limit-check${query({ unplanned, entry })}`, { signal });
+}
+
+// --- Changes other services asked of purchase orders (slice 18) ---
+
+export type InboundSource = "PLANNING_MESSAGE" | "DROPSHIP_CLOSED" | "DROPSHIP_CANCELLED";
+export type InboundStatus = "APPLIED" | "REFUSED" | "IGNORED";
+/** How a refused change was settled (slice 19); "NONE" in a filter lists the changes nobody has settled. */
+export type InboundResolution = "ACKNOWLEDGED" | "RETRIED";
+
+/**
+ * One planning message a planner applied to a purchase order, or one closed drop-ship remainder, as the
+ * purchasing consumer handled it. REFUSED rows are for a buyer to settle by hand.
+ */
+export interface InboundChange {
+  id: string;
+  legalEntityId: string;
+  source: InboundSource;
+  sourceKey: string;
+  eventId: string;
+  action: string;
+  purchaseOrderId?: string;
+  poNumber?: string;
+  lineNo?: number;
+  lineId?: string;
+  productId?: string;
+  status: InboundStatus;
+  reasonCode?: string;
+  reason?: string;
+  requestedQty?: string;
+  requestedDate?: string;
+  qtyBefore?: string;
+  qtyAfter?: string;
+  dateBefore?: string;
+  dateAfter?: string;
+  versionNo?: number;
+  reapprovalRequired: boolean;
+  requestedBy?: string;
+  note?: string;
+  createdAt: string;
+  warehouseId?: string;
+  /** Runs of the request: the consumer's first and every retry. */
+  attempts?: number;
+  resolution?: InboundResolution;
+  resolvedBy?: string;
+  resolvedAt?: string;
+  resolutionNote?: string;
+}
+
+export interface InboundFilters {
+  source?: InboundSource | "";
+  status?: InboundStatus | "";
+  resolution?: InboundResolution | "NONE" | "";
+  purchaseOrderId?: string;
+}
+
+export function listInboundChanges(filters: InboundFilters = {}, options: ListOptions = {}) {
+  return list<InboundChange>(
+    "/inbound-changes",
+    {
+      source: filters.source || undefined,
+      status: filters.status || undefined,
+      resolution: filters.resolution || undefined,
+      purchaseOrderId: filters.purchaseOrderId || undefined,
+    },
+    options,
+  );
+}
+
+export function getInboundChange(id: string, signal?: AbortSignal) {
+  return send<InboundChange>("GET", `/inbound-changes/${encodeURIComponent(id)}`, { signal });
+}
+
+/**
+ * Settles a refused change (slice 19; needs PurchaseOrderMaintain): "acknowledge" says the buyer dealt with it by
+ * hand, "retry" runs the request again against the order as it is now.
+ */
+export function settleInboundChange(id: string, action: "acknowledge" | "retry", note: string, idempotencyKey = newIdempotencyKey()) {
+  return send<InboundChange>("POST", `/inbound-changes/${encodeURIComponent(id)}:${action}`, {
+    body: note ? { note } : undefined,
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
 }

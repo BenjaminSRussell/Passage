@@ -27,7 +27,10 @@ const (
 
 // Errors returned by the pick and pack rules. Codes are the FUL catalog entries.
 var (
-	ErrOverPick        = errors.New("FUL-0004: over-pick")
+	ErrOverPick = errors.New("FUL-0004: over-pick")
+	// ErrOverShip rejects a pick above the planned quantity plus the customer's
+	// over-delivery tolerance (BR-28.7).
+	ErrOverShip        = errors.New("FUL-0005: over-ship exceeds customer tolerance")
 	ErrOverPack        = errors.New("FUL-0023: packed quantity exceeds picked quantity")
 	ErrNegativeQty     = errors.New("FUL-0030: quantity must not be negative")
 	ErrInvalidMove     = errors.New("FUL-0021: shipment transition is not allowed")
@@ -82,22 +85,47 @@ type LineQty struct {
 	Confirmed bool
 }
 
-// ConfirmPick records the picked quantity for a line (FR-28.2, BR-28.7). An
-// over-pick is rejected. A short pick leaves the difference as backorder,
-// returned so the caller can release the unpicked reservation.
+// ConfirmPick records the picked quantity for a line (FR-28.2, BR-28.7) with no
+// over-delivery tolerance: an over-pick is rejected. A short pick leaves the
+// difference as backorder, returned so the caller can release the unpicked
+// reservation.
 func ConfirmPick(l LineQty, picked decimal.Decimal) (LineQty, decimal.Decimal, error) {
+	return ConfirmPickWithin(l, picked, decimal.Zero)
+}
+
+// MaxPick is the most a line may pick: the planned quantity plus tolerancePct
+// percent of it, cut to the six decimals a quantity carries (so the stored
+// check, which is exact, never rejects it).
+func MaxPick(planned, tolerancePct decimal.Decimal) decimal.Decimal {
+	if !tolerancePct.IsPositive() {
+		return planned
+	}
+	hundred := decimal.NewFromInt(100)
+	return planned.Mul(hundred.Add(tolerancePct)).Div(hundred).Truncate(6)
+}
+
+// ConfirmPickWithin is ConfirmPick with the customer's over-delivery tolerance
+// in percent (BR-28.7). A pick above the planned quantity is FUL-0004 when no
+// tolerance applies and FUL-0005 when it is above planned plus the tolerance;
+// within the tolerance it is accepted and the backorder is zero.
+func ConfirmPickWithin(l LineQty, picked, tolerancePct decimal.Decimal) (LineQty, decimal.Decimal, error) {
 	if picked.IsNegative() {
 		return l, decimal.Zero, ErrNegativeQty
 	}
 	if picked.GreaterThan(l.Planned) {
-		return l, decimal.Zero, fmt.Errorf("%w: %s exceeds planned %s", ErrOverPick, picked, l.Planned)
+		if !tolerancePct.IsPositive() {
+			return l, decimal.Zero, fmt.Errorf("%w: %s exceeds planned %s", ErrOverPick, picked, l.Planned)
+		}
+		if max := MaxPick(l.Planned, tolerancePct); picked.GreaterThan(max) {
+			return l, decimal.Zero, fmt.Errorf("%w %s%%: %s exceeds planned %s (at most %s)", ErrOverShip, tolerancePct.String(), picked, l.Planned, max)
+		}
 	}
 	if picked.LessThan(l.Packed) {
 		return l, decimal.Zero, fmt.Errorf("%w: %s is below packed %s", ErrPickBelowPacked, picked, l.Packed)
 	}
 	l.Picked = picked
 	l.Confirmed = true
-	return l, l.Planned.Sub(picked), nil
+	return l, decimal.Max(decimal.Zero, l.Planned.Sub(picked)), nil
 }
 
 // PostTarget is the shipment status once a packing slip has posted: SHIPPED when
@@ -105,7 +133,7 @@ func ConfirmPick(l LineQty, picked decimal.Decimal) (LineQty, decimal.Decimal, e
 // remainder is left (FR-28.8); a short-picked remainder is re-picked from there.
 func PostTarget(lines []LineQty) ShipmentStatus {
 	for _, l := range lines {
-		if !l.Shipped.Equal(l.Planned) {
+		if l.Shipped.LessThan(l.Planned) {
 			return StatusPartiallyShipped
 		}
 	}
@@ -163,7 +191,7 @@ func CloseRemainder(from ShipmentStatus, lines []LineQty) (ShipmentStatus, []Clo
 		if l.Packed.GreaterThan(l.Shipped) {
 			return from, nil, fmt.Errorf("%w: packed quantity is waiting to ship, post it first", ErrInvalidMove)
 		}
-		out[i] = ClosedQty{Closed: l.Planned.Sub(l.Shipped), PickedUnpacked: l.Picked.Sub(l.Shipped)}
+		out[i] = ClosedQty{Closed: decimal.Max(decimal.Zero, l.Planned.Sub(l.Shipped)), PickedUnpacked: l.Picked.Sub(l.Shipped)}
 		if out[i].Closed.IsPositive() {
 			open = true
 		}

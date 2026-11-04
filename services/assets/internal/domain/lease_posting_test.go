@@ -8,7 +8,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-var leaseAcc = LeaseAccounts{ROUAsset: "1700", ROUAccumulated: "1790", Liability: "2400", InterestExpense: "7200", DepreciationExpense: "6820", PaymentClearing: "2110", RemeasurementGain: "7120"}
+var leaseAcc = LeaseAccounts{ROUAsset: "1700", ROUAccumulated: "1790", Liability: "2400", InterestExpense: "7200", DepreciationExpense: "6820", PaymentClearing: "2110", RemeasurementGain: "7120", TerminationGainLoss: "7130", ExemptLeaseExpense: "6830"}
 
 func dd(s string) decimal.Decimal { return decimal.RequireFromString(s) }
 

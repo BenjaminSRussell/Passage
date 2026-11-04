@@ -205,9 +205,11 @@ func (rc Recurrence) Windows(loc *time.Location, from, to time.Time) ([]Interval
 	}
 	var out []Interval
 	for _, n := range r.occurrences(first, last, until) {
-		start := time.Date(y, m, d+n, 0, rc.StartMinute, 0, 0, loc).UTC()
-		end := time.Date(y, m, d+n, 0, rc.EndMinute, 0, 0, loc).UTC()
-		if end.After(from) && start.Before(to) {
+		// Wall times in a DST gap or overlap resolve as the shifts of the
+		// calendar do (OpenIntervals), so a recurring and a weekly window agree.
+		start := firstInstantAt(loc, y, m, d+n, rc.StartMinute).UTC()
+		end := firstInstantAt(loc, y, m, d+n, rc.EndMinute).UTC()
+		if end.After(start) && end.After(from) && start.Before(to) {
 			out = append(out, Interval{Start: start, End: end})
 		}
 	}

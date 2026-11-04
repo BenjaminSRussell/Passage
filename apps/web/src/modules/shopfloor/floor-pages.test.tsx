@@ -78,6 +78,7 @@ const downtime = (extra: Partial<Downtime> = {}): Downtime => ({
   endedAt: null,
   reasonCode: null,
   category: "unplanned",
+  cause: "down",
   andonRaised: true,
   ...extra,
 });
@@ -149,6 +150,18 @@ describe("Machines", () => {
 });
 
 describe("Downtimes", () => {
+  it("labels idle time found by the sweep as Idle, not Down", async () => {
+    handler = (url) => {
+      if (url.pathname.endsWith("/downtime-reasons")) return json(200, { items: [] });
+      if (url.pathname.endsWith("/downtimes")) return json(200, { items: [downtime({ cause: "idle", andonRaised: false })] });
+      return undefined;
+    };
+    renderAt("/shopfloor/downtimes");
+    const table = await findTable({ name: "Downtimes" });
+    expect(within(table).getByText("Idle")).toBeInTheDocument();
+    expect(within(table).queryByText("Down")).not.toBeInTheDocument();
+  });
+
   it("lists open downtimes and codes a reason with an Idempotency-Key", async () => {
     let coded = false;
     handler = (url, init) => {

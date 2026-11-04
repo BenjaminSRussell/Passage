@@ -1342,6 +1342,12 @@ func (f *fakeStore) CreateHierarchyType(_ context.Context, in store.HierarchyTyp
 	return in, nil
 }
 
+func (f *fakeStore) HierarchyVersionDraftKeys(context.Context, string) (map[string]string, error) {
+	return map[string]string{}, f.err
+}
+
+func (f *fakeStore) TreeLimits() domain.TreeLimits { return domain.DefaultTreeLimits }
+
 func (f *fakeStore) CreateHierarchyDraft(_ context.Context, typeID, _, editedBy string) (store.HierarchyVersion, error) {
 	f.draftEditor = editedBy
 	if f.err != nil {

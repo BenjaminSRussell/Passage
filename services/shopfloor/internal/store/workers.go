@@ -37,14 +37,19 @@ type Worker struct {
 	// dispatch list for the worker ("my jobs", GET jobs?workerId=) is that resource's jobs. Nil
 	// means the worker sees every job.
 	DefaultResourceID *string `json:"defaultResourceId"`
+	// DeactivatedAt, DeactivatedBy and DeactivationReason describe the latest deactivation of an
+	// inactive worker (D2a'); they are nil while the worker is active.
+	DeactivatedAt      *time.Time `json:"deactivatedAt"`
+	DeactivatedBy      *string    `json:"deactivatedBy"`
+	DeactivationReason *string    `json:"deactivationReason"`
 }
 
-const workerColumns = `id::text, party_id::text, name, badge_id, user_id, cost_rate::text, currency, active, version, created_at, profile_id::text, pay_agreement_id::text, default_resource_id::text`
+const workerColumns = `id::text, party_id::text, name, badge_id, user_id, cost_rate::text, currency, active, version, created_at, profile_id::text, pay_agreement_id::text, default_resource_id::text, deactivated_at, deactivated_by, deactivation_reason`
 
 func scanWorker(row pgx.Row) (Worker, error) {
 	var w Worker
 	var rate string
-	if err := row.Scan(&w.ID, &w.PartyID, &w.Name, &w.BadgeID, &w.UserID, &rate, &w.Currency, &w.Active, &w.Version, &w.CreatedAt, &w.ProfileID, &w.PayAgreementID, &w.DefaultResourceID); err != nil {
+	if err := row.Scan(&w.ID, &w.PartyID, &w.Name, &w.BadgeID, &w.UserID, &rate, &w.Currency, &w.Active, &w.Version, &w.CreatedAt, &w.ProfileID, &w.PayAgreementID, &w.DefaultResourceID, &w.DeactivatedAt, &w.DeactivatedBy, &w.DeactivationReason); err != nil {
 		return Worker{}, err
 	}
 	var err error

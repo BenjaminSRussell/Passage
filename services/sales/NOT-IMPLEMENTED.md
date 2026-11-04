@@ -374,7 +374,7 @@ configuration problem or any other 4xx, is written to `intake_error`
 (migration 0024) in its own transaction, because the request's transaction
 rolls back: one row per legal entity, channel, external reference, payload
 hash and error code, with `attempts`, first and last seen, the message and
-the status OPEN or RESOLVED; the payload itself is not kept, only its hash.
+the status OPEN or RESOLVED; the payload itself is kept only from slice 30 (see there), and its hash always.
 A retry of the same payload raises `attempts` and reopens a resolved row.
 Server faults (5xx), requests whose legal entity is missing or outside the
 caller's scope, and the 409 `SLS-0007` of a concurrent request that stored the
@@ -511,8 +511,271 @@ stale `If-Match` `412 SLS-0006`; duty `sales.order.write`. The order page's
 "Cancel the remainder" card gains a "Close" choice of every line or one line.
 The OpenAPI and AsyncAPI documents pass the doc gates with no FAIL lines.
 
+Slice 26 adds the reject half of the credit release queue (PRD §5.27.6,
+"release/reject with comment"): `POST /orders/{id}/holds/{holdId}:reject`
+(`If-Match`, duty `sales.credit.release`, required `comment` of 1 to 500
+characters). Only an ACTIVE CREDIT hold of an order still awaiting confirmation
+(DRAFT or OPEN) can be rejected (`SLS-0062` for another hold type or a CONFIRMED
+order, `SLS-0022` for a hold that is not ACTIVE, `412 SLS-0006` for a stale
+ETag, 403 for the user who applied the hold, as for a release). In one
+transaction under the order's row lock the hold becomes REJECTED (migration
+0029: the status value and `rejected_by`, `rejected_at`, `rejection_comment` on
+`order_hold`; no new table, so no new grant), the order is cancelled exactly as
+`:cancel` does (lines cancelled, allocation quota and agreement quantity
+returned, open schedule lines cancelled, the order's other ACTIVE holds
+CLEARED, a version whose reason is "Credit hold rejected: <comment>"), and
+`orderhold.rejected.v1` (with the comment) and `order.cancelled.v1` are queued.
+No change approval applies (the order is unconfirmed). There is no
+`Idempotency-Key` replay: the If-Match version makes a retry safe, as for
+`:cancel`. The queue screen gains a "Reject" button on CREDIT rows that opens a
+comment form (required, 500 characters) and shows the service's refusals; the
+queue rows carry `orderStatus`, so a CREDIT hold raised on a CONFIRMED order by
+a total-raising change offers only "Release". The order detail's hold table
+shows the rejecting user and comment in its "Decision" column. The order
+version and `order.cancelled.v1` carry "Credit hold rejected: <comment>" cut to
+the 500 characters a cancel reason may have; the whole comment is on the hold
+(check `order_hold_rejection_check`: 1 to 500 characters, and who, when and why
+on every REJECTED hold) and in `orderhold.rejected.v1`. A rejection also counts
+in `sales_orders_cancelled_total`. The OpenAPI and AsyncAPI documents pass the doc gates with no
+FAIL lines.
+
+Slice 27 finishes the amount-threshold and named-approver half of change
+approval (FR-27.9). `customer_change_policy` (migration 0032, no new table, so
+no new grant: 0016 already gives SELECT, INSERT, UPDATE) gains
+`approval_threshold` + `threshold_currency` and `approver_user_ids` (uuid[], at
+most 20); `sales_order` gains `unapproved_change_value` (0032, its check
+validated in 0033; 0009 already grants UPDATE). `PUT
+/customers/{id}/change-policy` replaces `approvalRequired` and every member the
+body names (`approvalThreshold` as a decimal string above 0 and below 10^15
+with at most 4 places, together with a three-letter `thresholdCurrency`;
+`approverIds` as identity user ids, stored canonical, de-duplicated and
+sorted; `null` / `[]` clear them) and keeps a member the body leaves out, so
+the plain `{"approvalRequired": true}` body of slice 13 clients does not wipe a
+threshold or group set since. With the switch on and a threshold set, a PATCH
+of a CONFIRMED order is measured on a copy with the same `ApplyChange` the
+PATCH would use (an invalid change is still 422 before anything is stored):
+the value it moves is the sum of each line's absolute net movement, so a rise
+on one line and an equal cut on another count twice, not zero. It applies at
+once only while that value plus the order's `unapproved_change_value` (what
+earlier changes applied without approval moved) stays below the threshold; the
+applied value is then added to it. A large change split into several small
+PATCHes therefore reaches the threshold like the large change would. A
+date-only change moves no money and applies at once. Approved changes and the
+direct changes of an approver are not counted. A `:cancel` moves the whole
+order total on top of that. An order in a different currency than
+`thresholdCurrency` always needs approval, because there is no rate (w12) to
+convert it; the web form says so. A non-empty `approverIds` limits who may
+approve or reject a request for that customer (anyone else gets 403
+`SLS-0150`, new code, README catalogue) and who may skip approval with the
+`sales.order.approve` duty: a duty holder outside the group who PATCHes or
+cancels the customer's confirmed order gets a stored request (202) like a
+requester, otherwise the group could be bypassed by a direct change. The
+requester cannot approve their own request and can still withdraw it. An empty
+group lets anyone holding the duty decide, so no policy leaves requests
+without an approver; a group whose members all left is changed through the
+same PUT (duty `sales.order.approve`, not limited to the group, so it cannot
+lock itself). The group is read at decision time, so a change of the group
+applies to requests already waiting. `changepolicy.changed.v1` carries
+`approval_threshold`, `threshold_currency` and `approver_ids`. The web
+"Customer change approval" page gains the threshold, currency and named
+approvers fields with client-side checks (user ids must be UUIDs) and sends
+`null` / `[]` to clear them. No new duty and no new route: the existing
+`sales.order.approve` / `sales.order.read` rows cover it, so there is nothing
+to seed. Not checked: that a named approver exists in identity or holds
+`sales.order.approve` (no identity user lookup from sales; a member without the
+duty simply cannot decide). The OpenAPI and AsyncAPI documents pass the doc
+gates with no FAIL lines.
+
+Slice 28 adds and removes lines by `PATCH /orders/{id}` (FR-27.9), the gap
+every earlier change row listed ("neither is adding or removing lines by
+PATCH"). No migration, no new table and no new route: the body of the existing
+PATCH (duty `sales.order.write`) gains `addLines` (entered like order lines;
+`configurationId` is refused with 400), `removeLines` (line numbers) and
+`listingOverrideReason`, so there is nothing to seed. An added line is numbered
+after the order's highest line number (a removed line keeps its number, so a
+number is never reused), is checked against the customer's product listings
+like a line at entry (`SLS-0011`; the `sales.order.approve` duty with a reason
+accepts it and the override is appended to the order's `listing_overrides`),
+gets the MANDATORY supplementary lines of its product (the `SLS-0012` warning;
+the follow-the-parent rules of BR-27.14 then keep them in step), and, on a
+CONFIRMED order, is promised at once through the delivery date control confirm
+uses, allocated against its quota (`SLS-0013` when no period can cover it),
+scheduled and counted in the credit re-check and the one-time-order limit
+because the total rises. A removed line is set to CANCELLED, not deleted: only
+an OPEN or RESERVED line can go, a supplementary line cannot be removed alone
+(remove its parent and it is cancelled with it), a line with a production order
+planned cannot be removed (cancel the production order first), and a change
+that would leave the order with no line is refused (cancel the order instead);
+all `SLS-0024`. A removed line returns its quota draw and leaves the schedule
+through the same path as a quantity cut. Added and removed lines, header and
+line edits go in one version: the diff names an added line with a `lineAdded`
+entry (the product) followed by `lineId`, `unit`, `siteId`, `warehouseId`,
+`quantity`, `unitPrice`, `discPct`, `requestedShipDate` and, when confirmed,
+`confirmedShipDate`, each with an empty old value, so a consumer of
+`order.changed.v1` has what it needs to plan the new line, and a removed line
+as `lineStatus` OPEN to CANCELLED; `repromised_lines` lists the added lines of
+a confirmed order. The approval path of FR-27.9 covers them: the stored
+request keeps `addLines` and `removeLines`, the value moved for the threshold
+counts an added or removed line's whole net, and approving applies them with
+the same code (the approver holds `sales.order.approve` and may decide for
+the customer, so the replayed listing check accepts the override the request
+carries; a requester without the approve duty cannot store a denied line at
+all, since the listing check runs when the request is made). The web change page gains a "Remove line N from the order"
+checkbox per line, an "Add a line" editor (the shared line grid, with the
+delivery date control) and the listing override reason, with the diff showing
+both before saving. Not built: a configured product on an added line
+(`configurationId`; production planning for it stays an explicit call),
+adding or removing lines of a PARTIALLY_SHIPPED order (PATCH still reaches
+DRAFT, OPEN and CONFIRMED orders only), re-checking OPTIONAL supplementary
+items of an added line (the evaluation endpoint is the prompt, as at entry),
+and the stored request's diff shows a `lineId` for an added line that the
+approval replaces with a new one (the diff of `order.changed` and the version
+history carry the real id). The OpenAPI and AsyncAPI documents pass the doc
+gates with no FAIL lines.
+
+Slice 28 review: three gaps closed. (1) Fulfillment follows
+`order.remaindercancelled.v1` and not `order.changed`, so a line removed from
+a CONFIRMED order whose shipment was already released would still have been
+picked and packed. The removal now also queues `order.remaindercancelled.v1`
+(after `order.changed`, same version, `status` CONFIRMED, now in the schema's
+enum) for the removed lines and the supplementary lines cancelled with them,
+each with `kept_qty` 0; fulfillment cuts what it released, closes their
+drop-ships and refuses a later slip (FUL-0066), and a slip posted first is
+refused by sales because the line is cancelled. Those lines are cancelled for
+good, so fulfillment's kept quantity never has to rise again. A line partly
+shipped cannot be removed at all: its first delivery makes it PICKED and the
+order PARTIALLY_SHIPPED, which PATCH does not reach (use the per-line
+`:cancel-remainder`). (2) Once a line is added, line 1 of an order released
+from a sales agreement (the release line) can be removed; its quantity now
+goes back to the agreement as a whole-order cancel gives it (at most the
+release quantity, once per release, `agreement.returned`). (3) A request made
+by a user with the approve duty outside the customer's named group, carrying a
+listing override, could be stored but never approved (the replay refused it
+with `SLS-0011`); the approval now accepts the override. Line numbers cannot
+collide under concurrent PATCHes: every PATCH and approval locks the order row
+and checks its version (a second writer gets 412, an approval of a request
+made at an older version `SLS-0046`), and `(tenant_id, order_id, line_no)` is
+unique. The slice 27 threshold counts an added or removed line's whole net in
+the order's cumulative unapproved value (tested).
+
+Slice 29 closes the fulfillment gap found in the slice 28 review: a `:cancel` of a
+CONFIRMED order (direct or through an approved CANCEL request) and a PATCH that
+lowers a confirmed line quantity now queue `order.remaindercancelled.v1` (kept 0
+for a cancel, the new quantity for a cut; `status` CANCELLED in the schema enum,
+`line_status` OPEN and RESERVED added), so the consumer fulfillment already has
+follows them. The review added the raise side: a PATCH that raises a confirmed
+line's quantity, or reopens a supplementary line a cut had cancelled, puts that
+line in the same event with `kept_qty` the new quantity and `cancelled_qty` 0.
+Fulfillment's consumer keeps the newest version per line, so without this a
+cut-then-raise left its stored ceiling at the cut quantity for good (release
+capped, the slip post refused with FUL-0066), and a reopened supplementary line
+stayed at kept 0 (tested; the consumer reads only `line_id` and `kept_qty`, so
+the new status values need no consumer change). Both specs pass the doc gates
+with no FAIL lines.
+
+Slice 30 adds the replay of refused channel orders (PRD §5.27.10, "Intake
+retry / DLQ replay"). The intake error log kept only the payload hash, so a
+refused order could not be sent again once its cause (a listing, a
+configuration, a mapping) was fixed. Migration 0034 adds `request_payload`,
+`idempotency_key`, `replayed_order_id` and `replay_count` to `intake_error` (no
+new table, so no new grant). A refused channel order now keeps its request body
+and Idempotency-Key on the OPEN row (the same payload failing again replaces
+them); resolving the row, by hand or by a replay, clears both, so the buyer
+data of a one-time order is not kept longer than the failure needs. A
+one-time customer request carries the buyer's name, address and tax id, which
+this service never stores in clear (slice 15), so its body is kept only as a
+fieldcrypt envelope in `request_payload_sealed` (field
+`intake_error.request_payload`) and not at all when the service runs without
+`FIELDCRYPT_KEYS` (the row is then not replayable, 409 `SLS-0118`; a sealed row
+read without keys is 503 `SLS-0054`). The body and key are never returned by
+the API (`replayable` says whether they are there), never put in an event and
+never logged; the row keeps intake_error's tenant and legal-entity RLS.
+`POST /intake-errors/{id}:replay` (no body, no `If-Match`) sends the kept
+request through the same intake code as `POST /orders` (`submitOrder`, shared)
+as the caller and under the kept key (a key derived from the row id when the
+request had none), so a replay whose order was already stored returns that
+order and does not add another. Stored or found: the row is RESOLVED with the
+note "Replayed as order SO-n", `replayed_order_id` set and
+`intakeerror.resolved.v1` written in the same transaction. The replay runs with
+the replaying user's own legal-entity scope and duties, not the original
+sender's: the row is invisible outside the user's scope (RLS, 404), the order's
+legal entity is checked again (403), and `sales.order.write` is a duty that
+may already create orders through `POST /orders`. Two replays of one row (or a
+single and a bulk replay at once) store one order: they share the key, so the
+second finds the order (and the row is closed once) or gets the 409 `SLS-0007`
+of the insert in progress, which is answered as is and not counted (nor are a
+fault or a 401/403). Refused again (any other
+4xx, including a body that no longer validates): the answer is still 200 with
+`replayed` false and the new refusal in `failure`; the row stays OPEN with
+`attempts` and `replay_count` raised, its message replaced and
+`intakeerror.recorded.v1` written (the row keeps its first error code, so a
+different refusal does not open a second row). A resolved row is 409
+`SLS-0116`; a row logged before this slice (no kept body) is 409 `SLS-0118`.
+`POST /intake-errors:replay` replays up to `limit` (default 50, at most 100)
+OPEN rows of the legal entity, oldest first, optionally by channel and error
+code; rows at 10 attempts or more are the dead letters of the PRD: counted in
+`skipped`, left alone, and replayable one by one by hand. It is safe to repeat,
+which is what the scheduled retry does. The web gets a "Replay order" action on
+the intake error detail (order link once replayed, the refusal when it fails
+again), a "Replay open errors" action on the list with the counts, and
+`replayable` / `replayCount` / `replayedOrderId` on the error. Both specs pass
+the doc gates with no FAIL lines.
+
+Slice 31 keys the request hash of refused one-time orders and adds the order
+auto-close. (1) `intake_error.request_hash` of a request that carries a
+one-time buyer was a plain SHA-256, so a guessed buyer name and tax id could be
+confirmed against the log (and against `intakeerror.recorded.v1` and the API's
+`requestHash`). It is now an HMAC under the field encryption key,
+`hmac:<key id>:<hex>`, in a hash domain of its own
+(`sales.intake.error`), as `sales_order` does since slice 15; an ordinary
+request keeps its plain hash, since it names no buyer. The dedupe of the log
+survives key rotation: before the upsert the store recomputes the stored keyed
+hashes of the same legal entity, channel, reference and error code under the
+key each names and reuses the match, so a retry raises `attempts` instead of
+opening a second row. A service without `FIELDCRYPT_KEYS` stores the constant
+`unkeyed` for such a request (any digest would leak), so those refusals dedupe
+on (legal entity, channel, reference, error code) alone. Migration 0035
+cannot compute an HMAC in SQL, so it replaces the plain hash of every row that
+may cover a buyer (sealed body, no kept body, or a clear body with a `oneTime`
+member) with `cleared:<row id>`; rows whose clear body has no `oneTime`
+member keep theirs. The cost is that a retry of a cleared row's payload opens a
+new row beside the old one, which an operator can resolve. No new table, so no
+new grant. (2) `POST /orders:auto-close` (PRD §5.27.16, "Order auto-close"; BR-27.5
+INVOICED to CLOSED) moves INVOICED orders that nothing has changed for
+`graceDays` (0 to 365, default 30) and that carry no ACTIVE hold to CLOSED,
+oldest first, up to `limit` (1 to 500, default 100), for the query
+`legalEntityId` or the caller's (an all-scope caller covers every legal
+entity). `dryRun=true` lists the candidates and closes nothing. Each order
+closes in its own transaction under its row lock and is re-checked against the
+version, status, age and holds the listing saw (an order that changed meanwhile
+is SKIPPED), so the job is safe to repeat and two runs close an order once. A
+close writes an order version (diff `status` INVOICED to CLOSED, reason with
+the grace days) and `order.closed.v1` through the outbox in the same
+transaction. A CLOSED order takes no progress report (`SLS-0058`), change or
+cancel. Duty: the existing `sales.order.write`. The web gets "Close invoiced
+orders" (preview, close, result table, empty and error states). Both specs pass
+the doc gates with no FAIL line.
+
+The slice 31 review fixed: (a) migration 0035 updated no row under the
+deployed migration role (the database owner is NOSUPERUSER NOBYPASSRLS,
+`intake_error` forces RLS and a migration sets no tenant), so every plain
+digest would have stayed; it now lifts FORCE for the one UPDATE and forces it
+again in the same transaction, as fulfillment 0018 and purchasing 0023 do, and
+the store test runs the step as a non-bypass owner (`passage_app`) when
+`PASSAGE_TEST_APP_DATABASE_URL` is set and checks FORCE is back. (b) The
+rotation dedupe recomputed an HMAC per stored row of the reference, which grows
+without bound for a channel that sends no reference (`external_ref` ''); it now
+computes one HMAC per other key the stored rows name and looks the candidates
+up by equality on `intake_error_key`. (c) Migration 0036 adds a partial index
+`sales_order_auto_close (tenant_id, updated_at, id) WHERE status = 'INVOICED'
+AND order_type = 'ORDER'`; the nightly listing read every order of the tenant
+before. (d) The item's `invoicedAt` is renamed `lastChangedAt`: it is
+`updated_at`, which a later change (a hold release) also moves. (e) The web
+offered Preview to a reader, but the preview is the same POST under
+`sales.order.write` and was refused; both actions now need the duty.
+
 Wave 30 AC3 adds return orders (`return_order` / `return_order_line`, migration
-0029): create in REQUESTED from a billing invoice (customer, currency, net unit
+0037): create in REQUESTED from a billing invoice (customer, currency, net unit
 price and the returnable quantity, invoiced less other open RMAs per product,
 come from the invoice; 422 `SLS-0123` above it), `:authorize` by a user other
 than the creator (30-day validity), `:receive` into quarantine (lines left out
@@ -559,18 +822,18 @@ weighted average net unit price is used). Duties stay `sales.order.read` /
 | 3 | Credit exposure recompute and nightly reconciliation (`exposure.open_orders`) | implemented in part | Built (slice 18): `openOrders` is computed from this service's own CONFIRMED and PARTIALLY_SHIPPED orders at every check and on every profile read, so it needs no recompute job and there is no stored figure to reconcile. Not built: the nightly reconciliation job (nothing to reconcile until the w29/w30 projection stores exposure), conversion of orders in a currency other than the profile's (no FX rate, w12; they are listed and flagged instead), and `deliveredNotInvoiced` from shipped quantities (w28/w29; see the slice 24 decision below). Since slice 24 a PARTIALLY_SHIPPED order counts only its undelivered part. |
 | 3 | Credit review warnings daily job (06:00), review_date handling | implemented in part | Built (slice 19): `GET /credit-profiles?reviewDueBy=` and the web filter list the profiles due for review; the CR-4 review-date rule runs at confirm. Not built: the 06:00 job that notifies the credit manager (handoff: deployment-cicd CronJob and w3 notifications; it can call this list). |
 | 4 | Holds: FRAUD / MANUAL / PRICE_REVIEW apply endpoint (`POST /orders/{id}/holds`) | implemented | Duty `sales.order.hold`; DRAFT, OPEN or CONFIRMED orders; one ACTIVE hold per type; the hold, version bump and `orderhold.applied` commit together. A FRAUD hold blocks confirmation. The request is versioned by `If-Match` rather than the PRD's `Idempotency-Key`: a retry with the old ETag is refused (412) instead of replayed. |
-| 3, 4 | Credit release queue (PRD §5.27.6, §5.27.14: customer, order, amount, exposure vs limit, rule failed, age; release/reject with comment) | implemented in part | Built: `GET /holds` (duty `sales.credit.release` or `sales.order.hold`), ACTIVE holds oldest first with the order, amount, failed rule (for CR-1 the exposure plus order against the limit with tolerance), credit limit, age and SLA due time (`slaDueAt`, the legal entity's `credit_hold_sla_business_days` counted Monday to Friday, slice 11), and the queue screen releasing a hold at the order's ETag and flagging a hold past its due time. Not built: a reject action with a comment (no hold rejection state exists), the exposure breakdown by component (the profile screen shows it), and public holidays in the SLA count (the w6 work calendar is not read). |
+| 3, 4 | Credit release queue (PRD §5.27.6, §5.27.14: customer, order, amount, exposure vs limit, rule failed, age; release/reject with comment) | implemented in part (release and reject) | Built: `GET /holds` (duty `sales.credit.release` or `sales.order.hold`), ACTIVE holds oldest first with the order, amount, failed rule (for CR-1 the exposure plus order against the limit with tolerance), credit limit, age and SLA due time (`slaDueAt`, the legal entity's `credit_hold_sla_business_days` counted Monday to Friday, slice 11), and the queue screen releasing a hold at the order's ETag and flagging a hold past its due time. Slice 26 adds the reject action with a comment (see the slice 26 note above). Not built: the exposure breakdown by component (the profile screen shows it), and public holidays in the SLA count (the w6 work calendar is not read). |
 | 4 | Temporal release workflow with approvers by duty and 2-business-day SLA timer (FR-27.8, AC E2E "SLA timer fires") | later slice of PSG-27; handoff for the Temporal namespace `sales` (deployment-cicd) | Release is a synchronous API call. The SLA due time is computed per legal entity (slice 11) and shown on the queue, but no workflow, no timer that fires and no escalation exist. |
 | 4 | Release validity re-trigger on amount increase > 5% (BR-27.4) | implemented | A CREDIT release covers its own order only while it is valid (7 days) and the amount is within the released amount plus 5% (`domain.ReleaseCovers`). At confirm, and when a PATCH raises a CONFIRMED order's total, a failing credit check that no valid release covers places a CREDIT hold. |
 | 4 | MANUAL / PRICE_REVIEW blocking warehouse release (BR-27.4) | handoff (w28) | The holds are placed and listed on the order; warehouse release belongs to fulfillment. |
-| 4 | Change management: PATCH with If-Match, version per change, field-level diff, selective re-pricing/ATP/credit, `order.changed` and `order.cancelled` events, optional approval per customer (FR-27.9, AC-27.7) | implemented in part | Built: PATCH, `:cancel`, version history and both events. Re-pricing recomputes the changed lines' nets from the entered price (the w26 price resolver is not called; see "Order entry grid" under Web). Re-promise sets a changed line's confirmed date to its requested date, the delivery date control confirm uses until the ATP projection exists. Slice 13 adds the optional approval per customer: see the slice 13 note above and the FR-27.9 change approval row below. Slice 23 adds `POST /orders/{id}:cancel-remainder` for the whole order (see the slice 23 note above); closing the remainder of a single line is not built, and neither is adding or removing lines by PATCH. PATCH changes DRAFT, OPEN and CONFIRMED orders only, so the undelivered lines of a PARTIALLY_SHIPPED order cannot be changed (they can still be promised and run); whether PATCH should reach them is a decision to confirm. |
-| 4 | Line-level status machine beyond confirm (RESERVED / PICKED / DELIVERED / INVOICED) and order status derivation (BR-27.5) | implemented in part (slice 22) | Built: PICKED (delivered in part), DELIVERED and INVOICED lines and the derived PARTIALLY_SHIPPED, SHIPPED and INVOICED order statuses, driven by `:record-progress`. Not built: RESERVED (set when the w16 reservation exists), CLOSED (needs the w30 payment signal), the automatic caller (fulfillment and billing do not call `:record-progress` yet, see the handoff row), reversal of a delivery or invoice (returns are w30) and the over-delivery tolerance (`overdelivery_pct` is 0: a delivery above the ordered quantity is `SLS-0059`). |
+| 4 | Change management: PATCH with If-Match, version per change, field-level diff, selective re-pricing/ATP/credit, `order.changed` and `order.cancelled` events, optional approval per customer (FR-27.9, AC-27.7) | implemented in part | Built: PATCH, `:cancel`, version history and both events. Re-pricing recomputes the changed lines' nets from the entered price (the w26 price resolver is not called; see "Order entry grid" under Web). Re-promise sets a changed line's confirmed date to its requested date, the delivery date control confirm uses until the ATP projection exists. Slice 13 adds the optional approval per customer: see the slice 13 note above and the FR-27.9 change approval row below. Slice 23 adds `POST /orders/{id}:cancel-remainder` for the whole order (see the slice 23 note above); closing the remainder of a single line is built (slice 24); adding and removing lines by PATCH is built (slice 28). PATCH changes DRAFT, OPEN and CONFIRMED orders only, so the undelivered lines of a PARTIALLY_SHIPPED order cannot be changed (they can still be promised and run); whether PATCH should reach them is a decision to confirm. |
+| 4 | Line-level status machine beyond confirm (RESERVED / PICKED / DELIVERED / INVOICED) and order status derivation (BR-27.5) | implemented in part (slice 22) | Built: PICKED (delivered in part), DELIVERED and INVOICED lines and the derived PARTIALLY_SHIPPED, SHIPPED and INVOICED order statuses, driven by `:record-progress`. Not built: RESERVED (set when the w16 reservation exists), CLOSED by age (slice 31, the nightly auto-close; the w30 payment signal is still not used), the automatic caller (fulfillment and billing do not call `:record-progress` yet, see the handoff row), reversal of a delivery or invoice (returns are w30) and the over-delivery tolerance (`overdelivery_pct` is 0: a delivery above the ordered quantity is `SLS-0059`). |
 | 4 | Order status CANCELLED path | implemented | `:cancel` from DRAFT, OPEN or CONFIRMED when no line is past RESERVED (BR-27.5); ACTIVE holds move to `CLEARED`. Reservations are not released because none exist yet (BR-27.7, w16). |
 | 5 | Customer portal order entry and status | handoff | Wave 30 (portal UI). The intake API it will use exists. |
 | 5 | Multi-channel intake: `(channel, externalRef)` dedup (BR-27.10) | implemented in part | Same-key replay (200) and different payload (409 SLS-0007) are implemented and tested. The dedup window (`intake_dedup_window_days`, default 30 days, per legal entity) is enforced since slice 19; a repeat after the window opens a new order, and a reference is matched within its legal entity, not across the tenant (the PRD's tenant scope is a decision to confirm, see slice 19). Not built: the window does not apply to the other intake kinds (quotations, agreements and releases dedupe on their Idempotency-Key only). |
 | 5 | Intake rate limit per key (`INTAKE_RATE_LIMIT_PER_KEY=1000/min`, 429 with Retry-After) | later slice of PSG-27; handoff for shared rate-limit store (Valkey addendum, open question) | Needs the kernel rate-limit middleware; no per-pod limiter here. |
 | 5 | ChannelIntake client credentials (service accounts) | handoff | Keycloak `_internal`/client registration belongs to edge-identity and w35 integration. The duty `sales.channel.intake` is enforced in code. |
-| 6 | Supplementary items (FR-27.14, BR-27.14, AC-27.10) | implemented in part; later slice of PSG-27; handoff for w26 free-goods proposals | Built: `supplementary_item_rule` per (ordered product, customer or every customer, item) with MANDATORY/OPTIONAL, quantity per base quantity, FREE or PRICED; create (duty `sales.listing.maintain`), list, remove; the stateless `POST /supplementary-items:evaluate`, which returns the AC-27.10 lines (1 per 10 on 25 gives 2, free) with a customer's own rule replacing the all-customers rule for the same item; MANDATORY lines added in the order-create transaction of every order (create, quotation conversion, agreement release) with `supplementary_of` (the parent line id), the rule id and the rule's base quantity and quantity per base kept on the line, the rule's unit and price (0.00 for FREE), no discount, and an `SLS-0012` warning per added line on the create result; BR-27.14 on PATCH (the supplementary line's own quantity and date are refused with `SLS-0024`, a new parent quantity recomputes it, a parent below the base quantity cancels it, parent dates carry over, and the follow-on changes are in the version diff and `order.changed`); cancellation with the order. A supplementary line cancelled because its parent fell below the base quantity reopens, recomputed, when the open parent reaches the base again (slice 6). Not built (later slice): prompting for OPTIONAL items at line commit in an order-entry grid (the evaluation endpoint is the prompt; there is no grid, see Web) and the `supplementary_prompt_optional` parameter; a MANDATORY line for a parent that was below the base quantity when the order was created (no line exists to reopen; PATCH cannot add lines); adding a supplementary line for a parent line added by PATCH (PATCH cannot add lines); the delivery address (BR-27.14 inheritance), since orders carry no address yet (w7); and a listing check on the supplementary item itself (only the ordered lines are checked; the item goes with its parent). Not built (handoff): product-group and customer-group rule scopes (w8 product groups, w7 customer groups) and the w26 FREE_GOODS proposals. |
+| 6 | Supplementary items (FR-27.14, BR-27.14, AC-27.10) | implemented in part; later slice of PSG-27; handoff for w26 free-goods proposals | Built: `supplementary_item_rule` per (ordered product, customer or every customer, item) with MANDATORY/OPTIONAL, quantity per base quantity, FREE or PRICED; create (duty `sales.listing.maintain`), list, remove; the stateless `POST /supplementary-items:evaluate`, which returns the AC-27.10 lines (1 per 10 on 25 gives 2, free) with a customer's own rule replacing the all-customers rule for the same item; MANDATORY lines added in the order-create transaction of every order (create, quotation conversion, agreement release) with `supplementary_of` (the parent line id), the rule id and the rule's base quantity and quantity per base kept on the line, the rule's unit and price (0.00 for FREE), no discount, and an `SLS-0012` warning per added line on the create result; BR-27.14 on PATCH (the supplementary line's own quantity and date are refused with `SLS-0024`, a new parent quantity recomputes it, a parent below the base quantity cancels it, parent dates carry over, and the follow-on changes are in the version diff and `order.changed`); cancellation with the order. A supplementary line cancelled because its parent fell below the base quantity reopens, recomputed, when the open parent reaches the base again (slice 6). Built in slice 28: a parent line added by PATCH gets its MANDATORY supplementary lines. Not built (later slice): prompting for OPTIONAL items at line commit in an order-entry grid (the evaluation endpoint is the prompt; there is no grid, see Web) and the `supplementary_prompt_optional` parameter; a MANDATORY line for a parent that was below the base quantity when the order was created (no line exists to reopen, and an added line cannot name an existing parent); the delivery address (BR-27.14 inheritance), since orders carry no address yet (w7); and a listing check on the supplementary item itself (only the ordered lines are checked; the item goes with its parent). Not built (handoff): product-group and customer-group rule scopes (w8 product groups, w7 customer groups) and the w26 FREE_GOODS proposals. |
 | 6 | Product listing / exclusion (FR-27.15, BR-27.13, AC-27.11 `PRODUCT_NOT_LISTED`) | implemented in part | Built: `product_listing` (ALLOW/DENY per customer or group, validity), create, inquiry and remove, and the BR-27.13 check on every line of a new order on the order date: a denied line is 422 `SLS-0011` unless the caller has `sales.order.approve` and gives `listingOverrideReason`, and each accepted line is logged in `listingOverrides`. Not built: the customer group from w7 (handoff; the order takes `customerGroup` in the request until the party lookup exists, so a caller that omits it is checked at customer level only), the `listing_override_duty` parameter (the duty is fixed), and a check at line commit in an order-entry grid (no grid yet; see Web). PATCH cannot change a line's product, so changes need no re-check. |
 | 6 | Cross-selling and product proposals (FR-27.21) | implemented in part; handoff for w8 related products | Built: `product_proposal_rule` (ordered product → proposed product, CROSS_SELL / UP_SELL / ACCESSORY, one customer or every customer; create with duty `sales.listing.maintain`, list by legal entity and ordered products, remove); the stateless `POST /product-proposals:evaluate` over the products being committed and those already on the order (nothing is created); `POST /product-proposals:respond` with `Idempotency-Key`, storing each accept or decline once in `product_proposal_response` (kept when the rule is removed) and returning accepted and declined counts per rule on the list; the new-order screen proposes products for its lines, adds a line for an accepted proposal and records the answer. Not built: rules derived from w8 related products (handoff: no related-products API yet; rules are entered by hand), product-group and customer-group scopes (w8, w7), proposals on the change and quotation screens and in the channel intake response, an analytics event for responses (the PRD event table names none; the counts are read from the rule list), and the dynamic product proposal from the customer's order history (SAP dynamic proposal). |
 | 7 | Product allocation quotas (FR-27.16, BR-27.15, AC for SLS-0013) | implemented in part | Built: see slice 7 above. Not built: quota by product group or region (handoff: w8 product groups, w7 customer regions; a quota is per product and customer or every customer), splitting one line across periods (a line is confirmed whole in one period, so a line larger than any period's remaining quantity is refused), the `allocation_enabled` legal-entity parameter (a product is allocated when it has a quota covering the requested date; there is no parameter table), the first-of-period roll job (00:05), and drawing from ATP confirmation rather than the requested-date confirm (the ATP projection is not built). |
@@ -587,7 +850,7 @@ weighted average net unit price is used). Duties stay `sales.order.read` /
 |---|---|---|
 | FR-27.11 configured products and make-to-order production link (AC-27.4) | implemented in part | Built: `configurationId` on an order line (migration 0017), checked on order create against the product service (`GET /v1/product/saved-configurations/{id}?productId=`, service token holding only `product.configuration.read`): unknown, not valid or another product's configuration is `SLS-0047`, an unreachable product service `SLS-0048` (fail closed, nothing stored); carried in `order.confirmed` as `configuration_id`; `POST /orders/{id}:plan-production` (duty `sales.order.plan-production`) creates, per configured line of a CONFIRMED order, the production order with origin `SalesOrderLine` through `POST /v1/production/sales-line-orders` (service token holding only `production.order.create-from-sales`, `Idempotency-Key` `sales-line-<lineId>`) and links it in `order_line_production` (RLS tenant + restrictive legal entity); idempotent per line on both sides. Integration style: synchronous HTTP with a service grant, the repo's pattern between services; the Kafka consumer of #405 is not used because sales events reach Kafka only through the outbox relay and no production consumer deployment exists. Not built: planning on confirm (the call is explicit, so a confirm never depends on production being up; a scheduler or an `order.confirmed` consumer in production can call the same route), the BOM and route of the configured product (production creates the order with none, to be resolved from the configuration with w9), re-planning after a PATCH of the line quantity or a cancel (the production order keeps the quantity it was planned with), and the production-side status on the order line. |
 | FR-27.13 alternative items | implemented in part | See deliverable 2 and slice 16. |
-| FR-27.9 change approval: notification of the manager, approval by amount threshold or by a named approver group | later slice of PSG-27 | Slice 13 built the per customer switch, the stored request and approve/reject; slice 17 added withdrawal by the requester and cancellations. The queue is polled, nothing notifies a manager; every approver holding `sales.order.approve` can decide any request. |
+| FR-27.9 change approval: notification of the manager, approval by amount threshold or by a named approver group | implemented in part (slice 27) | Slice 13 built the per customer switch, the stored request and approve/reject; slice 17 added withdrawal by the requester and cancellations; slice 27 added the amount threshold and the named approver group per customer (see the slice 27 note above). Not built: the notification of the manager (the queue is polled; handoff to w3 notifications), a threshold per legal entity or customer group (it is per customer), a threshold in a currency other than the order's (no w12 rate: such orders always need approval), approver groups by role (the group is named user ids, as the role mapping is edge-identity), a check that named approvers exist in identity, and resetting an order's unapproved change value (it only grows over the order's life; see decisions). |
 | Duties `sales.order.approve` for change requests and the customer change policy | done (seeded in `policies/authz/data.json`) | `sales.order.approve` is seeded with the change request decisions and the customer change policy PUT. |
 | Change requests of other types of change (hold) | later slice of PSG-27 | A PATCH and `:cancel` (slice 17) are routed to approval; holds apply at once. |
 | Duty for withdrawing a change request | decision to confirm | PRD §5.27.17 names no duty for a withdrawal. `:withdraw` requires `sales.order.write` (the PATCH duty) and that the caller is the requester; a user holding only `sales.order.confirm` who asked for a cancellation needs `sales.order.write` to withdraw it. |
@@ -665,7 +928,7 @@ consumers depend on it.
 | Config flags (`sales.ctp`, `sales.alternative_items`, `sales.change_approval`) and `ATP_*`, `CREDIT_CHECK_POINTS` | later slice of PSG-27 | Not read by the service yet. Change approval is always available; a customer without a saved policy needs no approval, so it is off until someone switches a customer on. |
 | Quotation expiry hourly: scheduler calling `POST /v1/sales/quotations:expire` | handoff (deployment-cicd: a CronJob with a service identity holding `sales.quotation.maintain`) | The endpoint is built and safe to repeat; nothing in the chart calls it yet. The PRD partitions the job by legal entity: the scheduler either calls it once with an all-scope identity or once per legal entity with `legalEntityId`, and calls again while `more` is true. The monitor "none expired for 2 days while candidates exist" can read `quotationsLapsed` from `GET /summary`; no alert rule is built. |
 | Duty for the quotation expiry run | done (seeded in `policies/authz/data.json`) | `sales.quotation.maintain` is seeded with the quotation expiry run. |
-| Intake retry / DLQ replay every 5 min, DLQ after 10 attempts (PRD §5.27.10) | later slice of PSG-27; handoff for the replay worker (deployment-cicd) | The log keeps the hash and attempts only; replaying needs the stored payload and a worker. Not built. |
+| Intake retry / DLQ replay every 5 min, DLQ after 10 attempts (PRD §5.27.10) | implemented in part (slice 30); handoff for the scheduler (deployment-cicd) | Built: the kept request, `POST /intake-errors/{id}:replay`, the bulk `POST /intake-errors:replay` (oldest first, dead letters at 10 attempts counted and skipped) and the web actions, see slice 30. Not built: the 5-minute caller (a CronJob with a service identity holding `sales.order.write`, calling the bulk endpoint per legal entity), which is outside the owned paths. Rows logged before slice 30 have no kept request (`SLS-0118`): resolve them. Retention of resolved rows is still w48. |
 | "Today" of the delivery date rule is the UTC day (slice 21) | decision to confirm | The past-date rule (SLS-0003) and SALES_LEAD_TIME count from the UTC calendar day, as every other date rule of this service does (agreement validity, credit release validity, listings). Sales holds no time zone for a legal entity or a shipping site (org has the site and warehouse time zones; BR-28.3 dates shipping in the warehouse time zone), so for an entity far from UTC the rule is one day off for some hours around midnight. Using the shipping warehouse's time zone needs it replicated from org. |
 | Transport days are calendar days; release-confirm re-dates (slice 21) | decision to confirm | BR-27.2 says ship date plus transport days rolled to the next receiving day; the days are counted as calendar days (no transport calendar or holidays until w6/w48) and only the receipt is rolled to a receiving weekday (the terms need at least one, so the roll ends within a week). An order that is confirmed again when its hold is released gets new ship dates from the rule and copies the customer's terms in force at that moment. |
 | JOURNAL orders take no credit check at confirm or on a change | decision to confirm | BR-27.7 says only that a JOURNAL order never reserves or consumes ATP. As at entry (slice 18) and in the exposure (JOURNAL orders count for none), the credit check is skipped at confirm and on a total-raising change, since in AX a journal-type order posts no packing slip or invoice. This holds only while w28/w29 refuse to ship or invoice a JOURNAL order (they can read `order_type` from `order.confirmed`); if JOURNAL orders may ship, they need the credit check back. |
@@ -678,12 +941,34 @@ consumers depend on it.
 | Authz seed for `:cancel-remainder` (slice 23) | handoff (authz seed, #313) | No new duty: the action uses the existing `sales.order.write`. One route row is needed under `sales.order.write` in `policies/authz/data.json`: `{"resource": "/v1/sales/orders/*:cancel-remainder", "methods": ["POST"]}`, so the gateway lets the call through. |
 | Delivered-not-invoiced computed in sales (slice 25) | implemented; decision to confirm | `deliveredNotInvoiced` is computed from each line's `delivered_qty − invoiced_qty` at the line price and discount (BR-27.3), for the customer's other ORDER orders that are PARTIALLY_SHIPPED or SHIPPED, on the profile read, the list and every credit check; a value sent in the PUT is ignored. A partly shipped order now keeps its full exposure (delivered part here, undelivered part in `openOrders`). SUBSCRIPTION orders are left out (billing invoices them per period, not per line quantity, so `invoiced_qty` never moves; slice 22), which leaves the delivered part of a partly shipped SUBSCRIPTION order in no exposure figure until the receivables projection reports its open AR; JOURNAL orders are left out too. Alternative: count a SUBSCRIPTION order's delivered part until it is SHIPPED. Orders in other currencies are returned in `deliveredNotInvoicedOtherCurrencies` and make a BALANCE_PACKING_SLIP or BALANCE_ALL CR-1 pass a WARN, as for open orders. Decision: w29/w30 will own the receivables side; once billing posts invoices to AR the delivered-and-invoiced part is open AR, and a document that bills ahead of delivery is not modelled (an invoice may not pass delivery, `SLS-0059`). Index `sales_order_delivered_exposure` (migration 0028). |
 | Authz seed for the per-line `:cancel-remainder` (slice 24) | handoff (authz seed, #313) | No new duty: the action uses the existing `sales.order.write`. One route row is needed under `sales.order.write` in `policies/authz/data.json`: `{"resource": "/v1/sales/orders/*/lines/*:cancel-remainder", "methods": ["POST"]}`, so the gateway lets the call through. |
+| Authz seed for the credit hold rejection (slice 26) | handoff (authz seed, #313) | No new duty: the action uses the existing `sales.credit.release`. One route row is needed under `sales.credit.release` in `policies/authz/data.json`: `{"resource": "/v1/sales/orders/*/holds/*:reject", "methods": ["POST"]}`, next to the existing `/v1/sales/orders/*/holds/*:release` row, so the gateway lets the call through. The queue nav item stays gated on the seeded read duty. |
+| Replay as the replaying user (slice 30) | decision to confirm | A replay re-submits the kept request as the user (or scheduler identity) who replays it, not as the channel that sent it: the user's legal-entity scope applies and the order's `actor` is the user. One consequence: a user holding `sales.order.approve` who replays a request that asked for a listing override (`listingOverrideReason`) gets the override the channel's identity could not grant. Alternatives: never pass the approve duty on a replay, or keep the original principal's duties on the row. |
+| Re-refusal answered 200 (slice 30) | decision to confirm | A replay that intake refuses again answers 200 with `replayed: false` and the refusal in `failure`, because the call did change the row (an attempt, the new message, `intakeerror.recorded`) and the bulk call reports the same per-row shape. Alternative: answer the refusal's own 4xx for the single replay. |
+| Kept refused requests: retention (slice 30) | decision to confirm; w48 | The body and key are kept while the row is OPEN, however long that is, including dead letters (10 or more attempts); they go only when the row is resolved. Alternative: purge them from OPEN rows after a period (for example 30 days) and leave such a row not replayable. The intake error row itself (hash, message, no body) has no retention yet (w48). |
+| Bulk replay cost and faults (slice 30) | decision to confirm | One bulk call replays up to 100 rows one after another, each in its own transactions (the order, then the row), inside the request; at the default of 50 it stays well under the PRD's 1-minute run. A server fault on one row (for example the product service down for a configured line) stops the batch with that problem; the replays done before it are kept and the next run starts again from the oldest row, so a row that faults every time holds back the rows behind it until it is resolved or replayed by hand. Partitioning is by legal entity (optional channel filter) rather than by channel as the PRD's job row says. |
+| Derived replay key `replay:<id>` (slice 30) | implemented | A request refused without an Idempotency-Key is replayed under `replay:<intake error id>`, stable across replays so a repeat finds the order. A sender could send such a key itself only by knowing the row id, and would then get only an order with the identical body (the request hash must match) or a 422; keys are unique per tenant. |
+| Authz seed for the order auto-close (slice 31) | handoff (authz seed, #313) | No new duty: the action uses the existing `sales.order.write`. One route row is needed under `sales.order.write` in `policies/authz/data.json`: `{"resource": "/v1/sales/orders:auto-close", "methods": ["POST"]}` (the existing `/v1/sales/orders/*:cancel-remainder` style rows do not cover it). The scheduler needs a service principal holding `sales.order.write` (and the legal-entity scope it closes for), or an all-scope one. Until seeded the web action is refused with 403; the preview is refused too, as it is the same route. |
+| Order auto-close scheduler and `order.closed` consumers (slice 31) | handoff (deployment-cicd; portal, analytics) | PRD §5.27.16 runs it nightly at 02:00 per legal entity: a CronJob calling `POST /v1/sales/orders:auto-close?legalEntityId=<id>` for each entity, repeated while `more` is true and the call closed at least one order (an order SKIPPED on every run, whose lines no longer derive INVOICED, would otherwise keep the head of the list and loop the job). `dev.passage.sales.order.closed.v1` (topic `passage.sales.order`) has no consumer yet. |
+| Order auto-close grace period (slice 31) | decision to confirm | The PRD gives no rule for INVOICED to CLOSED, and row 4 below ties CLOSED to the wave 30 payment signal, which does not exist. The close is therefore by age: unchanged for `graceDays` (default 30) with no active hold. Alternatives: a `order_auto_close_days` sales parameter per legal entity (it would be added to the parameters PUT, read and `parameters.changed`), or closing only once w30 reports the invoice paid. Payment is not checked either way. |
+| Refusals of one-time requests without keys share a row (slice 31) | decision to confirm | Without `FIELDCRYPT_KEYS` the hash of a one-time request is the constant `unkeyed`, so every such refusal under one (legal entity, channel, reference, error code) raises `attempts` on one row and the last message wins. No request body is lost: without keys such a body is never kept, so the row is not replayable either way. Alternative: refuse to log them at all without keys. |
+| Keyed intake hash across a key rollout (slice 31) | decision to confirm | Replicas that briefly hold different current keys can each open a row for one refused request (one per key); later retries land on the older row. A key removed from `FIELDCRYPT_KEYS` cannot be recomputed, so a retry of a request logged under it opens a row under the current key. Both are accepted splits of `attempts`, not lost refusals. |
+| Plain digests already published (slice 31) | decision to confirm; w48 | Migration 0035 clears `intake_error.request_hash`, but `intakeerror.recorded` / `resolved` events written by slices 20 to 30 carry the plain digest of a one-time request in `request_hash`, both in Kafka (`passage.sales.intakeerror`, kept for the topic's retention) and in the sales `outbox` table, which is never pruned. Rewriting outbox rows would reach Debezium as updates and is not done; pruning the outbox and the topic retention belong to the data retention work (w48). |
+| Auto-close and returns or payments (slice 31) | decision to confirm | The close looks only at the order: an INVOICED order closes after the grace period whether or not the invoice is paid (w30 payment signal) or an RMA against its invoice is open. Return orders are created from the billing invoice, not from the order's status, so a CLOSED order does not block a return. |
+| `order.closed` for fulfillment (slice 31) | none needed | The `fulfillment-order` consumer ignores the type (it follows `order.confirmed`, `order.changed`, `order.cancelled` and `order.remaindercancelled`), and an INVOICED order has nothing left to ship. |
+| Authz seed for the intake error replay (slice 30) | handoff (authz seed, #313) | No new duty: both actions use the existing `sales.order.write`. Two route rows are needed under `sales.order.write` in `policies/authz/data.json`: `{"resource": "/v1/sales/intake-errors/*:replay", "methods": ["POST"]}` and `{"resource": "/v1/sales/intake-errors:replay", "methods": ["POST"]}` (the existing `/v1/sales/intake-errors/*:resolve` row does not cover them). Until seeded the web actions are refused with 403. |
+| Fulfillment's copy of holds and `orderhold.rejected` (slice 26) | handoff (fulfillment, wave 28) | A rejection cancels a DRAFT or OPEN order, which was never confirmed, so fulfillment holds no shipment for it (fulfillment does not follow `order.cancelled`; see the slice 28 review row). A consumer that mirrors each hold from `orderhold.applied` / `released` should also treat `dev.passage.sales.orderhold.rejected.v1` (`order_id`, `hold_id`, `comment`, `version`) as the end of that hold, so its copy does not show an ACTIVE hold on a cancelled order. Collections and the portal may show the comment. |
+| A credit hold rejection cancels the order (slice 26) | decision to confirm | The PRD says only "release/reject with comment" (§5.27.6). Rejecting ends the order: it is cancelled exactly as `:cancel` does (same code path), with no approval step because the order is unconfirmed, and the customer is quoted or ordered again. Only a CREDIT hold of a DRAFT or OPEN order can be rejected; a CREDIT hold raised on a CONFIRMED order by a total-raising change is answered by a release, a further change or `:cancel` (which runs change approval). Alternatives: leave the order OPEN with the hold REJECTED for the sales rep to change and confirm again, or allow rejection of the CONFIRMED-order hold through change approval. A release takes no comment yet (the PRD's "with comment" is built for rejection only). |
+| Fulfillment and the slice 29 `order.remaindercancelled` (slice 29) | handoff (fulfillment, wave 28) | Sales now emits what the existing `fulfillment-order` consumer (`internal/api/orderconsumer.go`, `internal/store/remaindercancel.go`) already handles, so no new event type and no consumer change is required for correctness: the consumer decodes only `order_id`, `legal_entity_id`, `version` and per line `line_id` and `kept_qty` (unknown `status` / `line_status` values are ignored), upserts `order_line_kept` when the stored `order_version` is not newer (a redelivery re-applies the same ceiling and cuts nothing more; exceptions are open-once), and cuts released and picked quantity above `kept_qty` less what shipped. What sales emits: (1) a `:cancel` of a CONFIRMED order (direct, or an approved CANCEL request) queues it after `order.cancelled`, same version and transaction, `status` CANCELLED, every cancelled line `kept_qty` 0 and `cancelled_qty` the line quantity; (2) a PATCH of a CONFIRMED order puts in one event, after `order.changed` with the same version, every line whose quantity ceiling moved: removed and cancelled supplementary lines (kept 0), lowered lines (kept the new quantity, `line_status` OPEN or RESERVED), raised lines and reopened supplementary lines (kept the new quantity, `cancelled_qty` 0). Only OPEN or RESERVED lines can change or be cancelled, and the first delivery moves a line to PICKED and the order to PARTIALLY_SHIPPED, so sales never sends a `kept_qty` below what it has recorded as delivered; a slip fulfillment posted before the event arrived is raised by the consumer as SLIP_POSTED_BEYOND_KEPT and its DELIVERED report is refused by sales (`SLS-0058` on a cancelled order, `SLS-0059` beyond a cut line's quantity). Left for fulfillment: a raise on a drop-ship line does not reopen the drop-ship quantity the cut closed (the line is skipped at release while a drop-ship is active), and a CANCEL request waiting for approval does not stop fulfillment from shipping (the first delivery moves the order on, so the approval is then refused with `SLS-0046`). The fulfillment AsyncAPI text for the consumed message still says "remainder of a partly shipped order" and should name these cases. |
+| Sales and the drop-ship closes of wave 28 (slice 26) | nothing to build in sales | Fulfillment's `dropship.closed` / `dropship.cancelled` with reason `order_remainder_cancelled` follow sales' own `order.remaindercancelled`, which sales has already applied when it emits it. Sales consumes no events (it has no Kafka consumer; its inputs are HTTP calls), so it cannot cancel an order line a second time on them, and it needs no handler to treat them as known: the close of the remainder is done at the moment sales commits it. If sales later consumes drop-ship events (for example to drive `:record-progress`), a close with that reason must be ignored for cancellation. |
 | Authz seed for slice 25 | none needed | No new duty, route or service grant: the computed figure is on the existing credit-profile reads (`sales.order.read`). |
 | Fulfillment must react to `order.remaindercancelled` (slice 23) | handoff (fulfillment, wave 28) | Sales cannot see shipments, so it does not refuse a close while a release, pick or pack for the remainder is in flight; fulfillment owns that side. The `fulfillment-order` consumer should follow `dev.passage.sales.order.remaindercancelled.v1` on `passage.sales.order` (ordered by `version`, like `order.confirmed`). For each entry of `lines` (`line_id`, `kept_qty`, `cancelled_qty`; `kept_qty` 0 and `line_status` CANCELLED for a line closed with nothing delivered), it should cancel or close the shipment lines and pick work of that sales line that are not yet on a posted packing slip, beyond `kept_qty` less what was already posted. It should release their reservations (FR-28.2) and stop releasing the line again. It should refuse a packing slip post for that quantity with a FUL code naming the closed remainder, so the post fails before the goods leave. If a slip was already posted for the remainder before the event arrived (the race), the slip's `:record-progress` DELIVERED report is refused by sales with `422 SLS-0058` ("nothing is left to deliver ... its remainder was cancelled"). Fulfillment must not retry that report. It should raise it as an exception for the order desk: the goods are off the order and need a return (w30) or a new order. |
 | Duty for `:cancel-remainder` (slice 23) | decision to confirm | The PRD has two answers: the API table puts `:confirm, :cancel; /lines/{l}:cancel-remainder` under SalesOrderConfirm, and the duty catalog (and the Backorders screen) puts `:cancel-remainder` under SalesOrderMaintain, with SalesOrderConfirm only for `:confirm`. The route takes `sales.order.write` (SalesOrderMaintain), as the catalog says, while `:cancel` keeps `sales.order.confirm`. Alternative: `sales.order.confirm`, like `:cancel`. |
 | Holds at a remainder close (slice 23) | decision to confirm | ACTIVE holds stay on the closed order and are released by their owners (see the slice 23 note). Alternative: clear a CREDIT hold at the close, because the exposure it guarded is gone, emitting `orderhold.released` so fulfillment's copy follows. FRAUD and MANUAL holds would still stay. |
 | Remainder close needs no approval (slice 23) | decision to confirm | FR-27.9 change approval applies to CONFIRMED orders. A close of a PARTIALLY_SHIPPED order keeps the delivered quantity and is allowed to a holder of `sales.order.confirm`, without an approver or a change request. |
-| Jobs: ATP rebuild 01:00, credit review daily, order auto-close, intake DLQ replay | later slice of PSG-27 | No jobs built. |
+| Threshold measure and budget (slice 27) | decision to confirm | The PRD names only a per-customer switch (5.27.13 `change_approval_required`); the amount threshold and its measure are a slice default. A change is measured as the sum of each line's absolute net movement, and the changes applied to an order without approval share one budget below the threshold for the order's whole life (approved changes do not reset it), so a change cannot be split to avoid approval. Alternatives: measure the net total delta (a line swap would count 0), or reset the budget at each approval. |
+| Named approvers vs the approve duty (slice 27) | decision to confirm | A non-empty group limits both deciding a request and skipping approval with `sales.order.approve`; the policy PUT itself stays open to any holder of the duty, so a group whose members left can be changed, at the cost that a duty holder outside the group can rewrite the group (audited in `changepolicy.changed`). Alternative: limit the PUT to the group once one is named, with an administrator override. |
+| PUT keeps members it does not name (slice 27) | decision to confirm | `PUT /change-policy` keeps a stored threshold or group the body leaves out (null / [] clear them), so slice 13 clients cannot wipe them. Alternative: a strict whole-policy replace, which is simpler but lets an older client silently drop a threshold and group. |
+| Jobs: ATP rebuild 01:00, credit review daily, order auto-close, intake DLQ replay | later slice of PSG-27; handoff (deployment-cicd) | No scheduler is built here. The intake replay (slice 30) and the order auto-close (slice 31, `POST /orders:auto-close`) are endpoints that a scheduler calls; the ATP rebuild and the credit review notice are not built. |
 | SLO alerts (lag > 120 s, hold queue age, intake 5xx) and runbooks | handoff (deployment-cicd) | Alert rules live in deploy/ (outside owned paths). |
 
 ## Migration (PRD §5.27.11)

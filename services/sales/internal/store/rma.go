@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	CodeRMANotFound      = "SLS-0118"
+	CodeRMANotFound      = "SLS-0125"
 	CodeRMAState         = "SLS-0119"
 	CodeRMAExpired       = "SLS-0120"
 	CodeARUnavailable    = "SLS-0121"

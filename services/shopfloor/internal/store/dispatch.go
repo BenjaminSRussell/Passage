@@ -49,22 +49,35 @@ type Warning struct {
 	Message string `json:"message"`
 }
 
-// lockJobWorkers takes the worker row lock for every worker with an open
-// job-start in the batch, in one order, so two batches of one worker cannot both
-// see no open job and leave two open (FR-25.3). Unknown workers are left to the
-// insert, which reports SF-0101.
+// lockJobWorkers locks the row of every worker in the batch, in one order. A worker with an
+// open job-start in the batch is locked for update, so two batches of one worker cannot both
+// see no open job and leave two open (FR-25.3). Every other worker is locked for share, so a
+// deactivation (which locks the row for update and then looks for open time) and a punch of
+// the same worker serialize: either the deactivation sees the punch and refuses (SF-0166) or
+// the insert sees the inactive worker and refuses (SF-0101). Shared locks do not block other
+// batches. Unknown workers are left to the insert, which reports SF-0101.
 func lockJobWorkers(ctx context.Context, tx pgx.Tx, tenantID string, items []Registration) error {
-	seen := map[string]bool{}
-	var workers []string
+	exclusive := map[string]bool{}
 	for _, in := range items {
-		if in.Kind == KindJobStart && in.StoppedAt == nil && !seen[in.WorkerID] {
-			seen[in.WorkerID] = true
-			workers = append(workers, in.WorkerID)
+		key := strings.ToLower(in.WorkerID)
+		if _, ok := exclusive[key]; !ok {
+			exclusive[key] = false
 		}
+		if in.Kind == KindJobStart && in.StoppedAt == nil {
+			exclusive[key] = true
+		}
+	}
+	workers := make([]string, 0, len(exclusive))
+	for w := range exclusive {
+		workers = append(workers, w)
 	}
 	sort.Strings(workers)
 	for _, w := range workers {
-		if _, err := tx.Exec(ctx, `select 1 from worker where tenant_id = $1 and id = $2 for update`, tenantID, w); err != nil {
+		q := `select 1 from worker where tenant_id = $1 and id = $2 for share`
+		if exclusive[w] {
+			q = `select 1 from worker where tenant_id = $1 and id = $2 for update`
+		}
+		if _, err := tx.Exec(ctx, q, tenantID, w); err != nil {
 			return err
 		}
 	}

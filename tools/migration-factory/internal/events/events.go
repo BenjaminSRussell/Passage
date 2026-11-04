@@ -20,11 +20,13 @@ var (
 	CutoverPlanRolledBack = events.Type("cutover", "plan", "rolledback", 1)
 	// CutoverDecisionRecorded is written when a go/no-go decision is recorded on a plan (FR-49.6).
 	CutoverDecisionRecorded = events.Type("cutover", "decision", "recorded", 1)
+	// ToleranceConfigured is written when a control-total tolerance is set or changed (FR-49.2).
+	ToleranceConfigured = events.Type("migration", "tolerance", "configured", 1)
 )
 
 // All lists every event type the service publishes.
 func All() []string {
-	return []string{PackReconciled, PackLoaded, ParallelRunDiffed, CutoverStepCompleted, CutoverPlanRolledBack, CutoverDecisionRecorded}
+	return []string{PackReconciled, PackLoaded, ParallelRunDiffed, CutoverStepCompleted, CutoverPlanRolledBack, CutoverDecisionRecorded, ToleranceConfigured}
 }
 
 // PackReconciledData is the payload of dev.passage.migration.pack.reconciled.v1.
@@ -110,4 +112,16 @@ type CutoverDecisionRecordedData struct {
 type CutoverDecisionWaiver struct {
 	Pack   string `json:"pack"`
 	Reason string `json:"reason"`
+}
+
+// ToleranceConfiguredData is the payload of dev.passage.migration.tolerance.configured.v1. Amounts are
+// decimal strings.
+type ToleranceConfiguredData struct {
+	Pack           string `json:"pack"`
+	Total          string `json:"total"`
+	Amount         string `json:"amount"`
+	PreviousAmount string `json:"previous_amount"`
+	Reason         string `json:"reason"`
+	Version        int    `json:"version"`
+	ConfiguredBy   string `json:"configured_by"`
 }

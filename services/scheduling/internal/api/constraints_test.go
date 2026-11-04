@@ -32,6 +32,14 @@ func TestCreateOperation_PassesSetupAttributesAndNetwork(t *testing.T) {
 	}
 }
 
+func TestCreateOperation_PassesQueueTimes(t *testing.T) {
+	f := &fakeStore{}
+	rec := do(newRouter(f), http.MethodPost, "/v1/scheduling/operations", operationBody(`,"queueBeforeMinutes":20,"queueAfterMinutes":40`), allDuties, "op-q")
+	if rec.Code != http.StatusCreated || f.lastOp.QueueBeforeMinutes != 20 || f.lastOp.QueueAfterMinutes != 40 {
+		t.Fatalf("status %d store got %+v", rec.Code, f.lastOp)
+	}
+}
+
 func TestCreateOperation_ValidatesSetupAttributesAndNetwork(t *testing.T) {
 	many := make([]string, 0, 21)
 	for i := range 21 {
@@ -46,6 +54,8 @@ func TestCreateOperation_ValidatesSetupAttributesAndNetwork(t *testing.T) {
 		{"attribute name with spaces", `,"attributes":{" color":"white"}`, `"attributes"`},
 		{"attribute value too long", `,"attributes":{"color":"` + strings.Repeat("w", 121) + `"}`, `"attributes"`},
 		{"campaign key attribute over 64", `,"attributes":{"campaignKey":"` + strings.Repeat("F", 65) + `"}`, `"attributes"`},
+		{"negative queue before", `,"queueBeforeMinutes":-1`, `"queueBeforeMinutes"`},
+		{"queue after over a week", `,"queueAfterMinutes":10081`, `"queueAfterMinutes"`},
 		{"network id not a UUID", `,"networkId":"MIX-FILL"`, `"networkId"`},
 	}
 	for _, c := range cases {

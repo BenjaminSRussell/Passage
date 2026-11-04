@@ -326,7 +326,7 @@ func TestStore_SvcBilling30PostsWorkOrders(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, to := range []domain.WOStatus{domain.WOScheduled, domain.WODispatched, domain.WOTraveling, domain.WOInProgress, domain.WOCompleted} {
-				if wo, err = s.TransitionWorkOrder(ctx, wo.ID, wo.Version, to); err != nil {
+				if wo, err = s.moveWorkOrder(ctx, wo.ID, wo.Version, to); err != nil {
 					t.Fatalf("transition to %s: %v", to, err)
 				}
 			}

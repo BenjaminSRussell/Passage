@@ -25,6 +25,9 @@ type generateRequest struct {
 	// RehearsalPlanID carries the durations measured on that earlier plan into this one (FR-49.6);
 	// rehearsalDurationsMin entries override its values.
 	RehearsalPlanID string `json:"rehearsalPlanId"`
+	// ExpandByEntity generates the per-entity runbook: a load and a reconcile step per pack and
+	// legal entity, and the per-entity freeze, extract, reconcile, sign-off and hypercare steps.
+	ExpandByEntity bool `json:"expandByEntity"`
 }
 
 type stepDTO struct {
@@ -37,6 +40,7 @@ type stepDTO struct {
 	Status             string     `json:"status"`
 	GoNoGo             bool       `json:"goNoGo"`
 	Pack               string     `json:"pack,omitempty"`
+	Entity             string     `json:"entity,omitempty"`
 	CompletedBy        string     `json:"completedBy,omitempty"`
 	CompletedAt        *time.Time `json:"completedAt,omitempty"`
 	// StartedAt is set once the step is started; the runbook timer runs from it (FR-49.6).
@@ -133,7 +137,7 @@ func (s *Server) toPlanDTO(p domain.Plan, withSteps bool) planDTO {
 		out.Steps = make([]stepDTO, 0, len(p.Steps))
 		for _, st := range p.Steps {
 			d := stepDTO{Seq: st.Seq, OffsetMin: st.OffsetMin, Name: st.Name, Owner: st.Owner, PlannedDurationMin: st.PlannedDurationMin,
-				ActualDurationMin: st.ActualDurationMin, Status: st.Status, GoNoGo: st.GoNoGo, Pack: st.Pack, CompletedBy: st.CompletedBy, CompletedAt: st.CompletedAt,
+				ActualDurationMin: st.ActualDurationMin, Status: st.Status, GoNoGo: st.GoNoGo, Pack: st.Pack, Entity: st.Entity, CompletedBy: st.CompletedBy, CompletedAt: st.CompletedAt,
 				StartedAt: st.StartedAt, StartedBy: st.StartedBy}
 			if elapsed, tone, warning := st.Timing(now, overrunAmberPct, overrunRedPct); tone != "" {
 				d.ElapsedMin, d.Tone, d.OverrunWarning = &elapsed, tone, warning
@@ -191,7 +195,7 @@ func (s *Server) generatePlan(w http.ResponseWriter, r *http.Request) {
 	}
 	plan, err := domain.GeneratePlan(domain.PlanInput{
 		PlanID: ids.New(), T0: req.T0.UTC(), Packs: packs, Entities: req.Entities,
-		AbortOffsetH: req.AbortOffsetHours, Rehearsal: rehearsal, RehearsalPlanID: req.RehearsalPlanID,
+		AbortOffsetH: req.AbortOffsetHours, Rehearsal: rehearsal, RehearsalPlanID: req.RehearsalPlanID, ExpandByEntity: req.ExpandByEntity,
 	})
 	if err != nil {
 		fail(w, r, err)

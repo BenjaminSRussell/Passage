@@ -24,7 +24,7 @@ func splitSetup(t *testing.T) (env, domain.SplittingRule) {
 		"1999": {Name: "Zero-balance clearing", Type: "asset", Postable: true},
 		"1990": {Name: "Total account", Type: "balance_sheet_total", Postable: false},
 	} {
-		if _, _, err := e.store.PutAccount(e.ctx, "STD", num, a); err != nil {
+		if _, _, err := e.store.PutAccount(e.ctx, "STD", num, 0, a); err != nil {
 			t.Fatalf("put account %s: %v", num, err)
 		}
 	}

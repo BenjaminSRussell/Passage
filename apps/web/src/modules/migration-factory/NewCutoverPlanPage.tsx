@@ -11,10 +11,15 @@ export interface PlanValues {
   entities: string;
   abortOffsetHours: string;
   rehearsalPlanId: string;
+  /** Expand the runbook per legal entity; left out means one plan-wide runbook. */
+  expandByEntity?: boolean;
 }
 
 type Field = "t0" | "packs" | "entities" | "abortOffsetHours" | "rehearsalPlanId";
 type Errors = Partial<Record<Field, string>>;
+
+/** The most legal entities a per-entity runbook covers (the service refuses more). */
+const MAX_EXPANDED_ENTITIES = 50;
 
 /** The checks the planner makes, and the request the form sends. */
 export function validatePlan(values: PlanValues): { errors: Errors; input?: GenerateCutoverRequest } {
@@ -24,6 +29,9 @@ export function validatePlan(values: PlanValues): { errors: Errors; input?: Gene
   if (values.packs.length === 0) errors.packs = "Select at least one pack.";
   const entities = splitList(values.entities);
   if (entities.length === 0) errors.entities = "Enter at least one legal entity.";
+  else if (values.expandByEntity && entities.length > MAX_EXPANDED_ENTITIES) {
+    errors.entities = `A per-entity runbook covers at most ${MAX_EXPANDED_ENTITIES} legal entities.`;
+  }
   const hours = values.abortOffsetHours.trim();
   if (hours !== "" && (!/^\d{1,2}$/.test(hours) || Number(hours) < 12 || Number(hours) > 72)) {
     errors.abortOffsetHours = "Enter whole hours from 12 to 72.";
@@ -41,6 +49,7 @@ export function validatePlan(values: PlanValues): { errors: Errors; input?: Gene
       entities,
       ...(hours !== "" ? { abortOffsetHours: Number(hours) } : {}),
       ...(rehearsal !== "" ? { rehearsalPlanId: rehearsal } : {}),
+      ...(values.expandByEntity ? { expandByEntity: true } : {}),
     },
   };
 }
@@ -109,6 +118,13 @@ export function NewCutoverPlanPage() {
               <Input {...control} value={values.rehearsalPlanId} invalid={Boolean(errors.rehearsalPlanId)} onChange={(event) => update({ rehearsalPlanId: event.target.value })} />
             )}
           </FormField>
+          <div className={styles.check}>
+            <Input id="plan-expandByEntity" type="checkbox" checked={Boolean(values.expandByEntity)} onChange={(event) => update({ expandByEntity: event.target.checked })} />
+            <label htmlFor="plan-expandByEntity">Expand the runbook per legal entity</label>
+          </div>
+          <p className={styles.note}>
+            Each entity gets its own freeze, extract, load and reconcile steps per pack, a sign-off and a hypercare check, run in that order. The go/no-go steps wait for every entity&apos;s sign-off. Three entities and nine packs give 84 steps.
+          </p>
           <fieldset className={styles.choices} aria-describedby={errors.packs ? "plan-packs-error" : undefined}>
             <legend className={styles.legend}>Packs</legend>
             {PACKS.map((pack) => (

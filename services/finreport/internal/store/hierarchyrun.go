@@ -115,10 +115,16 @@ func hierarchyRef(h *RunHierarchy) string {
 	return fmt.Sprintf("%s@%d", h.Code, h.Version)
 }
 
-func runParameters(period string, h *RunHierarchy) map[string]string {
+func runParameters(period string, h *RunHierarchy, t *RunTree) map[string]string {
 	p := map[string]string{"period": period}
 	if h != nil {
 		p["hierarchy"] = hierarchyRef(h)
+	}
+	if t != nil {
+		p["tree"] = treeRef(t)
+		if t.Unit != "" {
+			p["treeUnit"] = t.Unit
+		}
 	}
 	return p
 }
