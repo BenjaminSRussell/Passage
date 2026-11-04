@@ -233,6 +233,53 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 `passage_app` so RLS and the journal grants apply. They are skipped when
 `PASSAGE_TEST_DATABASE_URL` is unset.
 
+## Local performance benchmark (AC4 proxy, issue #476)
+
+Issue #11 Proof AC4 asks for **5,000 journal lines/s sustained on the dev cluster
+with p99 < 200 ms**. That is a live test on the deployed stack (#213) and is not
+met or measured here. `internal/store/ac4_proxy_test.go` is a local proxy so a
+regression in the posting or balance-read path shows before stage: workers post
+balanced entries through `PostEntry` (the full posting transaction: validation,
+journal, balance projection, outbox) while readers read the trial balance; it
+reports lines/s overall and for the slowest one-second window, posting and read
+latency percentiles, and afterwards checks that every trial balance nets to zero
+and a rebuild finds no differing projection rows. It is skipped unless
+`PASSAGE_LEDGER_BENCH` is set, so CI does not run it.
+
+```
+make bench-ledger                       # from the repository root, or:
+services/ledger/scripts/bench-local.sh  # throwaway PG16 cluster (pg_createcluster, root), dropped on exit
+PASSAGE_TEST_DATABASE_URL=... PASSAGE_TEST_APP_DATABASE_URL='...&pool_max_conns=10' services/ledger/scripts/bench-local.sh
+```
+
+Knobs: `PASSAGE_LEDGER_BENCH_SECONDS` (30), `_WARMUP_SECONDS` (5), `_WORKERS` (8),
+`_LEDGERS` (4, workers round robin), `_LINES` (10 per entry), `_READERS` (2),
+`_READ_INTERVAL_MS` (250), `_OUT` (JSON report). `_MIN_LPS` and `_MAX_P99_MS` turn
+the report into a gate (slowest one-second window, posting p99). Posting is
+serialized per ledger (gap-free posting sequence), so lines/s scales with ledgers,
+not with workers on one ledger: more workers on one ledger only queue.
+
+Measured 2026-11-04 on a shared cloud container (4 vCPU Intel Xeon 2.10 GHz,
+15 GB RAM, other jobs running: load average 10 to 16), PostgreSQL 16.15 with the
+default `postgresql.conf` (128 MB shared buffers, synchronous commit), the Go
+client on the same host, 10-line entries, 2 trial balance readers, 30 s after a
+5 s warm-up:
+
+| Workers x ledgers | Lines/s | Slowest 1 s | Post p50 | Post p99 | Read p99 |
+|---|---|---|---|---|---|
+| 1 x 1 | 1,619 | 700 | 5.4 ms | 14.3 ms | 6.0 ms |
+| 8 x 1 | 1,516 | 950 | 47.3 ms | 141.4 ms | 7.1 ms |
+| 8 x 4 (default), four runs | 1,957 / 3,449 / 1,988 / 514 | 1,600 / 1,460 / 1,350 / 0 | 19 to 36 ms | 77 / 108 / 113 / 1,883 ms | 17 to 52 ms |
+| 32 x 1 | 1,006 | 610 | 163 ms | 2,731 ms | 24.6 ms |
+| 32 x 32 | 3,000 to 4,677 | 1,760 to 2,190 | 54 to 97 ms | 224 to 278 ms | 67 to 79 ms |
+
+The run-to-run spread (the 514 lines/s run stalled for a second) comes from the
+shared host; compare numbers from the same machine only. None of these reach the
+AC4 target, which is for the dev cluster's hardware and topology, not a laptop.
+The benchmark found a deadlock between ledgers of one tenant posting the same
+new dimension combinations in different orders (`40P01` on `dimension_combination`);
+`PostEntry` now inserts each new combination once, in id order.
+
 ## Duties
 
 | Duty | Routes |

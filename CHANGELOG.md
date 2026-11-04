@@ -10,6 +10,9 @@ release may change public APIs.
 
 ### Added
 
+- Local ledger performance benchmark as a proxy for wave 11 AC4 (#476): `make bench-ledger` posts balanced
+  entries and reads trial balances against a throwaway Postgres 16 cluster and reports lines/s and p50/p95/p99;
+  results and the hardware caveat are in `services/ledger/README.md`. It does not meet or replace AC4.
 - Per-vendor-group AP control comparison (#421): party vendor groups with a short `code`
   (`POST/GET /v1/party/vendor-groups`, `vendorGroupCode` on the vendor, `vendorgroup.created.v1`), the
   `VENDGRP` ledger dimension (`addDimensionAttributes` on `PATCH /v1/ledger/ledgers/{id}`), receiving
@@ -38,6 +41,11 @@ release may change public APIs.
   role and `passage_eam` database in the dev Postgres) as `service:scheduling-downtime`, holding
   only `scheduling.downtime.apply`, and books a downtime capacity override idempotently (#44).
   `kafka.ConfigFromEnv` now holds the consumer's Kafka settings for both services.
+
+### Fixed
+
+- Ledger posting no longer deadlocks (`40P01`) when two ledgers of one tenant post the same new dimension
+  combinations at once: each new combination is inserted once, in id order (found by the #476 benchmark).
 
 ### Security
 
