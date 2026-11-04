@@ -221,6 +221,7 @@ func (t *tenantData) register(r store.Receipt, fn store.RegisterFunc) (store.Rec
 			r.Lines[i].Qty, r.Lines[i].Batch, r.Lines[i].LocationID = l.Qty, l.Batch, l.LocationID
 			r.Lines[i].InventoryStatus = cmp.Or(l.InventoryStatus, "AVAILABLE")
 			r.Lines[i].Serials = slices.Sorted(slices.Values(l.Serials))
+			r.Lines[i].CWQty, r.Lines[i].CWNominal, r.Lines[i].CWMin, r.Lines[i].CWMax = l.CWQty, l.CWNominal, l.CWMin, l.CWMax
 		}
 	}
 	return r, nil
@@ -738,6 +739,9 @@ func (s *Store) Correct(ctx context.Context, id string, fn store.AdjustFunc) (ou
 			for i := range current.Lines {
 				if l := &current.Lines[i]; l.LineNo == c.LineNo {
 					l.Qty, l.Amount, l.AmountAcct = c.Qty, decimal.NullDecimal{Decimal: c.Amount, Valid: true}, decimal.NullDecimal{Decimal: c.AmountAcct, Valid: true}
+					if c.CWQty > 0 {
+						l.CWQty = c.CWQty
+					}
 				}
 			}
 			if g := t.grirFor(id, c.LineNo); g >= 0 {

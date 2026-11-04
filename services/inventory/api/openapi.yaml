@@ -3045,6 +3045,7 @@ components:
         qty: { $ref: '#/components/schemas/Decimal' }
         enteredQty: { $ref: '#/components/schemas/Decimal' }
         enteredUnit: { type: string }
+        cwQty: { type: integer, minimum: 1, description: Catch-weight count (cases); omitted when the item is not catch-weight. qty is the inventory (weight) quantity used for on-hand and cost }
         issueStatus: { $ref: '#/components/schemas/TransactionStatus' }
         receiptStatus: { $ref: '#/components/schemas/TransactionStatus' }
         physicalDate: { type: string, format: date }
@@ -3114,6 +3115,7 @@ components:
         enteredUnit: { type: string, pattern: '^[A-Z0-9_-]{1,12}$', description: Registration only }
         currency: { type: string, pattern: '^[A-Z]{3}$', description: Registration only }
         costPrice: { $ref: '#/components/schemas/Decimal', description: 'Registration only: unit cost of a receipt, or the fallback unit cost of an issue from a row with no posted stock; vendor-owned stock is never valued' }
+        cwQty: { type: integer, minimum: 1, description: 'Registration only: catch-weight count (cases). qty is the inventory (weight) quantity used for on-hand and cost' }
         toStatus: { $ref: '#/components/schemas/TransactionStatus', description: 'Registration: a physical or expected status matching the sign of qty (never SOLD or PURCHASED). STEP: a later status of the same direction' }
         date: { type: string, format: date, description: 'Physical date of a registration or of a move into a physical status, financial date of a move into SOLD or PURCHASED; default today (UTC)' }
     ReserveRequest:

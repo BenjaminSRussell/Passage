@@ -96,7 +96,7 @@ func (s *Postgres) cancelRemainder(ctx context.Context, id string, lineNo, versi
 			}
 			net := decimal.Zero
 			if after.Status != domain.LineCancelled {
-				net, err = domain.LineNet(after.Quantity, l.UnitPrice, l.DiscPct)
+				net, err = domain.LineNetFor(after.Quantity, l.DeliveredQty, l.UnitPrice, l.DiscPct, l.CatchWeight, l.ActualWeight)
 				if err != nil {
 					return problem(http.StatusInternalServerError, "COM-0500", err.Error())
 				}

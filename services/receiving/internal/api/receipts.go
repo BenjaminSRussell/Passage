@@ -75,6 +75,7 @@ type receiptLineBody struct {
 	InventoryStatus  string   `json:"inventoryStatus"`
 	Amount           *string  `json:"amount"`
 	AmountAcct       *string  `json:"amountAcct"`
+	CWQty            *int     `json:"cwQty,omitempty"`
 }
 
 type receiptBody struct {
@@ -124,12 +125,16 @@ func toReceiptBody(r store.Receipt) receiptBody {
 		if l.POLineNo > 0 {
 			poLineNo = &l.POLineNo
 		}
-		out.Lines = append(out.Lines, receiptLineBody{
+		body := receiptLineBody{
 			LineNo: l.LineNo, POLineID: l.POLineID, POLineNo: poLineNo, ProductID: l.ProductID, OrderedRemaining: l.OrderedRemaining.String(),
 			OverDeliveryPct: l.OverDeliveryPct.String(), UnitPrice: l.UnitPrice.String(), Unit: l.Unit, BatchTracked: l.BatchTracked,
 			SerialTracked: l.SerialTracked, Qty: l.Qty.String(), Batch: l.Batch, Serials: serials, LocationID: l.LocationID,
 			InventoryStatus: l.InventoryStatus, Amount: nullableString(l.Amount), AmountAcct: nullableString(l.AmountAcct),
-		})
+		}
+		if l.CWQty > 0 {
+			body.CWQty = &l.CWQty
+		}
+		out.Lines = append(out.Lines, body)
 	}
 	return out
 }

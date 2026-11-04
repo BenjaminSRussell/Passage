@@ -609,10 +609,14 @@ func writeTransaction(ctx context.Context, tx pgx.Tx, tenantID string, doc docum
 	if pl.Corrects != "" {
 		corrects = &pl.Corrects
 	}
+	var cwQty any
+	if pl.Line.CWQty > 0 {
+		cwQty = pl.Line.CWQty
+	}
 	if _, err := tx.Exec(ctx, `insert into inventory_transaction (tenant_id, legal_entity_id, id, origin_id, product_id, dimension_set_hash, qty, entered_qty,
-		entered_unit, issue_status, receipt_status, physical_date, financial_date, currency, cost_amount_physical, cost_amount_posted, corrects_transaction_id)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
-		tenantID, doc.legalEntityID, txnID, originID, r.product, r.hash, pl.Line.Qty.String(), pl.Line.EnteredQty.String(), pl.Line.EnteredUnit,
+		entered_unit, cw_qty, issue_status, receipt_status, physical_date, financial_date, currency, cost_amount_physical, cost_amount_posted, corrects_transaction_id)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+		tenantID, doc.legalEntityID, txnID, originID, r.product, r.hash, pl.Line.Qty.String(), pl.Line.EnteredQty.String(), pl.Line.EnteredUnit, cwQty,
 		issue, receipt, date, financialDate, doc.currency, value, posted, corrects); err != nil {
 		return "", err
 	}
@@ -621,6 +625,10 @@ func writeTransaction(ctx context.Context, tx pgx.Tx, tenantID string, doc docum
 		DimensionSet: map[string]string(r.dims), Qty: pl.Line.Qty.String(), IssueStatus: issue, ReceiptStatus: receipt,
 		PhysicalDate: date, FinancialDate: financialDate, Currency: doc.currency, CostAmountPhysical: value, CostAmountPosted: posted,
 		CorrectsTransactionID: corrects,
+	}
+	if pl.Line.CWQty > 0 {
+		n := pl.Line.CWQty
+		data.CWQty = &n
 	}
 	if doc.journalID != "" {
 		data.JournalID = &doc.journalID

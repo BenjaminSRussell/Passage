@@ -89,6 +89,12 @@ type Line struct {
 	ConfigurationID   *string `json:"configurationId,omitempty"`
 	ProductionOrderID *string `json:"productionOrderId,omitempty"`
 
+	// CatchWeight is the per-unit weight spec of a catch-weight item (FR-24.7).
+	// Quantity is then the catch-weight count (cases) and LineNet is priced per
+	// weight (cases × nominal until ActualWeight is recorded).
+	CatchWeight  *domain.CatchWeight `json:"catchWeight,omitempty"`
+	ActualWeight *decimal.Decimal    `json:"actualWeight,omitempty"`
+
 	// SupplementaryOf is the id of the parent line a MANDATORY supplementary
 	// line was added for at commit, ParentLineNo that line's number and
 	// SupplementaryRuleID the rule that added it (FR-27.14, BR-27.14). All
@@ -499,11 +505,14 @@ func createOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder)
 	lineIDs := make(map[int]string, len(in.Lines))
 	for _, l := range in.Lines {
 		lineIDs[l.LineNo] = ids.New()
+		nom, minv, maxv := catchWeightCols(l)
 		if _, err := tx.Exec(ctx, `insert into sales_order_line (tenant_id, id, order_id, line_no, product_id, quantity, unit, site_id, warehouse_id,
-				unit_price, disc_pct, line_net, requested_ship_date, line_status, configuration_id, delivery_date_control)
-			values ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10::numeric, $11::numeric, $12::numeric, $13::date, 'OPEN', $14, $15)`,
+				unit_price, disc_pct, line_net, requested_ship_date, line_status, configuration_id, delivery_date_control,
+				cw_nominal, cw_min, cw_max)
+			values ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10::numeric, $11::numeric, $12::numeric, $13::date, 'OPEN', $14, $15, $16, $17, $18)`,
 			tenantID, lineIDs[l.LineNo], id, l.LineNo, l.ProductID, l.Quantity.String(), l.Unit, l.SiteID, l.WarehouseID,
-			l.UnitPrice.String(), l.DiscPct.String(), l.LineNet.String(), l.RequestedShipDate, l.ConfigurationID, l.DeliveryDateControl); err != nil {
+			l.UnitPrice.String(), l.DiscPct.String(), l.LineNet.String(), l.RequestedShipDate, l.ConfigurationID, l.DeliveryDateControl,
+			nom, minv, maxv); err != nil {
 			return Order{}, err
 		}
 	}
@@ -634,6 +643,7 @@ func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 			unit_price::text, disc_pct::text, line_net::text, requested_ship_date::text, confirmed_ship_date::text, line_status,
 			supplementary_of::text, supplementary_rule_id::text, coalesce(supplementary_base_qty, 0)::text, coalesce(supplementary_qty_per_base, 0)::text,
 			configuration_id::text, delivery_date_control, delivered_qty::text, invoiced_qty::text,
+			cw_nominal::text, cw_min::text, cw_max::text, actual_weight::text,
 			(select p.production_order_id::text from order_line_production p where p.tenant_id = l.tenant_id and p.line_id = l.id)
 		from sales_order_line l where l.tenant_id = $1 and l.order_id = $2 order by l.line_no`, tenantID, id)
 	if err != nil {
@@ -644,14 +654,18 @@ func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 	for lineRows.Next() {
 		var l Line
 		var qty, price, disc, net, base, perBase, delivered, invoiced string
+		var cwNom, cwMin, cwMax, actual *string
 		if err := lineRows.Scan(&l.ID, &l.LineNo, &l.ProductID, &qty, &l.Unit, &l.SiteID, &l.WarehouseID, &price, &disc, &net,
-			&l.RequestedShipDate, &l.ConfirmedShipDate, &l.LineStatus, &l.SupplementaryOf, &l.SupplementaryRuleID, &base, &perBase, &l.ConfigurationID, &l.DeliveryDateControl, &delivered, &invoiced, &l.ProductionOrderID); err != nil {
+			&l.RequestedShipDate, &l.ConfirmedShipDate, &l.LineStatus, &l.SupplementaryOf, &l.SupplementaryRuleID, &base, &perBase, &l.ConfigurationID, &l.DeliveryDateControl, &delivered, &invoiced,
+			&cwNom, &cwMin, &cwMax, &actual, &l.ProductionOrderID); err != nil {
 			return Order{}, err
 		}
 		l.Quantity, l.UnitPrice = decimal.RequireFromString(qty), decimal.RequireFromString(price)
 		l.DeliveredQty, l.InvoicedQty = decimal.RequireFromString(delivered), decimal.RequireFromString(invoiced)
 		l.DiscPct, l.LineNet = decimal.RequireFromString(disc), decimal.RequireFromString(net)
 		l.suppBase, l.suppPerBase = decimal.RequireFromString(base), decimal.RequireFromString(perBase)
+		l.CatchWeight = catchWeightFrom(cwNom, cwMin, cwMax)
+		l.ActualWeight = parseOptDec(actual)
 		o.Lines = append(o.Lines, l)
 	}
 	if err := lineRows.Err(); err != nil {
@@ -681,6 +695,28 @@ func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 	}
 	addReceiptDates(&o)
 	return o, nil
+}
+
+func catchWeightCols(l Line) (any, any, any) {
+	if l.CatchWeight == nil {
+		return nil, nil, nil
+	}
+	return l.CatchWeight.Nominal, l.CatchWeight.Min, l.CatchWeight.Max
+}
+
+func catchWeightFrom(nom, minv, maxv *string) *domain.CatchWeight {
+	if nom == nil || minv == nil || maxv == nil {
+		return nil
+	}
+	return &domain.CatchWeight{Nominal: decimal.RequireFromString(*nom), Min: decimal.RequireFromString(*minv), Max: decimal.RequireFromString(*maxv)}
+}
+
+func parseOptDec(s *string) *decimal.Decimal {
+	if s == nil {
+		return nil
+	}
+	d := decimal.RequireFromString(*s)
+	return &d
 }
 
 func setOrderState(ctx context.Context, tx pgx.Tx, tenantID, id, status string) error {
@@ -790,9 +826,14 @@ func checksAtTx(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, point s
 // discount. It is read only for lines with delivered_qty < quantity. SQL round
 // is half away from zero where domain.LineNet rounds half to even, so the
 // figure can differ from a Go recomputation by at most 0.0001 on an exact tie.
-// It assumes line_net is quantity x price less the discount; a line priced
-// another way (such as by catch weight) needs its own delivered net here.
-const undeliveredNetSQL = `(l.line_net - round(l.delivered_qty * l.unit_price * (100 - l.disc_pct) / 100, 4))`
+// A catch-weight line (cw_nominal set) has delivered its recorded actual_weight
+// and keeps the undelivered cases at nominal inside line_net.
+const undeliveredNetSQL = `(l.line_net - round(` + deliveredWeightSQL + ` * l.unit_price * (100 - l.disc_pct) / 100, 4))`
+
+// deliveredWeightSQL is the priced quantity a line (alias l) has delivered:
+// the recorded actual weight of a catch-weight line, else delivered cases at
+// nominal, else delivered_qty.
+const deliveredWeightSQL = `coalesce(l.actual_weight, l.delivered_qty * coalesce(l.cw_nominal, 1))`
 
 // openOrdersTx is the customer's exposure from orders in this service: the net
 // total of the customer's other CONFIRMED ORDER and SUBSCRIPTION orders, and
@@ -845,8 +886,11 @@ func openOrdersTx(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, custo
 // deliveredNotInvoicedSQL is the value of what a line (alias l) has delivered
 // and not invoiced: the delivered less the invoiced quantity at the line's
 // price and discount. It is read only for lines with delivered_qty >
-// invoiced_qty. Like undeliveredNetSQL it assumes a quantity x price line.
-const deliveredNotInvoicedSQL = `round((l.delivered_qty - l.invoiced_qty) * l.unit_price * (100 - l.disc_pct) / 100, 4)`
+// invoiced_qty. A catch-weight line values the uninvoiced cases at the average
+// delivered weight per case.
+const deliveredNotInvoicedSQL = `round(case when l.cw_nominal is null
+	then (l.delivered_qty - l.invoiced_qty) * l.unit_price * (100 - l.disc_pct) / 100
+	else ` + deliveredWeightSQL + ` * (l.delivered_qty - l.invoiced_qty) / l.delivered_qty * l.unit_price * (100 - l.disc_pct) / 100 end, 4)`
 
 // deliveredNotInvoicedTx is the customer's delivered, not yet invoiced goods
 // (BR-27.3 deliveredNotInvoiced) from the lines of the customer's other ORDER

@@ -32,14 +32,30 @@ const (
 	missingMatch = "If-Match header is required"
 )
 
+const (
+	maxCWQty = 1_000_000
+	// qtyScale is the numeric(20,6) bound of receiving_receipt_line.qty, for
+	// every received quantity (a larger or finer value was a 500 or silently
+	// rounded before).
+	qtyScale = "must have at most 6 decimals and 14 integer digits"
+)
+
 var inventoryStatuses = []string{inventoryOK, "QUARANTINE", "BLOCKED"}
 
+type catchWeightSpec struct {
+	Nominal *fieldDecimal `json:"nominal"`
+	Min     *fieldDecimal `json:"min"`
+	Max     *fieldDecimal `json:"max"`
+}
+
 type receivedFields struct {
-	Qty             *fieldDecimal `json:"qty"`
-	Batch           string        `json:"batch"`
-	Serials         []string      `json:"serials"`
-	LocationID      string        `json:"locationId"`
-	InventoryStatus string        `json:"inventoryStatus"`
+	Qty             *fieldDecimal    `json:"qty"`
+	CWQty           *int             `json:"cwQty"`
+	CatchWeight     *catchWeightSpec `json:"catchWeight"`
+	Batch           string           `json:"batch"`
+	Serials         []string         `json:"serials"`
+	LocationID      string           `json:"locationId"`
+	InventoryStatus string           `json:"inventoryStatus"`
 }
 
 type receivedLine struct {
@@ -64,6 +80,9 @@ type directReceiptRequest struct {
 type deltaLine struct {
 	LineNo   int           `json:"lineNo"`
 	QtyDelta *fieldDecimal `json:"qtyDelta"`
+	// CWQtyDelta corrects the case count of a catch-weight line together with
+	// its weight (qtyDelta); BR-24.5 is checked on the corrected pair.
+	CWQtyDelta *int `json:"cwQtyDelta"`
 }
 
 type correctRequest struct {
@@ -77,6 +96,8 @@ type cancelRequest struct {
 
 type registerInput struct {
 	Qty             decimal.Decimal
+	CWQty           int
+	CatchWeight     domain.CatchWeight
 	Batch           string
 	Serials         []string
 	LocationID      string
@@ -96,13 +117,41 @@ func inScope(p tenant.Principal, legalEntityID string) error {
 	return httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "legal entity is outside the caller's scope")
 }
 
+func parseCatchWeight(fields map[string]string, name string, spec *catchWeightSpec) domain.CatchWeight {
+	nom, okN := decimalField(fields, name+".nominal", spec.Nominal, true)
+	minv, okMin := decimalField(fields, name+".min", spec.Min, true)
+	maxv, okMax := decimalField(fields, name+".max", spec.Max, true)
+	out := domain.CatchWeight{Nominal: nom, Min: minv, Max: maxv}
+	if okN && okMin && okMax {
+		if err := out.Validate(); err != nil {
+			fields[name] = err.(*domain.Error).Detail
+		}
+	}
+	return out
+}
+
 func parseReceived(fields map[string]string, prefix string, f receivedFields) registerInput {
 	in := registerInput{Batch: f.Batch, Serials: f.Serials, LocationID: f.LocationID, InventoryStatus: f.InventoryStatus}
 	if v, ok := decimalField(fields, prefix+"qty", f.Qty, true); ok {
 		if v.Sign() <= 0 {
 			fields[prefix+"qty"] = "must be greater than zero"
+		} else if !domain.FitsColumn(v) {
+			fields[prefix+"qty"] = qtyScale
 		}
 		in.Qty = v
+	}
+	if f.CWQty != nil {
+		if *f.CWQty < 1 || *f.CWQty > maxCWQty {
+			fields[prefix+"cwQty"] = fmt.Sprintf("must be a whole number from 1 to %d", maxCWQty)
+		} else {
+			in.CWQty = *f.CWQty
+		}
+	}
+	if f.CatchWeight != nil {
+		in.CatchWeight = parseCatchWeight(fields, prefix+"catchWeight", f.CatchWeight)
+	}
+	if (f.CWQty != nil) != (f.CatchWeight != nil) {
+		fields[prefix+"cwQty"] = "catchWeight and cwQty must be sent together"
 	}
 	checkUUID(fields, prefix+"locationId", f.LocationID)
 	if utf8.RuneCountInString(f.Batch) > maxBatch {
@@ -155,6 +204,7 @@ func toDomain(r store.Receipt) domain.Receipt {
 			LineNo: l.LineNo, ProductID: l.ProductID, Qty: l.Qty, InvoicedQty: l.InvoicedQty, ClearedAmount: l.ClearedAmount, OrderedRemaining: l.OrderedRemaining,
 			OverDeliveryPct: l.OverDeliveryPct, UnitPrice: money.Amount{Value: l.UnitPrice, Currency: l.Currency},
 			BatchTracked: l.BatchTracked, SerialTracked: l.SerialTracked, Tracking: domain.Tracking{Batch: l.Batch, Serials: l.Serials},
+			CWQty: l.CWQty, CatchWeight: domain.CatchWeight{Nominal: l.CWNominal, Min: l.CWMin, Max: l.CWMax},
 		})
 	}
 	return out
@@ -175,6 +225,10 @@ func registerFn(inputs map[int]registerInput, version int, poQty map[int]decimal
 			if !ok {
 				return nil, &domain.Error{Code: domain.CodeInvalidReceipt, Detail: fmt.Sprintf("line %d has no received quantity", lines[i].LineNo)}
 			}
+			if in.CWQty > 0 && !domain.IsWeightUnit(lines[i].Unit) {
+				// Also without a PO line: qty is a weight, so the line's unit must be one.
+				return nil, &domain.Error{Code: domain.CodeCatchWeightUnit, Detail: fmt.Sprintf("line %d is received in %q; a catch-weight line is received and priced per mass unit", lines[i].LineNo, lines[i].Unit)}
+			}
 			if lines[i].POLineNo > 0 {
 				ordered, known := poQty[lines[i].LineNo]
 				if !known {
@@ -185,7 +239,9 @@ func registerFn(inputs map[int]registerInput, version int, poQty map[int]decimal
 				}
 			}
 			dr.Lines[i].Qty, dr.Lines[i].Tracking = in.Qty, domain.Tracking{Batch: in.Batch, Serials: in.Serials}
+			dr.Lines[i].CWQty, dr.Lines[i].CatchWeight = in.CWQty, in.CatchWeight
 			lines[i].Qty, lines[i].Batch, lines[i].Serials, lines[i].LocationID, lines[i].InventoryStatus = in.Qty, in.Batch, in.Serials, in.LocationID, in.InventoryStatus
+			lines[i].CWQty, lines[i].CWNominal, lines[i].CWMin, lines[i].CWMax = in.CWQty, in.CatchWeight.Nominal, in.CatchWeight.Min, in.CatchWeight.Max
 		}
 		if _, err := dr.Register(recorded); err != nil {
 			return nil, err
@@ -366,6 +422,7 @@ func (a *API) correctReceipt(w http.ResponseWriter, r *http.Request) {
 	}
 	fields := map[string]string{}
 	deltas := map[int]decimal.Decimal{}
+	caseDeltas := map[int]int{}
 	if len(req.Lines) == 0 || len(req.Lines) > maxLines {
 		fields["lines"] = fmt.Sprintf("must hold 1 to %d lines", maxLines)
 	}
@@ -380,8 +437,17 @@ func (a *API) correctReceipt(w http.ResponseWriter, r *http.Request) {
 		if v, ok := decimalField(fields, prefix+"qtyDelta", l.QtyDelta, true); ok {
 			if v.IsZero() {
 				fields[prefix+"qtyDelta"] = "must not be zero"
+			} else if !domain.FitsColumn(v) {
+				fields[prefix+"qtyDelta"] = qtyScale
 			}
 			deltas[l.LineNo] = v
+		}
+		if l.CWQtyDelta != nil {
+			if d := *l.CWQtyDelta; d == 0 || d < -maxCWQty || d > maxCWQty {
+				fields[prefix+"cwQtyDelta"] = fmt.Sprintf("must be a non-zero whole number from -%d to %d", maxCWQty, maxCWQty)
+			} else {
+				caseDeltas[l.LineNo] = d
+			}
 		}
 	}
 	if len(fields) > 0 {
@@ -418,7 +484,11 @@ func (a *API) correctReceipt(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		seq := rec.CorrectionSeq + 1
-		entryID, changes, err := toDomain(rec).Correct(ctx, a.ledgerFor(rec.ID), a.ports.Profile, seq, postingDate, deltas)
+		dr, err := toDomain(rec).WithCaseDeltas(caseDeltas)
+		if err != nil {
+			return store.Adjustment{}, err
+		}
+		entryID, changes, err := dr.Correct(ctx, a.ledgerFor(rec.ID), a.ports.Profile, seq, postingDate, deltas)
 		if err != nil {
 			return store.Adjustment{}, err
 		}
@@ -427,9 +497,9 @@ func (a *API) correctReceipt(w http.ResponseWriter, r *http.Request) {
 		for _, c := range changes {
 			line := rec.Lines[slices.IndexFunc(rec.Lines, func(l store.Line) bool { return l.LineNo == c.LineNo })]
 			amountDelta := c.Amount.Value.Sub(line.Amount.Decimal)
-			adj.Lines = append(adj.Lines, store.LineChange{LineNo: c.LineNo, Qty: c.Qty, Amount: c.Amount.Value, AmountAcct: acct(c.Amount.Value, rec.ExchangeRate)})
+			adj.Lines = append(adj.Lines, store.LineChange{LineNo: c.LineNo, Qty: c.Qty, CWQty: c.CWQty, Amount: c.Amount.Value, AmountAcct: acct(c.Amount.Value, rec.ExchangeRate)})
 			eventLines = append(eventLines, correctedLineData{
-				LineNo: c.LineNo, POLineID: line.POLineID, ProductID: line.ProductID, QtyDelta: c.Qty.Sub(line.Qty).String(),
+				LineNo: c.LineNo, POLineID: line.POLineID, ProductID: line.ProductID, QtyDelta: c.Qty.Sub(line.Qty).String(), CWQtyDelta: c.CWQty - line.CWQty,
 				AmountDelta: amountDelta.String(), AmountAcctDelta: acct(amountDelta, rec.ExchangeRate).String(),
 			})
 		}

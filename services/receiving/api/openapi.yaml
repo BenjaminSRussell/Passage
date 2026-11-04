@@ -90,7 +90,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '409': { $ref: '#/components/responses/Problem', description: 'RCV-DUP-001 packing slip already used; COM-0410 key in flight.' }
-        '422': { $ref: '#/components/responses/Problem', description: 'RCV-OVR-001 over-delivery; INV-SER-001 serial already recorded; RCV-VAL-001 tracking rule; COM-0409 key reused with a different request.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'RCV-OVR-001 over-delivery; INV-SER-001 serial already recorded; RCV-VAL-001 tracking rule; RCV-CW-001 catch-weight outside min/max × cases; COM-0409 key reused with a different request.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
     get:
       operationId: listReceipts
@@ -156,7 +156,7 @@ paths:
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-001' }
         '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 receipt is not ARRIVED; COM-0410 key in flight.' }
         '412': { $ref: '#/components/responses/Problem', description: 'COM-0412 If-Match differs from the current version.' }
-        '422': { $ref: '#/components/responses/Problem', description: 'RCV-OVR-001, INV-SER-001, RCV-VAL-001, COM-0409.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'RCV-OVR-001, INV-SER-001, RCV-VAL-001, RCV-CW-001, COM-0409.' }
         '428': { $ref: '#/components/responses/Problem', description: 'COM-0428 If-Match missing.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
   /v1/receiving/receipts/{id}:post:
@@ -1058,6 +1058,7 @@ components:
         inventoryStatus: { type: string }
         amount: { type: [string, 'null'], description: Null until posted. }
         amountAcct: { type: [string, 'null'], description: Null until posted. }
+        cwQty: { type: integer, minimum: 1, description: Catch-weight count (cases). qty is the actual weight. }
     Receipt:
       type: object
       required: [id, receiptNumber, state, version, vendorId, purchaseOrderId, legalEntityId, packingSlip, carrier, receiptDate, currency, exchangeRate, createdAt, lines]
@@ -1114,7 +1115,16 @@ components:
               unit: { type: string, minLength: 1, maxLength: 16 }
               batchTracked: { type: boolean, default: false }
               serialTracked: { type: boolean, default: false }
-              qty: { type: [number, string], exclusiveMinimum: 0 }
+              qty: { type: [number, string], exclusiveMinimum: 0, description: Actual weight when cwQty is set, otherwise the received quantity. }
+              cwQty: { type: integer, minimum: 1, description: Catch-weight count (cases). Requires catchWeight. }
+              catchWeight:
+                type: object
+                additionalProperties: false
+                required: [nominal, min, max]
+                properties:
+                  nominal: { type: [number, string] }
+                  min: { type: [number, string] }
+                  max: { type: [number, string] }
               batch: { type: string, maxLength: 128 }
               serials: { type: array, maxItems: 1000, items: { type: string, minLength: 1, maxLength: 64 } }
               locationId: { type: string, format: uuid }
@@ -1134,7 +1144,16 @@ components:
             required: [lineNo, qty, locationId]
             properties:
               lineNo: { type: integer, minimum: 1 }
-              qty: { type: [number, string], exclusiveMinimum: 0 }
+              qty: { type: [number, string], exclusiveMinimum: 0, description: Actual weight when cwQty is set, otherwise the received quantity. }
+              cwQty: { type: integer, minimum: 1, description: Catch-weight count (cases). Requires catchWeight. }
+              catchWeight:
+                type: object
+                additionalProperties: false
+                required: [nominal, min, max]
+                properties:
+                  nominal: { type: [number, string] }
+                  min: { type: [number, string] }
+                  max: { type: [number, string] }
               batch: { type: string, maxLength: 128 }
               serials: { type: array, maxItems: 1000, items: { type: string, minLength: 1, maxLength: 64 } }
               locationId: { type: string, format: uuid }
@@ -1155,7 +1174,8 @@ components:
             required: [lineNo, qtyDelta]
             properties:
               lineNo: { type: integer, minimum: 1 }
-              qtyDelta: { type: [number, string], description: Non-zero; negative reduces the received quantity. }
+              qtyDelta: { type: [number, string], description: Non-zero; negative reduces the received quantity (the weight on a catch-weight line). }
+              cwQtyDelta: { type: integer, description: "Catch-weight lines only: non-zero change of the case count, sent with the qtyDelta of the weight; the corrected count stays at least 1 and BR-24.5 (RCV-CW-001) is checked on the corrected weight and count. RCV-VAL-001 (422) on a line that is not catch-weight." }
     ReceiptPage:
       type: object
       required: [items]

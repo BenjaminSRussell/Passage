@@ -25,10 +25,13 @@ const (
 	CodeProgressRepeated = "SLS-0060"
 )
 
-// ProgressLineInput is the quantity a report covers on one line.
+// ProgressLineInput is the quantity a report covers on one line. ActualWeight
+// is the catch-weight of a DELIVERED report (FR-24.7); absent, a catch-weight
+// line stays priced at cases × nominal.
 type ProgressLineInput struct {
-	LineNo   int
-	Quantity decimal.Decimal
+	LineNo       int
+	Quantity     decimal.Decimal
+	ActualWeight *decimal.Decimal
 }
 
 // NewProgress is a delivery or invoice report for one order. SourceRef names
@@ -178,8 +181,17 @@ func (s *Postgres) RecordProgress(ctx context.Context, in NewProgress, now time.
 			if err != nil {
 				return problem(http.StatusUnprocessableEntity, CodeProgressQuantity, fmt.Sprintf("line %d: %s", l.LineNo, err))
 			}
-			if _, err := tx.Exec(ctx, `update sales_order_line set delivered_qty = $4::numeric, invoiced_qty = $5::numeric, line_status = $6
-				where tenant_id = $1 and order_id = $2 and id = $3`, p.TenantID, o.ID, l.ID, next.Delivered.String(), next.Invoiced.String(), next.Status); err != nil {
+			oldNet := l.LineNet
+			if err := applyCatchWeightProgress(l, in.Kind, req.Quantity, next.Delivered, req.ActualWeight); err != nil {
+				return err
+			}
+			if !l.LineNet.Equal(oldNet) {
+				diff = append(diff, domain.FieldChange{LineNo: l.LineNo, Field: "lineNet", Old: oldNet.String(), New: l.LineNet.String()})
+			}
+			if _, err := tx.Exec(ctx, `update sales_order_line set delivered_qty = $4::numeric, invoiced_qty = $5::numeric, line_status = $6,
+					actual_weight = $7, line_net = $8::numeric
+				where tenant_id = $1 and order_id = $2 and id = $3`, p.TenantID, o.ID, l.ID, next.Delivered.String(), next.Invoiced.String(), next.Status,
+				nullDec(l.ActualWeight), l.LineNet.String()); err != nil {
 				return err
 			}
 			if in.Kind == domain.ProgressDelivered {
@@ -202,9 +214,13 @@ func (s *Postgres) RecordProgress(ctx context.Context, in NewProgress, now time.
 		if status != o.Status {
 			diff = append(diff, domain.FieldChange{LineNo: 0, Field: "status", Old: o.Status, New: status})
 		}
+		total := netOf(o.Lines)
+		if !total.Equal(o.NetTotal) {
+			diff = append(diff, domain.FieldChange{LineNo: 0, Field: "netTotal", Old: o.NetTotal.String(), New: total.String()})
+		}
 		version := o.Version + 1
-		if _, err := tx.Exec(ctx, `update sales_order set status = $3, version = $4, updated_at = $5 where tenant_id = $1 and id = $2`,
-			p.TenantID, o.ID, status, version, now); err != nil {
+		if _, err := tx.Exec(ctx, `update sales_order set status = $3, version = $4, net_total = $5::numeric, updated_at = $6 where tenant_id = $1 and id = $2`,
+			p.TenantID, o.ID, status, version, total.String(), now); err != nil {
 			return err
 		}
 		reason := fmt.Sprintf("%s recorded: %s", in.Kind, in.SourceRef)
@@ -272,4 +288,54 @@ func (s *Postgres) ListProgress(ctx context.Context, f ProgressFilter) ([]OrderP
 		return err
 	})
 	return out, err
+}
+
+func applyCatchWeightProgress(l *Line, kind string, cases decimal.Decimal, delivered decimal.Decimal, actual *decimal.Decimal) error {
+	if l.CatchWeight != nil && !domain.WholeCases(cases) {
+		// Every report on a catch-weight line counts whole cases, a delivery
+		// without a weight (priced at nominal) and an invoice included.
+		return problem(http.StatusUnprocessableEntity, domain.CodeCatchWeightInput,
+			fmt.Sprintf("line %d is a catch-weight item; a %s report must cover a whole number of cases", l.LineNo, kind))
+	}
+	if actual != nil {
+		switch {
+		case kind != domain.ProgressDelivered:
+			return problem(http.StatusUnprocessableEntity, domain.CodeCatchWeightInput, "actualWeight applies only to a DELIVERED report")
+		case l.CatchWeight == nil:
+			return problem(http.StatusUnprocessableEntity, domain.CodeCatchWeightInput, fmt.Sprintf("line %d is not a catch-weight item", l.LineNo))
+		}
+		if err := domain.ValidateCatchWeight(*l.CatchWeight, cases, *actual); err != nil {
+			var cw *domain.CatchWeightError
+			if errors.As(err, &cw) {
+				return problem(http.StatusUnprocessableEntity, cw.Code, fmt.Sprintf("line %d: %s", l.LineNo, cw.Detail))
+			}
+			return err
+		}
+	}
+	if kind != domain.ProgressDelivered || l.CatchWeight == nil {
+		return nil
+	}
+	reported := cases.Mul(l.CatchWeight.Nominal)
+	if actual != nil {
+		reported = *actual
+	}
+	total := reported
+	if l.ActualWeight != nil {
+		total = total.Add(*l.ActualWeight)
+	} else {
+		total = total.Add(l.DeliveredQty.Mul(l.CatchWeight.Nominal))
+	}
+	net, err := domain.LineNetFor(l.Quantity, delivered, l.UnitPrice, l.DiscPct, l.CatchWeight, &total)
+	if err != nil {
+		return problem(http.StatusUnprocessableEntity, CodeProgressQuantity, fmt.Sprintf("line %d: %s", l.LineNo, err))
+	}
+	l.ActualWeight, l.LineNet = &total, net
+	return nil
+}
+
+func nullDec(d *decimal.Decimal) any {
+	if d == nil {
+		return nil
+	}
+	return d.String()
 }

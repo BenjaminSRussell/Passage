@@ -114,6 +114,9 @@ type JournalLine struct {
 	EnteredQty     decimal.Decimal
 	EnteredUnit    string
 	CostPrice      decimal.Decimal
+	// CWQty is the optional catch-weight count (cases). Qty is the inventory
+	// (weight) quantity used for on-hand and cost.
+	CWQty int
 	// ToDims is the destination dimension set of a TRANSFER line; nil on any
 	// other line.
 	ToDims Dimensions
@@ -126,7 +129,7 @@ func (l JournalLine) SameContent(o JournalLine) bool {
 	b, errB := o.Dims.Normalize()
 	return errA == nil && errB == nil && l.ProductID == o.ProductID && a.Canonical() == b.Canonical() &&
 		l.Qty.Equal(o.Qty) && l.EnteredQty.Equal(o.EnteredQty) && l.EnteredUnit == o.EnteredUnit && l.CostPrice.Equal(o.CostPrice) &&
-		l.sameDestination(o)
+		l.CWQty == o.CWQty && l.sameDestination(o)
 }
 
 func (l JournalLine) sameDestination(o JournalLine) bool {

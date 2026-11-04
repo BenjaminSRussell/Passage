@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -26,6 +27,7 @@ const (
 	statusChangesPath    = "/v1/inventory/status-changes"
 	maxReferenceLength   = 60
 	maxQtyDecimals       = 6
+	maxCWQty             = 1_000_000
 )
 
 // namedCommandVerbs maps each custom-method verb to its named backward command.
@@ -51,6 +53,7 @@ type applyRequest struct {
 	EnteredUnit   string            `json:"enteredUnit"`
 	Currency      string            `json:"currency"`
 	CostPrice     string            `json:"costPrice"`
+	CWQty         *int              `json:"cwQty"`
 	// Both.
 	ToStatus string `json:"toStatus"`
 	Date     string `json:"date"`
@@ -155,7 +158,8 @@ func (a *API) stepTransaction(w http.ResponseWriter, r *http.Request, req applyR
 		fields["fromStatus"] = "must be the status the caller read"
 	}
 	for name, set := range map[string]bool{"legalEntityId": req.LegalEntityID != "", "productId": req.ProductID != "", "qty": req.Qty != "",
-		"dimensions": req.Dimensions != nil, "currency": req.Currency != "", "costPrice": req.CostPrice != "", "enteredUnit": req.EnteredUnit != ""} {
+		"dimensions": req.Dimensions != nil, "currency": req.Currency != "", "costPrice": req.CostPrice != "", "enteredUnit": req.EnteredUnit != "",
+		"cwQty": req.CWQty != nil} {
 		if set {
 			fields[name] = "applies only when origin registers a new transaction"
 		}
@@ -218,13 +222,21 @@ func (a *API) registerTransaction(w http.ResponseWriter, r *http.Request, req ap
 	if err != nil || cost.Sign() < 0 {
 		fields["costPrice"] = "must be a non-negative decimal number"
 	}
+	cwQty := 0
+	if req.CWQty != nil {
+		if *req.CWQty < 1 || *req.CWQty > maxCWQty {
+			fields["cwQty"] = fmt.Sprintf("must be a whole number from 1 to %d", maxCWQty)
+		} else {
+			cwQty = *req.CWQty
+		}
+	}
 	if len(fields) > 0 {
 		return
 	}
 	change, applied, err := a.store.CreateTransaction(r.Context(), store.CreateTransactionInput{LegalEntityID: req.LegalEntityID,
 		SourceType: o.SourceType, SourceID: o.SourceID, Reference: o.Reference, ProductID: req.ProductID, Dims: domain.Dimensions(req.Dimensions),
 		Qty: qty, EnteredQty: entered, EnteredUnit: req.EnteredUnit, Status: domain.Status(req.ToStatus), Currency: req.Currency,
-		CostPrice: cost, Date: date, IdempotencyKey: key, Negative: a.post.Negative})
+		CostPrice: cost, CWQty: cwQty, Date: date, IdempotencyKey: key, Negative: a.post.Negative})
 	writeStatusChange(w, r, a, "register transaction", change, applied, err)
 }
 

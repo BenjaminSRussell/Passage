@@ -94,6 +94,13 @@ func buildQuotation(req createQuotationRequest, today time.Time) (store.NewQuota
 		if l.DeliveryDateControl != nil {
 			f[path("deliveryDateControl")] = "a quotation line has no delivery date control; set it on the order line"
 		}
+		if l.CatchWeight != nil {
+			// The quotation store keeps no catch-weight spec, and an order made
+			// from the quotation would carry a weight-priced LineNet on a plain
+			// line (FR-24.7): quote catch-weight items on an order instead.
+			f[path("catchWeight")] = "a quotation line cannot be a catch-weight item; set catchWeight on the order line"
+			continue
+		}
 		if line, ok := buildLine(i, l, f, path); ok {
 			in.Lines = append(in.Lines, line)
 		}

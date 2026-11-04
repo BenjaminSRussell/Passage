@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,6 +70,7 @@ type CreateTransactionInput struct {
 	Status         domain.Status
 	Currency       string
 	CostPrice      decimal.Decimal
+	CWQty          int
 	Date           time.Time
 	IdempotencyKey string
 	Negative       domain.NegativePolicy
@@ -195,7 +197,7 @@ func (s *Postgres) CreateTransaction(ctx context.Context, in CreateTransactionIn
 		doc := document{legalEntityID: in.LegalEntityID, currency: in.Currency, date: date, sourceType: in.SourceType,
 			referenceID: strings.TrimSpace(in.Reference), statusChangeID: changeID}
 		pl := domain.PostedLine{Line: domain.JournalLine{ProductID: in.ProductID, Dims: dims, Qty: in.Qty, EnteredQty: in.EnteredQty,
-			EnteredUnit: in.EnteredUnit, CostPrice: in.CostPrice}, Status: in.Status, Value: value}
+			EnteredUnit: in.EnteredUnit, CostPrice: in.CostPrice, CWQty: in.CWQty}, Status: in.Status, Value: value}
 		txnID, err := writeTransaction(ctx, tx, tp.TenantID, doc, in.SourceID, r, pl)
 		if err != nil {
 			return err
@@ -561,8 +563,12 @@ func stepRequestHash(in StatusStepInput) string {
 
 func createRequestHash(in CreateTransactionInput) string {
 	raw, _ := json.Marshal(in.Dims)
-	return fingerprint("CREATE", in.LegalEntityID, in.SourceType, in.SourceID, strings.TrimSpace(in.Reference), in.ProductID, string(raw),
-		in.Qty.String(), in.EnteredQty.String(), in.EnteredUnit, string(in.Status), in.Currency, in.CostPrice.String(), requestedDate(in.Date))
+	parts := []string{"CREATE", in.LegalEntityID, in.SourceType, in.SourceID, strings.TrimSpace(in.Reference), in.ProductID, string(raw),
+		in.Qty.String(), in.EnteredQty.String(), in.EnteredUnit, string(in.Status), in.Currency, in.CostPrice.String()}
+	if in.CWQty > 0 {
+		parts = append(parts, strconv.Itoa(in.CWQty))
+	}
+	return fingerprint(append(parts, requestedDate(in.Date))...)
 }
 
 // StatusChangeFilter selects audit rows for the status-change inquiry. Empty

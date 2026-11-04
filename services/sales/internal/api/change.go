@@ -83,6 +83,11 @@ func buildChange(req changeOrderRequest) (store.ChangeRequest, map[string]string
 			f[path("configurationId")] = "a line added by a change cannot carry a configuration yet"
 			ok = false
 		}
+		if l.CatchWeight != nil {
+			// The added line is stored and priced without a spec (FR-24.7).
+			f[path("catchWeight")] = "a line added by a change cannot be a catch-weight item yet; add it on a new order"
+			ok = false
+		}
 		if ok {
 			out.AddLines = append(out.AddLines, store.NewLine{ProductID: line.ProductID, Quantity: line.Quantity, Unit: line.Unit,
 				SiteID: line.SiteID, WarehouseID: line.WarehouseID, UnitPrice: line.UnitPrice, DiscPct: line.DiscPct,

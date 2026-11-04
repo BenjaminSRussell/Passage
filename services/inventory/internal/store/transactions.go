@@ -56,6 +56,7 @@ type TransactionRow struct {
 	Qty                decimal.Decimal
 	EnteredQty         decimal.Decimal
 	EnteredUnit        string
+	CWQty              *int
 	IssueStatus        string
 	ReceiptStatus      string
 	PhysicalDate       string
@@ -125,7 +126,7 @@ func (s *Postgres) ListTransactions(ctx context.Context, f TransactionFilter) ([
 
 const transactionColumns = `t.id::text, t.legal_entity_id::text, t.origin_id::text, o.source_type, o.source_id::text,
 			coalesce(l.journal_id::text, ''), coalesce(o.reference_number, ''), t.product_id::text, d.dims, t.qty::text, t.entered_qty::text,
-			t.entered_unit, coalesce(t.issue_status, ''), coalesce(t.receipt_status, ''), to_char(t.physical_date, 'YYYY-MM-DD'),
+			t.entered_unit, t.cw_qty, coalesce(t.issue_status, ''), coalesce(t.receipt_status, ''), to_char(t.physical_date, 'YYYY-MM-DD'),
 			coalesce(to_char(t.financial_date, 'YYYY-MM-DD'), ''), t.currency::text, t.cost_amount_physical::text, t.cost_amount_posted::text, t.created_at`
 
 const transactionFrom = `
@@ -140,7 +141,7 @@ func scanTransaction(rows pgx.Rows) (TransactionRow, error) {
 	var qty, entered, cost string
 	var posted *string
 	if err := rows.Scan(&r.ID, &r.LegalEntityID, &r.OriginID, &r.SourceType, &r.SourceID, &r.JournalID, &r.Reference, &r.ProductID, &raw,
-		&qty, &entered, &r.EnteredUnit, &r.IssueStatus, &r.ReceiptStatus, &r.PhysicalDate, &r.FinancialDate, &r.Currency,
+		&qty, &entered, &r.EnteredUnit, &r.CWQty, &r.IssueStatus, &r.ReceiptStatus, &r.PhysicalDate, &r.FinancialDate, &r.Currency,
 		&cost, &posted, &r.CreatedAt); err != nil {
 		return r, err
 	}
