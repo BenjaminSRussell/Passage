@@ -194,6 +194,7 @@
       {"resource": "/v1/production/inheritance-rules/*:retire", "methods": ["POST"]}
     ]},
     "production.planned.intake": {"flag": true, "permissions": []},
+    "production.jobcard.shopfloor": {"flag": true, "permissions": []},
     "sales.order.record-delivery": {"permissions": [{"resource": "/v1/sales/orders/*:record-progress", "methods": ["POST"]}]},
     "sales.order.record-invoice": {"permissions": [{"resource": "/v1/sales/orders/*:record-progress", "methods": ["POST"]}]},
     "tax.transaction.record": {"permissions": [{"resource": "/v1/tax/transactions", "methods": ["POST"]}]},
@@ -3378,6 +3379,7 @@
     "integration-hub": ["migration.outbound.render", "migration.xref.record"],
     "migration-loader": ["party.import.write", "party.import.read", "product.import.write", "product.import.read", "receivables.import.write", "receivables.import.read", "engineering.import.write", "engineering.import.read"],
     "production-planning": ["production.planned.intake"],
+    "production-shopfloor": ["production.jobcard.shopfloor"],
     "receiving-erasure": ["compliance.legal_hold.check"],
     "receiving-ers": ["VendorInvoicePost"],
     "scheduling-downtime": ["scheduling.downtime.apply"],

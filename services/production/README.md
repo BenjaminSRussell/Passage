@@ -629,6 +629,12 @@ Slice 25:
   such rows are visible to all-entity callers only), and ignores purchase and transfer orders. It runs as service principal
   `production-planning` (seeded) and refuses to start if that principal is missing from the service
   principal table.
+- Shop-floor labor (#481, AC-25.1). `production consume-shopfloor` (chart value
+  `shopfloorConsumer.enabled`) follows the shop floor's `registration.posted` and `.corrected` and
+  posts each closed job-stop as a job card at the worker cost rate (BR-25.9), re-booking it on a
+  correction. It runs as service principal `production-shopfloor` (duty
+  `production.jobcard.shopfloor`), reads the order's legal entity first and posts pinned to it;
+  refusals are dead-lettered to `passage.shopfloor.registration.dlq`, other failures retried with backoff.
 - `GET /v1/production/planned-intake` (status, site, keyset paging) and `GET …/{id}`;
   `POST …/{id}:convert` creates the production order under the planned order's `target_id` with the
   row's legal entity, product, site, quantity, delivery date and warehouse, originType `PlannedOrder`,

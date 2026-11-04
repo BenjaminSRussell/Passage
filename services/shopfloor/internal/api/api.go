@@ -187,6 +187,8 @@ type API struct {
 	// oeeChanged and oeeRemoved count stored OEE buckets the rollup wrote or removed.
 	oeeChanged atomic.Int64
 	oeeRemoved atomic.Int64
+	// streamPoll and streamLife override the live OEE stream's poll interval and lifetime (tests).
+	streamPoll, streamLife time.Duration
 	// badgeRejected counts kiosk badge logins refused with SF-0001.
 	badgeRejected atomic.Int64
 	// feedbackStored and feedbackReplays count job feedback stored and replayed by

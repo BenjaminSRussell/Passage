@@ -76,6 +76,7 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"/v1/shopfloor/andon:sweep post":                                           DutyOEERollup,
 		"/v1/shopfloor/andon/{id}:clear post":                                      DutyCheckOverride,
 		"/v1/shopfloor/oee get":                                                    DutyView,
+		"/v1/shopfloor/oee/stream get":                                             DutyView,
 		"/v1/shopfloor/oee:rollup post":                                            DutyOEERollup,
 		"/v1/shopfloor/sessions:badge post":                                        DutyKioskLogin,
 		"/v1/shopfloor/clocked-in get":                                             DutyView,

@@ -1000,6 +1000,47 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
+  /v1/shopfloor/oee/stream:
+    get:
+      operationId: streamOee
+      summary: Live OEE tile of one resource as Server-Sent Events (FR-25.14, AC-25.4)
+      description: |
+        A `text/event-stream` of `oee` events for the bucket that holds the server's now,
+        computed from stored machine events exactly as GET /oee computes it. The first event
+        is sent at once; the stream recomputes every 2 seconds and sends an event only when
+        the bucket changed (a new count, state or downtime, or a new bucket period), so a
+        tile is within 5 seconds of the machine events without waiting for the rollup. Each
+        event's data is an OeeTile; `bucket` is null while the bucket has no planned time or
+        the resource has no machine. The stream ends after about 25 seconds (before the
+        request timeout) and starts with `retry: 1000`, so the browser's EventSource
+        reconnects. A store failure after the stream started sends an `error` event and ends it.
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: resourceId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: bucket
+          in: query
+          schema:
+            type: string
+            enum: [5m, 15m, 60m]
+            default: 15m
+      responses:
+        "200":
+          description: Server-Sent Events, each `event: oee` with an OeeTile as data.
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/OeeTile"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
   /v1/shopfloor/oee:rollup:
     post:
       operationId: rollupOee
@@ -4674,6 +4715,27 @@ components:
         cleared:
           type: integer
           description: Downtime and scrap-rate alerts whose condition had been clear for 5 minutes.
+    OeeTile:
+      type: object
+      required: [resourceId, bucketStart, bucketEnd, computedAt, bucket]
+      properties:
+        resourceId:
+          type: string
+          format: uuid
+        bucketStart:
+          type: string
+          format: date-time
+        bucketEnd:
+          type: string
+          format: date-time
+        computedAt:
+          type: string
+          format: date-time
+        bucket:
+          description: The current bucket; null while it has no planned time or the resource has no machine.
+          oneOf:
+            - $ref: "#/components/schemas/OeeBucket"
+            - type: "null"
     OeeBucket:
       type: object
       required: [resourceId, bucketStart, plannedMinutes, runMinutes, downMinutes, totalCount, goodCount,

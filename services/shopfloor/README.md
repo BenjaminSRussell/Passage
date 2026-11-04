@@ -533,6 +533,10 @@ agreement list shows the windows and the create form adds and removes them.
   the machine events (BR-25.5). Until the w23 calendar supplies planned time, every known
   state except OFF counts as scheduled; RUNNING is run time. Minutes and counts are summed
   to roll up, never ratios.
+- Live OEE tile (`GET oee/stream?resourceId=&bucket=`, duty `shopfloor.view`, #481): a
+  `text/event-stream` of `oee` events with the resource's bucket that holds now, computed as
+  `GET oee` computes it, sent at once and again when it changes (polled every 2 s, AC-25.4).
+  The stream ends before the 30 s request timeout with `retry: 1000`, so EventSource reconnects.
 - Payroll export (`pay:export`): every approved pay line in a range of up to 31 days that is
   not yet exported joins one new batch (a line is exported once). The response carries the
   CSV (batch id on every row) and `dev.passage.shopfloor.payday.exported.v1` carries the

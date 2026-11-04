@@ -25,6 +25,7 @@ var servicePrincipals = map[string][]string{
 	"pricing-cache":           {"pricing.cache.invalidate"},
 	"migration-loader":        {"party.import.write", "party.import.read", "product.import.write", "product.import.read", "receivables.import.write", "receivables.import.read", "engineering.import.write", "engineering.import.read"},
 	"production-planning":     {"production.planned.intake"},
+	"production-shopfloor":    {"production.jobcard.shopfloor"},
 	"receiving-erasure":       {"compliance.legal_hold.check"},
 	"receiving-ers":           {"VendorInvoicePost"},
 	"scheduling-downtime":     {"scheduling.downtime.apply"},
@@ -46,6 +47,7 @@ var servicePrincipalIssuers = map[string][]string{
 	// Its token holds only party's own grant (numbering.sequence.allocate), so nothing is borrowed (#475).
 	"migration-loader":        {"migration", "migration-factory", "party"},
 	"production-planning":     {"production"},
+	"production-shopfloor":    {"production"},
 	"receiving-erasure":       {"receiving"},
 	"receiving-ers":           {"receiving"},
 	"scheduling-downtime":     {"scheduling"},

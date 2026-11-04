@@ -21,6 +21,11 @@ release may change public APIs.
   request timeout; numbers and caveats in `services/planning/README.md`. The plan-run route now accepts
   bodies up to 128 MiB and `RunPlan` sends its rows in batches of 10,000 (one unbounded batch ran out of
   memory at 50k items). ADR-0002 (Proposed) records the frePPLe comparison decision for AC4.
+- Wave 25 gaps (#481): production's `consume-shopfloor` consumer (principal `production-shopfloor`) posts
+  closed shop-floor job-stops as job cards at the worker cost rate, pinned to the order's legal entity, and
+  re-books them on `registration.corrected`; the web kiosk's IndexedDB offline queue replays punches and job
+  actions once, in order, when back online (Playwright `kiosk-offline.spec.ts`); `GET /v1/shopfloor/oee/stream`
+  pushes the live OEE tile as Server-Sent Events, shown on the OEE page for a selected machine.
 - Local ledger performance benchmark as a proxy for wave 11 AC4 (#476): `make bench-ledger` posts balanced
   entries and reads trial balances against a throwaway Postgres 16 cluster and reports lines/s and p50/p95/p99;
   results and the hardware caveat are in `services/ledger/README.md`. It does not meet or replace AC4.

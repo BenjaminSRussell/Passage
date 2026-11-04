@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Alert, Badge, Button, DataTable, EmptyState, FormField, Input, PageHeader, Select, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import { getOee, listMachines, type Machine, type OeeBucket, type OeeBucketSize } from "./api/client";
 import { fixed, formatDateTime, percent, sumDecimals, today } from "./format";
+import { OeeLiveTile } from "./OeeLiveTile";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -21,7 +22,7 @@ export function dayWindow(date: string): { from: string; to: string } | null {
   return { from: start.toISOString(), to: end.toISOString() };
 }
 
-/** OEE per resource and bucket from machine events (FR-25.10, BR-25.5). */
+/** OEE per resource and bucket from machine events (FR-25.10, BR-25.5), with the live tile of a selected machine (AC-25.4). */
 export function OeePage() {
   const [date, setDate] = useState(today());
   const [bucket, setBucket] = useState<OeeBucketSize>("15m");
@@ -97,6 +98,7 @@ export function OeePage() {
           {machines.error.message} ({machines.error.code})
         </Alert>
       ) : null}
+      {resourceId ? <OeeLiveTile resourceId={resourceId} machineLabel={machineOf.get(resourceId) ?? resourceId} bucket={bucket} /> : null}
       {noMachines ? (
         <EmptyState
           title="No machines registered"

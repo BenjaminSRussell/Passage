@@ -19,28 +19,53 @@ import (
 
 const deadLetterSuffix = ".dlq"
 
-func kafkaConfig(getenv func(string) string) (kafka.Config, error) {
-	return kafka.ConfigFromEnv(getenv, api.PlanningConsumerName, api.PlanningConsumerName, []string{api.PlannedOrderFirmedTopic})
+// consumerSpec is one Kafka consumer the production binary runs: its name (Kafka group and
+// service principal), the duty that principal must hold, its topics and handlers.
+type consumerSpec struct {
+	name, duty      string
+	topics          []string
+	deadLetterTopic string
+	handlers        func(*store.Postgres) map[string]eventing.Handler
 }
 
-// planningSeeded reports whether the service principal table gives the production consumer its
-// principal with the intake duty. Until the policy bundle and platform/go/tenant seed it (a handoff,
-// see NOT-IMPLEMENTED.md), the consumer does not start: it never borrows another consumer's principal.
-func planningSeeded(table map[string][]string) bool {
-	return slices.Contains(table[api.PlanningConsumerName], api.DutyPlannedIntake)
+// planningSpec follows planning's plannedorder.firmed.v1 into the planned order intake (FR-22.10).
+var planningSpec = consumerSpec{
+	name: api.PlanningConsumerName, duty: api.DutyPlannedIntake,
+	topics: []string{api.PlannedOrderFirmedTopic}, deadLetterTopic: api.PlannedOrderFirmedTopic + deadLetterSuffix,
+	handlers: func(s *store.Postgres) map[string]eventing.Handler { return api.PlanningConsumerHandlers(s) },
 }
+
+// shopfloorSpec follows the shop floor's registration.posted and .corrected into job cards (AC-25.1).
+var shopfloorSpec = consumerSpec{
+	name: api.ShopfloorConsumerName, duty: api.DutyShopfloorJobCard,
+	topics: []string{api.RegistrationPostedTopic, api.RegistrationCorrectedTopic}, deadLetterTopic: api.RegistrationPostedTopic + deadLetterSuffix,
+	handlers: func(s *store.Postgres) map[string]eventing.Handler { return api.ShopfloorConsumerHandlers(s) },
+}
+
+func kafkaConfig(getenv func(string) string, spec consumerSpec) (kafka.Config, error) {
+	return kafka.ConfigFromEnv(getenv, spec.name, spec.name, spec.topics)
+}
+
+// seeded reports whether the service principal table gives the consumer its own principal with
+// its duty. Until the policy bundle and platform/go/tenant seed it (see NOT-IMPLEMENTED.md), the
+// consumer does not start: it never borrows another consumer's principal.
+func seeded(table map[string][]string, spec consumerSpec) bool {
+	return slices.Contains(table[spec.name], spec.duty)
+}
+
+func planningSeeded(table map[string][]string) bool { return seeded(table, planningSpec) }
 
 // servicePrincipals is the service principal table the start gate reads; tests replace it so they do
 // not depend on what platform/go/tenant has seeded.
 var servicePrincipals = tenant.ServicePrincipalTable
 
-// runConsumer follows planning's plannedorder.firmed.v1 and serves the consumer's admin port.
-func runConsumer(ctx context.Context, getenv func(string) string, s *store.Postgres, pool *pgxpool.Pool) error {
-	if !planningSeeded(servicePrincipals()) {
-		return errors.New("planning consumer not started: service principal " + tenant.ServiceActor(api.PlanningConsumerName) +
-			" with duty " + api.DutyPlannedIntake + " is not seeded")
+// runConsumer runs one consumer and serves its admin port.
+func runConsumer(ctx context.Context, getenv func(string) string, s *store.Postgres, pool *pgxpool.Pool, spec consumerSpec) error {
+	if !seeded(servicePrincipals(), spec) {
+		return errors.New(spec.name + " consumer not started: service principal " + tenant.ServiceActor(spec.name) +
+			" with duty " + spec.duty + " is not seeded")
 	}
-	cfg, err := kafkaConfig(getenv)
+	cfg, err := kafkaConfig(getenv, spec)
 	if err != nil {
 		return err
 	}
@@ -50,8 +75,8 @@ func runConsumer(ctx context.Context, getenv func(string) string, s *store.Postg
 	}
 	defer client.Close()
 	consumer, err := eventing.NewConsumer(client, client, eventing.NewPgInbox(pool), eventing.Config{
-		Name: api.PlanningConsumerName, Handlers: api.PlanningConsumerHandlers(s),
-		DeadLetterTopic: api.PlannedOrderFirmedTopic + deadLetterSuffix, Log: slog.Default(),
+		Name: spec.name, Handlers: spec.handlers(s),
+		DeadLetterTopic: spec.deadLetterTopic, Log: slog.Default(),
 	})
 	if err != nil {
 		return err
@@ -67,7 +92,7 @@ func runConsumer(ctx context.Context, getenv func(string) string, s *store.Postg
 		w.WriteHeader(http.StatusOK)
 	})
 	admin.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
-		consumer.Metrics().Write(w, api.PlanningConsumerName)
+		consumer.Metrics().Write(w, spec.name)
 	})
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -77,7 +102,7 @@ func runConsumer(ctx context.Context, getenv func(string) string, s *store.Postg
 	go func() {
 		err := consumer.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			slog.ErrorContext(ctx, "consumer stopped", "consumer", api.PlanningConsumerName, "err", err)
+			slog.ErrorContext(ctx, "consumer stopped", "consumer", spec.name, "err", err)
 		}
 		errs <- err
 	}()

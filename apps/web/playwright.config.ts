@@ -21,6 +21,7 @@ const E2E_DUTIES = [
   "production.order.read",
   "settlement.read",
   "shopfloor.kiosk.login",
+  "shopfloor.view",
   "tenant.administer",
   "View effective permissions",
   "workflow.approve",

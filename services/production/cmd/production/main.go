@@ -30,11 +30,15 @@ func main() {
 	slog.SetDefault(newLogger(os.Stdout))
 	runner := run
 	if len(os.Args) > 1 {
-		if os.Args[1] != "consume" {
-			slog.Error("production stopped", "err", fmt.Errorf("unknown command %q (use no argument to serve or \"consume\" to run the planned order consumer)", os.Args[1]))
+		switch os.Args[1] {
+		case "consume":
+			runner = consume
+		case "consume-shopfloor":
+			runner = consumeShopfloor
+		default:
+			slog.Error("production stopped", "err", fmt.Errorf("unknown command %q (use no argument to serve, \"consume\" to run the planned order consumer or \"consume-shopfloor\" to run the shop-floor job card consumer)", os.Args[1]))
 			os.Exit(1)
 		}
-		runner = consume
 	}
 	if err := runner(context.Background(), os.Getenv); err != nil {
 		slog.Error("production stopped", "err", err)
@@ -158,6 +162,17 @@ func addr(getenv func(string) string, key, fallback string) string {
 // consume runs the planned order consumer (FR-22.10): it follows planning's plannedorder.firmed.v1 into
 // the production intake. It does not migrate and serves no API; its admin port has health and metrics.
 func consume(ctx context.Context, getenv func(string) string) error {
+	return consumeWith(ctx, getenv, planningSpec)
+}
+
+// consumeShopfloor runs the shop-floor job card consumer (AC-25.1, BR-25.9): it follows the shop
+// floor's registration.posted and .corrected and posts the labor of closed job-stops to the
+// production order as job cards. Like consume it does not migrate and serves no API.
+func consumeShopfloor(ctx context.Context, getenv func(string) string) error {
+	return consumeWith(ctx, getenv, shopfloorSpec)
+}
+
+func consumeWith(ctx context.Context, getenv func(string) string, spec consumerSpec) error {
 	databaseURL := getenv("DATABASE_URL")
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")
@@ -167,5 +182,5 @@ func consume(ctx context.Context, getenv func(string) string) error {
 		return fmt.Errorf("connect database: %w", err)
 	}
 	defer pool.Close()
-	return runConsumer(ctx, getenv, store.New(pool), pool)
+	return runConsumer(ctx, getenv, store.New(pool), pool, spec)
 }
