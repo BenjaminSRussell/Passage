@@ -2424,7 +2424,8 @@
       {"resource": "/v1/pricing/royalty-agreements/*/accruals", "methods": ["GET"]},
       {"resource": "/v1/pricing/royalty-agreements/*/claim-preview", "methods": ["GET"]},
       {"resource": "/v1/pricing/contract-claims", "methods": ["GET"]},
-      {"resource": "/v1/pricing/contract-claims/*", "methods": ["GET"]}
+      {"resource": "/v1/pricing/contract-claims/*", "methods": ["GET"]},
+      {"resource": "/v1/pricing/rebates/agreements/*/statement", "methods": ["GET"]}
     ]},
     "pricing.view": {"permissions": [
       {"resource": "/v1/pricing/parameters", "methods": ["GET"]},
@@ -2458,7 +2459,8 @@
       {"resource": "/v1/pricing/price-list", "methods": ["GET"]},
       {"resource": "/v1/pricing/price-list/net-prices", "methods": ["GET"]},
       {"resource": "/v1/pricing/condition-records:export", "methods": ["GET"]},
-      {"resource": "/v1/pricing/tenant-parameters", "methods": ["GET"]}
+      {"resource": "/v1/pricing/tenant-parameters", "methods": ["GET"]},
+      {"resource": "/v1/pricing/journals/*/audit-extract", "methods": ["GET"]}
     ]},
     "product.configuration.read": {"service_only": true, "permissions": [{"resource": "/v1/product/saved-configurations/*", "methods": ["GET"]}]},
     "product.configure": {"permissions": [{"resource": "/v1/product/configuration-models/*:solve", "methods": ["POST"]}]},
