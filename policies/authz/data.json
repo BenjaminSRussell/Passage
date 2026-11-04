@@ -2922,7 +2922,9 @@
       {"resource": "/v1/sales/quotations/*:convert", "methods": ["POST"]},
       {"resource": "/v1/sales/quotations/*:lose", "methods": ["POST"]},
       {"resource": "/v1/sales/quotations/*:send", "methods": ["POST"]},
-      {"resource": "/v1/sales/quotations:expire", "methods": ["POST"]}
+      {"resource": "/v1/sales/quotations:expire", "methods": ["POST"]},
+      {"resource": "/v1/sales/quotations/*:cancel", "methods": ["POST"]},
+      {"resource": "/v1/sales/quotations/*", "methods": ["PATCH"]}
     ]},
     "scheduling.campaign.write": {"permissions": [
       {"resource": "/v1/scheduling/campaigns", "methods": ["POST"]},
