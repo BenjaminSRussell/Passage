@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -199,50 +198,6 @@ func TestPostgres_ConcurrentReservationsAgreeOnTargetIDsAndKeepHashes(t *testing
 	got, err := x.GetMany(ctx, "ax2012", "customer", []string{"C0"})
 	if err != nil || got["C0"].ContentHash != "loaded" {
 		t.Fatalf("reservation overwrote loaded hash: %+v, %v", got, err)
-	}
-}
-
-type generatedExtractor struct{ n int }
-
-func (e generatedExtractor) Extract(context.Context, string) ([]domain.Record, error) {
-	rows := make([]domain.Record, e.n)
-	for i := range rows {
-		id := fmt.Sprintf("I%07d", i)
-		rows[i] = domain.Record{Key: id, Fields: map[string]any{"id": id}}
-	}
-	return rows, nil
-}
-
-func TestPostgres_FullSizeLoadMeetsTimeBudgetAndRerunsUnchanged(t *testing.T) {
-	if testing.Short() {
-		t.Skip("full-size Postgres load skipped under -short")
-	}
-	const rows = 180_000
-	s := newStore(t)
-	ctx := principalContext(1)
-	mapping, err := domain.ParseMapping([]byte(`{"entity":"item","version":1,"fields":[{"source":"id","target":"sku","type":"string","required":true}]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	loader := domain.NewMemLoader()
-	n := 0
-	p := &domain.Pipeline{Extractor: generatedExtractor{rows}, Loader: loader, Reader: loader, Xref: s.Xref(), IDGen: func() string {
-		n++
-		return fmt.Sprintf("00000000-0000-7000-8000-%012d", n)
-	}}
-	run := domain.RunSpec{SourceSystem: "ax2012", Entity: "item", Mapping: mapping}
-
-	start := time.Now()
-	first, err := p.Run(ctx, run)
-	if err != nil || first.Status != domain.StatusSucceeded || first.Created != rows {
-		t.Fatalf("first run status=%s created=%d err=%v", first.Status, first.Created, err)
-	}
-	if elapsed := time.Since(start); elapsed >= 30*time.Minute {
-		t.Fatalf("load took %s", elapsed)
-	}
-	second, err := p.Run(ctx, run)
-	if err != nil || second.Unchanged != rows || second.Created != 0 || second.Updated != 0 {
-		t.Fatalf("rerun unchanged=%d created=%d updated=%d err=%v", second.Unchanged, second.Created, second.Updated, err)
 	}
 }
 

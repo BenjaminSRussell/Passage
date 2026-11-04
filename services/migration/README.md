@@ -4,6 +4,8 @@ Data migration framework for Passage (wave 10): the declarative mapping DSL, the
 
 Test: `go vet ./... && go test ./...` (`-short` skips the full-size 50k/20k/100k/10k load). Database tests need `PASSAGE_TEST_DATABASE_URL`, and the RLS test also `PASSAGE_TEST_APP_DATABASE_URL`.
 
+Wave 10 AC1 (issue #10, partial; the real batch-API loader is unmeasured, #475): `make ac1-load` loads 50k customers, 20k vendors, 100k items and 10k BOMs through the pipeline with the cross-reference in Postgres and the rows in the test table `ac1.target`, then reconciles the raw extract against a fresh read of that table (row counts, hash totals, sampled field compare) and re-runs for zero changes, in under 30 minutes, writing `internal/ac1load/testdata/ac1-reconciliation.{json,md}`. It needs `PASSAGE_TEST_DATABASE_URL` (schema owner) and `PASSAGE_TEST_APP_DATABASE_URL` (the non-superuser role the load runs as); with neither set the script starts a Postgres 16 container (`AC1_PG_PORT`, default 55442) holding the throwaway database `passage_ac1`. The command drops and re-creates the `migration` and `ac1` schemas, so it refuses any database that is not named `passage_ac1` and not empty, and takes the test advisory lock first. It never reads `DATABASE_URL`.
+
 ## API
 
 | Route | Duty | Result |

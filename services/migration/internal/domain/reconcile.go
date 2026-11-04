@@ -38,14 +38,14 @@ func (r ReconcileReport) OK() bool {
 func Reconcile(source, target []Record, sampleSize int, seed int64) ReconcileReport {
 	rep := ReconcileReport{Source: len(source), Target: len(target)}
 	rep.Checks = append(rep.Checks, Check{CheckRowCount, len(source) == len(target), fmt.Sprintf("source %d target %d", len(source), len(target))})
-	srcTotal, tgtTotal := hashTotal(source), hashTotal(target)
+	srcTotal, tgtTotal := HashTotal(source), HashTotal(target)
 	rep.Checks = append(rep.Checks, Check{CheckHashTotal, srcTotal == tgtTotal, "order-independent SHA-256 over key and content hash"})
 	mismatched := sampleMismatches(source, target, sampleSize, seed)
 	rep.Checks = append(rep.Checks, Check{CheckSampleCompare, len(mismatched) == 0, fmt.Sprintf("%d sampled keys differ", len(mismatched))})
 	return rep
 }
 
-func hashTotal(records []Record) string {
+func HashTotal(records []Record) string {
 	hashes := make([]string, len(records))
 	for i, r := range records {
 		hashes[i] = r.Key + "|" + ContentHash(r.Fields)
