@@ -76,7 +76,7 @@ func GetJSONSigned(ctx context.Context, client *http.Client, url string, out any
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
 		return ErrNotFound

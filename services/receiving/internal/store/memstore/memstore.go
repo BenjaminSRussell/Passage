@@ -372,7 +372,7 @@ func (s *Store) GetReceipt(ctx context.Context, id string) (out store.Receipt, e
 }
 
 func skipForCursor(at time.Time, id string, cursorAt time.Time, cursorID string) bool {
-	return !cursorAt.IsZero() && !at.Before(cursorAt) && !(at.Equal(cursorAt) && id < cursorID)
+	return !cursorAt.IsZero() && !at.Before(cursorAt) && (!at.Equal(cursorAt) || id >= cursorID)
 }
 
 func pageLimit(limit int) int {
@@ -577,7 +577,7 @@ func (s *Store) ReservePosting(ctx context.Context, p store.PendingPosting) (str
 	}
 	key := store.GenerationKey(p.BaseKey, generation)
 	for rowKey, row := range rows {
-		if !row.touches(p.Subjects) || !(row.open() || (rowKey == key && (row.Outcome == store.OutcomePosted || row.Outcome == store.OutcomeReversed))) {
+		if !row.touches(p.Subjects) || (!row.open() && (rowKey != key || (row.Outcome != store.OutcomePosted && row.Outcome != store.OutcomeReversed))) {
 			continue
 		}
 		if rowKey != key || row.Hash != p.Hash || row.claimedAt != nil || row.Outcome == store.OutcomeReversed {

@@ -35,7 +35,7 @@ func (c *commitFails) Post(ctx context.Context, id string, fn store.PostFunc) (s
 	if !c.failing {
 		return c.Store.Post(ctx, id, fn)
 	}
-	rec, err := c.Store.GetReceipt(ctx, id)
+	rec, err := c.GetReceipt(ctx, id)
 	if err != nil {
 		return store.Receipt{}, err
 	}
@@ -49,7 +49,7 @@ func (c *commitFails) Correct(ctx context.Context, id string, fn store.AdjustFun
 	if !c.failing {
 		return c.Store.Correct(ctx, id, fn)
 	}
-	rec, err := c.Store.GetReceipt(ctx, id)
+	rec, err := c.GetReceipt(ctx, id)
 	if err != nil {
 		return store.Receipt{}, err
 	}
@@ -63,7 +63,7 @@ func (c *commitFails) Cancel(ctx context.Context, id string, fn store.AdjustFunc
 	if !c.failing {
 		return c.Store.Cancel(ctx, id, fn)
 	}
-	rec, err := c.Store.GetReceipt(ctx, id)
+	rec, err := c.GetReceipt(ctx, id)
 	if err != nil {
 		return store.Receipt{}, err
 	}
@@ -77,7 +77,7 @@ func (c *commitFails) PostInvoice(ctx context.Context, in store.Invoice, fn stor
 	if !c.failing {
 		return c.Store.PostInvoice(ctx, in, fn)
 	}
-	page, err := c.Store.ListGrir(ctx, store.GrirFilter{})
+	page, err := c.ListGrir(ctx, store.GrirFilter{})
 	if err != nil {
 		return store.Invoice{}, err
 	}

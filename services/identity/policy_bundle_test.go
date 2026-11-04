@@ -10,7 +10,6 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -452,5 +451,5 @@ func TestSidecarConfigActivatesTheSignedBundle(t *testing.T) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	t.Fatal(fmt.Sprintf("sidecar never activated the signed bundle\n%s", logs.String()))
+	t.Fatalf("sidecar never activated the signed bundle\n%s", logs.String())
 }

@@ -134,7 +134,7 @@ func (c *HTTPProductClient) once(ctx context.Context, method, path, duty string,
 	if err != nil {
 		return 0, fmt.Errorf("product request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		detail, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorDetail))
 		err := fmt.Errorf("product responded with status %d: %s", resp.StatusCode, strings.TrimSpace(string(detail)))

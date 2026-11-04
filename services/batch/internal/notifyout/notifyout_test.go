@@ -313,13 +313,13 @@ func startFakeSMTP(t *testing.T, mode smtpMode, tlsConf *tls.Config) *fakeSMTP {
 		ln = tls.NewListener(ln, tlsConf)
 	}
 	f := &fakeSMTP{ln: ln, mode: mode, tlsConf: tlsConf}
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 	go func() {
 		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if mode == modeHang {
 			time.Sleep(5 * time.Second)
 			return
@@ -331,7 +331,7 @@ func startFakeSMTP(t *testing.T, mode smtpMode, tlsConf *tls.Config) *fakeSMTP {
 
 func (f *fakeSMTP) serve(conn net.Conn) {
 	r := bufio.NewReader(conn)
-	say := func(s string) { conn.Write([]byte(s + "\r\n")) }
+	say := func(s string) { _, _ = conn.Write([]byte(s + "\r\n")) }
 	say("220 fake ESMTP")
 	inData := false
 	var data strings.Builder
@@ -593,7 +593,7 @@ func TestSMTPSenderConnectionFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	host, portStr, _ := net.SplitHostPort(ln.Addr().String())
-	ln.Close()
+	_ = ln.Close()
 	port, _ := strconv.Atoi(portStr)
 	err = NewSMTPSender(SMTPConfig{Host: host, Port: port, User: "u", Password: "pw-secret", From: "a@b.test", TLS: TLSNone}).
 		Send(context.Background(), Message{To: "x@y.test"})

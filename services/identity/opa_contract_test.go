@@ -114,7 +114,8 @@ func startRealPolicy(t *testing.T) string {
 	go func() { exited <- cmd.Wait(); close(exited) }()
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
-		<-exited
+		for range exited { // wait for Wait; its error (the kill) is expected
+		}
 	})
 
 	base := "http://" + addr

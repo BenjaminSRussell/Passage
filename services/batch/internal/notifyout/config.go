@@ -156,7 +156,7 @@ func loadWebhook(src secretSource, allowInsecure bool) (*WebhookConfig, error) {
 	if err != nil || parsed.Host == "" {
 		return nil, errors.New("http notify adapter NOTIFY_WEBHOOK_URL is not a valid absolute url")
 	}
-	if parsed.Scheme != "https" && !(allowInsecure && parsed.Scheme == "http") {
+	if parsed.Scheme != "https" && (!allowInsecure || parsed.Scheme != "http") {
 		return nil, errors.New("http notify adapter NOTIFY_WEBHOOK_URL must use https (NOTIFY_ALLOW_INSECURE=true permits http for dev)")
 	}
 	return &WebhookConfig{URL: rawURL, Token: token}, nil

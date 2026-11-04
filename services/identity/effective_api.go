@@ -139,7 +139,7 @@ func (a *EffectivePermissionsAPI) get(w http.ResponseWriter, r *http.Request) {
 	grants := a.catalogue.Effective(duties)
 	permissions := make([]effectivePermission, len(grants))
 	for i, g := range grants {
-		permissions[i] = effectivePermission{Resource: g.Resource, Method: g.Method, Allow: g.Allow, Duty: g.Duty, DutyMissing: g.DutyMissing}
+		permissions[i] = effectivePermission(g)
 	}
 	httpx.JSON(w, http.StatusOK, effectivePermissionsResponse{
 		UserID: userID, LegalEntityID: legalEntityID,
