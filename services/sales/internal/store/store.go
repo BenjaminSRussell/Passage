@@ -308,6 +308,8 @@ type Store interface {
 	GetQuotation(ctx context.Context, id string) (Quotation, error)
 	SendQuotation(ctx context.Context, id string, version int, now time.Time) (Quotation, error)
 	LoseQuotation(ctx context.Context, id string, version int, reason string) (Quotation, error)
+	CancelQuotation(ctx context.Context, id string, version int, reason, actor string) (Quotation, error)
+	ChangeQuotation(ctx context.Context, id string, in QuotationChange, now time.Time) (Quotation, error)
 	ConvertQuotation(ctx context.Context, id string, in ConvertRequest, now time.Time) (QuotationConversion, error)
 	ExpireQuotations(ctx context.Context, legalEntityID string, today time.Time, actor string) (ExpireResult, error)
 	Summary(ctx context.Context, f SummaryFilter) (Summary, error)

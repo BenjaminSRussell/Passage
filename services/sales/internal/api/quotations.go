@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
@@ -244,7 +245,7 @@ func (a *API) loseQuotation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		reason := strings.TrimSpace(req.Reason)
-		if n := len(reason); n == 0 || n > maxLostReason {
+		if n := utf8.RuneCountInString(reason); n == 0 || n > maxLostReason {
 			validationFailed(w, r, map[string]string{"reason": fmt.Sprintf("must be 1 to %d characters", maxLostReason)})
 			return
 		}
@@ -300,5 +301,122 @@ func (a *API) convertQuotation(w http.ResponseWriter, r *http.Request) {
 		a.created.Add(1)
 		setETag(w, res.Quotation.Version)
 		httpx.JSON(w, http.StatusCreated, res)
+	})(w, r)
+}
+
+// changeQuotationRequest is the body of PATCH /v1/sales/quotations/{id}. Absent
+// fields stay as they are; lines, when present, replaces the whole line set of
+// a DRAFT quotation (renumbered from 1).
+type changeQuotationRequest struct {
+	ValidUntil     *string             `json:"validUntil,omitempty"`
+	ProbabilityPct *int                `json:"probabilityPct,omitempty"`
+	Lines          *[]orderLineRequest `json:"lines,omitempty"`
+}
+
+// cancelQuotationRequest records why a quotation was cancelled.
+type cancelQuotationRequest struct {
+	Reason string `json:"reason"`
+}
+
+// buildQuotationChange validates a quotation PATCH. Field errors are keyed by
+// JSON path, as for creation.
+func buildQuotationChange(req changeQuotationRequest, version int, today time.Time) (store.QuotationChange, map[string]string) {
+	f := map[string]string{}
+	in := store.QuotationChange{Version: version, ProbabilityPct: req.ProbabilityPct}
+	if req.ValidUntil == nil && req.ProbabilityPct == nil && req.Lines == nil {
+		f["body"] = "must change validUntil, probabilityPct or lines"
+	}
+	if req.ValidUntil != nil {
+		day, err := time.Parse(dayLayout, *req.ValidUntil)
+		switch {
+		case err != nil:
+			f["validUntil"] = "must be a date such as 2027-03-04"
+		case day.Before(domain.DayOf(today)):
+			f["validUntil"] = "must not be before today"
+		case day.After(domain.QuotationValidUntil(today, domain.MaxQuotationExpiryDays)):
+			f["validUntil"] = fmt.Sprintf("must be at most %d days from today", domain.MaxQuotationExpiryDays)
+		default:
+			in.ValidUntil = &day
+		}
+	}
+	if req.ProbabilityPct != nil {
+		if err := domain.ValidateProbability(*req.ProbabilityPct); err != nil {
+			f["probabilityPct"] = err.Error()
+		}
+	}
+	if req.Lines != nil {
+		lines := *req.Lines
+		if len(lines) == 0 || len(lines) > maxLines {
+			f["lines"] = fmt.Sprintf("must have 1 to %d lines", maxLines)
+		}
+		in.Lines = []store.Line{}
+		for i, l := range lines {
+			path := func(name string) string { return fmt.Sprintf("lines[%d].%s", i, name) }
+			if l.DeliveryDateControl != nil {
+				f[path("deliveryDateControl")] = "a quotation line has no delivery date control; set it on the order line"
+			}
+			if line, ok := buildLine(i, l, f, path); ok {
+				in.Lines = append(in.Lines, line)
+			}
+		}
+	}
+	return in, f
+}
+
+// changeQuotation changes a DRAFT or SENT quotation's validity or probability,
+// and a DRAFT quotation's lines. If-Match carries the version.
+func (a *API) changeQuotation(w http.ResponseWriter, r *http.Request) {
+	quotationRoute(func(w http.ResponseWriter, r *http.Request, id string) {
+		version, ok := ifMatch(w, r)
+		if !ok {
+			return
+		}
+		var req changeQuotationRequest
+		if err := httpx.Decode(r, &req); err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		in, fields := buildQuotationChange(req, version, a.now())
+		if len(fields) > 0 {
+			validationFailed(w, r, fields)
+			return
+		}
+		p, _ := tenant.FromContext(r.Context())
+		in.Actor = p.UserID
+		q, err := a.store.ChangeQuotation(r.Context(), id, in, a.now())
+		if err != nil {
+			a.fail(w, r, "change quotation", err)
+			return
+		}
+		setETag(w, q.Version)
+		httpx.JSON(w, http.StatusOK, q)
+	})(w, r)
+}
+
+// cancelQuotation moves a DRAFT or SENT quotation to CANCELLED with a reason.
+func (a *API) cancelQuotation(w http.ResponseWriter, r *http.Request) {
+	quotationRoute(func(w http.ResponseWriter, r *http.Request, id string) {
+		version, ok := ifMatch(w, r)
+		if !ok {
+			return
+		}
+		var req cancelQuotationRequest
+		if err := httpx.Decode(r, &req); err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		reason := strings.TrimSpace(req.Reason)
+		if n := utf8.RuneCountInString(reason); n == 0 || n > maxLostReason {
+			validationFailed(w, r, map[string]string{"reason": fmt.Sprintf("must be 1 to %d characters", maxLostReason)})
+			return
+		}
+		p, _ := tenant.FromContext(r.Context())
+		q, err := a.store.CancelQuotation(r.Context(), id, version, reason, p.UserID)
+		if err != nil {
+			a.fail(w, r, "cancel quotation", err)
+			return
+		}
+		setETag(w, q.Version)
+		httpx.JSON(w, http.StatusOK, q)
 	})(w, r)
 }

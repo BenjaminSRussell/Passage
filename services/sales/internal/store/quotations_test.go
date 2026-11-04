@@ -319,3 +319,108 @@ func TestPostgres_HoldQueueListsActiveCreditHolds(t *testing.T) {
 		t.Fatalf("a released hold must leave the queue: %v %+v", err, after)
 	}
 }
+
+// TestPostgres_QuotationChangeAndCancel covers the quotation maintenance of
+// FR-27.1 and BR-27.5: a DRAFT quotation takes a new line set, validity and
+// probability; a SENT one takes only validity and probability; CANCELLED needs
+// a reason and ends the quotation; each change writes its event with the
+// version.
+func TestPostgres_QuotationChangeAndCancel(t *testing.T) {
+	s, pool, ctx := migrated(t)
+	le, customer := ids.New(), ids.New()
+	in := threeLineQuotation(le, customer, "quote-change")
+	q, _, err := s.CreateQuotation(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2027, 3, 2, 9, 0, 0, 0, time.UTC)
+	site, wh := ids.New(), ids.New()
+	newLines := []Line{
+		{LineNo: 1, ProductID: ids.New(), Quantity: d(5), Unit: "EA", SiteID: site, WarehouseID: wh, UnitPrice: d(8), DiscPct: d(0), LineNet: d(40), RequestedShipDate: "2027-03-20"},
+		{LineNo: 2, ProductID: ids.New(), Quantity: d(1), Unit: "EA", SiteID: site, WarehouseID: wh, UnitPrice: d(7), DiscPct: d(0), LineNet: d(7), RequestedShipDate: "2027-03-21"},
+	}
+	if _, err := s.ChangeQuotation(ctx, q.ID, QuotationChange{Version: 9, Lines: newLines, Actor: "rep"}, now); problemCode(t, err) != CodeVersionConflict {
+		t.Fatalf("stale change must conflict: %v", err)
+	}
+	until, prob := time.Date(2027, 4, 15, 0, 0, 0, 0, time.UTC), 85
+	changed, err := s.ChangeQuotation(ctx, q.ID, QuotationChange{Version: q.Version, ValidUntil: &until, ProbabilityPct: &prob, Lines: newLines, Actor: "rep"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed.Version != 2 || changed.ValidUntil != "2027-04-15" || changed.ProbabilityPct != 85 || changed.LineCount != 2 ||
+		!changed.NetTotal.Equal(d(47)) || changed.Lines[0].ProductID != newLines[0].ProductID || changed.Lines[1].LineNo != 2 {
+		t.Fatalf("after change: %+v", changed)
+	}
+	var evt salesevents.QuotationChangedData
+	if err := json.Unmarshal(outboxData(t, pool, q.ID, salesevents.QuotationChanged), &evt); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(evt.Changed, []string{"valid_until", "probability_pct", "lines"}) || evt.Version != 2 || evt.NetTotal != "47" ||
+		evt.LineCount != 2 || evt.Actor != "rep" || evt.Status != domain.QuoteDraft || evt.ValidUntil != "2027-04-15" {
+		t.Fatalf("event %+v", evt)
+	}
+
+	sent, err := s.SendQuotation(ctx, q.ID, changed.Version, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ChangeQuotation(ctx, q.ID, QuotationChange{Version: sent.Version, Lines: newLines, Actor: "rep"}, now); problemCode(t, err) != CodeQuotationState {
+		t.Fatalf("a SENT quotation takes no new lines: %v", err)
+	}
+	later := time.Date(2027, 5, 1, 0, 0, 0, 0, time.UTC)
+	ext, err := s.ChangeQuotation(ctx, q.ID, QuotationChange{Version: sent.Version, ValidUntil: &later, Actor: "rep"}, now)
+	if err != nil || ext.ValidUntil != "2027-05-01" || ext.Status != domain.QuoteSent || ext.LineCount != 2 || !ext.NetTotal.Equal(d(47)) {
+		t.Fatalf("extend a sent quotation: %v %+v", err, ext)
+	}
+	if _, err := s.ChangeQuotation(ctx, q.ID, QuotationChange{Version: ext.Version, ProbabilityPct: &prob, Actor: "rep"},
+		time.Date(2027, 5, 2, 0, 0, 0, 0, time.UTC)); problemCode(t, err) != CodeQuotationExpired {
+		t.Fatalf("a lapsed quotation cannot be changed: %v", err)
+	}
+
+	if _, err := s.CancelQuotation(ctx, q.ID, 99, "customer withdrew", "rep"); problemCode(t, err) != CodeVersionConflict {
+		t.Fatalf("stale cancel must conflict: %v", err)
+	}
+	gone, err := s.CancelQuotation(ctx, q.ID, ext.Version, "customer withdrew", "rep")
+	if err != nil || gone.Status != domain.QuoteCancelled || gone.CancelReason == nil || *gone.CancelReason != "customer withdrew" || gone.Version != ext.Version+1 {
+		t.Fatalf("cancel: %v %+v", err, gone)
+	}
+	var cancelled salesevents.QuotationCancelledData
+	if err := json.Unmarshal(outboxData(t, pool, q.ID, salesevents.QuotationCancelled), &cancelled); err != nil {
+		t.Fatal(err)
+	}
+	if cancelled.PreviousStatus != domain.QuoteSent || cancelled.Reason != "customer withdrew" || cancelled.Version != gone.Version ||
+		cancelled.NetTotal != "47" || cancelled.Actor != "rep" || cancelled.LegalEntityID != le {
+		t.Fatalf("event %+v", cancelled)
+	}
+	for name, err := range map[string]error{
+		"cancel again": func() error { _, e := s.CancelQuotation(ctx, q.ID, gone.Version, "again", "rep"); return e }(),
+		"send":         func() error { _, e := s.SendQuotation(ctx, q.ID, gone.Version, now); return e }(),
+		"lose":         func() error { _, e := s.LoseQuotation(ctx, q.ID, gone.Version, "x"); return e }(),
+		"change": func() error {
+			_, e := s.ChangeQuotation(ctx, q.ID, QuotationChange{Version: gone.Version, ProbabilityPct: &prob}, now)
+			return e
+		}(),
+		"convert": func() error {
+			_, e := s.ConvertQuotation(ctx, q.ID, ConvertRequest{Version: gone.Version}, now)
+			return e
+		}(),
+	} {
+		if problemCode(t, err) != CodeQuotationState {
+			t.Errorf("%s on a CANCELLED quotation: %v", name, err)
+		}
+	}
+
+	// A converted quotation keeps its orders and cannot be cancelled.
+	conv, _, err := s.CreateQuotation(ctx, threeLineQuotation(le, customer, "quote-change-2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, _ := s.SendQuotation(ctx, conv.ID, conv.Version, now)
+	res, err := s.ConvertQuotation(ctx, conv.ID, ConvertRequest{Version: cs.Version, LineNos: []int{1}, Actor: "rep"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CancelQuotation(ctx, conv.ID, res.Quotation.Version, "too late", "rep"); problemCode(t, err) != CodeQuotationState {
+		t.Fatalf("a converted quotation must not be cancelled: %v", err)
+	}
+}

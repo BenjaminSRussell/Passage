@@ -22,6 +22,8 @@ var (
 	AgreementReturned    = events.Type(Context, "agreement", "returned", 1)
 	QuotationConverted   = events.Type(Context, "quotation", "converted", 1)
 	QuotationExpired     = events.Type(Context, "quotation", "expired", 1)
+	QuotationChanged     = events.Type(Context, "quotation", "changed", 1)
+	QuotationCancelled   = events.Type(Context, "quotation", "cancelled", 1)
 	AllocationQuotaSet   = events.Type(Context, "allocationquota", "created", 1)
 	AllocationQuotaMoved = events.Type(Context, "allocationquota", "changed", 1)
 	AllocationConsumed   = events.Type(Context, "allocation", "consumed", 1)
@@ -62,7 +64,7 @@ var (
 func All() []string {
 	return []string{OrderConfirmed, OrderHoldApplied, OrderHoldReleased, OrderHoldRejected, CreditCheckEvaluated, OrderChanged, OrderCancelled, AgreementReleased,
 		AgreementChanged, AgreementClosed, AgreementReturned,
-		QuotationConverted, QuotationExpired, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
+		QuotationConverted, QuotationExpired, QuotationChanged, QuotationCancelled, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
 		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted, ParametersChanged, IntakeErrorRecorded, IntakeErrorResolved,
 		OrderChangeRequested, OrderChangeApproved, OrderChangeRejected, OrderChangeWithdrawn, ChangePolicyChanged,
 		DeliveryTermsCreated, DeliveryTermsChanged, OrderProgressRecorded, OrderRemainderCancelled, OrderClosed,
@@ -144,6 +146,41 @@ type QuotationConvertedData struct {
 	OrderID         string `json:"order_id"`
 	OrderNumber     string `json:"order_number"`
 	Lines           []int  `json:"lines"`
+	Actor           string `json:"actor"`
+	Version         int    `json:"version"`
+}
+
+// QuotationChangedData is the data member of quotation.changed.v1: a DRAFT or
+// SENT quotation took a new validity, probability or line set (FR-27.1).
+// changed names what the call changed (valid_until, probability_pct, lines);
+// net_total is a decimal string in currency.
+type QuotationChangedData struct {
+	QuotationID     string   `json:"quotation_id"`
+	QuotationNumber string   `json:"quotation_number"`
+	LegalEntityID   string   `json:"legal_entity_id"`
+	CustomerID      string   `json:"customer_id"`
+	Status          string   `json:"status"`
+	Changed         []string `json:"changed"`
+	ValidUntil      string   `json:"valid_until"`
+	ProbabilityPct  int      `json:"probability_pct"`
+	LineCount       int      `json:"line_count"`
+	NetTotal        string   `json:"net_total"`
+	Currency        string   `json:"currency"`
+	Actor           string   `json:"actor"`
+	Version         int      `json:"version"`
+}
+
+// QuotationCancelledData is the data member of quotation.cancelled.v1: a DRAFT
+// or SENT quotation was withdrawn by a user, with the reason (FR-27.1).
+type QuotationCancelledData struct {
+	QuotationID     string `json:"quotation_id"`
+	QuotationNumber string `json:"quotation_number"`
+	LegalEntityID   string `json:"legal_entity_id"`
+	CustomerID      string `json:"customer_id"`
+	PreviousStatus  string `json:"previous_status"`
+	Reason          string `json:"reason"`
+	NetTotal        string `json:"net_total"`
+	Currency        string `json:"currency"`
 	Actor           string `json:"actor"`
 	Version         int    `json:"version"`
 }

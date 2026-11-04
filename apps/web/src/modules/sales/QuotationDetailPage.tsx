@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, DataTable, EmptyState, FormField,
 import { convertQuotation, describeProblem, getQuotation, loseQuotation, sendQuotation, type Order, type Problem, type QuotationLine } from "./api/client";
 import { formatDateTime, money, supplementaryNote } from "./format";
 import styles from "./pages.module.css";
+import { QuotationMaintenance } from "./QuotationMaintenance";
 import { isExpired, QuotationStatusBadge } from "./QuotationsPage";
 import { useLoad } from "./useLoad";
 
@@ -166,6 +167,7 @@ export function QuotationDetailPage() {
     ["Open lines", `${quotation.openLines} of ${quotation.lineCount}`],
     ["Created", `${formatDateTime(quotation.createdAt)} by ${quotation.createdBy}`],
     ...(quotation.lostReason ? ([["Lost because", quotation.lostReason]] as [string, ReactNode][]) : []),
+    ...(quotation.cancelReason ? ([["Cancelled because", quotation.cancelReason]] as [string, ReactNode][]) : []),
   ];
   const mono = new Set(["Customer", "Invoice account", "Legal entity"]);
 
@@ -258,6 +260,7 @@ export function QuotationDetailPage() {
           </form>
         </Card>
       ) : null}
+      {losable && !expired ? <QuotationMaintenance key={quotation.id} quotation={quotation} etag={etag} onDone={(text) => { setOutcome({ tone: "success", text }); state.reload(); }} onConflict={state.reload} /> : null}
     </div>
   );
 }

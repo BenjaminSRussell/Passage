@@ -818,6 +818,8 @@ export interface Quotation {
   probabilityPct: number;
   netTotal: Decimal;
   lostReason?: string;
+  /** Why a CANCELLED quotation was cancelled. */
+  cancelReason?: string;
   version: number;
   createdBy: string;
   createdAt: string;
@@ -836,6 +838,13 @@ export interface NewQuotation {
   validUntil?: string;
   probabilityPct?: number;
   lines: NewOrderLine[];
+}
+
+/** A quotation change: absent fields stay; lines (DRAFT only) replaces the whole line set. */
+export interface ChangeQuotationInput {
+  validUntil?: string;
+  probabilityPct?: number;
+  lines?: NewOrderLine[];
 }
 
 export interface QuotationFilter {
@@ -882,6 +891,16 @@ export function sendQuotation(id: string, etag: string): Promise<Versioned<Quota
 /** Marks a DRAFT or SENT quotation LOST with a reason. */
 export function loseQuotation(id: string, etag: string, reason: string): Promise<Versioned<Quotation>> {
   return versioned<Quotation>(`/quotations/${encodeURIComponent(id)}:lose`, { method: "POST", body: JSON.stringify({ reason }), headers: { "If-Match": etag } });
+}
+
+/** Changes the validity or probability of a DRAFT or SENT quotation, and the lines of a DRAFT one (FR-27.1). */
+export function changeQuotation(id: string, etag: string, input: ChangeQuotationInput): Promise<Versioned<Quotation>> {
+  return versioned<Quotation>(`/quotations/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(input), headers: { "If-Match": etag } });
+}
+
+/** Cancels a DRAFT or SENT quotation with a reason (BR-27.5). */
+export function cancelQuotation(id: string, etag: string, reason: string): Promise<Versioned<Quotation>> {
+  return versioned<Quotation>(`/quotations/${encodeURIComponent(id)}:cancel`, { method: "POST", body: JSON.stringify({ reason }), headers: { "If-Match": etag } });
 }
 
 /** Converts the selected open lines (all when none are given) into one DRAFT order (AC-27.6). */
