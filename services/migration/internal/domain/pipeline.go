@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sort"
 	"strings"
 )
@@ -650,6 +651,7 @@ func (m *MemLoader) LoadBatch(_ context.Context, _ string, items []LoadItem) ([]
 			results[i].Code = code
 			continue
 		}
+		it.Fields = maps.Clone(it.Fields)
 		m.Rows[it.TargetID] = it
 	}
 	return results, nil
@@ -658,7 +660,7 @@ func (m *MemLoader) LoadBatch(_ context.Context, _ string, items []LoadItem) ([]
 func (m *MemLoader) Read(_ context.Context, _ string) ([]Record, error) {
 	out := make([]Record, 0, len(m.Rows))
 	for _, it := range m.Rows {
-		out = append(out, Record{it.SourceKey, it.Fields})
+		out = append(out, Record{it.SourceKey, maps.Clone(it.Fields)})
 	}
 	return out, nil
 }

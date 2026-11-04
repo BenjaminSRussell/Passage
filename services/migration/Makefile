@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 .PHONY: ac1-load vet test test-ac1
 
-# Seeded 50k/20k/100k/10k load against Postgres (starts Docker if DATABASE_URL is unset).
+# Seeded 50k/20k/100k/10k load against Postgres (starts Docker if the two PASSAGE_TEST_*DATABASE_URL variables are unset).
 ac1-load:
 	./scripts/ac1-load.sh
 

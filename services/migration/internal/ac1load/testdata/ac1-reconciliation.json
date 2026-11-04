@@ -2,9 +2,15 @@
   "criterion": "AC1",
   "issue": 10,
   "budget": "30m0s",
-  "elapsed": "12.458680717s",
-  "elapsedMs": 12458,
+  "elapsed": "1m54.737256667s",
+  "elapsedMs": 114737,
   "ok": true,
+  "env": {
+    "commit": "a119fa119f6e39cd995eefcbfe5bb228538e21a5 (base; report generated before the fix commit)",
+    "host": "Zacharys-MacBook-Pro",
+    "dbVersion": "PostgreSQL 16.15 (Homebrew) on aarch64-apple-darwin27.0.0, compiled by Apple clang version 21.0.0 (clang-2100.3.34.2), 64-bit",
+    "dbRole": "passage_app"
+  },
   "volumes": {
     "customers": 50000,
     "vendors": 20000,
@@ -14,8 +20,8 @@
   "entities": [
     {
       "entity": "customer",
-      "elapsed": "3.336143156s",
-      "elapsedMs": 3336,
+      "elapsed": "20.00144825s",
+      "elapsedMs": 20001,
       "extracted": 50000,
       "created": 50000,
       "updated": 0,
@@ -43,14 +49,16 @@
           }
         ]
       },
+      "sourceHashTotal": "d26807c380db0dde3939580b6ea0f81c93ea8644d822739776cb3c9a26a8c5c8",
+      "targetHashTotal": "d26807c380db0dde3939580b6ea0f81c93ea8644d822739776cb3c9a26a8c5c8",
       "rerunCreated": 0,
       "rerunUpdated": 0,
       "rerunUnchanged": 50000
     },
     {
       "entity": "vendor",
-      "elapsed": "1.105919901s",
-      "elapsedMs": 1105,
+      "elapsed": "3.109016792s",
+      "elapsedMs": 3109,
       "extracted": 20000,
       "created": 20000,
       "updated": 0,
@@ -78,14 +86,16 @@
           }
         ]
       },
+      "sourceHashTotal": "fbf90d20f689ccfcc7528c124a0dc728b55f7a023f334b72a162b2a8d50a6059",
+      "targetHashTotal": "fbf90d20f689ccfcc7528c124a0dc728b55f7a023f334b72a162b2a8d50a6059",
       "rerunCreated": 0,
       "rerunUpdated": 0,
       "rerunUnchanged": 20000
     },
     {
       "entity": "item",
-      "elapsed": "5.530187898s",
-      "elapsedMs": 5530,
+      "elapsed": "17.625153042s",
+      "elapsedMs": 17625,
       "extracted": 100000,
       "created": 100000,
       "updated": 0,
@@ -113,14 +123,16 @@
           }
         ]
       },
+      "sourceHashTotal": "8f97f176cfa9f6af215d680a645215cbc1c2cb1d3c34b81052dc1e2ce6cf8d4a",
+      "targetHashTotal": "8f97f176cfa9f6af215d680a645215cbc1c2cb1d3c34b81052dc1e2ce6cf8d4a",
       "rerunCreated": 0,
       "rerunUpdated": 0,
       "rerunUnchanged": 100000
     },
     {
       "entity": "bom",
-      "elapsed": "594.280903ms",
-      "elapsedMs": 594,
+      "elapsed": "2.189338334s",
+      "elapsedMs": 2189,
       "extracted": 10000,
       "created": 10000,
       "updated": 0,
@@ -148,6 +160,8 @@
           }
         ]
       },
+      "sourceHashTotal": "53b29cae4df4fefb168b7785d764b4683955052d2d5fa80a7ced53d33e2b7d04",
+      "targetHashTotal": "53b29cae4df4fefb168b7785d764b4683955052d2d5fa80a7ced53d33e2b7d04",
       "rerunCreated": 0,
       "rerunUpdated": 0,
       "rerunUnchanged": 10000

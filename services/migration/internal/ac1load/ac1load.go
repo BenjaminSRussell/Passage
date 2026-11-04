@@ -1,7 +1,6 @@
 // Package ac1load is the Wave 10 AC1 seeded load: 50k customers, 20k vendors, 100k items
-// and 10k BOMs through the extract-map-validate-load-reconcile pipeline, with the
-// cross-reference in Postgres (or any XrefStore) and an in-process target so the run
-// can reconcile without the owning services' batch APIs.
+// and 10k BOMs through the extract-map-validate-load pipeline into a Target, then a
+// reconciliation of the raw extract against a fresh read of that Target.
 package ac1load
 
 import (
@@ -14,8 +13,10 @@ import (
 )
 
 const (
-	SourceSystem = "ax2012"
-	Budget       = 30 * time.Minute
+	SourceSystem    = "ax2012"
+	Budget          = 30 * time.Minute
+	reconcileSample = 100
+	reconcileSeed   = 1
 )
 
 // FullSize is the AC1 volume in issue #10.
@@ -44,10 +45,17 @@ func (v Volumes) Count(entity string) int {
 	return 0
 }
 
+type Target interface {
+	domain.TargetLoader
+	domain.TargetReader
+}
+
 type EntityResult struct {
-	Entity  string
-	Elapsed time.Duration
-	Report  domain.Report
+	Entity     string
+	Elapsed    time.Duration
+	Report     domain.Report
+	SourceHash string
+	TargetHash string
 }
 
 type Result struct {
@@ -159,10 +167,23 @@ func idGen() func() string {
 	}
 }
 
-// Run loads every AC1 entity through the pipeline, then re-runs the same extract.
-// Loader and reader are in-process (MemLoader) so reconciliation can compare mapped
-// output to the target; xref is the caller's store (Postgres in the measured proof).
-func Run(ctx context.Context, xref domain.XrefStore, vols Volumes) (Result, error) {
+func Reconcile(ctx context.Context, entity string, m domain.Mapping, extract []domain.Record, target domain.TargetReader) (domain.ReconcileReport, string, string, error) {
+	source := make([]domain.Record, 0, len(extract))
+	for _, r := range extract {
+		out, _, rejects, _ := m.ApplyTemplate(r.Fields, nil)
+		if len(rejects) == 0 {
+			source = append(source, domain.Record{Key: r.Key, Fields: out})
+		}
+	}
+	read, err := target.Read(ctx, entity)
+	if err != nil {
+		return domain.ReconcileReport{}, "", "", fmt.Errorf("read target %s: %w", entity, err)
+	}
+	rep := domain.Reconcile(source, read, reconcileSample, reconcileSeed)
+	return rep, domain.HashTotal(source), domain.HashTotal(read), nil
+}
+
+func Run(ctx context.Context, xref domain.XrefStore, target Target, vols Volumes) (Result, error) {
 	res := Result{Volumes: vols, Rerun: map[string]domain.Report{}}
 	rows := Dataset(vols)
 	ids := idGen()
@@ -172,15 +193,19 @@ func Run(ctx context.Context, xref domain.XrefStore, vols Volumes) (Result, erro
 		if err != nil {
 			return res, err
 		}
-		loader := domain.NewMemLoader()
-		p := &domain.Pipeline{Extractor: recordsExtractor{rows[entity]}, Loader: loader, Reader: loader, Xref: xref, IDGen: ids}
+		p := &domain.Pipeline{Extractor: recordsExtractor{rows[entity]}, Loader: target, Xref: xref, IDGen: ids}
 		spec := domain.RunSpec{SourceSystem: SourceSystem, Entity: entity, Mapping: m}
 		began := time.Now()
 		rep, err := p.Run(ctx, spec)
 		if err != nil {
 			return res, fmt.Errorf("%s: %w", entity, err)
 		}
-		res.Entities = append(res.Entities, EntityResult{Entity: entity, Elapsed: time.Since(began), Report: rep})
+		recon, srcHash, tgtHash, err := Reconcile(ctx, entity, m, rows[entity], target)
+		if err != nil {
+			return res, err
+		}
+		rep.Reconciliation = &recon
+		res.Entities = append(res.Entities, EntityResult{Entity: entity, Elapsed: time.Since(began), Report: rep, SourceHash: srcHash, TargetHash: tgtHash})
 		again, err := p.Run(ctx, spec)
 		if err != nil {
 			return res, fmt.Errorf("%s re-run: %w", entity, err)
@@ -202,9 +227,18 @@ type EntityDoc struct {
 	Rejected       int                     `json:"rejected"`
 	Status         string                  `json:"status"`
 	Reconciliation *domain.ReconcileReport `json:"reconciliation"`
+	SourceHash     string                  `json:"sourceHashTotal"`
+	TargetHash     string                  `json:"targetHashTotal"`
 	RerunCreated   int                     `json:"rerunCreated"`
 	RerunUpdated   int                     `json:"rerunUpdated"`
 	RerunUnchanged int                     `json:"rerunUnchanged"`
+}
+
+type Env struct {
+	Commit    string `json:"commit"`
+	Host      string `json:"host"`
+	DBVersion string `json:"dbVersion"`
+	DBRole    string `json:"dbRole"`
 }
 
 type Doc struct {
@@ -214,11 +248,12 @@ type Doc struct {
 	Elapsed   string      `json:"elapsed"`
 	ElapsedMs int64       `json:"elapsedMs"`
 	OK        bool        `json:"ok"`
+	Env       Env         `json:"env"`
 	Volumes   Volumes     `json:"volumes"`
 	Entities  []EntityDoc `json:"entities"`
 }
 
-func Document(r Result) Doc {
+func Document(r Result, env Env) Doc {
 	doc := Doc{
 		Criterion: "AC1",
 		Issue:     10,
@@ -226,6 +261,7 @@ func Document(r Result) Doc {
 		Elapsed:   r.Elapsed.String(),
 		ElapsedMs: r.Elapsed.Milliseconds(),
 		OK:        r.OK(),
+		Env:       env,
 		Volumes:   r.Volumes,
 	}
 	for _, e := range r.Entities {
@@ -234,8 +270,8 @@ func Document(r Result) Doc {
 			Entity: e.Entity, Elapsed: e.Elapsed.String(), ElapsedMs: e.Elapsed.Milliseconds(),
 			Extracted: e.Report.Extracted, Created: e.Report.Created, Updated: e.Report.Updated,
 			Unchanged: e.Report.Unchanged, Rejected: len(e.Report.Rejects), Status: e.Report.Status,
-			Reconciliation: e.Report.Reconciliation,
-			RerunCreated:   again.Created, RerunUpdated: again.Updated, RerunUnchanged: again.Unchanged,
+			Reconciliation: e.Report.Reconciliation, SourceHash: e.SourceHash, TargetHash: e.TargetHash,
+			RerunCreated: again.Created, RerunUpdated: again.Updated, RerunUnchanged: again.Unchanged,
 		})
 	}
 	return doc
@@ -244,19 +280,22 @@ func Document(r Result) Doc {
 func Markdown(d Doc) string {
 	var b strings.Builder
 	b.WriteString("# Wave 10 AC1 reconciliation\n\n")
-	b.WriteString("Seeded AX-shaped load of 50k customers, 20k vendors, 100k items and 10k BOMs ")
-	b.WriteString("through the migration pipeline. Persistence is Postgres `migration.xref`; ")
-	b.WriteString("the target is the in-process `MemLoader` (owning-service batch APIs are a later slice).\n\n")
+	b.WriteString("Seeded load of 50k customers, 20k vendors, 100k items and 10k BOMs ")
+	b.WriteString("through the migration pipeline. The cross-reference is Postgres `migration.xref`; ")
+	b.WriteString("the target is the test table `ac1.target` (not the party/product batch APIs, which are unmeasured: #475). ")
+	b.WriteString("Reconciliation compares the raw extract, mapped independently, with a fresh read of `ac1.target`.\n\n")
 	if d.OK {
 		b.WriteString("**Result: PASS**\n\n")
 	} else {
 		b.WriteString("**Result: FAIL**\n\n")
 	}
+	fmt.Fprintf(&b, "- Commit: %s, host: %s, database: %s, role: %s\n", d.Env.Commit, d.Env.Host, d.Env.DBVersion, d.Env.DBRole)
 	fmt.Fprintf(&b, "- Elapsed: %s (budget %s)\n", d.Elapsed, d.Budget)
 	fmt.Fprintf(&b, "- Volumes: customers %d, vendors %d, items %d, boms %d\n\n", d.Volumes.Customers, d.Volumes.Vendors, d.Volumes.Items, d.Volumes.BOMs)
 	for _, e := range d.Entities {
 		fmt.Fprintf(&b, "## %s\n\n", e.Entity)
 		fmt.Fprintf(&b, "- status %s extracted %d created %d updated %d rejected %d in %s\n", e.Status, e.Extracted, e.Created, e.Updated, e.Rejected, e.Elapsed)
+		fmt.Fprintf(&b, "- hash total: source %s target %s\n", e.SourceHash, e.TargetHash)
 		if e.Reconciliation != nil {
 			if e.Reconciliation.OK() {
 				b.WriteString("- reconciliation: OK\n")

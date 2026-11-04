@@ -1,15 +1,17 @@
 # Wave 10 AC1 reconciliation
 
-Seeded AX-shaped load of 50k customers, 20k vendors, 100k items and 10k BOMs through the migration pipeline. Persistence is Postgres `migration.xref`; the target is the in-process `MemLoader` (owning-service batch APIs are a later slice).
+Seeded load of 50k customers, 20k vendors, 100k items and 10k BOMs through the migration pipeline. The cross-reference is Postgres `migration.xref`; the target is the test table `ac1.target` (not the party/product batch APIs, which are unmeasured: #475). Reconciliation compares the raw extract, mapped independently, with a fresh read of `ac1.target`.
 
 **Result: PASS**
 
-- Elapsed: 12.458680717s (budget 30m0s)
+- Commit: a119fa119f6e39cd995eefcbfe5bb228538e21a5 (base; report generated before the fix commit), host: Zacharys-MacBook-Pro, database: PostgreSQL 16.15 (Homebrew) on aarch64-apple-darwin27.0.0, compiled by Apple clang version 21.0.0 (clang-2100.3.34.2), 64-bit, role: passage_app
+- Elapsed: 1m54.737256667s (budget 30m0s)
 - Volumes: customers 50000, vendors 20000, items 100000, boms 10000
 
 ## customer
 
-- status succeeded extracted 50000 created 50000 updated 0 rejected 0 in 3.336143156s
+- status succeeded extracted 50000 created 50000 updated 0 rejected 0 in 20.00144825s
+- hash total: source d26807c380db0dde3939580b6ea0f81c93ea8644d822739776cb3c9a26a8c5c8 target d26807c380db0dde3939580b6ea0f81c93ea8644d822739776cb3c9a26a8c5c8
 - reconciliation: OK
   - row_count: ok=true source 50000 target 50000
   - hash_total: ok=true order-independent SHA-256 over key and content hash
@@ -18,7 +20,8 @@ Seeded AX-shaped load of 50k customers, 20k vendors, 100k items and 10k BOMs thr
 
 ## vendor
 
-- status succeeded extracted 20000 created 20000 updated 0 rejected 0 in 1.105919901s
+- status succeeded extracted 20000 created 20000 updated 0 rejected 0 in 3.109016792s
+- hash total: source fbf90d20f689ccfcc7528c124a0dc728b55f7a023f334b72a162b2a8d50a6059 target fbf90d20f689ccfcc7528c124a0dc728b55f7a023f334b72a162b2a8d50a6059
 - reconciliation: OK
   - row_count: ok=true source 20000 target 20000
   - hash_total: ok=true order-independent SHA-256 over key and content hash
@@ -27,7 +30,8 @@ Seeded AX-shaped load of 50k customers, 20k vendors, 100k items and 10k BOMs thr
 
 ## item
 
-- status succeeded extracted 100000 created 100000 updated 0 rejected 0 in 5.530187898s
+- status succeeded extracted 100000 created 100000 updated 0 rejected 0 in 17.625153042s
+- hash total: source 8f97f176cfa9f6af215d680a645215cbc1c2cb1d3c34b81052dc1e2ce6cf8d4a target 8f97f176cfa9f6af215d680a645215cbc1c2cb1d3c34b81052dc1e2ce6cf8d4a
 - reconciliation: OK
   - row_count: ok=true source 100000 target 100000
   - hash_total: ok=true order-independent SHA-256 over key and content hash
@@ -36,7 +40,8 @@ Seeded AX-shaped load of 50k customers, 20k vendors, 100k items and 10k BOMs thr
 
 ## bom
 
-- status succeeded extracted 10000 created 10000 updated 0 rejected 0 in 594.280903ms
+- status succeeded extracted 10000 created 10000 updated 0 rejected 0 in 2.189338334s
+- hash total: source 53b29cae4df4fefb168b7785d764b4683955052d2d5fa80a7ced53d33e2b7d04 target 53b29cae4df4fefb168b7785d764b4683955052d2d5fa80a7ced53d33e2b7d04
 - reconciliation: OK
   - row_count: ok=true source 10000 target 10000
   - hash_total: ok=true order-independent SHA-256 over key and content hash
