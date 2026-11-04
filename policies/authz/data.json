@@ -1325,7 +1325,8 @@
     "PackingRuleMaintain": {"permissions": [
       {"resource": "/v1/fulfillment/container-types", "methods": ["POST"]},
       {"resource": "/v1/fulfillment/packing-rules", "methods": ["POST"]},
-      {"resource": "/v1/fulfillment/product-packaging", "methods": ["POST"]}
+      {"resource": "/v1/fulfillment/product-packaging", "methods": ["POST"]},
+      {"resource": "/v1/fulfillment/delivery-tolerances", "methods": ["PUT"]}
     ]},
     "PackingSlipPost": {"permissions": [
       {"resource": "/v1/fulfillment/packing-slips/*:cancel", "methods": ["POST"]},
@@ -1700,7 +1701,8 @@
       {"resource": "/v1/fulfillment/release-rules/*", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/exceptions", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/exceptions/*", "methods": ["GET"]},
-      {"resource": "/v1/fulfillment/returnable-packaging/movements", "methods": ["GET"]}
+      {"resource": "/v1/fulfillment/returnable-packaging/movements", "methods": ["GET"]},
+      {"resource": "/v1/fulfillment/delivery-tolerances", "methods": ["GET"]}
     ]},
     "ReturnablePackagingMaintain": {"permissions": [{"resource": "/v1/fulfillment/returnable-packaging:adjust", "methods": ["POST"]}]},
     "audit.read": {"permissions": [
