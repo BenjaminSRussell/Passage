@@ -2044,7 +2044,7 @@ components:
       required: [scope]
       properties:
         scope: { type: string, enum: [site, selection], description: 'site (every operation) or selection (operationIds)' }
-        mode: { type: string, enum: [operations, jobs], description: 'Recorded on the run; both modes place at minute granularity in this slice. Left out, it takes defaultMode of the scheduling parameters (jobs until changed).' }
+        mode: { type: string, enum: [operations, jobs], description: 'jobs places every operation to the minute. operations (FR-23.2) schedules in daily buckets: an operation that follows another in its order (placed in the run, fixed or firmed) starts no earlier than the next local midnight, in its candidate resource''s time zone, at or after the time its predecessor allows (end, queue times, overlap share, network transfer; a predecessor ending exactly at midnight lets it start then), and never before the run start, so the plan steps in whole days between operations. The first operation of an order, moves, POST /orders/{id}:schedule and campaign sequencing are placed as in jobs, and the minutes still book exactly. Left out, it takes defaultMode of the scheduling parameters (jobs until changed).' }
         finite: { type: boolean, description: 'Left out, it takes defaultFinite of the scheduling parameters (true until changed).' }
         direction: { type: string, enum: [forward, backward], description: 'backward schedules from each order''s due date (FR-23.2, BR-23.2). Left out, it takes defaultDirection of the scheduling parameters (forward until changed).' }
         operationIds:
