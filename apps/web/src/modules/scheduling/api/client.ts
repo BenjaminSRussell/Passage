@@ -539,6 +539,50 @@ export async function fetchLateOrders(minLateMinutes: number, signal?: AbortSign
   return { items: body.items, truncated: body.truncated === true };
 }
 
+/** One numbered line of a resource's dispatch list (PRD 4.23.15). */
+export interface DispatchLine {
+  sequence: number;
+  jobId: string;
+  orderId: string;
+  operNumber: number;
+  segment: number;
+  role: "primary" | "secondary";
+  start: string;
+  end: string;
+  minutesInWindow: number;
+  setupGroup?: string;
+  changeoverMinutes: number;
+  finite: boolean;
+  firmed: boolean;
+  lateMinutes: number;
+}
+
+export interface DispatchList {
+  resource: { id: string; code: string; name: string; timeZone: string };
+  date: string;
+  days: number;
+  windowStart: string;
+  windowEnd: string;
+  totalMinutes: number;
+  lines: DispatchLine[];
+  truncated: boolean;
+}
+
+/** The jobs booked on a resource in a window of its local calendar: a date and a minute-of-day range (a night shift ends after 1440). */
+export async function fetchDispatchList(
+  resourceId: string,
+  date: string,
+  startMinute: number,
+  endMinute: number,
+  signal?: AbortSignal,
+): Promise<DispatchList> {
+  const body = await send<Partial<DispatchList>>(`/dispatch-list${query({ resourceId, date, startMinute, endMinute })}`, {}, signal);
+  if (!Array.isArray(body.lines) || !body.resource) {
+    throw new SchedulingApiError(0, "COM-0001", "The response has no lines");
+  }
+  return body as DispatchList;
+}
+
 /** Why an operation of a production order was not registered (or was left as it was). */
 export const ORDER_IMPORT_SKIP_LABELS: Record<string, string> = {
   "no-process-job": "No process job",

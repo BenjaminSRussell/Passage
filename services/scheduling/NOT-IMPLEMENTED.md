@@ -637,6 +637,35 @@ FAIL lines on the doc gates.
 | Built-in defaults forward and finite instead of the PRD 4.23.13 defaults backward and infinite | decision for Ben | Runs before this slice defaulted to forward and finite; taking the PRD defaults would change every run that leaves direction or finite out. A tenant can set backward or infinite on the Parameters page. |
 | Drag snap stored per tenant, not per user (PRD 4.23.13 scope `user`) | decision for Ben | There is no per-user preference store in the service; the per-user setting stays in the Gantt deliverable row. |
 
+Slice 25 builds the dispatch list document (PRD 4.23.15 Dispatch list, per
+resource and day or shift): `GET /v1/scheduling/dispatch-list?resourceId&date&days&startMinute&endMinute`
+(duty `scheduling.read`). The window is a local calendar date of the resource
+(1 to 7 days) and a local minute-of-day range, converted with the resource's
+time zone, so a night shift is `startMinute=1320&endMinute=1800`. Both ends are
+wall-clock times, so across a DST change the window holds the hours the clock
+showed (a skipped time maps to the instant of the change, a repeated one to its
+first occurrence; a window wholly inside a skipped hour is a 400). The answer is
+the resource header, the UTC window, the primary and secondary bookings in start
+order numbered from 1 (order, operation, segment, start, end, minutes inside the
+window, setup group, changeover minutes, firmed, finite, late minutes), their
+total minutes and a truncated flag at 1,000 lines. Read only: no migration, no
+event. Web: a Dispatch list page (`/scheduling/dispatch-list`; resource, date and
+shift pickers taken from the resource calendar, loading, empty, error with retry,
+a Print button whose print layout hides the filters; a night shift kept in the
+calendar as two spans across midnight is offered as one shift, and start and
+end print on the resource's clock). The bookings in the window are cut to the
+1,001-row limit before the operation and primary-booking lookups, so those stay
+index probes on a busy resource; the window itself is a one-sided range on the
+resource's start or end index (a range index cannot serve it under row-level
+security because the range overlap operator is not leakproof). Not built: item and
+quantity columns (wave 21 data), a PDF render and the kiosk view (wave 25).
+The OpenAPI spec has no FAIL lines on the doc gate.
+
+| Item | Status | Reason |
+|---|---|---|
+| `policies/authz/data.json`: resource row `/v1/scheduling/dispatch-list` (GET) under `scheduling.read` | handoff - main session (authz seed) | Existing duty; only the route row is needed. |
+| Dispatch list as PDF and the shop-floor kiosk view; item and quantity per line | handoff - wave 25 (kiosk) and wave 21 (order header data) | The page prints through the browser; there is no document template service call and no order header data here. |
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
@@ -705,7 +734,8 @@ FAIL lines on the doc gates.
 | Block utilization inquiry (4.23.14) | built (slice 5) | `GET /resources/{id}/block-utilization` per resource and range, shown on the resource detail screen. A cross-resource report screen with period totals is not built; the inquiry is per resource. |
 | Resource utilization and changeover time of a run (4.23.14) | built (slice 17) | `GET /runs/{id}/kpis` and the Plan measures card on the run detail; they describe the jobs the run still holds. |
 | Run comparison and network feasibility reports (4.23.14) | later slice of PSG-23 | Comparison needs per-run snapshots of the jobs, which a run replaces; not stored. |
-| Dispatch list, Gantt print, campaign sheet, cleanout record documents (4.23.15) | later slice of PSG-23 | No document templates yet. |
+| Dispatch list (4.23.15) | built (slice 25) as an inquiry and a printable page | See the slice 25 section; a PDF template and the kiosk view are handoffs. |
+| Gantt print, campaign sheet, cleanout record documents (4.23.15) | later slice of PSG-23 | No document templates yet. |
 | Feature flags `scheduling.cp-sat`, `scheduling.propagate-dependents`; config `SCHED_OPT_TIME_LIMIT_S` | later slice of PSG-23 | No flag client; CP-SAT is chosen per campaign with its sequence rule and switched off by leaving `SCHED_OPT_URL` empty, propagation is chosen per move with `propagate`, and the campaign solver limit is fixed at 20 s. |
 | Site parameters (default method and direction, drag snap, propagation limit) | built (slice 24) as tenant-wide parameters | `GET/PATCH /v1/scheduling/parameters`; see the slice 24 section. |
 | Site parameters per site; resource selection rule, safety/queue time, horizon days and the default start | later slice of PSG-23 (per-site parameters are a handoff to wave 9, sites) | The parameters are one row per tenant. Selection stays least finish, no safety or queue time is added, and the horizon is `SCHED_HORIZON_DAYS`. |

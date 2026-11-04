@@ -9,6 +9,7 @@ import { CapacityLoadJobsPage } from "./CapacityLoadJobsPage";
 import { CapacityLoadPage } from "./CapacityLoadPage";
 import { CapacityOverridesPage } from "./CapacityOverridesPage";
 import { CleanoutRulesPage } from "./CleanoutRulesPage";
+import { DispatchListPage } from "./DispatchListPage";
 import { EditResourcePage } from "./EditResourcePage";
 import { LateOrdersPage } from "./LateOrdersPage";
 import { NetworkDetailPage } from "./NetworkDetailPage";
@@ -41,11 +42,12 @@ const scheduling: PassageModule = {
   id: "scheduling",
   title: "Scheduling",
   description:
-    "Finite capacity scheduling: the Gantt workspace, schedule runs, capacity load by week or day with its job drill-down, late orders, production orders received from wave 21, run utilization and lateness measures, resources, operations (change, delete, take an order off the schedule), order pegs, campaigns and campaign proposals, setup matrices, cleanout rules, resource networks, capacity blocks, capacity overrides (downtimes and extra shifts) and the scheduling parameters (run defaults, drag snap, propagation limits).",
+    "Finite capacity scheduling: the Gantt workspace, schedule runs, capacity load by week or day with its job drill-down, late orders, the dispatch list of a resource for a day or shift, production orders received from wave 21, run utilization and lateness measures, resources, operations (change, delete, take an order off the schedule), order pegs, campaigns and campaign proposals, setup matrices, cleanout rules, resource networks, capacity blocks, capacity overrides (downtimes and extra shifts) and the scheduling parameters (run defaults, drag snap, propagation limits).",
   routes: [
     { path: "/scheduling", element: createElement(WorkspacePage), handle: { title: "Scheduling workspace" } },
     { path: "/scheduling/load", element: createElement(CapacityLoadPage), handle: { title: "Capacity load" } },
     { path: "/scheduling/load/jobs", element: createElement(CapacityLoadJobsPage), handle: { title: "Capacity load detail" } },
+    { path: "/scheduling/dispatch-list", element: createElement(DispatchListPage), handle: { title: "Dispatch list" } },
     { path: "/scheduling/late-orders", element: createElement(LateOrdersPage), handle: { title: "Late orders" } },
     { path: "/scheduling/runs", element: createElement(RunsPage), handle: { title: "Schedule runs" } },
     { path: "/scheduling/runs/new", element: createElement(NewRunPage), handle: { title: "Start a schedule run" } },
@@ -83,6 +85,7 @@ const scheduling: PassageModule = {
   nav: [
     { label: "Gantt", to: "/scheduling", duty: "scheduling.read" },
     { label: "Capacity load", to: "/scheduling/load", duty: "scheduling.read" },
+    { label: "Dispatch list", to: "/scheduling/dispatch-list", duty: "scheduling.read" },
     { label: "Late orders", to: "/scheduling/late-orders", duty: "scheduling.read" },
     { label: "Schedule runs", to: "/scheduling/runs", duty: "scheduling.read" },
     { label: "Resources", to: "/scheduling/resources", duty: "scheduling.read" },

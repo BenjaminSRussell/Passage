@@ -274,6 +274,7 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | GET | `/v1/scheduling/capacity-load/jobs?resourceId&from&to` | `scheduling.read` |
 | GET | `/v1/scheduling/runs/{id}/kpis` | `scheduling.read` |
 | GET | `/v1/scheduling/late-orders?minLateMinutes&limit` | `scheduling.read` |
+| GET | `/v1/scheduling/dispatch-list?resourceId&date&days&startMinute&endMinute` | `scheduling.read` |
 | GET | `/v1/scheduling/order-imports?status&limit` | `scheduling.read` |
 | GET | `/v1/scheduling/order-imports/{orderId}` | `scheduling.read` |
 | POST | `/v1/scheduling/order-imports/{orderId}:reimport` | `scheduling.schedule.write` |

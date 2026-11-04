@@ -743,6 +743,79 @@ paths:
                   truncated: { type: boolean }
         '400': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/dispatch-list:
+    get:
+      operationId: getDispatchList
+      summary: Dispatch list of a resource for a day or shift
+      description: >
+        The jobs booked on one resource in a window of its own local calendar
+        (PRD 4.23.15), in start order and numbered from 1. The window runs from
+        `startMinute` of `date` to `endMinute` of the last of `days` days, in the
+        resource's time zone, so a night shift is asked as `startMinute=1320`
+        and `endMinute=1800`. Both ends are wall-clock times: across a
+        daylight-saving change the window holds the hours the clock showed
+        (a 22:00 to 06:00 shift is 7 hours on the spring night, 9 on the
+        autumn night); a time skipped by the change maps to the instant of the
+        change, and a repeated time to its first occurrence. A window that lies
+        wholly inside a skipped hour is refused with 400. Start and end of each
+        line are UTC instants. Primary and secondary bookings (BR-23.4) are listed;
+        `minutesInWindow` is the part of each segment inside the window and
+        `totalMinutes` their sum. At most 1,000 lines (then `truncated` is true).
+      x-passage-duty: scheduling.read
+      parameters:
+        - name: resourceId
+          in: query
+          required: true
+          description: Resource UUID.
+          schema: { type: string, format: uuid }
+        - name: date
+          in: query
+          required: true
+          description: First local calendar date of the window, YYYY-MM-DD.
+          schema: { type: string, format: date }
+        - name: days
+          in: query
+          required: false
+          description: Number of local days covered.
+          schema: { type: integer, minimum: 1, maximum: 7, default: 1 }
+        - name: startMinute
+          in: query
+          required: false
+          description: Local minute of the day the window starts, on the first day.
+          schema: { type: integer, minimum: 0, maximum: 1439, default: 0 }
+        - name: endMinute
+          in: query
+          required: false
+          description: Local minute after midnight of the last day the window ends; above 1440 it runs into the next day. Must exceed `startMinute` for a one-day window.
+          schema: { type: integer, minimum: 1, maximum: 2880, default: 1440 }
+      responses:
+        '200':
+          description: The numbered dispatch lines of the window
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [resource, date, days, windowStart, windowEnd, totalMinutes, lines, truncated]
+                properties:
+                  resource:
+                    type: object
+                    required: [id, code, name, timeZone]
+                    properties:
+                      id: { type: string, format: uuid }
+                      code: { type: string }
+                      name: { type: string }
+                      timeZone: { type: string }
+                  date: { type: string, format: date }
+                  days: { type: integer }
+                  windowStart: { type: string, format: date-time }
+                  windowEnd: { type: string, format: date-time }
+                  totalMinutes: { type: integer }
+                  lines:
+                    type: array
+                    items: { $ref: '#/components/schemas/DispatchLine' }
+                  truncated: { type: boolean }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/runs/{id}/kpis:
     get:
       operationId: getRunKpis
@@ -2044,6 +2117,24 @@ components:
         start: { type: string, format: date-time }
         end: { type: string, format: date-time }
         minutesInRange: { type: integer }
+        finite: { type: boolean }
+        firmed: { type: boolean }
+        lateMinutes: { type: integer }
+    DispatchLine:
+      type: object
+      required: [sequence, jobId, orderId, operNumber, segment, role, start, end, minutesInWindow, changeoverMinutes, finite, firmed, lateMinutes]
+      properties:
+        sequence: { type: integer, minimum: 1 }
+        jobId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        operNumber: { type: integer }
+        segment: { type: integer }
+        role: { type: string, enum: [primary, secondary] }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        minutesInWindow: { type: integer }
+        setupGroup: { type: string, description: Setup group of the operation; absent on secondary bookings and when none is set. }
+        changeoverMinutes: { type: integer, description: Changeover laid in front of the job, on its first segment. }
         finite: { type: boolean }
         firmed: { type: boolean }
         lateMinutes: { type: integer }

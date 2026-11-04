@@ -191,6 +191,8 @@ func (a *API) Register(r chi.Router) {
 	// Slice 17: run measures and the late orders inquiry (PRD 4.23.14).
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/runs/{id}/kpis", a.runKPIs)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/late-orders", a.lateOrders)
+	// Slice 25: the dispatch list of a resource for a day or shift (PRD 4.23.15).
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/dispatch-list", a.dispatchList)
 
 	// Slice 18: production orders received from wave 21 (FR-23.10).
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/order-imports", a.listOrderImports)

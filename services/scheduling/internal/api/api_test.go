@@ -42,6 +42,7 @@ type fakeStore struct {
 	reimported  string
 	lastOps     store.OperationFilter
 	lastOp      store.Operation
+	resourceTZ  string // time zone GetResource answers; empty is UTC
 
 	// slice 2
 	campaign     store.Campaign
@@ -91,7 +92,7 @@ func (f *fakeStore) ListResources(context.Context) ([]store.Resource, error) {
 }
 
 func (f *fakeStore) GetResource(_ context.Context, id string) (store.Resource, error) {
-	return store.Resource{ID: id, Code: "MIX-1"}, f.err
+	return store.Resource{ID: id, Code: "MIX-1", TimeZone: f.resourceTZ}, f.err
 }
 
 func (f *fakeStore) ResourceCapacity(_ context.Context, _ string, from, _ time.Time) ([]domain.Interval, error) {
