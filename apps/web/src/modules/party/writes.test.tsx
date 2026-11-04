@@ -1,8 +1,7 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Party } from "./api/client";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
-import { render } from "@testing-library/react";
 import { PrincipalProvider } from "../../shell/principal";
 import party from "./module";
 import { json, pageViolations, problem, renderAt, useFakeApi, type Call } from "./testServer";
@@ -430,5 +429,32 @@ describe("focus and navigation", () => {
     await waitFor(() => expect(api.calls.some((c) => c.url.pathname.endsWith(NEXT))).toBe(true));
     await screen.findByLabelText("Customer role id");
     await waitFor(() => expect(screen.getByLabelText("Customer role id")).toHaveValue(""));
+  });
+});
+
+describe("same-field edit conflict", () => {
+  it("keeps the user's value, warns with the other value and focuses the field before the second save", async () => {
+    let server = org();
+    api.handler = (call) => {
+      if (call.url.pathname.endsWith("/vendors")) return json(200, { vendors: [] });
+      if (call.method === "PATCH")
+        return server.version === 3 ? problem(409, "PTY-VERSION-CONFLICT", "stale") : json(200, org({ version: 5 }));
+      return json(200, server);
+    };
+    renderAt(`/party/${PARTY}`);
+    await screen.findByRole("heading", { name: "Northwind" });
+    type("Legal name", "Northwind GmbH");
+    click("Save changes");
+    await screen.findByText(/Someone changed this party after you opened it/);
+    server = org({ version: 4, legalName: "Northwind AG" });
+    click("Try again");
+    expect(await screen.findByText(/Changed by someone else to \u201cNorthwind AG\u201d\. Saving replaces it\./)).toBeInTheDocument();
+    expect(screen.getByLabelText("Legal name")).toHaveValue("Northwind GmbH");
+    expect(screen.getByText(/Your values are kept/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Legal name")).toHaveFocus());
+    expect(api.calls.filter((c) => c.method === "PATCH")).toHaveLength(1);
+    click("Save changes");
+    await waitFor(() => expect(api.calls.filter((c) => c.method === "PATCH")).toHaveLength(2));
+    expect(api.calls.filter((c) => c.method === "PATCH")[1]?.body).toEqual({ legalName: "Northwind GmbH" });
   });
 });

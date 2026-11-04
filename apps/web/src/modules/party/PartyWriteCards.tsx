@@ -64,6 +64,7 @@ export function EditPartyCard({ party, onSaved }: { party: Party; onSaved(): voi
   const [done, setDone] = useState<ReactNode>(null);
   const original = namesOf(party);
   const base = useRef({ version: party.version, names: original });
+  const [clashes, setClashes] = useState<Partial<Record<keyof NameValues, string>>>({});
   const form = useWriteForm<NameValues>(
     original,
     (values) => {
@@ -85,12 +86,29 @@ export function EditPartyCard({ party, onSaved }: { party: Party; onSaved(): voi
   useEffect(() => {
     if (party.version === base.current.version) return;
     const edited = base.current.names;
+    const mine = form.values;
+    const keys = Object.keys(mine) as (keyof NameValues)[];
+    const clashes = keys.filter((key) => mine[key] !== edited[key] && original[key] !== edited[key] && mine[key].trim() !== original[key]);
     setValues(
       (values) =>
-        Object.fromEntries(
-          (Object.keys(values) as (keyof NameValues)[]).map((key) => [key, values[key] !== edited[key] ? values[key] : original[key]]),
-        ) as unknown as NameValues,
+        Object.fromEntries(keys.map((key) => [key, values[key] !== edited[key] ? values[key] : original[key]])) as unknown as NameValues,
     );
+    setClashes(
+      Object.fromEntries(
+        clashes.map((key) => [
+          key,
+          original[key] === ""
+            ? "Cleared by someone else. Saving replaces that."
+            : `Changed by someone else to \u201c${original[key]}\u201d. Saving replaces it.`,
+        ]),
+      ),
+    );
+    if (clashes.length > 0) {
+      setDone(
+        `Someone else changed ${clashes.length === 1 ? "a field" : "fields"} you also edited. Your values are kept; review the warnings before saving.`,
+      );
+      setTimeout(() => document.getElementById(`edit-party-${clashes[0]}`)?.focus(), 0);
+    }
     base.current = { version: party.version, names: original };
     clearFailure();
   }, [party.version]);
@@ -98,7 +116,14 @@ export function EditPartyCard({ party, onSaved }: { party: Party; onSaved(): voi
   return (
     <Card title="Edit party">
       <form ref={form.formRef} className={styles.form} onSubmit={(event) => void form.submit(event)} noValidate aria-label="Edit party">
-        <NameFieldset type={party.partyType} idPrefix="edit-party" values={form.values} errors={form.errors} onChange={form.set} />
+        <NameFieldset
+          type={party.partyType}
+          idPrefix="edit-party"
+          values={form.values}
+          errors={form.errors}
+          warnings={clashes}
+          onChange={form.set}
+        />
         {form.errors.form ? (
           <Alert tone="warning" live="alert">
             {form.errors.form}

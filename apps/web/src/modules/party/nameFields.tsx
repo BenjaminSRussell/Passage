@@ -71,18 +71,20 @@ export function NameFieldset({
   idPrefix,
   values,
   errors,
+  warnings = {},
   onChange,
 }: {
   type: PartyType;
   idPrefix: string;
   values: NameValues;
   errors: Errors;
+  warnings?: Partial<Record<keyof NameValues, string>>;
   onChange(key: keyof NameValues, value: string): void;
 }) {
   return (
     <>
       {fieldsFor(type).map(([key, label, required]) => (
-        <FormField key={key} id={`${idPrefix}-${key}`} label={label} optional={!required} error={errors[key]}>
+        <FormField key={key} id={`${idPrefix}-${key}`} label={label} optional={!required} hint={warnings[key]} error={errors[key]}>
           {(control) => (
             <Input
               {...control}
