@@ -139,6 +139,7 @@ type InvoiceLine struct {
 	UnitPrice     decimal.Decimal
 	Amount        decimal.Decimal
 	StandardCost  bool
+	Service       bool
 	GrirCleared   decimal.Decimal
 }
 
@@ -168,6 +169,8 @@ type Invoice struct {
 	RejectReason     string
 	TaxAmount        decimal.Decimal
 	TaxCode          string
+	TaxRatePct       decimal.Decimal
+	SupplyDate       time.Time
 	Lines            []InvoiceLine
 }
 
@@ -177,7 +180,10 @@ type InvoiceOutcome struct {
 	Blocked       bool
 	Clearings     []decimal.Decimal
 	Event         events.Event
+	SelfBill      SelfBillBuild
 }
+
+type SelfBillBuild func(number string) (SelfBill, events.Event, error)
 
 type InvoiceFunc func(items []*domain.GrirItem) (InvoiceOutcome, error)
 
@@ -282,7 +288,6 @@ type Store interface {
 	GetSheet(ctx context.Context, id string) (ServiceSheet, error)
 	DecideSheet(ctx context.Context, id, by string, accept bool, reason string, fn SheetDecisionFunc) (ServiceSheet, error)
 	AcceptSheet(ctx context.Context, id, by string, fn SheetAcceptFunc) (ServiceSheet, error)
-	PutSelfBill(ctx context.Context, in SelfBill, evt events.Event) error
 	GetSelfBill(ctx context.Context, invoiceID string) (SelfBill, error)
 	GetCapture(ctx context.Context, id string) (Capture, error)
 	FindCapture(ctx context.Context, legalEntityID, digest string) (Capture, bool, error)

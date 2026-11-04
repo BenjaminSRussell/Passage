@@ -24,8 +24,8 @@ Store tests run only when `PASSAGE_TEST_DATABASE_URL` is set, against a role wit
 | `INVENTORY_URL` | base URL of `services/inventory` (`GET /v1/inventory/journals` and `/{id}`, 2 s timeout); with a signing key the reads carry a signed service token holding only `inventory.ownership-change.read`, so the caller needs no inventory duty (#305); without one the caller's identity is forwarded and the caller needs `inventory.read`; optional: without it (and without `PASSAGE_ALLOW_FAKES=1`) the consignment settlement answers 503 `COM-0503` |
 | `POSTING_LEDGER_ID` | UUID of the ledger that receipt journals post to (`ledgerId` in the ledger's entry request); invoices carry their own `ledgerId`; required |
 | `POSTING_ACCOUNT_INVENTORY`, `POSTING_ACCOUNT_GRIR`, `POSTING_ACCOUNT_PPV`, `POSTING_ACCOUNT_VENDOR_CONTROL`, `POSTING_ACCOUNT_EXPENSE`, `POSTING_ACCOUNT_INPUT_TAX` | ledger account codes for receipt, invoice, service-entry accrual and ERS input-tax journals (posting profile); all six required |
-| `TAX_URL` | base URL of the tax service (`POST /v1/tax/calculate`, `POST /v1/tax/transactions`); optional. Unset: ERS still issues the self-billing PDF at zero tax |
-| `TAX_CODE`, `TAX_RATE_PCT` | inline tax config sent with `calculate` (direction `input`); without both, a configured `TAX_URL` still issues the document at zero tax |
+| `TAX_URL`, `PARTY_URL`, `ORG_URL` | base URLs of the tax, party and org services. `TAX_URL` is optional, but when set `TAX_RULES`, `PARTY_URL` and `ORG_URL` are required (startup error otherwise). Unset: ERS settlement skips every receipt as `TAX_NOT_DETERMINED` |
+| `TAX_RULES` | JSON array of `{"country","code","jurisdiction","ratePct"}`, one per legal entity country; sent with `calculate` (direction `input`). A country without a rule is `TAX_NOT_DETERMINED`. `TAX_GROUP`, `TAX_ITEM_GROUP`, `TAX_ROUNDING` are optional |
 | `PASSAGE_ALLOW_FAKES` | `1` lets an empty `LEDGER_URL`, `CLOSE_URL`, `PURCHASING_URL` or posting account fall back to the in-memory fakes with a warning log; local development only, any other value fails start-up |
 | `HTTP_ADDR` | default `:8080` |
 | `ADMIN_ADDR` | default `:9090`, serves `/metrics` only |
@@ -105,6 +105,7 @@ Every POST except the tester requires `Idempotency-Key`; replays carry `Idempote
 | RCV-PO-001 | 422 | evaluate: purchase order is not APPROVED or CONFIRMED |
 | RCV-PO-002 | 422 | evaluate: purchase order line is cancelled |
 | RCV-LDG-001 | 422 | the ledger refused the reversal made by a resolve; not retryable |
+| RCV-SVC-001 | 409 | `:correct` or `:cancel` of the receipt an accepted service entry sheet created |
 | COM-0503 | 503 | the ledger could not be reached while resolving a pending posting |
 | COM-0412 | 412 | `If-Match` differs from the receipt version |
 | COM-0428 | 428 | `If-Match` missing |

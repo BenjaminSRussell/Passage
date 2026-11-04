@@ -60,6 +60,7 @@ type Ports struct {
 	AuditSampler       *domain.Sampler
 	Tax                domain.TaxCalculator
 	TaxRecorder        domain.TaxRecorder
+	SelfBillParties    domain.SelfBillPartySource
 
 	ResolveMinAge time.Duration
 	ResolveLease  time.Duration

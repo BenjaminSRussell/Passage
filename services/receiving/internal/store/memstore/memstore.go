@@ -56,6 +56,7 @@ type tenantData struct {
 	captures        map[string]store.Capture
 	sheets          map[string]store.ServiceSheet
 	selfBills       map[string]store.SelfBill
+	selfBillSeq     map[string]int
 	ersPrices       map[string]store.PriceConfirmation
 	ersPriceHistory []string
 
@@ -905,6 +906,7 @@ func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.Invo
 					ReceiptID: k.ReceiptID, LineNo: k.LineNo, ReceivedQty: item.ReceivedQty, InvoicedQty: item.InvoicedQty,
 					ReceivedAmount: money.Amount{Value: item.ReceivedAmount, Currency: item.Currency},
 					ClearedAmount:  money.Amount{Value: item.ClearedAmount, Currency: item.Currency},
+					Service:        t.receipts[k.ReceiptID].Source == domain.ReceiptSourceService,
 				}, g
 			}
 			items[i] = working[k]
@@ -920,6 +922,9 @@ func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.Invo
 		}
 		if !outcome.Blocked {
 			if err := s.markDone(ctx, in.ID, outcome.LedgerEntryID != ""); err != nil {
+				return err
+			}
+			if err := s.putSelfBill(t, in, outcome.SelfBill); err != nil {
 				return err
 			}
 		}
@@ -945,6 +950,7 @@ func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.Invo
 		}
 		in.Lines = slices.Clone(in.Lines)
 		for i := range in.Lines {
+			in.Lines[i].Service = items[i].Service
 			if i < len(outcome.Clearings) {
 				in.Lines[i].GrirCleared = outcome.Clearings[i]
 			}

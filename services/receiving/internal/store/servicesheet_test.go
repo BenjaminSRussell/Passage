@@ -157,36 +157,83 @@ func TestServiceSheet_AcceptWritesPostedReceiptAndGrir(t *testing.T) {
 	}
 }
 
-func TestSelfBill_PutGetAndIsolation(t *testing.T) {
+func selfBillBuilder(t *testing.T, db settlementDB, inv store.Invoice) store.SelfBillBuild {
+	return func(number string) (store.SelfBill, events.Event, error) {
+		evt, err := events.New("dev.passage.receiving.ersselfbill.issued.v1", "/passage/receiving/receiving", inv.ID, testkit.TenantID(1), map[string]string{"invoice_id": inv.ID, "document_number": number})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return store.SelfBill{
+			Number: number, InvoiceID: inv.ID, LegalEntityID: inv.LegalEntityID, VendorID: inv.VendorID, InvoiceNumber: inv.InvoiceNumber,
+			ContentType: "application/pdf", Body: []byte("%PDF-1.4 " + number), TaxCode: "VAT19", TaxAmount: decimal.RequireFromString("1.9"), Total: decimal.RequireFromString("11.9"),
+		}, evt, nil
+	}
+}
+
+func TestSelfBill_IsWrittenInTheReleaseTransactionWithAGaplessNumber(t *testing.T) {
 	db := seedInvoice(t)
+	seedOpenGrir(t, db)
 	st := store.New(db.pool)
 	ctx := tenant.With(context.Background(), db.one)
-	evt, err := events.New("dev.passage.receiving.ersselfbill.issued.v1", "/passage/receiving/receiving", invoiceID, testkit.TenantID(1), map[string]string{"invoice_id": invoiceID})
-	if err != nil {
+	held := fullInvoice(db, "00000000-0000-0000-0000-00000000c500", "ERS-RCV-SB", domain.InvoiceSourceERS)
+	if _, err := st.PostInvoice(ctx, held, holdFunc(t, db, held, true)); err != nil {
 		t.Fatal(err)
 	}
-	in := store.SelfBill{
-		InvoiceID: invoiceID, LegalEntityID: db.one.LegalEntityID, VendorID: vendorID, InvoiceNumber: "ERS-RCV-00000001",
-		ContentType: "application/pdf", Body: []byte("%PDF-1.4 test"), TaxCode: "VAT19", TaxAmount: decimal.RequireFromString("95"), Total: decimal.RequireFromString("595"),
+	if _, err := st.GetSelfBill(ctx, held.ID); !errors.Is(err, store.ErrSelfBillNotFound) {
+		t.Fatalf("a blocked invoice already has a self-bill: %v", err)
 	}
-	if err := st.PutSelfBill(ctx, in, evt); err != nil {
-		t.Fatal(err)
+	boom := errors.New("party master down")
+	_, err := st.ReleaseInvoice(ctx, held.ID, db.one.LegalEntityID, "bob", func(store.Invoice) (store.InvoiceOutcome, error) {
+		return store.InvoiceOutcome{
+			LedgerEntryID: "released", Total: decimal.NewFromInt(10), Event: event(t, db.one, "vendorinvoice", "posted"),
+			SelfBill: func(string) (store.SelfBill, events.Event, error) { return store.SelfBill{}, events.Event{}, boom },
+		}, nil
+	})
+	if !errors.Is(err, boom) {
+		t.Fatalf("release with a failing self-bill: %v", err)
 	}
-	if err := st.PutSelfBill(ctx, in, evt); err != nil {
-		t.Fatal(err)
+	if got := scalar(t, db, `select status from receiving_vendor_invoice where invoice_number = 'ERS-RCV-SB'`); got != "AUDIT_BLOCKED" {
+		t.Fatalf("the invoice left AUDIT_BLOCKED (%s) although its self-bill failed", got)
 	}
-	got, err := st.GetSelfBill(ctx, invoiceID)
-	if err != nil || got.InvoiceNumber != in.InvoiceNumber || string(got.Body) != string(in.Body) || got.TaxCode != "VAT19" {
+	released, err := st.ReleaseInvoice(ctx, held.ID, db.one.LegalEntityID, "bob", func(inv store.Invoice) (store.InvoiceOutcome, error) {
+		return store.InvoiceOutcome{LedgerEntryID: "released", Total: decimal.NewFromInt(10), Event: event(t, db.one, "vendorinvoice", "posted"), SelfBill: selfBillBuilder(t, db, inv)}, nil
+	})
+	if err != nil || released.Status != domain.InvoiceStatusPosted {
+		t.Fatalf("release %+v %v", released, err)
+	}
+	got, err := st.GetSelfBill(ctx, held.ID)
+	if err != nil || got.Number != "SB-00000001" || got.InvoiceNumber != "ERS-RCV-SB" || string(got.Body) != "%PDF-1.4 SB-00000001" || got.TaxCode != "VAT19" {
 		t.Fatalf("got %+v %v", got, err)
 	}
-	if db.rows(db.one, "outbox") != 1 {
-		t.Fatalf("duplicate put wrote another outbox row")
+	if n := scalar(t, db, `select count(*) from outbox where aggregate_type = 'ersselfbill'`); n != "1" {
+		t.Fatalf("%s self-bill outbox rows, want 1", n)
 	}
-	if _, err := st.GetSelfBill(tenant.With(context.Background(), principal(2)), invoiceID); !errors.Is(err, store.ErrSelfBillNotFound) {
+	if _, err := st.GetSelfBill(tenant.With(context.Background(), principal(2)), held.ID); !errors.Is(err, store.ErrSelfBillNotFound) {
 		t.Fatalf("another tenant read the self-bill: %v", err)
 	}
 	otherEntity := tenant.Principal{TenantID: db.one.TenantID, LegalEntityID: testkit.TenantID(8)}
-	if _, err := st.GetSelfBill(tenant.With(context.Background(), otherEntity), invoiceID); !errors.Is(err, store.ErrSelfBillNotFound) {
+	if _, err := st.GetSelfBill(tenant.With(context.Background(), otherEntity), held.ID); !errors.Is(err, store.ErrSelfBillNotFound) {
 		t.Fatalf("another legal entity read the self-bill: %v", err)
+	}
+}
+
+func TestPostInvoice_ASelfBillFailureRollsTheInvoiceBack(t *testing.T) {
+	db := seedInvoice(t)
+	seedOpenGrir(t, db)
+	st := store.New(db.pool)
+	ctx := tenant.With(context.Background(), db.one)
+	in := fullInvoice(db, "00000000-0000-0000-0000-00000000c501", "ERS-RCV-RB", domain.InvoiceSourceERS)
+	boom := errors.New("render failed")
+	fn := holdFunc(t, db, in, false)
+	_, err := st.PostInvoice(ctx, in, func(items []*domain.GrirItem) (store.InvoiceOutcome, error) {
+		out, err := fn(items)
+		out.SelfBill = func(string) (store.SelfBill, events.Event, error) { return store.SelfBill{}, events.Event{}, boom }
+		return out, err
+	})
+	if !errors.Is(err, boom) {
+		t.Fatalf("err %v", err)
+	}
+	if n := scalar(t, db, `select count(*) from receiving_vendor_invoice where invoice_number = 'ERS-RCV-RB'`); n != "0" {
+		t.Fatalf("the invoice stayed posted without its self-bill")
 	}
 }

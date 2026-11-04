@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,7 +21,10 @@ import (
 
 var ErrSheetNotFound = errors.New("service entry sheet not found")
 
-const sheetAggregate = "serviceentrysheet"
+const (
+	sheetAggregate    = "serviceentrysheet"
+	SelfBillAggregate = "ersselfbill"
+)
 
 type ServiceSheet struct {
 	ID              string
@@ -41,6 +45,7 @@ type ServiceSheet struct {
 }
 
 type SelfBill struct {
+	Number        string
 	InvoiceID     string
 	LegalEntityID string
 	VendorID      string
@@ -60,6 +65,7 @@ type SheetAcceptOutcome struct {
 	Amounts       []LineAmount
 	LedgerEntryID string
 	Events        []events.Event
+	PostedEvent   func(number string) (events.Event, error)
 }
 
 type SheetAcceptFunc func(sheet ServiceSheet, allocated Receipt) (SheetAcceptOutcome, error)
@@ -225,12 +231,12 @@ func (s *Postgres) AcceptSheet(ctx context.Context, id, by string, fn SheetAccep
 			return err
 		}
 		sheet.Status, sheet.DecidedBy, sheet.RejectReason = domain.SheetAccepted, by, ""
-		number, err := allocateNumber(ctx, tx, tenantID)
+		allocated := Receipt{ID: ids.New()}
+		outcome, err := fn(sheet, allocated)
 		if err != nil {
 			return err
 		}
-		allocated := Receipt{ID: ids.New(), Number: number}
-		outcome, err := fn(sheet, allocated)
+		number, err := allocateNumber(ctx, tx, tenantID)
 		if err != nil {
 			return err
 		}
@@ -238,9 +244,7 @@ func (s *Postgres) AcceptSheet(ctx context.Context, id, by string, fn SheetAccep
 		if rec.ID == "" {
 			rec.ID = allocated.ID
 		}
-		if rec.Number == "" {
-			rec.Number = number
-		}
+		rec.Number = number
 		if rec.ExchangeRate.Sign() == 0 {
 			rec.ExchangeRate = decimal.NewFromInt(1)
 		}
@@ -281,7 +285,15 @@ func (s *Postgres) AcceptSheet(ctx context.Context, id, by string, fn SheetAccep
 			return err
 		}
 		sheet.ReceiptID, sheet.LedgerEntryID = rec.ID, outcome.LedgerEntryID
-		for _, evt := range outcome.Events {
+		accepted := outcome.Events
+		if outcome.PostedEvent != nil {
+			postedEvt, err := outcome.PostedEvent(number)
+			if err != nil {
+				return err
+			}
+			accepted = append(slices.Clone(accepted), postedEvt)
+		}
+		for _, evt := range accepted {
 			aggregate, aggregateID := sheetAggregate, id
 			if evt.Type == "dev.passage.receiving.receipt.posted.v1" {
 				aggregate, aggregateID = receiptAggregate, rec.ID
@@ -302,25 +314,28 @@ func (s *Postgres) AcceptSheet(ctx context.Context, id, by string, fn SheetAccep
 	return out, err
 }
 
-func (s *Postgres) PutSelfBill(ctx context.Context, in SelfBill, evt events.Event) error {
-	tenantID, err := tenantOf(ctx)
+func putSelfBill(ctx context.Context, tx pgx.Tx, tenantID string, in Invoice, build SelfBillBuild) error {
+	var seq int
+	if err := tx.QueryRow(ctx, `INSERT INTO receiving_self_bill_counter (tenant_id, legal_entity_id, last_no) VALUES ($1, $2, 1)
+		ON CONFLICT (tenant_id, legal_entity_id) DO UPDATE SET last_no = receiving_self_bill_counter.last_no + 1 RETURNING last_no`, tenantID, in.LegalEntityID).Scan(&seq); err != nil {
+		return err
+	}
+	doc, evt, err := build(SelfBillNumber(seq))
 	if err != nil {
 		return err
 	}
-	if in.ContentType == "" {
-		in.ContentType = "application/pdf"
+	if doc.ContentType == "" {
+		doc.ContentType = "application/pdf"
 	}
-	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `INSERT INTO receiving_ers_self_bill (tenant_id, invoice_id, legal_entity_id, vendor_id, invoice_number, content_type, body, tax_code, tax_amount, total)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-			ON CONFLICT (tenant_id, invoice_id) DO NOTHING`,
-			tenantID, in.InvoiceID, in.LegalEntityID, in.VendorID, in.InvoiceNumber, in.ContentType, in.Body, in.TaxCode, in.TaxAmount, in.Total)
-		if err != nil || tag.RowsAffected() == 0 || evt.Type == "" {
-			return err
-		}
-		return outbox.Enqueue(ctx, tx, "ersselfbill", in.InvoiceID, evt)
-	})
+	if _, err := tx.Exec(ctx, `INSERT INTO receiving_ers_self_bill (tenant_id, invoice_id, legal_entity_id, vendor_id, invoice_number, document_number, content_type, body, tax_code, tax_amount, total)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		tenantID, in.ID, in.LegalEntityID, in.VendorID, in.InvoiceNumber, doc.Number, doc.ContentType, doc.Body, doc.TaxCode, doc.TaxAmount, doc.Total); err != nil {
+		return err
+	}
+	return outbox.Enqueue(ctx, tx, SelfBillAggregate, in.ID, evt)
 }
+
+func SelfBillNumber(seq int) string { return fmt.Sprintf("SB-%08d", seq) }
 
 func (s *Postgres) GetSelfBill(ctx context.Context, invoiceID string) (SelfBill, error) {
 	tenantID, err := tenantOf(ctx)
@@ -329,9 +344,9 @@ func (s *Postgres) GetSelfBill(ctx context.Context, invoiceID string) (SelfBill,
 	}
 	var out SelfBill
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT invoice_id, legal_entity_id, vendor_id, invoice_number, content_type, body, tax_code, tax_amount, total, created_at
+		return tx.QueryRow(ctx, `SELECT invoice_id, legal_entity_id, vendor_id, invoice_number, document_number, content_type, body, tax_code, tax_amount, total, created_at
 			FROM receiving_ers_self_bill WHERE tenant_id = $1 AND invoice_id = $2`, tenantID, invoiceID).
-			Scan(&out.InvoiceID, &out.LegalEntityID, &out.VendorID, &out.InvoiceNumber, &out.ContentType, &out.Body, &out.TaxCode, &out.TaxAmount, &out.Total, &out.CreatedAt)
+			Scan(&out.InvoiceID, &out.LegalEntityID, &out.VendorID, &out.InvoiceNumber, &out.Number, &out.ContentType, &out.Body, &out.TaxCode, &out.TaxAmount, &out.Total, &out.CreatedAt)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SelfBill{}, ErrSelfBillNotFound

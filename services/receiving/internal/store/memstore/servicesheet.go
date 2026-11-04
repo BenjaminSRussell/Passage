@@ -8,7 +8,6 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
@@ -93,11 +92,12 @@ func (s *Store) AcceptSheet(ctx context.Context, id, by string, fn store.SheetAc
 		now := time.Now().UTC()
 		sheet = cloneSheet(sheet)
 		sheet.Status, sheet.DecidedBy, sheet.DecidedAt, sheet.RejectReason = domain.SheetAccepted, by, &now, ""
-		allocated := store.Receipt{ID: ids.New(), Number: fmt.Sprintf("RCV-%08d", t.counter+1)}
+		allocated := store.Receipt{ID: ids.New()}
 		outcome, err := fn(sheet, allocated)
 		if err != nil {
 			return err
 		}
+		number := fmt.Sprintf("RCV-%08d", t.counter+1)
 		rec := cloneReceipt(outcome.Receipt)
 		if rec.ID == "" {
 			rec.ID = allocated.ID
@@ -108,7 +108,7 @@ func (s *Store) AcceptSheet(ctx context.Context, id, by string, fn store.SheetAc
 		if rec.Source == "" {
 			rec.Source = domain.ReceiptSourceService
 		}
-		rec.Number, rec.State, rec.Version, rec.CreatedAt = allocated.Number, domain.Posted, 1, now
+		rec.Number, rec.State, rec.Version, rec.CreatedAt = number, domain.Posted, 1, now
 		t.counter++
 		posted := now
 		rec.PostingDate, rec.PostedAt, rec.PostedBy, rec.LedgerEntryID = &rec.Date, &posted, by, outcome.LedgerEntryID
@@ -143,32 +143,44 @@ func (s *Store) AcceptSheet(ctx context.Context, id, by string, fn store.SheetAc
 		}
 		sheet.ReceiptID, sheet.LedgerEntryID = rec.ID, outcome.LedgerEntryID
 		t.sheets[canonical] = sheet
-		s.events = append(s.events, outcome.Events...)
+		accepted := outcome.Events
+		if outcome.PostedEvent != nil {
+			postedEvt, err := outcome.PostedEvent(number)
+			if err != nil {
+				return err
+			}
+			accepted = append(slices.Clone(accepted), postedEvt)
+		}
+		s.events = append(s.events, accepted...)
 		out = cloneSheet(sheet)
 		return nil
 	})
 	return out, err
 }
 
-func (s *Store) PutSelfBill(ctx context.Context, in store.SelfBill, evt events.Event) error {
-	return s.with(ctx, func(t *tenantData) error {
-		if t.selfBills == nil {
-			t.selfBills = map[string]store.SelfBill{}
-		}
-		if _, ok := t.selfBills[in.InvoiceID]; ok {
-			return nil
-		}
-		if in.ContentType == "" {
-			in.ContentType = "application/pdf"
-		}
-		in.CreatedAt = time.Now().UTC()
-		in.Body = slices.Clone(in.Body)
-		t.selfBills[in.InvoiceID] = in
-		if evt.Type != "" {
-			s.events = append(s.events, evt)
-		}
+func (s *Store) putSelfBill(t *tenantData, in store.Invoice, build store.SelfBillBuild) error {
+	if build == nil {
 		return nil
-	})
+	}
+	if t.selfBills == nil {
+		t.selfBills = map[string]store.SelfBill{}
+	}
+	if t.selfBillSeq == nil {
+		t.selfBillSeq = map[string]int{}
+	}
+	doc, evt, err := build(store.SelfBillNumber(t.selfBillSeq[in.LegalEntityID] + 1))
+	if err != nil {
+		return err
+	}
+	t.selfBillSeq[in.LegalEntityID]++
+	if doc.ContentType == "" {
+		doc.ContentType = "application/pdf"
+	}
+	doc.CreatedAt = time.Now().UTC()
+	doc.Body = slices.Clone(doc.Body)
+	t.selfBills[in.ID] = doc
+	s.events = append(s.events, evt)
+	return nil
 }
 
 func (s *Store) GetSelfBill(ctx context.Context, invoiceID string) (out store.SelfBill, err error) {

@@ -294,20 +294,39 @@ func TestBuildPorts_MalformedServiceSigningKeyStopsStartup(t *testing.T) {
 
 func TestBuildPortsWiresTaxWhenConfigured(t *testing.T) {
 	env := withAccounts(map[string]string{"LEDGER_URL": "http://l", "CLOSE_URL": "http://c", "PURCHASING_URL": "http://p"})
-	unset, err := buildPorts(func(k string) string { return env[k] })
-	if err != nil || unset.Tax != nil || unset.TaxRecorder != nil {
+	get := func(k string) string { return env[k] }
+	unset, err := buildPorts(get)
+	if err != nil || unset.Tax != nil || unset.TaxRecorder != nil || unset.SelfBillParties != nil {
 		t.Fatalf("unset TAX_URL: tax %T recorder %T err %v", unset.Tax, unset.TaxRecorder, err)
 	}
 	env["TAX_URL"] = "http://tax"
-	wired, err := buildPorts(func(k string) string { return env[k] })
+	if _, err := buildPorts(get); err == nil || !strings.Contains(err.Error(), "TAX_RULES") {
+		t.Fatalf("TAX_URL without rules must stop startup, got %v", err)
+	}
+	env["TAX_RULES"] = `[{"country":"de","code":"DE19","jurisdiction":"DE","ratePct":"19"}]`
+	if _, err := buildPorts(get); err == nil || !strings.Contains(err.Error(), "PARTY_URL and ORG_URL") {
+		t.Fatalf("TAX_URL without the party and org services must stop startup, got %v", err)
+	}
+	env["PARTY_URL"], env["ORG_URL"] = "http://party", "http://org"
+	wired, err := buildPorts(get)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if wired.Tax == nil || wired.TaxRecorder == nil {
-		t.Fatal("TAX_URL must wire both the calculator and the recorder")
+	if wired.Tax == nil || wired.TaxRecorder == nil || wired.SelfBillParties == nil {
+		t.Fatal("TAX_URL must wire the calculator, the recorder and the self-billing party source")
 	}
-	env["TAX_RATE_PCT"] = "not-a-rate"
-	if _, err := buildPorts(func(k string) string { return env[k] }); err == nil || !strings.Contains(err.Error(), "TAX_RATE_PCT") {
-		t.Fatalf("got %v, want TAX_RATE_PCT rejected", err)
+	for name, rules := range map[string]string{
+		"not json":      `19`,
+		"empty":         `[]`,
+		"bad rate":      `[{"country":"DE","code":"DE19","jurisdiction":"DE","ratePct":"x"}]`,
+		"negative rate": `[{"country":"DE","code":"DE19","jurisdiction":"DE","ratePct":"-1"}]`,
+		"bad country":   `[{"country":"DEU","code":"DE19","jurisdiction":"DE","ratePct":"19"}]`,
+		"no code":       `[{"country":"DE","jurisdiction":"DE","ratePct":"19"}]`,
+		"duplicate":     `[{"country":"DE","code":"A","jurisdiction":"DE","ratePct":"19"},{"country":"de","code":"B","jurisdiction":"DE","ratePct":"7"}]`,
+	} {
+		env["TAX_RULES"] = rules
+		if _, err := buildPorts(get); err == nil || !strings.Contains(err.Error(), "TAX_RULES") {
+			t.Errorf("%s: got %v, want TAX_RULES rejected", name, err)
+		}
 	}
 }

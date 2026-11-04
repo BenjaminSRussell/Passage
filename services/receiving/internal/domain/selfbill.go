@@ -2,6 +2,7 @@ package domain
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"strings"
 
@@ -10,15 +11,45 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/money"
 )
 
+type SelfBillParty struct {
+	Name               string
+	Address            string
+	Country            string
+	RegistrationNumber string
+	VatID              string
+}
+
+type SelfBillParties struct {
+	Supplier SelfBillParty
+	Customer SelfBillParty
+}
+
+type SelfBillPartySource interface {
+	SelfBillParties(ctx context.Context, legalEntityID, vendorID string) (SelfBillParties, error)
+}
+
+type FakeSelfBillParties struct {
+	Parties SelfBillParties
+	Err     error
+}
+
+func (f FakeSelfBillParties) SelfBillParties(context.Context, string, string) (SelfBillParties, error) {
+	return f.Parties, f.Err
+}
+
 // SelfBill is the evaluated-receipt (self-billing) tax document issued to the vendor.
 type SelfBill struct {
+	Number        string
 	InvoiceID     string
 	InvoiceNumber string
 	LegalEntityID string
 	VendorID      string
 	InvoiceDate   string
+	SupplyDate    string
 	Currency      string
 	TaxCode       string
+	TaxRatePct    decimal.Decimal
+	Parties       SelfBillParties
 	Net           decimal.Decimal
 	Tax           decimal.Decimal
 	Total         decimal.Decimal
@@ -32,22 +63,39 @@ type SelfBillLine struct {
 	Amount    decimal.Decimal
 }
 
+func (p SelfBillParty) text(role string) string {
+	var b strings.Builder
+	b.WriteString(role + " " + p.Name + "\n")
+	if p.Address != "" {
+		b.WriteString("  Address " + p.Address + "\n")
+	}
+	if p.VatID != "" {
+		b.WriteString("  VAT id " + p.VatID + "\n")
+	}
+	if p.RegistrationNumber != "" {
+		b.WriteString("  Registration no " + p.RegistrationNumber + "\n")
+	}
+	return b.String()
+}
+
 func (d SelfBill) RenderPDF() []byte {
 	var b strings.Builder
-	b.WriteString("Self-billing invoice " + d.InvoiceNumber + "\n")
-	b.WriteString("Vendor " + d.VendorID + "\n")
-	b.WriteString("Legal entity " + d.LegalEntityID + "\n")
-	b.WriteString("Date " + d.InvoiceDate + "\n")
+	b.WriteString("Self-billing invoice " + d.Number + "\n")
+	b.WriteString(d.Parties.Customer.text("Issued by (customer)"))
+	b.WriteString(d.Parties.Supplier.text("Supplier"))
+	b.WriteString("Reference " + d.InvoiceNumber + "\n")
+	b.WriteString("Date of issue " + d.InvoiceDate + "\n")
+	b.WriteString("Date of supply " + d.SupplyDate + "\n")
 	b.WriteString("Currency " + d.Currency + "\n")
 	scale := money.MinorUnits(d.Currency)
 	for _, l := range d.Lines {
 		fmt.Fprintf(&b, "Line %d  qty %s  unit %s  amount %s\n", l.LineNo, l.Qty.String(), l.UnitPrice.String(), l.Amount.StringFixed(scale))
 	}
 	if d.TaxCode != "" {
-		b.WriteString("Tax code " + d.TaxCode + "\n")
+		fmt.Fprintf(&b, "Tax code %s  rate %s%%\n", d.TaxCode, d.TaxRatePct.String())
 	}
 	fmt.Fprintf(&b, "Net %s\nTax %s\nTotal %s\n", d.Net.StringFixed(scale), d.Tax.StringFixed(scale), d.Total.StringFixed(scale))
-	return pdfFromText("Self-billing invoice "+d.InvoiceNumber, b.String())
+	return pdfFromText("Self-billing invoice "+d.Number, b.String())
 }
 
 func pdfFromText(title, body string) []byte {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
@@ -87,6 +88,7 @@ func (s *Postgres) PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) 
 			in.Status = domain.InvoiceStatusAuditBlocked
 		}
 		for i := range in.Lines {
+			in.Lines[i].Service = items[i].Service
 			if i < len(outcome.Clearings) {
 				in.Lines[i].GrirCleared = outcome.Clearings[i]
 			}
@@ -116,6 +118,11 @@ func (s *Postgres) PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) 
 			if err := markPostingsDone(ctx, tx, tenantID, in.ID, outcome.LedgerEntryID != ""); err != nil {
 				return err
 			}
+			if outcome.SelfBill != nil {
+				if err := putSelfBill(ctx, tx, tenantID, in, outcome.SelfBill); err != nil {
+					return err
+				}
+			}
 		}
 		return outbox.Enqueue(ctx, tx, invoiceAggregate, in.ID, outcome.Event)
 	})
@@ -133,9 +140,10 @@ func lockGrirItem(ctx context.Context, tx pgx.Tx, tenantID string, in Invoice, k
 	var legalEntityID, vendorID, currency string
 	item := &domain.GrirItem{ReceiptID: key.ReceiptID, LineNo: key.LineNo}
 	var receivedAmount, clearedAmount decimal.Decimal
-	err := tx.QueryRow(ctx, `SELECT legal_entity_id::text, COALESCE(vendor_id::text, ''), received_qty, invoiced_qty, received_amount, cleared_amount, currency
-		FROM receiving_grir_open_item WHERE tenant_id = $1 AND receipt_id = $2 AND line_no = $3 FOR UPDATE`, tenantID, key.ReceiptID, key.LineNo).
-		Scan(&legalEntityID, &vendorID, &item.ReceivedQty, &item.InvoicedQty, &receivedAmount, &clearedAmount, &currency)
+	err := tx.QueryRow(ctx, `SELECT g.legal_entity_id::text, COALESCE(g.vendor_id::text, ''), g.received_qty, g.invoiced_qty, g.received_amount, g.cleared_amount, g.currency,
+		COALESCE((SELECT r.source = 'SERVICE_ENTRY_SHEET' FROM receiving_receipt r WHERE r.tenant_id = g.tenant_id AND r.id = g.receipt_id), false)
+		FROM receiving_grir_open_item g WHERE g.tenant_id = $1 AND g.receipt_id = $2 AND g.line_no = $3 FOR UPDATE OF g`, tenantID, key.ReceiptID, key.LineNo).
+		Scan(&legalEntityID, &vendorID, &item.ReceivedQty, &item.InvoicedQty, &receivedAmount, &clearedAmount, &currency, &item.Service)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrGrirNotFound
 	}
@@ -152,15 +160,22 @@ func lockGrirItem(ctx context.Context, tx pgx.Tx, tenantID string, in Invoice, k
 
 func insertInvoice(ctx context.Context, tx pgx.Tx, tenantID string, in *Invoice) error {
 	if err := tx.QueryRow(ctx, `INSERT INTO receiving_vendor_invoice (tenant_id, id, legal_entity_id, vendor_id, invoice_number, invoice_date, posting_date,
-		currency, ledger_id, fiscal_period_id, ledger_entry_id, total, source, status, posted_by, audit_reason, one_time_payee_id, audit_rule_version, tax_amount, tax_code) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NULLIF($17, '')::uuid, NULLIF($18, 0), $19, $20) RETURNING created_at`,
+		currency, ledger_id, fiscal_period_id, ledger_entry_id, total, source, status, posted_by, audit_reason, one_time_payee_id, audit_rule_version, tax_amount, tax_code, tax_rate_pct, supply_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NULLIF($17, '')::uuid, NULLIF($18, 0), $19, $20, $21, $22) RETURNING created_at`,
 		tenantID, in.ID, in.LegalEntityID, in.VendorID, in.InvoiceNumber, in.InvoiceDate, in.PostingDate, in.Currency, in.LedgerID, in.FiscalPeriodID,
-		in.LedgerEntryID, in.Total, in.Source, in.Status, in.PostedBy, in.AuditReason, in.OneTimePayeeID, in.AuditRuleVersion, in.TaxAmount, in.TaxCode).Scan(&in.CreatedAt); err != nil {
+		in.LedgerEntryID, in.Total, in.Source, in.Status, in.PostedBy, in.AuditReason, in.OneTimePayeeID, in.AuditRuleVersion, in.TaxAmount, in.TaxCode, in.TaxRatePct, supplyDate(in.SupplyDate)).Scan(&in.CreatedAt); err != nil {
 		return err
 	}
 	rows := make([][]any, len(in.Lines))
 	for i, l := range in.Lines {
-		rows[i] = []any{tenantID, in.ID, i + 1, in.LegalEntityID, l.ReceiptID, l.ReceiptLineNo, l.Qty, l.UnitPrice, l.Amount, l.StandardCost, l.GrirCleared}
+		rows[i] = []any{tenantID, in.ID, i + 1, in.LegalEntityID, l.ReceiptID, l.ReceiptLineNo, l.Qty, l.UnitPrice, l.Amount, l.StandardCost, l.GrirCleared, l.Service}
 	}
-	return execBatch(ctx, tx, `INSERT INTO receiving_vendor_invoice_line (tenant_id, invoice_id, line_no, legal_entity_id, receipt_id, receipt_line_no, qty, unit_price, amount, standard_cost, grir_cleared)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, rows)
+	return execBatch(ctx, tx, `INSERT INTO receiving_vendor_invoice_line (tenant_id, invoice_id, line_no, legal_entity_id, receipt_id, receipt_line_no, qty, unit_price, amount, standard_cost, grir_cleared, service)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`, rows)
+}
+
+func supplyDate(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return t
 }

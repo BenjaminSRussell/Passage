@@ -39,6 +39,7 @@ type HeldLine struct {
 	Qty          decimal.Decimal
 	UnitPrice    decimal.Decimal
 	StandardCost bool
+	Service      bool
 	Clearing     decimal.Decimal
 }
 
@@ -82,7 +83,10 @@ func buildInvoiceEntry(in VendorInvoice, lines []HeldLine, profile PostingProfil
 		entry.Lines = append(entry.Lines, JournalLine{Account: profile.GRIR, Amount: money.Amount{Value: l.Clearing, Currency: in.Currency}})
 		if diff := amount.Value.Sub(l.Clearing); !diff.IsZero() {
 			account := profile.Inventory
-			if l.StandardCost {
+			switch {
+			case l.Service:
+				account = profile.Expense
+			case l.StandardCost:
 				account = profile.PPV
 			}
 			entry.Lines = append(entry.Lines, JournalLine{Account: account, Amount: money.Amount{Value: diff, Currency: in.Currency}})
@@ -115,7 +119,7 @@ func assessInvoice(in VendorInvoice, profile PostingProfile) (JournalEntry, erro
 		exhausts := claimed[l.Item].Equal(l.Item.ReceivedQty.Sub(l.Item.InvoicedQty))
 		clearing := clearingFor(*l.Item, l.Qty, exhausts, cleared[l.Item])
 		cleared[l.Item] = cleared[l.Item].Add(clearing.Value)
-		held[i] = HeldLine{Qty: l.Qty, UnitPrice: l.UnitPrice, StandardCost: l.StandardCost, Clearing: clearing.Value}
+		held[i] = HeldLine{Qty: l.Qty, UnitPrice: l.UnitPrice, StandardCost: l.StandardCost, Service: l.Item.Service, Clearing: clearing.Value}
 	}
 	return buildInvoiceEntry(in, held, profile), nil
 }

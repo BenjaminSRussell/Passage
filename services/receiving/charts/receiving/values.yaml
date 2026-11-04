@@ -12,6 +12,7 @@ serviceUrls:
   purchasing: ""
   inventory: ""
   party: ""
+  org: ""
   tax: ""
   compliance: ""
 # postingProfile values are required outside dev: the pod exits at startup with "POSTING_LEDGER_ID is required" when ledgerId is empty.
@@ -24,11 +25,10 @@ postingProfile:
   vendorControlAccount: ""
   expenseAccount: ""
   inputTaxAccount: ""
-# tax.code and tax.ratePct enable ERS input-tax calculation when serviceUrls.tax is set.
+# tax.rules is required when serviceUrls.tax is set: a JSON array of {"country","code","jurisdiction","ratePct"}, one entry per legal entity country.
+# A receipt whose legal entity country has no rule is skipped as TAX_NOT_DETERMINED; it is never settled at zero tax.
 tax:
-  code: ""
-  ratePct: ""
-  jurisdiction: ""
+  rules: ""
 # legalEntityCountries maps legal entity ids to ISO country codes ("<uuid>=GB,<uuid>=DE"); one-time payee erasure keeps every payee of an entity that is not listed.
 legalEntityCountries: ""
 replicaCount: 1

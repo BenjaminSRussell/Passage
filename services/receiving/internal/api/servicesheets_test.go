@@ -38,13 +38,14 @@ type sheetJSON struct {
 }
 
 func newSheetRig(po domain.PurchaseOrder) *rig {
-	rg := &rig{st: memstore.New(), ledger: &domain.FakeLedger{}}
+	rg := &rig{st: memstore.New(), ledger: &domain.FakeLedger{}, orders: map[string]domain.PurchaseOrder{po.ID: po}}
 	a := api.New(rg.st, api.Ports{
 		Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: rg.ledger,
 		Profile:        domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000", Expense: "6000", InputTax: "1570"},
-		PurchaseOrders: domain.FakePurchaseOrders{Orders: map[string]domain.PurchaseOrder{po.ID: po}},
+		PurchaseOrders: domain.FakePurchaseOrders{Orders: rg.orders},
 		AuditSampler:   testSampler("seed-one-0123456789"),
 		ResolveMinAge:  time.Nanosecond,
+		Tax:            testTax, SelfBillParties: testParties,
 	})
 	router := httpx.NewRouter()
 	a.Register(router)
@@ -258,4 +259,65 @@ func TestServiceSheet_AcceptedSheetSettlesByERS(t *testing.T) {
 	}
 	entry := lastEntry(t, rg)
 	wantLines(t, entry, "2100=7.5", "2000=-7.5")
+}
+
+func TestServiceSheet_ERSPriceDifferenceGoesToExpenseNotInventory(t *testing.T) {
+	rg := newSheetRig(servicePO())
+	created := parseSheet(t, rg.sheetAs("alice", sheetBodyFor(sheetLine(1, "4", "2.5"))), http.StatusCreated)
+	accepted := parseSheet(t, rg.decideSheet(created.ID, "accept", "bob", ""), http.StatusOK)
+	repriced := servicePO()
+	repriced.Lines[0].UnitPrice = decimal.RequireFromString("3")
+	rg.orders[poID] = repriced
+	rg.enableErs(t, true)
+	rg.confirmPrice(t, accepted.ReceiptID, 1, "3", http.StatusOK)
+	run := rg.ersRun(t, http.StatusOK)
+	if len(run.Settled) != 1 {
+		t.Fatalf("run %+v", run)
+	}
+	wantLines(t, lastEntry(t, rg), "2100=10", "6000=2", "2000=-12")
+	if rg.ledger.Balance("1400").Sign() != 0 {
+		t.Fatalf("a service price difference reached Inventory: %s", rg.ledger.Balance("1400"))
+	}
+}
+
+func TestServiceSheet_ManualInvoiceDifferenceGoesToExpenseToo(t *testing.T) {
+	rg := newSheetRig(servicePO())
+	created := parseSheet(t, rg.sheetAs("alice", sheetBodyFor(sheetLine(1, "4", "2.5"))), http.StatusCreated)
+	accepted := parseSheet(t, rg.decideSheet(created.ID, "accept", "bob", ""), http.StatusOK)
+	rec := rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-SES-1", accepted.ReceiptID, 4, ""), userDuty("VendorInvoicePost", rg.key(), "ap-clerk"))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("manual invoice %d %s", rec.Code, rec.Body.String())
+	}
+	if rg.ledger.Balance("1400").Sign() != 0 {
+		t.Fatalf("Inventory %s", rg.ledger.Balance("1400"))
+	}
+}
+
+func TestServiceSheet_ReceiptCannotBeCorrectedOrCancelled(t *testing.T) {
+	rg := newSheetRig(servicePO())
+	created := parseSheet(t, rg.sheetAs("alice", sheetBodyFor(sheetLine(1, "4", "2.5"))), http.StatusCreated)
+	accepted := parseSheet(t, rg.decideSheet(created.ID, "accept", "bob", ""), http.StatusOK)
+	entries := len(rg.ledger.Entries)
+	path := receiptsPath + "/" + accepted.ReceiptID
+	problemCode(t, rg.call(http.MethodPost, path+":correct", `{"lines":[{"lineNo":1,"qtyDelta":1}]}`, rg.poster(1)), http.StatusConflict, "RCV-SVC-001")
+	problemCode(t, rg.call(http.MethodPost, path+":cancel", "", rg.poster(1)), http.StatusConflict, "RCV-SVC-001")
+	if len(rg.ledger.Entries) != entries {
+		t.Fatalf("a refused command posted to the ledger: %+v", rg.ledger.Entries[entries:])
+	}
+	read := decode[sheetJSON](t, rg.call(http.MethodGet, sheetsPath+"/"+created.ID, "", duty("ServiceEntryMaintain", "", "X-Passage-User", "alice")), http.StatusOK)
+	if read.Status != "ACCEPTED" {
+		t.Fatalf("sheet %+v", read)
+	}
+}
+
+func TestServiceSheet_AcceptFailsWhenThePurchaseOrderCannotBeRead(t *testing.T) {
+	rg := newSheetRig(servicePO())
+	created := parseSheet(t, rg.sheetAs("alice", sheetBodyFor(sheetLine(1, "4", "2.5"))), http.StatusCreated)
+	delete(rg.orders, poID)
+	if r := rg.decideSheet(created.ID, "accept", "bob", ""); r.code == http.StatusOK {
+		t.Fatalf("accepted without reading the purchase order: %s", r.body)
+	}
+	if len(rg.ledger.Entries) != 0 {
+		t.Fatalf("ledger %+v", rg.ledger.Entries)
+	}
 }

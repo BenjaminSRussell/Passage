@@ -56,6 +56,18 @@ func TestErasureKafkaConfigKeepsItsOwnGroupAndTopic(t *testing.T) {
 	}
 }
 
+func TestErsTaxKafkaConfigKeepsItsOwnGroupAndTopic(t *testing.T) {
+	cfg, err := ersTaxKafkaConfig(func(k string) string {
+		return map[string]string{"KAFKA_BROKERS": "a:9093", "KAFKA_GROUP": "receiving-ers"}[k]
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Group != "receiving-ers-tax" || len(cfg.Topics) != 1 || cfg.Topics[0] != "passage.receiving.ersselfbill" {
+		t.Fatalf("config = %+v", cfg)
+	}
+}
+
 func TestRunRefusesUnknownSubcommand(t *testing.T) {
 	err := run(context.Background(), func(string) string { return "" }, []string{"receiving", "migrate"})
 	if err == nil || !strings.Contains(err.Error(), "unknown command") {

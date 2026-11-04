@@ -34,6 +34,7 @@ const (
 	skipPartial       = "PARTIALLY_INVOICED"
 	skipPriceChange   = "PRICE_CHANGED"
 	skipSelfConfirmed = "PRICE_CONFIRMED_BY_RUNNER"
+	skipTaxUndefined  = "TAX_NOT_DETERMINED"
 )
 
 type ersRunRequest struct {
@@ -255,6 +256,10 @@ func (r *ersRun) receipt(receiptID string) error {
 		return nil
 	}
 	posted, err := r.api.submitInvoice(r.ctx, r.groups, r.principal, in)
+	if errors.Is(err, domain.ErrTaxNotDetermined) {
+		r.skip(ref, skipTaxUndefined)
+		return nil
+	}
 	var domainErr *domain.Error
 	if errors.As(err, &domainErr) {
 		reasons := map[string]string{domain.CodeDuplicateInvoice: skipAlreadySettled, domain.CodePlanSettled: skipPlanSettled, domain.CodeOverInvoice: skipLineInvoiced}

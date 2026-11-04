@@ -338,3 +338,20 @@ func TestPostInvoice_RefusesTaxWithoutAnInputTaxAccount(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 }
+
+func TestPostInvoice_ServiceLineDifferenceGoesToExpenseNotInventory(t *testing.T) {
+	item := grirItem("10", "5")
+	item.Service = true
+	profile := testProfile
+	profile.Expense = "6000"
+	entry, err := domain.PostInvoice(context.Background(), invoiceFor(item, "10", "5.10", august15), domain.FakePeriods{Status: domain.PeriodOpen}, &domain.FakeLedger{}, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"2100": "50", "6000": "1", "2000": "-51"}
+	for _, l := range entry.Lines {
+		if w, ok := want[l.Account]; !ok || !l.Amount.Value.Equal(dec(w)) {
+			t.Fatalf("%s = %s, want %v", l.Account, l.Amount.Value, want)
+		}
+	}
+}

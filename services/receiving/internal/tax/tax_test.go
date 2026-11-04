@@ -2,6 +2,7 @@ package tax_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,26 +29,50 @@ func TestClient_CalculateInput(t *testing.T) {
 		_, _ = w.Write([]byte(`{"document_taxes_by_code":[{"code":"VAT19","direction":"input","tax_amount":"95.00"}]}`))
 	}))
 	t.Cleanup(srv.Close)
-	c := tax.New(srv.URL, tax.Config{Code: "VAT19", RatePct: decimal.RequireFromString("19")}, nil)
+	c := tax.New(srv.URL, tax.Config{Rules: map[string]tax.Rule{"DE": {Code: "VAT19", Jurisdiction: "DE", RatePct: decimal.RequireFromString("19")}}}, nil)
 	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9)})
 	got, err := c.CalculateInput(ctx, testkit.TenantID(9), domain.TaxDocument{
-		Currency: "EUR", Date: "2026-11-03", Lines: []domain.TaxDocumentLine{{Ref: "1", Amount: decimal.RequireFromString("500")}},
+		Country: "DE", Currency: "EUR", Date: "2026-11-03", Lines: []domain.TaxDocumentLine{{Ref: "1", Amount: decimal.RequireFromString("500")}},
 	})
 	if err != nil || got.Code != "VAT19" || !got.Amount.Equal(decimal.RequireFromString("95.00")) || sawDuty != "Calculate tax" {
 		t.Fatalf("got %+v err %v duty %q", got, err, sawDuty)
 	}
 }
 
-func TestClient_CalculateInputSkipsWhenConfigIsNotReady(t *testing.T) {
+func TestClient_CalculateInputFailsClosedWithoutARuleForTheCountry(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Fatal("tax must not be called when the rate is not configured")
+		t.Fatal("tax must not be called without a rule for the country")
 	}))
 	t.Cleanup(srv.Close)
-	c := tax.New(srv.URL, tax.Config{Code: "VAT19"}, nil)
+	c := tax.New(srv.URL, tax.Config{Rules: map[string]tax.Rule{"DE": {Code: "VAT19", RatePct: decimal.RequireFromString("19")}}}, nil)
 	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9)})
-	got, err := c.CalculateInput(ctx, testkit.TenantID(9), domain.TaxDocument{Currency: "EUR", Date: "2026-11-03"})
-	if err != nil || got.Code != "" || !got.Amount.IsZero() {
-		t.Fatalf("got %+v err %v", got, err)
+	for _, country := range []string{"FR", ""} {
+		if _, err := c.CalculateInput(ctx, testkit.TenantID(9), domain.TaxDocument{Country: country, Currency: "EUR", Date: "2026-11-03"}); !errors.Is(err, domain.ErrTaxNotDetermined) {
+			t.Fatalf("country %q: err %v, want ErrTaxNotDetermined", country, err)
+		}
+	}
+}
+
+func TestClient_CalculateInputRefusesAnotherTaxCodeInTheResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"document_taxes_by_code":[{"code":"VAT19","tax_amount":"95"},{"code":"VAT7","tax_amount":"7"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := tax.New(srv.URL, tax.Config{Rules: map[string]tax.Rule{"DE": {Code: "VAT19", RatePct: decimal.RequireFromString("19")}}}, nil)
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9)})
+	if _, err := c.CalculateInput(ctx, testkit.TenantID(9), domain.TaxDocument{Country: "DE", Currency: "EUR", Date: "2026-11-03"}); err == nil {
+		t.Fatal("a second tax code was folded into one amount")
+	}
+}
+
+func TestClient_CalculateInputReportsAGatewayFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }))
+	t.Cleanup(srv.Close)
+	c := tax.New(srv.URL, tax.Config{Rules: map[string]tax.Rule{"DE": {Code: "VAT19", RatePct: decimal.RequireFromString("19")}}}, nil)
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9)})
+	var status *tax.StatusError
+	if _, err := c.CalculateInput(ctx, testkit.TenantID(9), domain.TaxDocument{Country: "DE", Currency: "EUR", Date: "2026-11-03"}); !errors.As(err, &status) || status.Status != http.StatusServiceUnavailable {
+		t.Fatalf("err %v", err)
 	}
 }
 
@@ -60,7 +85,7 @@ func TestClient_RecordInput(t *testing.T) {
 		_, _ = w.Write([]byte(`{"recorded":1}`))
 	}))
 	t.Cleanup(srv.Close)
-	c := tax.New(srv.URL, tax.Config{Code: "VAT19", RatePct: decimal.RequireFromString("19")}, nil)
+	c := tax.New(srv.URL, tax.Config{Rules: map[string]tax.Rule{"DE": {Code: "VAT19", Jurisdiction: "DE", RatePct: decimal.RequireFromString("19")}}}, nil)
 	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9)})
 	id := "11111111-1111-4111-8111-111111111111"
 	if err := c.RecordInput(ctx, testkit.TenantID(9), domain.TaxTxn{ID: id, Code: "VAT19", Date: "2026-11-03", Amount: decimal.RequireFromString("95")}); err != nil {

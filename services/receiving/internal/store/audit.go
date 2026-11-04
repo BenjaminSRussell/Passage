@@ -94,9 +94,9 @@ func (s *Postgres) ReleaseInvoice(ctx context.Context, id, legalEntityID, by str
 			return err
 		}
 		err := tx.QueryRow(ctx, `SELECT legal_entity_id::text, vendor_id::text, invoice_number, invoice_date, posting_date, currency, ledger_id::text, fiscal_period_id::text,
-			ledger_entry_id, total, created_at, source, status, posted_by, COALESCE(one_time_payee_id::text, ''), tax_amount, COALESCE(tax_code, '') FROM receiving_vendor_invoice WHERE tenant_id = $1 AND id = $2 FOR UPDATE`, tenantID, id).
+			ledger_entry_id, total, created_at, source, status, posted_by, COALESCE(one_time_payee_id::text, ''), tax_amount, COALESCE(tax_code, ''), tax_rate_pct, COALESCE(supply_date, invoice_date) FROM receiving_vendor_invoice WHERE tenant_id = $1 AND id = $2 FOR UPDATE`, tenantID, id).
 			Scan(&inv.LegalEntityID, &inv.VendorID, &inv.InvoiceNumber, &inv.InvoiceDate, &inv.PostingDate, &inv.Currency, &inv.LedgerID, &inv.FiscalPeriodID,
-				&inv.LedgerEntryID, &inv.Total, &inv.CreatedAt, &inv.Source, &inv.Status, &inv.PostedBy, &inv.OneTimePayeeID, &inv.TaxAmount, &inv.TaxCode)
+				&inv.LedgerEntryID, &inv.Total, &inv.CreatedAt, &inv.Source, &inv.Status, &inv.PostedBy, &inv.OneTimePayeeID, &inv.TaxAmount, &inv.TaxCode, &inv.TaxRatePct, &inv.SupplyDate)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrInvoiceNotFound
 		}
@@ -121,13 +121,18 @@ func (s *Postgres) ReleaseInvoice(ctx context.Context, id, legalEntityID, by str
 		if err := markPostingsDone(ctx, tx, tenantID, id, outcome.LedgerEntryID != ""); err != nil {
 			return err
 		}
+		if outcome.SelfBill != nil {
+			if err := putSelfBill(ctx, tx, tenantID, inv, outcome.SelfBill); err != nil {
+				return err
+			}
+		}
 		return outbox.Enqueue(ctx, tx, invoiceAggregate, id, outcome.Event)
 	})
 	return inv, err
 }
 
 func loadInvoiceLines(ctx context.Context, tx pgx.Tx, tenantID string, inv *Invoice) error {
-	rows, err := tx.Query(ctx, `SELECT receipt_id::text, receipt_line_no, qty, unit_price, amount, standard_cost, COALESCE(grir_cleared, 0)
+	rows, err := tx.Query(ctx, `SELECT receipt_id::text, receipt_line_no, qty, unit_price, amount, standard_cost, COALESCE(grir_cleared, 0), service
 		FROM receiving_vendor_invoice_line WHERE tenant_id = $1 AND invoice_id = $2 ORDER BY line_no`, tenantID, inv.ID)
 	if err != nil {
 		return err
@@ -135,7 +140,7 @@ func loadInvoiceLines(ctx context.Context, tx pgx.Tx, tenantID string, inv *Invo
 	defer rows.Close()
 	for rows.Next() {
 		var l InvoiceLine
-		if err := rows.Scan(&l.ReceiptID, &l.ReceiptLineNo, &l.Qty, &l.UnitPrice, &l.Amount, &l.StandardCost, &l.GrirCleared); err != nil {
+		if err := rows.Scan(&l.ReceiptID, &l.ReceiptLineNo, &l.Qty, &l.UnitPrice, &l.Amount, &l.StandardCost, &l.GrirCleared, &l.Service); err != nil {
 			return err
 		}
 		inv.Lines = append(inv.Lines, l)

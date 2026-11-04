@@ -197,8 +197,9 @@ components:
     ErsSelfBillIssued:
       name: dev.passage.receiving.ersselfbill.issued.v1
       summary: >-
-        A posted ERS invoice issued the self-billing tax document (PDF) to the vendor. Emitted after invoices:post for source
-        ERS, or after release of an audit-blocked ERS invoice. Consumers: tax, audit, supplier portal.
+        A posted ERS invoice issued the self-billing tax document (PDF) to the vendor. Written in the same transaction as the
+        ERS invoice post, or as the release of an audit-blocked ERS invoice. Receiving's own tax consumer (group receiving-ers-tax) records
+        the input tax in the tax service from it, retrying with backoff. Consumers: receiving, audit, supplier portal.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/ErsSelfBillIssuedData"
@@ -367,10 +368,12 @@ components:
               amount: { type: string }
     ErsSelfBillIssuedData:
       type: object
-      required: [invoice_id, invoice_number, legal_entity_id, vendor_id, currency, tax, total]
+      required: [invoice_id, document_number, invoice_number, tax_date, legal_entity_id, vendor_id, currency, tax, total]
       properties:
         invoice_id: { type: string, format: uuid }
+        document_number: { type: string, description: "gapless per-legal-entity self-billing number, SB-nnnnnnnn" }
         invoice_number: { type: string }
+        tax_date: { type: string, format: date, description: "invoice date; the date the input tax is recorded for" }
         legal_entity_id: { type: string, format: uuid }
         vendor_id: { type: string, format: uuid }
         currency: { type: string, pattern: "^[A-Z]{3}$" }

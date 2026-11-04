@@ -199,7 +199,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-001' }
-        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 receipt not POSTED; RCV-COR-001 correction below the invoiced quantity; RCV-IDM-001 an earlier ledger posting touching the receipt is unfinished or differs (errors.pendingKey and errors.createdAt name it); COM-0410.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 receipt not POSTED; RCV-SVC-001 receipt of an accepted service entry sheet; RCV-COR-001 correction below the invoiced quantity; RCV-IDM-001 an earlier ledger posting touching the receipt is unfinished or differs (errors.pendingKey and errors.createdAt name it); COM-0410.' }
         '412': { $ref: '#/components/responses/Problem', description: 'COM-0412' }
         '422': { $ref: '#/components/responses/Problem', description: 'RCV-VAL-001, RCV-OVR-001, PER-AP-001, COM-0409.' }
         '428': { $ref: '#/components/responses/Problem', description: 'COM-0428' }
@@ -228,7 +228,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-001' }
-        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 already cancelled or has invoiced quantity; RCV-IDM-001 an earlier ledger posting touching the receipt is unfinished or differs (errors.pendingKey and errors.createdAt name it); COM-0410.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 already cancelled or has invoiced quantity; RCV-SVC-001 receipt of an accepted service entry sheet; RCV-IDM-001 an earlier ledger posting touching the receipt is unfinished or differs (errors.pendingKey and errors.createdAt name it); COM-0410.' }
         '412': { $ref: '#/components/responses/Problem', description: 'COM-0412' }
         '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001, RCV-VAL-001 posting date before the receipt date, COM-0409.' }
         '428': { $ref: '#/components/responses/Problem', description: 'COM-0428' }
@@ -717,7 +717,7 @@ paths:
         cannot be invoiced again and an invoiced line is skipped. Idempotent per receipt (ALREADY_SETTLED). The invoice goes
         through the stochastic audit block like any other (status AUDIT_BLOCKED in the result). At most 100 invoices are created
         per run and 1000 GR/IR items scanned (hasMore); a failure stops the run and a repeat continues. Quantity discrepancies
-        are not handled. BR-18.9: a receipt line whose recorded unit price differs (at 6 decimals) from the PO line's current net price is skipped (PRICE_CHANGED, detail AP-ERS-001 with old and new price) until a buyer confirms the current price (PUT /v1/receiving/receipts/{id}/lines/{lineNo}/ers-price-confirmation); a later PO price change needs a new confirmation. Writes dev.passage.payables.invoice.posted.v1 (source ERS) or
+        are not handled. A receipt whose legal entity country has no tax rule (or a supplier in another country, or no tax service) is skipped TAX_NOT_DETERMINED. BR-18.9: a receipt line whose recorded unit price differs (at 6 decimals) from the PO line's current net price is skipped (PRICE_CHANGED, detail AP-ERS-001 with old and new price) until a buyer confirms the current price (PUT /v1/receiving/receipts/{id}/lines/{lineNo}/ers-price-confirmation); a later PO price change needs a new confirmation. Writes dev.passage.payables.invoice.posted.v1 (source ERS) or
         invoice.sampled.v1 per invoice.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'

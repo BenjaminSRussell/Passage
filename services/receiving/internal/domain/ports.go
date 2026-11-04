@@ -305,15 +305,19 @@ type TaxDocumentLine struct {
 }
 
 type TaxDocument struct {
+	Country  string
 	Currency string
 	Date     string
 	Lines    []TaxDocumentLine
 }
 
 type TaxResult struct {
-	Code   string
-	Amount decimal.Decimal
+	Code    string
+	RatePct decimal.Decimal
+	Amount  decimal.Decimal
 }
+
+var ErrTaxNotDetermined = errors.New("no tax code is configured for the legal entity country")
 
 type TaxCalculator interface {
 	CalculateInput(ctx context.Context, legalEntityID string, in TaxDocument) (TaxResult, error)

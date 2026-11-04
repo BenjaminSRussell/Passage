@@ -33,6 +33,7 @@ assert_env() {
 assert_env "$defaults" LEDGER_URL "http://ledger.hello-ledger.svc:8080"
 assert_env "$defaults" CLOSE_URL "http://close.hello-ledger.svc:8080"
 assert_env "$defaults" PURCHASING_URL "http://purchasing-purchasing.hello-ledger.svc"
+assert_env "$defaults" ORG_URL "http://org.hello-ledger.svc:8080"
 assert_env "$dev" LEDGER_URL "http://ledger.hello-ledger.svc:8080"
 assert_env "$dev" CLOSE_URL "http://close.hello-ledger.svc:8080"
 assert_env "$dev" PURCHASING_URL "http://purchasing-purchasing.hello-ledger.svc"
@@ -47,7 +48,7 @@ assert_env "$dev" POSTING_ACCOUNT_INPUT_TAX "1570"
 ports_go="$repo_root/services/receiving/cmd/receiving/ports.go"
 for name in LEDGER_URL CLOSE_URL PURCHASING_URL POSTING_LEDGER_ID \
   POSTING_ACCOUNT_INVENTORY POSTING_ACCOUNT_GRIR POSTING_ACCOUNT_PPV \
-  POSTING_ACCOUNT_VENDOR_CONTROL POSTING_ACCOUNT_EXPENSE POSTING_ACCOUNT_INPUT_TAX TAX_URL; do
+  POSTING_ACCOUNT_VENDOR_CONTROL POSTING_ACCOUNT_EXPENSE POSTING_ACCOUNT_INPUT_TAX TAX_URL ORG_URL TAX_RULES; do
   if ! grep -Fq -- "\"$name\"" "$ports_go"; then
     printf 'cmd/receiving/ports.go no longer reads %s\n' "$name" >&2
     exit 1

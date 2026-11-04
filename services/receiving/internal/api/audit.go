@@ -207,7 +207,15 @@ func (a *API) releaseAuditBlock(w http.ResponseWriter, r *http.Request) {
 		}
 		total := entry.Lines[len(entry.Lines)-1].Amount.Value.Neg()
 		evt, err := invoicePostedEvent(p.TenantID, inv, group, entry.LedgerEntryID, total, entry.GrirCleared)
-		return store.InvoiceOutcome{LedgerEntryID: entry.LedgerEntryID, Total: total, Event: evt}, err
+		outcome := store.InvoiceOutcome{LedgerEntryID: entry.LedgerEntryID, Total: total, Event: evt}
+		if inv.Source == domain.InvoiceSourceERS {
+			parties, err := a.selfBillParties(ctx, inv)
+			if err != nil {
+				return store.InvoiceOutcome{}, err
+			}
+			outcome.SelfBill = a.selfBillBuild(p.TenantID, inv, parties)
+		}
+		return outcome, err
 	})
 	if err != nil {
 		writeError(w, r, err)
@@ -216,13 +224,6 @@ func (a *API) releaseAuditBlock(w http.ResponseWriter, r *http.Request) {
 	a.pendingPostings.finish(invoiceSubjects(released)...)
 	a.auditReleased.Add(1)
 	a.invoiced.Add(1)
-	if released.Source == domain.InvoiceSourceERS {
-		if err := a.issueSelfBill(r.Context(), p.TenantID, released); err != nil {
-			writeError(w, r, err)
-			return
-		}
-		a.recordERSTax(r.Context(), released)
-	}
 	httpx.JSON(w, http.StatusOK, toInvoiceBody(released))
 }
 

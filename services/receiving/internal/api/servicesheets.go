@@ -251,14 +251,18 @@ func (a *API) acceptServiceSheet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	products := a.sheetProductIDs(r.Context(), sheet)
+	products, err := a.sheetProductIDs(r.Context(), sheet)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
 	accepted, err := a.store.AcceptSheet(r.Context(), sheet.ID, p.UserID, func(s store.ServiceSheet, allocated store.Receipt) (store.SheetAcceptOutcome, error) {
 		accrual := domain.ServiceAccrual{
 			ID: s.ID, LegalEntityID: s.LegalEntityID, LedgerID: a.ports.Profile.LedgerID, FiscalPeriodID: fiscalPeriodID,
 			PostingDate: postingDate, Currency: s.Currency,
 		}
 		rec := store.Receipt{
-			ID: allocated.ID, Number: allocated.Number, LegalEntityID: s.LegalEntityID, VendorID: s.VendorID,
+			ID: allocated.ID, LegalEntityID: s.LegalEntityID, VendorID: s.VendorID,
 			PurchaseOrderID: s.PurchaseOrderID, PackingSlip: serviceSheetSlipPrefix + s.ID, Date: postingDate,
 			Currency: s.Currency, Source: domain.ReceiptSourceService,
 		}
@@ -285,15 +289,16 @@ func (a *API) acceptServiceSheet(w http.ResponseWriter, r *http.Request) {
 		for i, item := range items {
 			amounts[i] = store.LineAmount{LineNo: item.LineNo, Amount: item.ReceivedAmount.Value, AmountAcct: acct(item.ReceivedAmount.Value, decimal.NewFromInt(1))}
 		}
-		postedEvt, err := receiptPostedEvent(p.TenantID, rec, amounts, entry.LedgerEntryID)
-		if err != nil {
-			return store.SheetAcceptOutcome{}, err
-		}
 		decidedEvt, err := sheetDecidedEvent(p.TenantID, s)
 		if err != nil {
 			return store.SheetAcceptOutcome{}, err
 		}
-		return store.SheetAcceptOutcome{Receipt: rec, Amounts: amounts, LedgerEntryID: entry.LedgerEntryID, Events: []events.Event{decidedEvt, postedEvt}}, nil
+		postedEvent := func(number string) (events.Event, error) {
+			numbered := rec
+			numbered.Number = number
+			return receiptPostedEvent(p.TenantID, numbered, amounts, entry.LedgerEntryID)
+		}
+		return store.SheetAcceptOutcome{Receipt: rec, Amounts: amounts, LedgerEntryID: entry.LedgerEntryID, Events: []events.Event{decidedEvt}, PostedEvent: postedEvent}, nil
 	})
 	if err != nil {
 		writeSheetError(w, r, err)
@@ -305,18 +310,18 @@ func (a *API) acceptServiceSheet(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, toSheetBody(accepted))
 }
 
-func (a *API) sheetProductIDs(ctx context.Context, sheet store.ServiceSheet) map[int]string {
-	out := map[int]string{}
+func (a *API) sheetProductIDs(ctx context.Context, sheet store.ServiceSheet) (map[int]string, error) {
 	po, err := a.loadPurchaseOrder(ctx, sheet.LegalEntityID, sheet.PurchaseOrderID)
 	if err != nil {
-		return out
+		return nil, err
 	}
+	out := map[int]string{}
 	for _, l := range po.Lines {
 		if ids.Valid(l.ProductID) {
 			out[l.LineNo] = l.ProductID
 		}
 	}
-	return out
+	return out, nil
 }
 
 func (a *API) rejectServiceSheet(w http.ResponseWriter, r *http.Request) {

@@ -202,8 +202,16 @@ func (a *API) postVendorInvoice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) submitInvoice(ctx context.Context, memo groupMemo, p tenant.Principal, in store.Invoice) (store.Invoice, error) {
+	var parties domain.SelfBillParties
 	if in.Source == domain.InvoiceSourceERS {
-		if err := a.applyERSTax(ctx, &in); err != nil {
+		var err error
+		if parties, err = a.selfBillParties(ctx, in); err != nil {
+			return store.Invoice{}, err
+		}
+		if in.SupplyDate, err = a.latestReceiptDate(ctx, in); err != nil {
+			return store.Invoice{}, err
+		}
+		if err := a.applyERSTax(ctx, &in, parties); err != nil {
 			return store.Invoice{}, err
 		}
 	}
@@ -248,7 +256,11 @@ func (a *API) submitInvoice(ctx context.Context, memo groupMemo, p tenant.Princi
 		}
 		total := entry.Lines[len(entry.Lines)-1].Amount.Value.Neg()
 		evt, err := invoicePostedEvent(p.TenantID, in, group, entry.LedgerEntryID, total, entry.GrirCleared)
-		return store.InvoiceOutcome{LedgerEntryID: entry.LedgerEntryID, Total: total, Clearings: entry.GrirCleared, Event: evt}, err
+		outcome := store.InvoiceOutcome{LedgerEntryID: entry.LedgerEntryID, Total: total, Clearings: entry.GrirCleared, Event: evt}
+		if in.Source == domain.InvoiceSourceERS {
+			outcome.SelfBill = a.selfBillBuild(p.TenantID, in, parties)
+		}
+		return outcome, err
 	})
 	if err != nil {
 		return store.Invoice{}, err
@@ -259,12 +271,6 @@ func (a *API) submitInvoice(ctx context.Context, memo groupMemo, p tenant.Princi
 	}
 	a.pendingPostings.finish(invoiceSubjects(posted)...)
 	a.invoiced.Add(1)
-	if posted.Source == domain.InvoiceSourceERS {
-		if err := a.issueSelfBill(ctx, p.TenantID, posted); err != nil {
-			return store.Invoice{}, err
-		}
-		a.recordERSTax(ctx, posted)
-	}
 	return posted, nil
 }
 

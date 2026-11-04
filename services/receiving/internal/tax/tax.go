@@ -39,17 +39,20 @@ type StatusError struct{ Status int }
 
 func (e *StatusError) Error() string { return fmt.Sprintf("tax: unexpected status %d", e.Status) }
 
-type Config struct {
+type Rule struct {
 	Code         string
 	Jurisdiction string
-	Group        string
-	ItemGroup    string
-	Country      string
-	Rounding     string
 	RatePct      decimal.Decimal
 }
 
-func (c Config) Ready() bool { return c.Code != "" && c.RatePct.IsPositive() }
+type Config struct {
+	Rules     map[string]Rule
+	Group     string
+	ItemGroup string
+	Rounding  string
+}
+
+func (c Config) Ready() bool { return len(c.Rules) > 0 }
 
 type Client struct {
 	baseURL string
@@ -72,9 +75,6 @@ func New(baseURL string, cfg Config, httpClient *http.Client) *Client {
 	}
 	if cfg.ItemGroup == "" {
 		cfg.ItemGroup = "I"
-	}
-	if cfg.Jurisdiction == "" {
-		cfg.Jurisdiction = "DE"
 	}
 	return &Client{baseURL: strings.TrimRight(baseURL, "/"), http: &noRedirect, config: cfg}
 }
@@ -133,8 +133,9 @@ type calculateResult struct {
 }
 
 func (c *Client) CalculateInput(ctx context.Context, legalEntityID string, in domain.TaxDocument) (domain.TaxResult, error) {
-	if !c.config.Ready() {
-		return domain.TaxResult{}, nil
+	rule, ok := c.config.Rules[strings.ToUpper(in.Country)]
+	if !ok || rule.Code == "" {
+		return domain.TaxResult{}, domain.ErrTaxNotDetermined
 	}
 	lines := make([]lineBody, 0, len(in.Lines))
 	for i, l := range in.Lines {
@@ -146,13 +147,13 @@ func (c *Client) CalculateInput(ctx context.Context, legalEntityID string, in do
 	}
 	payload, err := json.Marshal(calculateBody{
 		Currency: in.Currency, Direction: "input", DocumentDate: in.Date, TaxDate: in.Date,
-		Party: partyBody{TaxGroup: c.config.Group, Country: c.config.Country},
+		Party: partyBody{TaxGroup: c.config.Group, Country: strings.ToUpper(in.Country)},
 		Lines: lines,
 		Config: calculateCfg{
 			DefaultRounding: c.config.Rounding,
-			Groups:          map[string][]string{c.config.Group: {c.config.Code}},
-			ItemGroups:      map[string][]string{c.config.ItemGroup: {c.config.Code}},
-			Codes:           []codeBody{{Code: c.config.Code, Jurisdiction: c.config.Jurisdiction, Rates: []rateBody{{ValidFrom: "2000-01-01", RatePct: c.config.RatePct.String()}}}},
+			Groups:          map[string][]string{c.config.Group: {rule.Code}},
+			ItemGroups:      map[string][]string{c.config.ItemGroup: {rule.Code}},
+			Codes:           []codeBody{{Code: rule.Code, Jurisdiction: rule.Jurisdiction, Rates: []rateBody{{ValidFrom: "2000-01-01", RatePct: rule.RatePct.String()}}}},
 		},
 	})
 	if err != nil {
@@ -167,18 +168,17 @@ func (c *Client) CalculateInput(ctx context.Context, legalEntityID string, in do
 		return domain.TaxResult{}, errors.New("tax: response has no usable tax amount")
 	}
 	total := decimal.Zero
-	code := c.config.Code
 	for _, row := range res.DocumentTaxesByCode {
 		amount, err := decimal.NewFromString(row.TaxAmount)
 		if err != nil || amount.IsNegative() {
 			return domain.TaxResult{}, errors.New("tax: response has no usable tax amount")
 		}
-		total = total.Add(amount)
-		if row.Code != "" {
-			code = row.Code
+		if row.Code != "" && row.Code != rule.Code {
+			return domain.TaxResult{}, fmt.Errorf("tax: response carries tax code %q, the document was sent with %q only", row.Code, rule.Code)
 		}
+		total = total.Add(amount)
 	}
-	return domain.TaxResult{Code: code, Amount: total}, nil
+	return domain.TaxResult{Code: rule.Code, RatePct: rule.RatePct, Amount: total}, nil
 }
 
 type transactionsBody struct {
