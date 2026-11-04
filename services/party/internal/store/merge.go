@@ -79,6 +79,9 @@ func adminTx(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, fn fun
 	return dbx.WithTenantWideAdminTx(ctx, pool, p, DutyMerge, fn)
 }
 
+// Merge executes a merge at once, with no approval. No route calls it: the API
+// holds every merge for approval (RequestMerge, then DecideMerge from the
+// workflow-ts merge approval, #450).
 func (s *Postgres) Merge(ctx context.Context, req MergeRequest) (MergeResult, error) {
 	var res MergeResult
 	p, err := fullScope(ctx)
@@ -95,53 +98,7 @@ func (s *Postgres) Merge(ctx context.Context, req MergeRequest) (MergeResult, er
 		return res, ErrNotMergeable
 	}
 	err = adminTx(ctx, s.pool, p, func(tx pgx.Tx) error {
-		rows, err := lockParties(ctx, tx, p.TenantID, req.WinnerID, req.LoserID)
-		if err != nil {
-			return err
-		}
-		winner, loser := rows[req.WinnerID], rows[req.LoserID]
-		if winner == nil || loser == nil {
-			return ErrNotFound
-		}
-		if winner.partyType != loser.partyType || winner.status == "merged" || loser.status == "merged" {
-			return ErrNotMergeable
-		}
-		resolved, err := domain.Survive(
-			domain.Side{Values: winner.values, UpdatedAt: winner.updatedAt},
-			domain.Side{Values: loser.values, UpdatedAt: loser.updatedAt}, req.Rules)
-		if err != nil {
-			return err
-		}
-		if err := rejectRoleConflicts(ctx, tx, p.TenantID, req); err != nil {
-			return err
-		}
-		if err := updateWinner(ctx, tx, p.TenantID, req.WinnerID, resolved); err != nil {
-			return err
-		}
-		movedRoles, err := moveRoles(ctx, tx, p.TenantID, req)
-		if err != nil {
-			return err
-		}
-		tag, err := tx.Exec(ctx, `update customer_role set invoice_account_party_id = $3
-			where tenant_id = $1 and invoice_account_party_id = $2`, p.TenantID, req.LoserID, req.WinnerID)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `update party set status = 'merged', merged_into_id = $3, version = version + 1, updated_at = now()
-			where tenant_id = $1 and id = $2`, p.TenantID, req.LoserID, req.WinnerID); err != nil {
-			return err
-		}
-		res = MergeResult{MergeID: ids.New(), RolesMoved: len(movedRoles), ReferencesRewritten: int(tag.RowsAffected()), Resolved: resolved}
-		resolution, err := json.Marshal(resolved)
-		if err != nil {
-			return err
-		}
-		var mergedAt time.Time
-		if err := tx.QueryRow(ctx, `insert into party_merge (tenant_id, id, survivor_party_id, merged_party_id, field_resolution, roles_moved, references_rewritten)
-			values ($1, $2, $3, $4, $5, $6, $7) returning merged_at`, p.TenantID, res.MergeID, req.WinnerID, req.LoserID, resolution, res.RolesMoved, res.ReferencesRewritten).Scan(&mergedAt); err != nil {
-			return err
-		}
-		if err := enqueueMerged(ctx, tx, p.TenantID, req, res, movedRoles, mergedAt.UTC()); err != nil {
+		if res, err = mergeIn(ctx, tx, p.TenantID, req); err != nil {
 			return err
 		}
 		if s.beforeCommit != nil {
@@ -150,6 +107,59 @@ func (s *Postgres) Merge(ctx context.Context, req MergeRequest) (MergeResult, er
 		return nil
 	})
 	return res, err
+}
+
+// mergeIn runs the merge inside tx, which must already see every legal entity
+// of the tenant (passage.legal_entity_scopes = '*'). req ids are canonical.
+func mergeIn(ctx context.Context, tx pgx.Tx, tenantID string, req MergeRequest) (MergeResult, error) {
+	var res MergeResult
+	rows, err := lockParties(ctx, tx, tenantID, req.WinnerID, req.LoserID)
+	if err != nil {
+		return res, err
+	}
+	winner, loser := rows[req.WinnerID], rows[req.LoserID]
+	if winner == nil || loser == nil {
+		return res, ErrNotFound
+	}
+	if winner.partyType != loser.partyType || winner.status == "merged" || loser.status == "merged" {
+		return res, ErrNotMergeable
+	}
+	resolved, err := domain.Survive(
+		domain.Side{Values: winner.values, UpdatedAt: winner.updatedAt},
+		domain.Side{Values: loser.values, UpdatedAt: loser.updatedAt}, req.Rules)
+	if err != nil {
+		return res, err
+	}
+	if err := rejectRoleConflicts(ctx, tx, tenantID, req); err != nil {
+		return res, err
+	}
+	if err := updateWinner(ctx, tx, tenantID, req.WinnerID, resolved); err != nil {
+		return res, err
+	}
+	movedRoles, err := moveRoles(ctx, tx, tenantID, req)
+	if err != nil {
+		return res, err
+	}
+	tag, err := tx.Exec(ctx, `update customer_role set invoice_account_party_id = $3
+		where tenant_id = $1 and invoice_account_party_id = $2`, tenantID, req.LoserID, req.WinnerID)
+	if err != nil {
+		return res, err
+	}
+	if _, err := tx.Exec(ctx, `update party set status = 'merged', merged_into_id = $3, version = version + 1, updated_at = now()
+		where tenant_id = $1 and id = $2`, tenantID, req.LoserID, req.WinnerID); err != nil {
+		return res, err
+	}
+	res = MergeResult{MergeID: ids.New(), RolesMoved: len(movedRoles), ReferencesRewritten: int(tag.RowsAffected()), Resolved: resolved}
+	resolution, err := json.Marshal(resolved)
+	if err != nil {
+		return res, err
+	}
+	var mergedAt time.Time
+	if err := tx.QueryRow(ctx, `insert into party_merge (tenant_id, id, survivor_party_id, merged_party_id, field_resolution, roles_moved, references_rewritten)
+		values ($1, $2, $3, $4, $5, $6, $7) returning merged_at`, tenantID, res.MergeID, req.WinnerID, req.LoserID, resolution, res.RolesMoved, res.ReferencesRewritten).Scan(&mergedAt); err != nil {
+		return res, err
+	}
+	return res, enqueueMerged(ctx, tx, tenantID, req, res, movedRoles, mergedAt.UTC())
 }
 
 func lockParties(ctx context.Context, tx pgx.Tx, tenantID string, partyIDs ...string) (map[string]*partyRow, error) {

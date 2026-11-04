@@ -49,6 +49,7 @@ type API struct {
 	sequence  Sequencer
 
 	creditCounts     creditMetrics
+	mergeCounts      mergeMetrics
 	created          atomic.Int64
 	vendorsCreated   atomic.Int64
 	customersCreated atomic.Int64
@@ -128,7 +129,10 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP party_parties_created_total Parties created; an idempotent replay is not counted.\n# TYPE party_parties_created_total counter\nparty_parties_created_total %d\n", a.created.Load())
 		fmt.Fprintf(w, "# HELP party_vendor_roles_created_total Vendor roles created; an idempotent replay is not counted.\n# TYPE party_vendor_roles_created_total counter\nparty_vendor_roles_created_total %d\n", a.vendorsCreated.Load())
 		fmt.Fprintf(w, "# HELP party_customer_roles_created_total Customer roles created; an idempotent replay is not counted.\n# TYPE party_customer_roles_created_total counter\nparty_customer_roles_created_total %d\n", a.customersCreated.Load())
-		fmt.Fprintf(w, "# HELP party_merges_total Party merges completed.\n# TYPE party_merges_total counter\nparty_merges_total %d\n", a.merged.Load())
+		fmt.Fprintf(w, "# HELP party_merges_total Party merges completed (approved merge requests).\n# TYPE party_merges_total counter\nparty_merges_total %d\n", a.merged.Load())
+		m := &a.mergeCounts
+		fmt.Fprintf(w, "# HELP party_merge_requests_total Merge requests by outcome: requested, approved, rejected; replays are not counted.\n# TYPE party_merge_requests_total counter\nparty_merge_requests_total{outcome=\"requested\"} %d\nparty_merge_requests_total{outcome=\"approved\"} %d\nparty_merge_requests_total{outcome=\"rejected\"} %d\n",
+			m.requested.Load(), m.approved.Load(), m.rejected.Load())
 		fmt.Fprint(w, "# HELP party_credit_limit_changes_total Credit limit changes by outcome: requested (increase held for approval), applied (decrease), approved, rejected.\n# TYPE party_credit_limit_changes_total counter\n")
 		c := &a.creditCounts
 		fmt.Fprintf(w, "party_credit_limit_changes_total{outcome=\"requested\"} %d\nparty_credit_limit_changes_total{outcome=\"applied\"} %d\nparty_credit_limit_changes_total{outcome=\"approved\"} %d\nparty_credit_limit_changes_total{outcome=\"rejected\"} %d\n",

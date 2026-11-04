@@ -31,15 +31,28 @@ func (e *RuleError) Error() string {
 	return fmt.Sprintf("survivorship rule for %q: %s", e.Field, e.Reason)
 }
 
-func Survive(winner, loser Side, rules map[string]Rule) (map[string]string, error) {
+// ValidateRules refuses a survivorship rule for an unknown field or an unknown rule name.
+func ValidateRules(rules map[string]Rule) error {
 	known := make(map[string]bool, len(MergeFields))
 	for _, f := range MergeFields {
 		known[f] = true
 	}
-	for f := range rules {
+	for f, rule := range rules {
 		if !known[f] {
-			return nil, &RuleError{Field: f, Reason: "unknown field"}
+			return &RuleError{Field: f, Reason: "unknown field"}
 		}
+		switch rule {
+		case "", KeepWinner, KeepLoser, Newest, NonEmpty:
+		default:
+			return &RuleError{Field: f, Reason: fmt.Sprintf("unknown rule %q", rule)}
+		}
+	}
+	return nil
+}
+
+func Survive(winner, loser Side, rules map[string]Rule) (map[string]string, error) {
+	if err := ValidateRules(rules); err != nil {
+		return nil, err
 	}
 	resolved := make(map[string]string, len(MergeFields))
 	for _, f := range MergeFields {
@@ -53,8 +66,6 @@ func Survive(winner, loser Side, rules map[string]Rule) (map[string]string, erro
 			if loser.UpdatedAt.After(winner.UpdatedAt) {
 				preferred = l
 			}
-		default:
-			return nil, &RuleError{Field: f, Reason: fmt.Sprintf("unknown rule %q", rule)}
 		}
 		if preferred == "" {
 			preferred = w
@@ -86,4 +97,27 @@ type PartyMerged struct {
 	MergedPartyIDs  []string        `json:"mergedPartyIds"`
 	RoleIDMap       []RoleIDMapping `json:"roleIdMap"`
 	MergedAt        time.Time       `json:"mergedAt"`
+}
+
+const (
+	MergePending  = "pending"
+	MergeApproved = "approved"
+	MergeRejected = "rejected"
+)
+
+// MergeRequest is a merge awaiting, or past, its approval (#450). It is executed
+// only on approval by a user other than RequestedBy.
+type MergeRequest struct {
+	ID              string          `json:"id"`
+	SurvivorPartyID string          `json:"survivorPartyId"`
+	MergedPartyID   string          `json:"mergedPartyId"`
+	Rules           map[string]Rule `json:"rules"`
+	Status          string          `json:"status"`
+	RequestedBy     string          `json:"requestedBy"`
+	DecidedBy       *string         `json:"decidedBy"`
+	Reason          *string         `json:"reason"`
+	MergeID         *string         `json:"mergeId"`
+	RequestedAt     time.Time       `json:"requestedAt"`
+	DecidedAt       *time.Time      `json:"decidedAt"`
+	Replayed        bool            `json:"-"`
 }

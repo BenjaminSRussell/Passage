@@ -11,12 +11,20 @@ import {
   ecoApprovalStateQuery,
   ecoApprovalWorkflowId,
   ecoDecisionSignal,
+  partyMergeRequestId,
 } from "./workflows.js";
 import { inLegalEntityScope } from "./serviceToken.js";
 
 export const ECO_DECIDE_DUTY = "engineering.eco.approve";
 export const CAPA_DECIDE_DUTY = "QM_CAPA_MAINTAIN";
 export const PARTY_DECIDE_DUTY = "party.approve";
+export const PARTY_MERGE_DECIDE_DUTY = "party.merge.approve";
+export const TENANT_ADMIN_DUTY = "tenant.administer";
+/**
+ * Segregation of duties (#450): a merge moves vendor roles and their bank accounts to the survivor, so whoever approves
+ * merges may not also approve or execute payment runs. Holding both is refused, whatever the request.
+ */
+export const MERGE_SOD_CONFLICTS = ["payment-proposal.approve", "payment-run.execute"] as const;
 
 const MAX_BODY_BYTES = 8192;
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
@@ -24,6 +32,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ECO_ROUTE = /^\/v1\/workflows\/eco-approvals\/([^/:]+):(approve|reject)$/;
 const CAPA_ROUTE = /^\/v1\/workflows\/capa\/([^/:]+):(step-done|effectiveness)$/;
 const PARTY_ROUTE = /^\/v1\/workflows\/party-changes\/([^/:]+):(approve|reject|delegate)$/;
+const MERGE_ROUTE = /^\/v1\/workflows\/party-merges\/([^/:]+):(approve|reject|delegate)$/;
 
 interface Principal {
   tenantId: string;
@@ -54,12 +63,14 @@ async function handle(client: Pick<Client, "workflow">, request: IncomingMessage
   const eco = ECO_ROUTE.exec(path);
   const capa = CAPA_ROUTE.exec(path);
   const party = PARTY_ROUTE.exec(path);
-  if (!eco && !capa && !party) return reply(response, new Refusal(404, "COM-0404", "no such route"));
+  const merge = MERGE_ROUTE.exec(path);
+  if (!eco && !capa && !party && !merge) return reply(response, new Refusal(404, "COM-0404", "no such route"));
   if (request.method !== "POST") return reply(response, new Refusal(405, "COM-0405", "POST only"));
   try {
     const principal = principalOf(request);
     const body = await readJson(request);
     if (party) await decidePartyChange(client, principal, party[1]!, party[2] as "approve" | "reject" | "delegate", body);
+    else if (merge) await decidePartyMerge(client, principal, merge[1]!, merge[2] as "approve" | "reject" | "delegate", body);
     else if (eco) await decideEco(client, principal, eco[1]!, eco[2] as "approve" | "reject", body);
     else await advanceCapa(client, principal, capa![1]!, capa![2] as "step-done" | "effectiveness", body);
     response.writeHead(202, { "Content-Type": "application/json" }).end(JSON.stringify({ accepted: true }));
@@ -176,6 +187,39 @@ async function decidePartyChange(
     throw new Refusal(400, "COM-0001", "delegate to someone other than yourself and the requester");
   }
   await handle.signal(approvalDecisionSignal, { action, actor: principal.userId, scope: principal.scope, ...(delegate ? { delegate } : {}) });
+}
+
+async function decidePartyMerge(
+  client: Pick<Client, "workflow">,
+  principal: Principal,
+  mergeRequestId: string,
+  action: "approve" | "reject" | "delegate",
+  body: Record<string, unknown>,
+): Promise<void> {
+  requireDuty(principal, PARTY_MERGE_DECIDE_DUTY);
+  const conflict = MERGE_SOD_CONFLICTS.find((duty) => principal.duties.has(duty));
+  if (conflict) throw new Refusal(403, "PTY-MERGE-SOD", `a merge approver may not also hold ${conflict}`);
+  // A merge spans legal entities, as in party: only a tenant administrator with no legal-entity claim decides one.
+  if (!principal.duties.has(TENANT_ADMIN_DUTY) || principal.scope.length > 0) {
+    throw new Refusal(403, "AUTH-0003", "a merge is decided by a tenant.administer user with no legal-entity claim");
+  }
+  const delegate = action === "delegate" ? text(body, "delegate", 200, true) : undefined;
+  const handle = client.workflow.getHandle(approvalWorkflowId(partyMergeRequestId(mergeRequestId)));
+  let state;
+  try {
+    state = await handle.query(approvalStateQuery);
+  } catch (error) {
+    if (error instanceof WorkflowNotFoundError) throw new Refusal(404, "WF-0404", "no party merge approval is running for this record");
+    throw error;
+  }
+  if (!state.mergeRequestId || state.tenantId !== principal.tenantId) throw new Refusal(404, "WF-0404", "no party merge approval is running for this record");
+  if (state.status !== "pending") throw new Refusal(409, "WF-0409", `the party merge approval is ${state.status}`);
+  if (state.requester === principal.userId) throw new Refusal(403, "PTY-MERGE-SELF-APPROVAL", "the user who requested the merge cannot decide it");
+  if (state.approver !== principal.userId) throw new Refusal(403, "WF-0403", "only the current approver of this level can decide it");
+  if (delegate !== undefined && (delegate === principal.userId || delegate === state.requester)) {
+    throw new Refusal(400, "COM-0001", "delegate to someone other than yourself and the requester");
+  }
+  await handle.signal(approvalDecisionSignal, { action, actor: principal.userId, scope: [], ...(delegate ? { delegate } : {}) });
 }
 
 function reply(response: ServerResponse, refusal: Refusal): void {

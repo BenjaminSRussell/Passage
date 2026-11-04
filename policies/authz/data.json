@@ -729,7 +729,8 @@
       {"resource": "/v1/party/vendors/*", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-groups", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-groups/*", "methods": ["GET"]},
-      {"resource": "/v1/party/vendors/*/bank-accounts", "methods": ["GET"]}
+      {"resource": "/v1/party/vendors/*/bank-accounts", "methods": ["GET"]},
+      {"resource": "/v1/party/merge-requests/*", "methods": ["GET"]}
     ]},
     "party.vendor_bank.write": {"permissions": [
       {"resource": "/v1/party/vendors/*/bank-accounts", "methods": ["POST"]}
@@ -739,6 +740,15 @@
     ]},
     "pii.read": {"flag": true, "permissions": []},
     "party.merge": {"flag": true, "permissions": []},
+    "party.merge.approve": {"permissions": [
+      {"resource": "/v1/workflows/party-merges/*:approve", "methods": ["POST"]},
+      {"resource": "/v1/workflows/party-merges/*:reject", "methods": ["POST"]},
+      {"resource": "/v1/workflows/party-merges/*:delegate", "methods": ["POST"]}
+    ]},
+    "party.merge.execute": {"service_only": true, "permissions": [
+      {"resource": "/v1/party/merge-requests/*:approve", "methods": ["POST"]},
+      {"resource": "/v1/party/merge-requests/*:reject", "methods": ["POST"]}
+    ]},
     "tenant.administer": {"flag": true, "permissions": []},
     "party.approve": {"permissions": [
       {"resource": "/v1/party/pending-changes/*:approve", "methods": ["POST"]},
@@ -3305,7 +3315,7 @@
       "engineering": ["engineering.eco.workflow"],
       "quality": ["quality.capa.execute"],
       "transport": ["transport.tender.execute"],
-      "party": ["party.approve"]
+      "party": ["party.approve", "party.merge.execute"]
     },
     "party": {
       "numbering": ["numbering.sequence.allocate"]

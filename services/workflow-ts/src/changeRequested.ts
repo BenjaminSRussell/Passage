@@ -1,6 +1,6 @@
 import { WorkflowExecutionAlreadyStartedError, WorkflowIdReusePolicy } from "@temporalio/client";
 import type { Client } from "@temporalio/client";
-import { approvalWorkflow, approvalWorkflowId, type ApprovalInput, type ApprovalLevel } from "./workflows.js";
+import { approvalWorkflow, approvalWorkflowId, partyMergeRequestId, type ApprovalInput, type ApprovalLevel } from "./workflows.js";
 
 export const changeRequestedType = "dev.passage.party.change.requested.v1";
 
@@ -33,13 +33,56 @@ export function toApprovalInput(event: ChangeRequestedEvent, levels: ApprovalLev
   };
 }
 
+export const mergeRequestedType = "dev.passage.party.merge.requested.v1";
+
+export interface MergeRequestedEvent {
+  type: string;
+  tenantid: string;
+  data: {
+    merge_request_id: string;
+    survivor_party_id: string;
+    merged_party_id: string;
+    requested_by: string;
+  };
+}
+
+/** Maps party merge.requested (#450) to a tenant-level approval: requestId `party-merge:<id>`, no legal entity. */
+export function toMergeApprovalInput(event: MergeRequestedEvent, levels: ApprovalLevel[]): ApprovalInput {
+  if (event.type !== mergeRequestedType) {
+    throw new TypeError(`expected ${mergeRequestedType}, got ${event.type}`);
+  }
+  const { merge_request_id, requested_by } = event.data;
+  if (!event.tenantid || !merge_request_id || !requested_by) {
+    throw new TypeError("merge.requested event is missing tenant, merge request or requester");
+  }
+  return {
+    requestId: partyMergeRequestId(merge_request_id),
+    entityType: "party_merge",
+    levels,
+    requester: requested_by,
+    partyMerge: { mergeRequestId: merge_request_id, tenantId: event.tenantid },
+  };
+}
+
+export async function handleMergeRequested(
+  client: Pick<Client, "workflow">,
+  taskQueue: string,
+  levels: ApprovalLevel[],
+  event: MergeRequestedEvent,
+): Promise<{ workflowId: string; started: boolean }> {
+  return startApproval(client, taskQueue, toMergeApprovalInput(event, levels));
+}
+
 export async function handleChangeRequested(
   client: Pick<Client, "workflow">,
   taskQueue: string,
   levels: ApprovalLevel[],
   event: ChangeRequestedEvent,
 ): Promise<{ workflowId: string; started: boolean }> {
-  const input = toApprovalInput(event, levels);
+  return startApproval(client, taskQueue, toApprovalInput(event, levels));
+}
+
+async function startApproval(client: Pick<Client, "workflow">, taskQueue: string, input: ApprovalInput): Promise<{ workflowId: string; started: boolean }> {
   const workflowId = approvalWorkflowId(input.requestId);
   try {
     await client.workflow.start(approvalWorkflow, {

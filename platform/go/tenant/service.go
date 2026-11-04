@@ -153,7 +153,7 @@ var serviceGrants = map[string]map[string][]string{
 		"engineering": {"engineering.eco.workflow"},
 		"quality":     {"quality.capa.execute"},
 		"transport":   {"transport.tender.execute"},
-		"party":       {"party.approve"},
+		"party":       {"party.approve", "party.merge.execute"},
 	},
 	"party": {
 		"numbering": {"numbering.sequence.allocate"},
@@ -202,6 +202,22 @@ func ServiceGrantTable() map[string]map[string][]string {
 }
 
 func serviceGrant(iss, aud string) []string { return serviceGrants[iss][aud] }
+
+// tenantLevelDuties act on tenant-level data that no single legal entity owns
+// (a party merge moves roles in every entity). A token carrying one names no
+// legal entity and carries no other duty, and every other token names one
+// entity, so a tenant-level duty never rides in an entity-scoped token (#450).
+var tenantLevelDuties = map[string]struct{}{"party.merge.execute": {}}
+
+func tenantLevelToken(duties []string) (tenantLevel, mixed bool) {
+	n := 0
+	for _, d := range duties {
+		if _, ok := tenantLevelDuties[d]; ok {
+			n++
+		}
+	}
+	return n > 0 && n == len(duties), n > 0 && n < len(duties)
+}
 
 // ServiceClaims is the signed payload: iss calls aud for tenant tid in legal
 // entity le on behalf of end user act, holding only the service's own duties.
@@ -288,19 +304,28 @@ func (s *ServiceSigner) Mint(aud string, p Principal, legalEntity string) (strin
 
 // MintDuties is Mint restricted to the given duties: the token carries the
 // intersection of duties and the service's grant for aud, never more than the
-// grant. A nil duties means the whole grant.
+// grant. A nil duties means the whole grant less its tenant-level duties, which
+// are signed only when asked for by name.
 func (s *ServiceSigner) MintDuties(aud string, p Principal, legalEntity string, only []string) (string, error) {
 	duties := serviceGrant(s.name, aud)
-	if only != nil {
+	if only == nil {
+		duties = slices.DeleteFunc(slices.Clone(duties), func(d string) bool { _, ok := tenantLevelDuties[d]; return ok })
+	} else {
 		duties = slices.DeleteFunc(slices.Clone(duties), func(d string) bool { return !slices.Contains(only, d) })
 	}
 	if len(duties) == 0 {
 		return "", fmt.Errorf("%w: %s -> %s", ErrNoServiceGrant, s.name, aud)
 	}
 	le, ok := s.legalEntityFor(p, legalEntity, duties)
+	if tenantLevel, mixed := tenantLevelToken(duties); mixed {
+		return "", fmt.Errorf("%w: %s -> %s mixes tenant-level and legal-entity duties; restrict it with MintDuties", ErrNoServiceGrant, s.name, aud)
+	} else if tenantLevel {
+		// A tenant-level token is minted only for a tenant administrator with no legal-entity claim, and names no entity.
+		le, ok = "", legalEntity == "" && IsTenantAdmin(p)
+	}
 	tid, tok := canonicalUUID(p.TenantID)
 	if !ok || !tok || tid == ids.Nil {
-		return "", errors.New("service token needs a tenant and one legal entity within the end user's scope")
+		return "", errors.New("service token needs a tenant and one legal entity within the end user's scope (none, for a tenant administrator, on a tenant-level duty)")
 	}
 	if p.UserID == "" {
 		return "", errors.New("service token needs the end user as act")
@@ -527,8 +552,12 @@ func (v *ServiceVerifier) VerifyContext(ctx context.Context, token string) (Serv
 	if tid, ok := canonicalUUID(c.Tid); !ok || tid != c.Tid || tid == ids.Nil {
 		return ServiceClaims{}, ErrServiceToken
 	}
-	if le, ok := canonicalUUID(c.Le); !ok || le != c.Le || le == ids.Nil {
+	if tenantLevel, mixed := tenantLevelToken(c.Duties); mixed || tenantLevel != (c.Le == "") {
 		return ServiceClaims{}, ErrServiceToken
+	} else if !tenantLevel {
+		if le, ok := canonicalUUID(c.Le); !ok || le != c.Le || le == ids.Nil {
+			return ServiceClaims{}, ErrServiceToken
+		}
 	}
 	grant := serviceGrant(c.Iss, c.Aud)
 	if len(c.Duties) == 0 || slices.ContainsFunc(c.Duties, func(d string) bool { return d == DutyAllScope || !slices.Contains(grant, d) }) {

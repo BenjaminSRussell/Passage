@@ -882,7 +882,7 @@ test_workflow_ts_transport_service_duty if {
 }
 
 test_workflow_ts_party_decision_grant if {
-	data.service_grants["workflow-ts"].party == ["party.approve"]
+	data.service_grants["workflow-ts"].party == ["party.approve", "party.merge.execute"]
 	not data.duties["party.approve"].service_only
 	allowed("party.approve", "POST", "/v1/party/pending-changes/c1:approve")
 	allowed("party.approve", "POST", "/v1/party/pending-changes/c1:reject")
@@ -890,6 +890,51 @@ test_workflow_ts_party_decision_grant if {
 	not allowed("party.approve", "POST", "/v1/party/customers/c1/credit-limit")
 	not allowed("party.approve", "PUT", "/v1/party/legal-entities/le1/protected-fields")
 	not allowed("party.approve", "GET", "/v1/party/vendors/v1/bank-accounts:reveal")
+}
+
+# #450: a merge is requested (the gateway opens :merge under party.write, party checks the party.merge flag),
+# approved by another person through workflow-ts (party.merge.approve), and executed by workflow-ts alone
+# (service-only party.merge.execute). Payment approvers and party-change approvers cannot reach merge approval.
+test_party_merge_goes_through_a_separate_approver if {
+	allowed("party.write", "POST", "/v1/party/parties/p1:merge")
+	not allowed("party.merge", "POST", "/v1/party/parties/p1:merge")
+	not allowed("party.merge", "POST", "/v1/workflows/party-merges/m1:approve")
+	not allowed("party.merge", "POST", "/v1/party/merge-requests/m1:approve")
+	not allowed("party.write", "POST", "/v1/workflows/party-merges/m1:approve")
+	not allowed("party.write", "POST", "/v1/party/merge-requests/m1:approve")
+	allowed("party.read", "GET", "/v1/party/merge-requests/m1")
+	not allowed("party.read", "POST", "/v1/party/merge-requests/m1:approve")
+
+	not data.duties["party.merge.approve"].service_only
+	allowed("party.merge.approve", "POST", "/v1/workflows/party-merges/m1:approve")
+	allowed("party.merge.approve", "POST", "/v1/workflows/party-merges/m1:reject")
+	allowed("party.merge.approve", "POST", "/v1/workflows/party-merges/m1:delegate")
+	not allowed("party.merge.approve", "POST", "/v1/party/merge-requests/m1:approve")
+	not allowed("party.merge.approve", "POST", "/v1/party/parties/p1:merge")
+	not allowed("party.merge.approve", "POST", "/v1/payables/payment-proposals/p1:approve")
+	not allowed("party.merge.approve", "POST", "/v1/payables/payment-runs")
+
+	data.duties["party.merge.execute"].service_only
+	allowed("party.merge.execute", "POST", "/v1/party/merge-requests/m1:approve")
+	allowed("party.merge.execute", "POST", "/v1/party/merge-requests/m1:reject")
+	not allowed("party.merge.execute", "GET", "/v1/party/merge-requests/m1")
+	not allowed("party.merge.execute", "POST", "/v1/party/parties/p1:merge")
+	not allowed("party.merge.execute", "POST", "/v1/workflows/party-merges/m1:approve")
+
+	not allowed("payment-proposal.approve", "POST", "/v1/workflows/party-merges/m1:approve")
+	not allowed("payment-run.execute", "POST", "/v1/workflows/party-merges/m1:approve")
+	not allowed("party.approve", "POST", "/v1/workflows/party-merges/m1:approve")
+	not allowed("party.approve", "POST", "/v1/party/merge-requests/m1:approve")
+}
+
+test_party_merge_execution_hint_names_no_person_duty if {
+	result := decision with input as {
+		"subject": {"tenant_id": "tenant-a", "user_id": "user-a"},
+		"action": "POST",
+		"resource": "/v1/party/merge-requests/m1:approve",
+	}
+		with data.assignments as {"tenant-a": {"user-a": ["party.write"]}}
+	result == {"allow": false, "duty_missing": "party.merge.execute"}
 }
 
 principal_allowed(name, method, resource) if {

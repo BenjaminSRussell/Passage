@@ -692,3 +692,68 @@ func TestCloseMayMintOnlyItsYearEndLedgerDuties(t *testing.T) {
 		t.Error("an ALL-scope user must not get a posting token")
 	}
 }
+
+func TestTenantLevelMergeTokenNamesNoLegalEntityAndTravelsAlone(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	signer, _ := tenant.NewServiceSigner("workflow-ts", priv)
+	verifier := tenant.NewServiceVerifier("party", map[string]ed25519.PublicKey{"workflow-ts": pub})
+	admin := tenant.Principal{TenantID: validTenant, UserID: "ada", Duties: map[string]struct{}{tenant.DutyTenantAdmin: {}}}
+	scoped := tenant.Principal{TenantID: validTenant, LegalEntityID: validLE, UserID: "ada", Duties: map[string]struct{}{tenant.DutyTenantAdmin: {}}}
+	merge := []string{"party.merge.execute"}
+
+	token, err := signer.MintDuties("party", admin, "", merge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := verifier.Verify(token)
+	if err != nil || claims.Le != "" || claims.Act != "ada" || !reflect.DeepEqual(claims.Duties, merge) {
+		t.Fatalf("claims %+v err %v", claims, err)
+	}
+	if p := claims.Principal(); p.LegalEntityID != "" || tenant.IsTenantAdmin(p) || !p.HasDuty("party.merge.execute") {
+		t.Fatalf("principal %+v: no entity, the merge duty only, never a tenant admin", p)
+	}
+	for name, mint := range map[string]func() (string, error){
+		"a scoped user":      func() (string, error) { return signer.MintDuties("party", scoped, "", merge) },
+		"an explicit entity": func() (string, error) { return signer.MintDuties("party", admin, validLE, merge) },
+		"a user who is not admin": func() (string, error) {
+			return signer.MintDuties("party", tenant.Principal{TenantID: validTenant, UserID: "ada"}, "", merge)
+		},
+	} {
+		if _, err := mint(); err == nil {
+			t.Errorf("%s: tenant-level token minted", name)
+		}
+	}
+	if _, err := signer.MintDuties("party", admin, "", []string{"party.approve", "party.merge.execute"}); !errors.Is(err, tenant.ErrNoServiceGrant) {
+		t.Fatalf("mixed token: %v, want ErrNoServiceGrant", err)
+	}
+	whole, err := signer.Mint("party", scoped, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims, err := verifier.Verify(whole); err != nil || !reflect.DeepEqual(claims.Duties, []string{"party.approve"}) {
+		t.Fatalf("the whole grant leaves the tenant-level duty out: %+v %v", claims, err)
+	}
+
+	sign := func(jti, le string, duties ...string) string {
+		now := time.Now()
+		payload, _ := json.Marshal(tenant.ServiceClaims{
+			Iss: "workflow-ts", Aud: "party", Tid: validTenant, Le: le, Act: "ada", Duties: duties,
+			Iat: now.Unix(), Exp: now.Add(tenant.ServiceTokenMaxTTL).Unix(), Jti: jti,
+		})
+		body := base64.RawURLEncoding.EncodeToString(payload)
+		return body + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte("passage.service-token.v1."+body)))
+	}
+	if _, err := verifier.Verify(sign("ok", "", "party.merge.execute")); err != nil {
+		t.Fatalf("a hand-signed tenant-level token: %v", err)
+	}
+	for name, forged := range map[string]string{
+		"merge duty with an entity":   sign("f1", validLE, "party.merge.execute"),
+		"entity duty without entity":  sign("f2", "", "party.approve"),
+		"mixed duties without entity": sign("f3", "", "party.approve", "party.merge.execute"),
+		"mixed duties with an entity": sign("f4", validLE, "party.approve", "party.merge.execute"),
+	} {
+		if _, err := verifier.Verify(forged); err == nil {
+			t.Errorf("%s: verified", name)
+		}
+	}
+}

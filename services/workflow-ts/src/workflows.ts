@@ -6,13 +6,14 @@ import {
   setHandler,
 } from "@temporalio/workflow";
 import type { PartyDecisionActivities } from "./activities.js";
+import type { PartyMergeActivities } from "./partyMergeActivities.js";
 
 export * from "./paymentRunWorkflow.js";
 export * from "./ecoApprovalWorkflow.js";
 export * from "./capaWorkflow.js";
 export * from "./tenderWorkflow.js";
 
-const { decidePartyChange } = proxyActivities<PartyDecisionActivities>({
+const { decidePartyChange, decidePartyMerge } = proxyActivities<PartyDecisionActivities & PartyMergeActivities>({
   startToCloseTimeout: "30 seconds",
   retry: { maximumInterval: "1 minute" },
 });
@@ -21,6 +22,12 @@ export interface PartyChangeRef {
   changeId: string;
   tenantId: string;
   legalEntityId: string;
+}
+
+/** A party merge request (#450). Tenant-level: a merge spans legal entities, so it carries none. */
+export interface PartyMergeRef {
+  mergeRequestId: string;
+  tenantId: string;
 }
 
 export interface ApprovalLevel {
@@ -36,6 +43,7 @@ export interface ApprovalInput {
   levels: ApprovalLevel[];
   requester?: string;
   partyChange?: PartyChangeRef;
+  partyMerge?: PartyMergeRef;
 }
 
 export interface ApprovalHistoryEntry {
@@ -51,6 +59,8 @@ export interface ApprovalState {
   /** Set for a party change approval, so the decision route can check the caller's tenant and legal entity. */
   tenantId?: string;
   legalEntityId?: string;
+  /** Set for a party merge approval, which is tenant-level and has no legal entity. */
+  mergeRequestId?: string;
   requester?: string;
   status: "pending" | "approved" | "rejected";
   levelId?: string;
@@ -78,6 +88,11 @@ export function approvalWorkflowId(requestId: string): string {
   return `approval:${requestId}`;
 }
 
+/** Merge approvals get their own id space, so a party-change id can never name a merge approval or the reverse. */
+export function partyMergeRequestId(mergeRequestId: string): string {
+  return `party-merge:${mergeRequestId}`;
+}
+
 export async function approvalWorkflow(input: ApprovalInput): Promise<ApprovalResult> {
   validateInput(input);
 
@@ -85,6 +100,7 @@ export async function approvalWorkflow(input: ApprovalInput): Promise<ApprovalRe
     requestId: input.requestId,
     entityType: input.entityType,
     ...(input.partyChange ? { tenantId: input.partyChange.tenantId, legalEntityId: input.partyChange.legalEntityId } : {}),
+    ...(input.partyMerge ? { tenantId: input.partyMerge.tenantId, mergeRequestId: input.partyMerge.mergeRequestId } : {}),
     ...(input.requester ? { requester: input.requester } : {}),
     status: "pending",
     history: [],
@@ -101,6 +117,8 @@ export async function approvalWorkflow(input: ApprovalInput): Promise<ApprovalRe
     if (decision !== undefined || !state.levelId || actor !== state.approver || actor === input.requester) return;
     // A party change is decided under a service token for the actor, which may only name a legal entity in the actor's scope.
     if (input.partyChange && !inScope(scope, input.partyChange.legalEntityId)) return;
+    // A merge is tenant-level: only an approver with no legal-entity claim decides it (the route also requires tenant.administer).
+    if (input.partyMerge && scope.length > 0) return;
     if (action === "delegate") {
       if (!delegate || delegate === actor || delegate === input.requester) return;
       state.history.push({ action: "delegated", levelId: state.levelId, actor, to: delegate });
@@ -168,8 +186,9 @@ async function recordPartyDecision(
   scope: string[],
 ): Promise<void> {
   const decidedBy = history[history.length - 1]?.actor;
-  if (!input.partyChange || !decidedBy) return;
-  await decidePartyChange({ ...input.partyChange, decision, decidedBy, scope });
+  if (!decidedBy) return;
+  if (input.partyMerge) await decidePartyMerge({ ...input.partyMerge, decision, decidedBy });
+  if (input.partyChange) await decidePartyChange({ ...input.partyChange, decision, decidedBy, scope });
 }
 
 function inScope(scope: readonly string[], legalEntityId: string): boolean {
@@ -183,6 +202,9 @@ export function validateInput(input: ApprovalInput): void {
   }
   if (input.partyChange && !input.requester) {
     throw new TypeError("a party change approval requires the requester");
+  }
+  if (input.partyMerge && (!input.requester || input.partyChange)) {
+    throw new TypeError("a party merge approval requires the requester and is not also a party change");
   }
   for (const level of input.levels) {
     if (!level.id || !level.approver || !level.escalationApprover || level.slaMs <= 0) {
