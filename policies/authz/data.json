@@ -1260,7 +1260,8 @@
       {"resource": "/v1/leases", "methods": ["GET", "POST"]},
       {"resource": "/v1/leases/*", "methods": ["GET"]},
       {"resource": "/v1/leases/*/modify", "methods": ["POST"]},
-      {"resource": "/v1/leases/*/gl-postings", "methods": ["GET"]}
+      {"resource": "/v1/leases/*/gl-postings", "methods": ["GET"]},
+      {"resource": "/v1/leases/*/terminate", "methods": ["POST"]}
     ]},
     "LocalizationAdmin": {"permissions": [
       {"resource": "/v1/localization/in/tds:withhold", "methods": ["POST"]},
