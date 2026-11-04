@@ -104,6 +104,9 @@ func (s *Postgres) TerminateLease(ctx context.Context, leaseID string, in LeaseT
 				return LeaseTerminationResult{}, httpx.NewProblem(http.StatusPreconditionFailed, CodeVersionConflict,
 					fmt.Sprintf("the lease changed since you read it (version %d, current %d); reload and try again", in.Version, lease.Version))
 			}
+			if err := domain.CanMaintainRecognized(lease.Election); err != nil {
+				return LeaseTerminationResult{}, err
+			}
 			if err := domain.CanTerminate(lease.Status); err != nil {
 				return LeaseTerminationResult{}, err
 			}

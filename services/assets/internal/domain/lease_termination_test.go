@@ -45,14 +45,18 @@ func TestComputeTermination_Rejects(t *testing.T) {
 
 // The journal balances for any gain or loss: debits equal credits.
 func TestLeaseTerminationNet_Balances(t *testing.T) {
-	acc := LeaseAccounts{ROUAsset: "1700", ROUAccumulated: "1790", Liability: "2400", PaymentClearing: "2110", RemeasurementGain: "7120", InterestExpense: "7200", DepreciationExpense: "6820"}
+	acc := LeaseAccounts{ROUAsset: "1700", ROUAccumulated: "1790", Liability: "2400", PaymentClearing: "2110", RemeasurementGain: "7120", TerminationGainLoss: "7130", InterestExpense: "7200", DepreciationExpense: "6820"}
 	for _, pay := range []string{"0", "3500", "12000"} {
 		tm, err := ComputeTermination(TerminationInput{Currency: "USD", Liability: d("10000"), ROUAccumulated: d("4000"), ROURemaining: d("8000"), Payment: d(pay)})
 		if err != nil {
 			t.Fatal(err)
 		}
 		sum := decimal.Zero
-		for _, v := range LeaseTerminationNet(acc, tm) {
+		net := LeaseTerminationNet(acc, tm)
+		if _, onRemeasurement := net["7120"]; onRemeasurement || !net["7130"].Equal(tm.GainLoss.Neg()) {
+			t.Fatalf("payment %s: the gain or loss is not on the termination account: %v", pay, net)
+		}
+		for _, v := range net {
 			sum = sum.Add(v)
 		}
 		if !sum.IsZero() {

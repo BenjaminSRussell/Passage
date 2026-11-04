@@ -375,6 +375,13 @@ export interface Lease {
   paymentTiming: "arrears" | "advance";
   ibrRate: Decimal;
   rateMethod?: RateMethod;
+  /** Recognition exemption; a lease under an election has a liability and ROU asset of 0. */
+  election?: LeaseElection;
+  /** The lease contains a purchase option, which rules out the short-term election. */
+  purchaseOption?: boolean;
+  /** Value of the underlying asset when new, for a low-value election, in underlyingAssetCurrency. */
+  underlyingAssetValue?: Decimal;
+  underlyingAssetCurrency?: LowValueCurrency;
   currency: string;
   /** Liability at initial recognition. */
   liability: Decimal;
@@ -453,9 +460,21 @@ export interface LeasePostingProfile {
   depreciationExpenseAccount: string;
   paymentClearingAccount: string;
   remeasurementGainAccount: string;
+  /** Gain (credit) or loss (debit) of an early termination. */
+  terminationGainLossAccount: string;
+  /** Debited with each payment of a lease under a short-term or low-value election. */
+  exemptLeaseExpenseAccount: string;
   version?: number;
   placeholder?: boolean;
 }
+
+/** IFRS 16.5-8 recognition exemptions: None recognizes the lease, the others expense its payments. */
+export const LEASE_ELECTIONS = ["None", "ShortTerm", "LowValue"] as const;
+export type LeaseElection = (typeof LEASE_ELECTIONS)[number];
+
+/** lease.lowValueThreshold (domain.LowValueThresholds): the most an underlying asset may be worth when new, by the currency that value is stated in. */
+export const LOW_VALUE_THRESHOLDS = { USD: 5000, EUR: 5000 } as const;
+export type LowValueCurrency = keyof typeof LOW_VALUE_THRESHOLDS;
 
 export const RATE_METHODS = ["Nominal", "Effective"] as const;
 export type RateMethod = (typeof RATE_METHODS)[number];
@@ -601,6 +620,10 @@ export interface NewLease {
   ibrRate: Decimal;
   rateMethod?: RateMethod;
   currency: string;
+  election?: LeaseElection;
+  purchaseOption?: boolean;
+  underlyingAssetValue?: string;
+  underlyingAssetCurrency?: LowValueCurrency;
 }
 
 /** A value read together with the ETag that If-Match must echo back. */

@@ -172,6 +172,8 @@ const ACCOUNTS = [
   ["depreciationExpenseAccount", "Depreciation expense", "Debited with each period's ROU depreciation."],
   ["paymentClearingAccount", "Payment clearing", "Credited with each period's payment (cash or payables clearing)."],
   ["remeasurementGainAccount", "Remeasurement gain", "Credited with the part of a lower liability beyond the ROU carrying amount."],
+  ["terminationGainLossAccount", "Termination gain / loss", "Takes the gain (credit) or loss (debit) when a lease is terminated early."],
+  ["exemptLeaseExpenseAccount", "Short-term and low-value lease expense", "Debited with each payment of a lease under a short-term or low-value election."],
 ] as const;
 
 type AccountKey = (typeof ACCOUNTS)[number][0];
@@ -184,14 +186,14 @@ const ACCOUNT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/;
 export function validateProfile(values: ProfileValues): ProfileErrors {
   const errors: ProfileErrors = {};
   for (const [key] of ACCOUNTS) {
-    if (!ACCOUNT.test(values[key].trim())) errors[key] = "Enter an account number of at most 40 characters.";
+    if (!ACCOUNT.test((values[key] ?? "").trim())) errors[key] = "Enter an account number of at most 40 characters.";
   }
   return errors;
 }
 
 function ProfileForm({ entity, loaded, reload }: { entity: string; loaded: Versioned<LeasePostingProfile>; reload(): void }) {
   const { value, etag } = loaded;
-  const [values, setValues] = useState<ProfileValues>(() => Object.fromEntries(ACCOUNTS.map(([key]) => [key, value[key]])) as ProfileValues);
+  const [values, setValues] = useState<ProfileValues>(() => Object.fromEntries(ACCOUNTS.map(([key]) => [key, value[key] ?? ""])) as ProfileValues);
   const [errors, setErrors] = useState<ProfileErrors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [saved, setSaved] = useState(false);

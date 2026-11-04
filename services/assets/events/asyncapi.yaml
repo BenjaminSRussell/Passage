@@ -267,7 +267,7 @@ components:
         currency: { type: string, pattern: "^[A-Z]{3}$" }
     LeaseRecognizedData:
       type: object
-      required: [leaseId, liability, rouAsset, currency, termMonths, rate]
+      required: [leaseId, liability, rouAsset, currency, termMonths, rate, election]
       properties:
         leaseId: { type: string, format: uuid }
         liability: { type: string }
@@ -275,6 +275,7 @@ components:
         currency: { type: string, pattern: "^[A-Z]{3}$" }
         termMonths: { type: integer }
         rate: { type: string }
+        election: { type: string, enum: [None, ShortTerm, LowValue], description: "Recognition exemption; liability and rouAsset are 0 under an election" }
     AssetAdjustedData:
       type: object
       description: |

@@ -91,7 +91,8 @@ function LedgerCard({ lease }: { lease: Lease }) {
   }
   const postings: LeasePostings = state.data;
   const rows: PostingRow[] = [
-    { key: "0", label: "Recognition", date: lease.commencementDate, journalId: postings.recognitionJournalId },
+    // A lease under an election is never recognized, so it has no recognition journal to wait for.
+    ...(isExempt(lease) ? [] : [{ key: "0", label: "Recognition", date: lease.commencementDate, journalId: postings.recognitionJournalId }]),
     ...postings.periods.map((p) => ({ key: String(p.periodNo), label: `Period ${p.periodNo}`, date: p.periodEnd, journalId: p.postedJournalId })),
     ...(lease.termination
       ? [{ key: "termination", label: "Termination", date: lease.termination.terminationDate, journalId: postings.terminationJournalId ?? null }]
@@ -128,7 +129,10 @@ function TerminationCard({ lease, termination }: { lease: Lease; termination: Le
   );
 }
 
-export const canModify = (lease: Lease) => lease.status === "Active" || lease.status === "Modified";
+/** A lease under a short-term or low-value election has nothing to remeasure or derecognize (AST-0037). */
+export const isExempt = (lease: Lease) => lease.election === "ShortTerm" || lease.election === "LowValue";
+
+export const canModify = (lease: Lease) => (lease.status === "Active" || lease.status === "Modified") && !isExempt(lease);
 
 /** Lease detail: recognized liability and ROU asset, the schedule in force and its remeasurements (FR-37.10). */
 export function LeaseDetailPage() {
@@ -181,6 +185,11 @@ export function LeaseDetailPage() {
           ) : undefined
         }
       />
+      {isExempt(lease) ? (
+        <Alert tone="info" title="Not recognized on the balance sheet">
+          This lease is under a {lease.election === "ShortTerm" ? "short-term" : "low-value"} election (IFRS 16.5-8): it has no liability or right-of-use asset, and each payment is expensed when its period is posted. It cannot be modified or terminated.
+        </Alert>
+      ) : null}
       <StatGroup label="Lease balances">
         <StatTile label="Recognized liability" value={money(lease.liability, lease.currency)} />
         <StatTile label="Recognized ROU asset" value={money(lease.rouAsset, lease.currency)} />
@@ -196,6 +205,12 @@ export function LeaseDetailPage() {
           <Detail term="Timing">{lease.paymentTiming === "advance" ? "In advance" : "In arrears"}</Detail>
           <Detail term="Incremental borrowing rate">{percent(lease.ibrRate)}</Detail>
           <Detail term="Periodic rate">{lease.rateMethod === "Effective" ? "Effective (compounds to the annual rate)" : "Nominal (annual rate / payments per year)"}</Detail>
+          {isExempt(lease) ? (
+            <Detail term="Recognition exemption">
+              {lease.election === "ShortTerm" ? "Short-term lease" : `Low-value asset (${money(lease.underlyingAssetValue ?? "0", lease.underlyingAssetCurrency ?? lease.currency)} when new)`}
+            </Detail>
+          ) : null}
+          {lease.purchaseOption ? <Detail term="Purchase option">The lease contains a purchase option</Detail> : null}
           <Detail term="Legal entity">
             <span className={styles.mono}>{lease.legalEntityId}</span>
           </Detail>
@@ -354,7 +369,9 @@ export function ModifyLeasePage() {
       <div className={styles.stack}>
         <PageHeader title={`Modify lease ${lease.leaseNumber}`} meta={<StatusBadge status={lease.status} />} />
         <Alert tone="warning" title="This lease cannot be modified">
-          Only an active or modified lease can be remeasured.
+          {isExempt(lease)
+            ? "A lease under a short-term or low-value election has no liability to remeasure; record a change of its payments or term as a new lease."
+            : "Only an active or modified lease can be remeasured."}
         </Alert>
         <Link className={buttonClassName("ghost")} to={back}>
           Back to the lease

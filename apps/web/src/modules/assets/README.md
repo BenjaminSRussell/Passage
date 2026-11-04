@@ -74,3 +74,5 @@ cd apps/web
 npx vitest --run src/modules/assets
 npx tsc --noEmit
 ```
+
+Slice 8: `/assets/leases/new` has a recognition exemption select (short-term, refused with a purchase option, or low-value with the value of the underlying asset when new stated in USD or EUR and checked against the 5,000 threshold like the service) and a purchase option checkbox; the lease list has an Exemption column; the lease page explains a lease under an election, offers neither Modify nor Terminate and lists no recognition journal on its ledger card, and the modify and terminate pages refuse such a lease when opened by address; `/assets/leases/posting-profile` has the termination gain / loss and the short-term and low-value lease expense accounts.

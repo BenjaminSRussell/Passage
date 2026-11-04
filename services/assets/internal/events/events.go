@@ -187,6 +187,8 @@ type LeaseRecognizedData struct {
 	Currency   string `json:"currency"`
 	TermMonths int    `json:"termMonths"`
 	Rate       string `json:"rate"`
+	// Election is None, ShortTerm or LowValue; a lease under an election has liability and rouAsset 0.
+	Election string `json:"election"`
 }
 
 // LeasePostedData is the payload of LeasePosted. Kind is Termination (Period is the last period in force; Liability and ROUAsset are the amounts derecognized, with TerminationPayment and GainLoss), Recognition (period 0:

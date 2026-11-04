@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, ConfirmDialog, FormField, Input, PageHeader, Skeleton, StatGroup, StatTile } from "../../shell/ui";
 import { describeProblem, getLease, newKey, terminateLease, type Lease, type LeaseTerminationResult, type Problem, type TerminateLeaseInput } from "./api/client";
 import { StatusBadge } from "./badges";
+import { isExempt } from "./LeaseDetailPage";
 import { DECIMAL, money } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -43,7 +44,7 @@ export function leasePeriodEnd(commencement: string, paymentsPerYear: number, pe
   return end.toISOString().slice(0, 10);
 }
 
-const canTerminate = (lease: Lease) => lease.status === "Active" || lease.status === "Modified";
+const canTerminate = (lease: Lease) => (lease.status === "Active" || lease.status === "Modified") && !isExempt(lease);
 
 /** Terminate a lease early (D4c): the liability and the ROU asset are derecognized with the gain or loss. */
 export function TerminateLeasePage() {
@@ -144,7 +145,9 @@ export function TerminateLeasePage() {
       <div className={styles.stack}>
         <PageHeader title={`Terminate lease ${lease.leaseNumber}`} meta={<StatusBadge status={lease.status} />} />
         <Alert tone="warning" title="This lease cannot be terminated">
-          Only an active or modified lease can be terminated early.
+          {isExempt(lease)
+            ? "A lease under a short-term or low-value election has no liability or right-of-use asset to derecognize (AST-0037)."
+            : "Only an active or modified lease can be terminated early."}
         </Alert>
         <Link className={buttonClassName("ghost")} to={back}>
           Back to the lease

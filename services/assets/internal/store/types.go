@@ -198,24 +198,32 @@ type Disposal struct {
 // (BR-37.8). PaymentAmount, TermMonths and IBRRate are the terms in force.
 // RateMethod is Nominal or Effective (lease.periodicRateMethod).
 type Lease struct {
-	ID               string              `json:"id"`
-	LegalEntityID    string              `json:"legalEntityId"`
-	LeaseNumber      string              `json:"leaseNumber"`
-	CommencementDate Date                `json:"commencementDate"`
-	TermMonths       int                 `json:"termMonths"`
-	PaymentsPerYear  int                 `json:"paymentsPerYear"`
-	PaymentAmount    decimal.Decimal     `json:"paymentAmount"`
-	PaymentTiming    string              `json:"paymentTiming"`
-	IBRRate          decimal.Decimal     `json:"ibrRate"`
-	RateMethod       string              `json:"rateMethod"`
-	Currency         string              `json:"currency"`
-	Liability        decimal.Decimal     `json:"liability"`
-	ROUAsset         decimal.Decimal     `json:"rouAsset"`
-	Status           string              `json:"status"`
-	Version          int                 `json:"version"`
-	CreatedAt        time.Time           `json:"createdAt"`
-	Schedule         []LeaseLine         `json:"schedule,omitempty"`
-	Modifications    []LeaseModification `json:"modifications,omitempty"`
+	ID               string          `json:"id"`
+	LegalEntityID    string          `json:"legalEntityId"`
+	LeaseNumber      string          `json:"leaseNumber"`
+	CommencementDate Date            `json:"commencementDate"`
+	TermMonths       int             `json:"termMonths"`
+	PaymentsPerYear  int             `json:"paymentsPerYear"`
+	PaymentAmount    decimal.Decimal `json:"paymentAmount"`
+	PaymentTiming    string          `json:"paymentTiming"`
+	IBRRate          decimal.Decimal `json:"ibrRate"`
+	RateMethod       string          `json:"rateMethod"`
+	// Election is None, ShortTerm or LowValue (IFRS 16.5-8): a lease under an election is not recognized
+	// (Liability and ROUAsset are 0) and its payments are expensed. PurchaseOption rules out ShortTerm.
+	// UnderlyingAssetValue is the value of the underlying asset when new, in UnderlyingAssetCurrency (USD or
+	// EUR, the currencies of the low-value threshold), set for LowValue only.
+	Election                string              `json:"election"`
+	PurchaseOption          bool                `json:"purchaseOption"`
+	UnderlyingAssetValue    *decimal.Decimal    `json:"underlyingAssetValue,omitempty"`
+	UnderlyingAssetCurrency string              `json:"underlyingAssetCurrency,omitempty"`
+	Currency                string              `json:"currency"`
+	Liability               decimal.Decimal     `json:"liability"`
+	ROUAsset                decimal.Decimal     `json:"rouAsset"`
+	Status                  string              `json:"status"`
+	Version                 int                 `json:"version"`
+	CreatedAt               time.Time           `json:"createdAt"`
+	Schedule                []LeaseLine         `json:"schedule,omitempty"`
+	Modifications           []LeaseModification `json:"modifications,omitempty"`
 	// Termination is set once the lease was terminated early (D4c).
 	Termination *LeaseTermination `json:"termination,omitempty"`
 }

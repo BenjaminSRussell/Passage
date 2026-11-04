@@ -117,7 +117,7 @@ func TestTerminateLease_JournalFollowsThePeriodsAndClearsTheBalances(t *testing.
 		t.Fatalf("termination entry: %+v", last)
 	}
 	checks := map[string]string{
-		p.Liability: "0", p.ROUAsset: "0", p.ROUAccumulated: "0", p.RemeasurementGain: "-255.62", p.PaymentClearing: "-21000",
+		p.Liability: "0", p.ROUAsset: "0", p.ROUAccumulated: "0", p.TerminationGainLoss: "-255.62", p.RemeasurementGain: "0", p.PaymentClearing: "-21000",
 		p.DepreciationExpense: "17317.90",
 	}
 	for account, want := range checks {
@@ -230,7 +230,7 @@ func TestTerminateLease_ModifiedLeaseClearsTheLedger(t *testing.T) {
 				t.Errorf("%s: account %s = %s after the termination journal", c.name, account, got)
 			}
 		}
-		if got := net(t, fake, ledgerID, p.RemeasurementGain); !got.Equal(tm.GainLoss.Neg()) {
+		if got := net(t, fake, ledgerID, p.TerminationGainLoss); !got.Equal(tm.GainLoss.Neg()) {
 			t.Errorf("%s: gain account %s, want %s", c.name, got, tm.GainLoss.Neg())
 		}
 	}

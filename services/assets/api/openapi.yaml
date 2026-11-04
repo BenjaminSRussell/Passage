@@ -1217,6 +1217,10 @@ paths:
           $ref: "#/components/responses/Problem"
     post:
       summary: Recognize an IFRS 16 lease and compute its schedule
+      description: |
+        Recognizes the lease with its liability, ROU asset and schedule. With election ShortTerm or LowValue
+        (IFRS 16.5-8) nothing is recognized: the liability and ROU asset are 0 and each period expenses its payment
+        when posted. Publishes dev.passage.assets.lease.recognized.v1.
       operationId: createLease
       x-passage-duty: LeaseMaintain
       parameters:
@@ -1323,8 +1327,9 @@ paths:
         later date agreed now is a change of the lease term, booked as a modification (POST /v1/leases/{id}/modify with
         the shorter termMonths). A termination inside a payment period is not supported; it ends on a period's last day.
         A termination payment with more decimals than the currency allows is refused (AST-0036). The termination journal (Dr liability and accumulated depreciation, Cr gross ROU
-        asset, payment clearing and the gain account of the lease posting profile) is booked by POST /v1/leases/gl-postings
+        asset and payment clearing, the gain or loss on the termination gain / loss account of the lease posting profile) is booked by POST /v1/leases/gl-postings
         after every period up to the termination. Publishes dev.passage.assets.lease.terminated.v1.
+        A lease under a short-term or low-value election has nothing to derecognize and is refused (AST-0037).
         Requires If-Match with the lease ETag and an Idempotency-Key.
       operationId: terminateLease
       x-passage-duty: LeaseMaintain
@@ -1751,6 +1756,8 @@ components:
         depreciationExpenseAccount: { type: string }
         paymentClearingAccount: { type: string, description: Credited by the lease payment of each period (cash or payables clearing). }
         remeasurementGainAccount: { type: string, description: Credited with the part of a downward remeasurement beyond the ROU carrying amount. }
+        terminationGainLossAccount: { type: string, description: "Takes the gain (credit) or loss (debit) of an early termination. Optional on PUT: omitted, it is the remeasurement gain account." }
+        exemptLeaseExpenseAccount: { type: string, description: "Debited with the payment of each period of a lease under a short-term or low-value election. Optional on PUT: omitted, it is the depreciation expense account." }
         version: { type: integer, readOnly: true }
         updatedBy: { type: string, readOnly: true }
         updatedAt: { type: string, format: date-time, readOnly: true }
@@ -1955,6 +1962,26 @@ components:
           default: Nominal
           description: "lease.periodicRateMethod: Nominal is ibrRate / paymentsPerYear, Effective is (1 + ibrRate)^(1 / paymentsPerYear) - 1"
         currency: { type: string, pattern: "^[A-Z]{3}$" }
+        election:
+          type: string
+          enum: [None, ShortTerm, LowValue]
+          default: None
+          description: |
+            IFRS 16.5-8 recognition exemption (D4c), recorded per lease. ShortTerm needs a term of 12 months or less
+            and no purchase option; LowValue needs underlyingAssetValue, at most 5,000 in underlyingAssetCurrency (USD
+            or EUR, the lease.lowValueThreshold default). A lease under an election has no liability and no ROU asset,
+            its schedule lines carry only the payment, and each period expenses that payment, which is the
+            straight-line expense since the payments are level (the exempt lease expense account of the lease posting
+            profile against payment clearing). It cannot be modified or terminated. A refused election is AST-0037.
+        purchaseOption: { type: boolean, default: false, description: "The lease contains a purchase option; such a lease is not short-term (IFRS 16 Appendix A)" }
+        underlyingAssetValue: { type: string, description: "Value of the underlying asset when new, in underlyingAssetCurrency; required for LowValue, not allowed otherwise" }
+        underlyingAssetCurrency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+          description: |
+            Currency underlyingAssetValue is stated in: USD or EUR, the currencies the low-value threshold is set in,
+            whatever the lease currency. Omitted, it is the lease currency (so a lease in another currency must name
+            USD or EUR). Not allowed without underlyingAssetValue.
     ModifyLeaseRequest:
       type: object
       additionalProperties: false
@@ -2047,6 +2074,10 @@ components:
         paymentTiming: { type: string, enum: [arrears, advance] }
         ibrRate: { type: string, description: "Rate in force (the revised rate after a scope change)" }
         rateMethod: { type: string, enum: [Nominal, Effective] }
+        election: { type: string, enum: [None, ShortTerm, LowValue], description: "Recognition exemption; a lease under an election has liability and rouAsset 0" }
+        purchaseOption: { type: boolean, description: "The lease contains a purchase option" }
+        underlyingAssetValue: { type: string, description: "Value of the underlying asset when new, for LowValue only" }
+        underlyingAssetCurrency: { type: string, description: "Currency underlyingAssetValue is stated in (USD or EUR), for LowValue only" }
         currency: { type: string }
         liability: { type: string, description: "Liability at initial recognition" }
         rouAsset: { type: string, description: "ROU asset at initial recognition" }

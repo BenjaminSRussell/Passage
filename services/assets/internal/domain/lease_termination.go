@@ -55,15 +55,15 @@ func ComputeTermination(in TerminationInput) (Termination, error) {
 
 // LeaseTerminationNet is the net debit (credit when negative) per account of the termination
 // journal: the liability and the accumulated depreciation are cleared against the gross ROU asset
-// and the termination payment, the difference going to the gain account (the remeasurement gain
-// account of the posting profile, which also takes a loss as a debit).
+// and the termination payment, the difference going to the termination gain / loss account of
+// the posting profile (a gain is a credit, a loss a debit).
 func LeaseTerminationNet(a LeaseAccounts, t Termination) map[string]decimal.Decimal {
 	net := map[string]decimal.Decimal{}
 	addNet(net, a.Liability, t.Liability)
 	addNet(net, a.ROUAccumulated, t.ROUAccumulated)
 	addNet(net, a.ROUAsset, t.ROUGross.Neg())
 	addNet(net, a.PaymentClearing, t.Payment.Neg())
-	addNet(net, a.RemeasurementGain, t.GainLoss.Neg())
+	addNet(net, a.TerminationGainLoss, t.GainLoss.Neg())
 	return net
 }
 

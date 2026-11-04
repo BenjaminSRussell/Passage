@@ -257,6 +257,12 @@ type leaseRequest struct {
 	IBRRate          string `json:"ibrRate"`
 	RateMethod       string `json:"rateMethod"`
 	Currency         string `json:"currency"`
+	// Election is None (also when empty), ShortTerm or LowValue; UnderlyingAssetValue is required for LowValue,
+	// in UnderlyingAssetCurrency (USD or EUR; omitted, the lease currency). PurchaseOption rules out ShortTerm.
+	Election                string  `json:"election"`
+	PurchaseOption          bool    `json:"purchaseOption"`
+	UnderlyingAssetValue    *string `json:"underlyingAssetValue"`
+	UnderlyingAssetCurrency string  `json:"underlyingAssetCurrency"`
 }
 
 type scheduleLine struct {
@@ -616,6 +622,31 @@ func (a *API) createLease(w http.ResponseWriter, r *http.Request) {
 	if req.RateMethod != domain.RateNominal && req.RateMethod != domain.RateEffective {
 		fields["rateMethod"] = "must be Nominal or Effective"
 	}
+	var underlying *decimal.Decimal
+	if req.UnderlyingAssetValue != nil {
+		v, uerr := decimal.NewFromString(*req.UnderlyingAssetValue)
+		if uerr != nil || !v.IsPositive() {
+			fields["underlyingAssetValue"] = "must be a positive decimal"
+		} else {
+			underlying = &v
+		}
+	}
+	if req.UnderlyingAssetCurrency != "" && !currency.MatchString(req.UnderlyingAssetCurrency) {
+		fields["underlyingAssetCurrency"] = "must be an ISO 4217 code"
+	}
+	if req.Election == "" {
+		req.Election = domain.ElectionNone
+	}
+	if underlying != nil && req.UnderlyingAssetCurrency == "" {
+		req.UnderlyingAssetCurrency = req.Currency
+	}
+	if len(fields) == 0 {
+		if err := domain.ValidateElection(domain.ElectionInput{Election: req.Election, TermMonths: req.TermMonths, PurchaseOption: req.PurchaseOption,
+			UnderlyingValue: underlying, UnderlyingCurrency: req.UnderlyingAssetCurrency}); err != nil {
+			writeDomain(w, r, err)
+			return
+		}
+	}
 	if len(fields) > 0 {
 		writeValidation(w, r, fields)
 		return
@@ -624,7 +655,11 @@ func (a *API) createLease(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	payment = payment.Round(money.MinorUnits(req.Currency))
-	sched, err := domain.ComputeLease(domain.LeaseTerms{Payment: payment, PaymentsPerYear: req.PaymentsPerYear, TermMonths: req.TermMonths,
+	compute := domain.ComputeLease
+	if req.Election != domain.ElectionNone {
+		compute = domain.ComputeExemptLease
+	}
+	sched, err := compute(domain.LeaseTerms{Payment: payment, PaymentsPerYear: req.PaymentsPerYear, TermMonths: req.TermMonths,
 		Advance: req.PaymentTiming == "advance", AnnualRate: rate, Currency: req.Currency, RateMethod: req.RateMethod})
 	if err != nil {
 		writeDomain(w, r, err)
@@ -632,7 +667,8 @@ func (a *API) createLease(w http.ResponseWriter, r *http.Request) {
 	}
 	lease := store.Lease{LegalEntityID: req.LegalEntityID, LeaseNumber: strings.TrimSpace(req.LeaseNumber), CommencementDate: commencement,
 		TermMonths: req.TermMonths, PaymentsPerYear: req.PaymentsPerYear, PaymentAmount: payment, PaymentTiming: req.PaymentTiming,
-		IBRRate: rate, RateMethod: req.RateMethod, Currency: req.Currency, Liability: sched.Liability, ROUAsset: sched.ROUAsset, Schedule: toLeaseLines(sched.Lines)}
+		IBRRate: rate, RateMethod: req.RateMethod, Currency: req.Currency, Election: req.Election, PurchaseOption: req.PurchaseOption,
+		UnderlyingAssetValue: underlying, UnderlyingAssetCurrency: req.UnderlyingAssetCurrency, Liability: sched.Liability, ROUAsset: sched.ROUAsset, Schedule: toLeaseLines(sched.Lines)}
 	created, err := a.store.CreateLease(r.Context(), lease, key)
 	if err != nil {
 		httpx.Fail(w, r, err)

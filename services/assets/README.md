@@ -154,7 +154,8 @@ and `authz` until OPA is wired (wave 2 kernel).
   without one the placeholders apply and the booking is flagged
   `placeholderProfile`: ROU asset 1700, ROU accumulated depreciation 1790, lease
   liability 2400, interest expense 7200, depreciation expense 6820, payment
-  clearing 2110, remeasurement gain 7120. Superseded modifications are not
+  clearing 2110, remeasurement gain 7120, termination gain / loss 7130, short-term and
+  low-value lease expense 6830. Superseded modifications are not
   booked. A line whose remeasurement does not agree with the lease's live
   modifications is reported as AST-0610 and not booked (a data fault guard).
   Staging locks the leases (the lock a remeasurement takes), so a
@@ -390,3 +391,28 @@ See `events/asyncapi.yaml`.
 
 See NOT-IMPLEMENTED.md for everything in the ticket that is not in this slice,
 with status and reason.
+
+### Short-term and low-value lease elections (D4c, slice 8)
+
+`POST /v1/leases` takes `election` (`None`, `ShortTerm`, `LowValue`; IFRS 16.5-8),
+recorded per lease. A short-term lease has a term of 12 months or less at
+commencement and no purchase option (`purchaseOption`, IFRS 16 Appendix A). The
+standard makes the short-term election per class of underlying asset (IFRS 16.8);
+the lease carries no asset class, so the accountant applies the class policy to
+each lease. A low-value lease states `underlyingAssetValue`, the value of the
+underlying asset when new whatever its age (IFRS 16.B3-B5), in
+`underlyingAssetCurrency`: USD or EUR, at most 5,000 (the PRD default of
+`lease.lowValueThreshold`, after IFRS 16.BC100's USD 5,000 or less). The value
+currency defaults to the lease currency; the service holds no exchange rates, so a
+lease in another currency names USD or EUR and the accountant converts at the
+assessment date. A lease under an election is not recognized: liability and ROU
+asset are 0, its schedule lines carry only the payment, and
+`POST /v1/leases/gl-postings` books one journal per payment period (Dr the exempt
+lease expense account, Cr payment clearing) with no recognition journal. A lease
+has one level payment amount and an exempt lease cannot be modified, so each
+period's payment is the straight-line expense of IFRS 16.6. A refused election,
+or a modification or termination of such a lease, is AST-0037. The termination
+journal now books its gain or loss on the profile's own
+`terminationGainLossAccount` (it used the remeasurement gain account); both new
+profile accounts are optional on PUT and default to the remeasurement gain and
+depreciation expense accounts.

@@ -83,6 +83,9 @@ type leaseProfileRequest struct {
 	DepreciationExpense string `json:"depreciationExpenseAccount"`
 	PaymentClearing     string `json:"paymentClearingAccount"`
 	RemeasurementGain   string `json:"remeasurementGainAccount"`
+	// TerminationGainLoss and ExemptLeaseExpense are optional: omitted, they default to the remeasurement gain and the depreciation expense account.
+	TerminationGainLoss string `json:"terminationGainLossAccount"`
+	ExemptLeaseExpense  string `json:"exemptLeaseExpenseAccount"`
 }
 
 func (a *API) getLeasePostingProfile(w http.ResponseWriter, r *http.Request) {
@@ -130,6 +133,16 @@ func (a *API) saveLeasePostingProfile(w http.ResponseWriter, r *http.Request) {
 			fields[name] = "must be an account number of at most 40 characters"
 		}
 	}
+	if req.TerminationGainLoss = strings.TrimSpace(req.TerminationGainLoss); req.TerminationGainLoss == "" {
+		req.TerminationGainLoss = strings.TrimSpace(req.RemeasurementGain)
+	} else if !accountPattern.MatchString(req.TerminationGainLoss) {
+		fields["terminationGainLossAccount"] = "must be an account number of at most 40 characters"
+	}
+	if req.ExemptLeaseExpense = strings.TrimSpace(req.ExemptLeaseExpense); req.ExemptLeaseExpense == "" {
+		req.ExemptLeaseExpense = strings.TrimSpace(req.DepreciationExpense)
+	} else if !accountPattern.MatchString(req.ExemptLeaseExpense) {
+		fields["exemptLeaseExpenseAccount"] = "must be an account number of at most 40 characters"
+	}
 	if len(fields) > 0 {
 		writeValidation(w, r, fields)
 		return
@@ -148,7 +161,7 @@ func (a *API) saveLeasePostingProfile(w http.ResponseWriter, r *http.Request) {
 	saved, created, err := a.gl.SaveLeasePostingProfile(r.Context(), store.LeasePostingProfile{LegalEntityID: req.LegalEntityID, ROUAsset: strings.TrimSpace(req.ROUAsset),
 		ROUAccumulated: strings.TrimSpace(req.ROUAccumulated), Liability: strings.TrimSpace(req.Liability), InterestExpense: strings.TrimSpace(req.InterestExpense),
 		DepreciationExpense: strings.TrimSpace(req.DepreciationExpense), PaymentClearing: strings.TrimSpace(req.PaymentClearing),
-		RemeasurementGain: strings.TrimSpace(req.RemeasurementGain)}, version, p.UserID)
+		RemeasurementGain: strings.TrimSpace(req.RemeasurementGain), TerminationGainLoss: req.TerminationGainLoss, ExemptLeaseExpense: req.ExemptLeaseExpense}, version, p.UserID)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return

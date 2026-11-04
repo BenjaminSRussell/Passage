@@ -123,7 +123,7 @@ const (
 		in_service_date, cost, accumulated_depreciation, nbv, status, last_depreciated_period, coalesce(acquisition_cost, cost)`
 	txColumns = `t.id, t.asset_book_id, b.book_code, b.currency, t.type, t.transaction_date, t.cost_amount, t.accumulated_amount, t.proceeds_amount, t.gain_loss,
 		t.impairment_amount, t.source_type, t.source_id, t.run_id, t.created_at`
-	leaseColumns = "id, legal_entity_id, lease_number, commencement_date, term_months, payments_per_year, payment_amount, payment_timing, ibr_rate, rate_method, currency, liability, rou_asset, status, version, created_at"
+	leaseColumns = "id, legal_entity_id, lease_number, commencement_date, term_months, payments_per_year, payment_amount, payment_timing, ibr_rate, rate_method, election, purchase_option, underlying_asset_value, coalesce(underlying_asset_currency, ''), currency, liability, rou_asset, status, version, created_at"
 )
 
 func principal(ctx context.Context) tenant.Principal {
@@ -229,7 +229,7 @@ func scanTx(row pgx.Row) (Transaction, error) {
 func scanLease(row pgx.Row) (Lease, error) {
 	var l Lease
 	err := row.Scan(&l.ID, &l.LegalEntityID, &l.LeaseNumber, &l.CommencementDate, &l.TermMonths, &l.PaymentsPerYear, &l.PaymentAmount,
-		&l.PaymentTiming, &l.IBRRate, &l.RateMethod, &l.Currency, &l.Liability, &l.ROUAsset, &l.Status, &l.Version, &l.CreatedAt)
+		&l.PaymentTiming, &l.IBRRate, &l.RateMethod, &l.Election, &l.PurchaseOption, &l.UnderlyingAssetValue, &l.UnderlyingAssetCurrency, &l.Currency, &l.Liability, &l.ROUAsset, &l.Status, &l.Version, &l.CreatedAt)
 	return l, err
 }
 
@@ -599,19 +599,28 @@ func (s *Postgres) CreateLease(ctx context.Context, in Lease, idempotencyKey str
 	if in.RateMethod == "" {
 		in.RateMethod = domain.RateNominal
 	}
+	if in.Election == "" {
+		in.Election = domain.ElectionNone
+	}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		request := struct {
 			LegalEntityID, LeaseNumber, CommencementDate, PaymentAmount, PaymentTiming, IBRRate, RateMethod, Currency string
 			TermMonths, PaymentsPerYear                                                                               int
-		}{in.LegalEntityID, in.LeaseNumber, in.CommencementDate.String(), in.PaymentAmount.String(), in.PaymentTiming, in.IBRRate.String(), in.RateMethod,
-			in.Currency, in.TermMonths, in.PaymentsPerYear}
+			Election, UnderlyingAssetValue, UnderlyingAssetCurrency                                                   string
+			PurchaseOption                                                                                            bool
+		}{LegalEntityID: in.LegalEntityID, LeaseNumber: in.LeaseNumber, CommencementDate: in.CommencementDate.String(), PaymentAmount: in.PaymentAmount.String(),
+			PaymentTiming: in.PaymentTiming, IBRRate: in.IBRRate.String(), RateMethod: in.RateMethod, Currency: in.Currency, TermMonths: in.TermMonths,
+			PaymentsPerYear: in.PaymentsPerYear, Election: in.Election, UnderlyingAssetCurrency: in.UnderlyingAssetCurrency, PurchaseOption: in.PurchaseOption}
+		if in.UnderlyingAssetValue != nil {
+			request.UnderlyingAssetValue = in.UnderlyingAssetValue.String()
+		}
 		var err error
 		out, err = idempotent(ctx, tx, p.TenantID, idempotencyKey, "lease.create", request, func() (Lease, error) {
 			row, err := scanLease(tx.QueryRow(ctx, `insert into lease (tenant_id, id, legal_entity_id, lease_number, commencement_date, term_months, payments_per_year,
-				payment_amount, payment_timing, ibr_rate, rate_method, currency, liability, rou_asset)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) returning `+leaseColumns,
+				payment_amount, payment_timing, ibr_rate, rate_method, election, purchase_option, underlying_asset_value, underlying_asset_currency, currency, liability, rou_asset)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, nullif($15, ''), $16, $17, $18) returning `+leaseColumns,
 				p.TenantID, ids.New(), in.LegalEntityID, in.LeaseNumber, in.CommencementDate, in.TermMonths, in.PaymentsPerYear, in.PaymentAmount,
-				in.PaymentTiming, in.IBRRate, in.RateMethod, in.Currency, in.Liability, in.ROUAsset))
+				in.PaymentTiming, in.IBRRate, in.RateMethod, in.Election, in.PurchaseOption, in.UnderlyingAssetValue, in.UnderlyingAssetCurrency, in.Currency, in.Liability, in.ROUAsset))
 			if err != nil {
 				return Lease{}, err
 			}
@@ -622,7 +631,7 @@ func (s *Postgres) CreateLease(ctx context.Context, in Lease, idempotencyKey str
 			row.Modifications = []LeaseModification{}
 			return row, enqueue(ctx, tx, "lease", row.ID, assetevents.LeaseRecognized, p.TenantID, assetevents.LeaseRecognizedData{
 				LeaseID: row.ID, Liability: row.Liability.String(), ROUAsset: row.ROUAsset.String(), Currency: row.Currency,
-				TermMonths: row.TermMonths, Rate: row.IBRRate.String(),
+				TermMonths: row.TermMonths, Rate: row.IBRRate.String(), Election: row.Election,
 			})
 		})
 		return err
