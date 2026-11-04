@@ -73,6 +73,11 @@ func (a *API) registerReturnOrders(r chi.Router) {
 	r.With(authz.RequireDuty(dutyWrite)).Post(returnOrders+"/{id}:inspect", a.inspectReturnOrder)
 	r.With(authz.RequireDuty(dutyWrite)).Post(returnOrders+"/{id}:disposition", a.dispositionReturnOrder)
 	r.With(authz.RequireDuty(dutyWrite)).Post(returnOrders+"/{id}:credit", a.creditReturnOrder)
+	r.With(authz.RequireDuty(dutyWrite)).Post(returnOrders+"/{id}:reject", a.rejectReturnOrder)
+}
+
+func (a *API) rejectReturnOrder(w http.ResponseWriter, r *http.Request) {
+	a.rmaCommand(w, r, "reject return order", a.store.RejectReturnOrder)
 }
 
 func (a *API) createReturnOrder(w http.ResponseWriter, r *http.Request) {
@@ -245,9 +250,11 @@ func (a *API) inspectReturnOrder(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var req inspectReturnRequest
-		if err := httpx.Decode(r, &req); err != nil {
-			httpx.Fail(w, r, err)
-			return
+		if r.ContentLength != 0 {
+			if err := httpx.Decode(r, &req); err != nil {
+				httpx.Fail(w, r, err)
+				return
+			}
 		}
 		fields := map[string]string{}
 		var lines []store.InspectLine
@@ -267,9 +274,8 @@ func (a *API) inspectReturnOrder(w http.ResponseWriter, r *http.Request) {
 			}
 			lines = append(lines, store.InspectLine{LineNo: l.LineNo, Accepted: accepted, Disposition: l.Disposition})
 		}
-		if len(lines) == 0 {
-			fields["lines"] = "must name every received line"
-		}
+		// No lines is valid: an RMA that received nothing (credit-only lines no goods came back for) is inspected
+		// empty; the store refuses an empty inspection when a line was received.
 		if len(fields) > 0 {
 			validationFailed(w, r, fields)
 			return

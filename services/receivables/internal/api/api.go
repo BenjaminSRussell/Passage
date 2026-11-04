@@ -87,6 +87,9 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyView)).Get("/lockbox/imports", a.listLockboxBatches)
 		r.With(authz.RequireDuty(dutyView)).Get("/worklist", a.worklist)
 		r.With(authz.RequireDuty(dutyRMACredit)).Post("/rma-credits", a.postRMACredit)
+		r.With(authz.RequireDuty(dutyView)).Get("/rma-credits", a.listRMACredits)
+		r.With(authz.RequireDuty(dutyPayment)).Post("/rma-credits:sweep", a.sweepRMACredits)
+		r.Post("/rma-credits/{ref}", a.rmaCreditAction)
 	})
 }
 

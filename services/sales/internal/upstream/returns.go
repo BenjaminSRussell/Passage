@@ -11,6 +11,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/sales/internal/store"
 )
 
@@ -23,9 +24,9 @@ const (
 	dutyInvoiceRead      = "billing.invoice.read"
 	dutyPackingSlipRead  = "fulfillment.packing-slip.read"
 	dutyInventoryRead    = "inventory.read"
-	dutyJournalWrite     = "inventory.journal.write"
-	dutyJournalPost      = "inventory.journal.post"
+	dutyReturnReceipt    = "inventory.return-receipt.post"
 	dutyRMACreditPost    = "ar.rmacredit.post"
+	returnReceiptPath    = "/internal/v1/inventory/return-receipts"
 	journalTypeMovement  = "MOVEMENT"
 	journalStatusPosted  = "POSTED"
 	invoiceTypeCredit    = "CREDIT_NOTE"
@@ -121,10 +122,15 @@ func (r *Returns) ReadInvoice(ctx context.Context, legalEntityID, invoiceID stri
 	for _, l := range body.Lines {
 		qty, qerr := decimal.NewFromString(l.Qty)
 		net, nerr := decimal.NewFromString(l.Net)
-		if err := errors.Join(qerr, nerr); err != nil {
+		credited, cerr := decimal.Zero, error(nil)
+		if l.CreditedQty != "" {
+			credited, cerr = decimal.NewFromString(l.CreditedQty)
+		}
+		if err := errors.Join(qerr, nerr, cerr); err != nil {
 			return store.Invoice{}, fmt.Errorf("billing invoice line %d: %w", l.LineNo, err)
 		}
-		out.Lines = append(out.Lines, store.InvoiceLine{LineNo: l.LineNo, ProductID: l.ProductID, OrderLineID: l.OrderLineID, PackingSlipID: l.PackingSlip, Qty: qty, Net: net})
+		out.Lines = append(out.Lines, store.InvoiceLine{LineNo: l.LineNo, ProductID: l.ProductID, OrderLineID: l.OrderLineID, PackingSlipID: l.PackingSlip,
+			Qty: qty, Net: net, CreditedQty: credited})
 	}
 	return out, nil
 }
@@ -158,19 +164,40 @@ func (r *Returns) OriginalUnitCost(ctx context.Context, legalEntityID, packingSl
 	return cost.Div(qty).Round(6), true, nil
 }
 
+// CurrentUnitCost is the on-hand average cost of the product at the site and warehouse. Inventory keeps dimensions
+// as free text, and site and warehouse hold the org UUIDs in whatever case the posting service wrote them, so the
+// inquiry groups the product's on-hand by legal entity, site and warehouse and the match is made on the canonical
+// UUIDs here rather than by an exact-text filter.
 func (r *Returns) CurrentUnitCost(ctx context.Context, legalEntityID, productID, siteID, warehouseID string) (decimal.Decimal, bool, error) {
-	q := url.Values{"product": {productID}, "site": {siteID}, "warehouse": {warehouseID}}
+	site, okSite := ids.Canonical(siteID)
+	warehouse, okWarehouse := ids.Canonical(warehouseID)
+	le, okLE := ids.Canonical(legalEntityID)
+	if !okSite || !okWarehouse || !okLE {
+		return decimal.Zero, false, nil
+	}
+	q := url.Values{"product": {productID}, "groupBy": {"legal_entity,site,warehouse"}}
 	var out struct {
 		Items []struct {
-			PhysicalInvent string `json:"physicalInvent"`
-			PostedValue    string `json:"postedValue"`
+			Group          map[string]string `json:"group"`
+			PhysicalInvent string            `json:"physicalInvent"`
+			PostedValue    string            `json:"postedValue"`
 		} `json:"items"`
+		Truncated bool `json:"truncated"`
 	}
 	if err := r.call(ctx, r.inventoryURL, inventoryAudience, http.MethodGet, "/v1/inventory/onhand?"+q.Encode(), dutyInventoryRead, legalEntityID, "", nil, &out); err != nil {
 		return decimal.Zero, false, err
 	}
+	if out.Truncated {
+		return decimal.Zero, false, errors.New("inventory on-hand: the product's groups were truncated")
+	}
 	qty, value := decimal.Zero, decimal.Zero
 	for _, it := range out.Items {
+		gotLE, _ := ids.Canonical(it.Group["legal_entity"])
+		gotSite, _ := ids.Canonical(strings.TrimSpace(it.Group["site"]))
+		gotWarehouse, _ := ids.Canonical(strings.TrimSpace(it.Group["warehouse"]))
+		if gotLE != le || gotSite != site || gotWarehouse != warehouse {
+			continue
+		}
 		q, qerr := decimal.NewFromString(it.PhysicalInvent)
 		v, verr := decimal.NewFromString(it.PostedValue)
 		if err := errors.Join(qerr, verr); err != nil {
@@ -185,33 +212,43 @@ func (r *Returns) CurrentUnitCost(ctx context.Context, legalEntityID, productID,
 }
 
 type journalBody struct {
-	ID      string `json:"id"`
-	Status  string `json:"status"`
-	Version int    `json:"version"`
+	ID            string `json:"id"`
+	Status        string `json:"status"`
+	JournalType   string `json:"journalType"`
+	LegalEntityID string `json:"legalEntityId"`
+	Lines         []struct {
+		ClientKey string `json:"clientKey"`
+		ProductID string `json:"productId"`
+		Qty       string `json:"qty"`
+	} `json:"lines"`
 }
 
-// ReceiveReturn books the accepted quantity into stock as a MOVEMENT journal keyed by the receipt's key, so a retry
-// finds the same journal and line; it returns the posted journal's id.
+// ErrForeignReceipt is a journal under a receipt's key that is not that receipt.
+var ErrForeignReceipt = errors.New("inventory answered a journal that is not this return receipt")
+
+// ReceiveReturn books the accepted quantity into stock through inventory's service-only return-receipt command: one
+// MOVEMENT journal of one line, keyed by the receipt's per-line key, created and posted in one call, so a retry
+// finds the same journal. The answer is trusted only when it is that receipt: a POSTED MOVEMENT journal of the legal
+// entity whose only line carries the key, the product and the quantity.
 func (r *Returns) ReceiveReturn(ctx context.Context, in store.ReturnReceipt) (string, error) {
 	if r == nil || r.offsetAccount == "" {
 		return "", ErrNotConfigured
 	}
+	body := map[string]any{"legalEntityId": in.LegalEntityID, "postingDate": in.PostingDate, "currency": in.Currency, "offsetAccountId": r.offsetAccount,
+		"productId": in.ProductID, "qty": in.Quantity.String(), "enteredUnit": in.Unit, "costPrice": in.UnitCost.String(),
+		"dimensions": map[string]string{"site": in.SiteID, "warehouse": in.WarehouseID}}
 	var j journalBody
-	create := map[string]any{"journalType": journalTypeMovement, "legalEntityId": in.LegalEntityID, "postingDate": in.PostingDate,
-		"offsetAccountId": r.offsetAccount, "currency": in.Currency}
-	if err := r.call(ctx, r.inventoryURL, inventoryAudience, http.MethodPost, "/v1/inventory/journals", dutyJournalWrite, in.LegalEntityID, in.Key, create, &j); err != nil {
+	if err := r.call(ctx, r.inventoryURL, inventoryAudience, http.MethodPost, returnReceiptPath, dutyReturnReceipt, in.LegalEntityID, in.Key, body, &j); err != nil {
 		return "", err
 	}
-	if j.Status == journalStatusPosted {
-		return j.ID, nil
+	le, _ := ids.Canonical(j.LegalEntityID)
+	want, _ := ids.Canonical(in.LegalEntityID)
+	if j.ID == "" || j.Status != journalStatusPosted || j.JournalType != journalTypeMovement || le != want || len(j.Lines) != 1 ||
+		j.Lines[0].ClientKey != in.Key || j.Lines[0].ProductID != in.ProductID {
+		return "", fmt.Errorf("%w (journal %q status %q type %q)", ErrForeignReceipt, j.ID, j.Status, j.JournalType)
 	}
-	lines := map[string]any{"lines": []map[string]any{{"clientKey": in.Key, "productId": in.ProductID, "qty": in.Quantity.String(), "enteredUnit": in.Unit,
-		"costPrice": in.UnitCost.String(), "dimensions": map[string]string{"site": in.SiteID, "warehouse": in.WarehouseID}}}}
-	if err := r.call(ctx, r.inventoryURL, inventoryAudience, http.MethodPost, "/v1/inventory/journals/"+url.PathEscape(j.ID)+"/lines:bulk", dutyJournalWrite, in.LegalEntityID, "", lines, &j); err != nil {
-		return "", err
-	}
-	if err := r.call(ctx, r.inventoryURL, inventoryAudience, http.MethodPost, "/v1/inventory/journals/"+url.PathEscape(j.ID)+":post", dutyJournalPost, in.LegalEntityID, "", nil, &j, [2]string{"If-Match", fmt.Sprintf("%q", fmt.Sprint(j.Version))}); err != nil {
-		return "", err
+	if qty, err := decimal.NewFromString(j.Lines[0].Qty); err != nil || !qty.Equal(in.Quantity) {
+		return "", fmt.Errorf("%w (journal %q quantity %q)", ErrForeignReceipt, j.ID, j.Lines[0].Qty)
 	}
 	return j.ID, nil
 }

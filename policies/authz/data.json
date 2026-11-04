@@ -367,6 +367,7 @@
     ]},
     "fulfillment.shipment.read": {"service_only": true, "permissions": [{"resource": "/v1/fulfillment/shipments/*", "methods": ["GET"]}]},
     "ar.rmacredit.post": {"service_only": true, "permissions": [{"resource": "/v1/receivables/rma-credits", "methods": ["POST"]}]},
+    "inventory.return-receipt.post": {"service_only": true, "permissions": [{"resource": "/internal/v1/inventory/return-receipts", "methods": ["POST"]}]},
     "fulfillment.packing-slip.read": {"service_only": true, "permissions": [{"resource": "/v1/fulfillment/packing-slips/*", "methods": ["GET"]}]},
     "billing.invoice.read": {"service_only": true, "permissions": [{"resource": "/v1/billing/invoices/*", "methods": ["GET"]}]},
     "sales.order.lookup": {"service_only": true, "permissions": [{"resource": "/v1/sales/orders/*", "methods": ["GET"]}]},
@@ -701,7 +702,9 @@
       {"resource": "/v1/receivables/down-payments/*:receive", "methods": ["POST"]},
       {"resource": "/v1/receivables/payments", "methods": ["POST"]},
       {"resource": "/v1/receivables/payments/*:apply", "methods": ["POST"]},
-      {"resource": "/v1/receivables/payments/*:match", "methods": ["POST"]}
+      {"resource": "/v1/receivables/payments/*:match", "methods": ["POST"]},
+      {"resource": "/v1/receivables/rma-credits/*:retry", "methods": ["POST"]},
+      {"resource": "/v1/receivables/rma-credits:sweep", "methods": ["POST"]}
     ]},
     "ARRefund": {"permissions": [{"resource": "/v1/receivables/down-payments/*:release", "methods": ["POST"]}]},
     "ARSettle": {"permissions": [{"resource": "/v1/receivables/down-payments/*:clear", "methods": ["POST"]}]},
@@ -729,6 +732,7 @@
       {"resource": "/v1/receivables/payments", "methods": ["GET"]},
       {"resource": "/v1/receivables/payments/*", "methods": ["GET"]},
       {"resource": "/v1/receivables/promises", "methods": ["GET"]},
+      {"resource": "/v1/receivables/rma-credits", "methods": ["GET"]},
       {"resource": "/v1/receivables/statements", "methods": ["GET"]},
       {"resource": "/v1/receivables/worklist", "methods": ["GET"]}
     ]},
@@ -2786,7 +2790,9 @@
       {"resource": "/v1/sales/intake-errors/*", "methods": ["GET"]},
       {"resource": "/v1/sales/delivery-terms", "methods": ["GET"]},
       {"resource": "/v1/sales/delivery-terms/*", "methods": ["GET"]},
-      {"resource": "/v1/sales/order-progress", "methods": ["GET"]}
+      {"resource": "/v1/sales/order-progress", "methods": ["GET"]},
+      {"resource": "/v1/sales/return-orders", "methods": ["GET"]},
+      {"resource": "/v1/sales/return-orders/*", "methods": ["GET"]}
     ]},
     "sales.order.write": {"permissions": [
       {"resource": "/v1/sales/orders", "methods": ["POST"]},
@@ -2799,7 +2805,14 @@
       {"resource": "/v1/sales/orders/*/lines/*:cancel-remainder", "methods": ["POST"]},
       {"resource": "/v1/sales/intake-errors/*:replay", "methods": ["POST"]},
       {"resource": "/v1/sales/intake-errors:replay", "methods": ["POST"]},
-      {"resource": "/v1/sales/orders:auto-close", "methods": ["POST"]}
+      {"resource": "/v1/sales/orders:auto-close", "methods": ["POST"]},
+      {"resource": "/v1/sales/return-orders", "methods": ["POST"]},
+      {"resource": "/v1/sales/return-orders/*:authorize", "methods": ["POST"]},
+      {"resource": "/v1/sales/return-orders/*:receive", "methods": ["POST"]},
+      {"resource": "/v1/sales/return-orders/*:inspect", "methods": ["POST"]},
+      {"resource": "/v1/sales/return-orders/*:disposition", "methods": ["POST"]},
+      {"resource": "/v1/sales/return-orders/*:credit", "methods": ["POST"]},
+      {"resource": "/v1/sales/return-orders/*:reject", "methods": ["POST"]}
     ]},
     "sales.parameter.maintain": {"permissions": [
       {"resource": "/v1/sales/parameters", "methods": ["PUT"]},
@@ -3143,8 +3156,11 @@
       "production": ["production.order.create-from-sales"],
       "billing": ["billing.invoice.read"],
       "fulfillment": ["fulfillment.packing-slip.read"],
-      "inventory": ["inventory.read", "inventory.journal.write", "inventory.journal.post"],
+      "inventory": ["inventory.read", "inventory.return-receipt.post"],
       "receivables": ["ar.rmacredit.post"]
+    },
+    "receivables": {
+      "ledger": ["ledger.entry.post", "ledger.ledger.lookup"]
     },
     "ledger": {
       "close": ["period.check"],

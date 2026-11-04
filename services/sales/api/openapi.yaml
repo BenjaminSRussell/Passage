@@ -2742,8 +2742,9 @@ paths:
       summary: Create a return order (RMA) in REQUESTED (FR-30.11)
       description: |
         The original invoice is required. Customer, currency and each line's net unit price come from the
-        billing invoice; a line's quantity may not exceed what the invoice billed less what other open RMAs
-        already return of the product (422 SLS-0123). ORIGINAL_COST resolves the shipment's unit cost from
+        billing invoice; a line's quantity may not exceed what the invoice billed, less what billing credit
+        notes already credited (the invoice line's creditedQty) and what other live RMAs already return of
+        the product (422 SLS-0123). ORIGINAL_COST resolves the shipment's unit cost from
         the packing slip. A body price or currency is refused (400).
       operationId: createReturnOrder
       x-passage-duty: sales.order.write
@@ -2848,22 +2849,27 @@ paths:
   /v1/sales/return-orders/{id}:inspect:
     post:
       summary: Record inspection per received line (RECEIVED → INSPECTED)
+      description: |
+        Every received line must be inspected and a line that received nothing may not be; an RMA that
+        received nothing (credit-only lines no goods came back for) is inspected with no lines or no body.
+        RETURN_TO_STOCK is refused (409 SLS-0119) on a line with no site, warehouse or return cost (a line
+        created CREDIT_ONLY at ORIGINAL_COST). A CURRENT_COST line restocked here gets the on-hand average
+        cost read now; a product with none at the site and warehouse is 422 SLS-0122, and the RMA stays
+        RECEIVED so the line can be inspected CREDIT_ONLY.
       operationId: inspectReturnOrder
       x-passage-duty: sales.order.write
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
         - $ref: "#/components/parameters/IfMatch"
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
-              required: [lines]
               properties:
                 lines:
                   type: array
-                  minItems: 1
                   items:
                     type: object
                     required: [lineNo, quantityAccepted, disposition]
@@ -2882,7 +2888,9 @@ paths:
         "404": {$ref: "#/components/responses/Problem"}
         "409": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
   /v1/sales/return-orders/{id}:disposition:
     post:
       summary: Confirm dispositions and restock the accepted RETURN_TO_STOCK quantity (INSPECTED → DISPOSITIONED); repeat on a DISPOSITIONED RMA to retry a failed restock (503 SLS-0124)
@@ -2906,6 +2914,12 @@ paths:
   /v1/sales/return-orders/{id}:credit:
     post:
       summary: Post the credit note (restocking, AR, GL) and close the RMA (AC-30.5); repeat on a CREDITED RMA to retry a failed post (503 SLS-0124)
+      description: |
+        The restocking charge is each line's percentage (RETURN_TO_STOCK 15%, CREDIT_ONLY 0%, or the line's
+        restockingPct), with the 25.00 USD / 20.00 EUR floor applied once per note to the RETURN_TO_STOCK
+        lines together and never above their value. A return that leaves nothing to credit (no goods
+        accepted and no credit-only line, or a charge equal to the value) closes with net 0 and no credit
+        note, without asking receivables.
       operationId: creditReturnOrder
       x-passage-duty: sales.order.write
       parameters:
@@ -2924,6 +2938,26 @@ paths:
         "412": {$ref: "#/components/responses/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
         "503": {$ref: "#/components/responses/Problem"}
+  /v1/sales/return-orders/{id}:reject:
+    post:
+      summary: Reject an RMA before any goods are received (REQUESTED or AUTHORIZED → REJECTED); its quantity is returnable again
+      operationId: rejectReturnOrder
+      x-passage-duty: sales.order.write
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: rejected
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReturnOrder"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
 components:
   parameters:
     IdempotencyKey:

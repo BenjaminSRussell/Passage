@@ -11,6 +11,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/domain"
 	rcvevents "github.com/BenjaminSRussell/passage/services/receivables/internal/events"
 )
@@ -198,5 +199,190 @@ func TestPostRMACredit_LedgerRefusalParksTheCredit(t *testing.T) {
 	calls := gl.calls
 	if _, err := s.PostRMACredit(ctx, in); problemCode(err) != CodeRMAParked || gl.calls != calls {
 		t.Fatalf("a parked credit must not retry: %v", err)
+	}
+}
+
+func creditItems(t *testing.T, s *Postgres, ctx context.Context, customerID string) []OpenItem {
+	t.Helper()
+	items, err := s.ListOpenItems(ctx, OpenItemFilter{CustomerID: customerID}, 50)
+	if err != nil {
+		t.Fatalf("list open items: %v", err)
+	}
+	var out []OpenItem
+	for _, it := range items {
+		if it.SourceType == "CREDIT_NOTE" {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+func TestPostRMACredit_SettledInvoiceIsBoundedByItsAmountNotItsOpenAmount(t *testing.T) {
+	s, gl, _ := rmaSetup(t)
+	ctx := tenantCtx(1)
+	inv := seedInvoice(t, s, ctx)
+	execAdmin(t, s, `update open_item set open_amount = 0, status = 'SETTLED' where id = $1`, inv.ID)
+
+	in := rmaIn(inv.DocumentNumber)
+	note, err := s.PostRMACredit(ctx, in)
+	if err != nil || note.JournalPostingID == "" {
+		t.Fatalf("a settled invoice is returnable: %+v %v", note, err)
+	}
+	if items := creditItems(t, s, ctx, inv.CustomerID); len(items) != 1 || !items[0].OpenAmount.Equal(amt("-340.00")) || items[0].Status != "OPEN" {
+		t.Fatalf("credit balance item %+v", items)
+	}
+	// 400 of the 1000 invoiced is returned; 600 is left whatever is still open.
+	over := rmaIn(inv.DocumentNumber)
+	over.RMANumber = "RMA-0000002"
+	over.Gross, over.Restocking, over.Net = amt("600.01"), amt("0"), amt("600.01")
+	if _, err := s.PostRMACredit(ctx, over); problemCode(err) != CodeRMAInvoice {
+		t.Fatalf("return value above amount less earlier returns: %v", err)
+	}
+	rest := rmaIn(inv.DocumentNumber)
+	rest.RMANumber = "RMA-0000003"
+	rest.Gross, rest.Restocking, rest.Net = amt("600.00"), amt("90.00"), amt("510.00")
+	if _, err := s.PostRMACredit(ctx, rest); err != nil {
+		t.Fatalf("the rest of the invoice: %v", err)
+	}
+	if len(gl.Entries()) != 2 {
+		t.Fatalf("journals %d, want 2", len(gl.Entries()))
+	}
+}
+
+func TestPostRMACredit_NoCreditItemUntilTheJournalPosts(t *testing.T) {
+	s, gl, _ := rmaSetup(t)
+	ctx := tenantCtx(1)
+	inv := seedInvoice(t, s, ctx)
+	in := rmaIn(inv.DocumentNumber)
+	gl.err = &ledgerclient.Error{Op: "post", Status: http.StatusServiceUnavailable, Code: "down"}
+	if _, err := s.PostRMACredit(ctx, in); problemCode(err) != CodeRMAUnavailable {
+		t.Fatalf("outage: %v", err)
+	}
+	if items := creditItems(t, s, ctx, inv.CustomerID); len(items) != 0 {
+		t.Fatalf("a PENDING credit must not reach AR: %+v", items)
+	}
+	pending, err := s.ListRMACredits(ctx, RMACreditFilter{Status: "PENDING", Limit: 10})
+	if err != nil || len(pending) != 1 || pending[0].GLAttempts != 1 || pending[0].GLParked {
+		t.Fatalf("pending list %+v %v", pending, err)
+	}
+}
+
+func TestSweepRMACredits_PostsDuePendingCreditsOnce(t *testing.T) {
+	s, gl, _ := rmaSetup(t)
+	ctx := tenantCtx(1)
+	inv := seedInvoice(t, s, ctx)
+	in := rmaIn(inv.DocumentNumber)
+	gl.err = &ledgerclient.Error{Op: "post", Status: http.StatusServiceUnavailable, Code: "down"}
+	if _, err := s.PostRMACredit(ctx, in); problemCode(err) != CodeRMAUnavailable {
+		t.Fatalf("outage: %v", err)
+	}
+	now := time.Now().UTC()
+	if res, err := s.SweepRMACredits(ctx, now, 10); err != nil || res != (RMASweepResult{}) {
+		t.Fatalf("inside the backoff and the grace nothing is due: %+v %v", res, err)
+	}
+	gl.err = nil
+	later := now.Add(2 * time.Hour)
+	res, err := s.SweepRMACredits(ctx, later, 10)
+	if err != nil || res.Posted != 1 {
+		t.Fatalf("sweep: %+v %v", res, err)
+	}
+	if res, err := s.SweepRMACredits(ctx, later, 10); err != nil || res != (RMASweepResult{}) {
+		t.Fatalf("second sweep: %+v %v", res, err)
+	}
+	if items := creditItems(t, s, ctx, inv.CustomerID); len(items) != 1 || !items[0].Amount.Equal(amt("-340.00")) {
+		t.Fatalf("credit item %+v", items)
+	}
+	if n := countOutbox(t, s, ctx, rcvevents.CreditNotePosted); n != 1 || len(gl.Entries()) != 1 {
+		t.Fatalf("events %d journals %d", n, len(gl.Entries()))
+	}
+	note, err := s.PostRMACredit(ctx, in)
+	if err != nil || note.JournalPostingID == "" {
+		t.Fatalf("sales' repeat replays the swept credit: %+v %v", note, err)
+	}
+}
+
+func TestPostRMAJournal_ConcurrentPostOpensTheItemOnce(t *testing.T) {
+	s, gl, _ := rmaSetup(t)
+	ctx := tenantCtx(1)
+	inv := seedInvoice(t, s, ctx)
+	in := rmaIn(inv.DocumentNumber)
+	gl.err = &ledgerclient.Error{Op: "post", Status: http.StatusServiceUnavailable, Code: "down"}
+	_, _ = s.PostRMACredit(ctx, in)
+	gl.err = nil
+	var row rmaCreditRow
+	if err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
+		row, err = loadRMACredit(ctx, tx, `rma_id = $2`, testkit.TenantID(1), in.RMAID)
+		return err
+	}); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	row.nextAttempt = nil
+	first, err1 := s.postRMAJournal(ctx, testkit.TenantID(1), row, time.Now())
+	second, err2 := s.postRMAJournal(ctx, testkit.TenantID(1), row, time.Now())
+	if err1 != nil || err2 != nil || *first.journal != *second.journal {
+		t.Fatalf("posts: %v %v", err1, err2)
+	}
+	if items := creditItems(t, s, ctx, inv.CustomerID); len(items) != 1 {
+		t.Fatalf("credit items %+v", items)
+	}
+	if n := countOutbox(t, s, ctx, rcvevents.CreditNotePosted); n != 1 || len(gl.Entries()) != 1 {
+		t.Fatalf("events %d journals %d", n, len(gl.Entries()))
+	}
+}
+
+func TestRetryRMACredit_UnparksAndRedates(t *testing.T) {
+	s, gl, _ := rmaSetup(t)
+	ctx := tenantCtx(1)
+	inv := seedInvoice(t, s, ctx)
+	in := rmaIn(inv.DocumentNumber)
+	gl.RefuseClosedThrough("2027-03-31")
+	if _, err := s.PostRMACredit(ctx, in); problemCode(err) != CodeRMAParked {
+		t.Fatalf("closed period parks: %v", err)
+	}
+	parked, err := s.ListRMACredits(ctx, RMACreditFilter{ParkedOnly: true, Limit: 10})
+	if err != nil || len(parked) != 1 || parked[0].Status != "PENDING" {
+		t.Fatalf("parked list %+v %v", parked, err)
+	}
+	if res, err := s.SweepRMACredits(ctx, time.Now().Add(2*time.Hour), 10); err != nil || res != (RMASweepResult{}) {
+		t.Fatalf("the sweeper leaves parked credits alone: %+v %v", res, err)
+	}
+	if _, err := s.RetryRMACredit(ctx, parked[0].ID, ""); problemCode(err) != CodeRMAParked {
+		t.Fatalf("a retry on the same closed date parks again: %v", err)
+	}
+	if _, err := s.RetryRMACredit(ctx, ids.New(), ""); problemCode(err) != CodeRMACreditNotFound {
+		t.Fatalf("unknown credit: %v", err)
+	}
+	view, err := s.RetryRMACredit(ctx, parked[0].ID, "2027-04-01")
+	if err != nil || view.Status != "POSTED" || view.PostingDate != "2027-04-01" || view.GLParked || view.JournalPostingID == nil {
+		t.Fatalf("re-dated retry: %+v %v", view, err)
+	}
+	entries := gl.Entries()
+	if len(entries) != 1 || entries[0].PostingDate != "2027-04-01" {
+		t.Fatalf("journal %+v", entries)
+	}
+	if items := creditItems(t, s, ctx, inv.CustomerID); len(items) != 1 || items[0].DocumentDate != "2027-04-01" {
+		t.Fatalf("credit item %+v", items)
+	}
+	if _, err := s.RetryRMACredit(ctx, parked[0].ID, ""); problemCode(err) != CodeRMACreditState {
+		t.Fatalf("retry of a posted credit: %v", err)
+	}
+	note, err := s.PostRMACredit(ctx, in)
+	if err != nil || note.JournalPostingID != *view.JournalPostingID {
+		t.Fatalf("sales' repeat with the original date still replays: %+v %v", note, err)
+	}
+}
+
+func TestRetryRMACredit_RefusesRedatingAnUnparkedCredit(t *testing.T) {
+	s, gl, _ := rmaSetup(t)
+	ctx := tenantCtx(1)
+	inv := seedInvoice(t, s, ctx)
+	gl.err = &ledgerclient.Error{Op: "post", Status: http.StatusServiceUnavailable, Code: "down"}
+	_, _ = s.PostRMACredit(ctx, rmaIn(inv.DocumentNumber))
+	pending, _ := s.ListRMACredits(ctx, RMACreditFilter{Limit: 10})
+	if len(pending) != 1 {
+		t.Fatalf("pending %+v", pending)
+	}
+	if _, err := s.RetryRMACredit(ctx, pending[0].ID, "2027-04-01"); problemCode(err) != CodeRMACreditState {
+		t.Fatalf("re-dating a credit the ledger never refused: %v", err)
 	}
 }

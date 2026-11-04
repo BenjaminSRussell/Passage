@@ -103,6 +103,7 @@ charts/inventory/         Helm chart (Deployment, Service, HPA, ServiceMonitor t
 | POST | `/v1/inventory/consignment-orders/{id}:receive` | `inventory.consignment.write` | ConsignmentMaintain |
 | GET | `/v1/inventory/consignment/stock` | `inventory.read` | InventoryInquire |
 | POST | `/internal/v1/inventory/transactions:apply` | `inventory.transaction.apply` | service account (waves 17–20) |
+| POST | `/internal/v1/inventory/return-receipts` | `inventory.return-receipt.post` | service account (sales RMA restock, wave 30 AC3): one MOVEMENT journal of one line under `return-receipt:{Idempotency-Key}`, created and posted in one call; the `return-receipt:` journal key prefix is reserved |
 | POST | `/v1/inventory/transactions/{id}:unpick` | `inventory.transaction.step` | (no PRD duty; the warehouse user undoing a pick) |
 | POST | `/v1/inventory/transactions/{id}:unregister` | `inventory.transaction.step` | (no PRD duty; the receiving user undoing a registration) |
 | POST | `/v1/inventory/transactions/{id}:cancel-reservation` | `inventory.transaction.step` | (no PRD duty) |

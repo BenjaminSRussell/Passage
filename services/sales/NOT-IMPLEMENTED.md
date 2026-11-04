@@ -776,18 +776,25 @@ offered Preview to a reader, but the preview is the same POST under
 
 Wave 30 AC3 adds return orders (`return_order` / `return_order_line`, migration
 0037): create in REQUESTED from a billing invoice (customer, currency, net unit
-price and the returnable quantity, invoiced less other open RMAs per product,
-come from the invoice; 422 `SLS-0123` above it), `:authorize` by a user other
+price and the returnable quantity, invoiced less billing credit notes' creditedQty
+and other live RMAs per product, come from the invoice; 422 `SLS-0123` above it), `:authorize` by a user other
 than the creator (30-day validity), `:receive` into quarantine (lines left out
-receive 0), `:inspect` (accepted quantity and disposition per received line),
-`:disposition` (restocks the accepted RETURN_TO_STOCK quantity through inventory
-after the state commit, key `rma-receive:<lineId>`, at the ORIGINAL_COST packing
+receive 0), `:inspect` (accepted quantity and disposition per received line; no
+lines when nothing was received; RETURN_TO_STOCK refused on a line without site,
+warehouse or return cost; CURRENT_COST read here), `:reject` (REQUESTED or
+AUTHORIZED only),
+`:disposition` (restocks the accepted RETURN_TO_STOCK quantity after the state
+commit through inventory's service-only return-receipt command
+(duty `inventory.return-receipt.post`; sales no longer holds the general journal
+duties), key `rma-receive:<lineId>`, at the ORIGINAL_COST packing
 slip cost, the CURRENT_COST on-hand average or ZERO) and `:credit` (credit from
 accepted quantities, or the whole expected quantity of a line created
 CREDIT_ONLY that nothing came back for; stored as CREDITED, receivables posts the
 note, then CLOSED). A failed restock or credit post leaves the stored state and
-is retried by repeating the command. Credit computes restocking (BR-30.3: 15%
-with a 25.00 USD / 20.00 EUR floor on RETURN_TO_STOCK, 0% on CREDIT_ONLY).
+is retried by repeating the command. Credit computes restocking (BR-30.3: 15% on
+RETURN_TO_STOCK, 0% on CREDIT_ONLY, with a 25.00 USD / 20.00 EUR floor applied
+once per note to the RETURN_TO_STOCK lines together and never above their value);
+a note with nothing to credit closes the RMA with net 0 and no credit note.
 Events: `returnorder.{authorized,received,inspected,dispositioned,credited}.v1`.
 AC-30.5 is covered by `internal/store/rma_e2e_test.go`. Peers are wired from
 `BILLING_URL`, `FULFILLMENT_URL`, `INVENTORY_URL` (with
@@ -797,7 +804,8 @@ REPLACE / REJECT_RETURN_TO_CUSTOMER, tax lines, a physical quarantine stock
 status (receive records the quantity only), per-slip cost when one product
 shipped on several packing slips at different costs (the first slip's cost is
 used), and a different return price per invoice line of the same product (the
-weighted average net unit price is used). Duties stay `sales.order.read` /
+weighted average net unit price is used), and an event for `:reject` (the
+REJECTED status is visible on read and list only). Duties stay `sales.order.read` /
 `sales.order.write`.
 
 ## Ticket deliverables

@@ -50,11 +50,12 @@ type Invoice struct {
 	Lines                                           []InvoiceLine
 }
 
-// InvoiceLine is one billed line; Net is the line total after discount.
+// InvoiceLine is one billed line; Net is the line total after discount and CreditedQty what billing credit notes
+// already took back from it.
 type InvoiceLine struct {
 	LineNo                                int
 	ProductID, OrderLineID, PackingSlipID string
-	Qty, Net                              decimal.Decimal
+	Qty, Net, CreditedQty                 decimal.Decimal
 }
 
 // InvoiceReader loads a billing invoice with its lines.
@@ -225,6 +226,12 @@ func upstreamProblem(ctx context.Context, what string, err error) error {
 		}
 	}
 	return problem(http.StatusServiceUnavailable, CodeRMAUpstream, what+" is unavailable; the return order keeps its state, retry")
+}
+
+// restockable reports whether goods of the line can go back to stock: it names a site and a warehouse and its return
+// cost is known (stored at create, or CURRENT_COST read when restocked).
+func (l ReturnLine) restockable() bool {
+	return l.SiteID != "" && l.WarehouseID != "" && (l.UnitCost != nil || l.ReturnCostMethod == domain.CostCurrent)
 }
 
 func (l ReturnLine) pendingRestock() bool {
@@ -421,9 +428,11 @@ func (s *Postgres) originalCost(ctx context.Context, legalEntityID string, slips
 }
 
 func checkReturnable(ctx context.Context, tx pgx.Tx, tenantID string, invoice Invoice, lines []pricedLine) error {
-	invoiced := map[string]decimal.Decimal{}
+	// Returnable is what was invoiced, less what billing credit notes already credited, less other live RMAs.
+	invoiced, billingCredited := map[string]decimal.Decimal{}, map[string]decimal.Decimal{}
 	for _, il := range invoice.Lines {
 		invoiced[il.ProductID] = invoiced[il.ProductID].Add(il.Qty)
+		billingCredited[il.ProductID] = billingCredited[il.ProductID].Add(il.CreditedQty)
 	}
 	rows, err := tx.Query(ctx, `select l.product_id::text, coalesce(sum(l.quantity_expected), 0)::text from return_order_line l
 		join return_order o on o.tenant_id = l.tenant_id and o.id = l.return_order_id
@@ -448,9 +457,10 @@ func checkReturnable(ctx context.Context, tx pgx.Tx, tenantID string, invoice In
 		asked[l.ProductID] = asked[l.ProductID].Add(l.Quantity)
 	}
 	for product, qty := range asked {
-		if left := invoiced[product].Sub(returned[product]); qty.GreaterThan(left) {
+		if left := invoiced[product].Sub(billingCredited[product]).Sub(returned[product]); qty.GreaterThan(left) {
 			return problem(http.StatusUnprocessableEntity, CodeRMAOverReturn,
-				fmt.Sprintf("product %s: %s requested, only %s of %s invoiced is still returnable", product, qty, left, invoiced[product]))
+				fmt.Sprintf("product %s: %s requested, only %s of %s invoiced is still returnable (%s credited by billing, %s on other RMAs)",
+					product, qty, left, invoiced[product], billingCredited[product], returned[product]))
 		}
 	}
 	return nil
@@ -474,7 +484,7 @@ func (s *Postgres) ListReturnOrders(ctx context.Context, f ReturnOrderFilter) ([
 	out := []ReturnOrder{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+returnOrderColumns+` from return_order
-			where tenant_id = $1 and ($2 = '' or legal_entity_id::text = $2) and ($3 = '' or customer_id::text = $3)
+			where tenant_id = $1 and ($2 = '' or legal_entity_id = nullif($2, '')::uuid) and ($3 = '' or customer_id = nullif($3, '')::uuid)
 			and ($4 = '' or status = $4)
 			order by created_at desc, id desc limit $5`, p.TenantID, f.LegalEntityID, f.CustomerID, f.Status, f.Limit)
 		if err != nil {
@@ -516,6 +526,12 @@ func (s *Postgres) AuthorizeReturnOrder(ctx context.Context, id string, version 
 	})
 }
 
+// RejectReturnOrder ends a REQUESTED or AUTHORIZED RMA before any goods are received (REJECTED); its quantity is
+// returnable again on another RMA.
+func (s *Postgres) RejectReturnOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ReturnOrder, error) {
+	return s.moveReturn(ctx, id, version, actor, now, domain.RMAReject, nil)
+}
+
 // ReceiveReturnOrder records the physical receipt (into quarantine); lines left out receive 0 and stock is booked only
 // once inspection accepts goods.
 func (s *Postgres) ReceiveReturnOrder(ctx context.Context, id string, version int, lines []ReceiveLine, actor string, now time.Time) (ReturnOrder, error) {
@@ -549,7 +565,13 @@ func (s *Postgres) ReceiveReturnOrder(ctx context.Context, id string, version in
 }
 
 // InspectReturnOrder records, per received line, the accepted quantity and the disposition; moves RECEIVED → INSPECTED.
+// A line restocked at CURRENT_COST gets its cost read here, so a product with no on-hand average is refused at
+// inspection (where the line can still be dispositioned CREDIT_ONLY) rather than after the disposition commit.
 func (s *Postgres) InspectReturnOrder(ctx context.Context, id string, version int, lines []InspectLine, actor string, now time.Time) (ReturnOrder, error) {
+	costs, err := s.inspectionCosts(ctx, id, lines)
+	if err != nil {
+		return ReturnOrder{}, err
+	}
 	return s.moveReturn(ctx, id, version, actor, now, domain.RMAInspect, func(ctx context.Context, tx pgx.Tx, tenantID string, o *ReturnOrder) error {
 		byNo := map[int]InspectLine{}
 		for _, l := range lines {
@@ -572,15 +594,58 @@ func (s *Postgres) InspectReturnOrder(ctx context.Context, id string, version in
 				return rmaState(fmt.Sprintf("line %d accepted quantity must be between 0 and %s", l.LineNo, l.QuantityReceived))
 			case got.Disposition != domain.DispositionReturnToStock && got.Disposition != domain.DispositionCreditOnly:
 				return rmaState(fmt.Sprintf("line %d disposition must be RETURN_TO_STOCK or CREDIT_ONLY", l.LineNo))
+			case got.Disposition == domain.DispositionReturnToStock && got.Accepted.IsPositive() && !l.restockable():
+				// A line created CREDIT_ONLY carries no stock destination and, at ORIGINAL_COST, no resolved cost: restocking
+				// it would post empty dimensions or an unknown cost and leave the RMA DISPOSITIONED with no way forward.
+				return rmaState(fmt.Sprintf("line %d has no site, warehouse or return cost to restock into; inspect it CREDIT_ONLY or create a RETURN_TO_STOCK return", l.LineNo))
 			}
 			l.QuantityAccepted, l.Disposition = got.Accepted, got.Disposition
 			if _, err := tx.Exec(ctx, `update return_order_line set quantity_accepted = $4, disposition_code = $5 where tenant_id = $1 and return_order_id = $2 and id = $3`,
 				tenantID, o.ID, l.ID, got.Accepted.String(), got.Disposition); err != nil {
 				return err
 			}
+			if cost, ok := costs[l.LineNo]; ok && l.UnitCost == nil && got.Disposition == domain.DispositionReturnToStock && got.Accepted.IsPositive() {
+				if _, err := tx.Exec(ctx, `update return_order_line set unit_cost = $4 where tenant_id = $1 and return_order_id = $2 and id = $3 and unit_cost is null`,
+					tenantID, o.ID, l.ID, cost.String()); err != nil {
+					return err
+				}
+			}
 		}
 		return nil
 	})
+}
+
+// inspectionCosts reads the CURRENT_COST of each line the inspection restocks that has no stored cost yet.
+func (s *Postgres) inspectionCosts(ctx context.Context, id string, lines []InspectLine) (map[int]decimal.Decimal, error) {
+	current, err := s.GetReturnOrder(ctx, id)
+	if err != nil || current.Status != domain.RMAReceived {
+		// The state move reports a wrong status or a missing RMA.
+		return nil, nil
+	}
+	out := map[int]decimal.Decimal{}
+	for _, in := range lines {
+		if in.Disposition != domain.DispositionReturnToStock || !in.Accepted.IsPositive() {
+			continue
+		}
+		for _, l := range current.Lines {
+			if l.LineNo != in.LineNo || l.UnitCost != nil || l.ReturnCostMethod != domain.CostCurrent || l.SiteID == "" || l.WarehouseID == "" {
+				continue
+			}
+			if s.costs == nil {
+				return nil, problem(http.StatusServiceUnavailable, CodeRMAUpstream, "inventory is not configured; the current cost cannot be read")
+			}
+			cost, ok, err := s.costs.CurrentUnitCost(ctx, current.LegalEntityID, l.ProductID, l.SiteID, l.WarehouseID)
+			if err != nil {
+				return nil, upstreamProblem(ctx, "inventory cost", err)
+			}
+			if !ok {
+				return nil, problem(http.StatusUnprocessableEntity, CodeRMAInvoice,
+					fmt.Sprintf("line %d: the product has no on-hand average cost at the site and warehouse; inspect it CREDIT_ONLY", l.LineNo))
+			}
+			out[l.LineNo] = cost
+		}
+	}
+	return out, nil
 }
 
 func hasLine(lines []ReturnLine, no int) bool {
@@ -639,6 +704,9 @@ func (s *Postgres) restock(ctx context.Context, o ReturnOrder) error {
 			continue
 		}
 		cost := l.UnitCost
+		if cost == nil && l.ReturnCostMethod != domain.CostCurrent {
+			return problem(http.StatusUnprocessableEntity, CodeRMAInvoice, fmt.Sprintf("line %d: the return cost is unknown", l.LineNo))
+		}
 		if cost == nil {
 			current, ok, err := s.costs.CurrentUnitCost(ctx, o.LegalEntityID, l.ProductID, l.SiteID, l.WarehouseID)
 			if err != nil {
@@ -676,13 +744,24 @@ func (s *Postgres) restock(ctx context.Context, o ReturnOrder) error {
 // CreditReturnOrder computes the credit from the accepted quantities and stores it (DISPOSITIONED → CREDITED), asks
 // receivables to post the note after that commit, then closes the RMA. When receivables failed, repeating the call on
 // the CREDITED return order retries the post with the stored amounts and date.
+//
+// A return that leaves nothing to credit (no goods accepted and no credit-only line, or a restocking charge that takes
+// the whole value) is closed by the same call with its zero net and no credit note: receivables is not asked.
 func (s *Postgres) CreditReturnOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ReturnOrder, error) {
-	if s.ar == nil {
-		return ReturnOrder{}, problem(http.StatusServiceUnavailable, CodeARUnavailable, "receivables is not configured; the credit note cannot be posted")
-	}
 	current, err := s.GetReturnOrder(ctx, id)
 	if err != nil {
 		return ReturnOrder{}, err
+	}
+	needsAR := current.Net.IsPositive()
+	if current.Status == domain.RMADispositioned {
+		plan, err := planCredit(current)
+		if err != nil {
+			return ReturnOrder{}, err
+		}
+		needsAR = plan.total.Net.IsPositive()
+	}
+	if needsAR && s.ar == nil {
+		return ReturnOrder{}, problem(http.StatusServiceUnavailable, CodeARUnavailable, "receivables is not configured; the credit note cannot be posted")
 	}
 	if current.Status == domain.RMACredited {
 		if current.Version != version {
@@ -690,6 +769,9 @@ func (s *Postgres) CreditReturnOrder(ctx context.Context, id string, version int
 		}
 	} else if current, err = s.moveReturn(ctx, id, version, actor, now, domain.RMACreditStart, s.storeCredit(now)); err != nil {
 		return ReturnOrder{}, err
+	}
+	if !current.Net.IsPositive() {
+		return s.moveReturn(ctx, id, current.Version, actor, now, domain.RMACredit, nil)
 	}
 	note, err := s.ar.PostRMACredit(ctx, ARCredit{RMAID: current.ID, RMANumber: current.RMANumber, LegalEntityID: current.LegalEntityID,
 		InvoiceNumber: current.OriginalInvoiceNo, PostingDate: *current.CreditPostingDate, IdempotencyKey: "rma-credit-" + current.ID,
@@ -710,34 +792,54 @@ func (s *Postgres) storeCredit(now time.Time) func(context.Context, pgx.Tx, stri
 		if n := o.pendingRestocks(); n > 0 {
 			return rmaState(fmt.Sprintf("%d accepted line(s) are not restocked yet; repeat :disposition", n))
 		}
-		var gross, restock, net decimal.Decimal
-		for i := range o.Lines {
-			l := &o.Lines[i]
-			qty := domain.CreditQuantity(l.CreditOnly, l.QuantityExpected, l.QuantityReceived, l.QuantityAccepted)
-			if !qty.IsPositive() {
-				continue
-			}
-			amt, err := domain.CreditAmounts(domain.ReturnCredit{Disposition: l.Disposition, Quantity: qty, UnitPrice: l.UnitPrice,
-				Currency: o.Currency, RestockingPct: l.RestockingPct})
-			if err != nil {
-				return rmaState(err.Error())
-			}
-			l.RestockingAmount = amt.Restocking
-			gross, restock, net = gross.Add(amt.Gross), restock.Add(amt.Restocking), net.Add(amt.Net)
+		plan, err := planCredit(*o)
+		if err != nil {
+			return err
+		}
+		for i, idx := range plan.lines {
+			l := &o.Lines[idx]
+			l.RestockingAmount = plan.charges[i]
 			if _, err := tx.Exec(ctx, `update return_order_line set restocking_amount = $4 where tenant_id = $1 and return_order_id = $2 and id = $3`,
-				tenantID, o.ID, l.ID, amt.Restocking.String()); err != nil {
+				tenantID, o.ID, l.ID, l.RestockingAmount.String()); err != nil {
 				return err
 			}
 		}
-		if !net.IsPositive() {
-			return rmaState("nothing is left to credit: no goods were accepted and no line is credit-only")
-		}
 		date := now.UTC().Format(dayLayout)
-		o.Gross, o.Restocking, o.Net = gross, restock, net
-		_, err := tx.Exec(ctx, `update return_order set gross = $3, restocking = $4, net = $5, credit_posting_date = $6 where tenant_id = $1 and id = $2`,
-			tenantID, o.ID, gross.String(), restock.String(), net.String(), date)
+		o.Gross, o.Restocking, o.Net = plan.total.Gross, plan.total.Restocking, plan.total.Net
+		_, err = tx.Exec(ctx, `update return_order set gross = $3, restocking = $4, net = $5, credit_posting_date = $6 where tenant_id = $1 and id = $2`,
+			tenantID, o.ID, o.Gross.String(), o.Restocking.String(), o.Net.String(), date)
 		return err
 	}
+}
+
+// creditPlan is the credit note of an RMA: the totals and, per credited line (by index into the RMA's lines), its
+// restocking charge with the per-note floor applied.
+type creditPlan struct {
+	total   domain.CreditNoteAmounts
+	lines   []int
+	charges []decimal.Decimal
+}
+
+func planCredit(o ReturnOrder) (creditPlan, error) {
+	var plan creditPlan
+	var in []domain.ReturnCredit
+	for i, l := range o.Lines {
+		qty := domain.CreditQuantity(l.CreditOnly, l.QuantityExpected, l.QuantityReceived, l.QuantityAccepted)
+		if !qty.IsPositive() {
+			continue
+		}
+		plan.lines = append(plan.lines, i)
+		in = append(in, domain.ReturnCredit{Disposition: l.Disposition, Quantity: qty, UnitPrice: l.UnitPrice, Currency: o.Currency, RestockingPct: l.RestockingPct})
+	}
+	if len(in) == 0 {
+		return plan, nil
+	}
+	total, charges, err := domain.CreditNote(in)
+	if err != nil {
+		return creditPlan{}, rmaState(err.Error())
+	}
+	plan.total, plan.charges = total, charges
+	return plan, nil
 }
 
 func (s *Postgres) moveReturn(ctx context.Context, id string, version int, actor string, now time.Time, action string, extra func(context.Context, pgx.Tx, string, *ReturnOrder) error) (ReturnOrder, error) {

@@ -3,7 +3,9 @@ package api
 import (
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -71,4 +73,102 @@ func (a *API) postRMACredit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, out)
+}
+
+var rmaCreditStatuses = map[string]bool{"PENDING": true, "POSTED": true}
+
+// listRMACredits is the operator's view of RMA credits: PENDING ones still waiting for the ledger and parked ones
+// (parked=true) the ledger refused.
+func (a *API) listRMACredits(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	q := r.URL.Query()
+	f := store.RMACreditFilter{LegalEntityID: q.Get("legalEntityId"), Status: q.Get("status")}
+	if f.LegalEntityID != "" && !ids.Valid(f.LegalEntityID) {
+		badQuery(w, r, "legalEntityId", "must be a UUID")
+		return
+	}
+	if f.Status != "" && !rmaCreditStatuses[f.Status] {
+		badQuery(w, r, "status", "must be PENDING or POSTED")
+		return
+	}
+	switch q.Get("parked") {
+	case "", "false":
+	case "true":
+		f.ParkedOnly = true
+	default:
+		badQuery(w, r, "parked", "must be true or false")
+		return
+	}
+	limit, ok := pageLimit(w, r)
+	if !ok {
+		return
+	}
+	f.Limit = limit
+	if f.LegalEntityID != "" && !scopeAllows(w, r, f.LegalEntityID) {
+		return
+	}
+	items, err := a.store.ListRMACredits(r.Context(), f)
+	if err != nil {
+		a.fail("list rma credits", w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+type rmaRetryRequest struct {
+	PostingDate string `json:"postingDate"`
+}
+
+// rmaCreditAction dispatches the custom methods on one RMA credit (chi does not match ':' after a parameter).
+func (a *API) rmaCreditAction(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, action, found := strings.Cut(chi.URLParam(r, "ref"), ":")
+	if !found || !ids.Valid(id) || action != "retry" {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeRMACreditNotFound, "RMA credit not found"))
+		return
+	}
+	if !require(w, r, dutyPayment) {
+		return
+	}
+	var req rmaRetryRequest
+	if r.ContentLength != 0 {
+		if err := httpx.Decode(r, &req); err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+	}
+	if req.PostingDate != "" {
+		if _, err := store.ParseDay(req.PostingDate); err != nil {
+			badQuery(w, r, "postingDate", "must be YYYY-MM-DD")
+			return
+		}
+	}
+	out, err := a.store.RetryRMACredit(r.Context(), id, req.PostingDate)
+	if err != nil {
+		a.fail("retry rma credit", w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+// sweepRMACredits posts the caller's due PENDING RMA credits: the scheduler's entry point, and the same store call the
+// in-process sweeper (RECEIVABLES_RMA_SWEEP_TENANT_IDS) runs.
+func (a *API) sweepRMACredits(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	limit, ok := pageLimit(w, r)
+	if !ok {
+		return
+	}
+	res, err := a.store.SweepRMACredits(r.Context(), time.Now().UTC(), limit)
+	if err != nil {
+		a.fail("sweep rma credits", w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, res)
 }

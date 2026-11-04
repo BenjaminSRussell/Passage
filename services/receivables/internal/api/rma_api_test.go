@@ -60,3 +60,41 @@ func TestPostRMACredit_RejectsCallerSuppliedCustomerAndLedger(t *testing.T) {
 		t.Fatalf("status = %d, want 400 for body fields the service now derives: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestRMACreditOperatorRoutes(t *testing.T) {
+	f := &fakeStore{}
+	h := router(f)
+	id := ids.New()
+	tests := []struct {
+		name, method, path, body, duties string
+		status                           int
+	}{
+		{"list needs ARView", http.MethodGet, "/v1/receivables/rma-credits", "", "ARImport", http.StatusForbidden},
+		{"list parked", http.MethodGet, "/v1/receivables/rma-credits?status=PENDING&parked=true", "", "ARView", http.StatusOK},
+		{"list bad status", http.MethodGet, "/v1/receivables/rma-credits?status=OPEN", "", "ARView", http.StatusBadRequest},
+		{"list bad parked", http.MethodGet, "/v1/receivables/rma-credits?parked=yes", "", "ARView", http.StatusBadRequest},
+		{"list other legal entity", http.MethodGet, "/v1/receivables/rma-credits?legalEntityId=00000000-0000-0000-0000-0000000000ff", "", "ARView", http.StatusForbidden},
+		{"retry needs ARPaymentPost", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", "", "ARView", http.StatusForbidden},
+		{"retry service duty is not enough", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", "", "ar.rmacredit.post", http.StatusForbidden},
+		{"retry bad date", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", `{"postingDate":"03/01/2027"}`, "ARPaymentPost", http.StatusBadRequest},
+		{"retry unknown action", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":post", "", "ARPaymentPost", http.StatusNotFound},
+		{"retry re-dated", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", `{"postingDate":"2027-04-01"}`, "ARPaymentPost", http.StatusOK},
+		{"retry as is", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", "", "ARPaymentPost", http.StatusOK},
+		{"sweep needs ARPaymentPost", http.MethodPost, "/v1/receivables/rma-credits:sweep", "", "ARView", http.StatusForbidden},
+		{"sweep", http.MethodPost, "/v1/receivables/rma-credits:sweep", "", "ARPaymentPost", http.StatusOK},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := do(h, tc.method, tc.path, tc.body, tc.duties, nil)
+			if rec.Code != tc.status {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
+			}
+		})
+	}
+	if !f.rmaFilter.ParkedOnly || f.rmaFilter.Status != "PENDING" {
+		t.Fatalf("list filter %+v", f.rmaFilter)
+	}
+	if len(f.rmaRetries) != 2 || f.rmaRetries[0] != id+"|2027-04-01" || f.rmaRetries[1] != id+"|" {
+		t.Fatalf("retries forwarded %v", f.rmaRetries)
+	}
+}

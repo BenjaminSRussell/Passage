@@ -201,6 +201,9 @@ type Store interface {
 	RunAgingSnapshot(ctx context.Context, legalEntityID string, asOf time.Time) (SnapshotResult, error)
 	ListBalanceSnapshots(ctx context.Context, f SnapshotFilter, limit int) ([]BalanceSnapshot, error)
 	PostRMACredit(ctx context.Context, in RMACredit) (RMACreditNote, error)
+	RetryRMACredit(ctx context.Context, id, postingDate string) (RMACreditView, error)
+	ListRMACredits(ctx context.Context, f RMACreditFilter) ([]RMACreditView, error)
+	SweepRMACredits(ctx context.Context, now time.Time, limit int) (RMASweepResult, error)
 	Ping(ctx context.Context) error
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -419,8 +420,130 @@ func TestRMA_NothingAcceptedMeansNothingToCredit(t *testing.T) {
 	if err != nil || len(e.inv.receipts) != 0 {
 		t.Fatalf("disposition: %v", err)
 	}
-	if _, err := e.s.CreditReturnOrder(e.ctx, disp.ID, disp.Version, "ar", e.now); stateCode(t, err) != CodeRMAState || len(e.ar.credits) != 0 {
-		t.Fatalf("credit of nothing: %v", err)
+	// Nothing to credit closes the RMA without asking receivables (which is not even needed to be configured).
+	e.s.ar = nil
+	closed, err := e.s.CreditReturnOrder(e.ctx, disp.ID, disp.Version, "ar", e.now)
+	if err != nil || closed.Status != domain.RMAClosed || !closed.Net.IsZero() || closed.CreditNoteID != nil || len(e.ar.credits) != 0 {
+		t.Fatalf("credit of nothing: %+v %v", closed, err)
+	}
+}
+
+func TestRMA_RestockingFloorAppliesOncePerNote(t *testing.T) {
+	e := newRMAEnv(t)
+	second := ids.New()
+	e.src.invoice.Lines[0].Net = decimal.RequireFromString("200.00")
+	e.src.invoice.Lines = append(e.src.invoice.Lines, InvoiceLine{LineNo: 2, ProductID: second, OrderLineID: ids.New(), PackingSlipID: e.src.invoice.Lines[0].PackingSlipID,
+		Qty: d(10), Net: decimal.RequireFromString("200.00")})
+	in := e.newOrder(domain.DispositionReturnToStock, 1)
+	in.Lines = append(in.Lines, NewReturnLine{LineNo: 2, ProductID: second, SiteID: e.site, WarehouseID: e.wh, Quantity: d(1), Unit: "EA", Disposition: domain.DispositionReturnToStock})
+	rma := e.create(t, in)
+	auth, _ := e.s.AuthorizeReturnOrder(e.ctx, rma.ID, rma.Version, e.authorizer, e.now)
+	recv, err := e.s.ReceiveReturnOrder(e.ctx, auth.ID, auth.Version, []ReceiveLine{{LineNo: 1, Quantity: d(1)}, {LineNo: 2, Quantity: d(1)}}, "wh", e.now)
+	if err != nil {
+		t.Fatalf("receive: %v", err)
+	}
+	insp, err := e.s.InspectReturnOrder(e.ctx, recv.ID, recv.Version, []InspectLine{{LineNo: 1, Accepted: d(1), Disposition: domain.DispositionReturnToStock},
+		{LineNo: 2, Accepted: d(1), Disposition: domain.DispositionReturnToStock}}, "qc", e.now)
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	disp, err := e.s.DispositionReturnOrder(e.ctx, insp.ID, insp.Version, "returns", e.now)
+	if err != nil {
+		t.Fatalf("disposition: %v", err)
+	}
+	// 2 x 20.00: 3.00 + 3.00 is below the 25.00 floor, which applies once to the note (25.00, net 15.00); applied per
+	// line it charged 20.00 + 20.00 and left nothing to credit.
+	credited, err := e.s.CreditReturnOrder(e.ctx, disp.ID, disp.Version, "ar", e.now)
+	if err != nil || !credited.Gross.Equal(d(40)) || !credited.Restocking.Equal(d(25)) || !credited.Net.Equal(d(15)) {
+		t.Fatalf("two-line note: %+v %v", credited, err)
+	}
+	sum := decimal.Zero
+	for _, l := range credited.Lines {
+		sum = sum.Add(l.RestockingAmount)
+	}
+	if !sum.Equal(credited.Restocking) || len(e.ar.credits) != 1 || !e.ar.credits[0].Restocking.Equal(d(25)) {
+		t.Fatalf("line charges %s vs note %s, AR %+v", sum, credited.Restocking, e.ar.credits)
+	}
+}
+
+func TestRMA_InspectRefusesRestockingALineWithNoStockDestinationOrCost(t *testing.T) {
+	e := newRMAEnv(t)
+	in := e.newOrder(domain.DispositionCreditOnly, 2)
+	in.Lines[0].SiteID, in.Lines[0].WarehouseID = "", ""
+	recv := e.toReceived(t, e.create(t, in), 2)
+	if _, err := e.s.InspectReturnOrder(e.ctx, recv.ID, recv.Version, []InspectLine{{LineNo: 1, Accepted: d(2), Disposition: domain.DispositionReturnToStock}}, "qc", e.now); stateCode(t, err) != CodeRMAState {
+		t.Fatalf("RETURN_TO_STOCK on a credit-only line without site or warehouse: %v", err)
+	}
+	// With site and warehouse but created CREDIT_ONLY at ORIGINAL_COST, no cost was resolved: refused too.
+	in = e.newOrder(domain.DispositionCreditOnly, 2)
+	e.src.invoice.Lines[0].Qty = d(20)
+	recv = e.toReceived(t, e.create(t, in), 2)
+	if _, err := e.s.InspectReturnOrder(e.ctx, recv.ID, recv.Version, []InspectLine{{LineNo: 1, Accepted: d(2), Disposition: domain.DispositionReturnToStock}}, "qc", e.now); stateCode(t, err) != CodeRMAState {
+		t.Fatalf("RETURN_TO_STOCK on a credit-only line without a cost: %v", err)
+	}
+	insp, err := e.s.InspectReturnOrder(e.ctx, recv.ID, recv.Version, []InspectLine{{LineNo: 1, Accepted: d(2), Disposition: domain.DispositionCreditOnly}}, "qc", e.now)
+	if err != nil || insp.Status != domain.RMAInspected {
+		t.Fatalf("the same line inspected CREDIT_ONLY: %+v %v", insp, err)
+	}
+}
+
+func TestRMA_CurrentCostIsResolvedAtInspection(t *testing.T) {
+	e := newRMAEnv(t)
+	in := e.newOrder(domain.DispositionReturnToStock, 1)
+	in.Lines[0].ReturnCostMethod = domain.CostCurrent
+	recv := e.toReceived(t, e.create(t, in), 1)
+	if _, err := e.s.InspectReturnOrder(e.ctx, recv.ID, recv.Version, []InspectLine{{LineNo: 1, Accepted: d(1), Disposition: domain.DispositionReturnToStock}}, "qc", e.now); stateCode(t, err) != CodeRMAInvoice {
+		t.Fatalf("no on-hand average is refused at inspection: %v", err)
+	}
+	if got, _ := e.s.GetReturnOrder(e.ctx, recv.ID); got.Status != domain.RMAReceived {
+		t.Fatalf("the refused inspection keeps RECEIVED: %s", got.Status)
+	}
+	cur := decimal.RequireFromString("75.00")
+	e.src.current = &cur
+	insp, err := e.s.InspectReturnOrder(e.ctx, recv.ID, recv.Version, []InspectLine{{LineNo: 1, Accepted: d(1), Disposition: domain.DispositionReturnToStock}}, "qc", e.now)
+	if err != nil || insp.Lines[0].UnitCost == nil || !insp.Lines[0].UnitCost.Equal(cur) {
+		t.Fatalf("inspection stores the current cost: %+v %v", insp.Lines, err)
+	}
+	e.src.current = nil
+	if _, err := e.s.DispositionReturnOrder(e.ctx, insp.ID, insp.Version, "returns", e.now); err != nil || len(e.inv.receipts) != 1 || !e.inv.receipts[0].UnitCost.Equal(cur) {
+		t.Fatalf("restock at the inspected cost: %+v %v", e.inv.receipts, err)
+	}
+}
+
+func TestRMA_BillingCreditNotesReduceTheReturnableQuantity(t *testing.T) {
+	e := newRMAEnv(t)
+	e.src.invoice.Lines[0].CreditedQty = d(7)
+	if _, _, err := e.s.CreateReturnOrder(e.ctx, e.newOrder(domain.DispositionReturnToStock, 4)); stateCode(t, err) != CodeRMAOverReturn {
+		t.Fatalf("10 invoiced, 7 credited by billing, 4 asked: %v", err)
+	}
+	e.create(t, e.newOrder(domain.DispositionReturnToStock, 3))
+}
+
+func TestRMA_RejectFreesTheQuantityAndOnlyBeforeReceipt(t *testing.T) {
+	e := newRMAEnv(t)
+	rma := e.create(t, e.newOrder(domain.DispositionReturnToStock, 10))
+	if _, _, err := e.s.CreateReturnOrder(e.ctx, e.newOrder(domain.DispositionReturnToStock, 1)); stateCode(t, err) != CodeRMAOverReturn {
+		t.Fatalf("the open RMA holds the whole invoice: %v", err)
+	}
+	rejected, err := e.s.RejectReturnOrder(e.ctx, rma.ID, rma.Version, e.authorizer, e.now)
+	if err != nil || rejected.Status != domain.RMARejected {
+		t.Fatalf("reject: %+v %v", rejected, err)
+	}
+	again := e.create(t, e.newOrder(domain.DispositionReturnToStock, 10))
+	recv := e.toReceived(t, again, 10)
+	if _, err := e.s.RejectReturnOrder(e.ctx, recv.ID, recv.Version, e.authorizer, e.now); stateCode(t, err) != CodeRMAState {
+		t.Fatalf("a received RMA cannot be rejected: %v", err)
+	}
+}
+
+func TestRMA_ListFiltersCustomerByUUIDValue(t *testing.T) {
+	e := newRMAEnv(t)
+	e.create(t, e.newOrder(domain.DispositionReturnToStock, 1))
+	for _, customer := range []string{e.customer, strings.ToUpper(e.customer)} {
+		got, err := e.s.ListReturnOrders(e.ctx, ReturnOrderFilter{CustomerID: customer, LegalEntityID: strings.ToUpper(e.le), Limit: 10})
+		if err != nil || len(got) != 1 {
+			t.Fatalf("customer %s: %d %v", customer, len(got), err)
+		}
 	}
 }
 

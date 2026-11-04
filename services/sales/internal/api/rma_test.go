@@ -51,6 +51,25 @@ func (s *returnStore) CreditReturnOrder(_ context.Context, id string, version in
 	return store.ReturnOrder{ID: id, Version: version + 1}, s.err
 }
 
+func (s *returnStore) RejectReturnOrder(_ context.Context, id string, version int, _ string, _ time.Time) (store.ReturnOrder, error) {
+	s.version = version
+	return store.ReturnOrder{ID: id, Version: version + 1, Status: "REJECTED"}, s.err
+}
+
+func TestRejectReturnOrder_Route(t *testing.T) {
+	id := ids.New()
+	s := &returnStore{}
+	if rec := serve(t, s, http.MethodPost, returnOrders+"/"+id+":reject", principal(dutyRead), map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusForbidden {
+		t.Fatalf("reject without the write duty: %d", rec.Code)
+	}
+	if rec := serve(t, s, http.MethodPost, returnOrders+"/"+id+":reject", principal(dutyWrite), nil); rec.Code != http.StatusPreconditionRequired {
+		t.Fatalf("reject without If-Match: %d", rec.Code)
+	}
+	if rec := serve(t, s, http.MethodPost, returnOrders+"/"+id+":reject", principal(dutyWrite), map[string]string{"If-Match": `"2"`}); rec.Code != http.StatusOK || s.version != 2 {
+		t.Fatalf("reject: %d version %d", rec.Code, s.version)
+	}
+}
+
 func returnBody(extra string) string {
 	return `{"legalEntityId":"` + testLE + `","originalInvoiceId":"` + ids.New() + `","returnReasonCode":"DAMAGED",` + extra +
 		`"lines":[{"lineNo":1,"productId":"` + ids.New() + `","siteId":"` + ids.New() + `","warehouseId":"` + ids.New() + `","quantity":"4","disposition":"RETURN_TO_STOCK"}]}`
@@ -159,8 +178,15 @@ func TestReceiveAndInspectReturnOrder_Bodies(t *testing.T) {
 		si.inspect[0].Accepted.String() != "2" || si.inspect[0].Disposition != "RETURN_TO_STOCK" {
 		t.Fatalf("inspect: %d %+v", rec.Code, si.inspect)
 	}
+	// An RMA that received nothing (credit-only lines no goods came back for) is inspected with no lines: an empty
+	// list and an empty body both reach the store, which refuses it only when a line was received.
+	for name, body := range map[string]string{"empty list": `{"lines":[]}`, "no body": ""} {
+		se := &returnStore{}
+		if rec := serveBody(t, se, http.MethodPost, returnOrders+"/"+id+":inspect", body, principal(dutyWrite), h); rec.Code != http.StatusOK || len(se.inspect) != 0 || se.version != 2 {
+			t.Fatalf("inspect %s: %d %s", name, rec.Code, rec.Body.String())
+		}
+	}
 	for name, body := range map[string]string{
-		"no lines":        `{"lines":[]}`,
 		"bad disposition": `{"lines":[{"lineNo":1,"quantityAccepted":"2","disposition":"SCRAP"}]}`,
 		"negative":        `{"lines":[{"lineNo":1,"quantityAccepted":"-2","disposition":"CREDIT_ONLY"}]}`,
 	} {

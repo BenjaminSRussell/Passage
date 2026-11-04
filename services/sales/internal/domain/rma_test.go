@@ -52,6 +52,35 @@ func TestCreditAmounts_RestockingFloorAndCreditOnly(t *testing.T) {
 	}
 }
 
+func TestCreditNote_FloorAppliesOncePerNote(t *testing.T) {
+	// Two RETURN_TO_STOCK lines of 50.00 USD each: 7.50 + 7.50 is below the 25.00 floor, so the note pays 25.00
+	// once (not 25.00 per line, which would leave nothing to credit), booked on the lines in order.
+	got, charges, err := CreditNote([]ReturnCredit{
+		{Disposition: DispositionReturnToStock, Quantity: dec("1"), UnitPrice: dec("50.00"), Currency: "USD"},
+		{Disposition: DispositionReturnToStock, Quantity: dec("1"), UnitPrice: dec("50.00"), Currency: "USD"},
+		{Disposition: DispositionCreditOnly, Quantity: dec("2"), UnitPrice: dec("10.00"), Currency: "USD"},
+	})
+	if err != nil || !got.Gross.Equal(dec("120.00")) || !got.Restocking.Equal(dec("25.00")) || !got.Net.Equal(dec("95.00")) {
+		t.Fatalf("note %+v %v", got, err)
+	}
+	if !charges[0].Equal(dec("17.50")) || !charges[1].Equal(dec("7.50")) || !charges[2].IsZero() {
+		t.Fatalf("line charges %v", charges)
+	}
+	// Above the floor, each line pays its own percentage.
+	got, charges, err = CreditNote([]ReturnCredit{
+		{Disposition: DispositionReturnToStock, Quantity: dec("2"), UnitPrice: dec("100.00"), Currency: "USD"},
+		{Disposition: DispositionReturnToStock, Quantity: dec("1"), UnitPrice: dec("100.00"), Currency: "USD"},
+	})
+	if err != nil || !got.Restocking.Equal(dec("45.00")) || !charges[0].Equal(dec("30.00")) || !charges[1].Equal(dec("15.00")) {
+		t.Fatalf("above the floor %+v %v %v", got, charges, err)
+	}
+	// The floor never exceeds the stocked goods' value: the note nets to 0, which the store closes without a credit.
+	got, charges, err = CreditNote([]ReturnCredit{{Disposition: DispositionReturnToStock, Quantity: dec("2"), UnitPrice: dec("5.00"), Currency: "EUR"}})
+	if err != nil || !got.Restocking.Equal(dec("10.00")) || !got.Net.IsZero() || !charges[0].Equal(dec("10.00")) {
+		t.Fatalf("small return %+v %v %v", got, charges, err)
+	}
+}
+
 func TestRMAAdvance_AuthorizeReceiveInspectDispositionCredit(t *testing.T) {
 	now := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
 	status, expires, err := AdvanceRMA(RMARequested, RMAAuthorize, now)
@@ -74,5 +103,13 @@ func TestRMAAdvance_AuthorizeReceiveInspectDispositionCredit(t *testing.T) {
 	}
 	if _, _, err := AdvanceRMA(RMARequested, RMAReceive, now); err == nil {
 		t.Fatal("receive from REQUESTED must fail")
+	}
+	for _, from := range []string{RMARequested, RMAAuthorized} {
+		if got, _, err := AdvanceRMA(from, RMAReject, now); err != nil || got != RMARejected {
+			t.Fatalf("reject from %s: %s %v", from, got, err)
+		}
+	}
+	if _, _, err := AdvanceRMA(RMAReceived, RMAReject, now); err == nil {
+		t.Fatal("an RMA with goods received cannot be rejected")
 	}
 }

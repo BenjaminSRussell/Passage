@@ -87,6 +87,13 @@ func run() error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	sweep, err := newRMASweep(os.Getenv, s)
+	if err != nil {
+		return err
+	}
+	if sweep != nil {
+		go sweep.loop(ctx)
+	}
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr, r) }()
 	go func() { errs <- httpx.Serve(ctx, adminAddr, admin) }()

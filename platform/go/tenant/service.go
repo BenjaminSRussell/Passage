@@ -121,8 +121,11 @@ var serviceGrants = map[string]map[string][]string{
 		"production":  {"production.order.create-from-sales"},
 		"billing":     {"billing.invoice.read"},
 		"fulfillment": {"fulfillment.packing-slip.read"},
-		"inventory":   {"inventory.read", "inventory.journal.write", "inventory.journal.post"},
+		"inventory":   {"inventory.read", "inventory.return-receipt.post"},
 		"receivables": {"ar.rmacredit.post"},
+	},
+	"receivables": {
+		"ledger": {"ledger.entry.post", "ledger.ledger.lookup"},
 	},
 	"ledger": {
 		"close": {"period.check"},
