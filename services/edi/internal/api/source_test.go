@@ -13,6 +13,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
@@ -97,15 +98,18 @@ func sourceHandler(t *testing.T, f *fakeSources) (http.Handler, *pgxpool.Pool, s
 	return h, pool, p.ID
 }
 
+// srcScope makes the caller a user of the profile's legal entity: the trade profile is legal-entity scoped (RLS, #486).
+var srcScope = map[string]string{tenant.HeaderLegalEntity: srcLE}
+
 func fromSource(t *testing.T, h http.Handler, partner, set, id string) *httptest.ResponseRecorder {
 	t.Helper()
 	body := `{"transactionSet":"` + set + `","sourceId":"` + id + `"}`
-	return do(t, h, http.MethodPost, "/edi/v1/partners/"+partner+"/outbound:from-source", body, "EDI_OPERATE", nil)
+	return do(t, h, http.MethodPost, "/edi/v1/partners/"+partner+"/outbound:from-source", body, "EDI_OPERATE", srcScope)
 }
 
 func putProfile(t *testing.T, h http.Handler, partner, body string) {
 	t.Helper()
-	if rec := do(t, h, http.MethodPut, "/edi/v1/partners/"+partner+"/trade-profile", body, "EDI_ADMIN", nil); rec.Code != http.StatusOK {
+	if rec := do(t, h, http.MethodPut, "/edi/v1/partners/"+partner+"/trade-profile", body, "EDI_ADMIN", srcScope); rec.Code != http.StatusOK {
 		t.Fatalf("profile: %d %s", rec.Code, rec.Body.String())
 	}
 }
@@ -245,8 +249,11 @@ func TestTradeProfile_ValidatesAndIsPerTenant(t *testing.T) {
 	if rec := do(t, h, http.MethodPut, "/edi/v1/partners/"+partner+"/trade-profile", strings.Replace(profileBody, "0614141000012", "12", 1), "EDI_ADMIN", nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad GLN: %d %s", rec.Code, rec.Body.String())
 	}
+	if rec := do(t, h, http.MethodPut, "/edi/v1/partners/"+partner+"/trade-profile", strings.Replace(profileBody, srcLE, "00000000-0000-0000-0000-0000000000e2", 1), "EDI_ADMIN", srcScope); rec.Code != http.StatusBadRequest {
+		t.Fatalf("legal entity outside the caller's scope: %d %s", rec.Code, rec.Body.String())
+	}
 	missing := "00000000-0000-0000-0000-000000000099"
-	if rec := do(t, h, http.MethodPut, "/edi/v1/partners/"+missing+"/trade-profile", profileBody, "EDI_ADMIN", nil); rec.Code != http.StatusNotFound {
+	if rec := do(t, h, http.MethodPut, "/edi/v1/partners/"+missing+"/trade-profile", profileBody, "EDI_ADMIN", srcScope); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown partner: %d", rec.Code)
 	}
 	putProfile(t, h, partner, profileBody)

@@ -16,11 +16,12 @@ func allowReason(v violation) (string, bool) {
 }
 
 var allowlist = map[string]string{
-	"eam.asset:" + problemNoEntityPol:                 "tracked: #486; legal_entity_id is nullable until PUT /v1/eam/assets/{id}/legal-entity; tenant policy still binds",
-	"eam.work_order:" + problemNoEntityPol:            "tracked: #486; legal_entity_id is copied from the asset and may be null for legacy orders; tenant policy still binds",
-	"eam.eam_gl_posting:" + problemNoEntityPol:        "tracked: #486; tenant policy binds; legal-entity scope is enforced on eam_pending_booking before the subledger row is written",
-	"eam.eam_posting_profile:" + problemNoEntityPol:   "tracked: #486; tenant policy binds; profile rows are keyed by legal_entity_id in the primary key",
-	"edi.partner_trade_profile:" + problemNoEntityPol: "tracked: #486; tenant policy binds; legal_entity_id is a required column, not a caller scope filter",
+	// #486 review decision: in EAM, legal_entity_id on asset and work_order is the GL booking entity, not a visibility scope. Sites, plans, permits,
+	// rounds and every other EAM table are tenant-wide and join these rows, and legacy rows have a NULL entity that a scoped caller must see to set it
+	// (PUT /v1/eam/assets/{id}/legal-entity) and that the GL reconciliation lists; a restrictive policy would hide them or would have to admit NULL.
+	// The GL tables carrying the entity (eam_posting_profile, eam_gl_posting, eam_pending_booking) do have the policy (0010, 0011).
+	"eam.asset:" + problemNoEntityPol:      "permanent: tenant-wide EAM master data; legal_entity_id is the GL booking entity, nullable for legacy assets a scoped caller must see to set it (#486 review decision)",
+	"eam.work_order:" + problemNoEntityPol: "permanent: tenant-wide EAM work; legal_entity_id is copied from the asset for GL booking and is null for legacy orders (#486 review decision)",
 	// Per the #398 review decision: identity 0008_policy_bundle_read adds operator-gated permissive SELECT policies so the policy compiler can read users and role assignments; the gate is passage.policy_compile plus a visible identity_operator row.
 	"identity.identity_users:" + problemExtraPolicy:            "permanent: SELECT-only policy gated on passage.policy_compile and identity_operator (0008_policy_bundle_read, #398 review decision)",
 	"identity.identity_role_assignments:" + problemExtraPolicy: "permanent: SELECT-only policy gated on passage.policy_compile and identity_operator (0008_policy_bundle_read, #398 review decision)",

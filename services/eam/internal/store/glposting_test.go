@@ -283,6 +283,19 @@ func TestGLPosting_AppRoleBooksWithoutBypassingRLSOrRewritingTheSubledger(t *tes
 	if err != nil || len(rec.Accounts) != 0 {
 		t.Fatalf("another tenant must see no subledger rows: %+v %v", rec, err)
 	}
+	// #486: the profile and the subledger are legal-entity scoped by RLS, not only by the queries' entity filter.
+	otherEntity := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(7107), LegalEntityID: "00000000-0000-0000-0000-0000000000e2",
+		UserID: "u2", Duties: map[string]struct{}{"EamPlanner": {}}})
+	for ctx, want := range map[context.Context]int{f.ctx: 1, otherEntity: 0} {
+		for _, table := range []string{"eam_gl_posting", "eam_posting_profile"} {
+			var n int
+			if err := dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
+				return tx.QueryRow(ctx, `select count(distinct legal_entity_id) from `+table).Scan(&n)
+			}); err != nil || n != want {
+				t.Errorf("%s entities visible = %d, %v; want %d", table, n, err, want)
+			}
+		}
+	}
 }
 
 func TestGLPosting_OrdersTakeTheLegalEntityOfTheirAssetAndOnlyThatEntityBooksThem(t *testing.T) {

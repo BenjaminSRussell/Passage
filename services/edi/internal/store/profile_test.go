@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/migrations"
@@ -42,5 +43,19 @@ func TestTradeProfile_UpsertAsAppRoleAndTenantIsolated(t *testing.T) {
 	}
 	if _, err := st.PutTradeProfile(b, p.ID, tp); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("another tenant must not write the profile of a partner it cannot see: %v", err)
+	}
+	other := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: "00000000-0000-0000-0000-0000000000e2",
+		UserID: "user-e2", Duties: map[string]struct{}{"EDI_ADMIN": {}}})
+	if _, err := st.GetTradeProfile(other, p.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a caller of another legal entity must not read the profile: %v", err)
+	}
+	moved := tp
+	moved.LegalEntityID = "00000000-0000-0000-0000-0000000000e2"
+	if _, err := st.PutTradeProfile(other, p.ID, moved); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a caller of another legal entity must not repoint the profile: %v", err)
+	}
+	all := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "admin", Duties: testkit.ScopeDuties("")})
+	if got, err := st.GetTradeProfile(all, p.ID); err != nil || got != tp {
+		t.Fatalf("an all-entity caller reads the profile unchanged: %+v %v", got, err)
 	}
 }

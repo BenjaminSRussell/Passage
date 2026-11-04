@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 
@@ -27,6 +28,11 @@ func (s *Store) PutTradeProfile(ctx context.Context, partnerID string, p domain.
 			version = partner_trade_profile.version + 1, updated_at = now()`,
 			tid, partnerID, p.LegalEntityID, p.CustomerID, p.ShipFrom.Name, p.ShipFrom.GLN, p.ShipTo.Name, p.ShipTo.GLN,
 			p.BillTo.Name, p.BillTo.GLN, p.RemitTo.Name, p.RemitTo.GLN, p.DefaultSCAC)
+		var pe *pgconn.PgError
+		if errors.As(err, &pe) && pe.Code == "42501" {
+			// The partner's profile belongs to a legal entity outside the caller's scope (RLS refuses the upsert).
+			return ErrNotFound
+		}
 		if err != nil {
 			return err
 		}

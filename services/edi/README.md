@@ -50,7 +50,8 @@ Built in this slice:
   the service grant `edi` -> `fulfillment`/`billing`/`sales` (duties `fulfillment.shipment.read`,
   `billing.invoice.read`, `sales.order.lookup`, nothing else) for the legal entity of the
   partner's trade profile (`PUT /edi/v1/partners/{id}/trade-profile`: legal entity, customer,
-  ship-from/ship-to/bill-to/remit-to names and GLNs, default SCAC). The document must belong to
+  ship-from/ship-to/bill-to/remit-to names and GLNs, default SCAC; the legal entity must be one of the
+  caller's, and RLS shows the profile only to callers scoped to it). The document must belong to
   the profile's legal entity and customer (422 EDI-0011) and be final: shipment shipped with
   shipped containers, invoice posted (409 EDI-0013). It is an explicit API call: the
   `wms.load.shipped` and `invoice.posted` consumers are not built (the shared eventing consumer
