@@ -237,11 +237,14 @@
       {"resource": "/v1/reporting/column-sets", "methods": ["GET"]},
       {"resource": "/v1/reporting/column-sets/*", "methods": ["GET", "PUT"]},
       {"resource": "/v1/reporting/column-set-templates", "methods": ["GET"]},
-      {"resource": "/v1/reporting/definitions:compose", "methods": ["POST"]}
+      {"resource": "/v1/reporting/definitions:compose", "methods": ["POST"]},
+      {"resource": "/v1/reporting/trees", "methods": ["GET"]},
+      {"resource": "/v1/reporting/trees/*", "methods": ["GET", "PUT"]}
     ]},
     "reporting.statement.run": {"permissions": [
       {"resource": "/v1/reporting/runs", "methods": ["POST"]},
-      {"resource": "/v1/reporting/hierarchies", "methods": ["GET"]}
+      {"resource": "/v1/reporting/hierarchies", "methods": ["GET"]},
+      {"resource": "/v1/reporting/trees", "methods": ["GET"]}
     ]},
     "reporting.statement.schedule": {"permissions": [
       {"resource": "/v1/reporting/schedules", "methods": ["GET"]},
