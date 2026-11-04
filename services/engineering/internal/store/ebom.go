@@ -115,7 +115,7 @@ func (s *Postgres) ImportEbom(ctx context.Context, in EbomImportInput, idem Idem
 			}
 		}
 		rec.Exceptions, rec.Comparison = result.Exceptions, result.Comparison
-		if err := emit(ctx, tx, p, rec.ID, engevents.EbomImported, aggregateEbom, rec.ID, rec); err != nil {
+		if err := emit(ctx, tx, p, rec.ID, engevents.EbomImported, aggregateEbom, rec.ID, engevents.EbomImportedData{ImportID: rec.ID, PartNumber: rec.PartNumber, Revision: rec.Revision, Added: rec.Comparison.Added, Exceptions: len(rec.Exceptions)}); err != nil {
 			return err
 		}
 		return remember(ctx, tx, p.TenantID, idem, rec.ID)

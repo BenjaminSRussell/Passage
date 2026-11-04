@@ -285,7 +285,7 @@ func (s *Postgres) TransitionDocument(ctx context.Context, id, to, actor string,
 			if _, err := tx.Exec(ctx, `update document set signed_at = $3 where tenant_id = $1 and id = $2::uuid`, p.TenantID, doc.ID, sig.SignedAt); err != nil {
 				return err
 			}
-			if err := emit(ctx, tx, p, doc.ID, engevents.DocumentSigned, aggregateDocument, doc.ID, *sig); err != nil {
+			if err := emit(ctx, tx, p, doc.ID, engevents.DocumentSigned, aggregateDocument, doc.ID, engevents.DocumentSignedData{DocumentID: doc.ID, RecordID: sig.RecordID, SignerID: sig.SignerID, Meaning: sig.Meaning, SignedAt: sig.SignedAt.UTC().Format(time.RFC3339)}); err != nil {
 				return err
 			}
 			if err := enqueueAudit(ctx, tx, p, *sig); err != nil {
@@ -301,7 +301,7 @@ func (s *Postgres) TransitionDocument(ctx context.Context, id, to, actor string,
 		}
 		doc.Status = to
 		if to == domain.DocReleased {
-			return emit(ctx, tx, p, doc.ID, engevents.DocumentReleased, aggregateDocument, doc.ID, doc)
+			return emit(ctx, tx, p, doc.ID, engevents.DocumentReleased, aggregateDocument, doc.ID, documentReleased(doc))
 		}
 		return nil
 	})
@@ -434,6 +434,10 @@ func (s *Postgres) SetDocumentStructure(ctx context.Context, parentID string, ch
 	})
 }
 
+func documentReleased(d domain.Document) engevents.DocumentReleasedData {
+	return engevents.DocumentReleasedData{DocumentID: d.ID, Number: d.Number, Version: d.Version}
+}
+
 func releaseEcoDocuments(ctx context.Context, tx pgx.Tx, p tenant.Principal, e domain.Eco) error {
 	for _, r := range e.Documents {
 		for _, id := range []string{r.OldDocumentID, r.NewDocumentID} {
@@ -463,7 +467,7 @@ func releaseEcoDocuments(ctx context.Context, tx pgx.Tx, p tenant.Principal, e d
 		if _, err := tx.Exec(ctx, `update document set status = $3, eco_id = $4 where tenant_id = $1 and id = $2::uuid`, p.TenantID, pair.Current.ID, pair.Current.Status, e.ID); err != nil {
 			return err
 		}
-		if err := emit(ctx, tx, p, pair.Current.ID, engevents.DocumentReleased, aggregateDocument, pair.Current.ID, pair.Current); err != nil {
+		if err := emit(ctx, tx, p, pair.Current.ID, engevents.DocumentReleased, aggregateDocument, pair.Current.ID, documentReleased(pair.Current)); err != nil {
 			return err
 		}
 	}

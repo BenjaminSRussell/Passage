@@ -247,7 +247,7 @@ func TestPostgres_RouteActivationFailureRefusesTheRelease(t *testing.T) {
 }
 
 func TestPostgres_AC912_ReadinessBlocksThenActivates(t *testing.T) {
-	s, _, ctx := newStore(t, 1)
+	s, pool, ctx := newStore(t, 1)
 	policy := domain.ReadinessPolicy{Code: "RDY", TargetState: domain.ReleasedActive, Checks: []domain.ReadinessCheck{
 		{Key: "active_bom", Kind: domain.CheckAuto, Mandatory: true},
 		{Key: "tax_group", Kind: domain.CheckAuto, Mandatory: true},
@@ -303,6 +303,13 @@ func TestPostgres_AC912_ReadinessBlocksThenActivates(t *testing.T) {
 	}
 	if code := domain.ProcessPolicy(signed.State, "sales_order"); code != "" {
 		t.Fatalf("active product still blocked: %s", code)
+	}
+	// The AsyncAPI payloads (camelCase), not Go structs; the move to Active is published too.
+	if n := rowCount(t, pool, `select count(*) from outbox where type = 'dev.passage.engineering.releasedproduct.changed.v1' and payload->'data'->>'releasedProductId' = $1 and payload->'data'->>'state' = 'Active' and payload->'data'->>'legalEntityId' = $2`, got.ID, leUSMF); n != 1 {
+		t.Fatalf("releasedproduct.changed to Active = %d; want one contract-shaped event", n)
+	}
+	if n := rowCount(t, pool, `select count(*) from outbox where type = 'dev.passage.engineering.releasesession.created.v1' and payload->'data'->>'sessionId' = $1 and payload->'data'->>'number' = 'REL-1'`, session.Session.ID); n != 1 {
+		t.Fatalf("releasesession.created = %d; want one contract-shaped event", n)
 	}
 }
 
@@ -479,6 +486,12 @@ func TestPostgres_AC916_DocumentSignatureAndECO(t *testing.T) {
 
 	if err := releaseEco(ctx, s, submitted); err != nil {
 		t.Fatal(err)
+	}
+	if n := rowCount(t, pool, `select count(*) from outbox where type = 'dev.passage.engineering.document.released.v1' and payload->'data'->>'documentId' = $1 and payload->'data'->>'version' = '02'`, next.ID); n != 1 {
+		t.Fatalf("document.released events for the replacement = %d; want 1 shaped as the AsyncAPI payload", n)
+	}
+	if n := rowCount(t, pool, `select count(*) from outbox where type = 'dev.passage.engineering.document.signed.v1' and payload->'data'->>'signerId' = 'carol' and payload->'data' ? 'signedAt' and not payload->'data' ? 'OriginalsHash'`); n != 2 {
+		t.Fatalf("document.signed events = %d; want 2 shaped as the AsyncAPI payload", n)
 	}
 	old, err := s.GetDocument(ctx, first.ID)
 	if err != nil || old.Status != domain.DocObsolete {

@@ -198,12 +198,12 @@ func (s *Postgres) CreateReleaseSession(ctx context.Context, in ReleaseSessionIn
 				return err
 			}
 			if lines[i].Status == domain.LineAccepted {
-				if err := emit(ctx, tx, p, session.ID, engevents.ReleaseLineAccepted, aggregateReleaseLine, lines[i].ID, lines[i]); err != nil {
+				if err := emit(ctx, tx, p, session.ID, engevents.ReleaseLineAccepted, aggregateReleaseLine, lines[i].ID, lineAccepted(lines[i])); err != nil {
 					return err
 				}
 			}
 		}
-		if err := emit(ctx, tx, p, session.ID, engevents.ReleaseSessionCreated, aggregateReleaseSession, session.ID, session); err != nil {
+		if err := emit(ctx, tx, p, session.ID, engevents.ReleaseSessionCreated, aggregateReleaseSession, session.ID, engevents.ReleaseSessionCreatedData{SessionID: session.ID, Number: session.Number, Source: session.Source}); err != nil {
 			return err
 		}
 		if err := remember(ctx, tx, p.TenantID, idem, session.ID); err != nil {
@@ -410,7 +410,15 @@ func upsertReleasedProduct(ctx context.Context, tx pgx.Tx, p tenant.Principal, i
 			return err
 		}
 	}
-	return emit(ctx, tx, p, line.SessionID, engevents.ReleasedProductChanged, aggregateReleasedProd, id, ReleasedProduct{ID: id, ProductID: line.ProductID, LegalEntityID: line.LegalEntityID, EngineeringVersion: line.EngineeringVersion, SessionID: line.SessionID, State: state})
+	return emitReleasedProduct(ctx, tx, p, line.SessionID, id, line.ProductID, line.LegalEntityID, state)
+}
+
+func lineAccepted(l domain.ReleaseLine) engevents.ReleaseLineAcceptedData {
+	return engevents.ReleaseLineAcceptedData{LineID: l.ID, SessionID: l.SessionID, LegalEntityID: l.LegalEntityID, AcceptedBy: l.AcceptedBy}
+}
+
+func emitReleasedProduct(ctx context.Context, tx pgx.Tx, p tenant.Principal, correlationID, id, productID, legalEntityID, state string) error {
+	return emit(ctx, tx, p, correlationID, engevents.ReleasedProductChanged, aggregateReleasedProd, id, engevents.ReleasedProductChangedData{ReleasedProductID: id, ProductID: productID, LegalEntityID: legalEntityID, State: state})
 }
 
 func readinessPolicyFor(ctx context.Context, tx pgx.Tx, tenantID string, in ReleaseSessionInput) (domain.ReadinessPolicy, error) {
@@ -550,7 +558,7 @@ func (s *Postgres) DecideReleaseLine(ctx context.Context, id, actor, reason stri
 			p.TenantID, line.ID, line.CopiedBOMVersionID, line.CopiedRouteVersionID); err != nil {
 			return err
 		}
-		return emit(ctx, tx, p, line.SessionID, engevents.ReleaseLineAccepted, aggregateReleaseLine, line.ID, line)
+		return emit(ctx, tx, p, line.SessionID, engevents.ReleaseLineAccepted, aggregateReleaseLine, line.ID, lineAccepted(line))
 	})
 	return line, err
 }
@@ -668,5 +676,8 @@ func refreshReadiness(ctx context.Context, tx pgx.Tx, p tenant.Principal, id str
 			return err
 		}
 	}
-	return nil
+	if state == rec.State {
+		return nil
+	}
+	return emitReleasedProduct(ctx, tx, p, rec.SessionID, id, rec.ProductID, rec.LegalEntityID, state)
 }

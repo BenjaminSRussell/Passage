@@ -36,6 +36,9 @@ func TestPayloads_MatchAsyncAPI(t *testing.T) {
 		{"releaseSessionCreated", events.ReleaseSessionCreated, events.ReleaseSessionCreatedData{Source: "eco"}},
 		{"documentSigned", events.DocumentSigned, events.DocumentSignedData{SignedAt: "2026-07-01T12:00:00Z"}},
 		{"ebomImported", events.EbomImported, events.EbomImportedData{Added: 1, Exceptions: 0}},
+		{"releaseLineAccepted", events.ReleaseLineAccepted, events.ReleaseLineAcceptedData{}},
+		{"releasedProductChanged", events.ReleasedProductChanged, events.ReleasedProductChangedData{}},
+		{"documentReleased", events.DocumentReleased, events.DocumentReleasedData{}},
 	}
 	for _, tc := range cases {
 		start := strings.Index(spec, "    "+tc.message+":\n")
