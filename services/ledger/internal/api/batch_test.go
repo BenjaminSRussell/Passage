@@ -288,3 +288,43 @@ func TestBatchRoutes_RequireDuties(t *testing.T) {
 		}
 	}
 }
+
+func TestJournalNames_PostingRestrictionAndLanguage(t *testing.T) {
+	fs := &fakeStore{created: true}
+	rec := call(server(fs), http.MethodPut, "/v1/ledger/journal-names/OWN",
+		`{"name":"Own","postingRestriction":"own_journals_only","descriptionLanguage":"user"}`, journalDuties, nil)
+	if got := fs.putNames; rec.Code != http.StatusCreated || got[0].PostingRestriction != domain.PostingOwnJournalsOnly || got[0].DescriptionLanguage != domain.DescriptionLanguageUser {
+		t.Fatalf("status %d, writes %+v", rec.Code, got)
+	}
+
+	fs = &fakeStore{created: true}
+	call(server(fs), http.MethodPut, "/v1/ledger/journal-names/GJ", `{"name":"General"}`, journalDuties, nil)
+	if got := fs.putNames[0]; got.PostingRestriction != "none" || got.DescriptionLanguage != "legal_entity" {
+		t.Fatalf("defaults not applied: %+v", got)
+	}
+
+	fs = &fakeStore{}
+	rec = call(server(fs), http.MethodPut, "/v1/ledger/journal-names/GJ",
+		`{"name":"General","postingRestriction":"by_user_group","descriptionLanguage":"browser"}`, journalDuties, nil)
+	errs, _ := decode(t, rec)["errors"].(map[string]any)
+	if rec.Code != http.StatusBadRequest || errs["postingRestriction"] == nil || errs["descriptionLanguage"] == nil || len(fs.putNames) != 0 {
+		t.Fatalf("status %d, errors %v, writes %+v", rec.Code, errs, fs.putNames)
+	}
+}
+
+func TestPostBatch_AcceptLanguage(t *testing.T) {
+	for header, want := range map[string]string{"de-DE,de;q=0.9,en;q=0.8": "de-DE", "fr": "fr", "en;q=0.5": "en", "*": "", "de_DE": "", "": "",
+		"de-de": "de-DE", "FR-ca": "fr-CA", "zh-Hant-TW": "zh", "es-419": "es"} {
+		fs := &fakeStore{}
+		headers := map[string]string{"Idempotency-Key": "k-1"}
+		if header != "" {
+			headers["Accept-Language"] = header
+		}
+		if rec := call(server(fs), http.MethodPost, batchPath+"/post", "", journalDuties, headers); rec.Code != http.StatusCreated {
+			t.Fatalf("%q: status %d", header, rec.Code)
+		}
+		if got := fs.batchCalls[0].post.Language; got != want {
+			t.Errorf("Accept-Language %q: language %q, want %q", header, got, want)
+		}
+	}
+}

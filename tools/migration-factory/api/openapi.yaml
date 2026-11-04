@@ -360,16 +360,25 @@ paths:
   /api/v1/migration/runs/{id}/quarantine/{rec}/release:
     post:
       operationId: releaseQuarantined
-      summary: Correct and release a quarantined open item (FR-49.11)
+      summary: Correct and release a quarantined open item, bank balance, on-hand or open order line (FR-49.11)
       description: |
-        Applies the party and account correction, re-runs the open-items suite against the run's
-        master-data snapshot plus `parties`, and loads the record into legacy_xref. The run's
-        counts, control totals and version change under its row lock; a corrected account moves
-        the record's legacy amount to the corrected account's subtotal. When no total is
-        MISMATCH any more the run moves to RECONCILED and writes
+        Applies the correction, re-runs the pack's suite against the run's master-data snapshot
+        plus `parties`, and loads the record into legacy_xref. open_items takes `party` and
+        `account`; bank_balances takes `bankAccount`; onhand takes `item`, `site`, `warehouse`,
+        `location`, `batch` and `unit`; open_orders takes `item`, `party`, `unit` and `deliveryDate`
+        (a field of another pack is MIG-0001). Amounts, quantities, prices, currencies, order and
+        line numbers, legacy ids and serials are the legacy truth and change only by re-extract.
+        The run's counts, control totals and version change under its row lock; a corrected key
+        moves the record's legacy figures to the corrected key's subtotal, and a bank or stock
+        line or an order line also loads its opening row (no posting to treasury, the inventory ledger,
+        sales or purchasing); a released order line adds one to the order count only when the loaded
+        side holds no other line of its order. When no
+        total is MISMATCH any more the run moves to RECONCILED and writes
         dev.passage.migration.pack.reconciled.v1. Releasing a released record returns the run
-        with Idempotent-Replayed (idempotent by record). Only LOADED open_items runs take a
-        release (MIG-0004 otherwise, MIG-0005 for other packs).
+        with Idempotent-Replayed (idempotent by record). Only LOADED open_items, bank_balances,
+        onhand and open_orders runs take a release (MIG-0004 otherwise, MIG-0005 for other packs);
+        a line quarantined before its whole line was kept (bank_balances and onhand before
+        migration 0017, open_orders before migration 0018) is MIG-0004 and is re-extracted.
       x-passage-duty: MigrationRun
       parameters:
         - $ref: "#/components/parameters/Id"
@@ -1892,13 +1901,50 @@ components:
       properties:
         party:
           type: string
-          description: Corrected party; blank keeps the extracted one.
+          description: Corrected party of an open_items record or customer or vendor of an open_orders line; blank keeps the extracted one.
         account:
           type: string
           description: Corrected control account; blank keeps the extracted one.
+        bankAccount:
+          type: string
+          description: Corrected bank account of a bank_balances line; blank keeps the extracted one.
+        item:
+          type: string
+          description: Corrected item of an onhand or open_orders line; blank keeps the extracted one.
+        site:
+          type: string
+          description: Corrected site of an onhand line; blank keeps the extracted one.
+        warehouse:
+          type: string
+          description: Corrected warehouse of an onhand line; blank keeps the extracted one.
+        location:
+          type: string
+          description: Corrected location of an onhand line; blank keeps the extracted one.
+        batch:
+          type: string
+          description: Corrected batch of an onhand line; blank keeps the extracted one.
+        unit:
+          type: string
+          description: Corrected unit of measure of an onhand or open_orders line; blank keeps the extracted one.
+        deliveryDate:
+          type: string
+          format: date
+          description: Corrected delivery date of an open_orders line (ISO date); blank keeps the extracted one.
+        customers:
+          type: array
+          description: Customer ids added since an open_orders run, checked with the run's snapshot; another pack refuses them (MIG-0001).
+          items:
+            type: string
+        vendors:
+          type: array
+          description: Vendor ids added since an open_orders run, checked with the run's snapshot; another pack refuses them (MIG-0001).
+          items:
+            type: string
         parties:
           type: array
-          description: Party ids added to master data since the run, checked with the run's snapshot.
+          description: >-
+            Master-data ids added since the run, checked with the run's snapshot: parties for
+            open_items, bank accounts for bank_balances, items for onhand and open_orders.
           items:
             type: string
         version:

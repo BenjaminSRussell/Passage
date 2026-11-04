@@ -68,6 +68,10 @@ export type RestOutcome = (
   excerpt?: string;
   /** The legacy key read from the response at responseKeyPath. */
   legacyKey?: string;
+  /** The legacy keys of the elements of the pushed collection, by position (lineKeyPath). */
+  lineKeys?: { index: number; legacyKey: string }[];
+  /** The lookup table versions the render read, kept with the push for audit. */
+  lookups?: { name: string; table: string; version: number }[];
 };
 
 /** Renders and pushes one event; resolves with the outcome, never throws for a receiver problem. */

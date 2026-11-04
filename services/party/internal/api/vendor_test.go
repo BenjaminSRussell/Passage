@@ -16,6 +16,7 @@ const vendorGroup = "00000000-0000-0000-0000-0000000000c1"
 
 type fakeVendors struct {
 	created domain.NewVendor
+	group   domain.NewVendorGroup
 	partyID string
 	key     string
 	hash    string
@@ -28,6 +29,19 @@ func (f *fakeVendors) CreateVendorRole(_ context.Context, partyID string, role s
 	in := role.In
 	f.partyID, f.created, f.key, f.hash = partyID, in, role.Key, role.Hash
 	return domain.Vendor{ID: knownID, PartyID: partyID, VendorGroupID: in.VendorGroupID, AccountNumber: in.AccountNumber, CurrencyCode: in.CurrencyCode, Blocked: "none", Version: 1}, f.err == nil, f.err
+}
+
+func (f *fakeVendors) CreateVendorGroup(_ context.Context, in store.NewVendorGroupRequest) (domain.VendorGroup, bool, error) {
+	f.group, f.key = in.In, in.Key
+	return domain.VendorGroup{ID: vendorGroup, Code: in.In.Code, Name: in.In.Name, Version: 1}, f.err == nil, f.err
+}
+
+func (f *fakeVendors) GetVendorGroup(_ context.Context, id string) (domain.VendorGroup, error) {
+	return domain.VendorGroup{ID: id, Code: "VG1", Name: "Group", Version: 1}, f.err
+}
+
+func (f *fakeVendors) ListVendorGroups(context.Context) ([]domain.VendorGroup, error) {
+	return []domain.VendorGroup{{ID: vendorGroup, Code: "VG1", Name: "Group", Version: 1}}, f.err
 }
 
 func (f *fakeVendors) GetVendor(_ context.Context, vendorID string) (domain.Vendor, error) {
@@ -145,5 +159,39 @@ func TestVendorRoutes_StoreProblemsPassThrough(t *testing.T) {
 	rec = do(vendorRouter(f), http.MethodPost, "/v1/party/parties/"+knownID+"/vendor", valid, "party.write", true)
 	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "PTY-PARTY-NOT-FOUND") {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestVendorGroupRoutes(t *testing.T) {
+	f := &fakeVendors{}
+	r := vendorRouter(f)
+	const path = "/v1/party/vendor-groups"
+	rec := do(r, http.MethodPost, path, `{"code":" dom-1 ","name":"Domestic"}`, "party.write", true)
+	if rec.Code != http.StatusCreated || f.group.Code != "DOM-1" || !strings.Contains(rec.Body.String(), `"code":"DOM-1"`) {
+		t.Fatalf("create = %d %s group=%+v; want 201 with the code upper-cased", rec.Code, rec.Body, f.group)
+	}
+	for _, body := range []string{`{"code":"","name":"x"}`, `{"code":"TOOLONGCODE1","name":"x"}`, `{"code":"A B","name":"x"}`, `{"code":"A","name":""}`} {
+		if rec := do(r, http.MethodPost, path, body, "party.write", true); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), store.CodeVendorGroupInvalid) {
+			t.Fatalf("create %s = %d %s; want 422", body, rec.Code, rec.Body)
+		}
+	}
+	if rec := do(r, http.MethodPost, path, `{"id":" `+strings.ToUpper(vendorGroup)+` ","code":"LEG","name":"Legacy"}`, "party.write", true); rec.Code != http.StatusCreated || f.group.ID != vendorGroup {
+		t.Fatalf("create with an existing group id = %d %s group=%+v; want the canonical id passed on", rec.Code, rec.Body, f.group)
+	}
+	if rec := do(r, http.MethodPost, path, `{"id":"not-a-uuid","code":"LEG","name":"Legacy"}`, "party.write", true); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"id"`) {
+		t.Fatalf("create with a malformed id = %d %s; want 422 on id", rec.Code, rec.Body)
+	}
+	if rec := do(r, http.MethodPost, path, `{"code":"A","name":"x"}`, "party.read", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("create without party.write = %d, want 403", rec.Code)
+	}
+	if rec := do(r, http.MethodGet, path, ``, "party.read", true); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"vendorGroups"`) {
+		t.Fatalf("list = %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(r, http.MethodGet, path+"/"+vendorGroup, ``, "party.read", true); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"code":"VG1"`) {
+		t.Fatalf("get = %d %s", rec.Code, rec.Body)
+	}
+	f.err = httpx.NewProblem(http.StatusConflict, store.CodeVendorGroupExists, "taken")
+	if rec := do(r, http.MethodPost, path, `{"code":"A","name":"x"}`, "party.write", true); rec.Code != http.StatusConflict {
+		t.Fatalf("duplicate code = %d, want 409", rec.Code)
 	}
 }

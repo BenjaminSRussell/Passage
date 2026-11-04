@@ -127,21 +127,6 @@ export function buildBasis(grid: string[][]): { ok: true; value: string[][] } | 
   return { ok: true, value: rows };
 }
 
-/** Parses "mainAccount,amount" lines (an optional header row is skipped) for a reconciliation. */
-export function parseJournalCsv(text: string): { ok: true; value: { mainAccount: string; amount: string }[] } | { ok: false; error: string } {
-  const out: { mainAccount: string; amount: string }[] = [];
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== "");
-  for (const [i, line] of lines.entries()) {
-    const [account = "", amount = "", ...rest] = line.split(",").map((c) => c.trim());
-    if (i === 0 && toTicks(amount) === null && /account/i.test(account)) continue;
-    if (rest.length > 0 || account === "" || toTicks(amount) === null) {
-      return { ok: false, error: `Line ${i + 1} must be "mainAccount,amount" with a decimal amount.` };
-    }
-    out.push({ mainAccount: account, amount });
-  }
-  return { ok: true, value: out };
-}
-
 /** Ticks (1/10000) to whole cents, half away from zero. */
 function ticksToCents(t: bigint): bigint {
   const negative = t < 0n;

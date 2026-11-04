@@ -161,6 +161,7 @@ func TestListOrderVersions(t *testing.T) {
 type remainderStore struct {
 	fakeStore
 	version int
+	lineNo  int
 	reason  *string
 	actor   string
 }
@@ -168,6 +169,34 @@ type remainderStore struct {
 func (c *remainderStore) CancelRemainder(_ context.Context, _ string, version int, reason, actor string, _ time.Time) (store.Order, error) {
 	c.version, c.reason, c.actor = version, &reason, actor
 	return store.Order{Version: version + 1, Status: "SHIPPED", Lines: []store.Line{}, Holds: []store.Hold{}}, nil
+}
+
+func (c *remainderStore) CancelLineRemainder(_ context.Context, _ string, lineNo, version int, reason, actor string, _ time.Time) (store.Order, error) {
+	c.lineNo, c.version, c.reason, c.actor = lineNo, version, &reason, actor
+	return store.Order{Version: version + 1, Status: "PARTIALLY_SHIPPED", Lines: []store.Line{}, Holds: []store.Hold{}}, nil
+}
+
+// TestCancelLineRemainder_DutyAndBody checks the per-line close: the line number
+// reaches the store, the duty is sales.order.write, If-Match is required and a
+// line number that is not positive is a 400.
+func TestCancelLineRemainder_DutyAndBody(t *testing.T) {
+	c := &remainderStore{}
+	id := ids.New()
+	path := orders + "/" + id + "/lines/2:cancel-remainder"
+	rec := serveBody(t, c, http.MethodPost, path, `{"reason":"short"}`, principal(dutyWrite), map[string]string{"If-Match": `"5"`})
+	if rec.Code != http.StatusOK || c.lineNo != 2 || c.version != 5 || c.reason == nil || *c.reason != "short" || rec.Header().Get("ETag") != `"6"` {
+		t.Fatalf("status %d line %d version %d: %s", rec.Code, c.lineNo, c.version, rec.Body.String())
+	}
+	c.reason = nil
+	if rec := serveBody(t, c, http.MethodPost, path, "", principal(dutyConfirm), map[string]string{"If-Match": `"5"`}); rec.Code != http.StatusForbidden || c.reason != nil {
+		t.Fatalf("with only the confirm duty: %d", rec.Code)
+	}
+	if rec := serveBody(t, c, http.MethodPost, path, "", principal(dutyWrite), nil); rec.Code != http.StatusPreconditionRequired || c.reason != nil {
+		t.Fatalf("without If-Match: %d", rec.Code)
+	}
+	if rec := serveBody(t, c, http.MethodPost, orders+"/"+id+"/lines/0:cancel-remainder", "", principal(dutyWrite), map[string]string{"If-Match": `"5"`}); rec.Code != http.StatusBadRequest || c.reason != nil {
+		t.Fatalf("line 0: %d", rec.Code)
+	}
 }
 
 // TestCancelRemainder_DutyAndBody checks that :cancel-remainder needs

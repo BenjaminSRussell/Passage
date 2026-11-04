@@ -311,7 +311,7 @@ func (s *Postgres) AutoPack(ctx context.Context, id string, version int, unitWei
 			if err := checkVersion(sh, version); err != nil {
 				return AutoPackResult{}, err
 			}
-			if err := checkShippable(sh); err != nil {
+			if err := checkWorkable(ctx, tx, sh); err != nil {
 				return AutoPackResult{}, err
 			}
 			if sh.Status != domain.StatusPicked && sh.Status != domain.StatusPacked {

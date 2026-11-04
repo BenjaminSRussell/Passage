@@ -21,6 +21,15 @@ var PlanStarted = events.Type(Context, "plan", "started", 1)
 // (FR-22.7), in the run's transaction.
 var MessageRaised = events.Type(Context, "message", "raised", 1)
 
+// MessageApplied is published when a planner applies an action message (FR-22.7),
+// in the deciding transaction. The context that owns the source order (purchasing for
+// a purchase order, production for production and transfer orders) makes the change.
+var MessageApplied = events.Type(Context, "message", "applied", 1)
+
+// MessageDismissed is published when a planner dismisses an action message (FR-22.7),
+// in the deciding transaction.
+var MessageDismissed = events.Type(Context, "message", "dismissed", 1)
+
 // ForecastPublished is published when an approver publishes a submitted
 // forecast consensus (FR-22.9), in the publishing transaction.
 var ForecastPublished = events.Type(Context, "forecast", "published", 1)
@@ -37,7 +46,7 @@ var ScenarioSimulated = events.Type(Context, "scenario", "simulated", 1)
 
 // All lists the event types this service publishes.
 func All() []string {
-	return []string{PlanStarted, PlanCompleted, PlannedOrderFirmed, MessageRaised, ForecastPublished, ForecastGenerated, ScenarioSimulated}
+	return []string{PlanStarted, PlanCompleted, PlannedOrderFirmed, MessageRaised, MessageApplied, MessageDismissed, ForecastPublished, ForecastGenerated, ScenarioSimulated}
 }
 
 // ScenarioSimulatedData is the data member of scenario.simulated.v1. The
@@ -122,6 +131,30 @@ type MessageRaisedData struct {
 	SuggestedDate string  `json:"suggested_date"`
 	DelayDays     int     `json:"delay_days"`
 	Qty           string  `json:"qty"`
+}
+
+// MessageDecidedData is the data member of message.applied.v1 and message.dismissed.v1. The
+// message fields are those of message.raised.v1; Version is the message's ETag after the
+// decision and Note the planner's reason.
+type MessageDecidedData struct {
+	MessageID     string  `json:"message_id"`
+	PlanID        string  `json:"plan_id"`
+	PlanCode      string  `json:"plan_code"`
+	VersionID     string  `json:"version_id"`
+	SiteID        string  `json:"site_id"`
+	LegalEntityID *string `json:"legal_entity_id"`
+	Action        string  `json:"action"`
+	ItemID        string  `json:"item_id"`
+	// WarehouseID is the warehouse planning scope the message is about (FR-22.18); null for the site scope.
+	WarehouseID   *string `json:"warehouse_id"`
+	SupplyRef     string  `json:"supply_ref"`
+	DemandRef     string  `json:"demand_ref"`
+	SuggestedDate string  `json:"suggested_date"`
+	DelayDays     int     `json:"delay_days"`
+	Qty           string  `json:"qty"`
+	Version       int     `json:"version"`
+	DecidedBy     string  `json:"decided_by"`
+	Note          string  `json:"note"`
 }
 
 // PlannedOrderFirmedData is the data member of plannedorder.firmed.v1. The

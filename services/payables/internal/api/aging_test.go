@@ -43,6 +43,9 @@ func (f *fakeAgingStore) AgingRows(_ context.Context, le, asOf string) ([]domain
 type fakeLedger struct {
 	bal     ledger.Balance
 	err     error
+	grouped ledger.GroupBalance
+	groupAt string
+	groupEr error
 	account string
 	period  string
 	owner   string
@@ -62,6 +65,11 @@ func (f *fakeLedger) LegalEntity(context.Context, string, string) (string, error
 func (f *fakeLedger) AccountBalance(_ context.Context, _, _, account, period string) (ledger.Balance, error) {
 	f.account, f.period = account, period
 	return f.bal, f.err
+}
+
+func (f *fakeLedger) AccountBalanceByDimension(_ context.Context, _, _, account, period, attr string) (ledger.GroupBalance, error) {
+	f.account, f.period, f.groupAt = account, period, attr
+	return f.grouped, f.groupEr
 }
 
 func dec(s string) decimal.Decimal { return decimal.RequireFromString(s) }
@@ -258,21 +266,33 @@ func TestAging_MetricsCountOutcomes(t *testing.T) {
 func groupedRows() []domain.AgingRow {
 	due := time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC)
 	return []domain.AgingRow{
-		{VendorID: "v1", VendorGroupID: "g-b", Currency: "USD", DueDate: due, OpenAmount: dec("600.00")},
-		{VendorID: "v2", VendorGroupID: "g-a", Currency: "USD", DueDate: due, OpenAmount: dec("250.25")},
-		{VendorID: "v3", VendorGroupID: "g-a", Currency: "USD", DueDate: due.AddDate(0, 0, 40), OpenAmount: dec("149.75")},
+		{VendorID: "v1", VendorGroupID: "g-b", VendorGroupCode: "IMP", Currency: "USD", DueDate: due, OpenAmount: dec("600.00")},
+		{VendorID: "v2", VendorGroupID: "g-a", VendorGroupCode: "DOM", Currency: "USD", DueDate: due, OpenAmount: dec("250.25")},
+		{VendorID: "v3", VendorGroupID: "g-a", VendorGroupCode: "DOM", Currency: "USD", DueDate: due.AddDate(0, 0, 40), OpenAmount: dec("149.75")},
 		{VendorID: "v4", Currency: "USD", DueDate: due, OpenAmount: dec("0.50")},
 	}
 }
 
-func TestAging_ReconcileByVendorGroup(t *testing.T) {
-	l := &fakeLedger{bal: ledger.Balance{Currency: "USD", Credit: dec("1000.50")}}
+func groupedLedger(values map[string]string) *fakeLedger {
+	byValue := map[string]decimal.Decimal{}
+	total := decimal.Zero
+	for k, v := range values {
+		byValue[k] = dec(v)
+		total = total.Add(dec(v))
+	}
+	return &fakeLedger{bal: ledger.Balance{Currency: "USD", Credit: total}, grouped: ledger.GroupBalance{Currency: "USD", ByValue: byValue}}
+}
+
+func TestAging_ReconcileByVendorGroupComparesEachGroupWithTheLedgerSplit(t *testing.T) {
+	l := groupedLedger(map[string]string{"DOM": "400.00", "IMP": "600.00", "": "0.50"})
 	rec := get(agingRouter(&fakeAgingStore{rows: groupedRows()}, l, ""), reconcile+"&group_by=vendorGroup", "aging.reconcile", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	if rec.Code != http.StatusOK || l.groupAt != "VENDGRP" || l.account != api.DefaultControlAcct {
+		t.Fatalf("got %d %s (grouped on %q, account %q)", rec.Code, rec.Body, l.groupAt, l.account)
 	}
 	body := rec.Body.String()
-	order := []string{`"vendorGroupId":"g-a","currency":"USD","subledgerTotal":"400"`, `"vendorGroupId":"g-b","currency":"USD","subledgerTotal":"600"`, `"vendorGroupId":"UNASSIGNED","currency":"USD","subledgerTotal":"0.5"`}
+	order := []string{`"vendorGroupCode":"DOM","currency":"USD","subledgerTotal":"400","ledgerBalance":"400","difference":"0","comparable":true,"reconciled":true`,
+		`"vendorGroupCode":"IMP","currency":"USD","subledgerTotal":"600","ledgerBalance":"600","difference":"0","comparable":true,"reconciled":true`,
+		`"vendorGroupCode":"UNASSIGNED","currency":"USD","subledgerTotal":"0.5","ledgerBalance":"0.5"`}
 	last := -1
 	for _, want := range order {
 		i := strings.Index(body, want)
@@ -281,10 +301,52 @@ func TestAging_ReconcileByVendorGroup(t *testing.T) {
 		}
 		last = i
 	}
-	for _, want := range []string{`"reconciled":true`, `"difference":"0"`, `"comparable":false,"reason":"the ledger exposes one AP control balance`} {
+	for _, want := range []string{`"vendorGroupDimension":"VENDGRP"`, `"vendorGroupsReconciled":true`, `"reconciled":true`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body lacks %s: %s", want, body)
 		}
+	}
+}
+
+func TestAging_ReconcileByVendorGroupShowsAGroupThatDoesNotMatch(t *testing.T) {
+	// The total matches (1000.50) but 100 sits in the wrong group and OLD has a ledger balance with no open items.
+	l := groupedLedger(map[string]string{"DOM": "300.00", "IMP": "600.00", "": "0.50", "OLD": "100.00"})
+	l.grouped.ByValue["OLD"] = dec("100.00")
+	rec := get(agingRouter(&fakeAgingStore{rows: groupedRows()}, l, ""), reconcile+"&group_by=vendorGroup", "aging.reconcile", "")
+	body := rec.Body.String()
+	for _, want := range []string{`"vendorGroupCode":"DOM","currency":"USD","subledgerTotal":"400","ledgerBalance":"300","difference":"100","comparable":true,"reconciled":false`,
+		`"vendorGroupCode":"OLD","currency":"USD","subledgerTotal":"0","ledgerBalance":"100","difference":"-100"`, `"vendorGroupsReconciled":false`} {
+		if rec.Code != http.StatusOK || !strings.Contains(body, want) {
+			t.Fatalf("body lacks %s: %d %s", want, rec.Code, body)
+		}
+	}
+}
+
+func TestAging_ReconcileByVendorGroupWhenTheLedgerHasNoDimension(t *testing.T) {
+	l := groupedLedger(nil)
+	l.groupEr = &ledger.StatusError{Status: http.StatusBadRequest}
+	rec := get(agingRouter(&fakeAgingStore{rows: groupedRows()}, l, ""), reconcile+"&group_by=vendorGroup", "aging.reconcile", "")
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || !strings.Contains(body, `"comparable":false`) || !strings.Contains(body, "does not define the vendor group dimension") || !strings.Contains(body, `"vendorGroupsReconciled":false`) {
+		t.Fatalf("got %d %s", rec.Code, body)
+	}
+}
+
+func TestAging_ReconcileByVendorGroupLedgerFailureIs502(t *testing.T) {
+	l := groupedLedger(nil)
+	l.groupEr = &ledger.StatusError{Status: http.StatusInternalServerError}
+	if rec := get(agingRouter(&fakeAgingStore{rows: groupedRows()}, l, ""), reconcile+"&group_by=vendorGroup", "aging.reconcile", ""); rec.Code != http.StatusBadGateway {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAging_ReconcileByVendorGroupWithTheDimensionOff(t *testing.T) {
+	l := groupedLedger(nil)
+	r := httpx.NewRouter()
+	api.New(fakeDB{}, fakeValidator{}, fixedNow).WithAging(&fakeAgingStore{rows: groupedRows()}, l, "").WithVendorGroupDimension("").Register(r)
+	rec := get(r, reconcile+"&group_by=vendorGroup", "aging.reconcile", "")
+	if rec.Code != http.StatusOK || l.groupAt != "" || !strings.Contains(rec.Body.String(), "switched off") {
+		t.Fatalf("got %d %s (grouped on %q)", rec.Code, rec.Body, l.groupAt)
 	}
 }
 

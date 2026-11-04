@@ -208,6 +208,38 @@ func TestScheduler_ChangedScheduleMovesTheNextDueTime(t *testing.T) {
 	}
 }
 
+// The project's cron is read in its time zone: a 02:30 schedule in New York is due at 02:30 there, and moving the project
+// to another zone moves the binding's next slot.
+func TestScheduler_CronIsReadInTheProjectsTimeZone(t *testing.T) {
+	m := store.NewMem()
+	ctx := inTenant(1)
+	binding, project := setup(t, m, ctx)
+	ny, _ := time.LoadLocation("America/New_York")
+	berlin, _ := time.LoadLocation("Europe/Berlin")
+	fixed := time.Now()
+	sc := &syncer.Scheduler{Store: m, Runner: &fakeRunner{}, Now: func() time.Time { return fixed }}
+	project, err := m.UpdateProject(ctx, project.ID, project.Version, func(p *store.Project) error {
+		p.ScheduleCron, p.ScheduleTimezone = "30 2 * * *", "America/New_York"
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc.Tick(ctx)
+	want, _ := domain.CronNextIn("30 2 * * *", fixed, ny)
+	if st, _ := m.GetSync(ctx, binding.ID); st.ScheduleTimezone != "America/New_York" || st.NextDueAt == nil || !st.NextDueAt.Equal(want) {
+		t.Fatalf("next due = %+v, want %s", st.NextDueAt, want)
+	}
+	if _, err := m.UpdateProject(ctx, project.ID, project.Version, func(p *store.Project) error { p.ScheduleTimezone = "Europe/Berlin"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	sc.Tick(ctx)
+	want, _ = domain.CronNextIn("30 2 * * *", fixed, berlin)
+	if st, _ := m.GetSync(ctx, binding.ID); st.ScheduleTimezone != "Europe/Berlin" || st.NextDueAt == nil || !st.NextDueAt.Equal(want) {
+		t.Fatalf("after the zone changed: %+v, want %s", st, want)
+	}
+}
+
 // A long run holds one slot, not the loop: a binding that becomes due while it runs is started by a later tick.
 func TestScheduler_ALongRunDoesNotHoldBackOtherBindings(t *testing.T) {
 	m := store.NewMem()

@@ -12,6 +12,7 @@ import { GroupAssetDetailPage, GroupAssetsPage, NewGroupAssetPage } from "./Grou
 import { IndexSeriesPage, NewPolicyPage } from "./InsurancePage";
 import { InsuranceReportPage } from "./InsuranceReportPage";
 import { LeaseDetailPage, ModifyLeasePage } from "./LeaseDetailPage";
+import { LeaseProfilePage, LeasePostingPage } from "./LeasePostingPage";
 import { LeasesPage, NewLeasePage } from "./LeasesPage";
 import { MidQuarterPage } from "./MidQuarterPage";
 import { NewAssetPage } from "./NewAssetPage";
@@ -22,12 +23,14 @@ const assets: PassageModule = {
   id: "assets",
   title: "Fixed assets",
   description:
-    "Keep the asset register, add depreciation books and preview their schedules, post adjustments, impairments and additions, run and post depreciation, run the mid-quarter test, record insurance policies and review the insurance report, count assets on site, raise, approve and release capex requests, transfer or split assets, pool assets into group assets for tax depreciation, dispose of assets by sale or scrap, and recognize and remeasure IFRS 16 leases.",
+    "Keep the asset register, add depreciation books and preview their schedules, post adjustments, impairments and additions, run and post depreciation, run the mid-quarter test, record insurance policies and review the insurance report, count assets on site, raise, approve and release capex requests, transfer or split assets, pool assets into group assets for tax depreciation, dispose of assets by sale or scrap, and recognize, remeasure and book IFRS 16 leases in the general ledger.",
   routes: [
     { path: "/assets", element: createElement(AssetsPage), handle: { title: "Asset register" } },
     { path: "/assets/new", element: createElement(NewAssetPage), handle: { title: "New asset" } },
     { path: "/assets/leases", element: createElement(LeasesPage), handle: { title: "Leases" } },
     { path: "/assets/leases/new", element: createElement(NewLeasePage), handle: { title: "New lease" } },
+    { path: "/assets/leases/posting", element: createElement(LeasePostingPage), handle: { title: "Lease ledger posting" } },
+    { path: "/assets/leases/posting-profile", element: createElement(LeaseProfilePage), handle: { title: "Lease accounts" } },
     { path: "/assets/leases/:id", element: createElement(LeaseDetailPage), handle: { title: "Lease" } },
     { path: "/assets/leases/:id/modify", element: createElement(ModifyLeasePage), handle: { title: "Modify lease" } },
     { path: "/assets/count-sessions", element: createElement(CountSessionsPage), handle: { title: "Count sessions" } },
@@ -65,6 +68,8 @@ const assets: PassageModule = {
     { label: "Insurance report", to: "/assets/insurance-report", duty: "AssetView" },
     { label: "Count sessions", to: "/assets/count-sessions", duty: "AssetCount" },
     { label: "Leases", to: "/assets/leases", duty: "LeaseMaintain" },
+    { label: "Lease ledger posting", to: "/assets/leases/posting", duty: "AssetPostJournal" },
+    { label: "Lease accounts", to: "/assets/leases/posting-profile", duty: "LeaseMaintain" },
   ],
 };
 

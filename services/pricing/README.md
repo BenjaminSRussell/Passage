@@ -72,13 +72,21 @@ Built in slice 5:
 - **Pricing procedures** (FR-26.1): versioned procedures per legal entity and name (AX_STANDARD,
   SAP_RVAA01, ...). Each version holds steps 10–990 in increasing order with exactly one PRICE
   step, the condition type (the five the engine prices plus FREIGHT, REBATE_ACCRUAL, ROUNDING and
-  FREE_GOODS), an optional CEL requirement (≤ 512 characters), an exclusion group with its mode
+  FREE_GOODS; each type at most once, since records are keyed by type), an optional CEL requirement (≤ 512 characters), an exclusion group with its mode
   (BEST or FIRST, one mode per group), the statistical flag and the account key. Create numbers
   the next version under an advisory lock; `:revise` replaces a DRAFT's steps at its `revision`;
   `:activate` supersedes the ACTIVE version of the same name in one transaction and writes
   `procedure.activated`. ACTIVE and SUPERSEDED versions are immutable (409 PRC-0008). Writes need
-  `pricing.admin` (PricingAdmin). The engine still runs the reference step order; resolution by
-  the stored procedure is listed in NOT-IMPLEMENTED.md.
+  `pricing.admin` (PricingAdmin). Slice 14 makes the
+  engine run the ACTIVE procedure: `pricing_procedure_assignment` (migration `0014`) names the
+  procedure per legal entity and sales channel (an empty channel is the default), `resolve` and
+  `simulate` accept `salesChannel` and `procedure`, and the result names the procedure version
+  (part of the explain reference). Steps run in step order; one member of each exclusion group
+  survives per line (BEST lowest net, FIRST lowest step; losers stay in the trace with the
+  reason); a statistical step is reported with its amount and account key and leaves the net
+  alone. Every applied condition, PRICE included, carries its step number and account key.
+  Without an assignment the reference order runs. Step CEL requirements are stored but
+  not evaluated (NOT-IMPLEMENTED.md). Web: Procedure determination.
 - Migration `0005_procedures_campaigns.sql` (campaign, pricing_procedure, condition_record.campaign_id
   with a tenant-scoped foreign key; RLS and legal-entity scope on both new tables).
 - **Web**: campaign list, create and detail (kill and restore); procedure designer with the version
@@ -193,7 +201,7 @@ internal/domain/        pure engine: types, resolve, calc, journal validation an
 internal/store/         Postgres repository (pgx, tenant-scoped transactions, outbox)
 internal/api/           HTTP handlers and validation
 internal/events/        event type constants and payloads
-migrations/             0001_init.sql (condition_record, outbox, idempotency_keys), 0002 (journals, rebates), 0003 (commission, retro flag), 0004 (funds, promotions), 0005 (procedures, campaigns), 0006 (vendor rebates and claims); all with RLS
+migrations/             0001_init.sql (condition_record, outbox, idempotency_keys), 0002 (journals, rebates), 0003 (commission, retro flag), 0004 (funds, promotions), 0005 (procedures, campaigns), 0006 (vendor rebates and claims), 0014 (procedure determination); all with RLS
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml    AsyncAPI 3 for every published event
 charts/pricing/         Helm chart
@@ -281,6 +289,9 @@ testdata/               fixtures
 | GET | `/v1/pricing/procedures/{id}` | pricing.view | |
 | POST | `/v1/pricing/procedures/{id}:revise` | pricing.admin | body `{revision, steps}`; DRAFT only (PRC-0008); `Idempotency-Key` honoured |
 | POST | `/v1/pricing/procedures/{id}:activate` | pricing.admin | supersedes the ACTIVE version; `Idempotency-Key` honoured |
+| GET | `/v1/pricing/procedure-assignments?legalEntityId=` | pricing.view | the default (empty channel) first, then channels |
+| PUT | `/v1/pricing/procedure-assignments` | pricing.admin | body `{legalEntityId, salesChannel, procedureName, version}`; the procedure needs an ACTIVE version (PRC-0063); 412 on a stale version |
+| DELETE | `/v1/pricing/procedure-assignments?legalEntityId=&salesChannel=&version=` | pricing.admin | 204; the channel falls back to the default or the reference order |
 | GET | `/v1/pricing/parameters?legalEntityId=` | pricing.view | stored parameters or the defaults at version 0; 403 AUTH-0003 outside the caller's legal-entity scope |
 | PUT | `/v1/pricing/parameters` | pricing.admin | body `{legalEntityId, journalFourEyes, version}` (all required); 412 conflict_version; `parameters.changed`; `Idempotency-Key` honoured |
 | GET | `/healthz`, `/readyz`, `/metrics` | none | `/metrics` on the admin port |
@@ -323,6 +334,7 @@ testdata/               fixtures
 | PRC-0060 | 409 | The royalty period is closed and takes no more accruals |
 | PRC-0061 | 409 | The broker contract or royalty agreement is closed and takes no new invoice lines |
 | PRC-0062 | 409 | A royalty period is claimed before it is closed |
+| PRC-0063 | 422 | The named or assigned procedure has no ACTIVE version |
 | conflict_version | 412 | Body version does not match the stored version |
 | idempotency_key_reuse | 422 | Same `Idempotency-Key` with a different body, or an invoice line accrued again with a different date, value or quantity |
 | COM-0001 | 422 | Validation failure; `errors` maps each field to its message (percentages outside 0–100, a product-keyed TOTAL_DISC, bad dates, ...) |
@@ -343,6 +355,7 @@ Written to `outbox` in the same transaction as the change (see `events/asyncapi.
 - `dev.passage.pricing.fundusage.recorded.v1` (one per attribution, with the period usage and budget after it)
 - `dev.passage.pricing.campaign.killed.v1`, `dev.passage.pricing.campaign.restored.v1` (kill switch)
 - `dev.passage.pricing.procedure.activated.v1` (names the superseded version)
+- `dev.passage.pricing.procedureassignment.changed.v1` (a procedure was assigned to a sales channel, changed or cleared)
 - `dev.passage.pricing.parameters.changed.v1` (a legal entity's parameters after a change, with the version and the user: the audit record)
 - `dev.passage.pricing.brokercontract.created.v1` and `.closed.v1`; `dev.passage.pricing.royaltyagreement.created.v1` and `.closed.v1`
 - `dev.passage.pricing.contractaccrual.posted.v1` (one per broker or royalty accrual, credit or minimum royalty shortfall, with `posting_date`; Dr 6210 / Cr 2175 broker, Dr 6220 / Cr 2176 royalty by default)

@@ -6,6 +6,7 @@ import {
   BILLING_MODELS,
   createAgreement,
   describeProblem,
+  expireAgreements,
   listAgreements,
   listSlaProfiles,
   newKey,
@@ -35,17 +36,50 @@ const columns: DataTableColumn<Agreement>[] = [
 export function AgreementsPage() {
   const navigate = useNavigate();
   const [status, setStatus] = useState<AgreementStatus | "">("");
+  const [reloads, setReloads] = useState(0);
+  const [expiring, setExpiring] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [failure, setFailure] = useState<Problem | null>(null);
+
+  async function expire() {
+    setExpiring(true);
+    setNotice("");
+    setFailure(null);
+    try {
+      const res = await expireAgreements();
+      setNotice(res.expired === 0 ? "No agreement has passed its last day." : `${res.expired} agreement${res.expired === 1 ? "" : "s"} expired.`);
+      setReloads((n) => n + 1);
+    } catch (error) {
+      setFailure(describeProblem(error));
+    } finally {
+      setExpiring(false);
+    }
+  }
+
   return (
     <div className={styles.stack}>
       <PageHeader
         title="Service agreements"
         description="Agreements decide which cases are entitled, which SLA applies and what a work order bills."
         actions={
-          <Link className={buttonClassName("primary")} to="/service/agreements/new">
-            New agreement
-          </Link>
+          <div className={styles.actions}>
+            <Button loading={expiring} onClick={expire}>
+              Expire ended agreements
+            </Button>
+            <Link className={buttonClassName("primary")} to="/service/agreements/new">
+              New agreement
+            </Link>
+          </div>
         }
       />
+      <Alert tone="success" live="status">
+        {notice}
+      </Alert>
+      {failure ? (
+        <Alert tone="danger" title="The expiry pass failed" live="alert">
+          {failure.message} ({failure.code})
+        </Alert>
+      ) : null}
       <div className={styles.toolbar}>
         <FormField id="agreements-status" label="Status">
           {(control) => (
@@ -64,7 +98,7 @@ export function AgreementsPage() {
         label="Service agreements"
         columns={columns}
         load={(cursor, signal) => listAgreements({ status, cursor }, signal)}
-        loadKey={status}
+        loadKey={`${status}:${reloads}`}
         empty={{ title: "No service agreements yet", description: "Create an agreement to entitle a customer's cases." }}
         onRowOpen={(row) => navigate(`/service/agreements/${row.id}`)}
       />

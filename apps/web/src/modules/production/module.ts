@@ -13,6 +13,7 @@ import { JournalInquiryPage } from "./JournalInquiryPage";
 import { KpiPage } from "./KpiPage";
 import { OcmProfilesPage } from "./OcmProfilesPage";
 import { ParametersPage } from "./ParametersPage";
+import { MaterialRequirementsPage } from "./MaterialRequirementsPage";
 import { OperationsOverviewPage } from "./OperationsOverviewPage";
 import { OrderChangeDetailPage } from "./OrderChangeDetailPage";
 import { OrderChangesPage } from "./OrderChangesPage";
@@ -96,6 +97,11 @@ function SubcontractRoute() {
 function OperationsRoute() {
   const navigate = useNavigate();
   return createElement(OperationsOverviewPage, { onOpenOrder: (orderId) => navigate(open(orderId)) });
+}
+
+function MaterialsRoute() {
+  const navigate = useNavigate();
+  return createElement(MaterialRequirementsPage, { onOpenOrder: (orderId) => navigate(open(orderId)) });
 }
 
 function JobsRoute() {
@@ -184,7 +190,7 @@ const production: PassageModule = {
   id: "production",
   title: "Production",
   description:
-    "Production orders: create (also from the firmed planned orders of planning), estimate, schedule (dated jobs with infinite capacity), release, start, post picking lists, route cards and reports as finished, end with settlement; bulk status updates, split and merge, order-specific BOM and route edits; WIP balance and variance reports; subcontract operations with their vendor PO requests; the operations overview, the scheduled jobs and the production journals across orders; the order KPIs (on-time %, cycle days, scrap %, overdue orders) and the daily order cost snapshots; order changes from engineering changes with preview, change cost, apply and dismiss; order housekeeping (cancel stale orders, end fully reported orders); rework orders, as-built genealogy, production parameters and posting profiles.",
+    "Production orders: create (also from the firmed planned orders of planning), estimate, schedule (dated jobs with infinite capacity), release, start, post picking lists, route cards and reports as finished, end with settlement; bulk status updates, split and merge, order-specific BOM and route edits; WIP balance and variance reports; subcontract operations with their vendor PO requests; the operations overview, the material requirements of open orders, the scheduled jobs and the production journals across orders; the order KPIs (on-time %, cycle days, scrap %, overdue orders) and the daily order cost snapshots; order changes from engineering changes with preview, change cost, apply and dismiss; order housekeeping (cancel stale orders, end fully reported orders); rework orders, as-built genealogy, production parameters and posting profiles.",
   routes: [
     { path: list, element: createElement(OrdersRoute) },
     { path: `${list}/new`, element: createElement(CreateRoute), handle: { title: "New production order" } },
@@ -196,6 +202,7 @@ const production: PassageModule = {
     { path: `${list}/variances`, element: createElement(VariancesRoute), handle: { title: "Production variances" } },
     { path: `${list}/subcontract-operations`, element: createElement(SubcontractRoute), handle: { title: "Subcontract operations" } },
     { path: `${list}/operations`, element: createElement(OperationsRoute), handle: { title: "Operations overview" } },
+    { path: `${list}/material-requirements`, element: createElement(MaterialsRoute), handle: { title: "Material requirements" } },
     { path: `${list}/jobs`, element: createElement(JobsRoute), handle: { title: "Scheduled jobs" } },
     { path: `${list}/journals`, element: createElement(JournalsRoute), handle: { title: "Production journals" } },
     { path: `${list}/kpi`, element: createElement(KpiPage), handle: { title: "Production KPIs" } },
@@ -217,6 +224,7 @@ const production: PassageModule = {
     { label: "Production variances", to: `${list}/variances`, duty: "production.cost.read" },
     { label: "Subcontract operations", to: `${list}/subcontract-operations`, duty: "production.order.read" },
     { label: "Operations overview", to: `${list}/operations`, duty: "production.order.read" },
+    { label: "Material requirements", to: `${list}/material-requirements`, duty: "production.order.read" },
     { label: "Scheduled jobs", to: `${list}/jobs`, duty: "production.order.read" },
     { label: "Production journals", to: `${list}/journals`, duty: "production.order.read" },
     { label: "Production KPIs", to: `${list}/kpi`, duty: "production.order.read" },

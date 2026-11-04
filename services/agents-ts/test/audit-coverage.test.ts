@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { fixture, ownerUrl, type Fixture } from "./pgHelper.js";
 import { Pseudonymizer } from "../src/domain/redaction.js";
 import type {
   ApprovalDecision,
@@ -21,6 +22,7 @@ import {
   proposal,
   REAL_IBAN,
   ScriptedProvider,
+  TENANT,
   usd,
 } from "./fakes.js";
 
@@ -400,7 +402,7 @@ describe("audit and authorization invariants over generated runs (AC2, AC3)", ()
   const pick = <T>(r: () => number, xs: readonly T[]): T =>
     xs[Math.floor(r() * xs.length)] as T;
 
-  it("for 5,000 seeded runs: one row per proposal, no call beyond the user's duties, no lost approver", async () => {
+  const propertyRun = async (persisted?: Fixture): Promise<void> => {
     const r = prng(47);
     const counts = {
       committed: 0,
@@ -471,15 +473,19 @@ describe("audit and authorization invariants over generated runs (AC2, AC3)", ()
       ]);
       const deps = makeDeps({ provider, tools: port, approvals });
       if (killAt > 0) deps.killSwitch = killFromCheck(killAt);
+      if (persisted) deps.audit = persisted.store;
       const res = await runAgent(
         deps,
         makeRequest({
+          runId: `run-${i}`,
           agent,
           userDuties: duties,
           policy: r() < 0.5 ? autoPolicy : makeRequest().policy,
         }),
       );
 
+      if (persisted)
+        expect(await persisted.store.loadActions(TENANT, `run-${i}`), `run ${i}`).toEqual(res.actions);
       // A kill before the provider call means no proposal exists: no row, no call.
       if (provider.seen.length === 0) {
         expect(res.status).toBe("KILLED");
@@ -538,5 +544,21 @@ describe("audit and authorization invariants over generated runs (AC2, AC3)", ()
     // commits are the rarest outcome; seed 47 gives a fixed count per outcome.
     for (const [k, n] of Object.entries(counts))
       expect(n, k).toBeGreaterThanOrEqual(20);
+    if (persisted) {
+      const runs = await persisted.owner.query("select count(*)::int as n from agent_run");
+      expect(runs.rows[0].n).toBe(5000);
+    }
+  };
+
+  it("for 5,000 seeded runs: one row per proposal, no call beyond the user's duties, no lost approver", () => propertyRun());
+
+  describe.runIf(ownerUrl)("persisted in Postgres", () => {
+    let db: Fixture;
+    beforeAll(async () => {
+      db = await fixture();
+    });
+    afterAll(() => db.close());
+
+    it("for 5,000 seeded runs every run and action row is stored and reads back identical", () => propertyRun(db), 600_000);
   });
 });

@@ -197,3 +197,94 @@ func TestOrderKPIs_RejectsBadFiltersAndStoreFailure(t *testing.T) {
 		t.Fatalf("store failure: %d", rec.Code)
 	}
 }
+
+func (f *fakeStore) MaterialRequirements(_ context.Context, mf store.MaterialFilter) (store.MaterialRequirements, error) {
+	f.matFilters = append(f.matFilters, mf)
+	return f.matLines, f.getErr
+}
+
+func (f *fakeStore) MaterialItems(_ context.Context, mf store.MaterialFilter) (store.MaterialItems, error) {
+	f.matFilters = append(f.matFilters, mf)
+	return f.matItems, f.getErr
+}
+
+func TestMaterialRequirements_FormatsAndFilters(t *testing.T) {
+	order, item, site := ids.New(), ids.New(), ids.New()
+	due := "2026-11-30"
+	f := &fakeStore{}
+	f.matLines = store.MaterialRequirements{
+		Items: []store.MaterialLine{{OrderID: order, OrderNumber: "PO-000001", OrderStatus: domain.Released, SiteID: site, DueDate: &due, LineNumber: "10", LineSeq: 1,
+			ItemID: item, QtyRequired: decimal.RequireFromString("200.000000"), QtyIssued: decimal.RequireFromString("50"), QtyOutstanding: decimal.RequireFromString("150")}},
+		Totals: store.MaterialTotals{Lines: 4, Items: 2, Orders: 3}, NextCursor: order + ":1",
+	}
+	_, h := newServer(t, f)
+	expectProblem(t, do(h, call{method: http.MethodGet, path: "/v1/production/material-requirements", duties: []string{DutyCostRead}}), http.StatusForbidden, "AUTH-0003")
+	rec := do(h, call{method: http.MethodGet, duties: []string{DutyRead}, path: "/v1/production/material-requirements?itemId=" + item + "&siteId=" + site + "&orderId=" + order +
+		"&orderStatus=Released&dueFrom=2026-11-01&dueTo=2026-11-30&all=true&limit=10&cursor=" + order + ":5"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("requirements: %d %s", rec.Code, rec.Body.String())
+	}
+	var v materialRequirementsView
+	if err := json.Unmarshal(rec.Body.Bytes(), &v); err != nil {
+		t.Fatal(err)
+	}
+	row := v.Items[0]
+	if row.QtyRequired != "200" || row.QtyIssued != "50" || row.QtyOutstanding != "150" || row.LineNumber != "10" || *row.DueDate != due ||
+		v.Totals.Lines != 4 || v.Totals.Items != 2 || v.Totals.Orders != 3 || v.NextCursor != order+":1" {
+		t.Fatalf("view = %+v", v)
+	}
+	got := f.matFilters[0]
+	if got.ItemID != item || got.SiteID != site || got.OrderID != order || got.OrderStatus != domain.Released || got.DueFrom != "2026-11-01" || got.DueTo != "2026-11-30" ||
+		!got.All || got.Limit != 10 || got.CursorOrder != order || got.CursorSeq != 5 {
+		t.Fatalf("filter = %+v", got)
+	}
+	do(h, call{method: http.MethodGet, path: "/v1/production/material-requirements", duties: []string{DutyRead}})
+	if got := f.matFilters[1]; got != (store.MaterialFilter{Limit: defaultPageSize}) {
+		t.Fatalf("default filter = %+v", got)
+	}
+}
+
+func TestMaterialItems_FormatsAndFilters(t *testing.T) {
+	item := ids.New()
+	due := "2026-11-30"
+	f := &fakeStore{}
+	f.matItems = store.MaterialItems{Items: []store.MaterialItem{{ItemID: item, Orders: 2, Lines: 3, QtyRequired: decimal.RequireFromString("300"),
+		QtyIssued: decimal.RequireFromString("0"), QtyOutstanding: decimal.RequireFromString("300"), EarliestDue: &due}}, NextCursor: item}
+	_, h := newServer(t, f)
+	rec := do(h, call{method: http.MethodGet, duties: []string{DutyRead}, path: "/v1/production/material-requirements/by-item?limit=5&cursor=" + item})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("by item: %d %s", rec.Code, rec.Body.String())
+	}
+	var v materialItemsView
+	if err := json.Unmarshal(rec.Body.Bytes(), &v); err != nil {
+		t.Fatal(err)
+	}
+	if r := v.Items[0]; r.QtyOutstanding != "300" || r.Orders != 2 || r.Lines != 3 || *r.EarliestDue != due || v.NextCursor != item {
+		t.Fatalf("view = %+v", v)
+	}
+	if got := f.matFilters[0]; got.CursorItem != item || got.Limit != 5 {
+		t.Fatalf("filter = %+v", got)
+	}
+	expectProblem(t, do(h, call{method: http.MethodGet, path: "/v1/production/material-requirements/by-item", duties: []string{DutyCostRead}}), http.StatusForbidden, "AUTH-0003")
+}
+
+func TestMaterialRequirements_RejectsBadFiltersAndStoreFailure(t *testing.T) {
+	f := &fakeStore{}
+	_, h := newServer(t, f)
+	p := expectProblem(t, do(h, call{method: http.MethodGet, duties: []string{DutyRead},
+		path: "/v1/production/material-requirements?orderStatus=Open&itemId=v1&siteId=x&legalEntityId=y&orderId=z&dueFrom=2026-12-01&dueTo=2026-11-01&all=maybe&limit=501&cursor=bad"}),
+		http.StatusBadRequest, validationCode)
+	for _, name := range []string{"orderStatus", "itemId", "siteId", "legalEntityId", "orderId", "dueTo", "all", "limit", "cursor"} {
+		if _, ok := p.Errors[name]; !ok {
+			t.Errorf("no error for %s: %v", name, p.Errors)
+		}
+	}
+	expectProblem(t, do(h, call{method: http.MethodGet, duties: []string{DutyRead}, path: "/v1/production/material-requirements/by-item?cursor=1:2"}), http.StatusBadRequest, validationCode)
+	if len(f.matFilters) != 0 {
+		t.Fatalf("a refused filter reached the store: %+v", f.matFilters)
+	}
+	_, h = newServer(t, &fakeStore{getErr: httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "database unavailable")})
+	for _, path := range []string{"/v1/production/material-requirements", "/v1/production/material-requirements/by-item"} {
+		expectProblem(t, do(h, call{method: http.MethodGet, path: path, duties: []string{DutyRead}}), http.StatusServiceUnavailable, "COM-0503")
+	}
+}

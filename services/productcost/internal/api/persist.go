@@ -46,8 +46,11 @@ type Store interface {
 	PreviewActivation(ctx context.Context, in store.ActivationInput) (domain.RevalPreview, error)
 	ActivateVersion(ctx context.Context, in store.ActivationInput) (store.ActivationResult, bool, error)
 	ActivationPositions(ctx context.Context, versionID string) ([]inventory.Position, error)
+	StoreRoll(ctx context.Context, in store.RollInput) (store.RollResult, bool, error)
 	GetPostingAccounts(ctx context.Context, legalEntityID string) (store.PostingAccounts, error)
 	SetPostingAccounts(ctx context.Context, in store.PostingAccounts) (store.PostingAccounts, error)
+	ListActivationAttempts(ctx context.Context) ([]store.Attempt, error)
+	ResolveActivationAttempt(ctx context.Context, in store.ResolveInput) (store.ResolveResult, bool, error)
 }
 
 // WithStore attaches the repository. Without one the stored routes answer 503.

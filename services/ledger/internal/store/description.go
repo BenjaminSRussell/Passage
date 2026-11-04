@@ -213,7 +213,13 @@ func applyDefaultDescriptions(ctx context.Context, tx pgx.Tx, tenantID string, l
 	if !needed {
 		return in.Description, nil, nil
 	}
-	tpl, err := loadDescriptionTemplate(ctx, tx, tenantID, ledger.LegalEntityID, in.Source.Type, domain.DefaultDescriptionLanguage)
+	var tpl *DescriptionTemplate
+	var err error
+	for _, language := range domain.DescriptionLanguages(in.DescriptionLanguage) {
+		if tpl, err = loadDescriptionTemplate(ctx, tx, tenantID, ledger.LegalEntityID, in.Source.Type, language); err != nil || tpl != nil {
+			break
+		}
+	}
 	if err != nil || tpl == nil {
 		return in.Description, nil, err
 	}

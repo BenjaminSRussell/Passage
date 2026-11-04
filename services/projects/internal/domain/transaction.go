@@ -146,7 +146,7 @@ type Transaction struct {
 	SourceDocType string  `json:"sourceDocType"`
 	SourceDocID   *string `json:"sourceDocId,omitempty"`
 	Description   string  `json:"description"`
-	// JournalID stays empty until the wave-11 posting API posts the line (D2b).
+	// JournalID is the ledger entry that holds the line's cost once POST /gl-postings has booked it (D2b).
 	JournalID  *string   `json:"journalId,omitempty"`
 	ProposalID *string   `json:"proposalId,omitempty"`
 	CreatedBy  string    `json:"createdBy"`

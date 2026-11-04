@@ -39,7 +39,7 @@ internal/domain/       pure engine: low-level codes, lot sizing, netting, peggin
                        calculators: ddmrp.go, quota.go, strategy.go, shelflife.go, projection.go
 internal/store/        Postgres repository (pgx); a plan run is one transaction with its outbox events
 internal/api/          HTTP handlers under /v1/planning, RFC 9457 problems, /readyz with a database ping
-internal/events/       plan.started.v1, plan.completed.v1, message.raised.v1, plannedorder.firmed.v1 and forecast.published.v1 types and payloads
+internal/events/       plan.started.v1, plan.completed.v1, message.raised.v1, message.applied.v1, message.dismissed.v1, plannedorder.firmed.v1 and forecast.published.v1 types and payloads
 internal/forecastclient/ HTTP client of forecast-py for POST /forecasts/{modelCode}:generate (slice 28, FORECAST_URL, flag planning.statistical-forecast); forecast.generated.v1
 migrations/            0001_init.sql (plan, plan_version, planned_order, pegging, action_message, outbox; RLS on all)
                        0002_forecast_and_maintenance.sql (planned_order version/vendor/deleted, forecast_model, forecast_line; RLS)
@@ -363,7 +363,10 @@ NOT-IMPLEMENTED.md):
 | DELETE | `/v1/planning/planned-orders/{id}` | `planning.order.maintain` (If-Match required) |
 | POST | `/v1/planning/planned-orders:firm` | `planning.order.firm` (Idempotency-Key required) |
 | GET | `/v1/planning/planned-orders/{id}/pegging?depth=` | `planning.read` |
-| GET | `/v1/planning/messages?planCode=&action=&limit=` | `planning.read` |
+| GET | `/v1/planning/messages?planCode=&action=&status=&sort=&limit=` | `planning.read` (open messages unless `status` is applied, dismissed or all) |
+| GET | `/v1/planning/messages/{id}` | `planning.read` |
+| POST | `/v1/planning/messages/{id}:apply` | `planning.order.maintain` (If-Match required, Idempotency-Key optional) |
+| POST | `/v1/planning/messages/{id}:dismiss` | `planning.order.maintain` (If-Match required, Idempotency-Key optional) |
 | GET | `/v1/planning/forecasts/{modelCode}/lines?itemId=&siteId=&limit=` | `planning.read` |
 | PUT | `/v1/planning/forecasts/{modelCode}/lines` | `planning.forecast.maintain` (If-Match required) |
 | POST | `/v1/planning/forecasts/{modelCode}:submit` | `planning.forecast.maintain` (If-Match required) |

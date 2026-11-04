@@ -97,6 +97,8 @@ paths:
       responses:
         "201":
           description: Created
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Agreement" }
@@ -133,9 +135,162 @@ paths:
       responses:
         "200":
           description: The agreement
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Agreement" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/service/agreements/{id}:transition:
+    post:
+      operationId: transitionAgreement
+      summary: Activate, suspend, resume or cancel a service agreement (FR-45.3)
+      description: |
+        DRAFT to ACTIVE or CANCELED; ACTIVE to SUSPENDED or CANCELED; SUSPENDED to ACTIVE
+        (resume) or CANCELED. Only ACTIVE agreements entitle cases and cover work orders.
+        Suspending and canceling need a reason. Activating or resuming an agreement whose
+        validTo is behind today is refused (SVC-AGR-006). EXPIRED is not requested; the
+        expiry pass sets it. CANCELED and EXPIRED are final. Writes
+        `dev.passage.service.agreement.changed.v1` and a status history row in the same
+        transaction.
+      x-passage-duty: SvcAgreementMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional; a retry with the same key and request returns the first answer.
+          schema: { type: string, maxLength: 255 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              additionalProperties: false
+              properties:
+                to: { type: string, enum: [ACTIVE, SUSPENDED, CANCELED] }
+                reason: { type: string, maxLength: 500, description: Required when to is SUSPENDED or CANCELED }
+      responses:
+        "200":
+          description: Transitioned (a replay carries Idempotent-Replayed true)
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agreement" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/agreements:expire:
+    post:
+      operationId: expireAgreements
+      summary: Expire ACTIVE and SUSPENDED agreements whose validTo is behind today (FR-45.3)
+      description: |
+        One pass for the caller's tenant and legal-entity scope. Each expired agreement
+        writes `dev.passage.service.agreement.changed.v1` and a history row. Repeating the
+        pass changes nothing. A daily scheduler calls it.
+      x-passage-duty: SvcAgreementMaintain
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 5000, default: 500 }, description: Agreements handled in this pass }
+      responses:
+        "200":
+          description: The pass result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [scanned, expired]
+                properties:
+                  scanned: { type: integer }
+                  expired: { type: integer }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/service/agreements/{id}/visits:
+    post:
+      operationId: recordAgreementVisit
+      summary: Consume one included visit of an agreement line (FR-45.3)
+      description: |
+        The agreement must be ACTIVE (SVC-AGR-007) and cover the visit date (SVC-AGR-008);
+        the line must exist (SVC-AGR-009) and still have an included visit (SVC-AGR-010). A
+        visit tied to a work order requires an order of this agreement (SVC-AGR-011) and
+        consumes at most one visit per order (SVC-AGR-012). Writes
+        `dev.passage.service.agreementvisit.recorded.v1`.
+      x-passage-duty: SvcAgreementMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lineIndex, kind, visitDate]
+              additionalProperties: false
+              properties:
+                lineIndex: { type: integer, minimum: 0, description: Zero-based index in the agreement's lines }
+                kind: { type: string, enum: [PREVENTIVE, CORRECTIVE] }
+                visitDate: { type: string, format: date }
+                workOrderId: { type: [string, "null"], format: uuid }
+                note: { type: string, maxLength: 500 }
+      responses:
+        "201":
+          description: Recorded, with the visits left on the line
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgreementVisit" }
+        "200": { $ref: "#/components/responses/Replayed" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listAgreementVisits
+      summary: List the visits consumed from an agreement, oldest first
+      x-passage-duty: SvcInquire
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The visits
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/AgreementVisit" } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/service/agreements/{id}/history:
+    get:
+      operationId: listAgreementHistory
+      summary: List the status changes of an agreement, oldest first
+      x-passage-duty: SvcInquire
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The status changes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/AgreementChange" } }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
@@ -1709,7 +1864,7 @@ components:
       properties:
         serviceObjectId: { type: string, format: uuid }
         categoryId: { type: string, format: uuid }
-        includedVisits: { type: integer, minimum: 0, description: Recorded; visit consumption is a later slice }
+        includedVisits: { type: integer, minimum: 0, description: Visits the line includes; recorded visits consume them (record a visit on the agreement) }
         includedHours: { type: string, description: decimal labor hours consumed first-in first-out (BR-45.4) }
         partsCovered: { type: boolean }
         laborCovered: { type: boolean }
@@ -1741,6 +1896,32 @@ components:
             number: { type: string, example: SA-000001 }
             status: { type: string, enum: [DRAFT, ACTIVE, SUSPENDED, EXPIRED, CANCELED] }
             hoursConsumed: { type: string, description: Included labor hours consumed by posted work orders }
+            visitsConsumed: { type: integer, description: Visits recorded over all lines }
+            statusReason: { type: string, description: Reason of the last suspension or cancellation }
+            version: { type: integer, minimum: 1, description: Version for If-Match; also the ETag }
+    AgreementVisit:
+      type: object
+      required: [id, agreementId, lineIndex, kind, visitDate, workOrderId, note, visitsLeft, recordedBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        agreementId: { type: string, format: uuid }
+        lineIndex: { type: integer, minimum: 0 }
+        kind: { type: string, enum: [PREVENTIVE, CORRECTIVE] }
+        visitDate: { type: string, format: date }
+        workOrderId: { type: [string, "null"], format: uuid }
+        note: { type: string }
+        recordedBy: { type: string, description: User id of the caller }
+        createdAt: { type: string, format: date-time }
+        visitsLeft: { type: integer, minimum: 0, description: Visits left on the line once this visit was recorded }
+    AgreementChange:
+      type: object
+      required: [from, to, reason, actor, at]
+      properties:
+        from: { type: string, enum: [DRAFT, ACTIVE, SUSPENDED, EXPIRED, CANCELED] }
+        to: { type: string, enum: [DRAFT, ACTIVE, SUSPENDED, EXPIRED, CANCELED] }
+        reason: { type: string }
+        actor: { type: string }
+        at: { type: string, format: date-time }
     AgreementPage:
       type: object
       required: [items]

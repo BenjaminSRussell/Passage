@@ -9,6 +9,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
+	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/store"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/migrations"
 )
@@ -149,5 +150,61 @@ func TestSalesOrderType_StoredJournalBlocksPost(t *testing.T) {
 	confirm("ORDER", 3)
 	if _, err := s.PostPackingSlip(ctx, sh.ID, sh.Version, post, idem("order")); err != nil {
 		t.Fatalf("post after the order became ORDER: %v", err)
+	}
+}
+
+// An active hold also stops pick, pack and auto-pack (FUL-0001), not only the post; a wave pick of the rest
+// leaves the held order's shipment out instead of failing the wave, and releasing the hold lifts all of it.
+func TestSalesOrderHold_BlocksPickPackAndAutoPack(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(app, "0614141", 0)
+	ctx := ctxFor(35, "")
+	warehouse, le, customer := ids.New(), ids.New(), ids.New()
+	shipments := releaseMany(t, s, ctx, warehouse, le, []int{3, 3}, []string{customer, customer}, func(int) string { return "Z1" })
+	held, free := shipments[0], shipments[1]
+	hold := ids.New()
+	apply := func(active bool, version int) {
+		t.Helper()
+		err := dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
+			_, err := s.ApplyOrderHold(ctx, tx, store.OrderHoldIn{OrderID: held.OrderID, HoldID: hold, HoldType: "CREDIT", Active: active, Version: version, EventID: "e"})
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	apply(true, 2)
+	line := held.Lines[0]
+	pick := []store.PickInput{{ShipmentLineID: line.ID, Picked: line.Planned}}
+	if _, err := s.ConfirmPick(ctx, held.ID, held.Version, pick, idem("pick")); problemCode(err) != store.CodeOrderHeld {
+		t.Fatalf("pick on a held order = %v, want %s", err, store.CodeOrderHeld)
+	}
+	if _, err := s.PackContainer(ctx, held.ID, held.Version, "CARTON-C12", []store.PackInput{{ShipmentLineID: line.ID, Qty: line.Planned}}, idem("pack")); problemCode(err) != store.CodeOrderHeld {
+		t.Fatalf("pack on a held order = %v, want %s", err, store.CodeOrderHeld)
+	}
+	if _, err := s.AutoPack(ctx, held.ID, held.Version, nil, idem("auto")); problemCode(err) != store.CodeOrderHeld {
+		t.Fatalf("auto-pack on a held order = %v, want %s", err, store.CodeOrderHeld)
+	}
+	waves, err := s.CreateWaves(ctx, store.WaveRequest{WarehouseID: warehouse, GroupBy: domain.GroupCarrier, Limits: domain.WaveLimits{MaxLines: 20, MaxOrders: 50}}, idem("w"))
+	if err != nil || len(waves) != 1 {
+		t.Fatalf("CreateWaves: %d waves, %v", len(waves), err)
+	}
+	res, err := s.ConfirmWavePick(ctx, waves[0].ID, nil, true, idem("wp"))
+	if err != nil || len(res.Shipments) != 1 || res.Shipments[0].ID != free.ID {
+		t.Fatalf("wave pick over a held order: %+v, %v; want only the free shipment picked", res, err)
+	}
+	if _, err := s.ConfirmWavePick(ctx, waves[0].ID, []store.PickInput{{ShipmentLineID: line.ID, Picked: line.Planned}}, false, idem("wp2")); problemCode(err) != store.CodeOrderHeld {
+		t.Fatalf("naming a held line in a wave pick = %v, want %s", err, store.CodeOrderHeld)
+	}
+	apply(false, 3)
+	now, err := s.GetShipment(ctx, held.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ConfirmPick(ctx, held.ID, now.Version, pick, idem("pick2")); err != nil {
+		t.Fatalf("pick after the hold was released: %v", err)
 	}
 }

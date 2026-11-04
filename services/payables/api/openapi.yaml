@@ -107,7 +107,7 @@ paths:
         - { name: legal_entity, in: query, required: false, schema: { type: string, format: uuid } }
         - { name: as_of, in: query, required: false, schema: { type: string, format: date } }
         - { name: ledger, in: query, required: true, description: Ledger holding the control account for the legal entity., schema: { type: string, format: uuid } }
-        - { name: group_by, in: query, required: false, description: "vendorGroup adds vendorGroups, the open AP per currency and vendor group (open items without a group are UNASSIGNED). The ledger exposes one AP control balance per ledger, so group lines are a breakdown of the currency total and are never comparable; reconciled still reflects the per-currency comparison. The aging report rejects vendorGroup.", schema: { type: string, enum: [vendor, vendorGroup, none], default: none } }
+        - { name: group_by, in: query, required: false, description: "vendorGroup adds vendorGroups: per currency and vendor group code, the open AP of the subledger against the AP control balance of the ledger lines carrying that code as the VENDGRP dimension (ledger balances with group_by=VENDGRP; open items and ledger lines without a code are UNASSIGNED). vendorGroupsReconciled is true only when every line is comparable and reconciles; reconciled still reflects the per-currency comparison. When the ledger does not define VENDGRP the lines are not comparable and say so. The aging report rejects vendorGroup.", schema: { type: string, enum: [vendor, vendorGroup, none], default: none } }
       responses:
         '200':
           description: Per-currency differences and the overall reconciled flag.
@@ -151,6 +151,7 @@ paths:
   /v1/payables/open-items/{id}:
     get:
       operationId: getOpenItem
+      summary: Read one AP open item
       x-passage-duty: open-item.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -319,6 +320,7 @@ paths:
   /v1/payables/payment-proposals/{id}:
     get:
       operationId: getPaymentProposal
+      summary: Read one payment proposal with its groups and lines
       x-passage-duty: payment-proposal.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -409,6 +411,7 @@ paths:
   /v1/payables/payment-runs/{id}:
     get:
       operationId: getPaymentRun
+      summary: Read one payment run
       x-passage-duty: payment-run.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -427,7 +430,7 @@ paths:
     get:
       operationId: getPaymentRunFile
       x-passage-duty: payment-run.execute
-      description: The generated pain.001.001.09 file, which carries the payees' full bank details, so it needs the execute duty and every read is audited (log line "audit: payment file read" and payables_payment_file_reads_total). 404 until the generate-file step has run.
+      description: 'The generated pain.001.001.09 file, which carries the payees'' full bank details, so it needs the execute duty and every read is audited (log line "audit: payment file read" and payables_payment_file_reads_total). 404 until the generate-file step has run.'
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -613,16 +616,21 @@ components:
         reconciled: { type: boolean, description: True only when every currency reconciles. }
         vendorGroups:
           type: array
-          description: Present with group_by=vendorGroup; the subledger total per currency and vendor group, UNASSIGNED last per currency.
+          description: Present with group_by=vendorGroup; per currency and vendor group code, the subledger total against the ledger control balance of the VENDGRP dimension, UNASSIGNED last per currency.
           items:
             type: object
-            required: [vendorGroupId, currency, subledgerTotal, comparable, reason]
+            required: [vendorGroupCode, currency, subledgerTotal, comparable, reconciled]
             properties:
-              vendorGroupId: { type: string, description: Vendor group uuid or UNASSIGNED. }
+              vendorGroupCode: { type: string, description: Vendor group short code or UNASSIGNED. }
               currency: { type: string }
               subledgerTotal: { type: string }
+              ledgerBalance: { type: string, description: Credits minus debits of the control account for the code; absent when the ledger side is unavailable. }
+              difference: { type: string, description: Subledger minus ledger; absent when not comparable. }
               comparable: { type: boolean }
-              reason: { type: string }
+              reconciled: { type: boolean }
+              reason: { type: string, description: Why the line is not comparable. }
+        vendorGroupDimension: { type: string, description: The ledger dimension attribute the vendor group lines were compared on; present with vendorGroups. }
+        vendorGroupsReconciled: { type: boolean, description: True when every vendor group line is comparable and reconciles; present with vendorGroups. }
         currencies:
           type: array
           items:
@@ -645,6 +653,7 @@ components:
         legalEntityId: { type: string, format: uuid }
         vendorId: { type: string, format: uuid }
         vendorGroupId: { type: string, format: uuid, description: Vendor group at creation (invoice.posted vendor_group_id); absent when the event carried none. }
+        vendorGroupCode: { type: string, description: Short code of the vendor group (invoice.posted vendor_group_code, the VENDGRP ledger dimension value); absent when the event carried none. }
         sourceInvoiceId: { type: string, format: uuid }
         invoiceNumber: { type: string }
         invoiceDate: { type: string, format: date }
@@ -658,6 +667,7 @@ components:
         status: { type: string, enum: [OPEN, PARTIALLY_SETTLED, SETTLED, REVERSED] }
         version: { type: integer }
         paymentHold: { type: boolean }
+        payeeUnverified: { type: boolean, description: "True for an item whose payee id (an employee worker id) is not yet verified against the vendor master; with bank bindings on it is left out of proposals until it resolves." }
         valuation:
           type: object
           description: Present when value_in is set. amount is openAmount times rate rounded to the minor unit of currency.
@@ -770,6 +780,16 @@ components:
         failedAt: { type: string, format: date-time }
         totalValued: { type: string, description: Sum of group valued amounts in legalEntityCurrency. }
         totalWithheld: { type: object, additionalProperties: { type: string }, description: Tax withheld per group currency; never summed across currencies. }
+        excludedItems:
+          type: array
+          description: Only on the 201 that created the proposal. Open items left out because their payee (for example an expense reimbursement to an employee) is not in the vendor master; reason PAYEE_UNVERIFIED. They stay open and are offered again once the payee resolves.
+          items:
+            type: object
+            required: [itemId, vendorId, reason]
+            properties:
+              itemId: { type: string, format: uuid }
+              vendorId: { type: string, format: uuid }
+              reason: { type: string, enum: [PAYEE_UNVERIFIED] }
         groups:
           type: array
           items:

@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -12,6 +14,7 @@ const (
 	paintID   = "22222222-2222-2222-2222-222222222222"
 	latheID   = "33333333-3333-3333-3333-333333333333"
 	paintBoth = "44444444-4444-4444-4444-444444444444"
+	productID = "55555555-5555-5555-5555-555555555555"
 )
 
 // editFixture is an order of 100: line 10 needs 3.05 kg per unit (305 kg), and two
@@ -235,4 +238,104 @@ func TestVariancePct(t *testing.T) {
 	if VariancePct(d("10"), decimal.Zero) != nil {
 		t.Error("a variance with nothing planned has no percentage")
 	}
+}
+
+func TestApplyCoProductEdits_Rules(t *testing.T) {
+	base := func() []CoProduct {
+		cos, err := PlanCoProducts([]CoProduct{{LineNo: "C1", ItemID: steelID, QtyPer: d("0.2")}}, d("100"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cos
+	}
+	cases := []struct {
+		name     string
+		edits    []CoProductEdit
+		journal  map[string]bool
+		reported string
+		code     string
+		check    func(t *testing.T, cos []CoProduct, audit []EditAudit)
+	}{
+		{name: "add defaults to a co-product", edits: []CoProductEdit{{Op: EditAdd, LineNo: "C2", ItemID: ptr(paintID), QtyPer: dp("0.015")}},
+			check: func(t *testing.T, cos []CoProduct, audit []EditAudit) {
+				// 0.015 × 100 = 1.5.
+				if len(cos) != 2 || cos[1].Type != CoProductTypeCo || !cos[1].QtyPlanned.Equal(d("1.5")) || audit[0].CoBefore != nil || audit[0].CoAfter == nil {
+					t.Fatalf("cos %+v audit %+v", cos, audit)
+				}
+			}},
+		{name: "add a by-product", edits: []CoProductEdit{{Op: EditAdd, LineNo: "C2", Type: ptr(CoProductTypeBy), ItemID: ptr(paintID), QtyPer: dp("1")}},
+			check: func(t *testing.T, cos []CoProduct, _ []EditAudit) {
+				if cos[1].Type != CoProductTypeBy || cos[1].CarriesCost() {
+					t.Fatalf("cos %+v", cos)
+				}
+			}},
+		{name: "add twice", edits: []CoProductEdit{{Op: EditAdd, LineNo: "C1", ItemID: ptr(paintID), QtyPer: dp("1")}}, code: CodeEditTargetExists},
+		{name: "add without quantity", edits: []CoProductEdit{{Op: EditAdd, LineNo: "C2", ItemID: ptr(paintID)}}, code: CodeInvalidInput},
+		{name: "add with a bad type", edits: []CoProductEdit{{Op: EditAdd, LineNo: "C2", Type: ptr("waste"), ItemID: ptr(paintID), QtyPer: dp("1")}}, code: CodeInvalidInput},
+		{name: "change replans the quantity", edits: []CoProductEdit{{Op: EditChange, LineNo: "C1", QtyPer: dp("0.25")}},
+			check: func(t *testing.T, cos []CoProduct, audit []EditAudit) {
+				if !cos[0].QtyPlanned.Equal(d("25")) || !audit[0].CoBefore.QtyPlanned.Equal(d("20")) {
+					t.Fatalf("cos %+v audit %+v", cos, audit)
+				}
+			}},
+		{name: "change with no field", edits: []CoProductEdit{{Op: EditChange, LineNo: "C1"}}, code: CodeInvalidInput},
+		{name: "change a missing line", edits: []CoProductEdit{{Op: EditChange, LineNo: "C9", QtyPer: dp("1")}}, code: CodeEditTargetMissing},
+		{name: "remove", edits: []CoProductEdit{{Op: EditRemove, LineNo: "C1"}},
+			check: func(t *testing.T, cos []CoProduct, audit []EditAudit) {
+				if len(cos) != 0 || audit[0].CoBefore == nil || audit[0].CoAfter != nil {
+					t.Fatalf("cos %+v audit %+v", cos, audit)
+				}
+			}},
+		{name: "remove a missing line", edits: []CoProductEdit{{Op: EditRemove, LineNo: "C9"}}, code: CodeEditTargetMissing},
+		{name: "remove a journaled line", edits: []CoProductEdit{{Op: EditRemove, LineNo: "C1"}}, journal: map[string]bool{"C1": true}, code: CodeEditTargetInUse},
+		{name: "change the item of a journaled line", edits: []CoProductEdit{{Op: EditChange, LineNo: "C1", ItemID: ptr(paintID)}}, journal: map[string]bool{"C1": true}, code: CodeEditTargetInUse},
+		{name: "change the quantity of a journaled line", edits: []CoProductEdit{{Op: EditChange, LineNo: "C1", QtyPer: dp("0.3")}}, journal: map[string]bool{"C1": true},
+			check: func(t *testing.T, cos []CoProduct, _ []EditAudit) {
+				if !cos[0].QtyPlanned.Equal(d("30")) {
+					t.Fatalf("cos %+v", cos)
+				}
+			}},
+		{name: "plan below the reported quantity", edits: []CoProductEdit{{Op: EditChange, LineNo: "C1", QtyPer: dp("0.1")}}, reported: "12", code: CodeEditTargetInUse},
+		{name: "add the order's own product", edits: []CoProductEdit{{Op: EditAdd, LineNo: "C2", ItemID: ptr(productID), QtyPer: dp("1")}}, code: CodeInvalidInput},
+		{name: "change to the order's own product", edits: []CoProductEdit{{Op: EditChange, LineNo: "C1", ItemID: ptr(productID)}}, code: CodeInvalidInput},
+		{name: "more lines than an order declares", edits: manyCoProductAdds(MaxCoProducts), code: CodeInvalidInput},
+		{name: "edits apply in order", edits: []CoProductEdit{{Op: EditAdd, LineNo: "C2", ItemID: ptr(paintID), QtyPer: dp("1")}, {Op: EditRemove, LineNo: "C2"}},
+			check: func(t *testing.T, cos []CoProduct, audit []EditAudit) {
+				if len(cos) != 1 || len(audit) != 2 {
+					t.Fatalf("cos %+v audit %+v", cos, audit)
+				}
+			}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cos := base()
+			if c.reported != "" {
+				cos[0].QtyReported = d(c.reported)
+			}
+			orig := append([]CoProduct(nil), cos...)
+			got, audit, err := ApplyCoProductEdits(cos, d("100"), productID, c.edits, c.journal)
+			if c.code != "" {
+				var de *Error
+				if !errors.As(err, &de) || de.Code != c.code {
+					t.Fatalf("err = %v, want %s", err, c.code)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			} else {
+				c.check(t, got, audit)
+			}
+			if cos[0] != orig[0] {
+				t.Fatalf("input modified: %+v", cos)
+			}
+		})
+	}
+}
+
+// manyCoProductAdds adds n lines C100, C101, … of paint.
+func manyCoProductAdds(n int) []CoProductEdit {
+	out := make([]CoProductEdit, n)
+	for i := range out {
+		out[i] = CoProductEdit{Op: EditAdd, LineNo: fmt.Sprintf("C%d", 100+i), ItemID: ptr(paintID), QtyPer: dp("1")}
+	}
+	return out
 }

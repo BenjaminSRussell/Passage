@@ -112,7 +112,7 @@ paths:
         - { name: Idempotency-Key, in: header, schema: { type: string } }
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, additionalProperties: false, required: [mapping], properties: { mapping: { type: object, description: "Mapping DSL document with entity, version, fields (a field may name a source format or the codepage_normalize function), optional rejectWhen conditions (field, op, value or values, reason code) and at least one test." } } } } }
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [mapping], properties: { mapping: { type: object, description: "Mapping DSL document with entity, version, fields (a field may name a source format, the codepage_normalize function, or rule expr with an expr expression over source columns: + - * / comparisons && || ! and the functions round, min, max, abs, concat, substr, upper, lower, trim, len, isempty, coalesce, if), optional rejectWhen conditions (field, op, value or values, reason code; op expr takes an expression over mapped targets as value and rejects when it is true) and at least one test." } } } } }
       responses:
         '201':
           description: A new spec version was stored.
@@ -994,7 +994,7 @@ paths:
     post:
       operationId: recordOutboundXref
       summary: Record the legacy key of a pushed record
-      description: "Called by the integration hub (service token, issuer integration-hub) after the legacy ERP accepted a push and answered with the key it assigned. Stores the key in the cross-reference so later events about the record resolve it, and the record resolves in both directions. Only the subject entity of the mapping is recorded, and an existing cross-reference row is never repointed. A subject the owning service keeps per legal entity (everything except party, product and item) is recorded with the token's legal entity, which later lookups from other legal entities do not resolve. An existing row is never changed, its legal entity included: one already tagged with another legal entity is 409 MIG-XREF-CONFLICT, an untagged one is accepted and stays untagged. Idempotent on eventId: a repeat of the same call is 204 again; the same event with another key is 409."
+      description: "Called by the integration hub (service token, issuer integration-hub) after the legacy ERP accepted a push and answered with the key it assigned. Stores the key in the cross-reference so later events about the record resolve it, and the record resolves in both directions. Only the subject entities of the mapping (the header's and its collections') are recorded, every ref in one transaction (one conflict undoes the call), and an existing cross-reference row is never repointed. A subject the owning service keeps per legal entity (everything except party, product and item) is recorded with the token's legal entity, which later lookups from other legal entities do not resolve. An existing row is never changed, its legal entity included: one already tagged with another legal entity is 409 MIG-XREF-CONFLICT, an untagged one is accepted and stays untagged. Idempotent on eventId: a repeat of the same call is 204 again; the same event with another key is 409."
       x-passage-duty: migration.xref.record
       requestBody:
         required: true
@@ -1002,7 +1002,7 @@ paths:
       responses:
         '204': { description: The legacy key is recorded (or was already, for the same event). }
         '400':
-          description: COM-0001, a field is missing or malformed (more than one ref, a ref id that is not a UUID, an empty legacy key or event id).
+          description: COM-0001, a field is missing or malformed (more than one ref without its own legacyKey, a ref id that is not a UUID, an empty legacy key or event id).
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '403':
           description: AUTH-0003, the caller is not the integration hub.
@@ -1014,7 +1014,7 @@ paths:
           description: MIG-XREF-EVENT-CONFLICT (the event already recorded another key or record) or MIG-XREF-CONFLICT (the legacy key belongs to another Passage record).
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
-          description: MIG-XREF-REF-MISMATCH, the ref's entity is not the subject entity of the mapping.
+          description: MIG-XREF-REF-MISMATCH, a ref's entity is neither the subject entity nor a collection subject entity of the mapping.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/integration/lookup-tables:
@@ -1125,6 +1125,55 @@ paths:
           content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/LookupVersion' } } } } } }
         '404':
           description: MIG-LOOKUP-NOT-FOUND.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/lookup-tables/{id}:import:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: importLookupTableEntries
+      summary: Import entries into a lookup table from CSV
+      description: "Reads a CSV file and writes the next version of the table under the caller's version (409 MIG-VERSION-CONFLICT when it is stale). One entry per line: the key parts in the leading cells (up to three) and the value in the last cell, for example from,to,factor for a unit table or item,currency,price for a price list; a key already joined with | reads the same. Mode merge keeps the entries the file does not mention, replace keeps only the file's. A line that is not valid for the table's kind, or a key that appears twice, is reported with its line (at most ten lines, MIG-LOOKUP-INVALID) and nothing is saved. A file that changes nothing writes no version (written is false). The table still holds at most 5000 entries after the import. An archived table is refused."
+      x-passage-duty: migration.project.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ImportLookupEntries' } } }
+      responses:
+        '200':
+          description: The table (at its new version when written is true) and what the import did to its entries.
+          content: { application/json: { schema: { $ref: '#/components/schemas/LookupImportResult' } } }
+        '400':
+          description: The version, mode or csv is missing or malformed.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: MIG-LOOKUP-NOT-FOUND.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: MIG-VERSION-CONFLICT or MIG-LOOKUP-ARCHIVED.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-LOOKUP-INVALID, the file has no entries, a line is not valid for the kind, or the result exceeds 5000 entries.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/lookup-tables/{id}/entries.csv:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: exportLookupTableEntries
+      summary: Export a lookup table as CSV
+      description: The entries of the current version, or of the version named in the query, as CSV in key order, one entry per line with the key parts in separate cells and the value last, no header line. A cell that a spreadsheet would run as a formula (starting with = + - @, a tab or a carriage return, after any apostrophes) is written with one more leading apostrophe, which the import removes again, so the file can be edited and imported back unchanged.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: version, in: query, description: A version to export instead of the current one., schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: The entries as an attachment named <table>-v<version>.csv.
+          content: { text/csv: { schema: { type: string } } }
+        '400':
+          description: The version is not a positive integer.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: MIG-LOOKUP-NOT-FOUND or MIG-LOOKUP-VERSION-NOT-FOUND.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/integration/parallel-run-diffs:
@@ -1545,7 +1594,8 @@ components:
         connectionProfileId: { type: string, format: uuid, description: Migrate projects only. The connection profile the project reads from. }
         status: { type: string, enum: [active, archived] }
         cutoverAt: { type: string, format: date-time }
-        scheduleCron: { type: string, maxLength: 100, description: "Five-field cron expression (numbers, ranges, lists and steps; no names or macros) for recurring incremental imports, at least 15 minutes between runs (FR-10.16); stored, not yet run by a scheduler." }
+        scheduleCron: { type: string, maxLength: 100, description: "Five-field cron expression (numbers, ranges, lists and steps; no names or macros) for recurring incremental imports, at least 15 minutes between runs (FR-10.16), read in scheduleTimezone. The delta sync scheduler runs it for the bindings of the project's connection profile." }
+        scheduleTimezone: { type: string, maxLength: 64, description: "IANA time zone name the scheduleCron is read in, UTC unless set; a nonexistent local time (02:30 on a spring-forward day) runs once, at the instant it would have shown." }
         version: { type: integer, minimum: 1 }
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
@@ -1563,7 +1613,8 @@ components:
         targetLegalEntityId: { type: string, format: uuid, description: "Required for a copy project (different from the source); optional for a migrate project, which has no source legal entity." }
         connectionProfileId: { type: string, format: uuid, description: Migrate projects only. The connection profile the project reads from; it must be active and have the same source system. }
         cutoverAt: { type: string, format: date-time }
-        scheduleCron: { type: string, maxLength: 100, description: Five-field cron expression with at least 15 minutes between runs (FR-10.16). }
+        scheduleCron: { type: string, maxLength: 100, description: Five-field cron expression with at least 15 minutes between runs (FR-10.16). Read in scheduleTimezone. }
+        scheduleTimezone: { type: string, maxLength: 64, description: IANA time zone name (Europe/Berlin) the cron is read in; empty is UTC. Daylight saving time never runs a schedule twice. }
     UpdateMigrationProject:
       type: object
       additionalProperties: false
@@ -1574,6 +1625,7 @@ components:
         status: { type: string, enum: [active, archived] }
         cutoverAt: { type: string, description: "RFC 3339 timestamp, or empty to clear." }
         scheduleCron: { type: string, maxLength: 100, description: "Five-field cron expression with at least 15 minutes between runs, or empty to clear." }
+        scheduleTimezone: { type: string, maxLength: 64, description: IANA time zone name the cron is read in; empty resets it to UTC. }
         connectionProfileId: { type: string, description: "Attaches a connection profile (a UUID, active, with the project's source system) to a migrate project; empty detaches it." }
     KeyRewrite:
       type: object
@@ -1722,7 +1774,8 @@ components:
         connectionProfileName: { type: string }
         bindingStatus: { type: string, enum: [active, disabled] }
         projectId: { type: string, format: uuid, description: The active migrate project the binding runs under (the lowest id with a schedule; one without a schedule only when the binding has its own). }
-        scheduleCron: { type: string, description: "The cron the binding runs on: five fields in UTC, at least 15 minutes between runs. It is scheduleOverride when that is set, otherwise the scheduleCron of the migrate project; empty when neither exists." }
+        scheduleCron: { type: string, description: "The cron the binding runs on: five fields read in scheduleTimezone (UTC by default), at least 15 minutes between runs. It is scheduleOverride when that is set, otherwise the scheduleCron of the migrate project; empty when neither exists." }
+        scheduleTimezone: { type: string, description: "The time zone the cron is read in: the zone of the project the binding runs under (UTC by default)." }
         scheduleOverride: { type: string, description: "The binding's own cron, set with updateSyncStatus. Empty when the binding follows the project's scheduleCron." }
         projectScheduleCron: { type: string, description: "The default the binding falls back to without scheduleOverride: the scheduleCron of the lowest-id active migrate project with a schedule on its profile. Empty when there is none; clearing scheduleOverride then leaves the binding unscheduled (scheduleCron and nextDueAt empty) until a project gets a schedule or the binding its own." }
         sourceOfTruth: { type: string, enum: [legacy, passage] }
@@ -1761,7 +1814,7 @@ components:
       properties:
         version: { type: integer, minimum: 0 }
         paused: { type: boolean }
-        scheduleCron: { type: string, maxLength: 100, description: "The binding's own cron: five fields in UTC, at least 15 minutes between runs. It replaces the project's scheduleCron for this binding only and does not reset the watermark. An empty string clears it so the project's cron applies again. Not allowed together with runNow. Needs an active migrate project on the profile." }
+        scheduleCron: { type: string, maxLength: 100, description: "The binding's own cron: five fields read in the time zone of the project the binding runs under (UTC by default), at least 15 minutes between runs. It replaces the project's scheduleCron for this binding only and does not reset the watermark. An empty string clears it so the project's cron applies again. Not allowed together with runNow. Needs an active migrate project on the profile." }
         sourceOfTruth: { type: string, enum: [legacy, passage] }
         keyCheckHours: { type: integer, minimum: 0, maximum: 8760, description: Period in hours of the full read that finds deleted legacy rows; 0 turns it off. }
         keyCheckNow: { type: boolean, description: "Makes the next run a full read that looks for deleted legacy rows, whatever the period (also after a failed one); combine with runNow to start it at once." }
@@ -1846,7 +1899,7 @@ components:
         collections:
           type: array
           maxItems: 4
-          description: "Array iteration: each collection maps an array of the event (an order's data.lines) to an array of the request body, element by element, so one push creates a header and all its lines in the legacy ERP. An element's rules read the element itself, parent.* (the whole event), index (from 0), and the collection's own xref.<name> and lookup.<name>, resolved per element (idPath, keyPaths and quantityPath are relative to the element). An unresolved element is listed as Lines[2].item in MIG-XREF-UNRESOLVED (at most 50 per collection); an array that is missing, empty, not an array, or longer than maxItems is MIG-OUTBOUND-REJECTED, never truncated. The render's lookups name the tables read as <collection>.<lookup>. Each xref of a collection is one query for all its elements and each lookup table is read once per render, so every value comes from one table version. The legacy keys of the created lines are not recorded: xref:record keeps one subject per push."
+          description: "Array iteration: each collection maps an array of the event (an order's data.lines) to an array of the request body, element by element, so one push creates a header and all its lines in the legacy ERP. An element's rules read the element itself, parent.* (the whole event), index (from 0), and the collection's own xref.<name> and lookup.<name>, resolved per element (idPath, keyPaths and quantityPath are relative to the element). An unresolved element is listed as Lines[2].item in MIG-XREF-UNRESOLVED (at most 50 per collection); an array that is missing, empty, not an array, or longer than maxItems is MIG-OUTBOUND-REJECTED, never truncated. The render's lookups name the tables read as <collection>.<lookup>. Each xref of a collection is one query for all its elements and each lookup table is read once per render, so every value comes from one table version. A collection's optional subject {entity, idPath} (idPath relative to the element) adds one ref per element to the render's refs, so xref:record can record the key the legacy ERP assigns each line."
           items:
             type: object
             additionalProperties: false
@@ -1854,6 +1907,14 @@ components:
             properties:
               name: { type: string, description: "Body target of the array; dots nest (Header.Lines). Must not collide with a mapping target." }
               path: { type: string, description: Dotted path of the array in the event, for example data.lines. }
+              subject:
+                type: object
+                additionalProperties: false
+                required: [entity, idPath]
+                description: The Passage record each element creates in the legacy ERP (an order line). The render lists one ref per element (with collection and index) so xref:record can record the key the ERP assigns each line; an element without a Passage id there makes the render MIG-XREF-UNRESOLVED.
+                properties:
+                  entity: { type: string }
+                  idPath: { type: string, description: Dotted path of the element's id, relative to the element. }
               maxItems: { type: integer, minimum: 1, maximum: 1000, description: The most elements one event may carry (default 200). }
               optional: { type: boolean, description: "Leave the array out of the body when the event has none, and send [] when the event's array is empty; otherwise a missing or empty array is refused (MIG-OUTBOUND-REJECTED missing_array, empty_array)." }
               xrefs:
@@ -1955,6 +2016,31 @@ components:
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    ImportLookupEntries:
+      type: object
+      additionalProperties: false
+      required: [version, mode, csv]
+      properties:
+        version: { type: integer, minimum: 1, description: The table version the import is based on. }
+        mode: { type: string, enum: [merge, replace], description: merge keeps the entries the file does not mention; replace keeps only the entries of the file. }
+        hasHeader: { type: boolean, description: Skip the first line of the file. }
+        csv: { type: string, description: "The file text, at most 2 MiB of UTF-8. Two to four cells per line: up to three key parts, then the value." }
+    LookupImportSummary:
+      type: object
+      required: [rows, added, changed, unchanged, removed]
+      properties:
+        rows: { type: integer, description: Entries read from the file. }
+        added: { type: integer, description: Entries new to the table. }
+        changed: { type: integer, description: Entries whose value changed. }
+        unchanged: { type: integer, description: Entries the file repeated with the same value. }
+        removed: { type: integer, description: Entries the file left out (replace mode only). }
+    LookupImportResult:
+      type: object
+      required: [table, summary, written]
+      properties:
+        table: { $ref: '#/components/schemas/LookupTable' }
+        summary: { $ref: '#/components/schemas/LookupImportSummary' }
+        written: { type: boolean, description: False when the file changed nothing; no version was saved and table is the current one. }
     LookupVersion:
       type: object
       required: [version, entryCount, checksum, createdBy, createdAt]
@@ -2014,6 +2100,9 @@ components:
       properties:
         entity: { type: string }
         id: { type: string, format: uuid }
+        collection: { type: string, description: "On a render: the collection an element ref belongs to (absent on the header's ref)." }
+        index: { type: integer, minimum: 0, description: "On a render: the element's position in its collection (absent on the header's ref), so the hub pairs it with the key the legacy ERP answers for that element." }
+        legacyKey: { type: string, maxLength: 512, description: "On xref:record: the key the legacy ERP assigned this record. At most one ref may omit it; it takes the top-level legacyKey (the header)." }
     UnresolvedRef:
       type: object
       required: [name, entity, reason]
@@ -2046,11 +2135,11 @@ components:
     RecordOutboundXref:
       type: object
       additionalProperties: false
-      required: [outboundMappingId, refs, legacyKey, eventId]
+      required: [outboundMappingId, refs, eventId]
       properties:
         outboundMappingId: { type: string, format: uuid }
-        refs: { type: array, maxItems: 1, description: "The refs of the render: the subject (its entity must be the mapping's subject entity), or none for a mapping without a subject, in which case the event is recorded and the cross-reference is not touched.", items: { $ref: '#/components/schemas/OutboundRef' } }
-        legacyKey: { type: string, maxLength: 512, description: The key the legacy ERP assigned. }
+        refs: { type: array, maxItems: 4100, description: "The refs of the render: the header subject and, when the mapping's collections name a subject, one ref per element, each element ref with the legacyKey the legacy ERP assigned that line. Every ref's entity must be the mapping's subject entity or a collection subject entity. None for a mapping without a subject: the event is recorded and the cross-reference is not touched. All refs are recorded in one transaction or none.", items: { $ref: '#/components/schemas/OutboundRef' } }
+        legacyKey: { type: string, maxLength: 512, description: "The key the legacy ERP assigned the header: it belongs to the one ref without its own legacyKey (or to the event when refs is empty). Required unless every ref carries its own." }
         eventId: { type: string, maxLength: 256, description: The event whose push produced the key; the call is idempotent on it. }
     Problem:
       type: object

@@ -10,7 +10,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
-	"github.com/BenjaminSRussell/passage/platform/testkit"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/costing/internal/domain"
 )
 
@@ -23,9 +23,8 @@ type closeRun struct {
 
 func settleAndTieOut(t *testing.T, products, txnsPerProduct int) closeRun {
 	t.Helper()
-	s, _ := setup(t)
-	ctx := scopedCtx(testkit.TenantID(20))
-	le, site := ids.New(), ids.New()
+	f := newGLFixture(t, 20)
+	s, ctx, le, site := f.s, f.ctx, f.le, ids.New()
 	rng := rand.New(rand.NewSource(20))
 	start := time.Now()
 	var gl []domain.GLBalance
@@ -64,24 +63,30 @@ func settleAndTieOut(t *testing.T, products, txnsPerProduct int) closeRun {
 		if len(res.Exceptions) != 0 {
 			t.Fatalf("product %d: unexpected exceptions %+v", p, res.Exceptions)
 		}
-		ledger := decimal.Zero
+		provisional := decimal.Zero
 		for _, x := range txns {
 			qty, amount := x.Qty, x.Value
 			if x.Kind == domain.Issue {
-				qty, amount = x.Qty.Neg(), res.IssueCosts[x.ID].Neg()
+				qty, amount = x.Qty.Neg(), x.Qty.Neg()
 			}
-			ledger = ledger.Add(amount)
+			provisional = provisional.Add(amount)
 			rows = append(rows, costRow(product+"/"+x.ID, le, product, site, domain.KindFinancial, qty.String(), amount.String(), x.FinancialDate.Format("2006-01-02")))
 		}
-		if !ledger.Equal(res.RemainingValue) {
-			t.Fatalf("product %d: ledger %s differs from the settled remaining value %s", p, ledger, res.RemainingValue)
+		if _, err := f.ledger.Post(ctx, ledgerclient.Entry{LegalEntityID: le, LedgerID: f.glID, DocumentID: product, PostingDate: "2026-01-01", Currency: "EUR",
+			IdempotencyKey: "stock:" + product, Lines: []ledgerclient.Line{{Account: "1400", Amount: provisional}, {Account: "2100", Credit: true, Amount: provisional}}}); err != nil {
+			t.Fatal(err)
 		}
-		gl = append(gl, domain.GLBalance{Dims: map[string]string{"product": product}, Balance: ledger})
+		gl = append(gl, domain.GLBalance{Dims: map[string]string{"product": product}, Balance: res.RemainingValue})
 		if len(rows) >= MaxCostTransactionBatch*20 {
 			flush()
 		}
 	}
 	flush()
+	start = time.Now()
+	c, err := s.RunClose(ctx, f.ledger, CloseRequest{LegalEntityID: le, PeriodEnd: "2099-12-31"}, "tester")
+	if err != nil || c.Status != "COMPLETED" || c.Groups != products {
+		t.Fatalf("close %+v err %v, want %d groups settled", c, err, products)
+	}
 	bal, err := s.ValueBalances(ctx, BalanceQuery{LegalEntityID: le, AsOf: "2099-12-31"})
 	if err != nil {
 		t.Fatal(err)
@@ -94,9 +99,16 @@ func settleAndTieOut(t *testing.T, products, txnsPerProduct int) closeRun {
 	if err != nil {
 		t.Fatal(err)
 	}
+	rec, err := s.ReconcileInventory(ctx, f.ledger, le, "2099-12-31")
+	if err != nil {
+		t.Fatal(err)
+	}
 	elapsed := time.Since(start)
 	if !tie.Ties() || len(tie.Rows) != products {
 		t.Fatalf("tie-out: %d groups, %d differences, total diff %s; want %d groups and none", len(tie.Rows), tie.Differences, tie.TotalDiff, products)
+	}
+	if !rec.Ties || !rec.Ledger.Equal(rep.Total.Value()) {
+		t.Fatalf("ledger tie-out %+v: the report totals %s, want the ledger's inventory account to equal it", rec, rep.Total.Value())
 	}
 	return closeRun{txns: products * txnsPerProduct, elapsed: elapsed}
 }
@@ -113,7 +125,7 @@ func TestPostgres_CloseOfOneMillionTransactions(t *testing.T) {
 		t.Skip("set " + million + "=1 to run the 1M-transaction close")
 	}
 	run := settleAndTieOut(t, 1000, 1000)
-	t.Logf("settled, posted and tied out %d transactions in %s", run.txns, run.elapsed)
+	t.Logf("closed (settled, adjusted, posted) and tied out %d transactions in %s", run.txns, run.elapsed)
 	if run.elapsed >= 20*time.Minute {
 		t.Fatalf("close took %s, want under 20m", run.elapsed)
 	}

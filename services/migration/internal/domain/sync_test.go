@@ -3,6 +3,7 @@ package domain_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -280,6 +281,65 @@ func TestKeyCheckVanishTooLarge(t *testing.T) {
 	}{{0, 0, false}, {5, 10, false}, {6, 10, true}, {1, 1, true}, {1, 2, false}, {2, 3, true}, {0, 10, false}} {
 		if got := domain.KeyCheckVanishTooLarge(c.newly, c.present); got != c.want {
 			t.Errorf("%d of %d: %v", c.newly, c.present, got)
+		}
+	}
+}
+
+// A schedule is read as wall-clock time in its zone, and daylight saving time never fires it twice or skips it.
+func TestCronNextIn_TimeZonesAndDaylightSaving(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	berlin, _ := time.LoadLocation("Europe/Berlin")
+	utc := func(s string) time.Time {
+		v, err := time.Parse("2006-01-02 15:04", s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	for name, tc := range map[string]struct {
+		expr  string
+		after string // UTC
+		loc   *time.Location
+		want  string // UTC
+	}{
+		"UTC unchanged":                    {"30 2 * * *", "2026-03-07 12:00", time.UTC, "2026-03-08 02:30"},
+		"winter offset (EST, UTC-5)":       {"0 2 * * *", "2026-01-10 00:00", ny, "2026-01-10 07:00"},
+		"summer offset (EDT, UTC-4)":       {"0 2 * * *", "2026-07-10 00:00", ny, "2026-07-10 06:00"},
+		"the day before spring forward":    {"30 2 * * *", "2026-03-07 12:00", ny, "2026-03-08 07:30"},
+		"skipped 02:30 runs once at 3:30":  {"30 2 * * *", "2026-03-08 03:00", ny, "2026-03-08 07:30"},
+		"after the skipped run: next day":  {"30 2 * * *", "2026-03-08 07:30", ny, "2026-03-09 06:30"},
+		"skipped hour does not hide 03:00": {"0,30 2,3 * * *", "2026-03-08 06:50", ny, "2026-03-08 07:00"},
+		"fall back: 01:30 once, the first": {"30 1 * * *", "2026-11-01 00:00", ny, "2026-11-01 05:30"},
+		"fall back: next day is EST":       {"30 1 * * *", "2026-11-01 05:30", ny, "2026-11-02 06:30"},
+		"berlin summer (UTC+2)":            {"0 8 * * 1", "2026-07-01 00:00", berlin, "2026-07-06 06:00"},
+		"local date is not the UTC date":   {"0 0 * * *", "2026-07-10 02:00", ny, "2026-07-10 04:00"},
+	} {
+		got, ok := domain.CronNextIn(tc.expr, utc(tc.after), tc.loc)
+		if !ok || !got.Equal(utc(tc.want)) {
+			t.Errorf("%s: CronNextIn(%q, %s, %s) = %s %v, want %s", name, tc.expr, tc.after, tc.loc, got.Format("2006-01-02 15:04"), ok, tc.want)
+		}
+	}
+	// Across the whole spring-forward day a 02:30 schedule fires exactly once.
+	fires, at := 0, utc("2026-03-08 00:00")
+	for end := utc("2026-03-09 00:00"); ; fires++ {
+		next, _ := domain.CronNextIn("30 2 * * *", at, ny)
+		if !next.Before(end) {
+			break
+		}
+		at = next
+	}
+	if fires != 1 {
+		t.Errorf("02:30 on the spring-forward day fired %d times", fires)
+	}
+	if domain.ScheduleTimezoneProblem("Europe/Berlin") != "" || domain.ScheduleTimezoneProblem("") != "" || domain.ScheduleTimezoneProblem("UTC") != "" {
+		t.Error("valid zone refused")
+	}
+	for _, bad := range []string{"Mars/Base", "Local", "CET5", "../etc/localtime", strings.Repeat("a", 65)} {
+		if domain.ScheduleTimezoneProblem(bad) == "" {
+			t.Errorf("zone %q accepted", bad)
 		}
 	}
 }

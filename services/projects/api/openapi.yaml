@@ -1136,6 +1136,36 @@ paths:
           $ref: '#/components/responses/Problem'
         '428':
           $ref: '#/components/responses/Problem'
+  /v1/projects/{id}/forecasts/{modelId}/activate:
+    post:
+      operationId: activateForecastModel
+      summary: Designate the forecast model that drives GL revenue recognition (D4c)
+      description: Makes the model the project's active one (any other stops being active). The GL estimate to complete is the cost of its lines after the period.
+      x-passage-duty: ProjPlan
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/ForecastModelId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: The model, now active
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForecastModel'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '428':
+          $ref: '#/components/responses/Problem'
   /v1/projects/categories:
     get:
       operationId: listCategories
@@ -1559,6 +1589,186 @@ paths:
           $ref: '#/components/responses/Problem'
         '428':
           $ref: '#/components/responses/Problem'
+  /v1/projects/gl-postings:
+    post:
+      operationId: postProjectsToGL
+      summary: Book project costs and estimates in the general ledger (D2b, D4c)
+      description: |
+        Books the cost of every due, unposted project transaction of the legal entity and currency as one balanced entry (Dr WIP account, Cr the offset
+        account of the resolved posting profile: payroll allocation, expense clearing or inventory), keyed `projects:txn:{transactionId}:1`. With `period`
+        (YYYY-MM) it also books, for each fixed-price project that is not CREATED, the movement of its cost-to-cost position at the month end: revenue
+        earned (Dr accrued revenue, Cr invoiced revenue), the amount billed on approved invoice proposals (Dr on-account, Cr accrued revenue), the cost
+        incurred to date moved out of WIP (Dr cost of sales, Cr WIP) and the loss provision, which is the expected contract loss less the loss the margin
+        already shows (Dr loss expense, Cr loss provision; released when the estimate improves), keyed `projects:wip:{projectId}:{period}`. The estimate to
+        complete is the cost after the period of the project's active forecast model. Amounts and accounts come from stored data and posting profiles,
+        never from the request. A booking is stored before the ledger is called and resent unchanged until the ledger confirms it. A transaction that
+        fails backs off (1, 2, 4 minutes and so on up to 6 hours) and is parked after 5 failed runs (shown by the reconciliation with its reason);
+        `retryParked` puts the entity's parked transactions back. A failure is listed under failed with the ledger's problem code or PROJ-POST-001,
+        PROJ-POST-002 (profile account missing), PROJ-GL-001, PROJ-GL-002 (no active forecast model), PROJ-GL-003 (earlier period unconfirmed or later
+        period booked) or PROJ-GL-007 (forecast model currency differs). The legal entity is pinned to the ledger of its first posting: another ledger is
+        409 PROJ-GL-005, and a ledger the entity does not own is 422 PROJ-GL-006. At most 200 transactions and 200 projects per run (`more`). Signs only
+        ledger.entry.post.
+      x-passage-duty: ProjGlPost
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ledgerId, currency]
+              properties:
+                legalEntityId:
+                  type: string
+                  format: uuid
+                ledgerId:
+                  type: string
+                  format: uuid
+                currency:
+                  type: string
+                  pattern: '^[A-Z]{3}$'
+                period:
+                  type: string
+                  pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+                projectId:
+                  type: string
+                  maxLength: 20
+                retryParked:
+                  type: boolean
+      responses:
+        '200':
+          description: What was booked and what failed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [booked, failed, more]
+                properties:
+                  booked:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        kind:
+                          type: string
+                          enum: [TXN, WIP]
+                        ref:
+                          type: string
+                        entryId:
+                          type: string
+                          format: uuid
+                        lines:
+                          type: integer
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        kind:
+                          type: string
+                          enum: [TXN, WIP]
+                        ref:
+                          type: string
+                        code:
+                          type: string
+                  more:
+                    type: boolean
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '502':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/gl-reconciliation:
+    get:
+      operationId: getProjectsGLReconciliation
+      summary: Reconcile the project GL subledger to the ledger's accounts (AC4)
+      description: |
+        Per account the service booked on (up to periodTo, YYYY-MM) the net of its posted bookings. The control accounts (WIP, accrued revenue, invoiced
+        revenue, loss provision), which only project postings feed, are compared with the general ledger's balance (`compared`, `gl`, difference = GL
+        minus subledger); the other accounts are shared with other modules and show only the subledger. unpostedTransactions counts (and lists the first
+        100 of, with the reason of the last failure, the attempts and whether parked) the entity's transactions whose cost no ledger entry holds.
+        pendingEstimates are estimate bookings the ledger has not confirmed; unbookedEstimates (with periodTo) are fixed-price projects with cost whose
+        estimate for that period or a later one is not booked. reconciled is true when every compared difference is zero and all three are empty. The
+        ledger must be the one the entity is pinned to (409 PROJ-GL-005); a ledger balance in another currency is 422 PROJ-GL-008.
+      x-passage-duty: ProjInquire
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: ledgerId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: currency, in: query, required: true, schema: { type: string, pattern: '^[A-Z]{3}$' } }
+        - { name: periodTo, in: query, schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' } }
+      responses:
+        '200':
+          description: The reconciliation
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [currency, reconciled, unpostedTransactions, accounts]
+                properties:
+                  currency:
+                    type: string
+                  reconciled:
+                    type: boolean
+                  pendingEstimates:
+                    type: integer
+                  unbookedEstimates:
+                    type: integer
+                  unpostedTransactions:
+                    type: object
+                    properties:
+                      count:
+                        type: integer
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                              format: uuid
+                            reason:
+                              type: string
+                            attempts:
+                              type: integer
+                            parked:
+                              type: boolean
+                  accounts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        account:
+                          type: string
+                        compared:
+                          type: boolean
+                        subledger:
+                          type: string
+                        gl:
+                          type: string
+                        difference:
+                          type: string
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '502':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
 components:
   parameters:
     ProposalId:
@@ -1811,6 +2021,20 @@ components:
         onAccountAccount:
           type: string
           maxLength: 40
+        offsetAccount:
+          type: string
+          maxLength: 40
+          description: Credit of a transaction posting (payroll allocation, expense clearing or inventory, by category). Needed by POST /gl-postings.
+        costOfSalesAccount:
+          type: string
+          maxLength: 40
+        lossProvisionAccount:
+          type: string
+          maxLength: 40
+          description: Liability carrying the part of an expected contract loss not yet shown in the margin.
+        lossExpenseAccount:
+          type: string
+          maxLength: 40
         version:
           type: integer
           minimum: 1
@@ -1850,6 +2074,18 @@ components:
         onAccountAccount:
           type: string
           minLength: 1
+          maxLength: 40
+        offsetAccount:
+          type: string
+          maxLength: 40
+        costOfSalesAccount:
+          type: string
+          maxLength: 40
+        lossProvisionAccount:
+          type: string
+          maxLength: 40
+        lossExpenseAccount:
+          type: string
           maxLength: 40
     ResolveRequest:
       type: object
@@ -2708,8 +2944,11 @@ components:
             $ref: '#/components/schemas/ForecastLine'
     ForecastModel:
       type: object
-      required: [id, projectId, name, currency, version, lineCount, totalCost, totalSales, createdBy, createdAt, updatedAt]
+      required: [id, projectId, name, currency, active, version, lineCount, totalCost, totalSales, createdBy, createdAt, updatedAt]
       properties:
+        active:
+          type: boolean
+          description: The one model per project whose lines after a period are the estimate to complete for GL revenue recognition.
         id:
           type: string
           format: uuid

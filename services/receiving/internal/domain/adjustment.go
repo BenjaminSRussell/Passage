@@ -41,6 +41,8 @@ type InvoiceAdjustment struct {
 	Currency       string
 	Original       []InvoiceLineState
 	Lines          []AdjustmentLine
+	// VendorGroupCode is the short code of the invoice vendor's group; empty when unknown.
+	VendorGroupCode string
 }
 
 func PostInvoiceAdjustment(ctx context.Context, in InvoiceAdjustment, periods PeriodControl, ledger LedgerPoster, profile PostingProfile) (JournalEntry, error) {
@@ -90,7 +92,7 @@ func PostInvoiceAdjustment(ctx context.Context, in InvoiceAdjustment, periods Pe
 		entry.Lines = append(entry.Lines, JournalLine{Account: account, Amount: money.Amount{Value: l.Amount.Mul(sign), Currency: in.Currency}})
 		total = total.Add(l.Amount)
 	}
-	entry.Lines = append(entry.Lines, JournalLine{Account: profile.VendorControl, Amount: money.Amount{Value: total.Mul(sign.Neg()), Currency: in.Currency}})
+	profile.addVendorControlLine(&entry, money.Amount{Value: total.Mul(sign.Neg()), Currency: in.Currency}, in.VendorGroupCode)
 	if err := checkAPPeriod(ctx, periods, in.LegalEntityID, in.LedgerID, in.FiscalPeriodID, in.PostingDate, in.ID); err != nil {
 		return JournalEntry{}, err
 	}

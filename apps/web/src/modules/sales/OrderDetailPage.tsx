@@ -184,7 +184,16 @@ export function OrderDetailPage() {
     { key: "status", header: "Status", render: (h) => <StatusPill status={h.status} /> },
     { key: "orderAmount", header: "Amount held", align: "end", render: (h) => money(h.orderAmount, order.currency) },
     { key: "appliedAt", header: "Applied", render: (h) => `${formatDateTime(h.appliedAt)} by ${h.appliedBy}` },
-    { key: "releasedUntil", header: "Release valid until", render: (h) => (h.releasedUntil ? formatDateTime(h.releasedUntil) : dash) },
+    {
+      key: "releasedUntil",
+      header: "Decision",
+      render: (h) =>
+        h.status === "REJECTED"
+          ? `Rejected by ${h.rejectedBy ?? dash}${h.rejectionComment ? `: ${h.rejectionComment}` : ""}`
+          : h.releasedUntil
+            ? `Release valid until ${formatDateTime(h.releasedUntil)}`
+            : dash,
+    },
     {
       key: "actions",
       header: "Action",
@@ -308,7 +317,12 @@ export function OrderDetailPage() {
         onDone={(res) => {
           setLatest(res);
           setFailure(null);
-          setOutcome({ tone: "success", text: `The remainder of order ${res.value.orderNumber} is cancelled; it is ${sentence(res.value.status).toLowerCase()} with a total of ${money(res.value.netTotal, res.value.currency)}.` });
+          const total = money(res.value.netTotal, res.value.currency);
+          const text =
+            res.value.status === "PARTIALLY_SHIPPED"
+              ? `The remainder of the line is cancelled; order ${res.value.orderNumber} stays partly shipped with a total of ${total}.`
+              : `The remainder of order ${res.value.orderNumber} is cancelled; it is ${sentence(res.value.status).toLowerCase()} with a total of ${total}.`;
+          setOutcome({ tone: "success", text });
         }}
       />
       <Card title="Holds">

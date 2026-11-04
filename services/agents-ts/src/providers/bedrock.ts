@@ -2,7 +2,7 @@ import { createHash, createHmac } from "node:crypto";
 import { assertNoPii } from "../domain/redaction.js";
 import type { ModelProvider, ModelResponse, ModelUsage } from "../runtime/engine.js";
 import { postJson } from "./http.js";
-import { isRecord, PROPOSE_TOOL_NAME, providerRejected, proposeTool, toModelResponse } from "./wire.js";
+import { isRecord, PROPOSE_TOOL_NAME, providerRejected, proposeTool, toModelResponse, outputLimit } from "./wire.js";
 
 /** Static credentials are read from Vault-projected files by the caller (FR-47.12, 9.47.10). */
 export interface AwsCredentials {
@@ -50,7 +50,7 @@ export function createBedrockProvider(cfg: BedrockConfig): ModelProvider {
       const body = {
         system: [{ text: req.system }],
         messages: [{ role: "user", content: [{ text: req.user }] }],
-        inferenceConfig: { maxTokens: cfg.maxTokens ?? 1024 },
+        inferenceConfig: { maxTokens: outputLimit(cfg.maxTokens, req.maxOutputTokens) },
         toolConfig: {
           tools: [{ toolSpec: { name: tool.name, description: tool.description, inputSchema: { json: tool.inputSchema } } }],
           toolChoice: { tool: { name: tool.name } },

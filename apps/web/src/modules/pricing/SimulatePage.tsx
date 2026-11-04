@@ -17,6 +17,8 @@ interface HeaderDraft {
   customerGroupId: string;
   currency: string;
   pricingDate: string;
+  salesChannel: string;
+  procedure: string;
 }
 
 type Errors = Record<string, string>;
@@ -30,6 +32,8 @@ export function validateSimulation(h: HeaderDraft, lines: LineDraft[]): Errors {
   if (h.customerId.trim() === "") errors.customerId = "Enter the customer.";
   if (!/^[A-Z]{3}$/.test(h.currency)) errors.currency = "Use a three-letter ISO 4217 code, such as USD.";
   if (!DAY.test(h.pricingDate)) errors.pricingDate = "Enter the pricing date.";
+  if (!/^([A-Z0-9][A-Z0-9_-]{0,31})?$/.test(h.salesChannel.trim())) errors.salesChannel = "Use upper-case letters, digits, '_' or '-', such as WEB.";
+  if (!/^([A-Z0-9][A-Z0-9_-]*)?$/.test(h.procedure.trim())) errors.procedure = "Use upper-case letters, digits, '_' or '-', such as AX_STANDARD.";
   lines.forEach((l, i) => {
     if (l.productId.trim() === "") errors[`lines[${i}].productId`] = "Enter the product.";
     if (l.unit.trim() === "") errors[`lines[${i}].unit`] = "Enter the unit.";
@@ -45,6 +49,8 @@ function toRequest(h: HeaderDraft, lines: LineDraft[]): ResolveRequest {
     customerGroupId: h.customerGroupId.trim() || undefined,
     currency: h.currency,
     pricingDate: h.pricingDate,
+    salesChannel: h.salesChannel.trim() || undefined,
+    procedure: h.procedure.trim() || undefined,
     lines: lines.map((l) => ({ productId: l.productId.trim(), productGroupId: l.productGroupId.trim() || undefined, unit: l.unit.trim(), quantity: l.quantity })),
   };
 }
@@ -61,7 +67,7 @@ const lineColumns: DataTableColumn<ResolvedLine>[] = [
     render: (l) =>
       l.errorCode
         ? `${l.errorCode}: ${l.errorDetail ?? "no price"}`
-        : l.applied.map((a) => `${TYPE_LABELS[a.type] ?? a.type} (access ${a.access})`).join(", ") + (l.exclusive ? " · exclusive" : ""),
+        : l.applied.map((a) => `${TYPE_LABELS[a.type] ?? a.type} (${a.stepNo ? `step ${a.stepNo}, ` : ""}access ${a.access}${a.statistical ? `, statistical ${a.amount ?? ""}` : ""})`).join(", ") + (l.exclusive ? " · exclusive" : ""),
   },
 ];
 
@@ -77,6 +83,9 @@ const freeGoodsColumns: DataTableColumn<FreeGoodsProposal>[] = [
 
 interface TraceRow extends TraceAccess {
   condition: string;
+  stepNo?: number;
+  /** Why the condition did not apply although it found a record (exclusion group, FR-26.8). */
+  stepReason?: string;
 }
 
 const traceColumns: DataTableColumn<TraceRow>[] = [
@@ -86,16 +95,18 @@ const traceColumns: DataTableColumn<TraceRow>[] = [
   { key: "evaluated", header: "Evaluated", render: (r) => (r.evaluated ? "Yes" : "No") },
   { key: "candidates", header: "Candidates", mono: true, render: (r) => (r.candidates.length > 0 ? r.candidates.join(", ") : "—") },
   { key: "winner", header: "Winner", mono: true, render: (r) => r.winner ?? "—" },
-  { key: "reason", header: "Reason" },
+  { key: "reason", header: "Reason", render: (r) => (r.stepReason ? `${r.reason} · ${r.stepReason}` : r.reason) },
 ];
 
 function traceRows(steps: TraceStep[] = []): TraceRow[] {
-  return steps.flatMap((s) => s.accesses.map((a) => ({ ...a, condition: TYPE_LABELS[s.condition as keyof typeof TYPE_LABELS] ?? s.condition })));
+  return steps.flatMap((s) =>
+    s.accesses.map((a) => ({ ...a, condition: TYPE_LABELS[s.condition as keyof typeof TYPE_LABELS] ?? s.condition, stepNo: s.stepNo, stepReason: a.winner ? s.reason : undefined })),
+  );
 }
 
 /** Simulation / explain (FR-26.4, FR-26.13): price a tuple against the active agreements and show why. */
 export function SimulatePage() {
-  const [header, setHeader] = useState<HeaderDraft>({ legalEntityId: "", customerId: "", customerGroupId: "", currency: "USD", pricingDate: today() });
+  const [header, setHeader] = useState<HeaderDraft>({ legalEntityId: "", customerId: "", customerGroupId: "", currency: "USD", pricingDate: today(), salesChannel: "", procedure: "" });
   const [lines, setLines] = useState<LineDraft[]>([blankLine]);
   const [errors, setErrors] = useState<Errors>({});
   const [result, setResult] = useState<ResolveResponse | null>(null);
@@ -140,6 +151,8 @@ export function SimulatePage() {
           {headerField("sim-customer-group", "customerGroupId", "Customer group", { optional: true })}
           {headerField("sim-currency", "currency", "Currency")}
           {headerField("sim-date", "pricingDate", "Pricing date", { type: "date", hint: "Usually the requested ship date." })}
+          {headerField("sim-channel", "salesChannel", "Sales channel", { optional: true, hint: "Picks the channel's procedure; empty uses the default." })}
+          {headerField("sim-procedure", "procedure", "Procedure", { optional: true, hint: "Name a procedure to try instead of the assigned one." })}
           {lines.map((l, i) => (
             <fieldset key={i} className={styles.lineSet}>
               <legend className={styles.groupsLegend}>{`Line ${i + 1}`}</legend>
@@ -186,6 +199,7 @@ export function SimulatePage() {
             <StatTile label="Total discount" value={`${result.totalDiscount} ${result.currency}`} />
             {Number(result.surcharge) !== 0 ? <StatTile label="Small-order surcharge" value={`${result.surcharge} ${result.currency}`} /> : null}
             <StatTile label="Order net" value={`${result.orderNet} ${result.currency}`} />
+            <StatTile label="Procedure" value={result.procedure ? `${result.procedure.name} v${result.procedure.version}` : "Reference order"} />
           </StatGroup>
           <Card title="Priced lines">
             <div className={styles.stack}>
@@ -202,13 +216,13 @@ export function SimulatePage() {
           {result.lines.map((l) =>
             l.trace && l.trace.length > 0 ? (
               <Card key={l.lineNo} title={`Why line ${l.lineNo} has this price`} headingLevel={3}>
-                <DataTable label={`Explain line ${l.lineNo}`} columns={traceColumns} rows={traceRows(l.trace)} getRowKey={(r) => `${r.condition}-${r.seq}`} />
+                <DataTable label={`Explain line ${l.lineNo}`} columns={traceColumns} rows={traceRows(l.trace)} getRowKey={(r) => `${r.condition}-${r.stepNo ?? 0}-${r.seq}`} />
               </Card>
             ) : null,
           )}
           {result.trace && result.trace.length > 0 ? (
             <Card title="How the order-level conditions were chosen" headingLevel={3}>
-              <DataTable label="Explain order" columns={traceColumns} rows={traceRows(result.trace)} getRowKey={(r) => `${r.condition}-${r.seq}`} />
+              <DataTable label="Explain order" columns={traceColumns} rows={traceRows(result.trace)} getRowKey={(r) => `${r.condition}-${r.stepNo ?? 0}-${r.seq}`} />
             </Card>
           ) : null}
         </>

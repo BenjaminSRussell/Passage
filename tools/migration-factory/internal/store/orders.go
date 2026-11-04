@@ -128,10 +128,31 @@ func runOpenOrders(ctx context.Context, tx pgx.Tx, in OpenOrdersRun) (domain.Pac
 	if err := insertTotals(ctx, tx, run.RunID, run.Totals, 0); err != nil {
 		return domain.PackRun{}, err
 	}
+	// The orders the loaded side holds, for the order count of a later release.
+	orderBatch := &pgx.Batch{}
+	seenOrder := map[string]struct{}{}
+	for _, o := range in.Accepted {
+		h, ok := held[o.HeldKey()]
+		if !ok {
+			continue
+		}
+		k := h.OrderType + "\x1f" + h.OrderNumber
+		if _, dup := seenOrder[k]; dup {
+			continue
+		}
+		seenOrder[k] = struct{}{}
+		orderBatch.Queue(`insert into pack_run_order (tenant_id, run_id, order_type, order_number)
+			values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3)`, run.RunID, h.OrderType, h.OrderNumber)
+	}
+	if orderBatch.Len() > 0 {
+		if err := tx.SendBatch(ctx, orderBatch).Close(); err != nil {
+			return domain.PackRun{}, fmt.Errorf("insert pack_run_order: %w", err)
+		}
+	}
 	for i := range run.Quarantined {
 		q := &run.Quarantined[i]
 		q.Seq, q.Status = i+1, domain.QuarantineOpen
-		if err := insertQuarantine(ctx, tx, run.RunID, q.Seq, q.Record.LegacyID, q.Rule, q.Reason, recordJSON(q.Record)); err != nil {
+		if err := insertQuarantineLine(ctx, tx, run.RunID, q.Seq, q.Record.LegacyID, q.Rule, q.Reason, recordJSON(q.Record), q.Line); err != nil {
 			return domain.PackRun{}, err
 		}
 	}

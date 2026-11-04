@@ -103,6 +103,9 @@ func TestPostgres_ListLines_Filters(t *testing.T) {
 		{"an empty value excludes lines that set it", LineFilter{Dimensions: map[string]string{"DEPT": "D100", "CC": ""}}, nil},
 		{"voucher", LineFilter{Voucher: vouchers[1]}, []string{vouchers[1] + "/6010", vouchers[1] + "/2100"}},
 		{"source system", LineFilter{SourceSystem: "ar"}, nil},
+		{"source type", LineFilter{SourceType: "vendor_invoice", AccountFrom: "6010", AccountTo: "6010"},
+			[]string{vouchers[0] + "/6010", vouchers[1] + "/6010", vouchers[2] + "/6010"}},
+		{"another source type", LineFilter{SourceType: "year_end_closing"}, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

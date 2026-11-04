@@ -266,7 +266,7 @@ describe("open_orders run detail", () => {
     const quarantine = await findTable({ name: "Quarantined records" });
     expect(quarantine).toHaveTextContent("C1 / NUT / SALES/SO-9/1");
     expect(within(quarantine).getByRole("columnheader", { name: "Open quantity" })).toBeInTheDocument();
-    expect(within(quarantine).queryByRole("button", { name: /Release/ })).not.toBeInTheDocument();
+    expect(within(quarantine).getByRole("button", { name: /^Release record/ })).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
   });
 });

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Passage integration hub
-  version: 0.2.0
+  version: 0.3.0
   description: |
     Webhook and rest-push subscriptions, the delivery log, the dead-letter list, resume after a
     410 pause and replay (FR-35.9, FR-35.10). Callers reach these routes through the
@@ -24,12 +24,32 @@ info:
     cross-reference. Credentials are sealed at rest and write-only: no response ever
     contains them. A 4xx from the receiver other than 410 and 429 dead-letters at once
     (HUB-0117, with the response body kept, truncated); 5xx and silence follow the
-    8-step schedule; 429 honours Retry-After; 410 pauses. An event without a
+    8-step schedule; 429 honours Retry-After; 410 pauses. A push that carries a collection
+    (an order's lines, rendered as a body array by the mapping's `collections`) records the
+    legacy key the ERP assigned to each element: `lineKeyPath` ("lines[*].id") reads one key
+    per element of the response, matched to the pushed elements by position or by
+    `lineCorrelation` (a field both sides carry); the keys are kept on the delivery
+    (`lineKeys`) and, once the migration service renders a ref per element, recorded with the
+    header's in one xref:record call. Keys that cannot be matched dead-letter the accepted push
+    (HUB-0117) without recording any. Each delivery also keeps the lookup table versions its
+    render read (`lookups`) for audit. An event without a
     `legalentityid` extension is dead-lettered (HUB-0117) before the render: service
     tokens to the migration service name exactly one legal entity. Events whose actor is
     `service:migration-loader` are not pushed back (echo suppression). Receivers on
     private addresses are reachable only when the operator lists them in
     INTEGRATION_HUB_EGRESS_ALLOW.
+
+    API clients (FR-35.8, BR-35.8) are the hub's registry of Keycloak clients: the secret
+    stays in Keycloak, the hub keeps the client id, the scopes (duty keys the client may
+    use), the quota (requests per minute and burst, default 600 and 100, ranges 10..100000
+    and 1..100000), an optional sandbox tenant and the owner contact. The edge gateway asks
+    `consumeClientQuota` once per request (GraphQL: one unit per started 100 complexity
+    points) and answers the caller 429 with the returned `Retry-After` on HUB-0113. The token
+    bucket is held in Postgres under a row lock, so concurrent requests of one client never
+    overspend; usage per minute feeds the portal chart. Clients are revoked, never deleted.
+
+    The hub writes its own CloudEvents (`dev.passage.hub.*`, see events/asyncapi.yaml)
+    to the outbox in the same transaction as the change.
 servers:
   - url: https://api.passage.dev
 paths:
@@ -310,6 +330,182 @@ paths:
         "400": {$ref: "#/components/responses/Problem"}
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
+  /v1/hub/clients:
+    post:
+      operationId: registerClient
+      summary: Register an API client with its scopes and quota
+      description: |
+        Registers the hub's record of a Keycloak client (client credentials). `clientId` is the
+        Keycloak client id the edge sees in the verified token; provisioning the Keycloak client
+        itself is done by the platform. `scopes` are duty keys. `quotaPerMin` (default 600) and
+        `burst` (default 100) set the token bucket. `sandboxTenantId` names the tenant the
+        developer portal's test console may use and must not be the caller's own tenant.
+        A repeated Idempotency-Key returns the client created first; a client id already
+        registered in the tenant is 409 HUB-0409.
+      x-passage-duty: hub.client.write
+      parameters:
+        - {$ref: "#/components/parameters/ClientIdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/NewClient"}
+      responses:
+        "201":
+          description: The client was registered.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Client"}
+        "200":
+          description: The Idempotency-Key was already used; the first client is returned.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Client"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "413": {$ref: "#/components/responses/Problem"}
+    get:
+      operationId: listClients
+      summary: List the tenant's API clients, newest first
+      description: Keyset-paged; pass `nextCursor` as `cursor` for the next page. Revoked clients stay in the list.
+      x-passage-duty: hub.delivery.read
+      parameters:
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+      responses:
+        "200":
+          description: One page of API clients.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ClientPage"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/hub/clients/{clientRowId}:
+    parameters:
+      - {$ref: "#/components/parameters/ClientRowId"}
+    get:
+      operationId: getClient
+      summary: Read one API client
+      description: Another tenant's client is reported as not found.
+      x-passage-duty: hub.delivery.read
+      responses:
+        "200":
+          description: The API client.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Client"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+    patch:
+      operationId: updateClient
+      summary: Change an API client's name, scopes, quota, sandbox tenant or owner
+      description: |
+        Optimistic: `version` must be the version last read, otherwise 409 HUB-0409. A revoked
+        client cannot be changed (409). A lower burst takes effect at once: tokens above it are
+        dropped on the next request.
+      x-passage-duty: hub.client.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ClientPatch"}
+      responses:
+        "200":
+          description: The updated client with its new version.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Client"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+  /v1/hub/clients/{clientRowId}:revoke:
+    parameters:
+      - {$ref: "#/components/parameters/ClientRowId"}
+    post:
+      operationId: revokeClient
+      summary: Revoke an API client
+      description: Idempotent; a revoked client is refused by the quota check (403) and writes no second event. The Keycloak client is disabled by the platform.
+      x-passage-duty: hub.client.write
+      responses:
+        "200":
+          description: The client, revoked.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Client"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/hub/clients/{clientRowId}/usage:
+    parameters:
+      - {$ref: "#/components/parameters/ClientRowId"}
+    get:
+      operationId: getClientUsage
+      summary: Read a client's requests per minute (admitted and throttled)
+      description: Minutes with no requests are absent. `minutes` is the look-back window, 1 to 1440 (default 60).
+      x-passage-duty: hub.delivery.read
+      parameters:
+        - name: minutes
+          in: query
+          required: false
+          description: Look-back window in minutes, 1 to 1440 (default 60).
+          schema: {type: integer, minimum: 1, maximum: 1440, default: 60}
+      responses:
+        "200":
+          description: The per-minute usage, oldest first.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ClientUsage"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/hub/clients:consume:
+    post:
+      operationId: consumeClientQuota
+      summary: Spend a client's request quota (called by the edge gateway)
+      description: |
+        Takes `cost` units (default 1; GraphQL: one per started 100 complexity points) from the
+        client's token bucket of the caller's tenant. Allowed: 200 with the remaining units and
+        `RateLimit-*` headers. Empty bucket: 429 HUB-0113 with `Retry-After` in seconds. A cost
+        above the client's burst can never succeed: 422 HUB-0422. A revoked client is 403, an
+        unknown client id 404. `hub.client.consume` is service-only: no person or role may hold
+        it, because spending another client's quota throttles that client. No caller holds it
+        yet; the edge component that will call this route is a deployment handoff.
+      x-passage-duty: hub.client.consume
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ConsumeRequest"}
+      responses:
+        "200":
+          description: The units were taken.
+          headers:
+            RateLimit-Limit: {description: The client's requests per minute., schema: {type: integer}}
+            RateLimit-Remaining: {description: Whole units left in the bucket., schema: {type: integer}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ConsumeAllowed"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "429":
+          description: HUB-0113 quota exceeded; wait `Retry-After` seconds.
+          headers:
+            Retry-After: {description: Seconds until the bucket holds enough units., schema: {type: integer, minimum: 1}}
+            RateLimit-Limit: {description: The client's requests per minute., schema: {type: integer}}
+            RateLimit-Remaining: {description: Always 0., schema: {type: integer}}
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
 components:
   parameters:
     SubscriptionId:
@@ -318,6 +514,18 @@ components:
       required: true
       description: The subscription's id.
       schema: {type: string, format: uuid}
+    ClientRowId:
+      name: clientRowId
+      in: path
+      required: true
+      description: The API client's id in the hub (not the Keycloak client id).
+      schema: {type: string, format: uuid}
+    ClientIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: A caller-chosen key; a repeat returns the client registered first.
+      schema: {type: string, maxLength: 200}
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -338,7 +546,7 @@ components:
       schema: {type: string}
   responses:
     Problem:
-      description: An RFC 9457 problem with a stable `code` (HUB-0400 malformed, 0401 no identity, 0403 missing duty, 0404 not found, 0405 method, 0409 stale version, 0413 body too large, 0422 unsafe URL, 0500 unexpected, 0501 field encryption keys not configured, 0502 rest-push not configured).
+      description: An RFC 9457 problem with a stable `code` (HUB-0400 malformed, 0401 no identity, 0403 missing duty, 0404 not found, 0405 method, 0113 quota exceeded (429), 0409 stale version or a taken API client id or a revoked client, 0413 body too large, 0422 unsafe URL or a quota cost above the burst, 0500 unexpected, 0501 field encryption keys not configured, 0502 rest-push not configured).
       content:
         application/problem+json:
           schema: {$ref: "#/components/schemas/Problem"}
@@ -376,6 +584,8 @@ components:
         outboundMappingId: {type: string, format: uuid, description: "The migration service's outbound mapping that renders the event."}
         method: {type: string, enum: [POST, PUT, PATCH]}
         responseKeyPath: {type: string, description: "JSONPath-lite ($.data.id, orders[0].id) to the legacy key in the response; empty when the receiver returns none."}
+        lineKeyPath: {type: string, description: "Path with one [*] ($.data.lines[*].id) to the legacy key of each element of a pushed collection; empty when the push has none. Needs responseKeyPath."}
+        lineCorrelation: {$ref: "#/components/schemas/LineCorrelation"}
         onClientError: {type: string, enum: [dead_letter, retry], description: "What a 4xx other than 410 and 429 does."}
         auth:
           type: object
@@ -406,6 +616,29 @@ components:
         status: {type: [integer, "null"], description: "The receiver's (or the render service's) status; null when nothing answered."}
         excerpt: {type: string, description: "The answer, truncated, credentials removed."}
         legacyKey: {type: string}
+        lineKeys: {type: array, description: "sent with a lineKeyPath: the key per pushed element.", items: {$ref: "#/components/schemas/LineKey"}}
+        lineKeyError: {type: string, description: "sent with a lineKeyPath: why the keys could not be matched."}
+        lookups: {type: array, description: "The lookup table versions the render read.", items: {$ref: "#/components/schemas/LookupUse"}}
+    LineKey:
+      type: object
+      required: [index, legacyKey]
+      properties:
+        index: {type: integer, minimum: 0, description: "Position of the element in the pushed collection, from 0."}
+        legacyKey: {type: string, description: "The key the legacy ERP assigned to the element."}
+    LookupUse:
+      type: object
+      required: [name, table, version]
+      properties:
+        name: {type: string, description: "The lookup name in the mapping definition."}
+        table: {type: string, description: "The lookup table."}
+        version: {type: integer, minimum: 1, description: "The immutable table version the render read."}
+    LineCorrelation:
+      type: object
+      additionalProperties: false
+      required: [bodyPath, responsePath]
+      properties:
+        bodyPath: {type: string, maxLength: 200, description: "Path with one [*] to the correlating field of each pushed element (Lines[*].LineNum); its values must be unique. Its array names the collection whose element refs get the keys (Lines, Header.Lines), which a mapping with several collections needs."}
+        responsePath: {type: string, maxLength: 200, description: "Path with one [*] to the field of each response element that echoes it; iterates the same array as lineKeyPath. Every pushed element must be matched by exactly one response element."}
     NewSubscription:
       type: object
       additionalProperties: false
@@ -417,6 +650,8 @@ components:
         outboundMappingId: {type: string, format: uuid, description: "rest-push, required."}
         method: {type: string, enum: [POST, PUT, PATCH], default: POST, description: "rest-push."}
         responseKeyPath: {type: string, maxLength: 200, description: "rest-push."}
+        lineKeyPath: {type: string, maxLength: 200, description: "rest-push: per-element key path of a pushed collection (lines[*].id); needs responseKeyPath."}
+        lineCorrelation: {$ref: "#/components/schemas/LineCorrelation"}
         onClientError: {type: string, enum: [dead_letter, retry], default: dead_letter, description: "rest-push."}
         auth: {$ref: "#/components/schemas/RestAuth"}
         patterns:
@@ -441,6 +676,12 @@ components:
         outboundMappingId: {type: string, format: uuid, description: "rest-push."}
         method: {type: string, enum: [POST, PUT, PATCH], description: "rest-push."}
         responseKeyPath: {type: string, maxLength: 200, description: "rest-push."}
+        lineKeyPath: {type: string, maxLength: 200, description: "rest-push: per-element key path of a pushed collection (lines[*].id); needs responseKeyPath. An empty string stops reading line keys (clear lineCorrelation with it)."}
+        lineCorrelation:
+          description: "rest-push: null matches the lines by position again."
+          anyOf:
+            - {$ref: "#/components/schemas/LineCorrelation"}
+            - {type: "null"}
         onClientError: {type: string, enum: [dead_letter, retry], description: "rest-push."}
         auth: {$ref: "#/components/schemas/RestAuth"}
     Subscription:
@@ -489,7 +730,7 @@ components:
         truncated: {type: boolean, description: "More matching events remain after the cap."}
     Delivery:
       type: object
-      required: [id, subscriptionId, eventId, eventType, aggregateId, sequence, status, attempts, lastStatus, nextRetryAt, replay, deadLetterCode, responseExcerpt, legacyKey, createdAt]
+      required: [id, subscriptionId, eventId, eventType, aggregateId, sequence, status, attempts, lastStatus, nextRetryAt, replay, deadLetterCode, responseExcerpt, legacyKey, lineKeys, lookups, createdAt]
       properties:
         id: {type: string, format: uuid}
         subscriptionId: {type: string, format: uuid}
@@ -505,6 +746,8 @@ components:
         deadLetterCode: {type: [string, "null"], description: "HUB-0115 retries exhausted, HUB-0117 refused for good (rest-push 4xx or render refusal), HUB-0118 pushed but its legacy key conflicts with the one recorded for the event (not replayable)."}
         responseExcerpt: {type: [string, "null"], description: "rest-push: the receiver's last answer, truncated to 2000 characters, credentials removed."}
         legacyKey: {type: [string, "null"], description: "rest-push: the legacy key the receiver answered with."}
+        lineKeys: {type: array, description: "rest-push with lineKeyPath: the legacy key the receiver assigned to each element of the pushed collection.", items: {$ref: "#/components/schemas/LineKey"}}
+        lookups: {type: array, description: "rest-push: the lookup table versions the last render read, so the pushed body can be traced to the entries behind it.", items: {$ref: "#/components/schemas/LookupUse"}}
         createdAt: {type: string, format: date-time}
     DeliveryPage:
       type: object
@@ -512,3 +755,84 @@ components:
       properties:
         items: {type: array, items: {$ref: "#/components/schemas/Delivery"}}
         nextCursor: {type: [string, "null"]}
+    Scope:
+      type: string
+      maxLength: 100
+      pattern: "^[A-Za-z](?:[A-Za-z0-9 ._-]{0,98}[A-Za-z0-9._-])?$"
+      description: A duty name; no commas, because the gateway joins duties with commas.
+      examples: [sales.order.read]
+    NewClient:
+      type: object
+      additionalProperties: false
+      required: [clientId, name, scopes, ownerContact]
+      properties:
+        clientId: {type: string, pattern: "^[a-z0-9][a-z0-9._-]{2,63}$", description: "The Keycloak client id."}
+        name: {type: string, minLength: 1, maxLength: 200}
+        scopes: {type: array, minItems: 1, maxItems: 50, items: {$ref: "#/components/schemas/Scope"}, description: "Duty names the client may use, in any catalogue style (sales.order.read, VendorInvoicePost, Maintain users)."}
+        quotaPerMin: {type: integer, minimum: 10, maximum: 100000, default: 600}
+        burst: {type: integer, minimum: 1, maximum: 100000, default: 100}
+        sandboxTenantId: {type: [string, "null"], format: uuid, description: "The tenant the portal's test console runs against; not the caller's own."}
+        ownerContact: {type: string, description: "E-mail address of the client's owner."}
+    ClientPatch:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: {type: integer, minimum: 1}
+        name: {type: string, minLength: 1, maxLength: 200}
+        scopes: {type: array, minItems: 1, maxItems: 50, items: {$ref: "#/components/schemas/Scope"}}
+        quotaPerMin: {type: integer, minimum: 10, maximum: 100000}
+        burst: {type: integer, minimum: 1, maximum: 100000}
+        sandboxTenantId: {type: [string, "null"], format: uuid}
+        ownerContact: {type: string}
+    Client:
+      type: object
+      required: [id, clientId, name, scopes, quotaPerMin, burst, sandboxTenantId, ownerContact, status, revokedAt, version, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        clientId: {type: string}
+        name: {type: string}
+        scopes: {type: array, items: {type: string}}
+        quotaPerMin: {type: integer}
+        burst: {type: integer}
+        sandboxTenantId: {type: [string, "null"], format: uuid}
+        ownerContact: {type: string}
+        status: {type: string, enum: [active, revoked]}
+        revokedAt: {type: [string, "null"], format: date-time}
+        version: {type: integer}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    ClientPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/Client"}}
+        nextCursor: {type: [string, "null"]}
+    ClientUsage:
+      type: object
+      required: [minutes]
+      properties:
+        minutes:
+          type: array
+          items:
+            type: object
+            required: [minute, allowed, throttled]
+            properties:
+              minute: {type: string, format: date-time}
+              allowed: {type: integer, minimum: 0, description: "Units admitted in the minute."}
+              throttled: {type: integer, minimum: 0, description: "Units refused with 429 in the minute."}
+    ConsumeRequest:
+      type: object
+      additionalProperties: false
+      required: [clientId]
+      properties:
+        clientId: {type: string, description: "The Keycloak client id from the verified token."}
+        cost: {type: integer, minimum: 1, maximum: 100000, default: 1}
+    ConsumeAllowed:
+      type: object
+      required: [allowed, remaining, limitPerMin, burst]
+      properties:
+        allowed: {type: boolean, const: true}
+        remaining: {type: integer, minimum: 0}
+        limitPerMin: {type: integer}
+        burst: {type: integer}

@@ -42,7 +42,7 @@ const (
 	OutboundActive           = "active"
 	OutboundArchivedStatus   = "archived"
 	maxLegacyKeyLength       = 512
-	maxRefsPerRecord         = 1
+	maxRefsPerRecord         = 4100 // the header and every element of the most a definition can iterate (4 collections of 1000)
 	outboundScopeRefused     = "AUTH-0003"
 	outboundNameUniqueIndex  = "outbound_mapping_tenant_id_name_key"
 	zeroUUID                 = "00000000-0000-0000-0000-000000000000"
@@ -85,8 +85,10 @@ type OutboundXrefRecord struct {
 	MappingID string
 	EventID   string
 	LegacyKey string
-	Refs      []domain.OutboundRef
-	Actor     string
+	// Refs are the records the push created. A ref carries the LegacyKey the legacy ERP assigned it; at most one ref may
+	// omit it and then takes LegacyKey (the single-record form: one ref, or none for a mapping without a subject).
+	Refs  []domain.OutboundRef
+	Actor string
 }
 
 // OutboundStore is the storage of integration track S5. Mappings and the cross-reference are tenant data (no legal
@@ -102,8 +104,9 @@ type OutboundStore interface {
 	ListOutboundVersions(ctx context.Context, id string) ([]OutboundVersion, error)
 	// UpdateOutboundMapping applies edit under the mapping's version and writes version+1 (409 MIG-VERSION-CONFLICT otherwise).
 	UpdateOutboundMapping(ctx context.Context, id string, version int, edit func(*OutboundMapping) error) (OutboundMapping, error)
-	// RecordOutboundXref stores the legacy key of the push of one event; replayed is true when the same call was made
-	// before. The same event with another key, or a key that belongs to another record, is a 409.
+	// RecordOutboundXref stores the legacy keys of the push of one event, all or none (one transaction): the header's
+	// and one per line the push created. replayed is true when the same call was made before. The same event with
+	// other keys or records, or a key that belongs to another record, is a 409.
 	RecordOutboundXref(ctx context.Context, in OutboundXrefRecord) (replayed bool, err error)
 	domain.LegacyKeyResolver
 }
@@ -146,7 +149,7 @@ func OutboundChecksum(definition []byte) string {
 
 func sameRefs(a, b []domain.OutboundRef) bool {
 	return slices.EqualFunc(a, b, func(x, y domain.OutboundRef) bool {
-		return x.Entity == y.Entity && strings.EqualFold(x.ID, y.ID)
+		return x.Entity == y.Entity && strings.EqualFold(x.ID, y.ID) && x.LegacyKey == y.LegacyKey
 	})
 }
 
@@ -156,16 +159,30 @@ func ValidateOutboundRecord(in OutboundXrefRecord) map[string]string {
 	if in.EventID == "" || len(in.EventID) > 256 {
 		bad["eventId"] = "is required, at most 256 characters"
 	}
-	if strings.TrimSpace(in.LegacyKey) == "" || len(in.LegacyKey) > maxLegacyKeyLength {
-		bad["legacyKey"] = "is required, at most 512 characters"
-	}
 	if len(in.Refs) > maxRefsPerRecord {
-		bad["refs"] = "must hold the refs of the render: the one record the legacy key belongs to, or none for a mapping without a subject"
+		bad["refs"] = "at most " + strconv.Itoa(maxRefsPerRecord) + " refs: the header and its lines, or none for a mapping without a subject"
 	}
+	keyless := 0
 	for _, r := range in.Refs {
-		if r.Entity == "" || len(r.Entity) > 64 || !ids.Valid(r.ID) {
+		switch {
+		case r.Entity == "" || len(r.Entity) > 64 || !ids.Valid(r.ID):
 			bad["refs"] = "each reference needs an entity and a Passage id (UUID)"
+		case r.LegacyKey == "":
+			keyless++
+		case strings.TrimSpace(r.LegacyKey) == "" || len(r.LegacyKey) > maxLegacyKeyLength:
+			bad["refs"] = "a reference's legacyKey is at most 512 characters and not blank"
 		}
+	}
+	top := strings.TrimSpace(in.LegacyKey) != ""
+	switch {
+	case len(in.LegacyKey) > maxLegacyKeyLength:
+		bad["legacyKey"] = "is required, at most 512 characters"
+	case keyless > 1:
+		bad["refs"] = "at most one ref may omit its legacyKey (it takes the top-level legacyKey); give every other ref its own"
+	case keyless == 1 && !top, len(in.Refs) == 0 && !top:
+		bad["legacyKey"] = "is required unless every ref carries its own legacyKey, at most 512 characters"
+	case keyless == 0 && top && len(in.Refs) > 0 && in.LegacyKey != in.Refs[0].LegacyKey:
+		bad["legacyKey"] = "applies to a ref without its own legacyKey and every ref has one"
 	}
 	return bad
 }
@@ -464,18 +481,68 @@ func (s *Postgres) LegacyKeys(ctx context.Context, sourceSystem, entity string, 
 	return out, err
 }
 
-// canonicalRefs returns the refs with canonical ids (ValidateOutboundRecord has checked them).
-func canonicalRefs(refs []domain.OutboundRef) []domain.OutboundRef {
-	out := make([]domain.OutboundRef, 0, len(refs))
-	for _, r := range refs {
+func refMismatch(i int, entity string) error {
+	return httpx.NewProblem(http.StatusUnprocessableEntity, CodeXrefRefMismatch, "refs["+strconv.Itoa(i)+"].entity "+entity+" is not the subject entity of the header or of a collection of any version of this outbound mapping")
+}
+
+// effectiveRefs is what a record call stores: canonical ids, each ref with the key it records (the top-level legacyKey
+// for the one that has none), a ref repeated with the same key once (a set, so 4100 refs stay linear).
+func effectiveRefs(in OutboundXrefRecord) []domain.OutboundRef {
+	out := make([]domain.OutboundRef, 0, len(in.Refs))
+	seen := make(map[domain.OutboundRef]bool, len(in.Refs))
+	for _, r := range in.Refs {
 		id, _ := ids.Canonical(r.ID)
-		out = append(out, domain.OutboundRef{Entity: r.Entity, ID: id})
+		key := r.LegacyKey
+		if key == "" {
+			key = in.LegacyKey
+		}
+		n := domain.OutboundRef{Entity: r.Entity, ID: id, LegacyKey: key}
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
 	}
 	return out
 }
 
-func refMismatch(entity string) error {
-	return httpx.NewProblem(http.StatusUnprocessableEntity, CodeXrefRefMismatch, "refs[0].entity "+entity+" is not the subject entity of any version of this outbound mapping")
+// eventKey is the event's legacy_key: the header's key, which is the top-level legacyKey when the call gives one (the
+// ref without its own key, wherever it stands in refs), else the first ref's.
+func eventKey(in OutboundXrefRecord, eff []domain.OutboundRef) string {
+	if strings.TrimSpace(in.LegacyKey) != "" || len(eff) == 0 {
+		return in.LegacyKey
+	}
+	return eff[0].LegacyKey
+}
+
+// recordedEntities are the entities a mapping's versions create records of: the header subject and the subject of each
+// collection. The hub's grant reaches only the cross-reference rows its own mappings produce.
+func recordedEntities(definition []byte) []string {
+	var d struct {
+		Subject     *domain.OutboundSubject `json:"subject"`
+		Collections []struct {
+			Subject *domain.OutboundSubject `json:"subject"`
+		} `json:"collections"`
+	}
+	if json.Unmarshal(definition, &d) != nil {
+		return nil
+	}
+	var out []string
+	if d.Subject != nil {
+		out = append(out, d.Subject.Entity)
+	}
+	for _, c := range d.Collections {
+		if c.Subject != nil {
+			out = append(out, c.Subject.Entity)
+		}
+	}
+	return out
+}
+
+func xrefLess(a, b domain.OutboundRef) int {
+	if c := strings.Compare(a.Entity, b.Entity); c != 0 {
+		return c
+	}
+	return strings.Compare(a.LegacyKey, b.LegacyKey)
 }
 
 // RecordOutboundXref writes (mapping's source system, ref.entity, legacyKey) -> ref.id. The ref must name the subject
@@ -492,11 +559,12 @@ func (s *Postgres) RecordOutboundXref(ctx context.Context, in OutboundXrefRecord
 	if bad := ValidateOutboundRecord(in); len(bad) > 0 {
 		return false, errors.New("store: invalid xref record")
 	}
-	canonical := canonicalRefs(in.Refs)
+	canonical := effectiveRefs(in)
 	refsJSON, err := json.Marshal(canonical)
 	if err != nil {
 		return false, err
 	}
+	key := eventKey(in, canonical)
 	replayed := false
 	err = s.outboundTx(ctx, obRecord, func(tx pgx.Tx) error {
 		var system string
@@ -505,31 +573,55 @@ func (s *Postgres) RecordOutboundXref(ctx context.Context, in OutboundXrefRecord
 		} else if err != nil {
 			return err
 		}
-		if len(canonical) == 1 {
-			var subject bool
-			if err := tx.QueryRow(ctx, `select exists (select 1 from migration.outbound_mapping_version
-				where tenant_id = $1 and mapping_id = $2 and definition -> 'subject' ->> 'entity' = $3)`, p.TenantID, in.MappingID, canonical[0].Entity).Scan(&subject); err != nil {
+		if len(canonical) > 0 {
+			rows, err := tx.Query(ctx, `select definition::text from migration.outbound_mapping_version where tenant_id = $1 and mapping_id = $2`, p.TenantID, in.MappingID)
+			if err != nil {
 				return err
 			}
-			if !subject {
-				return refMismatch(canonical[0].Entity)
+			allowed := map[string]bool{}
+			for rows.Next() {
+				var def string
+				if err := rows.Scan(&def); err != nil {
+					rows.Close()
+					return err
+				}
+				for _, e := range recordedEntities([]byte(def)) {
+					allowed[e] = true
+				}
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			for i, r := range canonical {
+				if !allowed[r.Entity] {
+					return refMismatch(i, r.Entity)
+				}
 			}
 		}
 		tag, err := tx.Exec(ctx, `insert into migration.outbound_xref_event (tenant_id, mapping_id, event_id, legacy_key, refs, actor)
 			values ($1, $2, $3, $4, $5, $6) on conflict (tenant_id, mapping_id, event_id) do nothing`,
-			p.TenantID, in.MappingID, in.EventID, in.LegacyKey, refsJSON, in.Actor)
+			p.TenantID, in.MappingID, in.EventID, key, refsJSON, in.Actor)
 		if err != nil {
 			return err
 		}
 		if tag.RowsAffected() == 0 {
-			var key string
+			var storedKey string
 			var stored []byte
 			if err := tx.QueryRow(ctx, `select legacy_key, refs from migration.outbound_xref_event where tenant_id = $1 and mapping_id = $2 and event_id = $3`,
-				p.TenantID, in.MappingID, in.EventID).Scan(&key, &stored); err != nil {
+				p.TenantID, in.MappingID, in.EventID).Scan(&storedKey, &stored); err != nil {
 				return err
 			}
 			var was []domain.OutboundRef
-			if err := json.Unmarshal(stored, &was); err != nil || key != in.LegacyKey || !sameRefs(was, canonical) {
+			if err := json.Unmarshal(stored, &was); err != nil || storedKey != key {
+				return xrefEventConflict(in.EventID)
+			}
+			for i := range was {
+				if was[i].LegacyKey == "" {
+					was[i].LegacyKey = storedKey // recorded before a ref carried its own key
+				}
+			}
+			if !sameRefs(was, canonical) {
 				return xrefEventConflict(in.EventID)
 			}
 			replayed = true
@@ -538,30 +630,43 @@ func (s *Postgres) RecordOutboundXref(ctx context.Context, in OutboundXrefRecord
 		if len(canonical) == 0 {
 			return nil // a mapping without a subject: the push is recorded, there is no record to tie the key to
 		}
-		ref := canonical[0]
 		// A row this call creates for a subject the owning service scopes to a legal entity is tagged with the token's
 		// (the event's) legal entity; a tenant-wide one stays untagged. An existing row is never changed, its legal
 		// entity included: the token cannot prove that an untagged row (loaded before 0013 and not backfilled) belongs
 		// to its legal entity, so tagging it would let one legal entity's token take a record away from another. Such a
 		// row is accepted as before and stays tenant-wide; one tagged with another legal entity is 409. The no-op update
-		// only locks an existing row so RETURNING reports whom it resolves to and its legal entity.
-		le := ""
-		if domain.XrefLegalEntityScoped(ref.Entity) {
-			le, _ = ids.Canonical(p.LegalEntityID)
+		// only locks an existing row so RETURNING reports whom it resolves to and its legal entity. Every ref is written
+		// in the same transaction, in key order so that two pushes that share keys lock them in the same order; one
+		// conflict undoes the whole call.
+		writes := slices.Clone(canonical)
+		slices.SortFunc(writes, xrefLess)
+		leOf := func(entity string) string {
+			if domain.XrefLegalEntityScoped(entity) {
+				le, _ := ids.Canonical(p.LegalEntityID)
+				return le
+			}
+			return ""
 		}
-		var current, tagged string
-		err = tx.QueryRow(ctx, `insert into migration.xref (tenant_id, source_system, source_entity, source_key, target_id, legal_entity_id)
-			values ($1, $2, $3, $4, $5, nullif($6, '')::uuid)
-			on conflict (tenant_id, source_system, source_entity, source_key) do update set updated_at = migration.xref.updated_at
-			returning coalesce(merged_into_target_id, target_id)::text, coalesce(legal_entity_id::text, '')`,
-			p.TenantID, system, ref.Entity, in.LegacyKey, ref.ID, le).Scan(&current, &tagged)
-		if err != nil {
-			return err
+		batch := &pgx.Batch{}
+		for _, ref := range writes {
+			batch.Queue(`insert into migration.xref (tenant_id, source_system, source_entity, source_key, target_id, legal_entity_id)
+				values ($1, $2, $3, $4, $5, nullif($6, '')::uuid)
+				on conflict (tenant_id, source_system, source_entity, source_key) do update set updated_at = migration.xref.updated_at
+				returning coalesce(merged_into_target_id, target_id)::text, coalesce(legal_entity_id::text, '')`,
+				p.TenantID, system, ref.Entity, ref.LegacyKey, ref.ID, leOf(ref.Entity))
 		}
-		if current != ref.ID || (le != "" && tagged != "" && tagged != le) {
-			return xrefConflict(in.LegacyKey)
+		results := tx.SendBatch(ctx, batch)
+		defer results.Close()
+		for _, ref := range writes {
+			var current, tagged string
+			if err := results.QueryRow().Scan(&current, &tagged); err != nil {
+				return err
+			}
+			if le := leOf(ref.Entity); current != ref.ID || (le != "" && tagged != "" && tagged != le) {
+				return xrefConflict(ref.LegacyKey)
+			}
 		}
-		return nil
+		return results.Close()
 	})
 	return replayed, err
 }
@@ -749,39 +854,61 @@ func (m *Mem) RecordOutboundXref(ctx context.Context, in OutboundXrefRecord) (bo
 	if !ok {
 		return false, outboundNotFound()
 	}
-	in.Refs = canonicalRefs(in.Refs)
-	if len(in.Refs) == 1 && !slices.ContainsFunc(st.versions[in.MappingID], func(v memOutboundVersion) bool {
-		var d struct {
-			Subject *domain.OutboundSubject `json:"subject"`
+	eff := effectiveRefs(in)
+	allowed := map[string]bool{}
+	for _, v := range st.versions[in.MappingID] {
+		for _, e := range recordedEntities(v.Definition) {
+			allowed[e] = true
 		}
-		return json.Unmarshal(v.Definition, &d) == nil && d.Subject != nil && d.Subject.Entity == in.Refs[0].Entity
-	}) {
-		return false, refMismatch(in.Refs[0].Entity)
 	}
+	for j, r := range eff {
+		if !allowed[r.Entity] {
+			return false, refMismatch(j, r.Entity)
+		}
+	}
+	in.Refs = eff
 	k := [2]string{in.MappingID, in.EventID}
 	if was, seen := st.events[k]; seen {
-		if was.LegacyKey != in.LegacyKey || !sameRefs(was.Refs, in.Refs) {
+		if was.LegacyKey != eventKey(in, eff) || !sameRefs(was.Refs, eff) {
 			return false, xrefEventConflict(in.EventID)
 		}
 		return true, nil
 	}
-	if len(in.Refs) == 1 {
+	if len(eff) > 0 {
 		m.mu.Lock()
 		defer m.mu.Unlock()
-		ref := in.Refs[0]
-		key := domain.XrefKey{SourceSystem: st.items[i].SourceSystem, Entity: ref.Entity, SourceKey: in.LegacyKey}
-		le := ""
-		if domain.XrefLegalEntityScoped(ref.Entity) {
-			le, _ = ids.Canonical(p.LegalEntityID)
+		writes := slices.Clone(eff)
+		slices.SortFunc(writes, xrefLess)
+		type put struct {
+			key   domain.XrefKey
+			entry domain.XrefEntry
 		}
-		if cur, exists := m.xref.Entries[key]; exists {
-			if cur.TargetID != ref.ID || (le != "" && cur.LegalEntityID != "" && cur.LegalEntityID != le) {
-				return false, xrefConflict(in.LegacyKey)
+		var puts []put // applied only when no ref conflicts, so a refused call leaves nothing behind
+		pending := map[domain.XrefKey]int{}
+		for _, ref := range writes {
+			key := domain.XrefKey{SourceSystem: st.items[i].SourceSystem, Entity: ref.Entity, SourceKey: ref.LegacyKey}
+			le := ""
+			if domain.XrefLegalEntityScoped(ref.Entity) {
+				le, _ = ids.Canonical(p.LegalEntityID)
 			}
-		} else {
-			m.xref.Entries[key] = domain.XrefEntry{TargetID: ref.ID, LegalEntityID: le}
+			if cur, exists := m.xref.Entries[key]; exists {
+				if cur.TargetID != ref.ID || (le != "" && cur.LegalEntityID != "" && cur.LegalEntityID != le) {
+					return false, xrefConflict(ref.LegacyKey)
+				}
+			} else if j, dup := pending[key]; dup {
+				if puts[j].entry.TargetID != ref.ID {
+					return false, xrefConflict(ref.LegacyKey)
+				}
+			} else {
+				pending[key] = len(puts)
+				puts = append(puts, put{key, domain.XrefEntry{TargetID: ref.ID, LegalEntityID: le}})
+			}
+		}
+		for _, x := range puts {
+			m.xref.Entries[x.key] = x.entry
 		}
 	}
+	in.LegacyKey = eventKey(in, eff)
 	st.events[k] = in
 	return false, nil
 }

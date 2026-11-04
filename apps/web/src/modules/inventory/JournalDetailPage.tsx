@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -16,6 +16,7 @@ import {
 } from "../../shell/ui";
 import {
   addLines,
+  copyJournal,
   describeProblem,
   getJournal,
   LINE_DIMENSIONS,
@@ -31,7 +32,8 @@ import {
   type LineDimension,
   type Problem,
 } from "./api/client";
-import { dash, DECIMAL, describeDimensions, formatDateTime, sentence, shortId, statusTone, today, typeLabels, UUID } from "./format";
+import { dash, DECIMAL, describeDimensions, formatDateTime, isIsoDate, sentence, shortId, statusTone, today, typeLabels, UUID } from "./format";
+import { ImportLinesForm } from "./ImportLines";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -319,6 +321,75 @@ function ReverseForm({ journal, onCancel }: { journal: Journal; onCancel(): void
   );
 }
 
+/** Copies the journal into a new DRAFT and opens it (AX copy journal). */
+function CopyForm({ journal, onCancel }: { journal: Journal; onCancel(): void }) {
+  const navigate = useNavigate();
+  const [date, setDate] = useState(journal.postingDate);
+  const [error, setError] = useState("");
+  const [failure, setFailure] = useState<Problem | null>(null);
+  const [busy, setBusy] = useState(false);
+  // One key per copy: a retry after a lost response returns the copy already
+  // made instead of a second one. Another date is another copy.
+  const key = useRef(crypto.randomUUID());
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!isIsoDate(date)) {
+      setError("Enter the posting date of the copy.");
+      return;
+    }
+    setError("");
+    setFailure(null);
+    setBusy(true);
+    try {
+      const copy = await copyJournal(journal.id, date, key.current);
+      navigate(`/inventory/journals/${copy.id}`);
+    } catch (e) {
+      setFailure(describeProblem(e));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Copy journal">
+      <form onSubmit={submit} noValidate className={styles.form}>
+        <p className={`${styles.muted} ${styles.formActions}`}>
+          Creates a new draft with the same type, offset account, journal name and currency and every line of this journal. This journal is not changed.
+        </p>
+        <FormField id="copy-date" label="Posting date" error={error}>
+          {(control) => (
+            <Input
+              {...control}
+              type="date"
+              value={date}
+              onChange={(e) => {
+                setDate(e.target.value);
+                key.current = crypto.randomUUID();
+              }}
+              invalid={Boolean(error)}
+            />
+          )}
+        </FormField>
+        {failure ? (
+          <div className={styles.formActions}>
+            <Alert tone="danger" title="The journal was not copied" live="alert">
+              {failure.message} ({failure.code})
+            </Alert>
+          </div>
+        ) : null}
+        <div className={styles.formActions}>
+          <Button type="submit" variant="primary" loading={busy}>
+            Create copy
+          </Button>
+          <Button variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
 function Detail({ term, children, mono = false }: { term: string; children: string; mono?: boolean }) {
   return (
     <div className={styles.entry}>
@@ -361,10 +432,12 @@ export function JournalDetailPage() {
   const [failure, setFailure] = useState<{ action: Action; problem: Problem } | null>(null);
   const [notice, setNotice] = useState("");
   const [reversing, setReversing] = useState(false);
+  const [copying, setCopying] = useState(false);
 
   useEffect(() => {
     setJournal(state.data);
     setReversing(false);
+    setCopying(false);
   }, [state.data]);
 
   async function act(action: Action) {
@@ -421,6 +494,7 @@ export function JournalDetailPage() {
   const draft = journal.status === "DRAFT";
   const reversal = Boolean(journal.reversesJournalId);
   const canReverse = journal.status === "POSTED" && !journal.reversedByJournalId && journal.journalType !== "OWNERSHIP_CHANGE" && journal.journalType !== "TRANSFER";
+  const canCopy = journal.journalType !== "COUNT" && !reversal;
   const hasLines = journal.lines.length > 0;
   const button = (action: Action, label: string, variant: "primary" | "secondary" | "danger" = "secondary", disabled = false) => (
     <Button variant={variant} loading={busy === action} disabled={busy !== "" || disabled} onClick={() => act(action)}>
@@ -443,6 +517,7 @@ export function JournalDetailPage() {
             {journal.status === "REJECTED" ? button("reopen", "Reopen as draft") : null}
             {(draft && !reversal) || journal.status === "REJECTED" ? button("cancel", "Cancel journal", "danger") : null}
             {draft || journal.status === "APPROVED" ? button("post", reversal ? "Post reversal" : "Post journal", "primary", !hasLines) : null}
+            {canCopy && !copying ? <Button onClick={() => setCopying(true)}>Copy journal</Button> : null}
             {canReverse && !reversing ? <Button onClick={() => setReversing(true)}>Reverse journal</Button> : null}
           </>
         }
@@ -470,6 +545,7 @@ export function JournalDetailPage() {
           Reopen the journal as a draft to correct it, or cancel it.
         </Alert>
       ) : null}
+      {copying ? <CopyForm journal={journal} onCancel={() => setCopying(false)} /> : null}
       {reversing ? <ReverseForm journal={journal} onCancel={() => setReversing(false)} /> : null}
       {journal.reversesJournalId ? (
         <Alert tone="info" title={draft ? "Reversal draft" : "Reversal"}>
@@ -506,6 +582,7 @@ export function JournalDetailPage() {
         empty={{ title: "No lines yet", description: draft ? "Add a line below, then post the journal." : "This journal has no lines." }}
       />
       {draft && !reversal ? <AddLineForm journal={journal} onAdded={setJournal} /> : null}
+      {draft && !reversal ? <ImportLinesForm journal={journal} validate={validateLine} onAdded={setJournal} /> : null}
       {journal.glEntry ? (
         <Card title="GL entry">
           <div className={styles.stack}>

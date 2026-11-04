@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/costing/internal/store"
@@ -29,6 +31,7 @@ type fakeStore struct {
 	slice4
 	slice5
 	slice6
+	slice7
 }
 
 func (f *fakeStore) CreateCostingVersion(_ context.Context, in store.CostingVersion, key string) (store.CostingVersion, bool, error) {
@@ -160,6 +163,7 @@ func TestPPV_AC204(t *testing.T) {
 
 func TestPPV_PostsCostTransactionOnReceiptAndInvoice(t *testing.T) {
 	h, f := server()
+	f.cost = &store.CostLookup{UnitCost: "10.00", Currency: "EUR"}
 	const product, site = "22222222-2222-4222-8222-222222222222", "44444444-4444-4444-8444-444444444444"
 	ref := func(le, line string) string {
 		return `"legalEntityId":"` + le + `","productId":"` + product + `","siteId":"` + site + `","financialDate":"2026-03-05","sourceLineId":"` + line + `"`
@@ -317,5 +321,71 @@ func TestListAgingBucketSets_RefusesCallerWithoutLegalEntityScope(t *testing.T) 
 	rec := call(h, http.MethodGet, "/v1/costing/aging/bucket-sets", "", allDuties, scopedTo(""))
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status %d, want 403: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestPPV_ClearingAmountIsTheSameAtReceiptAndInvoice(t *testing.T) {
+	h, f := server()
+	f.cost = &store.CostLookup{UnitCost: "0.31", Currency: "EUR"}
+	ref := `"legalEntityId":"` + testLE + `","productId":"22222222-2222-4222-8222-222222222222","siteId":"44444444-4444-4444-8444-444444444444","financialDate":"2026-03-05","sourceLineId":"1"`
+	receipt := `{"kind":"RECEIPT","currency":"EUR","qty":"3","standardUnitCost":"0.31","poUnitPrice":"0.335","sourceDocumentId":"GR-9",` + ref + `}`
+	invoice := `{"kind":"INVOICE","currency":"EUR","qty":"3","poUnitPrice":"0.335","invoiceUnitPrice":"0.345","sourceDocumentId":"INV-9",` + ref + `}`
+	for _, body := range []string{receipt, invoice} {
+		if rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", body, allDuties, nil); rec.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+	}
+	legs := func(key string) (grir, ppv, other decimal.Decimal) {
+		row := f.costTxns[key]
+		grir, ppv = decimal.RequireFromString(row.GrirAmount), decimal.RequireFromString(row.Amount)
+		if strings.HasPrefix(key, "ppv:RECEIPT") {
+			return grir, ppv, grir.Sub(ppv)
+		}
+		return grir, ppv, grir.Add(ppv)
+	}
+	grir, ppv, inventory := legs("ppv:RECEIPT:" + testLE + ":GR-9:1")
+	if grir.String() != "1" || ppv.String() != "0.07" || inventory.String() != "0.93" {
+		t.Errorf("receipt GR/IR %s PPV %s inventory %s, want 1.00, 0.07 and the standard 0.93", grir, ppv, inventory)
+	}
+	grir, ppv, payable := legs("ppv:INVOICE:" + testLE + ":INV-9:1")
+	if grir.String() != "1" || ppv.String() != "0.04" || payable.String() != "1.04" {
+		t.Errorf("invoice GR/IR %s PPV %s payable %s, want 1.00, 0.04 and round(3 x 0.345) = 1.04", grir, ppv, payable)
+	}
+}
+
+func TestPPV_ReplayOfARecordedReceiptSurvivesAStandardChange(t *testing.T) {
+	h, f := server()
+	f.cost = &store.CostLookup{UnitCost: "10", Currency: "EUR"}
+	ref := `"legalEntityId":"` + testLE + `","productId":"22222222-2222-4222-8222-222222222222","siteId":"44444444-4444-4444-8444-444444444444","financialDate":"2026-03-05","sourceLineId":"1"`
+	body := `{"kind":"RECEIPT","currency":"EUR","qty":"100","standardUnitCost":"10.00","poUnitPrice":"10.50","sourceDocumentId":"GR-1",` + ref + `}`
+	if rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", body, allDuties, nil); rec.Code != http.StatusOK {
+		t.Fatalf("first call status %d: %s", rec.Code, rec.Body.String())
+	}
+	f.cost = &store.CostLookup{UnitCost: "11", Currency: "EUR"}
+	if rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", body, allDuties, nil); rec.Code != http.StatusOK || len(f.costTxns) != 1 {
+		t.Fatalf("replay after a same-day activation: status %d rows %d: %s, want 200 and one row", rec.Code, len(f.costTxns), rec.Body.String())
+	}
+}
+
+func TestPPV_RecordedReceiptMustUseTheStoredStandard(t *testing.T) {
+	h, f := server()
+	ref := `"legalEntityId":"` + testLE + `","productId":"22222222-2222-4222-8222-222222222222","siteId":"44444444-4444-4444-8444-444444444444","financialDate":"2026-03-05","sourceLineId":"1"`
+	body := func(std, currency string) string {
+		return `{"kind":"RECEIPT","currency":"` + currency + `","qty":"100","standardUnitCost":"` + std + `","poUnitPrice":"10.50","sourceDocumentId":"GR-1",` + ref + `}`
+	}
+	if rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", body("10.00", "EUR"), allDuties, nil); rec.Code != http.StatusNotFound {
+		t.Errorf("no stored standard: status %d, want 404", rec.Code)
+	}
+	f.cost = &store.CostLookup{UnitCost: "10", Currency: "EUR"}
+	for name, b := range map[string]string{"stale standard": body("9.00", "EUR"), "other currency": body("10.00", "USD")} {
+		if rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", b, allDuties, nil); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), CodePPVStandard) {
+			t.Errorf("%s: status %d: %s, want 422 %s", name, rec.Code, rec.Body.String(), CodePPVStandard)
+		}
+	}
+	if len(f.costTxns) != 0 {
+		t.Fatalf("refused receipts stored %d rows", len(f.costTxns))
+	}
+	if rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", body("10.00", "EUR"), allDuties, nil); rec.Code != http.StatusOK {
+		t.Errorf("matching standard: status %d: %s", rec.Code, rec.Body.String())
 	}
 }

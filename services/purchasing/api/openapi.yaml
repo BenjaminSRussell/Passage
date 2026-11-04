@@ -1332,6 +1332,137 @@ components:
               confirmedDate: { type: string, format: date, description: The date the vendor confirmed, when it has. }
               confirmedBy: { type: string, format: uuid }
               confirmedAt: { type: string, format: date-time }
+    OutlineRow:
+      type: object
+      description: A stored node of a service outline in depth-first order. A LEVEL's amount is the sum of its children (BR-17.19).
+      required: [seq, depth, kind, qty, unitPrice, amount]
+      properties:
+        seq: { type: integer, minimum: 1 }
+        parentSeq: { type: integer, minimum: 1, description: Absent on a top-level node. }
+        depth: { type: integer, minimum: 1, maximum: 5 }
+        kind: { type: string, enum: [LEVEL, ITEM] }
+        description: { type: string }
+        productId: { type: string, format: uuid, description: The service product of an item. }
+        qty: { type: string, description: Decimal string; 0 on a level. }
+        unit: { type: string }
+        unitPrice: { type: string, description: Decimal string; 0 on a level. }
+        amount: { type: string, description: Decimal string. }
+    OutlineNodeInput:
+      type: object
+      description: >-
+        A node of a service outline in the request. A LEVEL needs a description and at least one child and may state the total
+        its children must add up to (PRC-SRV-004). An ITEM needs a productId or a description, a positive qty, a unit and a unitPrice.
+        An outline holds at most 200 nodes in at most 5 levels.
+      required: [kind]
+      additionalProperties: false
+      properties:
+        kind: { type: string, enum: [LEVEL, ITEM] }
+        description: { type: string, maxLength: 500 }
+        productId: { type: string, format: uuid }
+        qty: { type: string, description: Decimal string, positive, at most six decimal places. }
+        unit: { type: string, maxLength: 20 }
+        unitPrice: { type: string, description: Decimal string, not negative, at most six decimal places. }
+        total: { type: string, description: Decimal string. The amount the caller expects a LEVEL to add up to. }
+        children:
+          type: array
+          items: { $ref: '#/components/schemas/OutlineNodeInput' }
+    ServiceSpec:
+      type: object
+      description: The service specification of one SERVICE PO line (FR-17.23).
+      required: [purchaseOrderId, lineNo, currency, lineAmount, valueLimit, expectedValue, plannedTotal, outline, updatedAt]
+      properties:
+        purchaseOrderId: { type: string, format: uuid }
+        lineNo: { type: integer }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        lineAmount: { type: string, description: Decimal string, the PO line amount. }
+        valueLimit: { type: string, description: Decimal string. The limit for unplanned services. }
+        expectedValue: { type: string, description: Decimal string. The value of unplanned services expected. }
+        plannedTotal: { type: string, description: Decimal string. The sum of the top-level outline amounts; never above lineAmount. }
+        contractAgreementLineId: { type: string, format: uuid }
+        contractRemaining: { type: string, description: Decimal string. The remaining value of the contract line now; present with contractAgreementLineId. }
+        modelId: { type: string, format: uuid, description: The model service specification the outline was copied from. }
+        outline: { type: array, items: { $ref: '#/components/schemas/OutlineRow' } }
+        updatedBy: { type: string, format: uuid }
+        updatedAt: { type: string, format: date-time }
+    ServiceSpecResult:
+      allOf:
+        - $ref: '#/components/schemas/ServiceSpec'
+        - type: object
+          required: [poRowVersion]
+          properties:
+            poRowVersion: { type: integer, description: The PO row version (its ETag) after the call }
+    ServiceSpecPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ServiceSpec' } }
+    ServiceSpecInput:
+      type: object
+      description: >-
+        The limits and either an outline or a modelId whose outline is copied (not both). An empty outline is a limit item with no planned services.
+      required: [valueLimit]
+      additionalProperties: false
+      properties:
+        valueLimit: { type: string, description: Decimal string, not negative. The limit for unplanned services; 0 allows none. }
+        expectedValue: { type: string, description: Decimal string, not above valueLimit. Defaults to 0. }
+        contractAgreementLineId: { type: string, format: uuid, description: An agreement line of an EFFECTIVE agreement of the same legal entity, vendor and currency whose remaining value also bounds unplanned services. }
+        modelId: { type: string, format: uuid }
+        outline:
+          type: array
+          items: { $ref: '#/components/schemas/OutlineNodeInput' }
+    LimitCheck:
+      type: object
+      description: The answer to an unplanned services check (BR-17.19). A refused entry has allowed false, code PRC-SRV-003 and detail.
+      required: [lineNo, currency, valueLimit, unplannedEntered, entry, valueRemaining, remaining, allowed]
+      properties:
+        lineNo: { type: integer, minimum: 1 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        valueLimit: { type: string, description: Decimal string. }
+        contractRemaining: { type: string, description: Decimal string. The remaining value of the contract line, when the specification names one. }
+        unplannedEntered: { type: string, description: Decimal string. What is already entered. }
+        entry: { type: string, description: Decimal string. The entry checked. }
+        valueRemaining: { type: string, description: 'Decimal string. valueLimit minus unplannedEntered, never negative.' }
+        remaining: { type: string, description: 'Decimal string. What unplanned services may still add before this entry: the smaller of valueRemaining and contractRemaining minus unplannedEntered, never negative.' }
+        allowed: { type: boolean }
+        code: { type: string, enum: [PRC-SRV-003], description: Present when allowed is false. }
+        detail: { type: string, description: 'Present when allowed is false, e.g. "Unplanned services 2100 exceed limit 2000 on PO line 1".' }
+    ModelServiceSpec:
+      type: object
+      description: A reusable service outline of a legal entity (SAP ML10-ML12) that fills the outline of a service line.
+      required: [id, legalEntityId, code, name, currency, status, plannedTotal, outline, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        status: { type: string, enum: [ACTIVE, INACTIVE] }
+        plannedTotal: { type: string, description: Decimal string. }
+        outline: { type: array, items: { $ref: '#/components/schemas/OutlineRow' }, description: Empty in a list. }
+        version: { type: integer, minimum: 1 }
+        createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedBy: { type: string, format: uuid }
+        updatedAt: { type: string, format: date-time }
+    ModelServiceSpecPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ModelServiceSpec' } }
+        nextCursor: { type: string, format: uuid }
+    ModelServiceSpecInput:
+      type: object
+      required: [name, currency]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid, description: Required on create; ignored on change. }
+        code: { type: string, pattern: '^[A-Z0-9_-]{1,20}$', description: Required on create; ignored on change. }
+        name: { type: string, maxLength: 200 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        status: { type: string, enum: [ACTIVE, INACTIVE], description: Defaults to ACTIVE. }
+        outline:
+          type: array
+          items: { $ref: '#/components/schemas/OutlineNodeInput' }
     DeliveryScheduleInput:
       type: object
       required: [rows]
@@ -2827,7 +2958,6 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RFQAwardResult' }
         '400': { description: Missing Idempotency-Key (PRC-IDEM-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '403': { description: Missing duty RFQAward (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: RFQ not found (PRC-RFQ-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: Version changed (PRC-VERSION-CONFLICT) or the RFQ is not REPLIES_OPEN or CLOSED (PRC-RFQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '403': { description: Missing duty RFQAward (AUTH-0003), or a sealed RFQ before its deadline (PRC-RFQ-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
@@ -3890,4 +4020,211 @@ paths:
         '404': { description: Not found (PRC-SL-REQUEST-NOT-FOUND or PRC-SL-LIMIT-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: If-Match is not the stored version (PRC-SL-005), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: id is not a UUID (COM-0001) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/purchase-orders/{id}/service-lines:
+    get:
+      operationId: listServiceSpecs
+      x-passage-duty: PurchaseOrderInquire or procurement.purchase-order.lookup
+      summary: The service lines of a purchase order with their outlines and limits (FR-17.23)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: The specifications in line order
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceSpecPage' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Purchase order not found (PRC-PO-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: id is not a UUID (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/purchase-orders/{id}/lines/{lineNo}/service:
+    get:
+      operationId: getServiceSpec
+      x-passage-duty: PurchaseOrderInquire or procurement.purchase-order.lookup
+      summary: The service specification of one PO line (ETag = PO row version)
+      parameters: [{ $ref: '#/components/parameters/Id' }, { $ref: '#/components/parameters/LineNo' }]
+      responses:
+        '200':
+          description: OK
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceSpecResult' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Purchase order not found (PRC-PO-NOT-FOUND) or the line has no specification (PRC-SRV-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Bad id or line number (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    put:
+      operationId: putServiceSpec
+      x-passage-duty: PurchaseOrderMaintain
+      summary: Save the service specification of one PO line, which makes it a SERVICE line (FR-17.23; duty PurchaseOrderMaintain)
+      description: >-
+        Replaces any earlier specification: the value limit and expected value for unplanned services, the optional contract limit (an
+        agreement line) and the outline, given as a tree or copied from a model service specification. Item amounts are quantity times
+        unit price rounded to the currency, a level's amount is the sum of its children (PRC-SRV-004 when a stated total differs), and the
+        planned total may not exceed the line amount (PRC-SRV-002, checked again at confirmation). Allowed on a DRAFT or REJECTED PO only.
+        If-Match is the PO row version; the write bumps it and the answer's ETag is the new one. Writes servicespec.changed.v1.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/LineNo' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ServiceSpecInput' }
+      responses:
+        '200':
+          description: Specification stored
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceSpecResult' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty PurchaseOrderMaintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Purchase order (PRC-PO-NOT-FOUND), line (PRC-PO-LINE-NOT-FOUND), model (PRC-SRV-MODEL-NOT-FOUND) or contract agreement line not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '412': { description: If-Match is not the current PO row version (PRC-PO-009), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'Validation (COM-0001), PO not DRAFT or REJECTED or line cancelled (PRC-SRV-001), planned outline above the line amount, expected value above the limit or unusable contract line (PRC-SRV-002), outline total mismatch (PRC-SRV-004), model inactive, of another legal entity or currency (PRC-SRV-005)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    delete:
+      operationId: deleteServiceSpec
+      x-passage-duty: PurchaseOrderMaintain
+      summary: Remove the service specification of one PO line, which becomes a plain line again (duty PurchaseOrderMaintain)
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/LineNo' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      responses:
+        '204':
+          description: Removed; the ETag is the new PO row version
+          headers:
+            ETag: { schema: { type: string } }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty PurchaseOrderMaintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Purchase order, line or specification not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '412': { description: If-Match is not the current PO row version (PRC-PO-009), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'Bad id or line number (COM-0001), PO not DRAFT or REJECTED or line cancelled (PRC-SRV-001)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/purchase-orders/{id}/lines/{lineNo}/service/limit-check:
+    get:
+      operationId: checkServiceLimit
+      x-passage-duty: PurchaseOrderInquire or procurement.purchase-order.lookup
+      summary: Whether an entry of unplanned services fits the line's limits (BR-17.19, AC-17.17)
+      description: >-
+        Wave 18 asks for a service entry sheet. The unplanned services already entered (unplanned, which the caller keeps) plus the
+        entry may not exceed the value limit, nor the remaining value of the contract line when the specification names one. A refused
+        entry is an answer, not an error: 200 with allowed false, code PRC-SRV-003 and the message in detail, so the caller keeps the
+        figures (remaining is what can still be entered) and raises PRC-SRV-003 on its own sheet. It changes nothing and holds no lock:
+        a caller that must be race free enforces remaining under its own lock. A line without a specification allows no unplanned
+        services (404 PRC-SRV-NOT-FOUND). Receiving reaches it with a signed service token carrying procurement.purchase-order.lookup.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/LineNo' }
+        - { name: unplanned, in: query, required: false, description: Decimal string, the unplanned amount already entered (default 0), schema: { type: string } }
+        - { name: entry, in: query, required: true, description: Decimal string, the unplanned amount of the entry to check, schema: { type: string } }
+      responses:
+        '200':
+          description: The answer; allowed false with code PRC-SRV-003 when the entry exceeds the value limit or the contract limit
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LimitCheck' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Purchase order not found (PRC-PO-NOT-FOUND) or the line has no specification (PRC-SRV-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'Bad id, line number or amount (COM-0001), the order or line is cancelled (PRC-SRV-001)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/model-service-specs:
+    post:
+      operationId: createModelServiceSpec
+      x-passage-duty: ProcurementPolicyMaintain
+      summary: Create a model service specification of a legal entity (FR-17.23; duty ProcurementPolicyMaintain)
+      description: >-
+        A model is a reusable outline (SAP ML10-ML12) priced in one currency; a service line takes a copy by modelId and the model can
+        change afterwards without moving the line. Writes modelservicespec.created.v1. A replayed Idempotency-Key returns the first row.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModelServiceSpecInput' }
+      responses:
+        '201':
+          description: The model at version 1
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelServiceSpec' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty ProcurementPolicyMaintain or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: The legal entity already has a model with this code (PRC-SRV-006), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation - code, currency, outline (COM-0001), outline total mismatch (PRC-SRV-004) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    get:
+      operationId: listModelServiceSpecs
+      x-passage-duty: ProcurementPolicyMaintain or PurchaseOrderInquire
+      summary: List model service specifications, newest first, without outlines (FR-17.23)
+      parameters:
+        - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [ACTIVE, INACTIVE] } }
+        - { name: q, in: query, required: false, description: Text found in the code or the name, schema: { type: string } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelServiceSpecPage' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: A filter is malformed (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/model-service-specs/{id}:
+    get:
+      operationId: getModelServiceSpec
+      x-passage-duty: ProcurementPolicyMaintain or PurchaseOrderInquire
+      summary: Read one model service specification with its outline (FR-17.23)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: The model
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelServiceSpec' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Model not found (PRC-SRV-MODEL-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: id is not a UUID (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    put:
+      operationId: changeModelServiceSpec
+      x-passage-duty: ProcurementPolicyMaintain
+      summary: Change a model service specification under If-Match (FR-17.23; duty ProcurementPolicyMaintain)
+      description: >-
+        PUT is idempotent, so no Idempotency-Key is taken. It replaces name, currency, status and outline; the code and the legal entity
+        do not change. A PO line that already took a copy keeps it. Writes modelservicespec.changed.v1.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModelServiceSpecInput' }
+      responses:
+        '200':
+          description: The model at its new version
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelServiceSpec' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty ProcurementPolicyMaintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Model not found (PRC-SRV-MODEL-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '412': { description: If-Match is not the stored version (PRC-SRV-007), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation (COM-0001) or outline total mismatch (PRC-SRV-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }

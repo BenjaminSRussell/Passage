@@ -9,6 +9,7 @@ paths:
   /v1/org/legal-entities:
     post:
       operationId: createLegalEntity
+      summary: Create a legal entity
       x-passage-duty: org.legal-entity.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -22,6 +23,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     get:
       operationId: listLegalEntities
+      summary: List legal entities
       x-passage-duty: org.read
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
@@ -39,6 +41,7 @@ paths:
   /v1/org/legal-entities/{id}:
     get:
       operationId: getLegalEntity
+      summary: Get a legal entity
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -49,6 +52,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     patch:
       operationId: updateLegalEntity
+      summary: Update a legal entity
       x-passage-duty: org.legal-entity.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -63,6 +67,7 @@ paths:
   /v1/org/legal-entities/{id}/fiscal-period:
     get:
       operationId: resolveLegalEntityFiscalPeriod
+      summary: Resolve the fiscal period of a legal entity for a date
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -75,6 +80,7 @@ paths:
   /v1/org/legal-entities/{id}/names:
     get:
       operationId: listLegalEntityNames
+      summary: List the name history of a legal entity
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -88,6 +94,7 @@ paths:
   /v1/org/operating-units:
     post:
       operationId: createOperatingUnit
+      summary: Create an operating unit
       x-passage-duty: org.operating-unit.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -101,6 +108,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     get:
       operationId: listOperatingUnits
+      summary: List operating units
       x-passage-duty: org.read
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
@@ -121,6 +129,7 @@ paths:
   /v1/org/operating-units/{id}:
     get:
       operationId: getOperatingUnit
+      summary: Get an operating unit
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -131,6 +140,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     patch:
       operationId: updateOperatingUnit
+      summary: Update an operating unit
       x-passage-duty: org.operating-unit.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -145,6 +155,7 @@ paths:
   /v1/org/team-types:
     get:
       operationId: listTeamTypes
+      summary: List team types
       x-passage-duty: org.read
       parameters:
         - { name: memberKind, in: query, schema: { type: string, enum: [user, party] } }
@@ -157,6 +168,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createTeamType
+      summary: Create a team type
       x-passage-duty: org.operating-unit.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -171,6 +183,7 @@ paths:
   /v1/org/team-types/{id}:
     get:
       operationId: getTeamType
+      summary: Get a team type
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -182,6 +195,7 @@ paths:
   /v1/org/teams:
     get:
       operationId: listTeams
+      summary: List teams
       x-passage-duty: org.read
       parameters:
         - { name: teamTypeId, in: query, schema: { type: string, format: uuid } }
@@ -198,6 +212,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createTeam
+      summary: Create a team
       x-passage-duty: org.operating-unit.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -212,6 +227,7 @@ paths:
   /v1/org/teams/{id}:
     get:
       operationId: getTeam
+      summary: Get a team
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -222,6 +238,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     patch:
       operationId: updateTeam
+      summary: Update a team
       x-passage-duty: org.operating-unit.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -236,6 +253,7 @@ paths:
   /v1/org/teams/{id}/members:
     get:
       operationId: listTeamMembers
+      summary: List the members of a team
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -251,6 +269,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: addTeamMember
+      summary: Add a member to a team
       x-passage-duty: org.operating-unit.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -266,6 +285,7 @@ paths:
   /v1/org/teams/{id}/members/{memberId}:end:
     post:
       operationId: endTeamMember
+      summary: End a team membership
       x-passage-duty: org.operating-unit.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -281,6 +301,7 @@ paths:
   /v1/org/teams/{id}/members/{memberId}:
     delete:
       operationId: removeTeamMember
+      summary: Remove a team membership
       x-passage-duty: org.operating-unit.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -292,6 +313,7 @@ paths:
   /v1/org/sites:
     post:
       operationId: createSite
+      summary: Create a site
       x-passage-duty: org.site.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -305,6 +327,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     get:
       operationId: listSites
+      summary: List sites
       x-passage-duty: org.read
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
@@ -319,6 +342,7 @@ paths:
   /v1/org/sites/{id}:
     get:
       operationId: getSite
+      summary: Get a site
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -329,6 +353,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     patch:
       operationId: updateSite
+      summary: Update a site
       x-passage-duty: org.site.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -343,6 +368,7 @@ paths:
   /v1/org/sites/{id}/fiscal-period:
     get:
       operationId: resolveSiteFiscalPeriod
+      summary: Resolve the fiscal period of a site for a date
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -355,6 +381,7 @@ paths:
   /v1/org/warehouses:
     post:
       operationId: createWarehouse
+      summary: Create a warehouse
       x-passage-duty: org.site.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -368,6 +395,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     get:
       operationId: listWarehouses
+      summary: List warehouses
       x-passage-duty: org.read
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
@@ -384,6 +412,7 @@ paths:
   /v1/org/warehouses/{id}:
     get:
       operationId: getWarehouse
+      summary: Get a warehouse
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -394,6 +423,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     patch:
       operationId: updateWarehouse
+      summary: Update a warehouse
       x-passage-duty: org.site.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -408,6 +438,7 @@ paths:
   /v1/org/fiscal-calendars:
     post:
       operationId: createFiscalCalendar
+      summary: Create a fiscal calendar
       x-passage-duty: org.fiscal-calendar.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -421,6 +452,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     get:
       operationId: listFiscalCalendars
+      summary: List fiscal calendars
       x-passage-duty: org.read
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
@@ -435,6 +467,7 @@ paths:
   /v1/org/fiscal-calendars/{id}:
     patch:
       operationId: updateFiscalCalendar
+      summary: Update a fiscal calendar
       x-passage-duty: org.fiscal-calendar.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -448,6 +481,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     get:
       operationId: getFiscalCalendar
+      summary: Get a fiscal calendar
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -459,6 +493,7 @@ paths:
   /v1/org/fiscal-calendars/{id}:generate:
     post:
       operationId: generateFiscalYear
+      summary: Generate the periods of a fiscal year
       x-passage-duty: org.fiscal-calendar.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -476,6 +511,7 @@ paths:
   /v1/org/fiscal-calendars/{id}/periods:
     get:
       operationId: listFiscalPeriods
+      summary: List the periods of a fiscal calendar
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -488,6 +524,7 @@ paths:
   /v1/org/hierarchy-types:
     get:
       operationId: listHierarchyTypes
+      summary: List hierarchy types
       x-passage-duty: org.read
       parameters:
         - { name: purpose, in: query, schema: { type: string, enum: [reporting, procurement, expenditure, security, centralized_payments, custom] } }
@@ -501,6 +538,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createHierarchyType
+      summary: Create a hierarchy type
       x-passage-duty: org.hierarchy.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -515,6 +553,7 @@ paths:
   /v1/org/hierarchy-types/{id}:
     get:
       operationId: getHierarchyType
+      summary: Get a hierarchy type
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -526,6 +565,7 @@ paths:
   /v1/org/hierarchy-types/{id}/versions:
     get:
       operationId: listHierarchyVersions
+      summary: List hierarchy versions
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -539,6 +579,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createHierarchyDraft
+      summary: Create a draft hierarchy version
       x-passage-duty: org.hierarchy.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -551,6 +592,7 @@ paths:
   /v1/org/hierarchy-versions/{id}:
     get:
       operationId: getHierarchyVersion
+      summary: Get a hierarchy version
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -561,6 +603,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     delete:
       operationId: deleteHierarchyDraft
+      summary: Delete a draft hierarchy version
       x-passage-duty: org.hierarchy.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -572,6 +615,7 @@ paths:
   /v1/org/hierarchy-versions/{id}/nodes:
     put:
       operationId: replaceHierarchyNodes
+      summary: Replace the nodes of a draft hierarchy version
       x-passage-duty: org.hierarchy.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -586,6 +630,7 @@ paths:
   /v1/org/hierarchy-versions/{id}:publish:
     post:
       operationId: publishHierarchyVersion
+      summary: Publish a hierarchy version
       x-passage-duty: org.hierarchy.publish
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -601,6 +646,7 @@ paths:
   /v1/org/hierarchy-types/{id}/as-of:
     get:
       operationId: getHierarchyAsOf
+      summary: Get the hierarchy version in force on a date
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -614,6 +660,7 @@ paths:
   /v1/org/hierarchy-types/{id}/compare:
     get:
       operationId: compareHierarchyVersions
+      summary: Compare two versions of a hierarchy type
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -627,6 +674,7 @@ paths:
   /v1/org/locations:
     post:
       operationId: createLocation
+      summary: Create a location
       x-passage-duty: org.site.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -640,6 +688,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     get:
       operationId: listLocations
+      summary: List locations
       x-passage-duty: org.read
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
@@ -656,6 +705,7 @@ paths:
   /v1/org/locations/{id}:
     get:
       operationId: getLocation
+      summary: Get a location
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -666,6 +716,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     patch:
       operationId: updateLocation
+      summary: Update a location
       x-passage-duty: org.site.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -680,6 +731,7 @@ paths:
   /v1/org/addresses:
     post:
       operationId: createAddress
+      summary: Create an address
       x-passage-duty: org.address.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -693,6 +745,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     get:
       operationId: listAddresses
+      summary: List addresses
       x-passage-duty: org.read
       parameters:
         - { name: ownerType, in: query, description: Required unless q is given; if either owner field is given both are required, schema: { type: string, enum: [legal_entity, operating_unit, site, warehouse, location, party] } }
@@ -710,6 +763,7 @@ paths:
   /v1/org/addresses:normalize:
     post:
       operationId: normalizeAddress
+      summary: Normalize a postal address without storing it
       x-passage-duty: org.read
       requestBody:
         required: true
@@ -722,6 +776,7 @@ paths:
   /v1/org/address-versions/{id}:
     get:
       operationId: getAddressVersion
+      summary: Get one version of an address
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid, description: The versionId of an address } }
@@ -733,6 +788,7 @@ paths:
   /v1/org/addresses/{id}:
     get:
       operationId: getAddress
+      summary: Get an address
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -744,6 +800,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     patch:
       operationId: updateAddress
+      summary: Update an address
       x-passage-duty: org.address.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -758,6 +815,7 @@ paths:
   /v1/org/addresses/{id}/versions:
     get:
       operationId: listAddressVersions
+      summary: List the versions of an address
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -769,6 +827,7 @@ paths:
   /v1/org/countries:
     get:
       operationId: listCountries
+      summary: List countries
       x-passage-duty: org.read
       parameters:
         - { name: status, in: query, schema: { type: string, enum: [active, inactive] } }
@@ -782,6 +841,7 @@ paths:
   /v1/org/countries/{code}:
     get:
       operationId: getCountry
+      summary: Get a country
       x-passage-duty: org.read
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
@@ -792,6 +852,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     patch:
       operationId: setCountryStatus
+      summary: Activate or deactivate a country for the tenant
       x-passage-duty: org.reference.write
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
@@ -806,6 +867,7 @@ paths:
   /v1/org/currencies:
     get:
       operationId: listCurrencies
+      summary: List currencies
       x-passage-duty: org.read
       parameters:
         - { name: status, in: query, schema: { type: string, enum: [active, inactive] } }
@@ -819,6 +881,7 @@ paths:
   /v1/org/currencies/{code}:
     get:
       operationId: getCurrency
+      summary: Get a currency
       x-passage-duty: org.read
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
@@ -829,6 +892,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     patch:
       operationId: setCurrencyStatus
+      summary: Activate or deactivate a currency for the tenant
       x-passage-duty: org.reference.write
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
@@ -843,6 +907,7 @@ paths:
   /v1/org/legal-entities/{id}/translations:
     get:
       operationId: listLegalEntityNameTranslations
+      summary: List legal entity name translations
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -856,6 +921,7 @@ paths:
   /v1/org/legal-entities/{id}/translations/{language}:
     put:
       operationId: putLegalEntityNameTranslation
+      summary: Set a name translation of a legal entity
       x-passage-duty: org.legal-entity.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -877,6 +943,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     delete:
       operationId: deleteLegalEntityNameTranslation
+      summary: Delete a name translation of a legal entity
       x-passage-duty: org.legal-entity.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -890,6 +957,7 @@ paths:
   /v1/org/legal-entities/{id}/name:
     get:
       operationId: resolveLegalEntityName
+      summary: Resolve the name of a legal entity in a language
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -905,6 +973,7 @@ paths:
   /v1/org/operating-units/{id}/translations:
     get:
       operationId: listOperatingUnitNameTranslations
+      summary: List operating unit name translations
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -918,6 +987,7 @@ paths:
   /v1/org/operating-units/{id}/translations/{language}:
     put:
       operationId: putOperatingUnitNameTranslation
+      summary: Set a name translation of an operating unit
       x-passage-duty: org.operating-unit.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -939,6 +1009,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     delete:
       operationId: deleteOperatingUnitNameTranslation
+      summary: Delete a name translation of an operating unit
       x-passage-duty: org.operating-unit.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -952,6 +1023,7 @@ paths:
   /v1/org/operating-units/{id}/name:
     get:
       operationId: resolveOperatingUnitName
+      summary: Resolve the name of an operating unit in a language
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -967,6 +1039,7 @@ paths:
   /v1/org/sites/{id}/translations:
     get:
       operationId: listSiteNameTranslations
+      summary: List site name translations
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -980,6 +1053,7 @@ paths:
   /v1/org/sites/{id}/translations/{language}:
     put:
       operationId: putSiteNameTranslation
+      summary: Set a name translation of a site
       x-passage-duty: org.site.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1001,6 +1075,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     delete:
       operationId: deleteSiteNameTranslation
+      summary: Delete a name translation of a site
       x-passage-duty: org.site.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1014,6 +1089,7 @@ paths:
   /v1/org/sites/{id}/name:
     get:
       operationId: resolveSiteName
+      summary: Resolve the name of a site in a language
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1029,6 +1105,7 @@ paths:
   /v1/org/warehouses/{id}/translations:
     get:
       operationId: listWarehouseNameTranslations
+      summary: List warehouse name translations
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1042,6 +1119,7 @@ paths:
   /v1/org/warehouses/{id}/translations/{language}:
     put:
       operationId: putWarehouseNameTranslation
+      summary: Set a name translation of a warehouse
       x-passage-duty: org.site.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1063,6 +1141,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     delete:
       operationId: deleteWarehouseNameTranslation
+      summary: Delete a name translation of a warehouse
       x-passage-duty: org.site.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1076,6 +1155,7 @@ paths:
   /v1/org/warehouses/{id}/name:
     get:
       operationId: resolveWarehouseName
+      summary: Resolve the name of a warehouse in a language
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1091,6 +1171,7 @@ paths:
   /v1/org/currencies/{code}/rounding-rules:
     get:
       operationId: listCurrencyRoundingRules
+      summary: List currency rounding rules
       x-passage-duty: org.read
       parameters:
         - { name: code, in: path, required: true, schema: { type: string, pattern: '^[A-Z]{3}$' } }
@@ -1107,6 +1188,7 @@ paths:
   /v1/org/currencies/{code}/rounding-rules/{purpose}:
     put:
       operationId: putCurrencyRoundingRule
+      summary: Set a currency rounding rule
       x-passage-duty: org.reference.write
       parameters:
         - { name: code, in: path, required: true, schema: { type: string, pattern: '^[A-Z]{3}$' } }
@@ -1125,6 +1207,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     delete:
       operationId: deleteCurrencyRoundingRule
+      summary: Delete a currency rounding rule
       x-passage-duty: org.reference.write
       parameters:
         - { name: code, in: path, required: true, schema: { type: string, pattern: '^[A-Z]{3}$' } }
@@ -1139,6 +1222,7 @@ paths:
   /v1/org/currencies/{code}/round:
     get:
       operationId: roundCurrencyAmount
+      summary: Round a currency amount by purpose
       x-passage-duty: org.read
       parameters:
         - { name: code, in: path, required: true, schema: { type: string, pattern: '^[A-Z]{3}$' } }
@@ -1156,6 +1240,7 @@ paths:
   /v1/org/regions:
     get:
       operationId: listRegions
+      summary: List regions
       x-passage-duty: org.read
       parameters:
         - { name: status, in: query, schema: { type: string, enum: [active, inactive] } }
@@ -1170,6 +1255,7 @@ paths:
   /v1/org/regions/{code}:
     get:
       operationId: getRegion
+      summary: Get a region
       x-passage-duty: org.read
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
@@ -1180,6 +1266,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     patch:
       operationId: setRegionStatus
+      summary: Activate or deactivate a region for the tenant
       x-passage-duty: org.reference.write
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
@@ -1194,6 +1281,7 @@ paths:
   /v1/org/languages:
     get:
       operationId: listLanguages
+      summary: List languages
       x-passage-duty: org.read
       parameters:
         - { name: status, in: query, schema: { type: string, enum: [active, inactive] } }
@@ -1207,6 +1295,7 @@ paths:
   /v1/org/languages/{code}:
     get:
       operationId: getLanguage
+      summary: Get a language
       x-passage-duty: org.read
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
@@ -1217,6 +1306,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     patch:
       operationId: setLanguageStatus
+      summary: Activate or deactivate a language for the tenant
       x-passage-duty: org.reference.write
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
@@ -1231,6 +1321,7 @@ paths:
   /v1/org/uom/convert:
     get:
       operationId: convertUnit
+      summary: Convert a quantity between two units of measure
       x-passage-duty: authenticated
       parameters:
         - { name: from, in: query, required: true, schema: { type: string } }
@@ -1244,6 +1335,7 @@ paths:
   /v1/org/uom/units:
     get:
       operationId: listUnits
+      summary: List units
       x-passage-duty: org.read
       parameters:
         - { name: class, in: query, schema: { type: string, enum: [quantity, each, mass, length, volume, area, time, temperature, energy, pressure, power, speed] } }
@@ -1257,6 +1349,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createUnit
+      summary: Create a unit
       x-passage-duty: org.reference.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1272,6 +1365,7 @@ paths:
   /v1/org/uom/units/{code}:
     get:
       operationId: getUnit
+      summary: Get a unit
       x-passage-duty: org.read
       parameters:
         - { name: code, in: path, required: true, schema: { type: string }, description: Case-sensitive. }
@@ -1283,6 +1377,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     patch:
       operationId: setUnitStatus
+      summary: Activate or deactivate a unit of measure
       x-passage-duty: org.reference.write
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
@@ -1298,6 +1393,7 @@ paths:
   /v1/org/uom/conversions:
     get:
       operationId: listUomConversions
+      summary: List unit of measure conversions
       x-passage-duty: org.read
       parameters:
         - { name: class, in: query, schema: { type: string, enum: [quantity, each, mass, length, volume, area, time, temperature, energy, pressure, power, speed] } }
@@ -1314,6 +1410,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createUomConversion
+      summary: Create a tenant unit of measure conversion
       x-passage-duty: org.reference.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1333,12 +1430,14 @@ paths:
   /healthz:
     get:
       operationId: liveness
+      summary: Liveness probe
       x-passage-duty: public
       responses:
         '200': { description: Process is alive. }
   /readyz:
     get:
       operationId: readiness
+      summary: Readiness probe
       x-passage-duty: public
       responses:
         '200': { description: Database reachable. }

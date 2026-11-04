@@ -210,7 +210,7 @@ describe("Firmed planned order", () => {
 
 describe("Cancel and decrease messages (FR-22.7)", () => {
   it("lists them and filters by cancel", async () => {
-    const cancel: Message = { action: "cancel", itemId: base.itemId, supplyRef: "PO-9", demandRef: "", suggestedDate: "2026-12-20", delayDays: 0, qty: "50" };
+    const cancel: Message = { id: "00000000-0000-0000-0000-00000000f001", status: "open", version: 1, action: "cancel", itemId: base.itemId, supplyRef: "PO-9", demandRef: "", suggestedDate: "2026-12-20", delayDays: 0, qty: "50" };
     const decrease: Message = { ...cancel, action: "decrease", supplyRef: "PO-1", demandRef: "SO-1", qty: "200" };
     const fetchMock = stubApi(["/messages", (url) => json({ items: url.includes("action=cancel") ? [cancel] : [cancel, decrease] })]);
     renderAt("/planning/messages");

@@ -215,9 +215,9 @@ func (a *API) submitInvoice(ctx context.Context, memo groupMemo, p tenant.Princi
 		in.AuditRuleVersion = policy.RuleVersion
 	}
 	blocked := in.AuditReason != ""
-	vendorGroupID := ""
+	var group domain.VendorGroupRef
 	if !blocked {
-		vendorGroupID = a.vendorGroupID(ctx, memo, in.ID, in.LegalEntityID, in.VendorID)
+		group = a.vendorGroup(ctx, memo, in.ID, in.LegalEntityID, in.VendorID)
 	}
 	posted, err := a.store.PostInvoice(ctx, in, func(items []*domain.GrirItem) (store.InvoiceOutcome, error) {
 		lines := make([]domain.PostLine, len(in.Lines))
@@ -226,7 +226,7 @@ func (a *API) submitInvoice(ctx context.Context, memo groupMemo, p tenant.Princi
 		}
 		doc := domain.VendorInvoice{
 			ID: in.ID, LegalEntityID: in.LegalEntityID, LedgerID: in.LedgerID, FiscalPeriodID: in.FiscalPeriodID,
-			PostingDate: in.PostingDate, InvoiceDate: in.InvoiceDate, Currency: in.Currency, Lines: lines,
+			PostingDate: in.PostingDate, InvoiceDate: in.InvoiceDate, Currency: in.Currency, Lines: lines, VendorGroupCode: group.Code,
 		}
 		if blocked {
 			entry, err := domain.HoldInvoice(ctx, doc, a.ports.Periods, a.ports.Profile)
@@ -242,7 +242,7 @@ func (a *API) submitInvoice(ctx context.Context, memo groupMemo, p tenant.Princi
 			return store.InvoiceOutcome{}, err
 		}
 		total := entry.Lines[len(entry.Lines)-1].Amount.Value.Neg()
-		evt, err := invoicePostedEvent(p.TenantID, in, vendorGroupID, entry.LedgerEntryID, total, entry.GrirCleared)
+		evt, err := invoicePostedEvent(p.TenantID, in, group, entry.LedgerEntryID, total, entry.GrirCleared)
 		return store.InvoiceOutcome{LedgerEntryID: entry.LedgerEntryID, Total: total, Clearings: entry.GrirCleared, Event: evt}, err
 	})
 	if err != nil {
@@ -257,27 +257,31 @@ func (a *API) submitInvoice(ctx context.Context, memo groupMemo, p tenant.Princi
 	return posted, nil
 }
 
-type groupMemo map[string]string
+type groupMemo map[string]domain.VendorGroupRef
 
-func (a *API) vendorGroupID(ctx context.Context, memo groupMemo, invoiceID, legalEntityID, vendorID string) string {
+func (a *API) vendorGroup(ctx context.Context, memo groupMemo, invoiceID, legalEntityID, vendorID string) domain.VendorGroupRef {
 	if a.ports.VendorGroups == nil {
-		return ""
+		return domain.VendorGroupRef{}
 	}
 	key := legalEntityID + "|" + vendorID
 	if group, ok := memo[key]; ok {
 		return group
 	}
-	group, err := a.ports.VendorGroups.VendorGroupID(ctx, legalEntityID, vendorID)
+	group, err := a.ports.VendorGroups.VendorGroup(ctx, legalEntityID, vendorID)
 	if err == nil {
 		var ok bool
-		if group, ok = ids.Canonical(group); !ok {
+		if group.ID, ok = ids.Canonical(group.ID); !ok {
 			err = errors.New("party returned a vendor group that is not a UUID")
 		}
 	}
 	if err != nil {
-		group = ""
+		group = domain.VendorGroupRef{}
 		a.groupMissing.Add(1)
 		slog.WarnContext(ctx, "invoice posts without vendor_group_id", "err", err, "invoiceId", invoiceID, "vendorId", vendorID, "notFound", errors.Is(err, domain.ErrVendorNotFound), "correlationId", middleware.GetReqID(ctx))
+	}
+	if group.Code != "" && !domain.ValidVendorGroupCode(group.Code) {
+		slog.WarnContext(ctx, "vendor group code is not postable and is dropped", "invoiceId", invoiceID, "vendorId", vendorID, "correlationId", middleware.GetReqID(ctx))
+		group.Code = ""
 	}
 	if memo != nil {
 		memo[key] = group

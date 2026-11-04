@@ -284,8 +284,20 @@ same transaction (see `events/asyncapi.yaml`).
   validation, an already reversed entry). A 400 or 404 does not (the ledger or entry lookup and
   request validation come first). Stuck state: an ambiguous attempt whose retries keep
   failing transiently blocks every other version of the legal entity with `CST-0729`; the
-  remedy is to retry the same activation until the ledger answers. There is no operator
-  discard path.
+  remedy is to retry the same activation until the ledger answers. An attempt older than the
+  ledger replay window (the ledger idempotency retention it was created under, at most
+  `PRODUCTCOST_LEDGER_IDEMPOTENCY_TTL_DAYS`, less 30 days) is never resent or cleared, because
+  the ledger may have dropped its key: the activation answers `CST-0730` (422). An operator with
+  duty `productcost.activation-attempt.resolve` settles it: `GET /v1/product-costing/activation-attempts`
+  lists the pending attempts (`needsOperator` past the window) and, after checking the ledger,
+  `POST /v1/product-costing/versions/{id}/activation-attempt/resolve` records `posted` with
+  the ledger entry id (the activation is recorded around that entry without posting again;
+  the roller of the calculations cannot do this, `CST-0738`) or `not-posted` (the attempt is
+  discarded and the version can be activated afresh), with a reason, under an
+  Idempotency-Key and the version counter. Either decision raises
+  `dev.passage.costing.activationattempt.resolved.v1`; a version without an attempt is
+  `CST-0742` (404), an attempt still inside the window `CST-0743` (409). The entry id is the
+  operator's word: productcost has no ledger read grant to look it up.
   Activations of one legal entity are serialised by an advisory lock, and an activation or
   reversal is refused with `CST-0729` (409), naming the blocking version, while another
   version of the legal entity has a pending attempt, because its standards are not final
@@ -359,7 +371,8 @@ helm lint charts/productcost
 ```
 
 Configuration (12-factor): `COSTING_MAX_LEVELS` (default 20, 1-40),
-`COSTING_ROLL_WORKERS` (default 4, 1-32), plus the platform variables
+`COSTING_ROLL_WORKERS` (default 4, 1-32), `ENGINEERING_URL` (BOM and route versions for the stored roll; unset answers 503 CST-0737), `PRODUCTCOST_LEDGER_IDEMPOTENCY_TTL_DAYS`
+(default 400, 400 to 3650; must equal the ledger's `LEDGER_IDEMPOTENCY_TTL_DAYS`), plus the platform variables
 `PASSAGE_ENV`, `HTTP_ADDR`, `ADMIN_ADDR`, `DATABASE_URL`.
 
 ## Dependencies
@@ -394,6 +407,7 @@ Problem `type` is `https://passage.dev/problems/<code>`.
 | CST-0725 | 422 | a position holds stock but has no earlier standard (or the version has no calculation for it) |
 | CST-0726 | 422 | the inventory reports no on-hand for a stored position (its site dimension must be the site id) |
 | CST-0729 | 409 | another version of the legal entity has a pending activation attempt; settle it first |
+| CST-0730 | 422 | the pending activation attempt is past the ledger replay window; an operator resolves it |
 | CST-0728 | 422 | too many items or positions for one activation |
 | CST-0727 | 422 | only a Standard version revalues stock |
 | CST-0731 | 422 / warning | inventory close through the day before the conversion date is required (warning in validation; 422 on the close and activate steps) |
@@ -403,6 +417,8 @@ Problem `type` is `https://passage.dev/problems/<code>`.
 | CST-0735 | 422 | conversion checklist blocked by an enabled blocker (new code) |
 | CST-0736 | 422 | conversion checklist step out of order, or checklist complete (new code) |
 | CST-0741 | 422 | mixing ratios do not total 100.00% |
+| CST-0742 | 404 | resolve: the version has no pending activation attempt (new code) |
+| CST-0743 | 409 | resolve: the attempt is still inside the ledger replay window; retry the activation (new code) |
 | CST-0751 | warning | sales order estimate superseded by a configuration change |
 | CST-0761 | warning | Group view: no supplier Legal-view cost for an intercompany item; intercompany price used |
 | CST-0762 | item error | ProfitCenter view: no transfer price and no cost-plus basis for a profit-center item (new code) |

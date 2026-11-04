@@ -25,6 +25,7 @@ const order: PlannedOrder = {
 const purchase: PlannedOrder = { ...order, id: "00000000-0000-0000-0000-0000000000a2", number: "PLN-000005", orderType: "purchase", qty: "500", futuresDate: null, delayDays: 0 };
 
 const delay: Message = {
+  id: "00000000-0000-0000-0000-00000000f102", status: "open", version: 1,
   action: "delay",
   itemId: order.itemId,
   supplyRef: "PLN-000001",
@@ -210,7 +211,7 @@ describe("DDMRP buffer orders (FR-22.16, AC-22.12)", () => {
   });
 
   it("shows the buffer priority and zone on a message and sorts messages by priority", async () => {
-    const red: Message = { action: "red-zone", itemId: buffered.itemId, supplyRef: "PLN-000007", demandRef: "ddmrp:red:item", suggestedDate: "2026-11-12", delayDays: 0, qty: "80", planningPriority: "0.2449", bufferZone: "red" };
+    const red: Message = { id: "00000000-0000-0000-0000-00000000f001", status: "open", version: 1, action: "red-zone", itemId: buffered.itemId, supplyRef: "PLN-000007", demandRef: "ddmrp:red:item", suggestedDate: "2026-11-12", delayDays: 0, qty: "80", planningPriority: "0.2449", bufferZone: "red" };
     const fetchMock = stubApi(["/messages", () => json({ items: [red] })]);
     renderAt("/planning/messages");
     const table = await findTable({ name: "Messages" });
@@ -220,7 +221,7 @@ describe("DDMRP buffer orders (FR-22.16, AC-22.12)", () => {
   });
 
   it("lists a PLAN-0015 sales-on-top message with its excess and filters by it", async () => {
-    const top: Message = { action: "sales-on-top", itemId: buffered.itemId, supplyRef: "", demandRef: "SO-1", suggestedDate: "2026-11-20", delayDays: 0, qty: "30", planningPriority: null, bufferZone: null };
+    const top: Message = { id: "00000000-0000-0000-0000-00000000f002", status: "open", version: 1, action: "sales-on-top", itemId: buffered.itemId, supplyRef: "", demandRef: "SO-1", suggestedDate: "2026-11-20", delayDays: 0, qty: "30", planningPriority: null, bufferZone: null };
     const fetchMock = stubApi(["/messages", () => json({ items: [top] })]);
     renderAt("/planning/messages");
     const table = await findTable({ name: "Messages" });
@@ -231,7 +232,7 @@ describe("DDMRP buffer orders (FR-22.16, AC-22.12)", () => {
   });
 
   it("shows a PLAN-0008 no-vendor message with its catalog text and filters by it", async () => {
-    const none: Message = { action: "no-vendor", code: "PLAN-0008", text: "No vendor for planned purchase of item-9; using none.", itemId: buffered.itemId, supplyRef: "PLN-000003", demandRef: "", suggestedDate: "2026-11-04", delayDays: 0, qty: "17", planningPriority: null, bufferZone: null };
+    const none: Message = { id: "00000000-0000-0000-0000-00000000f003", status: "open", version: 1, action: "no-vendor", code: "PLAN-0008", text: "No vendor for planned purchase of item-9; using none.", itemId: buffered.itemId, supplyRef: "PLN-000003", demandRef: "", suggestedDate: "2026-11-04", delayDays: 0, qty: "17", planningPriority: null, bufferZone: null };
     const fetchMock = stubApi(["/messages", () => json({ items: [none] })]);
     renderAt("/planning/messages");
     const table = await findTable({ name: "Messages" });

@@ -29,6 +29,17 @@ describe("purchasing module", () => {
     expect(purchasing.routes.map((r) => r.path)).toContain("/purchasing/purchase-orders/:id/lines/:lineNo/delivery-schedule");
   });
 
+  it("routes the service line of a PO line and the model service specification pages", () => {
+    expect(purchasing.routes.map((r) => r.path)).toEqual(
+      expect.arrayContaining([
+        "/purchasing/purchase-orders/:id/lines/:lineNo/service",
+        "/purchasing/model-service-specs",
+        "/purchasing/model-service-specs/new",
+        "/purchasing/model-service-specs/:id",
+      ]),
+    );
+  });
+
   it("routes the release documentation of a scheduling agreement", () => {
     expect(purchasing.routes.map((r) => r.path)).toContain("/purchasing/scheduling-agreements/:id/releases/:releaseNo");
   });

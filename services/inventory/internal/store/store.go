@@ -103,6 +103,7 @@ type Store interface {
 	GetABCRun(ctx context.Context, id string) (domain.AbcRun, error)
 	ListABCRuns(ctx context.Context) ([]AbcRunSummary, error)
 	ReverseJournal(ctx context.Context, id string, postingDate time.Time) (domain.Journal, bool, error)
+	CopyJournal(ctx context.Context, sourceID string, postingDate time.Time, idempotencyKey string, mayOwnershipChange bool) (domain.Journal, bool, error)
 	RebuildOnHand(ctx context.Context, repair bool) (RebuildReport, error)
 	BackfillTransferSupply(ctx context.Context, after string, limit int) (SupplyBackfillReport, error)
 	GenerateTags(ctx context.Context, planID, key string, count int) ([]domain.CountTag, bool, error)

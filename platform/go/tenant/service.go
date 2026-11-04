@@ -56,7 +56,9 @@ var (
 // policies/authz/data.json "service_grants" mirrors it and a test keeps them equal.
 var serviceGrants = map[string]map[string][]string{
 	"billing": {
-		"sales": {"sales.order.record-invoice", "sales.order.record-delivery"},
+		"ledger": {"ledger.entry.post", "ledger.ledger.lookup"},
+		"revrec": {"revrec.allocation.read"},
+		"sales":  {"sales.order.record-invoice", "sales.order.record-delivery"},
 	},
 	"fulfillment": {
 		"sales": {"sales.order.record-delivery"},
@@ -88,14 +90,24 @@ var serviceGrants = map[string]map[string][]string{
 		"ledger": {"ledger.entry.post", "ledger.balance.read"},
 	},
 	"productcost": {
-		"ledger":    {"ledger.entry.post", "ledger.journal.reverse"},
-		"inventory": {"inventory.read"},
+		"ledger":      {"ledger.entry.post", "ledger.journal.reverse"},
+		"inventory":   {"inventory.read"},
+		"engineering": {"engineering.read"},
+	},
+	"costing": {
+		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
 	},
 	"eam": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read"},
 	},
+	"projects": {
+		"ledger": {"ledger.entry.post", "ledger.balance.read"},
+	},
 	"revrec": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read"},
+	},
+	"costacct": {
+		"ledger": {"ledger.balance.read", "ledger.ledger.lookup"},
 	},
 	"assets": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read"},
@@ -118,6 +130,7 @@ var serviceGrants = map[string]map[string][]string{
 		"payables":    {"payment-run.execute"},
 		"engineering": {"engineering.eco.workflow"},
 		"quality":     {"quality.capa.execute"},
+		"transport":   {"transport.tender.execute"},
 	},
 	"party": {
 		"numbering": {"numbering.sequence.allocate"},
@@ -126,7 +139,8 @@ var serviceGrants = map[string]map[string][]string{
 		"inventory": {"inventory.hold.apply"},
 	},
 	"hr": {
-		"numbering": {"numbering.sequence.allocate"},
+		"compliance": {"compliance.legal_hold.check"},
+		"numbering":  {"numbering.sequence.allocate"},
 	},
 	"product": {
 		"org": {"org.read"},
@@ -304,7 +318,7 @@ func (s *ServiceSigner) legalEntityFor(p Principal, explicit string, duties []st
 
 var readDuties = map[string]struct{}{
 	"ledger.balance.read": {}, "ledger.ledger.lookup": {}, "ledger.account.lookup": {}, "ledger.entry.lookup": {}, "procurement.purchase-order.lookup": {},
-	"inventory.ownership-change.read": {}, "fx.rate.lookup": {},
+	"inventory.ownership-change.read": {}, "fx.rate.lookup": {}, "compliance.legal_hold.check": {},
 }
 
 func onlyReads(duties []string) bool {

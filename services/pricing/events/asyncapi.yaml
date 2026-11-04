@@ -54,6 +54,12 @@ channels:
     messages:
       parametersChanged:
         $ref: "#/components/messages/ParametersChanged"
+  procedureAssignment:
+    address: passage.pricing.procedureassignment
+    description: The pricing procedure of a legal entity and sales channel was set or cleared (PRD 5.26.13).
+    messages:
+      procedureAssignmentChanged:
+        $ref: "#/components/messages/ProcedureAssignmentChanged"
   campaign:
     address: passage.pricing.campaign
     description: Campaign kill switch set or cleared (FR-26.10).
@@ -233,6 +239,12 @@ operations:
     summary: A legal entity's pricing parameters (journal_four_eyes) were changed (PricingAdmin).
     messages:
       - {$ref: "#/channels/parameters/messages/parametersChanged"}
+  publishProcedureAssignmentChanged:
+    action: send
+    channel: {$ref: "#/channels/procedureAssignment"}
+    summary: The procedure a legal entity and sales channel price with was set or cleared (PricingAdmin).
+    messages:
+      - {$ref: "#/channels/procedureAssignment/messages/procedureAssignmentChanged"}
   publishCampaignKilled:
     action: send
     channel: {$ref: "#/channels/campaign"}
@@ -458,6 +470,12 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/ParametersChanged"
+    ProcedureAssignmentChanged:
+      name: dev.passage.pricing.procedureassignment.changed.v1
+      title: Pricing procedure assignment changed
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/ProcedureAssignmentChanged"
     CampaignKilled:
       name: dev.passage.pricing.campaign.killed.v1
       title: Campaign killed
@@ -792,6 +810,19 @@ components:
       properties:
         legal_entity_id: {type: string, format: uuid}
         journal_four_eyes: {type: boolean, description: "True when the user who created a price journal cannot post it."}
+        version: {type: integer, minimum: 1}
+        updated_by: {type: string}
+    ProcedureAssignmentChanged:
+      type: object
+      description: >
+        The procedure assignment of a legal entity and sales channel after a change, or as it
+        was when cleared (PRD 5.26.13). Sales caches key their price lookups by procedure name.
+      required: [legal_entity_id, sales_channel, procedure_name, cleared, version, updated_by]
+      properties:
+        legal_entity_id: {type: string, format: uuid}
+        sales_channel: {type: string, description: "Empty for the legal entity's default."}
+        procedure_name: {type: string}
+        cleared: {type: boolean, description: "True when the assignment was removed."}
         version: {type: integer, minimum: 1}
         updated_by: {type: string}
     CampaignStatus:

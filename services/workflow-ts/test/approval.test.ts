@@ -70,6 +70,38 @@ describe("approval workflow", () => {
   }, 30_000);
 });
 
+describe("party decision without a registered activity", () => {
+  it("fails the workflow with a clear error instead of retrying forever", async () => {
+    const environment = await TestWorkflowEnvironment.createTimeSkipping();
+    try {
+      const taskQueue = "approval-unbuilt-test";
+      const worker = await Worker.create({
+        connection: environment.nativeConnection,
+        taskQueue,
+        activities: { unrelated: async () => undefined },
+        workflowsPath: fileURLToPath(new URL("../src/workflows.ts", import.meta.url)),
+      });
+      await worker.runUntil(async () => {
+        const handle = await environment.client.workflow.start(approvalWorkflow, {
+          workflowId: "approval:unbuilt-1",
+          taskQueue,
+          args: [{
+            requestId: "unbuilt-1",
+            entityType: "credit_limit",
+            requester: "rita",
+            partyChange: { changeId: "chg-9", tenantId: "t1", legalEntityId: "le1" },
+            levels: [{ id: "l1", approver: "alice", escalationApprover: "finance", slaMs: 3_600_000 }],
+          }],
+        });
+        await handle.signal(approveSignal, "alice");
+        await expect(handle.result()).rejects.toHaveProperty("cause.message", expect.stringContaining("not built"));
+      });
+    } finally {
+      await environment.teardown();
+    }
+  }, 60_000);
+});
+
 describe("validateInput", () => {
   const base: ApprovalInput = {
     requestId: "req-2",

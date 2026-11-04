@@ -436,6 +436,30 @@ func ReverseJournal(orig Journal, newID string, postingDate time.Time) (Journal,
 	return out, nil
 }
 
+// CopyJournal builds a new DRAFT journal with the header and the lines of src
+// (AX copy journal): same legal entity, type, offset account, journal name and
+// currency, the given posting date, every line copied with its quantities,
+// unit, cost price and dimensions, without client keys or reversal links. Any
+// status can be copied, so a posted journal is a template for the next one. A
+// COUNT journal belongs to its sheet and a reversal to the journal it
+// reverses (a copy would lose the link that values it at the original), so
+// neither can be copied.
+func CopyJournal(src Journal, newID string, postingDate time.Time) (Journal, error) {
+	if !slices.Contains(KeyedJournalTypes, src.Type) {
+		return Journal{}, fail(CodeJournalNotReady, "%s journals are created by their source document and cannot be copied", src.Type)
+	}
+	if src.ReversesJournalID != "" {
+		return Journal{}, fail(CodeJournalNotReady, "a reversal cannot be copied: it only makes sense against the journal it reverses")
+	}
+	out := Journal{ID: newID, LegalEntityID: src.LegalEntityID, Type: src.Type, Status: JournalDraft, PostingDate: postingDate,
+		OffsetAccountID: src.OffsetAccountID, Currency: src.Currency, JournalNameID: src.JournalNameID, Version: 1}
+	for _, l := range src.Lines {
+		out.Lines = append(out.Lines, JournalLine{LineNo: l.LineNo, ProductID: l.ProductID, Dims: l.Dims, Qty: l.Qty, EnteredQty: l.EnteredQty,
+			EnteredUnit: l.EnteredUnit, CostPrice: l.CostPrice, ToDims: l.ToDims})
+	}
+	return out, nil
+}
+
 // ReceiptValue is a receipt's value: quantity times the entered cost price,
 // rounded to the currency's minor unit (BR-16.5).
 func ReceiptValue(qty, costPrice decimal.Decimal, currency string) decimal.Decimal {

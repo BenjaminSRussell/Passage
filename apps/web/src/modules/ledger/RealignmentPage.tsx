@@ -15,6 +15,13 @@ const columns: DataTableColumn<RealignmentRow>[] = [
   { key: "newCombination", header: "To", mono: true },
   { key: "lineCount", header: "Lines", align: "end", mono: true },
   { key: "net", header: "Net moved", align: "end", mono: true },
+  {
+    key: "quantities",
+    header: "Quantities moved",
+    align: "end",
+    mono: true,
+    render: (r) => (r.quantities ?? []).map((q) => `${q.net} ${q.unit}`).join(", "),
+  },
 ];
 
 function Actions({ run, ledgerId }: { run: RealignmentRun; ledgerId: string }) {

@@ -12,6 +12,7 @@ const columns: DataTableColumn<JournalName>[] = [
   { key: "requiresApproval", header: "Approval", render: (n) => (n.requiresApproval ? (n.selfApprovalAllowed ? "Required (self-approval allowed)" : "Required") : "None") },
   { key: "reversalReasonRequired", header: "Reversal reason", render: (n) => yesNo(n.reversalReasonRequired) },
   { key: "allowReconAccounts", header: "Reconciliation accounts", render: (n) => yesNo(n.allowReconAccounts) },
+  { key: "postingRestriction", header: "Posting", render: (n) => (n.postingRestriction === "own_journals_only" ? "Own journals only" : "Anyone") },
   { key: "linesLimit", header: "Lines limit", align: "end" },
   { key: "active", header: "Status", render: (n) => <StatusPill status={n.active ? "active" : "inactive"} /> },
 ];

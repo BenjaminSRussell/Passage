@@ -113,9 +113,22 @@ func (s *Postgres) UnpackContainer(ctx context.Context, id string, version int, 
 				refs = append(refs, fulevents.LineRef{OrderLineID: sh.Lines[li].OrderLineID, Qty: cl.Qty.String()})
 			}
 			sh.Containers = append(sh.Containers[:idx], sh.Containers[idx+1:]...)
-			return sh, enqueue(ctx, tx, sh.ID, fulevents.ContainerUnpacked, p.TenantID, fulevents.ContainerUnpackedData{
+			if err := enqueue(ctx, tx, sh.ID, fulevents.ContainerUnpacked, p.TenantID, fulevents.ContainerUnpackedData{
 				ShipmentID: sh.ID, ShipmentNumber: sh.ShipmentNumber, ContainerID: cont.ID, SSCC: cont.SSCC, Lines: refs,
-			})
+			}); err != nil {
+				return sh, err
+			}
+			// Sales may have cancelled the remainder while this quantity was packed (a
+			// PACKED_BEYOND_KEPT exception): what is unpacked above the kept quantity is cut now.
+			orderLines := make([]string, 0, len(refs))
+			for _, r := range refs {
+				orderLines = append(orderLines, r.OrderLineID)
+			}
+			trimmed, err := trimToKept(ctx, tx, p.TenantID, sh.OrderID, orderLines)
+			if err != nil || !trimmed {
+				return sh, err
+			}
+			return loadShipment(ctx, tx, sh.ID)
 		})
 		out = res
 		return err

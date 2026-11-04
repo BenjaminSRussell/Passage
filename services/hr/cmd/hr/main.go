@@ -17,6 +17,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/api"
+	"github.com/BenjaminSRussell/passage/services/hr/internal/compliance"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/numbering"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/store"
@@ -37,6 +38,15 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	}
+	if len(os.Args) > 1 {
+		if job, ok := jobByCommand(os.Args[1]); ok {
+			if err := runTenantJob(context.Background(), os.Getenv, job, os.Args[2:]); err != nil {
+				slog.Error("hr job stopped", "job", job.command, "err", err)
+				os.Exit(1)
+			}
+			return
+		}
 	}
 	if err := run(context.Background(), os.Getenv); err != nil {
 		slog.Error("hr stopped", "err", err)
@@ -156,15 +166,20 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(store.New(pool, sealer, depth)).EnableRetentionPurge(getenv("HR_RETENTION_PURGE_ENABLED") == "true")
+	a := api.New(store.New(pool, sealer, depth)).EnableRetentionPurge(getenv("HR_RETENTION_PURGE_ENABLED") != "false")
+	signer, err := tenant.ServiceSignerFromEnv(getenv)
+	if err != nil {
+		return err
+	}
 	if url := getenv("NUMBERING_URL"); url != "" {
-		signer, err := tenant.ServiceSignerFromEnv(getenv)
-		if err != nil {
-			return err
-		}
 		a.WithSequencer(numbering.New(url).WithSigner(signer))
 	} else {
 		slog.Warn("NUMBERING_URL is empty, a requisition without a requisitionNumber returns 503 until it is set")
+	}
+	if url := getenv("COMPLIANCE_URL"); url != "" {
+		a.WithLegalHolds(compliance.New(url).WithSigner(signer))
+	} else {
+		slog.Warn("COMPLIANCE_URL is empty, the candidate retention purge returns 503 until it is set")
 	}
 	router := httpx.NewRouter()
 	a.Register(router)

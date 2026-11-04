@@ -138,3 +138,56 @@ func bookCoProduct(ctx context.Context, tx pgx.Tx, tenantID, orderID, lineNo str
 		where tenant_id = $1 and order_id = $2 and line_number = $3`, tenantID, orderID, lineNo, qty.String())
 	return err
 }
+
+// journaledCoProducts names the co-product lines any journal of the order references,
+// posted, reversed or draft: they keep their item and type.
+func journaledCoProducts(ctx context.Context, tx pgx.Tx, tenantID, orderID string) (map[string]bool, error) {
+	used := map[string]bool{}
+	rows, err := tx.Query(ctx, `select distinct l.coproduct_line_number from production_journal_line l
+		join production_journal j on j.tenant_id = l.tenant_id and j.id = l.journal_id
+		where l.tenant_id = $1 and j.order_id = $2 and l.coproduct_line_number is not null`, tenantID, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var no string
+		if err := rows.Scan(&no); err != nil {
+			return nil, err
+		}
+		used[no] = true
+	}
+	return used, rows.Err()
+}
+
+// writeEditedCoProducts deletes the removed co-product lines, updates the kept ones
+// and inserts the added ones (reported quantities are untouched).
+func writeEditedCoProducts(ctx context.Context, tx pgx.Tx, tenantID, orderID, legalEntityID string, before, after []domain.CoProduct) error {
+	kept := map[string]bool{}
+	for _, c := range after {
+		kept[c.LineNo] = true
+	}
+	existed := map[string]bool{}
+	for _, c := range before {
+		existed[c.LineNo] = true
+		if !kept[c.LineNo] {
+			if _, err := tx.Exec(ctx, `delete from production_coproduct where tenant_id = $1 and order_id = $2 and line_number = $3`,
+				tenantID, orderID, c.LineNo); err != nil {
+				return err
+			}
+		}
+	}
+	var added []domain.CoProduct
+	for _, c := range after {
+		if !existed[c.LineNo] {
+			added = append(added, c)
+			continue
+		}
+		if _, err := tx.Exec(ctx, `update production_coproduct set coproduct_type = $4, item_id = $5, qty_per = $6, qty_planned = $7
+			where tenant_id = $1 and order_id = $2 and line_number = $3`, tenantID, orderID, c.LineNo, c.Type, c.ItemID,
+			c.QtyPer.String(), c.QtyPlanned.String()); err != nil {
+			return err
+		}
+	}
+	return insertCoProducts(ctx, tx, tenantID, orderID, legalEntityID, added)
+}

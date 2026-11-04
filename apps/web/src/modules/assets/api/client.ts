@@ -387,6 +387,41 @@ export interface Lease {
   modifications?: LeaseModification[];
 }
 
+/** Which journals of a lease are in the general ledger (D4d); null means not booked yet. */
+export interface LeasePostings {
+  leaseId: string;
+  recognitionJournalId: string | null;
+  periods: { periodNo: number; periodEnd: string; postedJournalId: string | null }[];
+}
+
+export interface LeasePostInput {
+  legalEntityId: string;
+  ledgerId: string;
+  postThrough: string;
+  leaseId?: string;
+}
+
+/** Period 0 is the recognition journal at commencement. */
+export interface LeasePostResult {
+  booked: { leaseId: string; leaseNumber: string; period: number; entryId: string; lines: number; placeholderProfile?: boolean }[];
+  failed: { leaseId: string; leaseNumber: string; period: number; code: string }[];
+  more: boolean;
+}
+
+/** Accounts of the lease journals of a legal entity; placeholder is true until the accountant saves a profile. */
+export interface LeasePostingProfile {
+  legalEntityId: string;
+  rouAssetAccount: string;
+  rouAccumulatedDepreciationAccount: string;
+  liabilityAccount: string;
+  interestExpenseAccount: string;
+  depreciationExpenseAccount: string;
+  paymentClearingAccount: string;
+  remeasurementGainAccount: string;
+  version?: number;
+  placeholder?: boolean;
+}
+
 export const RATE_METHODS = ["Nominal", "Effective"] as const;
 export type RateMethod = (typeof RATE_METHODS)[number];
 
@@ -407,6 +442,8 @@ export interface LeaseModification {
   rouAdjustment: Decimal;
   profitLossExcess: Decimal;
   createdAt: string;
+  /** A later modification taking effect in an earlier period replaced this one's schedule; its adjustments are not booked. */
+  superseded?: boolean;
 }
 
 export interface ModifyLeaseInput {
@@ -760,6 +797,23 @@ export async function getLease(leaseId: string, signal?: AbortSignal): Promise<V
 
 export function modifyLease(leaseId: string, etag: string, input: ModifyLeaseInput, key: string = newKey()): Promise<LeaseModificationResult> {
   return post(`/leases/${id(leaseId)}/modify`, input, key, { "If-Match": etag });
+}
+
+export function getLeasePostings(leaseId: string, signal?: AbortSignal): Promise<LeasePostings> {
+  return json(`/leases/${id(leaseId)}/gl-postings`, {}, signal);
+}
+
+export function postLeases(input: LeasePostInput): Promise<LeasePostResult> {
+  return json(`/leases/gl-postings`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function getLeasePostingProfile(legalEntityId: string, signal?: AbortSignal): Promise<Versioned<LeasePostingProfile>> {
+  return versioned(await send(`/leases/posting-profile${query({ legalEntityId })}`, {}, signal));
+}
+
+/** Creates the profile (no etag) or replaces it under its etag. */
+export async function saveLeasePostingProfile(input: LeasePostingProfile, etag?: string): Promise<Versioned<LeasePostingProfile>> {
+  return versioned(await send(`/leases/posting-profile`, { method: "PUT", body: JSON.stringify(input), headers: etag ? { "If-Match": etag } : {} }));
 }
 
 export function createLease(input: NewLease, key: string = newKey()): Promise<Lease> {

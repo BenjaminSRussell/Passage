@@ -48,6 +48,7 @@ export function useFakeServer() {
         const url = new URL(input, "http://localhost");
         server.calls.push({ method: init.method ?? "GET", url, init, body: readBody(init.body) });
         const reply = server.handler(url, init) ?? json(404, { code: "TEST-404", detail: `no fake for ${init.method ?? "GET"} ${url.pathname}` });
+        if (reply.status === 204) return new Response(null, { status: 204 });
         if (reply.text !== undefined) return new Response(reply.text, { status: reply.status, headers: reply.headers });
         return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { "Content-Type": "application/json" } });
       }),

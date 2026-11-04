@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import {
   describeProblem,
@@ -83,8 +83,12 @@ const noFilters: Filters = { product: "", status: "", sourceType: "", from: "", 
 
 /** Transaction inquiry (FR-16.13): every movement with its status, value and origin, newest first. */
 export function TransactionsPage() {
-  const [draft, setDraft] = useState<Filters>(noFilters);
-  const [filters, setFilters] = useState<Filters>(noFilters);
+  // The on-hand inquiry links here with ?product= to show one product's history.
+  const [params] = useSearchParams();
+  const linked = params.get("product")?.trim() ?? "";
+  const initial: Filters = UUID.test(linked) ? { ...noFilters, product: linked } : noFilters;
+  const [draft, setDraft] = useState<Filters>(initial);
+  const [filters, setFilters] = useState<Filters>(initial);
   const [errors, setErrors] = useState<Partial<Record<keyof Filters, string>>>({});
   const key = JSON.stringify(filters);
   const state = useLoad((signal) => listTransactions(filters as TransactionQuery, signal), key);

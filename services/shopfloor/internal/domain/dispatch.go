@@ -176,25 +176,62 @@ func capped(u StopUnit) StopUnit {
 	return u
 }
 
-// PlanProductionStop returns the open starts production's finish of an operation closes
-// (FR-25.3): each start on the finished job is stopped at the finish, or at its own start when it
-// began after the finish (an offline replay or a start accepted while the finish was on its way),
-// so work after the finish adds no hours. A start open for more than MaxJobHours is stopped at its
-// start plus MaxJobHours and marked Capped. Starts that belong to a bundle are returned in
-// bundled, untouched: closing one member would change the split of the others (BR-25.1), so they
-// stay open for the worker's stop or a supervisor. Units come back in start order.
-func PlanProductionStop(open []OpenStart, finishedAt time.Time) (stops []StopUnit, bundled []OpenStart) {
+// PlanProductionStop returns the units production's finish of an operation closes (FR-25.3,
+// BR-25.1). open is one worker's open starts; onOperation holds the ids of the jobs of the
+// finished operation. A start on one of those jobs is stopped at the finish, or at its own start
+// when it began after the finish (an offline replay or a start accepted while the finish was on
+// its way), so work after the finish adds no hours. A start of a bundle with a member on those
+// jobs closes the whole bundle as one unit: the time from its earliest start to the stop is split
+// again over all its members by good quantity (equal when none), so the bundle's time is counted
+// once and the members off the finished operation keep their share up to the finish. A unit open
+// for more than MaxJobHours is stopped at its start plus MaxJobHours and marked Capped. Units
+// come back in start order.
+func PlanProductionStop(open []OpenStart, finishedAt time.Time, onOperation map[string]bool) []StopUnit {
+	bundles := map[string]*StopUnit{}
+	hit := map[string]bool{}
+	var stops []StopUnit
 	for _, s := range open {
 		if s.BundleID != "" {
-			bundled = append(bundled, s)
+			u, ok := bundles[s.BundleID]
+			if !ok {
+				u = &StopUnit{BundleID: s.BundleID}
+				bundles[s.BundleID] = u
+			}
+			u.Members = append(u.Members, s)
+			hit[s.BundleID] = hit[s.BundleID] || onOperation[s.JobID]
 			continue
 		}
-		at := finishedAt
-		if s.StartedAt.After(at) {
-			at = s.StartedAt
+		if onOperation[s.JobID] {
+			stops = append(stops, StopUnit{Members: []OpenStart{s}, StoppedAt: laterOf(finishedAt, s.StartedAt)})
 		}
-		stops = append(stops, capped(StopUnit{Members: []OpenStart{s}, StoppedAt: at}))
 	}
-	sort.SliceStable(stops, func(i, j int) bool { return stops[i].StartedAt().Before(stops[j].StartedAt()) })
-	return stops, bundled
+	for b, u := range bundles {
+		if !hit[b] {
+			continue
+		}
+		sortStarts(u.Members)
+		at := finishedAt
+		for _, m := range u.Members {
+			at = laterOf(at, m.StartedAt)
+		}
+		u.StoppedAt = at
+		stops = append(stops, *u)
+	}
+	for i := range stops {
+		stops[i] = capped(stops[i])
+	}
+	sort.SliceStable(stops, func(i, j int) bool {
+		if a, b := stops[i].StartedAt(), stops[j].StartedAt(); !a.Equal(b) {
+			return a.Before(b)
+		}
+		return stops[i].Members[0].RegistrationID < stops[j].Members[0].RegistrationID
+	})
+	return stops
+}
+
+func laterOf(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
 }

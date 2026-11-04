@@ -84,7 +84,7 @@ func expireAll(t *testing.T, admin *pgxpool.Pool) {
 }
 
 // Two or more expiry runs at once release each due reservation exactly once: the release
-// re-checks the row under its lock (SKIP LOCKED), so the bucket and the events are not doubled.
+// re-checks the row under its lock, so the bucket and the events are not doubled.
 func TestConcurrentExpiryRunsReleaseEachReservationOnce(t *testing.T) {
 	s, _, admin := setup(t)
 	ctx := entityCtx(1, ids.New())

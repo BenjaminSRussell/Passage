@@ -69,6 +69,7 @@ func TestListLines_ValidationStopsBeforeStore(t *testing.T) {
 		{"dimension value too long", "ledger=" + testLedger + "&dim.DEPT=" + strings.Repeat("D", 21), "dim.DEPT"},
 		{"repeated dimension", "ledger=" + testLedger + "&dim.DEPT=D100&dim.DEPT=D200", "dim.DEPT"},
 		{"voucher too long", "ledger=" + testLedger + "&voucher=" + strings.Repeat("V", 31), "voucher"},
+		{"source type too long", "ledger=" + testLedger + "&source_type=" + strings.Repeat("S", 65), "source_type"},
 		{"limit above page cap", "ledger=" + testLedger + "&limit=5000", "limit"},
 		{"limit zero", "ledger=" + testLedger + "&limit=0", "limit"},
 		{"documentId not a uuid", "ledger=" + testLedger + "&documentId=doc-1", "documentId"},
@@ -107,7 +108,7 @@ func TestListLines_PassesFilterAndReturnsCursor(t *testing.T) {
 	}}
 	q := url.Values{
 		"ledger": {testLedger}, "account_from": {"6000"}, "account_to": {"6999"}, "dim.DEPT": {"D100"}, "dim.CC": {"C1"}, "dim.PROJECT": {""},
-		"date_from": {"2026-01-01"}, "date_to": {"2026-01-31"}, "voucher": {"GL-000042"}, "source_system": {"ap"},
+		"date_from": {"2026-01-01"}, "date_to": {"2026-01-31"}, "voucher": {"GL-000042"}, "source_system": {"ap"}, "source_type": {"year_end_closing"},
 		"cursor": {"12.3"}, "limit": {"2"},
 	}
 	rec := call(server(fs), http.MethodGet, linesPath+"?"+q.Encode(), "", dutyRead, nil)
@@ -116,7 +117,7 @@ func TestListLines_PassesFilterAndReturnsCursor(t *testing.T) {
 	}
 	got := fs.lineFilters[0]
 	if got.LedgerID != testLedger || got.AccountFrom != "6000" || got.AccountTo != "6999" ||
-		got.DateFrom != "2026-01-01" || got.DateTo != "2026-01-31" || got.Voucher != "GL-000042" || got.SourceSystem != "ap" {
+		got.DateFrom != "2026-01-01" || got.DateTo != "2026-01-31" || got.Voucher != "GL-000042" || got.SourceSystem != "ap" || got.SourceType != "year_end_closing" {
 		t.Fatalf("filter = %+v", got)
 	}
 	if v, set := got.Dimensions["PROJECT"]; len(got.Dimensions) != 3 || got.Dimensions["DEPT"] != "D100" || got.Dimensions["CC"] != "C1" || !set || v != "" {

@@ -52,7 +52,7 @@ func (a *API) listLines(w http.ResponseWriter, r *http.Request) {
 	f := store.LineFilter{
 		LedgerID: q.Get("ledger"), AccountFrom: q.Get("account_from"), AccountTo: q.Get("account_to"),
 		DateFrom: q.Get("date_from"), DateTo: q.Get("date_to"), Voucher: q.Get("voucher"),
-		SourceSystem: q.Get("source_system"), DocumentID: q.Get("documentId"), Dimensions: map[string]string{}, Limit: defaultLinePage,
+		SourceSystem: q.Get("source_system"), SourceType: q.Get("source_type"), DocumentID: q.Get("documentId"), Dimensions: map[string]string{}, Limit: defaultLinePage,
 	}
 	if !ids.Valid(f.LedgerID) {
 		fields["ledger"] = "is required and must be a UUID"
@@ -78,6 +78,9 @@ func (a *API) listLines(w http.ResponseWriter, r *http.Request) {
 	}
 	if f.SourceSystem != "" && utf8.RuneCountInString(f.SourceSystem) > 64 {
 		fields["source_system"] = "must be at most 64 characters"
+	}
+	if f.SourceType != "" && utf8.RuneCountInString(f.SourceType) > 64 {
+		fields["source_type"] = "must be at most 64 characters"
 	}
 	if f.DocumentID != "" && !ids.Valid(f.DocumentID) {
 		fields["documentId"] = "must be a UUID"

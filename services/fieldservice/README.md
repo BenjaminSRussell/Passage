@@ -38,7 +38,9 @@ migrations/             0001_init.sql (RLS, tenant_id first, money numeric(20,6)
                         0005_objects_activities_knowledge.sql (service objects, activities, knowledge
                         articles and votes, with their passage_app grants),
                         0006_generic_cases.sql (case processes, categories, generic cases,
-                        associations and the case log, with their passage_app grants)
+                        associations and the case log, with their passage_app grants),
+                        0007 supplier claims and email intake, 0008_agreement_lifecycle_visits.sql
+                        (agreement version and status log, included-visit consumption)
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml    AsyncAPI 3 for every event published
 charts/fieldservice     Helm chart (deployment, service, optional ServiceMonitor)
@@ -51,7 +53,11 @@ charts/fieldservice     Helm chart (deployment, service, optional ServiceMonitor
 | POST | `/v1/service/sla-profiles` | SvcAgreementMaintain |
 | GET | `/v1/service/sla-profiles`, `/v1/service/sla-profiles/{id}` | SvcInquire |
 | POST | `/v1/service/agreements` | SvcAgreementMaintain |
-| GET | `/v1/service/agreements` (`status`, `customerPartyId`), `/v1/service/agreements/{id}` | SvcInquire |
+| GET | `/v1/service/agreements` (`status`, `customerPartyId`), `/v1/service/agreements/{id}` (ETag) | SvcInquire |
+| POST | `/v1/service/agreements/{id}:transition` (activate, suspend, resume, cancel) | SvcAgreementMaintain (If-Match, optional Idempotency-Key) |
+| POST | `/v1/service/agreements:expire` (one expiry pass, `limit`) | SvcAgreementMaintain |
+| POST | `/v1/service/agreements/{id}/visits` | SvcAgreementMaintain (Idempotency-Key) |
+| GET | `/v1/service/agreements/{id}/visits`, `/v1/service/agreements/{id}/history` | SvcInquire |
 | POST | `/v1/service/cases` | SvcCaseCreate |
 | GET | `/v1/service/cases` (`status`, `slaState`, `customerPartyId`), `/v1/service/cases/{id}` | SvcInquire |
 | POST | `/v1/service/work-orders` | SvcWoMaintain |
@@ -131,6 +137,10 @@ create from posted work orders or EAM work order lines, detail with lines, submi
 the vendor decision, the credit-note match and close) and the case mailbox
 (`/service/case-mailbox`: mailboxes and their default categories, set up a mailbox,
 and the inbound email list with where each message landed, linking to its case).
+Slice 6 adds the agreement lifecycle on the agreement detail (activate, suspend and
+cancel with a reason, resume, the status history), the included visits of each line
+(consumed, listed and recorded with an optional work order) and the "Expire ended
+agreements" pass on the agreement list.
 
 ## Run
 
@@ -312,6 +322,14 @@ Problem details use `application/problem+json`; `type` is `https://passage.dev/p
 | `SVC-AGR-002` | 422 | Referenced SLA profile not found |
 | `SVC-AGR-003` | 422 | The agreement belongs to another customer or legal entity |
 | `SVC-AGR-004` | 404 | Service agreement not found |
+| `SVC-AGR-005` | 422 | Agreement status move not allowed (EXPIRED is set only by the expiry pass) |
+| `SVC-AGR-006` | 422 | Activating an agreement whose validTo is behind today |
+| `SVC-AGR-007` | 422 | Visits are recorded on ACTIVE agreements only |
+| `SVC-AGR-008` | 422 | The visit date is outside the agreement's validity |
+| `SVC-AGR-009` | 422 | The agreement has no such line |
+| `SVC-AGR-010` | 422 | The line's included visits are all used |
+| `SVC-AGR-011` | 422 | The work order is unknown or belongs to another agreement |
+| `SVC-AGR-012` | 422 | The work order already consumed a visit |
 | `SVC-ENT-001` | — | Info in the entitlement trace: no agreement matched, fallback profile applied |
 | `SVC-ENT-002` | 422 | No agreement matched and no fallback SLA profile supplied |
 | `SVC-CASE-001` | 404 / 422 | Service case not found (422 when a work order references it) |

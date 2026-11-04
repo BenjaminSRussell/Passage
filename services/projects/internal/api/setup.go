@@ -26,6 +26,10 @@ type profileBody struct {
 	AccruedRevenueAccount  string `json:"accruedRevenueAccount"`
 	InvoicedRevenueAccount string `json:"invoicedRevenueAccount"`
 	OnAccountAccount       string `json:"onAccountAccount"`
+	OffsetAccount          string `json:"offsetAccount,omitempty"`
+	CostOfSalesAccount     string `json:"costOfSalesAccount,omitempty"`
+	LossProvisionAccount   string `json:"lossProvisionAccount,omitempty"`
+	LossExpenseAccount     string `json:"lossExpenseAccount,omitempty"`
 }
 
 // profileView is a posting profile as returned by the API, with its version.
@@ -194,7 +198,8 @@ func toProfileView(p domain.PostingProfile) profileView {
 		profileBody: profileBody{
 			ProjectGroup: p.Key.ProjectGroup, Category: p.Key.Category, LineProperty: p.Key.LineProperty,
 			CostAccount: p.CostAccount, WIPAccount: p.WIPAccount, AccruedRevenueAccount: p.AccruedRevenueAccount,
-			InvoicedRevenueAccount: p.InvoicedRevenueAccount, OnAccountAccount: p.OnAccountAccount,
+			InvoicedRevenueAccount: p.InvoicedRevenueAccount, OnAccountAccount: p.OnAccountAccount, OffsetAccount: p.OffsetAccount,
+			CostOfSalesAccount: p.CostOfSalesAccount, LossProvisionAccount: p.LossProvisionAccount, LossExpenseAccount: p.LossExpenseAccount,
 		},
 		Version: p.Version,
 	}
@@ -208,5 +213,9 @@ func fromProfileBody(b profileBody) domain.PostingProfile {
 		AccruedRevenueAccount:  b.AccruedRevenueAccount,
 		InvoicedRevenueAccount: b.InvoicedRevenueAccount,
 		OnAccountAccount:       b.OnAccountAccount,
+		OffsetAccount:          b.OffsetAccount,
+		CostOfSalesAccount:     b.CostOfSalesAccount,
+		LossProvisionAccount:   b.LossProvisionAccount,
+		LossExpenseAccount:     b.LossExpenseAccount,
 	}
 }

@@ -30,13 +30,45 @@ interface RejectCondition {
   code: string;
 }
 
-const opText: Record<string, string> = { empty: "is empty", eq: "equals", ne: "does not equal", in: "is one of", notIn: "is not one of", match: "matches" };
+const opText: Record<string, string> = { empty: "is empty", eq: "equals", ne: "does not equal", in: "is one of", notIn: "is not one of", match: "matches", expr: "is true:" };
 
 /** The mapping's rejectWhen conditions; the service validated them when the spec was published. */
 function rejectConditions(mapping: unknown): RejectCondition[] {
   const list = (mapping as { rejectWhen?: unknown } | null | undefined)?.rejectWhen;
   return Array.isArray(list) ? (list as RejectCondition[]) : [];
 }
+
+interface FieldRuleRow {
+  target: string;
+  type: string;
+  rule?: string;
+  source?: string;
+  sources?: string[];
+  value?: string;
+  expr?: string;
+  fn?: string;
+}
+
+/** The mapping's field rules in order, for the Field rules card. */
+function fieldRules(mapping: unknown): FieldRuleRow[] {
+  const list = (mapping as { fields?: unknown } | null | undefined)?.fields;
+  return Array.isArray(list) ? (list as FieldRuleRow[]) : [];
+}
+
+/** What a field reads: a column, a joined list of columns, a constant or an expression. */
+function ruleInput(f: FieldRuleRow): string {
+  if (f.rule === "expr") return f.expr ?? "";
+  if (f.rule === "concat") return (f.sources ?? []).join(" + ");
+  if (f.rule === "const") return JSON.stringify(f.value ?? "");
+  return f.source ?? "";
+}
+
+const fieldRuleColumns: DataTableColumn<FieldRuleRow>[] = [
+  { key: "target", header: "Target", mono: true },
+  { key: "type", header: "Type" },
+  { key: "rule", header: "Rule", render: (f) => (f.fn ? `${f.rule || "copy"} (${f.fn})` : f.rule || "copy") },
+  { key: "input", header: "Reads", mono: true, render: ruleInput },
+];
 
 const rejectColumns: DataTableColumn<RejectCondition>[] = [
   { key: "code", header: "Reason code", mono: true },
@@ -198,6 +230,7 @@ export function SpecDetailPage() {
     );
   }
   const conditions = rejectConditions(spec.mapping);
+  const rules = fieldRules(spec.mapping);
   return (
     <div className={styles.stack}>
       <PageHeader
@@ -214,6 +247,11 @@ export function SpecDetailPage() {
       <Card title="Checksum">
         <code>{spec.checksum}</code>
       </Card>
+      {rules.length > 0 ? (
+        <Card title="Field rules">
+          <DataTable label="Field rules" columns={fieldRuleColumns} rows={rules} getRowKey={(f) => f.target} />
+        </Card>
+      ) : null}
       {conditions.length > 0 ? (
         <Card title="Reject conditions">
           <DataTable label="Reject conditions" columns={rejectColumns} rows={conditions} getRowKey={(c) => `${c.code}-${c.field}-${c.op}-${c.value ?? (c.values ?? []).join("|")}`} />

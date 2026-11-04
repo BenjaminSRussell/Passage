@@ -18,7 +18,10 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 - Posting: `POST /v1/ledger/journal-entries` posts a balanced entry atomically
   or rejects it entirely with every violation in one 422 response. Idempotency
   keys replay identical requests (200, `idempotency.replayed = true`) and reject
-  reused keys with different payloads (409 `LEDGER_IDEMPOTENCY_CONFLICT`).
+  reused keys with different payloads (409 `LEDGER_IDEMPOTENCY_CONFLICT`). The
+  entry keeps its key for good (unique per legal entity), so a verbatim resend
+  after the key record expired (`LEDGER_IDEMPOTENCY_TTL_DAYS`, default 400) returns the original entry as a replay
+  rather than booking a second one, and a changed body is the same 409.
 - Validation dry run: `POST /v1/ledger/validate` returns the same violations
   and the resolved dimension combinations without writing.
 - Reversal: `POST /v1/ledger/journal-entries/{id}/reverse` writes an exact
@@ -39,7 +42,9 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   `POST /v1/ledger/balances:rebuild` runs once for it. That first rebuild
   reports `quantityBackfill: true` and does not count the backfilled quantity
   rows in `rowsDiffering`, so it raises no drift alert; later rebuilds count
-  quantity drift as usual.
+  quantity drift as usual. A dimension realignment run on a flagged ledger reads
+  the quantities to move from the journal instead of the projection, so it still
+  empties the old combinations.
 - Ledger transactions (FR-11.14): `GET /v1/ledger/journal-lines?ledger=` lists
   posted lines in posting order (posting sequence, line number) with the entry's
   voucher, date, description, source and trace id. Filters: `account_from`/`account_to`
@@ -66,6 +71,14 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   deleted, because reversing entries reference them.
 - Ledger parameters `reversalReasonRequired` (default true) and
   `negativePostingEnabled` (default false), set when the ledger is created.
+  `allowReinstate` (default true, migration 0030) is set at creation or by
+  `PATCH /v1/ledger/ledgers/{id}` (with `If-Match`): when false, reversing a
+  reversing entry is refused with 422 `LEDGER_REINSTATEMENT_NOT_ALLOWED`.
+- Journal names also carry `postingRestriction` (`none` or `own_journals_only`:
+  403 `LEDGER_POSTING_RESTRICTED` when another user posts the batch) and
+  `descriptionLanguage` (`legal_entity` or `user`: with `user` the batch post
+  reads `Accept-Language` for the default description template, falling back to
+  the base language and then `en`).
 - Reversal reasons: the reverse request takes `reasonCode` and `reasonComment`
   (at most 255 characters). The code must exist, be active and apply to `ledger`;
   a comment is needed when the code requires one; a code that forbids an
@@ -257,6 +270,9 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
   (runs skipped by a resume stay skipped); a changed schedule recomputes it from the last run.
 - The web batch screen has "Save as recurring journal", which opens the new recurring journal form
   filled from the batch (fixed amounts, its ledger, journal name, description and posting date).
+- A template line may carry a fixed statistical `quantity` and `unit` (BR-11.2, migration 0029),
+  set together like on batch lines; generation copies them unscaled onto the draft batch line, so a
+  zero-amount template line is a recurring statistical posting (for example a monthly headcount).
 
 ## Open items and manual clearing (slice 8, FR-11.19, BR-11.12, BR-11.13, BR-11.18)
 
@@ -383,6 +399,8 @@ today:
 | `LEDGER_DATE_INVALID` | Posting date more than `futurePostingDays` ahead (BR-11.4), a reversal dated before the original (FR-11.8), or a reversal on another date with a reason code that forbids it (FR-11.15) |
 | `LEDGER_PERIOD_CLOSED` | Posting date before the ledger's `firstOpenDate` (BR-11.4; full period status is wave 14) |
 | `LEDGER_REVERSAL_ALREADY_REVERSED` | Entry already has a reversing entry (FR-11.8) |
+| `LEDGER_REINSTATEMENT_NOT_ALLOWED` | 422: reversing a reversing entry on a ledger with `allowReinstate` false (FR-11.8) |
+| `LEDGER_POSTING_RESTRICTED` | 403: a user other than the creator posts a batch of a journal name with `postingRestriction` `own_journals_only` (FR-11.9) |
 | `LEDGER_REASON_REQUIRED` | Reversal without a reason code on a ledger that requires one, an unknown or inactive code, or a missing comment the code requires (FR-11.15) |
 | `LEDGER_REASON_INVALID_MODULE` | Reason code does not apply to `ledger` (FR-11.15) |
 | `LEDGER_NEGATIVE_POSTING_DISABLED` | Reason code allows negative posting but the ledger does not (BR-11.16) |

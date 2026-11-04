@@ -109,6 +109,10 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyLeaseMaintain)).Get("/v1/leases", a.listLeases)
 		r.With(authz.RequireDuty(DutyLeaseMaintain)).Get("/v1/leases/{id}", a.getLease)
 		r.With(authz.RequireDuty(DutyLeaseMaintain)).Post("/v1/leases/{id}/modify", a.modifyLease)
+		r.With(authz.RequireDuty(DutyPostJournal)).Post("/v1/leases/gl-postings", a.postLeasesToGL)
+		r.With(authz.RequireDuty(DutyLeaseMaintain)).Get("/v1/leases/{id}/gl-postings", a.getLeasePostings)
+		r.With(requireAny(DutyLeaseMaintain, DutyConfigure)).Get("/v1/leases/posting-profile", a.getLeasePostingProfile)
+		r.With(authz.RequireDuty(DutyConfigure)).Put("/v1/leases/posting-profile", a.saveLeasePostingProfile)
 
 		r.With(authz.RequireDuty(DutyPostJournal)).Post("/v1/assets/{id}/transactions", a.adjust)
 		r.With(authz.RequireDuty(DutyMaintain)).Post("/v1/assets/{id}/additions", a.addAddition)

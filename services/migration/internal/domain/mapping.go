@@ -58,6 +58,8 @@ type FieldRule struct {
 	Default     *string           `json:"default,omitempty"`
 	Required    bool              `json:"required,omitempty"`
 	Format      string            `json:"format,omitempty"`
+	Expr        string            `json:"expr,omitempty"`
+	prog        *ExprProgram
 }
 
 type Mapping struct {
@@ -92,9 +94,12 @@ func ParseMapping(data []byte) (Mapping, error) {
 	}
 	m.loc = loc
 	targets := map[string]bool{}
-	for _, f := range m.Fields {
+	for i, f := range m.Fields {
 		if e := f.check(); e != nil {
 			return Mapping{}, e
+		}
+		if f.Rule == RuleExpr {
+			m.Fields[i].prog, _ = ParseExpr(f.Expr)
 		}
 		if targets[f.Target] {
 			return Mapping{}, &Error{CodeMapInvalid, "duplicate target " + f.Target}

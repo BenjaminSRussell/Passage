@@ -123,7 +123,7 @@ and `npx tsc --noEmit` in `apps/web`.
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | `/v1/fulfillment/releases:run` | WarehouseRelease | Idempotency-Key. Creates shipments per (order, warehouse, ship date); a line already on an open shipment is skipped as `already_released`, a line with an active drop-ship as `drop_ship`; runs per warehouse are serialised |
+| POST | `/v1/fulfillment/releases:run` | WarehouseRelease | Idempotency-Key. Creates shipments per (order, warehouse, ship date); a line already on an open shipment is skipped as `already_released`, a line with an active drop-ship as `drop_ship`; a line whose remainder sales cancelled is released only up to the quantity it keeps (`order_line_kept`) and skipped as `order_remainder_cancelled` when nothing is left; runs per warehouse are serialised |
 | GET | `/v1/fulfillment/shipments` | WarehouseView | Delivery monitor; filters `status`, `warehouseId`, `orderId`, `limit` (1 to 500, default 100) |
 | GET | `/v1/fulfillment/shipments/{id}` | WarehouseView | ETag carries the version |
 | POST | `/v1/fulfillment/shipments/{id}:confirm-pick` | WarehousePick | Idempotency-Key, If-Match |
@@ -242,10 +242,10 @@ with a stable `code`.
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | `/v1/fulfillment/drop-ships` | WarehouseRelease | Idempotency-Key; links an order line to its purchase order line at the PO cost (`unitCost` positive, `currency`); one active drop-ship per order line (FUL-0061); a line on a warehouse shipment that is not cancelled is refused (FUL-0062); `dropship.created` |
+| POST | `/v1/fulfillment/drop-ships` | WarehouseRelease | Idempotency-Key; links an order line to its purchase order line at the PO cost (`unitCost` positive, `currency`); one active drop-ship per order line (FUL-0061); a line on a warehouse shipment that is not cancelled is refused (FUL-0062), and a qty above what the line keeps after sales cancelled the remainder (FUL-0066); `dropship.created` |
 | GET | `/v1/fulfillment/drop-ships` | WarehouseView | Newest first; filters `status` (OPEN, CONFIRMED, CANCELLED), `orderId`, `vendorId`, `limit` |
 | GET | `/v1/fulfillment/drop-ships/{id}` | WarehouseView | One drop-ship with its journal; ETag carries the version |
-| POST | `/v1/fulfillment/drop-ships/{id}:confirm` | PurchaseOrderConfirm | Idempotency-Key, If-Match; body `shippedOn`, optional `vendorShipmentRef`, `postingDate`; books Dr 5000 / Cr 2110 at the PO cost with no inventory transaction; `dropship.confirmed` carries the journal; final |
+| POST | `/v1/fulfillment/drop-ships/{id}:confirm` | PurchaseOrderConfirm | Idempotency-Key, If-Match; body `shippedOn`, optional `vendorShipmentRef`, `postingDate`; books Dr 5000 / Cr 2110 at the PO cost with no inventory transaction; a confirmed total above what the line keeps after sales cancelled the remainder is refused (FUL-0066); `dropship.confirmed` carries the journal; final |
 | POST | `/v1/fulfillment/drop-ships/{id}:cancel` | WarehouseRelease | Idempotency-Key, If-Match; only an OPEN drop-ship (a CONFIRMED one is refused with FUL-0001); `dropship.cancelled` |
 
 The `short_pick_action` default is REMAINDER_BACKORDER (migration 0016); KEEP_OPEN and

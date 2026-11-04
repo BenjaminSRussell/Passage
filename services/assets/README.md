@@ -1,4 +1,4 @@
-# assets (Wave 37: Fixed Assets & Leases, slices 1 to 5)
+# assets (Wave 37: Fixed Assets & Leases, slices 1 to 6)
 
 The fixed-asset subledger and IFRS 16 leases. Slice 1 delivers the asset
 register, depreciation books with the straight-line and declining-balance
@@ -105,9 +105,47 @@ and `authz` until OPA is wired (wave 2 kernel).
   the ROU moves by the same amount; the part that would take the ROU below
   zero is `profitLossExcess` (P&L). `liability` and `rouAsset` stay the
   amounts at recognition; `modifications` lists every remeasurement, and
-  Σ ROU depreciation = rouAsset + Σ rouAdjustment. A period already posted
+  Σ ROU depreciation = rouAsset + Σ rouAdjustment of the modifications not
+  `superseded`. A modification that takes effect before an earlier recorded
+  one replaces the schedule from its own period, so the earlier one is
+  marked `superseded` and its ROU adjustment is left out of the new one's
+  `rouBefore` (the ROU carrying amount). A period already posted
   to the ledger cannot be remeasured (AST-0027). The response carries the
   AST-0516 info message.
+- Lease ledger posting (slice 6, D4d): `POST /v1/leases/gl-postings`
+  (AssetPostJournal; legalEntityId, ledgerId, postThrough, optional leaseId)
+  books the recognition journal (Dr ROU asset, Cr lease liability, dated at
+  commencement) and one journal per payment period that has ended by
+  `postThrough`, dated on its last day (commencement + period x 12 /
+  paymentsPerYear months - 1 day): Dr interest expense / Cr liability for the
+  interest, Dr liability / Cr payment clearing for the payment, Dr depreciation
+  expense / Cr ROU accumulated depreciation, and on the period a modification
+  takes effect Dr or Cr ROU asset against the liability with the part beyond
+  the ROU carrying amount credited to the remeasurement gain account. Periods
+  go in order; a lease whose journal the ledger refuses stops there and is
+  listed under `failed`, other leases go on. Each journal is stored as a
+  pending booking (`asset_pending_booking`, book code LEASE) before the ledger
+  is called and resent unchanged until it answers; a ledger refusal drops it,
+  a lost answer keeps it, and a lease with a pending booking cannot be
+  remeasured (AST-0027). The ledger entry lands on `lease.recognition_journal_id`
+  and `lease_schedule_line.posted_journal_id` and `dev.passage.assets.lease.posted.v1`
+  is written in the same transaction. `GET /v1/leases/{id}/gl-postings` shows
+  which journals are booked. Accounts come from `PUT /v1/leases/posting-profile`
+  (AssetConfigure, If-Match to replace; GET by LeaseMaintain or AssetConfigure);
+  without one the placeholders apply and the booking is flagged
+  `placeholderProfile`: ROU asset 1700, ROU accumulated depreciation 1790, lease
+  liability 2400, interest expense 7200, depreciation expense 6820, payment
+  clearing 2110, remeasurement gain 7120. Superseded modifications are not
+  booked. A line whose remeasurement does not agree with the lease's live
+  modifications is reported as AST-0610 and not booked (a data fault guard).
+  Staging locks the leases (the lock a remeasurement takes), so a
+  remeasurement cannot replace a period between reading it and staging its
+  journal; a request overtaken by another that confirmed the same journal
+  reports it booked with the same entry. Each journal is one per payment
+  period: a lease paid quarterly, half-yearly or yearly books its interest and
+  ROU depreciation at the end of each payment period, not monthly, and an
+  advance payment is booked with its period's journal on the period's last
+  day, not on its due date (see NOT-IMPLEMENTED.md D4d).
 - Count sessions (`POST /v1/assets/count-sessions`, duty AssetCount) classify
   the scans against the Open assets of the legal entity that carry a barcode:
   Found, Missing and Unknown (one AST-0525 warning each); a repeated scan
@@ -287,7 +325,7 @@ Problem details are `application/problem+json` with `code` and `type`
 | AST-0024 | 404 | Index series not found |
 | AST-0025 | 409 | The asset already has a policy with this number |
 | AST-0026 | 404 | Count session not found |
-| AST-0027 | 422 | A lease period from the effective period on is already posted |
+| AST-0027 | 422 | A lease period from the effective period on is already posted, or a ledger booking of the lease awaits the ledger's answer |
 | AST-0028 | 403 | The user created or requested the capex request and may not approve, reject or postpone it |
 | AST-0029 | 422 | The mid-quarter test covers books in more than one currency |
 | AST-0030 | 422 | Transfer or split invalid (a transfer with other than one target, a split with fewer than 2 or more than 50, a split into another legal entity, a date before in-service, a zero target quantity) |
@@ -309,6 +347,7 @@ Problem details are `application/problem+json` with `code` and `type`
 | AST-0531 | warning | Index series has no value for the valuation year; the latest year was used (BR-37.10) |
 | AST-0532 | warning | Asset is under-insured: sum insured below 90% of the indexed value (FR-37.15) |
 | AST-0535 | 409 | The asset's book already belongs to a group asset (BR-37.11) |
+| AST-0610 | n/a | A lease schedule line's remeasurement does not agree with the live modifications of its period (a data fault, not expected); its journal is not booked (listed under `failed`) |
 | idempotency_key_reuse | 422 | Idempotency-Key reused with a different request |
 
 Other PRD message codes (AST-0501, 0520, 0541, 0542) belong to later slices; see NOT-IMPLEMENTED.md.

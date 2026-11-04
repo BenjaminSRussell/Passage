@@ -207,6 +207,8 @@ type setEntryRequest struct {
 	Source       sourceDTO        `json:"source"`
 	Lines        []lineDTO        `json:"lines"`
 	LedgerLines  []ledgerLinesDTO `json:"ledgerLines"`
+	// OptionalDimensions: see postEntryRequest; decided per member ledger.
+	OptionalDimensions []string `json:"optionalDimensions,omitempty"`
 }
 
 type setEntryPayload struct {
@@ -264,7 +266,8 @@ func (a *API) postSetEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req := postEntryRequest{LedgerID: setID, DocumentID: body.DocumentID, PostingDate: body.PostingDate,
-		DocumentDate: body.DocumentDate, Description: body.Description, Source: body.Source, Lines: body.Lines}
+		DocumentDate: body.DocumentDate, Description: body.Description, Source: body.Source, Lines: body.Lines,
+		OptionalDimensions: body.OptionalDimensions}
 	in, fields := a.toPostInput(req, r)
 	if len(body.LedgerLines) > 0 && len(body.Lines) == 0 {
 		delete(fields, "lines")
@@ -275,7 +278,8 @@ func (a *API) postSetEntry(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	hash, err := domain.HashPayload(setEntryPayload{postEntryRequest: req, LedgerLines: canonicalGroups(body.LedgerLines)})
+	hashed, groups := withoutOptional(req, body.LedgerLines)
+	hash, err := domain.HashPayload(setEntryPayload{postEntryRequest: hashed, LedgerLines: canonicalGroups(groups)})
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return

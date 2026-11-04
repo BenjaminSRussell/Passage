@@ -154,7 +154,7 @@ describe("Order pegs", () => {
     attributes: {},
     networkId: null,
     status: "scheduled",
-    createdAt: "2026-10-26T06:00:00Z",
+    version: 1, createdAt: "2026-10-26T06:00:00Z",
   });
   const operations = [operation(PARENT, 10), operation(PARENT, 20), operation(DEPENDENT, 10)];
 

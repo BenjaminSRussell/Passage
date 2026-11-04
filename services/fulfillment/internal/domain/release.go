@@ -102,6 +102,10 @@ const (
 	// SkipDropShip marks a line with an active (not cancelled) drop-ship: the
 	// vendor ships it, so it is not picked from stock (FR-28.7).
 	SkipDropShip = "drop_ship"
+	// SkipOrderRemainderCancelled marks a line whose kept quantity (what sales left after
+	// cancelling the remainder of the order) is zero or already on live shipments: nothing is
+	// left to release.
+	SkipOrderRemainderCancelled = "order_remainder_cancelled"
 	// SkipJournalOrder marks a line of a JOURNAL order: it is a record, not
 	// goods, and never ships.
 	SkipJournalOrder = "journal_order"

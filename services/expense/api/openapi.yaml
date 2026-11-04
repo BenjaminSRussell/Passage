@@ -25,7 +25,7 @@ info:
     (FR-43.13); previews persist nothing and take no Idempotency-Key. Money is a decimal
     string, never a float.
     Error codes: COM-0001, COM-0503, AUTH-0001, AUTH-0003, AUTH-0004, EXP-REP-001,
-    EXP-REP-002, EXP-REP-003, EXP-REP-004, EXP-LINE-001, EXP-LINE-002, EXP-LINE-003,
+    EXP-REP-002, EXP-REP-003, EXP-REP-004, EXP-REP-005, EXP-LINE-001, EXP-LINE-002, EXP-LINE-003,
     EXP-IDEM-001, EXP-ADV-001, EXP-ADV-002, EXP-ADV-004, EXP-ADV-005, EXP-ADV-006,
     EXP-ADV-007, EXP-ADV-008, EXP-TR-003, EXP-TR-004, EXP-TR-005, EXP-CARD-002,
     EXP-SOD-001, COM-0500; a refused submit is a 422 carrying the first unsatisfied
@@ -386,6 +386,39 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/reports/{id}/decide:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    post:
+      operationId: decideReport
+      x-passage-duty: expense.approve
+      description: >-
+        Approves or rejects a SUBMITTED report (409 EXP-REP-002 otherwise). The decision needs
+        an authenticated user (401 AUTH-0001), and the user who submitted the report may not
+        decide it (403 EXP-SOD-001); a report that does not record its creator and submitter
+        (created before the approval migration) is refused with 403 EXP-REP-005. An approval
+        with a reimbursable amount writes dev.passage.expense.report.approved.v1 to the outbox,
+        carrying the stored reimbursable amount, in the same transaction; payables creates the
+        employee's AP open item. The open item is paid by a payment run only once its payee
+        resolves in the vendor master, which no employee does yet (see NOT-IMPLEMENTED), so the
+        report stays APPROVED until then. A report with nothing to
+        reimburse becomes PAID at once.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Decision' }
+      responses:
+        '200':
+          description: The decided report, or the replay of an earlier decision with the same key.
+          headers: { ETag: { $ref: '#/components/headers/ETag' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExpenseReport' }
         default: { $ref: '#/components/responses/Problem' }
   /v1/expense/cash-advances:
     get:

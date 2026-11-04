@@ -6,3 +6,16 @@ resources:
   requests: { cpu: 50m, memory: 64Mi }
   limits: { cpu: 500m, memory: 192Mi }
 serviceMonitor: { enabled: false }
+# Unset, POST /v1/controlling/reconciliations answers 503 CST-0031 and the nightly job cannot run.
+ledgerUrl: ""
+# Legal entity id -> ledger id; required when ledgerUrl is set (rendered as COSTACCT_LEDGER_IDS).
+ledgerIds: {}
+serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""
+# CronJob running `costacct cost-gl-reconcile <tenant-id>...`: reads the ledger's balances for the previous and the
+# current month and fails when the cost ledger differs. Tenants are listed because the app role cannot enumerate them.
+glReconcile:
+  enabled: false
+  schedule: "37 2 * * *"
+  tenantIds: []

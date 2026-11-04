@@ -25,10 +25,29 @@ export type ClientErrorPolicy = "dead_letter" | "retry";
 export type DeliveryStatus = "pending" | "delivered" | "dead_letter";
 export const DELIVERY_STATUSES: readonly DeliveryStatus[] = ["pending", "delivered", "dead_letter"];
 
+export interface LineCorrelation {
+  bodyPath: string;
+  responsePath: string;
+}
+
+export interface LineKey {
+  index: number;
+  legacyKey: string;
+}
+
+export interface LookupUse {
+  name: string;
+  table: string;
+  version: number;
+}
+
 export interface RestSettings {
   outboundMappingId: string;
   method: SyncMethod;
   responseKeyPath: string;
+  /** Path with one [*] to the legacy key of each element of a pushed collection (absent on older subscriptions). */
+  lineKeyPath?: string;
+  lineCorrelation?: LineCorrelation;
   onClientError: ClientErrorPolicy;
   auth: { type: AuthType; username?: string; headerName?: string; tokenUrl?: string; clientId?: string; scope?: string; hasCredentials: true };
 }
@@ -69,6 +88,8 @@ export interface NewRestSubscription {
   outboundMappingId: string;
   method: SyncMethod;
   responseKeyPath?: string;
+  lineKeyPath?: string;
+  lineCorrelation?: LineCorrelation;
   onClientError: ClientErrorPolicy;
   auth: AuthInput;
 }
@@ -88,6 +109,10 @@ export interface Delivery {
   deadLetterCode: string | null;
   responseExcerpt: string | null;
   legacyKey: string | null;
+  /** The key the ERP assigned to each element of the pushed collection. */
+  lineKeys?: LineKey[];
+  /** The lookup table versions the last render read. */
+  lookups?: LookupUse[];
   createdAt: string;
 }
 
@@ -104,6 +129,9 @@ export interface TestSendResult {
   status?: number | null;
   excerpt?: string;
   legacyKey?: string;
+  lineKeys?: LineKey[];
+  lineKeyError?: string;
+  lookups?: LookupUse[];
 }
 
 async function toError(res: Response): Promise<EdiApiError> {
@@ -170,4 +198,83 @@ export function listDeadLetters(cursor?: string, signal?: AbortSignal): Promise<
 
 export function replayDelivery(id: string): Promise<{ status: "pending" }> {
   return hub<{ status: "pending" }>(`/deliveries/${encodeURIComponent(id)}:replay`, { method: "POST" });
+}
+
+// API clients and quotas (FR-35.8, BR-35.8). The Keycloak secret never passes through the hub or these pages.
+
+/** New duty, enforced by the hub and by the page's actions only: no nav item or route is gated on it until it is seeded (hub NOT-IMPLEMENTED.md). */
+export const DUTY_HUB_CLIENT_WRITE = "hub.client.write";
+/** Defaults and ranges of the quota (FR-35.8, §6.35.13). */
+export const DEFAULT_QUOTA_PER_MIN = 600;
+export const DEFAULT_BURST = 100;
+export const QUOTA_MIN = 10;
+export const QUOTA_MAX = 100_000;
+export const BURST_MIN = 1;
+export const BURST_MAX = 100_000;
+
+export interface ApiClient {
+  id: string;
+  clientId: string;
+  name: string;
+  scopes: string[];
+  quotaPerMin: number;
+  burst: number;
+  sandboxTenantId: string | null;
+  ownerContact: string;
+  status: "active" | "revoked";
+  revokedAt: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewApiClient {
+  clientId: string;
+  name: string;
+  scopes: string[];
+  quotaPerMin: number;
+  burst: number;
+  sandboxTenantId?: string;
+  ownerContact: string;
+}
+
+export interface ApiClientPatch {
+  version: number;
+  name?: string;
+  scopes?: string[];
+  quotaPerMin?: number;
+  burst?: number;
+  sandboxTenantId?: string | null;
+  ownerContact?: string;
+}
+
+export interface UsageMinute {
+  minute: string;
+  allowed: number;
+  throttled: number;
+}
+
+export function listClients(cursor?: string, signal?: AbortSignal): Promise<Page<ApiClient>> {
+  return hub<Page<ApiClient>>(`/clients${query({ limit: 100, cursor })}`, {}, signal);
+}
+
+export function getClient(id: string, signal?: AbortSignal): Promise<ApiClient> {
+  return hub<ApiClient>(`/clients/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Reuse one key per form so a retried submit cannot register two clients. */
+export function registerClient(input: NewApiClient, key: string = newKey()): Promise<ApiClient> {
+  return hub<ApiClient>("/clients", json("POST", input, { "Idempotency-Key": key }));
+}
+
+export function updateClient(id: string, patch: ApiClientPatch): Promise<ApiClient> {
+  return hub<ApiClient>(`/clients/${encodeURIComponent(id)}`, json("PATCH", patch));
+}
+
+export function revokeClient(id: string): Promise<ApiClient> {
+  return hub<ApiClient>(`/clients/${encodeURIComponent(id)}:revoke`, { method: "POST" });
+}
+
+export function getClientUsage(id: string, minutes = 60, signal?: AbortSignal): Promise<{ minutes: UsageMinute[] }> {
+  return hub<{ minutes: UsageMinute[] }>(`/clients/${encodeURIComponent(id)}/usage${query({ minutes })}`, {}, signal);
 }

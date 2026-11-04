@@ -145,10 +145,16 @@ describe("lease remeasurement", () => {
   });
 
   it("offers Modify on an active lease and shows remeasurements on a modified one", async () => {
-    handler = () => ({ status: 200, body: modified, etag: '"2"' });
+    const superseded = { ...modification, id: "77777777-7777-4777-8777-777777777777", effectivePeriod: 5, superseded: true, liabilityAfter: "11000", createdAt: "2026-02-01T00:00:00Z" };
+    handler = (url) =>
+      url.pathname.endsWith("/gl-postings")
+        ? { status: 200, body: { leaseId: LEASE, recognitionJournalId: null, periods: [] } }
+        : { status: 200, body: { ...modified, modifications: [superseded, modification] }, etag: '"2"' };
     const { container } = renderAt(`/assets/leases/${LEASE}`);
     const history = await findTable({ name: "Remeasurements" });
     expect(within(history).getByText("32678.98 USD")).toBeInTheDocument();
+    expect(within(history).getByText("5 (superseded)")).toBeInTheDocument();
+    expect(within(history).getByText("3")).toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "Lease schedule" })).getByText("5446.49")).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Lease balances" })).toHaveTextContent("Liability after last remeasurement 32678.98 USD");
     expect(screen.getByRole("link", { name: "Modify lease" })).toHaveAttribute("href", `/assets/leases/${LEASE}/modify`);

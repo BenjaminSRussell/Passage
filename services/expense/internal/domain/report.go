@@ -9,6 +9,9 @@ type ReportStatus string
 const (
 	ReportDraft     ReportStatus = "DRAFT"
 	ReportSubmitted ReportStatus = "SUBMITTED"
+	ReportApproved  ReportStatus = "APPROVED"
+	ReportRejected  ReportStatus = "REJECTED"
+	ReportPaid      ReportStatus = "PAID"
 )
 
 // CanAddLine is true while lines may change. A submitted report is frozen.

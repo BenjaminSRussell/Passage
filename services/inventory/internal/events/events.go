@@ -4,21 +4,22 @@ package events
 
 // Event types (dev.passage.<context>.<entity>.<verb>.v<n>).
 const (
-	TransactionPosted   = "dev.passage.inventory.transaction.posted.v1"
-	OnhandChanged       = "dev.passage.inventory.onhand.changed.v1"
-	JournalPosted       = "dev.passage.inventory.journal.posted.v1"
-	ReservationCreated  = "dev.passage.inventory.reservation.created.v1"
-	ReservationReleased = "dev.passage.inventory.reservation.released.v1"
-	BlockingCreated     = "dev.passage.inventory.blocking.created.v1"
-	BlockingReleased    = "dev.passage.inventory.blocking.released.v1"
-	BlockingEscalated   = "dev.passage.inventory.blocking.escalated.v1"
-	HoldPlaced          = "dev.passage.inventory.hold.placed.v1"
-	HoldReleased        = "dev.passage.inventory.hold.released.v1"
+	TransactionPosted    = "dev.passage.inventory.transaction.posted.v1"
+	OnhandChanged        = "dev.passage.inventory.onhand.changed.v1"
+	JournalPosted        = "dev.passage.inventory.journal.posted.v1"
+	ReservationCreated   = "dev.passage.inventory.reservation.created.v1"
+	ReservationReleased  = "dev.passage.inventory.reservation.released.v1"
+	ReservationConverted = "dev.passage.inventory.reservation.converted.v1"
+	BlockingCreated      = "dev.passage.inventory.blocking.created.v1"
+	BlockingReleased     = "dev.passage.inventory.blocking.released.v1"
+	BlockingEscalated    = "dev.passage.inventory.blocking.escalated.v1"
+	HoldPlaced           = "dev.passage.inventory.hold.placed.v1"
+	HoldReleased         = "dev.passage.inventory.hold.released.v1"
 )
 
 // All lists every event type the service publishes.
 func All() []string {
-	return []string{TransactionPosted, OnhandChanged, JournalPosted, ReservationCreated, ReservationReleased, BlockingCreated, BlockingReleased, BlockingEscalated, HoldPlaced, HoldReleased,
+	return []string{TransactionPosted, OnhandChanged, JournalPosted, ReservationCreated, ReservationReleased, ReservationConverted, BlockingCreated, BlockingReleased, BlockingEscalated, HoldPlaced, HoldReleased,
 		TransferShipped, TransferReceived, TransferChanged, OwnershipChanged, ConsignmentClosed, ReconciliationDiff, CountSheetChanged, JournalNameCreated, JournalNameUpdated}
 }
 
@@ -126,6 +127,9 @@ type ReservationData struct {
 	Kind string `json:"kind"`
 	// Reason is "EXPIRED" when the release came from the expiry run, empty otherwise.
 	Reason string `json:"reason,omitempty"`
+	// ConvertedFromReservationID is set on reservation.converted when only part of an ORDERED
+	// reservation arrived: the converted part is a new allocation split off the named one.
+	ConvertedFromReservationID string `json:"convertedFromReservationId,omitempty"`
 }
 
 // BlockingData is the payload of the blocking events. DimensionSet is the

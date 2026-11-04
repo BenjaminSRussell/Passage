@@ -320,7 +320,7 @@ describe("Allocation runs", () => {
 });
 
 describe("ReconciliationPage", () => {
-  it("posts the journal balances and shows differences by element (AC-38.6)", async () => {
+  it("requests the reconciliation without balances and shows differences by element (AC-38.6)", async () => {
     const fetchMock = lists({
       "POST /api/v1/controlling/reconciliations": () =>
         json(200, {
@@ -330,12 +330,10 @@ describe("ReconciliationPage", () => {
         }),
     });
     const { container } = at("/costacct/reconciliation");
-    fireEvent.change(screen.getByLabelText("Journal balances"), { target: { value: "600100,abc" } });
     fireEvent.click(screen.getByRole("button", { name: "Reconcile" }));
-    expect(await screen.findByText(/Line 1 must be/)).toBeInTheDocument();
+    expect(await screen.findByText(/legal entity's id/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Period"), { target: { value: "2026-09" } });
-    fireEvent.change(screen.getByLabelText("Journal balances"), { target: { value: "mainAccount,amount\n600100,350.25\n400000,-500" } });
     fireEvent.click(screen.getByRole("button", { name: "Reconcile" }));
     expect(await screen.findByText("Differences found")).toBeInTheDocument();
     const byElement = screen.getByRole("table", { name: "Reconciliation by element" });
@@ -347,10 +345,6 @@ describe("ReconciliationPage", () => {
       legalEntityId: LE,
       period: "2026-09",
       currency: "USD",
-      journalBalances: [
-        { mainAccount: "600100", amount: "350.25" },
-        { mainAccount: "400000", amount: "-500" },
-      ],
     });
     expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBeUndefined();
     expect(pageViolations(container)).toEqual([]);

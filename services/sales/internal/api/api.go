@@ -79,6 +79,7 @@ type API struct {
 	held     atomic.Int64
 	applied  atomic.Int64
 	released atomic.Int64
+	rejected atomic.Int64
 	atp      atomic.Int64
 	changed  atomic.Int64
 	canceled atomic.Int64
@@ -119,6 +120,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyWrite)).Patch(orders+"/{id}", a.patchOrder)
 	r.With(authz.RequireDuty(dutyConfirm)).Post(orders+"/{id}:cancel", a.cancelOrder)
 	r.With(authz.RequireDuty(dutyWrite)).Post(orders+"/{id}:cancel-remainder", a.cancelRemainder)
+	r.With(authz.RequireDuty(dutyWrite)).Post(orders+"/{id}/lines/{lineNo}:cancel-remainder", a.cancelLineRemainder)
 	r.With(authz.RequireDuty(dutyPlanProduction)).Post(orders+"/{id}:plan-production", a.planProduction)
 	r.With(authz.RequireDuty(dutyRead)).Get(orders+"/{id}/versions", a.listOrderVersions)
 	r.With(authz.RequireAnyDuty(dutyRecordDelivery, dutyRecordInvoice)).Post(orders+"/{id}:record-progress", a.recordProgress)
@@ -133,6 +135,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get(backorderRuns+"/{id}", a.getBackorderRun)
 	r.With(authz.RequireDuty(dutyBackorder)).Post(backorderRuns+"/{id}:commit", a.commitBackorderRun)
 	r.With(authz.RequireDuty(dutyHold)).Post(orders+"/{id}/holds", a.applyHold)
+	r.With(authz.RequireDuty(dutyCreditRelease)).Post(orders+"/{id}/holds/{holdId}:reject", a.rejectHold)
 	r.With(requireAny(dutyCreditRelease, dutyHold)).Post(orders+"/{id}/holds/{holdId}:release", a.releaseHold)
 	r.With(authz.RequireDuty(dutyListing)).Post(productListings, a.createListing)
 	r.With(authz.RequireDuty(dutyRead)).Get(productListings, a.listListings)
@@ -201,6 +204,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP sales_credit_holds_applied_total CREDIT holds placed by the credit check.\n# TYPE sales_credit_holds_applied_total counter\nsales_credit_holds_applied_total %d\n", a.held.Load())
 		fmt.Fprintf(w, "# HELP sales_holds_applied_total MANUAL, FRAUD and PRICE_REVIEW holds applied through the holds API.\n# TYPE sales_holds_applied_total counter\nsales_holds_applied_total %d\n", a.applied.Load())
 		fmt.Fprintf(w, "# HELP sales_holds_released_total Holds released.\n# TYPE sales_holds_released_total counter\nsales_holds_released_total %d\n", a.released.Load())
+		fmt.Fprintf(w, "# HELP sales_credit_holds_rejected_total CREDIT holds rejected by a credit manager (the order is cancelled).\n# TYPE sales_credit_holds_rejected_total counter\nsales_credit_holds_rejected_total %d\n", a.rejected.Load())
 		fmt.Fprintf(w, "# HELP sales_atp_checks_total Stateless ATP promise checks.\n# TYPE sales_atp_checks_total counter\nsales_atp_checks_total %d\n", a.atp.Load())
 		fmt.Fprintf(w, "# HELP sales_orders_changed_total Order changes that produced a new version.\n# TYPE sales_orders_changed_total counter\nsales_orders_changed_total %d\n", a.changed.Load())
 		fmt.Fprintf(w, "# HELP sales_orders_cancelled_total Orders cancelled.\n# TYPE sales_orders_cancelled_total counter\nsales_orders_cancelled_total %d\n", a.canceled.Load())

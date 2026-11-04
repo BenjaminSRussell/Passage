@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -73,8 +74,8 @@ func (s *Postgres) ApplyOperationStatus(ctx context.Context, tx pgx.Tx, in Opera
 // every worker on the jobs of the operation production just finished (FR-25.3): a closed job-stop
 // from the start to the finish (see domain.PlanProductionStop) flagged production-finished, with
 // registration.posted, so the job's labour hours end at the finish and the worker's kiosk does not
-// keep a finished job open. Starts of a bundle stay open; the clocked-in inquiry and the kiosk
-// session show them with the job's productionFinishedAt. A stop the kiosk sends later for the same
+// keep a finished job open. A bundle with a member on the operation closes as a whole and its
+// time is split again over all its members (BR-25.1). A stop the kiosk sends later for the same
 // start supersedes the server's (supersedeAutoStop), so the hours are not counted twice.
 //
 // The operation's jobs are locked exclusively first, then the workers in id order: a registration
@@ -86,6 +87,19 @@ func stopOpenStartsOfFinishedOperation(ctx context.Context, tx pgx.Tx, tenantID 
 		tenantID, strings.ToLower(in.OrderID), strconv.Itoa(in.OperNumber))
 	if err != nil || len(jobs) == 0 {
 		return err
+	}
+	// A bundle with an open member on these jobs closes as a whole, so the finish takes the
+	// bundle locks a closing batch takes (lockBatchBundles) before the job locks, in the same order.
+	bundles, err := collect(ctx, tx, `select distinct bundle_id::text from time_registration
+		where tenant_id = $1 and job_id = any($2::uuid[]) and kind = 'job-start' and stopped_at is null and bundle_id is not null`, tenantID, jobs)
+	if err != nil {
+		return err
+	}
+	sort.Strings(bundles)
+	for _, b := range bundles {
+		if err := lockBundle(ctx, tx, tenantID, b); err != nil {
+			return err
+		}
 	}
 	if err := lockJobs(ctx, tx, tenantID, jobs, "pg_advisory_xact_lock"); err != nil {
 		return err
@@ -108,20 +122,23 @@ func stopOpenStartsOfFinishedOperation(ctx context.Context, tx pgx.Tx, tenantID 
 		if err != nil {
 			return err
 		}
-		var onJob []domain.OpenStart
-		for _, o := range open {
-			if onOperation[o.JobID] {
-				onJob = append(onJob, o)
-			}
-		}
-		stops, _ := domain.PlanProductionStop(onJob, in.At)
+		stops := domain.PlanProductionStop(open, in.At, onOperation)
 		for _, unit := range stops {
 			hours, err := unit.Hours()
 			if err != nil {
 				return err
 			}
-			if _, err := insertServerStop(ctx, tx, tenantID, w, unit.Members[0], unit, hours[0], domain.FlagProductionFinished, productionStopNote); err != nil {
-				return err
+			// A unit that ends after the finish holds a start stored before the event arrived:
+			// its lost time is closed at zero hours and also flagged job-finished-conflict for
+			// supervisor review.
+			var extra []string
+			if unit.StoppedAt.After(in.At) {
+				extra = append(extra, domain.ConflictJobFinished)
+			}
+			for i, m := range unit.Members {
+				if _, err := insertServerStop(ctx, tx, tenantID, w, m, unit, hours[i], domain.FlagProductionFinished, productionStopNote, extra...); err != nil {
+					return err
+				}
 			}
 		}
 	}

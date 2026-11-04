@@ -3,8 +3,10 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -153,6 +155,43 @@ func (a *API) cancelOrder(w http.ResponseWriter, r *http.Request) {
 			// The customer's changes need approval: nothing was cancelled.
 			setETag(w, order.Version)
 			httpx.JSON(w, http.StatusAccepted, order)
+			return
+		}
+		a.canceled.Add(1)
+		setETag(w, order.Version)
+		httpx.JSON(w, http.StatusOK, order)
+	})(w, r)
+}
+
+// cancelLineRemainder closes what one line of a partly shipped order has not
+// delivered (BR-27.5, /lines/{lineNo}:cancel-remainder), under the same duty and
+// rules as cancelRemainder.
+func (a *API) cancelLineRemainder(w http.ResponseWriter, r *http.Request) {
+	orderRoute(func(w http.ResponseWriter, r *http.Request, id string) {
+		lineNo, err := strconv.Atoi(chi.URLParam(r, "lineNo"))
+		if err != nil || lineNo < 1 {
+			validationFailed(w, r, map[string]string{"lineNo": "must be a positive integer"})
+			return
+		}
+		version, ok := ifMatch(w, r)
+		if !ok {
+			return
+		}
+		var req cancelOrderRequest
+		if r.ContentLength != 0 {
+			if err := httpx.Decode(r, &req); err != nil {
+				httpx.Fail(w, r, err)
+				return
+			}
+		}
+		if len(req.Reason) > maxChangeReason {
+			validationFailed(w, r, map[string]string{"reason": "must be at most 500 characters"})
+			return
+		}
+		p, _ := tenant.FromContext(r.Context())
+		order, err := a.store.CancelLineRemainder(r.Context(), id, lineNo, version, req.Reason, p.UserID, a.now())
+		if err != nil {
+			a.fail(w, r, "cancel line remainder", err)
 			return
 		}
 		a.canceled.Add(1)

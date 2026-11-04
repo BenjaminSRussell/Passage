@@ -8,8 +8,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -149,6 +151,9 @@ type Account struct {
 // Ledger is one accounting ledger of a legal entity.
 // ReversalReasonRequired makes a reason code mandatory on reversal (FR-11.15);
 // NegativePostingEnabled permits reason codes that allow storno postings (BR-11.16).
+// AllowReinstate lets a reversing entry itself be reversed, which re-instates the
+// original (FR-11.8). It is a pointer so the Go zero value is safe: CreateLedger
+// stores true when it is nil, and a ledger read from the database always has it set.
 type Ledger struct {
 	ID                     string    `json:"id"`
 	LegalEntityID          string    `json:"legalEntityId"`
@@ -161,6 +166,7 @@ type Ledger struct {
 	FuturePostingDays      int       `json:"futurePostingDays"`
 	ReversalReasonRequired bool      `json:"reversalReasonRequired"`
 	NegativePostingEnabled bool      `json:"negativePostingEnabled"`
+	AllowReinstate         *bool     `json:"allowReinstate,omitempty"`
 	CalendarCode           *string   `json:"calendarCode,omitempty"`
 	AccountingPrinciple    *string   `json:"accountingPrinciple,omitempty"`
 	ReportingCurrency      *string   `json:"reportingCurrency,omitempty"`
@@ -181,19 +187,25 @@ func (l Ledger) Rules() domain.Rules {
 }
 
 // ReversalPolicy returns the reversal parameters this ledger imposes (FR-11.15, BR-11.16).
+// ReinstateAllowed reports whether a reversing entry of this ledger may be
+// reversed (FR-11.8); unset means the default, true.
+func (l Ledger) ReinstateAllowed() bool { return l.AllowReinstate == nil || *l.AllowReinstate }
+
 func (l Ledger) ReversalPolicy() domain.ReversalPolicy {
 	return domain.ReversalPolicy{ReasonRequired: l.ReversalReasonRequired, NegativeEnabled: l.NegativePostingEnabled}
 }
 
-// PostInput is one entry to post or validate.
+// PostInput is one entry to post or validate. DescriptionLanguage, when set, is
+// the language default descriptions are looked up in first (FR-11.17).
 type PostInput struct {
-	LedgerID     string
-	DocumentID   string
-	PostingDate  time.Time
-	DocumentDate *time.Time
-	Description  string
-	Source       ledgerevents.Source
-	Lines        []domain.LineInput
+	DescriptionLanguage string
+	LedgerID            string
+	DocumentID          string
+	PostingDate         time.Time
+	DocumentDate        *time.Time
+	Description         string
+	Source              ledgerevents.Source
+	Lines               []domain.LineInput
 	// LedgerLines are extra lines per ledger id, posted by PostSetEntry to that ledger
 	// only (no account mapping) on top of the common Lines (BR-12.6 ledger_lines).
 	LedgerLines map[string][]domain.LineInput
@@ -208,6 +220,10 @@ type PostInput struct {
 	// CanPostLedgerSpecific is true when the caller holds the duty "Post to a
 	// ledger-specific ledger" (FB50L), needed to post to one non-leading ledger of a set.
 	CanPostLedgerSpecific bool
+	// OptionalDimensions are dimension attributes the poster tags lines with
+	// only where the ledger defines them: on a ledger without one it is dropped
+	// from the lines instead of refused (the vendor group code, #421).
+	OptionalDimensions []string
 }
 
 // rules returns the ledger's posting rules for this input: a manual journal
@@ -321,7 +337,15 @@ type BalanceFilter struct {
 	// GroupBy splits each account row by the value of these dimension attributes
 	// (at most MaxBalanceGroupBy); a combination without the attribute groups under "".
 	GroupBy []string
+	// ExcludeYearEndClosing leaves out the year-end closing entries the close service posted and their reversals.
+	ExcludeYearEndClosing bool
 }
+
+const (
+	// ClosePostingService is the token issuer of the close service, the only poster whose year-end closing entries a balance may leave out.
+	ClosePostingService      = "close"
+	YearEndClosingSourceType = "year_end_closing"
+)
 
 // MaxBalanceGroupBy bounds the dimension attributes one balance inquiry groups by.
 const MaxBalanceGroupBy = 5
@@ -378,6 +402,8 @@ type TrialBalance struct {
 	Filtered bool `json:"filtered,omitempty"`
 	// GroupBy echoes the dimension attributes the rows are split by.
 	GroupBy []string `json:"groupBy,omitempty"`
+	// ExcludesYearEndClosing echoes that exclude_year_end_closing was applied, so a caller can tell a ledger that ignores the option.
+	ExcludesYearEndClosing bool `json:"excludesYearEndClosing,omitempty"`
 }
 
 // RebuildResult reports a balance rebuild (BR-11.7, simplified: no shadow table).
@@ -467,15 +493,74 @@ func replayIdempotent(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, k
 	return true, nil
 }
 
+// replayFromJournal answers a resend whose idempotency_keys record has expired
+// (LEDGER_IDEMPOTENCY_TTL_DAYS, default 400) from the journal itself: journal_entry keeps idempotency_key for
+// good, unique per tenant x legal entity, and the payload hash it was posted with.
+// The same key and hash returns the original entries as a replay; the same key
+// with another body is 409 LEDGER_IDEMPOTENCY_CONFLICT. Without it the second
+// insert would hit the unique key and surface as a misleading
+// LEDGER_IDEMPOTENCY_IN_PROGRESS. keys are the journal keys of the request's
+// entries in output order (one for a post or reversal, one per ledger for a
+// ledger set).
+func replayFromJournal(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, key string, keys []string, hash []byte, out *EntryResult) (bool, error) {
+	var entries []Entry
+	traceID := ""
+	for _, k := range keys {
+		var id string
+		var stored []byte
+		err := tx.QueryRow(ctx, `select id::text, payload_hash from journal_entry where tenant_id = $1 and legal_entity_id = $2 and idempotency_key = $3`,
+			tenantID, legalEntityID, k).Scan(&id, &stored)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if !bytes.Equal(stored, hash) {
+			return false, httpx.NewProblem(http.StatusConflict, "LEDGER_IDEMPOTENCY_CONFLICT", "Idempotency-Key was already used with a different request body")
+		}
+		e, err := loadEntryTx(ctx, tx, tenantID, id)
+		if err != nil {
+			return false, err
+		}
+		if traceID == "" {
+			traceID = e.TraceID
+		}
+		entries = append(entries, e)
+	}
+	if len(entries) == 0 {
+		return false, nil
+	}
+	*out = EntryResult{Entries: entries, Idempotency: Idempotency{Key: key, Replayed: true}, TraceID: traceID}
+	return true, nil
+}
+
 // storeIdempotent records a successful response under the key (2xx only).
 func storeIdempotent(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, key string, hash []byte, result EntryResult) error {
 	body, err := json.Marshal(result)
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `insert into idempotency_keys (tenant_id, legal_entity_id, key, payload_hash, response_status, response_body)
-		values ($1, $2, $3, $4, 201, $5)`, tenantID, legalEntityID, key, hash, string(body))
+	_, err = tx.Exec(ctx, `insert into idempotency_keys (tenant_id, legal_entity_id, key, payload_hash, response_status, response_body, expires_at)
+		values ($1, $2, $3, $4, 201, $5, now() + make_interval(days => $6))`, tenantID, legalEntityID, key, hash, string(body), int32(idempotencyTTLDays.Load()))
 	return err
+}
+
+const (
+	MinIdempotencyTTLDays = 400
+	MaxIdempotencyTTLDays = 3650
+)
+
+var idempotencyTTLDays atomic.Int64
+
+func init() { idempotencyTTLDays.Store(MinIdempotencyTTLDays) }
+
+func SetIdempotencyTTLDays(days int) error {
+	if days < MinIdempotencyTTLDays || days > MaxIdempotencyTTLDays {
+		return fmt.Errorf("LEDGER_IDEMPOTENCY_TTL_DAYS must be from %d to %d, got %d", MinIdempotencyTTLDays, MaxIdempotencyTTLDays, days)
+	}
+	idempotencyTTLDays.Store(int64(days))
+	return nil
 }
 
 func loadLedger(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (Ledger, error) {
@@ -533,7 +618,7 @@ func accountNumbers(lines []domain.LineInput) []string {
 	return out
 }
 
-const ledgerFields = `id, legal_entity_id, code, name, chart_code, currency, dimension_attributes, first_open_date::text, future_posting_days, next_sequence, created_at, reversal_reason_required, negative_posting_enabled, calendar_code, accounting_principle, reporting_currency, settings_version`
+const ledgerFields = `id, legal_entity_id, code, name, chart_code, currency, dimension_attributes, first_open_date::text, future_posting_days, next_sequence, created_at, reversal_reason_required, negative_posting_enabled, calendar_code, accounting_principle, reporting_currency, settings_version, allow_reinstate`
 
 const ledgerColumns = `select ` + ledgerFields
 
@@ -541,7 +626,7 @@ func scanLedger(row pgx.Row) (Ledger, error) {
 	var l Ledger
 	err := row.Scan(&l.ID, &l.LegalEntityID, &l.Code, &l.Name, &l.ChartCode, &l.Currency, &l.DimensionAttributes,
 		&l.FirstOpenDate, &l.FuturePostingDays, &l.NextSequence, &l.CreatedAt, &l.ReversalReasonRequired, &l.NegativePostingEnabled,
-		&l.CalendarCode, &l.AccountingPrinciple, &l.ReportingCurrency, &l.Version)
+		&l.CalendarCode, &l.AccountingPrinciple, &l.ReportingCurrency, &l.Version, &l.AllowReinstate)
 	if l.DimensionAttributes == nil {
 		l.DimensionAttributes = []string{}
 	}

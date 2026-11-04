@@ -22,6 +22,7 @@ import { NewOperationPage } from "./NewOperationPage";
 import { NewOrderPegPage } from "./NewOrderPegPage";
 import { NewResourcePage } from "./NewResourcePage";
 import { NewRunPage } from "./NewRunPage";
+import { OperationDetailPage } from "./OperationDetailPage";
 import { OperationsPage } from "./OperationsPage";
 import { OrderImportDetailPage } from "./OrderImportDetailPage";
 import { OrderImportsPage } from "./OrderImportsPage";
@@ -39,7 +40,7 @@ const scheduling: PassageModule = {
   id: "scheduling",
   title: "Scheduling",
   description:
-    "Finite capacity scheduling: the Gantt workspace, schedule runs, capacity load by week or day with its job drill-down, late orders, production orders received from wave 21, run utilization and lateness measures, resources, operations, order pegs, campaigns and campaign proposals, setup matrices, cleanout rules, resource networks, capacity blocks and capacity overrides (downtimes and extra shifts).",
+    "Finite capacity scheduling: the Gantt workspace, schedule runs, capacity load by week or day with its job drill-down, late orders, production orders received from wave 21, run utilization and lateness measures, resources, operations (change, delete, take an order off the schedule), order pegs, campaigns and campaign proposals, setup matrices, cleanout rules, resource networks, capacity blocks and capacity overrides (downtimes and extra shifts).",
   routes: [
     { path: "/scheduling", element: createElement(WorkspacePage), handle: { title: "Scheduling workspace" } },
     { path: "/scheduling/load", element: createElement(CapacityLoadPage), handle: { title: "Capacity load" } },
@@ -54,6 +55,7 @@ const scheduling: PassageModule = {
     { path: "/scheduling/resources/:id/edit", element: createElement(EditResourcePage), handle: { title: "Edit resource" } },
     { path: "/scheduling/operations", element: createElement(OperationsPage), handle: { title: "Operations" } },
     { path: "/scheduling/operations/new", element: createElement(NewOperationPage), handle: { title: "New operation" } },
+    { path: "/scheduling/operations/:id", element: createElement(OperationDetailPage), handle: { title: "Operation" } },
     { path: "/scheduling/order-imports", element: createElement(OrderImportsPage), handle: { title: "Production orders received" } },
     { path: "/scheduling/order-imports/:orderId", element: createElement(OrderImportDetailPage), handle: { title: "Production order" } },
     { path: "/scheduling/order-pegs", element: createElement(OrderPegsPage), handle: { title: "Order pegs" } },

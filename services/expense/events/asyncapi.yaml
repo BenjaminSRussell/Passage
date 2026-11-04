@@ -12,8 +12,10 @@ info:
     with the same Idempotency-Key replays the refusal without publishing again. Slice 5
     publishes dev.passage.expense.cashadvance.paid.v1 when an APPROVED advance is recorded
     as paid by its AP prepayment, in the transaction that moves it to PAID (the PRD's
-    cash-advance.paid.v1; the kernel naming rule allows no hyphen in the entity). Not yet
-    published (later slices): dev.passage.expense.report.approved.v1.
+    cash-advance.paid.v1; the kernel naming rule allows no hyphen in the entity). PSG-43 AC3
+    publishes dev.passage.expense.report.approved.v1 when a report with a reimbursable
+    amount is approved; payables turns it into the employee's vendor open item. The payload
+    type is platform/go/reimbursement.ReportApproved.
 channels:
   passage.expense.policy:
     address: passage.expense.policy
@@ -25,6 +27,11 @@ channels:
     messages:
       paid:
         $ref: '#/components/messages/cashAdvancePaid'
+  passage.expense.report:
+    address: passage.expense.report
+    messages:
+      approved:
+        $ref: '#/components/messages/reportApproved'
 operations:
   publishPolicyViolated:
     action: send
@@ -40,6 +47,13 @@ operations:
     summary: An approved cash advance was paid as an AP prepayment to the employee vendor (FR-43.15).
     messages:
       - $ref: '#/channels/passage.expense.cashadvance/messages/paid'
+  publishReportApproved:
+    action: send
+    channel:
+      $ref: '#/channels/passage.expense.report'
+    summary: An approver approved a report; its reimbursable amount is payable to the worker through AP (FR-43.14).
+    messages:
+      - $ref: '#/channels/passage.expense.report/messages/approved'
 components:
   messages:
     policyViolated:
@@ -69,3 +83,18 @@ components:
           amount: { type: string, description: Paid amount in the advance currency (decimal string), example: '1000.00' }
           currency: { type: string, pattern: '^[A-Z]{3}$' }
           prepaymentId: { type: string, format: uuid, description: The wave-18 AP prepayment that paid the advance. }
+    reportApproved:
+      name: dev.passage.expense.report.approved.v1
+      title: Expense report approved
+      contentType: application/json
+      payload:
+        type: object
+        required: [reportId, legalEntityId, workerId, currency, amount, approvedOn]
+        additionalProperties: false
+        properties:
+          reportId: { type: string, format: uuid, description: Becomes the AP open item's source document id, so a redelivery creates no second item. }
+          legalEntityId: { type: string, format: uuid }
+          workerId: { type: string, format: uuid, description: The employee payee; the AP vendor id. }
+          currency: { type: string, pattern: '^[A-Z]{3}$' }
+          amount: { type: string, description: The stored reimbursable amount of the report (decimal string), example: '420.50' }
+          approvedOn: { type: string, format: date }

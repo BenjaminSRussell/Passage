@@ -34,7 +34,7 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	flag_duties := {"ARWriteOffApprove", "EDI_PII_VIEW", "Maintain tax codes", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "production.order.zero-output", "scheduling.order.import", "shopfloor.check.override", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
+	flag_duties := {"ARWriteOffApprove", "EDI_PII_VIEW", "Maintain tax codes", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "production.order.zero-output", "scheduling.order.import", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
 	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0
@@ -673,6 +673,7 @@ awaiting_service_caller := {
 	"sales.channel.intake",
 	"inventory.transaction.apply",
 	"pricing.contract.accrue",
+	"hub.client.consume",
 }
 
 test_internal_only_duties_are_service_only if {
@@ -832,6 +833,18 @@ test_workflow_ts_eco_and_capa_service_duties if {
 	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances")
 	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1:approve")
 	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1:refuse")
+}
+
+test_workflow_ts_transport_service_duty if {
+	data.service_grants["workflow-ts"].transport == ["transport.tender.execute"]
+	data.duties["transport.tender.execute"].service_only
+	allowed("transport.tender.execute", "POST", "/v1/transport/loads/l1:tender")
+	allowed("transport.tender.execute", "GET", "/v1/transport/tenders/t1")
+	allowed("transport.tender.execute", "POST", "/v1/transport/tenders:expire")
+	not allowed("transport.tender.execute", "GET", "/v1/transport/tenders")
+	not allowed("transport.tender.execute", "POST", "/v1/transport/tenders/t1:respond")
+	not allowed("transport.tender.execute", "POST", "/v1/transport/tracking-events")
+	not allowed("transport.tender.execute", "POST", "/v1/transport/freight-bills")
 }
 
 principal_allowed(name, method, resource) if {
@@ -1229,4 +1242,38 @@ test_posting_accounts_are_maintained_by_costing_maintain_and_read_by_costing_vie
 	not allowed("CostingActivate", "PUT", "/v1/product-costing/posting-accounts/le-1")
 	allowed("CostingView", "GET", "/v1/product-costing/posting-accounts/le-1")
 	not allowed("CostingMaintain", "GET", "/v1/product-costing/posting-accounts/le-1")
+}
+
+test_activation_attempts_are_resolved_only_by_the_operator_duty if {
+	allowed("productcost.activation-attempt.resolve", "GET", "/v1/product-costing/activation-attempts")
+	allowed("productcost.activation-attempt.resolve", "POST", "/v1/product-costing/versions/v-1/activation-attempt/resolve")
+	not allowed("productcost.activation-attempt.resolve", "POST", "/v1/product-costing/versions/v-1/activate")
+	not allowed("productcost.activation-attempt.resolve", "PUT", "/v1/product-costing/posting-accounts/le-1")
+	not allowed("CostingActivate", "GET", "/v1/product-costing/activation-attempts")
+	not allowed("CostingActivate", "POST", "/v1/product-costing/versions/v-1/activation-attempt/resolve")
+	not allowed("CostingMaintain", "POST", "/v1/product-costing/versions/v-1/activation-attempt/resolve")
+	not allowed("CostingView", "GET", "/v1/product-costing/activation-attempts")
+}
+
+test_shopfloor_andon_routes if {
+	allowed("shopfloor.oee.rollup", "POST", "/v1/shopfloor/andon:sweep")
+	allowed("shopfloor.check.override", "POST", "/v1/shopfloor/andon/a1:clear")
+	not allowed("shopfloor.view", "POST", "/v1/shopfloor/andon/a1:clear")
+	not allowed("shopfloor.check.override", "POST", "/v1/shopfloor/andon:sweep")
+}
+
+test_hub_client_routes_split_write_consume_and_read if {
+	allowed("hub.client.write", "POST", "/v1/hub/clients")
+	allowed("hub.client.write", "PATCH", "/v1/hub/clients/c1")
+	allowed("hub.client.write", "POST", "/v1/hub/clients/c1:revoke")
+	not allowed("hub.client.write", "POST", "/v1/hub/clients:consume")
+	not allowed("hub.client.write", "GET", "/v1/hub/clients")
+	allowed("hub.client.consume", "POST", "/v1/hub/clients:consume")
+	not allowed("hub.client.consume", "POST", "/v1/hub/clients")
+	data.duties["hub.client.consume"].service_only
+	allowed("hub.delivery.read", "GET", "/v1/hub/clients")
+	allowed("hub.delivery.read", "GET", "/v1/hub/clients/c1")
+	allowed("hub.delivery.read", "GET", "/v1/hub/clients/c1/usage")
+	not allowed("hub.delivery.read", "POST", "/v1/hub/clients:consume")
+	not allowed("hub.delivery.read", "PATCH", "/v1/hub/clients/c1")
 }

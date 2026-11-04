@@ -94,6 +94,9 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyFirmOrders)).Post("/v1/planning/planned-orders:firm", a.firmPlannedOrders)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/planned-orders/{id}/pegging", a.pegging)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/messages", a.listMessages)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/messages/{id}", a.getMessage)
+	r.With(authz.RequireDuty(dutyMaintainOrders)).Post("/v1/planning/messages/{id}:apply", a.applyMessage)
+	r.With(authz.RequireDuty(dutyMaintainOrders)).Post("/v1/planning/messages/{id}:dismiss", a.dismissMessage)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/net-requirements", a.listNetRequirements)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/forecasts/{modelCode}/lines", a.getForecastLines)
 	r.With(authz.RequireDuty(dutyMaintainForecast)).Put("/v1/planning/forecasts/{modelCode}/lines", a.putForecastLines)
@@ -982,7 +985,14 @@ func (a *API) listMessages(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, map[string]string{"sort": "must be priority"})
 		return
 	}
-	msgs, err := a.store.ListMessages(r.Context(), code, action, sort, limit)
+	status := q.Get("status")
+	switch status {
+	case "", domain.MessageOpen, domain.MessageApplied, domain.MessageDismissed, store.StatusAll:
+	default:
+		validationFailed(w, r, map[string]string{"status": "must be open, applied, dismissed or all"})
+		return
+	}
+	msgs, err := a.store.ListMessages(r.Context(), code, action, status, sort, limit)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return

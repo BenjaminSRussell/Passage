@@ -91,6 +91,46 @@ func vendorInvoice(ledgerID, key, amount string) PostInput {
 	}
 }
 
+func TestPostgres_IdempotencyKeyExpiryFollowsTheConfiguredTTL(t *testing.T) {
+	t.Cleanup(func() { _ = SetIdempotencyTTLDays(MinIdempotencyTTLDays) })
+	e, _ := setup(t)
+	expiryDays := func(key string) int {
+		var days int
+		err := e.admin.QueryRow(context.Background(), `select round(extract(epoch from expires_at - created_at) / 86400)::int from idempotency_keys where key = $1`, key).Scan(&days)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return days
+	}
+	if _, err := e.store.PostEntry(e.ctx, vendorInvoice(e.ledger.ID, "TTL-DEFAULT", "10.00")); err != nil {
+		t.Fatal(err)
+	}
+	if got := expiryDays("TTL-DEFAULT"); got != 400 {
+		t.Fatalf("default retention %d days, want 400", got)
+	}
+	if err := SetIdempotencyTTLDays(500); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.store.PostEntry(e.ctx, vendorInvoice(e.ledger.ID, "TTL-500", "10.00")); err != nil {
+		t.Fatal(err)
+	}
+	if got := expiryDays("TTL-500"); got != 500 {
+		t.Fatalf("configured retention %d days, want 500", got)
+	}
+}
+
+func TestSetIdempotencyTTLDays_RejectsLessThanFourHundred(t *testing.T) {
+	t.Cleanup(func() { _ = SetIdempotencyTTLDays(MinIdempotencyTTLDays) })
+	for _, days := range []int{399, 0, -1, 3651, 1 << 40} {
+		if err := SetIdempotencyTTLDays(days); err == nil {
+			t.Fatalf("%d days accepted", days)
+		}
+	}
+	if err := SetIdempotencyTTLDays(400); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPostgres_PostIsIdempotentAndBalances(t *testing.T) {
 	e, _ := setup(t)
 	in := vendorInvoice(e.ledger.ID, "INV-1", "1250.00")
@@ -581,6 +621,103 @@ func TestPostgres_StatisticalQuantityRoundTrips(t *testing.T) {
 	}
 	if n != 4 {
 		t.Fatalf("inquiry shows %d statistical lines, want 4", n)
+	}
+}
+
+// Issue 435: after the idempotency_keys record is gone (400 day retention), a verbatim
+// resend must return the original entry, not book a second one, and a changed body on
+// the same key is a conflict.
+func TestPostgres_ResendAfterIdempotencyKeyExpiryReturnsOriginal(t *testing.T) {
+	e, _ := setup(t)
+	in := vendorInvoice(e.ledger.ID, "INV-EXP", "75.00")
+	first, err := e.store.PostEntry(e.ctx, in)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	if _, err := e.admin.Exec(context.Background(), `update idempotency_keys set expires_at = now() - interval '1 day'`); err != nil {
+		t.Fatalf("expire: %v", err)
+	}
+	again, err := e.store.PostEntry(e.ctx, in)
+	if err != nil {
+		t.Fatalf("resend after expiry: %v", err)
+	}
+	if !again.Idempotency.Replayed || len(again.Entries) != 1 || again.Entries[0].ID != first.Entries[0].ID {
+		t.Fatalf("resend must return the original entry: %+v", again)
+	}
+	changed := vendorInvoice(e.ledger.ID, "INV-EXP", "75.01")
+	changed.Hash, _ = domain.HashPayload("different")
+	_, err = e.store.PostEntry(e.ctx, changed)
+	var p *httpx.Problem
+	if !errors.As(err, &p) || p.Code != "LEDGER_IDEMPOTENCY_CONFLICT" {
+		t.Fatalf("want LEDGER_IDEMPOTENCY_CONFLICT, got %v", err)
+	}
+	var n int
+	if err := e.admin.QueryRow(context.Background(), `select count(*) from journal_entry`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("journal entries = %d, %v; want 1", n, err)
+	}
+}
+
+// Issue 435: a reversal resent after its idempotency record expired returns the original
+// reversal entry instead of failing as in progress or booking a second one.
+func TestPostgres_ReversalResendAfterIdempotencyKeyExpiryReturnsOriginal(t *testing.T) {
+	e, _ := setup(t)
+	orig, err := e.store.PostEntry(e.ctx, vendorInvoice(e.ledger.ID, "INV-REV-EXP", "40.00"))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	hash, _ := domain.HashPayload("reverse INV-REV-EXP")
+	rev := ReverseInput{EntryID: orig.Entries[0].ID, Key: "REV-EXP", Hash: hash, Actor: "test-user", TraceID: testTrace, Today: testToday}
+	first, err := e.store.ReverseEntry(e.ctx, rev)
+	if err != nil {
+		t.Fatalf("reverse: %v", err)
+	}
+	if _, err := e.admin.Exec(context.Background(), `update idempotency_keys set expires_at = now() - interval '1 day'`); err != nil {
+		t.Fatalf("expire: %v", err)
+	}
+	again, err := e.store.ReverseEntry(e.ctx, rev)
+	if err != nil || !again.Idempotency.Replayed || len(again.Entries) != 1 || again.Entries[0].ID != first.Entries[0].ID {
+		t.Fatalf("resend must return the original reversal: %+v %v", again, err)
+	}
+	changed := rev
+	changed.Hash, _ = domain.HashPayload("reverse INV-REV-EXP differently")
+	var p *httpx.Problem
+	if _, err := e.store.ReverseEntry(e.ctx, changed); !errors.As(err, &p) || p.Code != "LEDGER_IDEMPOTENCY_CONFLICT" {
+		t.Fatalf("want LEDGER_IDEMPOTENCY_CONFLICT, got %v", err)
+	}
+	var n int
+	if err := e.admin.QueryRow(context.Background(), `select count(*) from journal_entry`).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("journal entries = %d, %v; want 2", n, err)
+	}
+}
+
+// Issue 435: a ledger-set post resent after its idempotency record expired returns the
+// original entry of every ledger of the set; a changed body is a conflict.
+func TestPostgres_SetResendAfterIdempotencyKeyExpiryReturnsOriginal(t *testing.T) {
+	e := setupLedgerSet(t)
+	in := vendorInvoice("", "SET-EXP", "60.00")
+	first, err := e.store.PostSetEntry(e.ctx, e.set.ID, in)
+	if err != nil || len(first.Entries) != 3 {
+		t.Fatalf("post: %+v %v", first, err)
+	}
+	if _, err := e.admin.Exec(context.Background(), `update idempotency_keys set expires_at = now() - interval '1 day'`); err != nil {
+		t.Fatalf("expire: %v", err)
+	}
+	again, err := e.store.PostSetEntry(e.ctx, e.set.ID, in)
+	if err != nil || !again.Idempotency.Replayed || len(again.Entries) != 3 {
+		t.Fatalf("resend must replay the set: %+v %v", again, err)
+	}
+	for i := range first.Entries {
+		if again.Entries[i].ID != first.Entries[i].ID {
+			t.Fatalf("entry %d: %s, want %s", i, again.Entries[i].ID, first.Entries[i].ID)
+		}
+	}
+	changed := vendorInvoice("", "SET-EXP", "60.01")
+	var p *httpx.Problem
+	if _, err := e.store.PostSetEntry(e.ctx, e.set.ID, changed); !errors.As(err, &p) || p.Code != "LEDGER_IDEMPOTENCY_CONFLICT" {
+		t.Fatalf("want LEDGER_IDEMPOTENCY_CONFLICT, got %v", err)
+	}
+	if n := e.entryCount(t); n != 3 {
+		t.Fatalf("journal entries = %d, want 3", n)
 	}
 }
 

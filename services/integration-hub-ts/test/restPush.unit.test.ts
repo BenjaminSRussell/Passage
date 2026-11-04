@@ -3,12 +3,17 @@ import { test } from "vitest";
 
 import { restStep } from "../src/dispatch.ts";
 import type { HubEvent } from "../src/dispatcher.ts";
-import type { MigrationClient, RenderInput } from "../src/migrationClient.ts";
+import { elementRefs, withLineKeys, type MigrationClient, type RenderInput, type XrefInput } from "../src/migrationClient.ts";
 import { actorFor, createServiceTokenSigner } from "../src/serviceToken.ts";
 import {
   classifyStatus,
   excerptOf,
   expandUrl,
+  bodyArrayOf,
+  matchLineKeys,
+  parseElementPath,
+  parseRestPatch,
+  readElements,
   parseRestInput,
   parseRetryAfter,
   readPath,
@@ -125,7 +130,7 @@ test("the migration service token is signed by integration-hub and carries only 
 const event: HubEvent = { eventId: "evt-1", type: "dev.passage.sales.order.confirmed.v1", aggregateId: "o1", sequence: 1, occurredAt: 1_800_000_000, data: { order_id: "o1" }, legalEntityId: "33333333-4444-4555-8666-777777777777" };
 const migration: MigrationClient = {
   async render(_i: RenderInput) {
-    return { ok: true, rendered: { body: { id: "o1" }, idempotencyKey: "k", refs: [{ entity: "salesOrder", id: "o1" }] } };
+    return { ok: true, rendered: { body: { id: "o1" }, idempotencyKey: "k", refs: [{ entity: "salesOrder", id: "o1" }], lookups: [] } };
   },
   async recordXref() {
     return { ok: true };
@@ -135,7 +140,7 @@ const migration: MigrationClient = {
 function target(auth: RestTarget["config"]["auth"], credentials: RestTarget["credentials"]): RestTarget {
   return {
     tenantId: TENANT, subscriptionId: "s1", urlTemplate: "https://erp.example/api/orders/{id}",
-    config: { outboundMappingId: MAPPING, method: "PUT", responseKeyPath: "", onClientError: "dead_letter", auth },
+    config: { outboundMappingId: MAPPING, method: "PUT", responseKeyPath: "", lineKeyPath: "", onClientError: "dead_letter", auth },
     credentials,
   };
 }
@@ -228,7 +233,7 @@ test("the HTTP migration client calls the S5 contract with a service token and m
   const client = httpMigrationClient({ baseUrl: "http://migration.svc:8080/", signer, fetch: fakeFetch });
   const input = { tenantId: TENANT, legalEntityId: "33333333-4444-4555-8666-777777777777", mappingId: MAPPING, event: { id: "e1" } };
 
-  assert.deepEqual(await client.render(input), { ok: true, rendered: { body: { a: 1 }, idempotencyKey: "k1", refs: [1] } });
+  assert.deepEqual(await client.render(input), { ok: true, rendered: { body: { a: 1 }, idempotencyKey: "k1", refs: [1], lookups: [] } });
   assert.equal(seen[0]?.url, `http://migration.svc:8080/v1/integration/outbound-mappings/${MAPPING}:render`);
   assert.deepEqual(seen[0]?.body, { event: { id: "e1" } });
   const claims = JSON.parse(Buffer.from((seen[0]?.headers["x-passage-service-token"] as string).split(".")[0] as string, "base64url").toString());
@@ -299,7 +304,7 @@ const xrefIn = { tenantId: TENANT, legalEntityId: LE, mappingId: MAPPING, refs: 
 test("render decodes the Go answer: body, idempotencyKey and refs [] or [{entity,id}] pass through", async () => {
   // renderView in outbound.go; TestOutbound_RenderHappyPathAndContract decodes {body, idempotencyKey, refs[{entity,id}]}.
   const ok = await clientFor(200, { body: { CustAccount: "C-1001", Header: { CustomerRef: "SO-9" } }, idempotencyKey: "abc123", refs: [{ entity: "salesOrder", id: "o1" }] }).render(renderIn);
-  assert.deepEqual(ok, { ok: true, rendered: { body: { CustAccount: "C-1001", Header: { CustomerRef: "SO-9" } }, idempotencyKey: "abc123", refs: [{ entity: "salesOrder", id: "o1" }] } });
+  assert.deepEqual(ok, { ok: true, rendered: { body: { CustAccount: "C-1001", Header: { CustomerRef: "SO-9" } }, idempotencyKey: "abc123", refs: [{ entity: "salesOrder", id: "o1" }], lookups: [] } });
   // TestOutbound_RecordWithoutSubject: `"refs":[]`.
   const none = await clientFor(200, { body: { Journal: 1 }, idempotencyKey: "k", refs: [] }).render(renderIn);
   assert.deepEqual(none.ok && none.rendered.refs, []);
@@ -383,4 +388,191 @@ test("an event with the nil legal entity is never rendered: the verifier would r
   assert.equal(out.kind, "dead");
   assert.ok(out.excerpt?.includes("no legalentityid"));
   assert.equal(renders, 0);
+});
+
+// ---- per-element response keys (lineKeyPath) ---------------------------------------------------------------------
+
+const CFG = { outboundMappingId: MAPPING, method: "POST" as const, responseKeyPath: "$.id", lineKeyPath: "lines[*].id", onClientError: "dead_letter" as const, auth: { type: "bearer" as const } };
+
+test("element paths have exactly one [*] and read every element, or nothing when the array is missing", () => {
+  assert.deepEqual(parseElementPath("lines[*].id"), { array: "lines", element: ".id" });
+  assert.deepEqual(parseElementPath("$[*]"), { array: "$", element: "" });
+  for (const bad of ["lines.id", "a[*].b[*].c", "lines[*]x", "$..a[*]"]) assert.throws(() => parseElementPath(bad), RestConfigError, bad);
+  const doc = { result: { lines: [{ no: 1 }, { no: 2 }, {}] }, root: [10, 20] };
+  assert.deepEqual(readElements(doc, "$.result.lines[*].no"), [1, 2, undefined]);
+  assert.deepEqual(readElements(doc.root, "$[*]"), [10, 20]);
+  assert.equal(readElements(doc, "$.missing[*].no"), undefined);
+});
+
+test("line keys match by position, numbers become text, a count that differs from the refs fails", () => {
+  const res = { id: "H", lines: [{ id: 501 }, { id: "L-2" }] };
+  assert.deepEqual(matchLineKeys(CFG, {}, res, null), { ok: true, keys: [{ index: 0, legacyKey: "501" }, { index: 1, legacyKey: "L-2" }] });
+  assert.deepEqual(matchLineKeys(CFG, {}, res, 2), { ok: true, keys: [{ index: 0, legacyKey: "501" }, { index: 1, legacyKey: "L-2" }] });
+  assert.equal(matchLineKeys(CFG, {}, res, 3).ok, false);
+  assert.equal(matchLineKeys(CFG, {}, { id: "H" }, null).ok, false);
+  assert.equal(matchLineKeys(CFG, {}, { lines: [{ id: "a" }, {}] }, null).ok, false);
+  assert.equal(matchLineKeys(CFG, {}, { lines: [{ id: "a" }, { id: "" }] }, null).ok, false);
+});
+
+test("line keys match by a correlation field when the ERP answers in another order; duplicates and strangers fail", () => {
+  const cfg = { ...CFG, lineCorrelation: { bodyPath: "Lines[*].LineNum", responsePath: "lines[*].lineNo" } };
+  const pushed = { Lines: [{ LineNum: 10 }, { LineNum: 20 }, { LineNum: 30 }] };
+  const res = { lines: [{ id: "C", lineNo: 30 }, { id: "A", lineNo: "10" }, { id: "B", lineNo: 20 }] };
+  assert.deepEqual(matchLineKeys(cfg, pushed, res, 3), { ok: true, keys: [{ index: 0, legacyKey: "A" }, { index: 1, legacyKey: "B" }, { index: 2, legacyKey: "C" }] });
+  assert.equal(matchLineKeys(cfg, pushed, { lines: [{ id: "A", lineNo: 10 }, { id: "B", lineNo: 10 }] }, null).ok, false);
+  assert.equal(matchLineKeys(cfg, pushed, { lines: [{ id: "A", lineNo: 99 }] }, null).ok, false);
+  assert.equal(matchLineKeys(cfg, { Lines: [{ LineNum: 1 }, { LineNum: 1 }] }, { lines: [{ id: "A", lineNo: 1 }] }, null).ok, false);
+  assert.equal(matchLineKeys(cfg, pushed, res, 2).ok, false);
+});
+
+test("lineKeyPath and lineCorrelation are validated and patched with the other rest settings", () => {
+  const good = { outboundMappingId: MAPPING, responseKeyPath: "$.id", lineKeyPath: "lines[*].id", auth: { type: "bearer", token: "tok-123456" } };
+  const t = "https://erp.example/api/orders";
+  assert.equal(parseRestInput(good, t).lineKeyPath, "lines[*].id");
+  assert.equal(parseRestInput({ ...good, lineKeyPath: undefined }, t).lineKeyPath, "");
+  assert.throws(() => parseRestInput({ ...good, responseKeyPath: "" }, t), /needs responseKeyPath/);
+  assert.throws(() => parseRestInput({ ...good, lineKeyPath: "lines.id" }, t), RestConfigError);
+  assert.throws(() => parseRestInput({ ...good, lineKeyPath: undefined, lineCorrelation: { bodyPath: "L[*].n", responsePath: "lines[*].n" } }, t), /needs lineKeyPath/);
+  assert.throws(() => parseRestInput({ ...good, lineCorrelation: { bodyPath: "L[*].n", responsePath: "other[*].n" } }, t), /same array/);
+  assert.throws(() => parseRestInput({ ...good, lineCorrelation: { bodyPath: "L[*].n", responsePath: "lines[*].n", x: 1 } }, t), RestConfigError);
+  const withC = parseRestInput({ ...good, lineCorrelation: { bodyPath: "L[*].n", responsePath: "lines[*].n" } }, t);
+  assert.deepEqual(withC.lineCorrelation, { bodyPath: "L[*].n", responsePath: "lines[*].n" });
+  const { credentials: _c, ...old } = withC;
+  const patched = parseRestPatch(old, t, { lineCorrelation: null });
+  assert.equal(patched?.config.lineCorrelation, undefined);
+  assert.equal(patched?.config.lineKeyPath, "lines[*].id");
+  assert.equal(parseRestPatch({ ...old, lineKeyPath: undefined, lineCorrelation: undefined } as unknown as typeof old, t, { method: "PUT" })?.config.lineKeyPath, "");
+});
+
+test("a push with line keys records them with the header in one xref call when the render names element refs, and keeps the render's lookups", async () => {
+  const calls: { refs: unknown; legacyKey: string; lines?: unknown }[] = [];
+  const lookups = [{ name: "uom", table: "uom_conversion", version: 3 }];
+  const refs = [{ entity: "salesOrder", id: "o1" }, { entity: "line", id: "l0", collection: "Lines", index: 0 }, { entity: "line", id: "l1", collection: "Lines", index: 1 }];
+  const m: MigrationClient = {
+    async render() {
+      return { ok: true, rendered: { body: { id: "o1", Lines: [{ n: 1 }, { n: 2 }] }, idempotencyKey: "k", refs, lookups } };
+    },
+    async recordXref(i) {
+      calls.push(i);
+      return { ok: true };
+    },
+  };
+  const exchange: Exchange = async () => ({ status: 201, headers: {}, body: JSON.stringify({ id: "SO-1", lines: [{ id: "L-1" }, { id: "L-2" }] }) });
+  const pusher = new RestPusher({ migration: m, exchange });
+  const t = { ...target({ type: "bearer" }, { token: "tok" }), config: { ...target({ type: "bearer" }, { token: "tok" }).config, responseKeyPath: "$.id", lineKeyPath: "lines[*].id" } };
+  const out = await pusher.attempt(t, pending);
+  assert.equal(out.kind, "delivered", out.excerpt);
+  assert.deepEqual(out.lineKeys, [{ index: 0, legacyKey: "L-1" }, { index: 1, legacyKey: "L-2" }]);
+  assert.deepEqual(out.lookups, lookups);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.legacyKey, "SO-1");
+  assert.deepEqual(calls[0]?.lines, out.lineKeys);
+
+  // A mismatch dead-letters without recording anything.
+  calls.length = 0;
+  const bad = await new RestPusher({ migration: m, exchange: async () => ({ status: 201, headers: {}, body: JSON.stringify({ id: "SO-1", lines: [{ id: "L-1" }] }) }) }).attempt(t, pending);
+  assert.equal(bad.kind, "dead");
+  assert.match(bad.excerpt ?? "", /line keys at lines\[\*\]\.id cannot be matched: 1 line keys for 2 pushed elements/);
+  assert.equal(calls.length, 0);
+});
+
+test("without element refs in the render (a migration service before slice 23) the keys are kept on the delivery and the xref call is the single-subject one", async () => {
+  const calls: { lines?: unknown }[] = [];
+  const m: MigrationClient = {
+    ...migration,
+    async recordXref(i) {
+      calls.push(i);
+      return { ok: true };
+    },
+  };
+  const exchange: Exchange = async () => ({ status: 201, headers: {}, body: JSON.stringify({ id: "SO-1", lines: [{ id: "L-1" }, { id: "L-2" }, { id: "L-3" }] }) });
+  const t = { ...target({ type: "bearer" }, { token: "tok" }), config: { ...target({ type: "bearer" }, { token: "tok" }).config, responseKeyPath: "$.id", lineKeyPath: "lines[*].id" } };
+  const out = await new RestPusher({ migration: m, exchange }).attempt(t, pending);
+  assert.equal(out.kind, "delivered");
+  assert.equal(out.lineKeys?.length, 3);
+  assert.equal(calls[0]?.lines, undefined);
+});
+
+test("the xref call carries element keys inside refs; the lookups of the render decode from the Go answer", async () => {
+  let sent: any;
+  const fakeFetch = (async (_u: string, init: RequestInit) => {
+    const body = JSON.parse(String(init.body));
+    if (String(_u).endsWith(":render")) {
+      return new Response(JSON.stringify({ body: { a: 1 }, idempotencyKey: "k", refs: [], lookups: [{ name: "uom", table: "u", version: 2 }, { name: 5 }, "x"] }), { status: 200 });
+    }
+    sent = body;
+    return new Response(null, { status: 204 });
+  }) as unknown as typeof fetch;
+  const c = httpMigrationClient({ baseUrl: "http://migration:8080", signer: createServiceTokenSigner({ seedBase64: Buffer.alloc(32, 1).toString("base64") }), fetch: fakeFetch });
+  const r = await c.render({ tenantId: TENANT, legalEntityId: "33333333-4444-4555-8666-777777777777", mappingId: MAPPING, event: { id: "e" } });
+  assert.ok(r.ok);
+  assert.deepEqual(r.ok && r.rendered.lookups, [{ name: "uom", table: "u", version: 2 }]);
+  const refs = [{ entity: "so", id: "a" }, { entity: "line", id: "b", collection: "Lines", index: 1 }, { entity: "line", id: "c", collection: "Lines", index: 0 }];
+  await c.recordXref({ tenantId: TENANT, legalEntityId: "33333333-4444-4555-8666-777777777777", mappingId: MAPPING, refs, legacyKey: "H", eventId: "e", lines: [{ index: 0, legacyKey: "L0" }, { index: 1, legacyKey: "L1" }], linesCollection: "Lines" });
+  assert.deepEqual(sent, { outboundMappingId: MAPPING, legacyKey: "H", eventId: "e", refs: [refs[0], { ...refs[1], legacyKey: "L1" }, { ...refs[2], legacyKey: "L0" }] });
+});
+
+test("line keys go only to the element refs of their own collection", () => {
+  const refs = [{ entity: "so", id: "a" }, { entity: "line", id: "l0", collection: "Lines", index: 0 }, { entity: "charge", id: "c0", collection: "Charges", index: 0 }];
+  const out = withLineKeys(refs, [{ index: 0, legacyKey: "L0" }], "Lines");
+  assert.equal(out.recorded, 1);
+  assert.deepEqual(out.refs, [refs[0], { ...refs[1], legacyKey: "L0" }, refs[2]]);
+  assert.equal(elementRefs([{ entity: "so", id: "a" }]), null);
+  assert.deepEqual(elementRefs(refs, "Charges"), { ok: true, collection: "Charges", count: 1 });
+  // Several collections and nothing naming one: the keys cannot be placed.
+  assert.match((elementRefs(refs) as { reason: string }).reason, /several collections \(Lines, Charges\)/);
+  assert.equal(elementRefs(refs, "Other")?.ok, false);
+  // One collection that is not the array the correlation read.
+  assert.equal(elementRefs(refs.slice(0, 2), "Charges")?.ok, false);
+  assert.deepEqual(elementRefs(refs.slice(0, 2)), { ok: true, collection: "Lines", count: 1 });
+});
+
+test("bodyArrayOf names the collection a correlation reads, as the migration service names it", () => {
+  const cfg = (bodyPath: string) => ({ ...CFG, lineCorrelation: { bodyPath, responsePath: "lines[*].n" } });
+  assert.equal(bodyArrayOf(CFG), undefined);
+  assert.equal(bodyArrayOf(cfg("Lines[*].LineNum")), "Lines");
+  assert.equal(bodyArrayOf(cfg("$.Header.Lines[*].LineNum")), "Header.Lines");
+});
+
+test("a correlated answer that leaves a pushed line without a key fails, as a short answer by position does", () => {
+  const cfg = { ...CFG, lineCorrelation: { bodyPath: "Lines[*].LineNum", responsePath: "lines[*].lineNo" } };
+  const pushed = { Lines: [{ LineNum: 10 }, { LineNum: 20 }, { LineNum: 30 }] };
+  const partial = { lines: [{ id: "B", lineNo: 20 }, { id: "A", lineNo: 10 }] };
+  assert.deepEqual(matchLineKeys(cfg, pushed, partial, null), { ok: false, reason: "2 line keys for 3 pushed elements at Lines[*].LineNum" });
+  assert.equal(matchLineKeys(cfg, pushed, partial, 3).ok, false);
+});
+
+test("with elements of two collections the keys go to the collection the correlation names; without one the push dead-letters", async () => {
+  const calls: XrefInput[] = [];
+  const refs = [
+    { entity: "salesOrder", id: "o1" },
+    { entity: "line", id: "l0", collection: "Lines", index: 0 },
+    { entity: "line", id: "l1", collection: "Lines", index: 1 },
+    { entity: "charge", id: "c0", collection: "Charges", index: 0 },
+  ];
+  const m: MigrationClient = {
+    async render() {
+      return { ok: true, rendered: { body: { id: "o1", Lines: [{ n: 1 }, { n: 2 }], Charges: [{ code: "FRT" }] }, idempotencyKey: "k", refs, lookups: [] } };
+    },
+    async recordXref(i) {
+      calls.push(i);
+      return { ok: true };
+    },
+  };
+  const exchange: Exchange = async () => ({ status: 201, headers: {}, body: JSON.stringify({ id: "SO-1", lines: [{ id: "L-2", n: 2 }, { id: "L-1", n: 1 }] }) });
+  const base = target({ type: "bearer" }, { token: "tok" });
+  const correlated = { ...base, config: { ...base.config, responseKeyPath: "$.id", lineKeyPath: "lines[*].id", lineCorrelation: { bodyPath: "Lines[*].n", responsePath: "lines[*].n" } } };
+  const out = await new RestPusher({ migration: m, exchange }).attempt(correlated, pending);
+  assert.equal(out.kind, "delivered", out.excerpt);
+  assert.deepEqual(calls[0]?.lines, [{ index: 0, legacyKey: "L-1" }, { index: 1, legacyKey: "L-2" }]);
+  assert.equal(calls[0]?.linesCollection, "Lines");
+
+  calls.length = 0;
+  const byPosition = { ...base, config: { ...base.config, responseKeyPath: "$.id", lineKeyPath: "lines[*].id" } };
+  const dead = await new RestPusher({ migration: m, exchange }).attempt(byPosition, pending);
+  assert.equal(dead.kind, "dead");
+  assert.match(dead.excerpt ?? "", /several collections/);
+  // Keys an earlier attempt read are cleared, and nothing is recorded.
+  assert.deepEqual(dead.lineKeys, []);
+  assert.equal(calls.length, 0);
 });

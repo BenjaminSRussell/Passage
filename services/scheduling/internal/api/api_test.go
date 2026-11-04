@@ -74,6 +74,8 @@ type fakeStore struct {
 	// slice 15
 	lastBlockPatch store.BlockPatch
 	lastNetPatch   store.NetworkPatch
+	// slice 22
+	lastRun store.RunRequest
 }
 
 func (f *fakeStore) CreateResource(_ context.Context, in store.Resource, _ store.Idem) (store.Resource, bool, error) {
@@ -110,7 +112,8 @@ func (f *fakeStore) ListOperations(_ context.Context, filter store.OperationFilt
 	return []store.Operation{}, f.err
 }
 
-func (f *fakeStore) RunSchedule(_ context.Context, req store.RunRequest, _ store.Idem) (store.Run, bool, error) {
+func (f *fakeStore) RunSchedule(_ context.Context, req store.RunRequest, idem store.Idem) (store.Run, bool, error) {
+	f.lastRun, f.lastIdem = req, idem
 	if f.err != nil {
 		return store.Run{}, false, f.err
 	}
@@ -118,7 +121,7 @@ func (f *fakeStore) RunSchedule(_ context.Context, req store.RunRequest, _ store
 	if req.Backward {
 		dir = "backward"
 	}
-	return store.Run{ID: ids.New(), Scope: req.Scope, Mode: req.Mode, Direction: dir, Finite: req.Finite, Status: "completed", Messages: []string{}}, true, nil
+	return store.Run{ID: ids.New(), Scope: req.Scope, Mode: req.Mode, Direction: dir, Finite: req.Finite, Status: "completed", Messages: []string{}}, !f.replay, nil
 }
 
 func (f *fakeStore) GetRun(_ context.Context, id string) (store.Run, error) {

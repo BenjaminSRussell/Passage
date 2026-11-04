@@ -98,6 +98,9 @@ type RecurringLine struct {
 	Amount      string
 	Currency    string
 	Text        string
+	// Quantity and Unit are a fixed statistical quantity (BR-11.2), copied as is; empty when none.
+	Quantity string
+	Unit     string
 }
 
 // ResolvedLine is a generated batch line amount.

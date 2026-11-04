@@ -122,7 +122,17 @@ func editLocked(ctx context.Context, tx pgx.Tx, cur PurchaseOrder, ifMatch int, 
 			return PurchaseOrder{}, editResult{}, err
 		}
 		out, err := loadPurchaseOrder(ctx, tx, id)
-		return out, res, err
+		if err != nil {
+			return PurchaseOrder{}, editResult{}, err
+		}
+		// A change of a confirmed PO cannot take a line below its planned services: the
+		// specification is frozen outside DRAFT and REJECTED, so it could not be fixed later.
+		if cur.VersionNo > 0 {
+			if err := checkServiceSpecsWithinLines(ctx, tx, out); err != nil {
+				return PurchaseOrder{}, editResult{}, err
+			}
+		}
+		return out, res, nil
 	}
 
 	if cur.VersionNo == 0 {
@@ -228,6 +238,13 @@ func (s *Postgres) ActOnPurchaseOrder(ctx context.Context, id string, ifMatch in
 			if head.ApprovalStatus, err = domain.NextApproval(cur.ApprovalStatus, action); err != nil {
 				return err
 			}
+			// A planned outline worth more than its line is refused at submit, while the
+			// specification can still be fixed (it is frozen once the PO leaves DRAFT).
+			if action == domain.POActionSubmit {
+				if err := checkServiceSpecsWithinLines(ctx, tx, cur); err != nil {
+					return err
+				}
+			}
 		}
 		if err := updateHeader(ctx, tx, head); err != nil {
 			return err
@@ -319,6 +336,9 @@ func checkVisible(ctx context.Context, tx pgx.Tx, poID string) error {
 // version written by an edit that needed re-approval.
 func confirmPending(ctx context.Context, tx pgx.Tx, cur PurchaseOrder) error {
 	if err := checkSchedulesBalanced(ctx, tx, cur); err != nil {
+		return err
+	}
+	if err := checkServiceSpecsWithinLines(ctx, tx, cur); err != nil {
 		return err
 	}
 	no := cur.VersionNo + 1

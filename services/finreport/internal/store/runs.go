@@ -32,6 +32,26 @@ type RunSpec struct {
 	RequestedBy       string
 	IdempotencyKey    string
 	RequestHash       string
+	// Hierarchy, when set, replaces the definition's rows by the nodes of a
+	// published hierarchy (FR-15.4).
+	Hierarchy *HierarchyRun
+}
+
+// HierarchyRun names the hierarchy a run takes its rows from. Version 0 is the
+// latest published version. AccountFrom and AccountTo narrow a dimension
+// hierarchy to accounts; NormalBalance (debit by default) is the presentation.
+type HierarchyRun struct {
+	Code          string
+	Version       int
+	NormalBalance string
+	AccountFrom   string
+	AccountTo     string
+}
+
+// RunHierarchy is the hierarchy version a stored run used.
+type RunHierarchy struct {
+	Code    string `json:"code"`
+	Version int    `json:"version"`
 }
 
 // Run is a stored statement run (FR-15.6). Replayed is true when the run was
@@ -53,8 +73,12 @@ type Run struct {
 	DurationMS        int              `json:"durationMs"`
 	// Checks are the warnings recorded with the run, such as REPORT-0015 for
 	// PL-FUNC lines without a functional area (FR-15.14). Never nil.
-	Checks   []domain.Check `json:"checks"`
-	Replayed bool           `json:"-"`
+	Checks []domain.Check `json:"checks"`
+	// Hierarchy is set when the run's rows are the nodes of a hierarchy; the
+	// run's own definition (GET /runs/{id}/definition) then differs from the
+	// published one.
+	Hierarchy *RunHierarchy `json:"hierarchy,omitempty"`
+	Replayed  bool          `json:"-"`
 }
 
 // LagRow reports how far the read model has advanced for one ledger (FR-15.1).
@@ -107,6 +131,13 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 		if err != nil {
 			return err
 		}
+		var hier *RunHierarchy
+		var extra []domain.Check
+		if spec.Hierarchy != nil {
+			if def, hier, extra, err = expandRunHierarchyTx(ctx, tx, def, spec, balances); err != nil {
+				return err
+			}
+		}
 		in := domain.Input{Definition: def, LedgerID: spec.LedgerID, CurrencyType: spec.CurrencyType,
 			IncludeAdjustmentPeriods: spec.IncludeAdjustment, Calendar: cal, At: at, Balances: balances}
 		res, err := domain.Evaluate(in)
@@ -123,7 +154,7 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 		if err := domain.CheckCashFlow(in, res); err != nil {
 			return err
 		}
-		checks := domain.RunChecks(def, res)
+		checks := append(domain.RunChecks(def, res), extra...)
 		checksJSON, err := json.Marshal(checks)
 		if err != nil {
 			return err
@@ -136,19 +167,28 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 		if err != nil {
 			return err
 		}
+		var hierCode, hierVersion, runDef any
+		if hier != nil {
+			body, err := json.Marshal(def)
+			if err != nil {
+				return err
+			}
+			hierCode, hierVersion, runDef = hier.Code, hier.Version, body
+		}
 		run = Run{
-			ID: ids.New(), DefinitionCode: def.Code, DefinitionVersion: def.Version, LedgerID: spec.LedgerID,
+			Hierarchy: hier,
+			ID:        ids.New(), DefinitionCode: def.Code, DefinitionVersion: def.Version, LedgerID: spec.LedgerID,
 			CurrencyType: spec.CurrencyType, PeriodYear: spec.PeriodYear, PeriodNo: spec.PeriodNo, Status: "completed",
 			HWMByLedger: hwm, ResultHash: res.Hash, CellCount: len(res.Cells), RequestedBy: spec.RequestedBy, StartedAt: started,
 			Checks: checks,
 		}
 		_, err = tx.Exec(ctx, `insert into statement_run(tenant_id, id, definition_code, definition_version, ledger_id, currency_type,
 			period_year, period_no, include_adjustment, status, hwm, result_hash, cell_count, requested_by, request_hash, idempotency_key,
-			started_at, completed_at, duration_ms, checks, legal_entity_id)
-			values($1,$2,$3,$4,$5,$6,$7,$8,$9,'completed',$10,$11,$12,$13,$14,$15,$16,now(),$17,$18,nullif($19,'')::uuid)`,
+			started_at, completed_at, duration_ms, checks, legal_entity_id, hierarchy_code, hierarchy_version, run_definition)
+			values($1,$2,$3,$4,$5,$6,$7,$8,$9,'completed',$10,$11,$12,$13,$14,$15,$16,now(),$17,$18,nullif($19,'')::uuid,$20,$21,$22)`,
 			tenantID(ctx), run.ID, def.Code, def.Version, spec.LedgerID, spec.CurrencyType, spec.PeriodYear, spec.PeriodNo,
 			spec.IncludeAdjustment, hwmJSON, hash, len(res.Cells), spec.RequestedBy, spec.RequestHash, nullable(spec.IdempotencyKey),
-			started, int(time.Since(started).Milliseconds()), checksJSON, entity)
+			started, int(time.Since(started).Milliseconds()), checksJSON, entity, hierCode, hierVersion, runDef)
 		if err != nil {
 			return err
 		}
@@ -175,15 +215,19 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 		if err := enqueue(ctx, tx, "statement", run.ID, events.StatementGenerated, tenantID(ctx), events.StatementGeneratedData{
 			RunID: run.ID, DefinitionCode: def.Code, DefinitionVersion: def.Version, LedgerID: spec.LedgerID, Period: period,
 			CurrencyType: spec.CurrencyType, HWMByLedger: hwm, ResultHash: res.Hash, Outputs: []events.OutputRef{},
-			Parameters: map[string]string{"period": period},
+			Parameters: runParameters(period, hier),
 		}); err != nil {
 			return err
 		}
+		details := map[string]any{
+			"definition": def.Code, "version": def.Version, "currencyType": spec.CurrencyType,
+			"hwm": hwm[spec.LedgerID], "resultHash": res.Hash, "cells": len(res.Cells),
+		}
+		if hier != nil {
+			details["hierarchy"] = hierarchyRef(hier)
+		}
 		return recordAuditTx(ctx, tx, domain.AuditEntry{Kind: domain.AuditStatementRun, LedgerID: spec.LedgerID, LegalEntityID: entity, Period: period,
-			ActorID: spec.RequestedBy, ObjectRef: "run:" + run.ID, Details: map[string]any{
-				"definition": def.Code, "version": def.Version, "currencyType": spec.CurrencyType,
-				"hwm": hwm[spec.LedgerID], "resultHash": res.Hash, "cells": len(res.Cells),
-			}})
+			ActorID: spec.RequestedBy, ObjectRef: "run:" + run.ID, Details: details})
 	})
 	return run, err
 }
@@ -368,7 +412,7 @@ func loadBalancesTx(ctx context.Context, tx pgx.Tx, ledgerID string, currencies 
 }
 
 const runColumns = `id::text, definition_code, definition_version, ledger_id::text, currency_type, period_year, period_no,
-	status, hwm, result_hash, cell_count, requested_by, started_at, duration_ms, checks`
+	status, hwm, result_hash, cell_count, requested_by, started_at, duration_ms, checks, hierarchy_code, hierarchy_version`
 
 func getRunTx(ctx context.Context, tx pgx.Tx, id string) (Run, error) {
 	run, err := scanRun(tx.QueryRow(ctx, `select `+runColumns+` from statement_run where id=$1::uuid`, id))
@@ -381,10 +425,14 @@ func getRunTx(ctx context.Context, tx pgx.Tx, id string) (Run, error) {
 func scanRun(r rowScanner) (Run, error) {
 	var run Run
 	var hwm, hash, checks []byte
-	var duration *int
+	var duration, hierVersion *int
+	var hierCode *string
 	if err := r.Scan(&run.ID, &run.DefinitionCode, &run.DefinitionVersion, &run.LedgerID, &run.CurrencyType, &run.PeriodYear, &run.PeriodNo,
-		&run.Status, &hwm, &hash, &run.CellCount, &run.RequestedBy, &run.StartedAt, &duration, &checks); err != nil {
+		&run.Status, &hwm, &hash, &run.CellCount, &run.RequestedBy, &run.StartedAt, &duration, &checks, &hierCode, &hierVersion); err != nil {
 		return run, err
+	}
+	if hierCode != nil && hierVersion != nil {
+		run.Hierarchy = &RunHierarchy{Code: *hierCode, Version: *hierVersion}
 	}
 	run.Checks = []domain.Check{}
 	if err := json.Unmarshal(checks, &run.Checks); err != nil {

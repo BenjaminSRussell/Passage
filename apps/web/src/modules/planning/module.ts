@@ -8,6 +8,7 @@ import { ItemCoveragePage, ItemCoveragesPage, NewItemCoveragePage } from "./Item
 import { PlanDiffPage } from "./PlanDiffPage";
 import { NetRequirementsPage } from "./NetRequirementsPage";
 import { SupplySchedulePage } from "./SupplySchedulePage";
+import { MessageDetailPage } from "./MessageDetail";
 import { MessagesPage, PlannedOrderPage, PlannedOrdersPage, PlanningHome, PlanRunsPage } from "./pages";
 import { NewQuotaArrangementPage, QuotaArrangementPage, QuotaArrangementsPage } from "./QuotaPages";
 import { RunPlanPage } from "./RunPlanPage";
@@ -18,12 +19,13 @@ const planning: PassageModule = {
   id: "planning",
   title: "Master planning",
   description:
-    "Run the plan in working days, review, change, approve and firm planned orders, read messages and net requirements, project the supply schedule and inventory value of items from the stored plan, explain any planned order back to its demand, maintain the forecast and its consensus, set up coverage groups with their fences and auto-firming, set up how each item is planned per site, warehouse or subcontractor, maintain DDMRP buffer profiles and see buffer status by zone and priority, split requirements across sources with quota arrangements, set how each planning strategy treats forecast against sales, and simulate what-if scenarios beside the operational plan.",
+    "Run the plan in working days, review, change, approve and firm planned orders, read action messages and apply or dismiss them, read net requirements, project the supply schedule and inventory value of items from the stored plan, explain any planned order back to its demand, maintain the forecast and its consensus, set up coverage groups with their fences and auto-firming, set up how each item is planned per site, warehouse or subcontractor, maintain DDMRP buffer profiles and see buffer status by zone and priority, split requirements across sources with quota arrangements, set how each planning strategy treats forecast against sales, and simulate what-if scenarios beside the operational plan.",
   routes: [
     { path: "/planning", element: createElement(PlanningHome) },
     { path: "/planning/planned-orders", element: createElement(PlannedOrdersPage) },
     { path: "/planning/planned-orders/:id", element: createElement(PlannedOrderPage) },
     { path: "/planning/messages", element: createElement(MessagesPage) },
+    { path: "/planning/messages/:id", element: createElement(MessageDetailPage) },
     { path: "/planning/net-requirements", element: createElement(NetRequirementsPage) },
     { path: "/planning/supply-schedule", element: createElement(SupplySchedulePage) },
     { path: "/planning/runs", element: createElement(PlanRunsPage) },

@@ -1,3 +1,4 @@
+import { addUsage, assertCanStartRun, budgetStatus, type BudgetState, type TokenBudget } from "../src/domain/budget.js";
 import type { AgentVersion } from "../src/domain/registry.js";
 import type { Money } from "../src/domain/money.js";
 import type {
@@ -7,6 +8,7 @@ import type {
   ApprovalRequest,
   ModelProvider,
   ModelResponse,
+  BudgetPort,
   RunDeps,
   RunRequest,
   ToolDescriptor,
@@ -35,14 +37,14 @@ export const postDescriptor: ToolDescriptor = { requiredDuty: "APInvoicePost", a
 export const codingDescriptor: ToolDescriptor = { requiredDuty: "APInvoicePost", approvalMode: "suggest" };
 
 export class ScriptedProvider implements ModelProvider {
-  readonly seen: Array<{ system: string; user: string; allowedTools: readonly string[] }> = [];
+  readonly seen: Array<{ system: string; user: string; allowedTools: readonly string[]; maxOutputTokens?: number }> = [];
   private readonly responses: ModelResponse[];
 
   constructor(responses: ModelResponse[]) {
     this.responses = [...responses];
   }
 
-  async complete(req: { system: string; user: string; allowedTools: readonly string[] }): Promise<ModelResponse> {
+  async complete(req: { system: string; user: string; allowedTools: readonly string[]; maxOutputTokens?: number }): Promise<ModelResponse> {
     this.seen.push(req);
     const next = this.responses.shift();
     if (!next) throw new Error("no scripted model response left");
@@ -84,6 +86,29 @@ export class FakeApprovals implements ApprovalPort {
   }
 }
 
+/** In-memory ports for tests that do not exercise persistence: nothing is stored or limited. */
+export const testAudit: RunDeps["audit"] = { startRun: async () => undefined, finishRun: async () => undefined, runStatus: async () => "RUNNING" };
+export const testBudgets: RunDeps["budgets"] = {
+  reserve: async (r) => ({ holdId: "test-hold", tenantId: r.tenantId, month: r.month }),
+  settle: async () => "OK",
+};
+
+/** An in-memory month budget: a HARD budget refuses a hold, settle charges at once and reports the state. */
+export function memoryBudgets(initial: TokenBudget): BudgetPort & { current(): TokenBudget } {
+  let budget = initial;
+  return {
+    current: () => budget,
+    reserve: async (r) => {
+      assertCanStartRun(budget);
+      return { holdId: "memory-hold", tenantId: r.tenantId, month: r.month };
+    },
+    settle: async (_hold, u): Promise<BudgetState> => {
+      budget = addUsage(budget, { ...u, estimated: false });
+      return budgetStatus(budget).state;
+    },
+  };
+}
+
 export function makeDeps(parts: {
   provider: ModelProvider;
   tools: ToolPort;
@@ -100,6 +125,8 @@ export function makeDeps(parts: {
     now: () => "2026-10-21T00:00:00.000Z",
     nowMs: () => Date.UTC(2026, 9, 21),
     pseudonymTtlMs: 86_400_000,
+    audit: testAudit,
+    budgets: testBudgets,
   };
 }
 
@@ -113,7 +140,6 @@ export function makeRequest(over: Partial<RunRequest> = {}): RunRequest {
     evalPassed: true,
     policy: { mode: "SUGGEST", autoThreshold: 0.95, autoAmountLimit: usd("5000") },
     selfApprovalLimit: usd("1000"),
-    budget: { limitIn: 50_000_000, limitOut: 10_000_000, usedIn: 0, usedOut: 0, softPct: 80 },
     runTokenCap: 400_000,
     prompt: `Code invoice INV-7 from Acme. Remit to IBAN ${REAL_IBAN}, total 1200 USD.`,
     ...over,

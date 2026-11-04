@@ -116,6 +116,7 @@ const operation: Operation = {
   attributes: {},
   networkId: null,
   status: "unplaced",
+  version: 1,
   createdAt: "2026-10-26T06:00:00Z",
 };
 

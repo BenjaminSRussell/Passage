@@ -41,6 +41,7 @@ npx tsc --noEmit
 
 - Nav duty `controlling.view` must exist in the duty catalogue (the service also uses `controlling.maintain` and
   `controlling.run`).
-- Journal balances for the reconciliation are pasted until the ledger (wave 11) exposes a balance query.
+- The reconciliation reads the journal balances from the general ledger itself; the page sends only the legal entity, the
+  period and the currency.
 - The cost control workspace (plan vs actual vs committed) and live step progress over server-sent events are later
   slices of PSG-38.

@@ -139,8 +139,9 @@ func (a *API) postInvoiceAdjustment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	posted, err := a.store.PostInvoiceAdjustment(ctx, in, func(base store.InvoiceBase) (store.AdjustmentOutcome, error) {
+		group := a.vendorGroup(ctx, nil, in.ID, in.LegalEntityID, base.Invoice.VendorID)
 		entry, err := domain.PostInvoiceAdjustment(ctx, domain.InvoiceAdjustment{
-			ID: in.ID, Kind: in.Kind, LegalEntityID: in.LegalEntityID, LedgerID: in.LedgerID, FiscalPeriodID: in.FiscalPeriodID,
+			VendorGroupCode: group.Code, ID: in.ID, Kind: in.Kind, LegalEntityID: in.LegalEntityID, LedgerID: in.LedgerID, FiscalPeriodID: in.FiscalPeriodID,
 			PostingDate: in.PostingDate, DocumentDate: in.DocumentDate, Currency: base.Invoice.Currency, Original: base.Lines, Lines: in.Lines,
 		}, a.ports.Periods, a.ledgerFor(in.ID, in.OriginalInvoiceID), a.ports.Profile)
 		if err != nil {

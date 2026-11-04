@@ -1,7 +1,7 @@
 import { assertNoPii } from "../domain/redaction.js";
 import type { ModelProvider, ModelResponse, ModelUsage } from "../runtime/engine.js";
 import { postJson } from "./http.js";
-import { isRecord, PROPOSE_TOOL_NAME, providerRejected, parseJsonBody, proposeTool, toModelResponse } from "./wire.js";
+import { isRecord, PROPOSE_TOOL_NAME, providerRejected, parseJsonBody, proposeTool, toModelResponse, outputLimit } from "./wire.js";
 
 export interface OpenAICompatibleConfig {
   /** Base URL up to (not including) /chat/completions, e.g. https://host/v1 or an Azure deployment URL. */
@@ -37,7 +37,7 @@ export function createOpenAICompatibleProvider(cfg: OpenAICompatibleConfig): Mod
         headers,
         {
           model: cfg.model,
-          max_tokens: cfg.maxTokens ?? 1024,
+          max_tokens: outputLimit(cfg.maxTokens, req.maxOutputTokens),
           messages: [
             { role: "system", content: req.system },
             { role: "user", content: req.user },

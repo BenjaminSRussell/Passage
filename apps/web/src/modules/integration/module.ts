@@ -1,10 +1,13 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { ClientPage } from "./ClientPage";
+import { ClientsPage } from "./ClientsPage";
 import { InterchangeDetailPage } from "./InterchangeDetailPage";
 import { InterchangesPage } from "./InterchangesPage";
 import { MapTesterPage } from "./MapTesterPage";
 import { MessageDetailPage } from "./MessageDetailPage";
 import { MessagesPage } from "./MessagesPage";
+import { NewClientPage } from "./NewClientPage";
 import { NewSyncSubscriptionPage } from "./NewSyncSubscriptionPage";
 import { NewPartnerPage } from "./NewPartnerPage";
 import { OutboundDocumentPage } from "./OutboundDocumentPage";
@@ -24,7 +27,7 @@ const integration: PassageModule = {
   id: "integration",
   title: "Integration",
   description:
-    "EDI trading partners, received and sent interchanges with their 997s and masked raw payload, the message monitor with single and bulk reprocess, the partner SLA dashboard, outbound 856/810/855 documents, the map tester, the punchout cart check, self-billing match and Peppol invoice dry runs, and outbound sync to the customer's legacy ERP: REST push subscriptions, the delivery monitor and dead letters with replay.",
+    "EDI trading partners, received and sent interchanges with their 997s and masked raw payload, the message monitor with single and bulk reprocess, the partner SLA dashboard, outbound 856/810/855 documents, the map tester, the punchout cart check, self-billing match and Peppol invoice dry runs, and outbound sync to the customer's legacy ERP: REST push subscriptions, the delivery monitor and dead letters with replay, and API clients with scopes, request quotas and usage.",
   routes: [
     { path: "/integration/partners", element: createElement(PartnersPage), handle: { title: "Trading partners" } },
     { path: "/integration/partners/new", element: createElement(NewPartnerPage), handle: { title: "New trading partner" } },
@@ -44,6 +47,9 @@ const integration: PassageModule = {
     { path: "/integration/sync/new", element: createElement(NewSyncSubscriptionPage), handle: { title: "New REST push", duty: "hub.subscription.write" } },
     { path: "/integration/sync/deliveries", element: createElement(SyncDeliveriesPage), handle: { title: "Sync deliveries" } },
     { path: "/integration/sync/dead-letters", element: createElement(SyncDeadLettersPage), handle: { title: "Sync dead letters" } },
+    { path: "/integration/clients", element: createElement(ClientsPage), handle: { title: "API clients" } },
+    { path: "/integration/clients/new", element: createElement(NewClientPage), handle: { title: "Register API client" } },
+    { path: "/integration/clients/:id", element: createElement(ClientPage), handle: { title: "API client" } },
     { path: "/integration/sync/:id", element: createElement(SyncSubscriptionPage), handle: { title: "Sync subscription" } },
   ],
   nav: [
@@ -59,6 +65,7 @@ const integration: PassageModule = {
     { label: "Outbound sync", to: "/integration/sync", duty: "hub.delivery.read" },
     { label: "Sync deliveries", to: "/integration/sync/deliveries", duty: "hub.delivery.read" },
     { label: "Sync dead letters", to: "/integration/sync/dead-letters", duty: "hub.delivery.read" },
+    { label: "API clients", to: "/integration/clients", duty: "hub.delivery.read" },
   ],
 };
 

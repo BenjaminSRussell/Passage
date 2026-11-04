@@ -83,6 +83,10 @@ func postEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in PostInput) 
 	if err != nil || replayed {
 		return out, err
 	}
+	replayed, err = replayFromJournal(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, []string{in.Key}, in.Hash, &out)
+	if err != nil || replayed {
+		return out, err
+	}
 	entry, notices, err := postToLedger(ctx, tx, tenantID, ledger, in)
 	if err != nil {
 		return out, err
@@ -120,6 +124,7 @@ func requireLedgerSpecific(ctx context.Context, tx pgx.Tx, tenantID, ledgerID st
 }
 
 func postToLedger(ctx context.Context, tx pgx.Tx, tenantID string, ledger Ledger, in PostInput) (Entry, []Notice, error) {
+	in.Lines = domain.DropUndefinedOptional(in.Lines, ledger.DimensionAttributes, in.OptionalDimensions)
 	accounts, err := loadAccounts(ctx, tx, tenantID, ledger.ChartCode, accountNumbers(in.Lines))
 	if err != nil {
 		return Entry{}, nil, err
@@ -227,6 +232,10 @@ func reverseEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in ReverseI
 	if err != nil || replayed {
 		return out, err
 	}
+	replayed, err = replayFromJournal(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, []string{in.Key}, in.Hash, &out)
+	if err != nil || replayed {
+		return out, err
+	}
 	if !in.clearingReset {
 		// Checked under the ledger lock that clearings take too.
 		if err := refuseClearedItems(ctx, tx, tenantID, in.EntryID); err != nil {
@@ -234,11 +243,13 @@ func reverseEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in ReverseI
 		}
 	}
 	var orig struct {
-		voucher, postingDate, documentID, sourceSystem, realignmentRunID string
+		voucher, postingDate, documentID, sourceSystem, realignmentRunID, reversalOf string
 	}
-	if err := tx.QueryRow(ctx, `select voucher, posting_date::text, document_id::text, source_system, coalesce(realignment_run_id::text, '')
+	if err := tx.QueryRow(ctx, `select voucher, posting_date::text, document_id::text, source_system, coalesce(realignment_run_id::text, ''),
+			coalesce(reversal_of_entry_id::text, '')
 		from journal_entry where tenant_id = $1 and id = $2`,
-		tenantID, in.EntryID).Scan(&orig.voucher, &orig.postingDate, &orig.documentID, &orig.sourceSystem, &orig.realignmentRunID); err != nil {
+		tenantID, in.EntryID).Scan(&orig.voucher, &orig.postingDate, &orig.documentID, &orig.sourceSystem, &orig.realignmentRunID,
+		&orig.reversalOf); err != nil {
 		return out, err
 	}
 	if orig.realignmentRunID != "" && orig.realignmentRunID != in.realignmentRunID {
@@ -256,6 +267,11 @@ func reverseEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in ReverseI
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
+	}
+	if orig.reversalOf != "" && !ledger.ReinstateAllowed() {
+		// Reversing a reversing entry would re-instate the original (FR-11.8).
+		return out, &domain.RejectedError{Violations: []domain.Violation{{Code: CodeReinstatementNotAllowed, Field: "id",
+			Message: "entry " + orig.voucher + " reverses another entry and ledger " + ledger.Code + " does not allow reinstatement"}}}
 	}
 	origDate, err := time.Parse(time.DateOnly, orig.postingDate)
 	if err != nil {
@@ -366,6 +382,12 @@ func voucherOf(ledgerCode string, seq int64) string {
 	return fmt.Sprintf("%s-%07d", ledgerCode, seq)
 }
 
+// postingService is the verified issuer of the service token the posting came with; empty for an end user.
+func postingService(ctx context.Context) string {
+	p, _ := principalOf(ctx)
+	return p.Service
+}
+
 // writeEntry inserts an entry, its lines, new dimension combinations and the
 // balance projection deltas, and enqueues journal.posted. It runs inside the
 // caller's transaction, after the ledger row lock.
@@ -385,12 +407,12 @@ func writeEntry(ctx context.Context, tx pgx.Tx, tenantID string, ne newEntry) (E
 	}
 	if _, err := tx.Exec(ctx, `insert into journal_entry (tenant_id, id, legal_entity_id, ledger_id, document_id, voucher, posting_sequence, posting_date, period_key,
 			document_date, description, source_system, source_type, source_id, source_uri, idempotency_key, payload_hash, reversal_of_entry_id, posted_by, trace_id,
-			reason_code, reason_comment, is_realignment, realignment_run_id)
+			reason_code, reason_comment, is_realignment, realignment_run_id, posted_by_service)
 		values ($1, $2, $3, $4, $5, $6, $7, $8::text::date, $9, nullif($10::text, '')::date, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-			nullif($21::text, ''), nullif($22::text, ''), $23::text <> '', nullif($23::text, '')::uuid)`,
+			nullif($21::text, ''), nullif($22::text, ''), $23::text <> '', nullif($23::text, '')::uuid, nullif($24::text, ''))`,
 		tenantID, entryID, l.LegalEntityID, l.ID, ne.documentID, voucher, seq, postingDate, period, docDate, ne.description,
 		ne.source.System, ne.source.Type, ne.source.ID, ne.source.URI, ne.key, ne.hash, ne.reversalOf, ne.actor, ne.traceID,
-		ne.reasonCode, ne.reasonComment, ne.realignmentRunID); err != nil {
+		ne.reasonCode, ne.reasonComment, ne.realignmentRunID, postingService(ctx)); err != nil {
 		return Entry{}, err
 	}
 
@@ -632,6 +654,7 @@ func (s *Postgres) ValidateEntry(ctx context.Context, in PostInput) (domain.Resu
 		if err := requireLedgerSpecific(ctx, tx, p.TenantID, ledger.ID, in.CanPostLedgerSpecific); err != nil {
 			return err
 		}
+		in.Lines = domain.DropUndefinedOptional(in.Lines, ledger.DimensionAttributes, in.OptionalDimensions)
 		accounts, err := loadAccounts(ctx, tx, p.TenantID, ledger.ChartCode, accountNumbers(in.Lines))
 		if err != nil {
 			return err

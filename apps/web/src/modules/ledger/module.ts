@@ -12,6 +12,7 @@ import { JournalBatchesPage } from "./JournalBatchesPage";
 import { JournalBatchPage, NewJournalBatchPage } from "./JournalBatchPage";
 import { EditJournalNamePage, NewJournalNamePage } from "./JournalNameFormPage";
 import { JournalNamesPage } from "./JournalNamesPage";
+import { LedgerSettingsPage } from "./LedgerSettingsPage";
 import { LedgerLinesPage } from "./LedgerLinesPage";
 import { NewRecurringJournalPage, RecurringJournalPage } from "./RecurringJournalPage";
 import { RecurringJournalsPage } from "./RecurringJournalsPage";
@@ -50,6 +51,7 @@ const ledger: PassageModule = {
     { path: "/ledger/journal-names", element: createElement(JournalNamesPage), handle: { title: "Journal names" } },
     { path: "/ledger/journal-names/new", element: createElement(NewJournalNamePage), handle: { title: "New journal name" } },
     { path: "/ledger/journal-names/:code", element: createElement(EditJournalNamePage), handle: { title: "Journal name" } },
+    { path: "/ledger/ledger-settings", element: createElement(LedgerSettingsPage), handle: { title: "Ledger settings" } },
     { path: "/ledger/recurring-journals", element: createElement(RecurringJournalsPage), handle: { title: "Recurring journals" } },
     { path: "/ledger/recurring-journals/new", element: createElement(NewRecurringJournalPage), handle: { title: "New recurring journal" } },
     { path: "/ledger/recurring-journals/:id", element: createElement(RecurringJournalPage), handle: { title: "Recurring journal" } },
@@ -112,6 +114,7 @@ const ledger: PassageModule = {
     { label: "Trial balance", to: "/ledger/trial-balance", duty: "ledger.balance.read" },
     { label: "Ledger transactions", to: "/ledger/transactions", duty: "ledger.journal.read" },
     { label: "Journal names", to: "/ledger/journal-names", duty: "ledger.journal.read" },
+    { label: "Ledger settings", to: "/ledger/ledger-settings", duty: "ledger.journal.read" },
     { label: "Reason codes", to: "/ledger/reason-codes", duty: "ledger.journal.read" },
     { label: "Account structures", to: "/ledger/structures", duty: "ledger.journal.read" },
     { label: "Advanced rules", to: "/ledger/advanced-rules", duty: "ledger.journal.read" },

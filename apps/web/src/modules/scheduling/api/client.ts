@@ -59,6 +59,40 @@ export interface Operation {
   networkId: string | null;
   status: OperationStatus;
   createdAt: string;
+  /** Starts at 1; the If-Match of a change or delete. */
+  version: number;
+  updatedAt?: string;
+}
+
+/** Fields left out stay as they are; the service cannot clear a date. */
+export interface OperationPatch {
+  minutes?: number;
+  dueAt?: string;
+  readyAt?: string;
+  priority?: number;
+  setupMinutes?: number;
+  /** Replaces the candidate resources, in priority order. */
+  resourceIds?: string[];
+}
+
+/** The changed operation; jobsRemoved is true when its non-firmed jobs left the schedule. */
+export type OperationUpdate = Operation & { jobsRemoved: boolean };
+
+export interface OperationRemoval {
+  operationId: string;
+  orderId: string;
+  operNumber: number;
+  jobsRemoved: boolean;
+}
+
+export interface OrderUnschedule {
+  orderId: string;
+  /** Operation numbers that are open again. */
+  operations: number[];
+  /** How many operations lost jobs. */
+  jobsRemoved: number;
+  /** Operation numbers a firmed job holds; they stay where they are. */
+  keptFirmed: number[];
 }
 
 export interface NewOperation {
@@ -93,7 +127,7 @@ export interface RunWarning {
 
 export interface Run {
   id: string;
-  scope: "site" | "selection" | "move";
+  scope: "site" | "selection" | "order" | "move";
   mode: string;
   direction: string;
   finite: boolean;
@@ -353,6 +387,26 @@ export function listOperations(filter: { status?: OperationStatus | ""; orderId?
   return items<Operation>(`/operations${query({ status: filter.status, orderId: filter.orderId, limit: filter.limit })}`, signal);
 }
 
+export function getOperation(id: string, signal?: AbortSignal): Promise<Operation> {
+  return send<Operation>(`/operations/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function updateOperation(id: string, version: number, patch: OperationPatch, key: string = newKey()): Promise<OperationUpdate> {
+  return send<OperationUpdate>(`/operations/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
+    body: JSON.stringify(patch),
+  });
+}
+
+export function deleteOperation(id: string, version: number, key: string = newKey()): Promise<OperationRemoval> {
+  return send<OperationRemoval>(`/operations/${encodeURIComponent(id)}`, { method: "DELETE", headers: { "Idempotency-Key": key, "If-Match": `"${version}"` } });
+}
+
+export function unscheduleOrder(orderId: string, key: string = newKey()): Promise<OrderUnschedule> {
+  return post<OrderUnschedule>(`/orders/${encodeURIComponent(orderId)}:unschedule`, undefined, key);
+}
+
 export function createOperation(input: NewOperation, key: string = newKey()): Promise<Operation> {
   return post<Operation>("/operations", input, key);
 }
@@ -367,6 +421,11 @@ export function getRun(id: string, signal?: AbortSignal): Promise<Run> {
 
 export function startRun(input: NewRun, key: string = newKey()): Promise<Run> {
   return post<Run>("/runs", input, key);
+}
+
+/** Schedules every operation of one order (POST /orders/{orderId}:schedule, scope order). */
+export function scheduleOrder(orderId: string, input: { finite?: boolean; direction?: "forward" | "backward" } = {}, key: string = newKey()): Promise<Run> {
+  return post<Run>(`/orders/${encodeURIComponent(orderId)}:schedule`, input, key);
 }
 
 export function fetchGantt(from: string, to: string, resourceIds: string[] = [], signal?: AbortSignal): Promise<GanttBar[]> {

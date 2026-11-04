@@ -139,6 +139,22 @@ A rejected URL is "no response". `test/ssrf.test.ts` covers each range with a st
   the subscription's own delivered or dead-lettered events from `from` whose type
   still matches its patterns, oldest first, up to `cap`, inside the caller's tenant,
   and answers `{enqueued, truncated}`. `api/openapi.yaml` describes the routes.
+- `src/clients.ts` and the `/v1/hub/clients` routes (FR-35.8, BR-35.8): the registry of API
+  clients (Keycloak client id, scopes as duty keys, `quotaPerMin` default 600, `burst` default 100,
+  sandbox tenant, owner, active or revoked) with optimistic `version` and idempotent create.
+  `POST /v1/hub/clients:consume` is the edge gateway's quota check: it spends `cost` units from the
+  client's token bucket (`src/quota.ts`, state in `hub_client_bucket` under a row lock) and answers
+  200 with `RateLimit-*` headers or 429 HUB-0113 with `Retry-After`; admitted and refused units are
+  counted per minute (`hub_client_usage`, `GET /v1/hub/clients/{id}/usage`). Duties:
+  `hub.client.write` (register, change, revoke), `hub.client.consume` (service-only: never a
+  person; no caller holds it until the edge quota check is built), reads under `hub.delivery.read`.
+  Scopes are duty names in any catalogue style. The client secret stays in Keycloak.
+- `src/events.ts`: the hub's own CloudEvents (`events/asyncapi.yaml`) are inserted into the
+  `outbox` table in the same transaction as the change: subscription created, updated, deleted,
+  paused (410) and resumed, webhook delivered and dead-lettered, API client registered, updated and
+  revoked. The payload is the whole CloudEvent; URLs, secrets and credentials are never in it. The
+  outbox `aggregate_type` is the type's entity, so the relay topic is `passage.hub.<entity>`
+  (`events.Topic`). Delivering one of the hub's own `webhook.*` events writes no outcome event.
 - `charts/integration-hub`: deployment (numeric non-root user), service, DB URL secret,
   Kafka values, `fieldCrypt.keysSecret` / `fieldCrypt.currentKeyId`, a NetworkPolicy
   (ingress to :8080 from the edge gateway only, :9090 from monitoring; egress to DNS,
@@ -191,7 +207,14 @@ cannot receive a CloudEvents webhook:
    service never changes) the delivery is dead-lettered HUB-0118 with the key the receiver
    returned: it is never resent, and both replays refuse it (409 for one, skipped by the
    subscription replay), since a resend could only add a duplicate in the legacy ERP. The
-   operator reconciles the record there.
+   operator reconciles the record there. With `lineKeyPath` (one `[*]`, `$.data.lines[*].id`)
+   the key of each line of a pushed collection is read too, by position or by
+   `lineCorrelation` (`bodyPath` / `responsePath`, a field both sides carry). Every line must
+   get exactly one key, or the accepted push is dead-lettered HUB-0117 with nothing recorded.
+   The keys are kept on the delivery (`lineKeys`, with the render's lookup table versions as
+   `lookups`) and, when the render names element refs, sent as their `legacyKey` in the same
+   `xref:record` call (only the refs of the collection `bodyPath` iterates, so a mapping with
+   several collections needs `lineCorrelation`).
 5. Failures: a 4xx other than 410 and 429 dead-letters at once (HUB-0117) with the receiver's
    answer kept in `responseExcerpt` (2000 characters, control characters stripped, every
    credential value removed), unless the subscription says `onClientError: "retry"`; 5xx,

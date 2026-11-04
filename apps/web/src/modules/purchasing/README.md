@@ -55,6 +55,10 @@ Procurement workspace for wave 17 (PSG-17), wired to `services/purchasing` throu
 | `/purchasing/signing-limit-requests` | Requests, pending first, with a status filter | `GET /signing-limit-requests` |
 | `/purchasing/signing-limit-requests/new` | Legal entity, worker, document, currency, spending and approval limits, reason | `POST /signing-limit-requests` |
 | `/purchasing/signing-limit-requests/:id` | The request and, while pending, Approve and Reject with a note (SigningLimitApprove in the service); PRC-SL-003, -004 and -005 shown with their codes | `GET /signing-limit-requests/{id}`, `POST /signing-limit-requests/{id}:approve`, `:reject` (If-Match) |
+| `/purchasing/purchase-orders/:id/lines/:lineNo/service` | The service specification of a PO line: planned services as an outline table, the unplanned limit, expected value, contract line and its remaining value; a form (draft or rejected orders only) with the outline rows (level or service item, nesting level, quantity, unit, unit price) or a model to copy, removal after confirmation, and a check of an entry of unplanned services against the limits (PRC-SRV-003 shown with its code); the PO detail shows a Service column per line | `GET/PUT/DELETE /purchase-orders/{id}/lines/{lineNo}/service` (If-Match = PO row version), `GET .../service/limit-check`, `GET /purchase-orders/{id}/service-lines`, `GET /model-service-specs` |
+| `/purchasing/model-service-specs` | Model service specifications with status and code or name filters and load-more paging (nav item gated on PurchaseOrderInquire; writes need ProcurementPolicyMaintain in the service) | `GET /model-service-specs` |
+| `/purchasing/model-service-specs/new` | Legal entity, code, name, currency and the outline rows | `POST /model-service-specs` |
+| `/purchasing/model-service-specs/:id` | The model with its outline table and a change form for name, currency, status and outline; stale version shown with PRC-SRV-007 | `GET /model-service-specs/{id}`, `PUT /model-service-specs/{id}` (If-Match) |
 | `/purchasing/policies` | Saved purchasing policies per legal entity (change management default, PO four-eyes, invoice before receipt, category access), open any legal entity by id | `GET /purchasing-policies` |
 | `/purchasing/policies/:legalEntityId` | The settings with their meaning, including the category access mode (hard, soft, off); Save policy (unsaved entity, If-Match 0) or Update policy; stale version shown with PRC-POL-003 | `GET /purchasing-policies/{legalEntityId}`, `PUT /purchasing-policies/{legalEntityId}` (If-Match) |
 
@@ -65,5 +69,5 @@ floats. Ids are typed as UUIDs until the vendor, product and legal-entity picker
 waves 6 to 8 are available to modules.
 
 Tests: `npx vitest --run src/modules/purchasing` (`pages.test.tsx`, `agreements.test.tsx`,
-`consolidation.test.tsx`, `openSupply.test.tsx`, `orderLifecycle.test.tsx`, `rfq.test.tsx`, `rfqSealed.test.tsx`, `invoicingPlan.test.tsx`, `reprice.test.tsx`, `scheduling.test.tsx`, `signing.test.tsx` and `charges.test.tsx` drive every route against a stubbed `fetch` through
+`consolidation.test.tsx`, `openSupply.test.tsx`, `orderLifecycle.test.tsx`, `rfq.test.tsx`, `rfqSealed.test.tsx`, `invoicingPlan.test.tsx`, `reprice.test.tsx`, `scheduling.test.tsx`, `signing.test.tsx`, `charges.test.tsx` and `service.test.tsx` drive every route against a stubbed `fetch` through
 `testHarness.tsx`).

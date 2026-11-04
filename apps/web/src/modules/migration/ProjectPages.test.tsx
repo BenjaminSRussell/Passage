@@ -63,7 +63,7 @@ const axProject: MigrationProject = { ...copyProject, id: "0195f0a0-0000-7000-80
 const noRules: KeyRewriteRules = { version: 1, items: [] };
 
 describe("project form parsing", () => {
-  const base: ProjectForm = { name: " USMF to CAMF ", projectType: "copy", sourceSystem: "", sourceLegalEntityId: LE_A, targetLegalEntityId: LE_B, cutoverAt: "", scheduleCron: "" };
+  const base: ProjectForm = { name: " USMF to CAMF ", projectType: "copy", sourceSystem: "", sourceLegalEntityId: LE_A, targetLegalEntityId: LE_B, cutoverAt: "", scheduleCron: "", scheduleTimezone: "" };
   it("trims and accepts a copy project", () => {
     expect(parseProjectForm(base).value).toEqual({ name: "USMF to CAMF", projectType: "copy", sourceLegalEntityId: LE_A, targetLegalEntityId: LE_B });
   });
@@ -80,6 +80,18 @@ describe("project form parsing", () => {
     expect(parseProjectForm({ ...base, scheduleCron: "* *" }).errors.scheduleCron).toBeTruthy();
     expect(parseProjectForm({ ...base, name: "x".repeat(81) }).errors.name).toMatch(/80/);
     expect(parseProjectForm({ ...base, projectType: "config_package" }).value).toEqual({ name: "USMF to CAMF", projectType: "config_package" });
+  });
+  it("reads the schedule in an IANA time zone, UTC when empty", () => {
+    expect(parseProjectForm({ ...base, scheduleCron: "30 2 * * *", scheduleTimezone: " Europe/Berlin " }).value?.scheduleTimezone).toBe("Europe/Berlin");
+    expect(parseProjectForm(base).value).not.toHaveProperty("scheduleTimezone");
+    expect(parseProjectForm({ ...base, scheduleTimezone: "Mars/Base" }).errors.scheduleTimezone).toBeTruthy();
+    expect(parseProjectForm({ ...base, scheduleTimezone: "Local" }).errors.scheduleTimezone).toBeTruthy();
+    const current = { ...axProject, scheduleCron: "0 2 * * *" };
+    const form = { name: current.name, cutoverAt: cutoverInput(current.cutoverAt), scheduleCron: "0 2 * * *", scheduleTimezone: "" };
+    expect(parseProjectEdit(form, current).value).toEqual({});
+    expect(parseProjectEdit({ ...form, scheduleTimezone: "America/Chicago" }, current).value).toEqual({ scheduleTimezone: "America/Chicago" });
+    expect(parseProjectEdit({ ...form, scheduleTimezone: "Nowhere/City" }, current).errors.scheduleTimezone).toBeTruthy();
+    expect(parseProjectEdit({ ...form, scheduleTimezone: "" }, { ...current, scheduleTimezone: "America/Chicago" }).value).toEqual({ scheduleTimezone: "" });
   });
   it("checks rewrite rules", () => {
     const rules = [
@@ -99,7 +111,7 @@ describe("project form parsing", () => {
   });
   it("sends only the changed details, and clears an emptied schedule", () => {
     const current = { ...axProject, scheduleCron: "0 2 * * *" };
-    const unchanged = { name: current.name, cutoverAt: cutoverInput(current.cutoverAt), scheduleCron: current.scheduleCron };
+    const unchanged = { name: current.name, cutoverAt: cutoverInput(current.cutoverAt), scheduleCron: current.scheduleCron, scheduleTimezone: "" };
     expect(unchanged.cutoverAt).toBe("2027-03-01T04:00");
     expect(parseProjectEdit(unchanged, current).value).toEqual({});
     expect(parseProjectEdit({ ...unchanged, name: " AX vendors ", scheduleCron: "", cutoverAt: "" }, current).value).toEqual({ name: "AX vendors", scheduleCron: "", cutoverAt: "" });

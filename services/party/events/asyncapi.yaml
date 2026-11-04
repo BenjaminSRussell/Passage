@@ -39,7 +39,16 @@ channels:
     messages:
       revealed:
         $ref: '#/components/messages/vendorBankRevealed'
+  passage.party.vendorgroup:
+    address: passage.party.vendorgroup
+    messages:
+      created:
+        $ref: '#/components/messages/vendorGroupCreated'
 operations:
+  onVendorGroupCreated:
+    action: send
+    channel: { $ref: '#/channels/passage.party.vendorgroup' }
+    messages: [{ $ref: '#/channels/passage.party.vendorgroup/messages/created' }]
   onVendorBankRevealed:
     action: send
     channel: { $ref: '#/channels/passage.party.vendorbank' }
@@ -188,6 +197,18 @@ components:
           actor_user_id: { type: string }
           updated_at: { type: string, format: date-time }
       x-passage-type: dev.passage.party.protectedfields.updated.v1
+    vendorGroupCreated:
+      name: created
+      title: Vendor group created
+      description: A vendor group was registered with its short code. The code is the VENDGRP ledger dimension value of the vendor-control credit.
+      payload:
+        type: object
+        required: [vendor_group_id, code, name]
+        properties:
+          vendor_group_id: { type: string, format: uuid }
+          code: { type: string, pattern: '^[A-Z0-9_-]{1,10}$' }
+          name: { type: string }
+      x-passage-type: dev.passage.party.vendorgroup.created.v1
     vendorBankRevealed:
       name: revealed
       title: Vendor bank details revealed

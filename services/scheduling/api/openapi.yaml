@@ -327,6 +327,164 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/Run' }
         '400': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/orders/{orderId}:schedule:
+    post:
+      operationId: scheduleOrder
+      summary: Schedule every operation of one order
+      description: >
+        Runs the heuristic over all operations of the order (run scope order),
+        with the same rules as createRun: firmed jobs stay, pegs, networks,
+        setup matrices, capacity blocks and secondary resources apply. An
+        order with no operations in scheduling answers 404 SCHED-0135.
+        Idempotent per Idempotency-Key and order. Takes the run duty, like
+        createRun.
+      x-passage-duty: scheduling.run
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          description: The production order id (UUID).
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: All fields are optional; send an empty object for the defaults.
+              properties:
+                finite: { type: boolean, default: true }
+                direction: { type: string, enum: [forward, backward], default: forward }
+                start: { type: string, format: date-time, description: Defaults to now; must not be before today (UTC). }
+                horizonDays: { type: integer, minimum: 30, maximum: 730, default: 365 }
+      responses:
+        '201':
+          description: 'Run completed. An idempotent replay returns 200 with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/operations/{id}:
+    get:
+      operationId: getOperation
+      summary: One operation with its version
+      x-passage-duty: scheduling.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 'The operation, with ETag "<version>" for the If-Match of an update or delete'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Operation' }
+        '404': { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateOperation
+      summary: Change an operation's duration, dates, priority, setup minutes or candidate resources (FR-23.4)
+      description: >
+        Send at least one of minutes, dueAt, readyAt, priority, setupMinutes or
+        resourceIds (the candidates, replacing the list, in priority order and
+        none of them a secondary resource of the operation: 422 SCHED-0139).
+        The order, operation number, secondary resources, setup group, network
+        and attributes are fixed when the operation is created. A change to
+        anything but the priority makes the placement stale: the operation's
+        non-firmed jobs are removed, its status is open again (jobsRemoved is
+        true) and the next run or order schedule places it. An operation a
+        firmed job holds is refused with 409 SCHED-0138. The priority alone
+        leaves the jobs where they are and only orders the next run. The
+        change needs the operation version in If-Match (the ETag of a read); a
+        stale version gets 412 SCHED-0137. An operation registered from a
+        production order is overwritten by that order's next event or re-import.
+      x-passage-duty: scheduling.schedule.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: true
+          description: The operation version from its ETag, for example "3". A stale version gets 412 SCHED-0137.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OperationPatch' }
+      responses:
+        '200':
+          description: 'The changed operation with ETag "<version>" and jobsRemoved. A replay of the same Idempotency-Key returns the first answer with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperationUpdate' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: deleteOperation
+      summary: Remove an operation and its non-firmed jobs (FR-23.4)
+      description: >
+        Deletes the operation and takes its jobs off the schedule. An operation
+        a firmed job holds is refused with 409 SCHED-0138; unfirm it first.
+        Needs the operation version in If-Match (stale: 412 SCHED-0137). A
+        replay of the same Idempotency-Key answers as the first request did.
+        An operation registered from a production order comes back with that
+        order's next event or re-import.
+      x-passage-duty: scheduling.schedule.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: true
+          description: The operation version from its ETag. A stale version gets 412 SCHED-0137.
+          schema: { type: string }
+      responses:
+        '200':
+          description: 'The operation was removed. A replay of the same Idempotency-Key returns the first answer with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperationRemoval' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/orders/{orderId}:unschedule:
+    post:
+      operationId: unscheduleOrder
+      summary: Take an order off the schedule
+      description: >
+        Removes the non-firmed jobs of every operation of the order and opens
+        the operations again, so the next run or order schedule can place the
+        order afresh. Operations a firmed job holds stay where they are and are
+        listed in keptFirmed. The operations themselves are kept. An order with
+        no operations in scheduling answers 404 SCHED-0135. Needs no body;
+        idempotent per Idempotency-Key and order.
+      x-passage-duty: scheduling.schedule.write
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          description: The production order id (UUID).
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: 'The order is off the schedule. A replay of the same Idempotency-Key returns the first answer with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderUnschedule' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/runs/{id}:
     get:
       operationId: getRun
@@ -1477,6 +1635,53 @@ components:
         networkId: { type: [string, 'null'], format: uuid }
         status: { type: string, enum: [open, scheduled, unplaced] }
         createdAt: { type: string, format: date-time }
+        version: { type: integer, description: Starts at 1; the If-Match of a change or delete. }
+        updatedAt: { type: string, format: date-time }
+    OperationPatch:
+      type: object
+      description: Send at least one field; fields left out stay as they are.
+      properties:
+        minutes: { type: integer, minimum: 1, maximum: 100000 }
+        dueAt: { type: string, format: date-time }
+        readyAt: { type: string, format: date-time }
+        priority: { type: integer, minimum: 0, maximum: 1000 }
+        setupMinutes: { type: integer, minimum: 0, maximum: 10080 }
+        resourceIds:
+          type: array
+          minItems: 1
+          maxItems: 50
+          description: The candidate resources in priority order; they replace the list.
+          items: { type: string, format: uuid }
+    OperationUpdate:
+      description: The changed operation.
+      allOf:
+        - $ref: '#/components/schemas/Operation'
+        - type: object
+          required: [jobsRemoved]
+          properties:
+            jobsRemoved: { type: boolean, description: The non-firmed jobs were removed and the operation is open again. }
+    OperationRemoval:
+      type: object
+      required: [operationId, orderId, operNumber, jobsRemoved]
+      properties:
+        operationId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        operNumber: { type: integer }
+        jobsRemoved: { type: boolean }
+    OrderUnschedule:
+      type: object
+      required: [orderId, operations, jobsRemoved, keptFirmed]
+      properties:
+        orderId: { type: string, format: uuid }
+        operations:
+          type: array
+          description: Operation numbers that are open again.
+          items: { type: integer }
+        jobsRemoved: { type: integer, description: How many operations lost jobs. }
+        keptFirmed:
+          type: array
+          description: Operation numbers a firmed job holds; they stay where they are.
+          items: { type: integer }
     RunRequest:
       type: object
       description: >
@@ -1506,7 +1711,7 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
-        scope: { type: string, enum: [site, selection, move] }
+        scope: { type: string, enum: [site, selection, order, move] }
         mode: { type: string }
         direction: { type: string, enum: [forward, backward] }
         finite: { type: boolean }

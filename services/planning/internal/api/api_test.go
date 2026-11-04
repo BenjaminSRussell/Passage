@@ -178,8 +178,16 @@ func (f *fakeStore) PegsOf(_ context.Context, _, supplyRef string) ([]domain.Peg
 	return nil, nil
 }
 
-func (f *fakeStore) ListMessages(context.Context, string, string, string, int) ([]store.Message, error) {
+func (f *fakeStore) ListMessages(context.Context, string, string, string, string, int) ([]store.Message, error) {
 	return []store.Message{}, nil
+}
+
+func (f *fakeStore) GetMessage(context.Context, string) (store.Message, error) {
+	return store.Message{}, nil
+}
+
+func (f *fakeStore) DecideMessage(context.Context, string, int, store.MessageDecision) (store.Message, bool, error) {
+	return store.Message{}, false, nil
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }

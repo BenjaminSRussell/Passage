@@ -14,6 +14,7 @@ const (
 	OpIn    = "in"
 	OpNotIn = "notIn"
 	OpMatch = "match"
+	OpExpr  = "expr"
 
 	maxRejectConditions = 50
 	maxMatchPattern     = 200
@@ -24,6 +25,7 @@ const (
 var reasonCode = regexp.MustCompile(`^[A-Z][A-Z0-9]*(-[A-Z0-9]+)+$`)
 
 // RejectWhen sends a row to the exception queue with a stated reason code when a mapped target meets the condition.
+// The expr op takes an expression over mapped targets as its value and rejects when it is true.
 // Conditions run on the mapped output once every field rule has succeeded, and every matching condition adds its own reject.
 type RejectWhen struct {
 	Field  string   `json:"field"`
@@ -32,6 +34,7 @@ type RejectWhen struct {
 	Values []string `json:"values,omitempty"`
 	Code   string   `json:"code"`
 	re     *regexp.Regexp
+	prog   *ExprProgram
 }
 
 func (c *RejectWhen) check(targets map[string]bool) *Error {
@@ -66,6 +69,20 @@ func (c *RejectWhen) check(targets map[string]bool) *Error {
 			return invalid("match pattern is not valid RE2")
 		}
 		c.re = re
+	case OpExpr:
+		if c.Value == nil || len(c.Values) > 0 {
+			return invalid("expr takes the expression as value")
+		}
+		prog, err := ParseExpr(*c.Value)
+		if err != nil {
+			return invalid("expression: " + err.Error())
+		}
+		for _, ref := range prog.Refs() {
+			if !targets[ref] {
+				return invalid("expression reads " + ref + ", which is not a mapping target")
+			}
+		}
+		c.prog = prog
 	default:
 		return unknownFn(c.Op)
 	}
@@ -99,6 +116,15 @@ func (c RejectWhen) matches(out map[string]any) bool {
 func (m Mapping) rejectConditions(out map[string]any) []Reject {
 	var rejects []Reject
 	for _, c := range m.RejectWhen {
+		if c.Op == OpExpr {
+			v, err := c.evalExpr(out)
+			if err != nil {
+				rejects = append(rejects, Reject{c.Field, c.Code, "rejectWhen expression failed: " + err.Error()})
+			} else if v.truthy() {
+				rejects = append(rejects, Reject{c.Field, c.Code, "matched rejectWhen expr"})
+			}
+			continue
+		}
 		if c.matches(out) {
 			rejects = append(rejects, Reject{c.Field, c.Code, "matched rejectWhen " + c.Op})
 		}
@@ -116,4 +142,19 @@ func (m *Mapping) checkRejectWhen(targets map[string]bool) *Error {
 		}
 	}
 	return nil
+}
+
+// evalExpr runs an expr condition over the mapped row; a failure (a text target used in arithmetic) rejects the row.
+func (c RejectWhen) evalExpr(out map[string]any) (xval, error) {
+	prog := c.prog
+	if prog == nil && c.Value != nil {
+		var err error
+		if prog, err = ParseExpr(*c.Value); err != nil {
+			return xval{}, err
+		}
+	}
+	if prog == nil {
+		return xval{}, exprErr("no expression")
+	}
+	return prog.Eval(func(path string) any { return out[path] })
 }

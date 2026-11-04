@@ -550,6 +550,60 @@ from slices 16 to 20 lie outside it:
 | `policies/authz/data.json`: resource row `/v1/scheduling/order-imports/*:reimport` (POST) under `scheduling.schedule.write` (an existing duty) | done (seeded in `policies/authz/data.json`) | `POST /v1/scheduling/order-imports/{orderId}:reimport` uses the existing duty `scheduling.schedule.write`; no new duty. |
 | `services/production/internal/store/journal.go` `logStatus`: set `startDate`/`endDate` on the statuschanged of auto-start and report as finished (slice 20) | handoff — wave 21 | Those events carry null dates for a dated order. Scheduling withdraws only on a move to Estimated, Created or Cancelled, so it is not affected; consumers that read the dates are. No new route, duty or topic: the event is on `passage.production.order`, which the order intake already reads. |
 
+Slice 22 builds the per-order schedule command (FR-23.11, scope `order`):
+`POST /v1/scheduling/orders/{orderId}:schedule` (existing duty
+`scheduling.run`, the duty of `POST /runs`, since it is a schedule run) runs the heuristic over every operation of the
+order, idempotent per key and order, 404 SCHED-0135 for an unknown order; the
+run and `run.completed.v1` carry scope `order`; a "Schedule this order" button
+on the production order page. No migration (the scope check already allowed
+`order`).
+
+| Item | Status | Reason |
+|---|---|---|
+| `policies/authz/data.json`: resource row `/v1/scheduling/orders/*:schedule` (POST) under `scheduling.run` (an existing duty) | handoff - main session (authz seed) | The route uses the existing duty of `POST /v1/scheduling/runs`; only the route row is new. Until it is seeded the gateway refuses the button on the production order page with 403. |
+| Per-order run started automatically by production's `:schedule` transition (FR-23.11 "on `:schedule`") | open - product decision, later slice of PSG-23 | The order intake registers the operations on `order.scheduled.v1` but does not run the heuristic for them; whether every production `:schedule` should place the order at once (and with which direction and finite setting) is not settled by the PRD. Today a planner presses "Schedule this order" (or starts a run). |
+
+Slice 23 builds operation maintenance and taking an order off the schedule
+(FR-23.4, FR-23.11). Until now an operation could only be created, so a wrong
+duration, due date or candidate list meant editing the database.
+`GET /v1/scheduling/operations/{id}` (ETag with the version),
+`PATCH /operations/{id}` (`minutes`, `dueAt`, `readyAt`, `priority`,
+`setupMinutes`, `resourceIds`; Idempotency-Key and If-Match, stale 412
+SCHED-0137, an unknown candidate 422 SCHED-0107, a candidate that is also a
+secondary 422 SCHED-0139) and `DELETE /operations/{id}` (If-Match; answers 200
+with `jobsRemoved`) take duty `scheduling.schedule.write`, the duty of
+`POST /operations`. Any change but the priority takes the operation's non-firmed
+jobs (and secondary bookings) off the schedule and opens it again
+(`jobsRemoved`); a priority change only orders the next run. An operation a
+firmed job holds cannot be changed or deleted (409 SCHED-0138); only its
+priority can. `POST /orders/{orderId}:unschedule` (no body, Idempotency-Key,
+same duty) removes the non-firmed jobs of every operation of the order and opens
+them again, keeps firmed operations and lists them (`keptFirmed`), 404
+SCHED-0135 for an order with no operations. Replays answer with the stored
+result, also after the operation is gone. Events through the outbox:
+`operation.updated`, `operation.deleted`, `order.unscheduled` (AsyncAPI
+documents all three). Migration `0017_operation_version.sql` adds `version`
+(default 1) and `updated_at` to `scheduling_operation` (no new table, the grants
+of 0001 apply); every operation read now carries `version`, and an order import
+that changes an operation moves its version too, so a planner's change based on
+the values before the import is refused as stale (412) instead of overwriting
+them. Web: an operation
+detail page (`/scheduling/operations/:id`, linked from the operations list)
+with the facts, a change form (stale-version message with a reload of the
+latest version), a confirmed delete and a confirmed "take the order off the
+schedule". Not built: clearing a due or ready date, changing the secondary
+resources, setup group, network or attributes of an existing operation (delete
+and create instead), and keeping a planner's change when the production order is
+imported again (the next `order.scheduled.v1` or `:reimport` of an operation
+registered from a production order overwrites the change, as a re-date does).
+The OpenAPI and AsyncAPI specs have no FAIL lines on the doc gates.
+
+| Item | Status | Reason |
+|---|---|---|
+| `policies/authz/data.json`: resource rows `/v1/scheduling/operations/*` GET under `scheduling.read`, PATCH and DELETE under `scheduling.schedule.write` | handoff - main session (authz seed) | Existing duties; only the route rows are new. Until seeded the gateway answers 403 for the operation detail page, its save and delete. |
+| `policies/authz/data.json`: resource row `/v1/scheduling/orders/*:unschedule` (POST) under `scheduling.schedule.write` | handoff - main session (authz seed) | Existing duty; only the route row is new. Until seeded the "Take the order off the schedule" button gets 403. The duty is Maintain schedule (like `:move`, `:firm` and `:reimport`, which also take jobs off the schedule), not Run scheduling of the per-order `:schedule`: placing an order is a run, removing its placements is schedule maintenance. Product decision open for Ben. |
+| Event `order.unscheduled` / `operation.updated` consumers (production dates cleared when an order is taken off the schedule) | handoff - wave 21 | Production keeps the dates of the last `job.scheduled` / `orderdates.changed` until it reads these events; nothing in this wave clears them. The outbox aggregate types are the new `operation` and `order`; deploy/kafka has no scheduling outbox connector yet, so the topics `passage.scheduling.operation` and `passage.scheduling.order` follow whenever that connector is added (deploy owner). |
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
@@ -611,7 +665,7 @@ from slices 16 to 20 lie outside it:
 | AC-23.3 sales line delay in the move preview | handoff — wave 27 (sales lines) and wave 22 (pegging to demand) | Pegs link orders to orders; the preview lists every pegged order with its old and new dates, but sales lines are not pegged here. |
 | Schedule runs honouring pegs (a dependent placed no earlier than its parent ends) | built (slice 11) | `domain.Schedule` places parents first (`pegPlan`) and floors the dependent's first operation at the parents' last end (`pegFloor`; `store.pegsForRun` loads pegs and the ends of parents outside the run); an unplaced parent (in the run, or outside it with an operation stored as unplaced) leaves the dependent unplaced. Not yet: a peg-forced delay is not reported as a warning; `:move` without propagate still ignores pegs; a selection run that moves a parent later does not push its dependents outside the selection (run them too, or the site); a parent outside the run that was never scheduled sets no floor; a backward run schedules a parent against its own due date, not back from its dependent's start. |
 | PRD 4.23.17 limit of 100 orders in the propagation preview | later slice of PSG-23 | The preview walks the same 500 orders / 5 levels as the commit, so what is previewed is what is saved. |
-| FR-23.11 runs as Temporal jobs with checkpoints every 500 operations; nightly site run at 00:30; per-order `:schedule` (scope `order`) | later slice of PSG-23 | Runs execute synchronously inside one transaction (5,000 operations schedule in well under the 60 s budget in the domain test). |
+| FR-23.11 runs as Temporal jobs with checkpoints every 500 operations; nightly site run at 00:30 | later slice of PSG-23 (per-order `:schedule` is built, slice 22) | Runs execute synchronously inside one transaction (5,000 operations schedule in well under the 60 s budget in the domain test). |
 | Sites: `siteId` on resources, runs and the Gantt query | handoff — wave 9 (sites on resources) | Slice 1 schedules every resource of the tenant as one plant. |
 | Late orders inquiry (4.23.14) | built (slice 17) | `GET /late-orders` and the Late orders page: late and unplaced orders with due, planned end, lateness. Item and quantity per order are not shown. |
 | Order header data on bars and late orders (item, quantity) | handoff — wave 21 | Bars and late orders carry the order id, operation counts and dates only. |

@@ -262,11 +262,27 @@ export interface OpenOrdersRunRequest {
   records: OpenOrderRecord[];
 }
 
-/** A correction to a quarantined open item (FR-49.11). Blank fields keep the extracted value. */
+/**
+ * A correction to a quarantined open item, bank balance or on-hand line (FR-49.11). Blank fields keep
+ * the extracted value; each pack takes its own fields (open_items: party, account; bank_balances:
+ * bankAccount; onhand: item, site, warehouse, location, batch, unit).
+ */
 export interface ReleaseRequest {
   party?: string;
   account?: string;
-  /** Party ids added to master data since the run. */
+  bankAccount?: string;
+  item?: string;
+  site?: string;
+  warehouse?: string;
+  location?: string;
+  batch?: string;
+  unit?: string;
+  /** Corrected delivery date (ISO) of an open_orders line; party, item and unit also correct one. */
+  deliveryDate?: string;
+  /** Customer and vendor ids added since an open_orders run. */
+  customers?: string[];
+  vendors?: string[];
+  /** Master-data ids added since the run: parties, bank accounts or items (also of open_orders), by pack. */
   parties?: string[];
   version?: number;
 }

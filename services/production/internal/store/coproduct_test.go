@@ -310,3 +310,97 @@ func TestCoProducts_StartedSplitKeepsReceiptsAndWIP(t *testing.T) {
 		}
 	}
 }
+
+// FR-21.14 with FR-21.18: co-products are added, changed and removed on the order, planned
+// quantities follow, the edits are audited and published; a line a journal names keeps its item
+// and type and cannot be removed.
+func TestCoProducts_EditedOnTheOrder(t *testing.T) {
+	pool, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(93))
+	in := coProductOrder(t, "key-co-edit")
+	allProfile(t, s, ctx, in.LegalEntityID)
+	o, _, err := s.CreateOrder(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := &stepper{t: t, s: s, ctx: ctx, orderID: o.ID, version: o.Version}
+
+	scrap := ids.New()
+	edited, err := st.edit(domain.OrderEdits{CoProducts: []domain.CoProductEdit{
+		{Op: domain.EditAdd, LineNo: "C2", Type: ptrTo(domain.CoProductTypeBy), ItemID: &scrap, QtyPer: qty("0.05")},
+		{Op: domain.EditChange, LineNo: "C1", QtyPer: qty("0.3")},
+	}}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edited.CoProducts) != 2 || !edited.CoProducts[0].QtyPlanned.Equal(d("30")) || edited.CoProducts[1].Type != domain.CoProductTypeBy ||
+		!edited.CoProducts[1].QtyPlanned.Equal(d("5")) || !edited.OrderBOMModified || edited.Version != o.Version+1 {
+		t.Fatalf("after the edit: %+v", edited)
+	}
+	entries, err := s.OrderEdits(ctx, o.ID)
+	if err != nil || len(entries) != 2 || entries[0].Target != domain.TargetCoProduct || string(entries[0].Before) != "null" || string(entries[1].Before) == "null" {
+		t.Fatalf("audit trail: %v %+v", err, entries)
+	}
+	if evts := bomEditedEvents(t, pool, o.ID); len(evts) != 1 || len(evts[0].Edits) != 2 || evts[0].Edits[0].Target != "coproduct" {
+		t.Fatalf("event: %+v", evts)
+	}
+
+	if _, err = st.edit(domain.OrderEdits{CoProducts: []domain.CoProductEdit{{Op: domain.EditRemove, LineNo: "C2"}}}, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.refresh(); len(got.CoProducts) != 1 || got.CoProducts[0].LineNo != "C1" {
+		t.Fatalf("after the removal: %+v", got.CoProducts)
+	}
+	_, err = st.edit(domain.OrderEdits{CoProducts: []domain.CoProductEdit{{Op: domain.EditRemove, LineNo: "C2"}}}, false)
+	expectProblem(t, err, 422, domain.CodeEditTargetMissing)
+	// As at creation, a line never yields the order's own product.
+	_, err = st.edit(domain.OrderEdits{CoProducts: []domain.CoProductEdit{{Op: domain.EditChange, LineNo: "C1", ItemID: &in.ProductID}}}, false)
+	expectProblem(t, err, 422, domain.CodeInvalidInput)
+
+	// A line a posted report names: the item and type stay, the quantity still follows.
+	st.must(domain.CmdEstimate, nil)
+	st.must(domain.CmdSchedule, nil)
+	st.must(domain.CmdRelease, nil)
+	st.must(domain.CmdStart, nil)
+	_, err = st.edit(domain.OrderEdits{CoProducts: []domain.CoProductEdit{{Op: domain.EditChange, LineNo: "C1", QtyPer: qty("0.1")}}}, true)
+	expectProblem(t, err, 409, domain.CodeEditNotAllowed)
+	st.mustPost(st.mustJournal(NewJournal{Type: domain.JournalPickingList}).ID)
+	st.mustPost(st.mustJournal(NewJournal{Type: domain.JournalRouteCard}).ID)
+	st.mustPost(st.mustJournal(NewJournal{Type: domain.JournalReportFinished, QtyGood: d("100"),
+		CoProducts: []CoProductInput{{LineNo: "C1", Qty: d("30")}}}).ID)
+	st.must(domain.CmdResetStatus, func(tr *Transition) { tr.ResetTo = domain.Released })
+	if got := st.refresh(); !got.CoProducts[0].QtyReported.IsZero() {
+		t.Fatalf("reported after the reset: %+v", got.CoProducts)
+	}
+	_, err = st.edit(domain.OrderEdits{CoProducts: []domain.CoProductEdit{{Op: domain.EditRemove, LineNo: "C1"}}}, true)
+	expectProblem(t, err, 409, domain.CodeEditTargetInUse)
+	_, err = st.edit(domain.OrderEdits{CoProducts: []domain.CoProductEdit{{Op: domain.EditChange, LineNo: "C1", ItemID: &scrap}}}, true)
+	expectProblem(t, err, 409, domain.CodeEditTargetInUse)
+	_, err = st.edit(domain.OrderEdits{CoProducts: []domain.CoProductEdit{{Op: domain.EditChange, LineNo: "C1", QtyPer: qty("0.1")}}}, false)
+	expectProblem(t, err, 403, CodeEditAfterRelease)
+	dated := len(scheduledEvents(t, pool, o.ID))
+	got, err := st.edit(domain.OrderEdits{CoProducts: []domain.CoProductEdit{{Op: domain.EditChange, LineNo: "C1", QtyPer: qty("0.1")}}}, true)
+	if err != nil || !got.CoProducts[0].QtyPlanned.Equal(d("10")) {
+		t.Fatalf("quantity change on a journaled line: %v %+v", err, got.CoProducts)
+	}
+	// Co-product edits alone leave the route: the dated order is not re-dated.
+	if n := len(scheduledEvents(t, pool, o.ID)); dated == 0 || n != dated {
+		t.Fatalf("a co-product edit re-dated the order: %d scheduled events before, %d after", dated, n)
+	}
+}
+
+// A rework order yields no co-products (FR-21.20), so an edit cannot add one.
+func TestCoProducts_ReworkOrderTakesNone(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(94))
+	in := sampleOrder(t, "key-co-rework", ids.New())
+	in.OriginType, in.ReworkReference = domain.OriginRework, &domain.ReworkRef{Type: domain.ReworkRefBatch, ID: "B-2026-11"}
+	o, _, err := s.CreateOrder(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scrap := ids.New()
+	_, err = s.EditOrder(ctx, OrderEdit{OrderID: o.ID, IfMatch: o.Version, Actor: "planner", Edits: domain.OrderEdits{CoProducts: []domain.CoProductEdit{
+		{Op: domain.EditAdd, LineNo: "C1", ItemID: &scrap, QtyPer: qty("0.1")}}}})
+	expectProblem(t, err, 422, domain.CodeInvalidInput)
+}

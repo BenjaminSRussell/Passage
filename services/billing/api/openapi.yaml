@@ -295,6 +295,91 @@ paths:
           $ref: "#/components/responses/Problem"
         "503":
           $ref: "#/components/responses/Problem"
+  /v1/billing/gl-postings:
+    post:
+      operationId: postGL
+      summary: Book the invoice journal (FR-29.3) of posted invoices and credit notes in the general ledger.
+      x-passage-duty: billing.invoice.post (InvoicePost)
+      description: >
+        Books one balanced entry per posted invoice not yet booked: Dr receivable
+        (billed gross), Cr revenue per line account, Cr 2400, Cr charges, Cr tax. The invoice
+        lines, the receivable and the tax keep the contractual price; the split of the
+        lines between revenue and 2400 is the revrec allocation of the order's contract
+        (ASC 606, BR-29.1), read at posting time: the lines of a product share its allocated
+        amount, and the part that is not a POINT_IN_TIME obligation goes to 2400. An invoice
+        with a line on a deferred revenue account of the entity's GL posting profile
+        (`BILLING_GL_PROFILES`) is not booked while revrec has no unique contract for its
+        order or does not answer: it is listed under `failed` with BIL-0207 and backed off,
+        never booked at its billed amounts and never parked for it. The allocated amounts
+        must add up to the billed nets, because the PRD names no contract asset or liability
+        account for a difference: otherwise (or for a deferred line the allocation does not
+        cover) the document is parked with BIL-0208. A credit note books the mirror entry in
+        the proportions of its original. Ledger, accounts and amounts come
+        from the profile, the stored document and revrec, never from the request; the ledger key
+        (`billing-invoice-<id>`, `billing-credit-note-<id>`) makes a retry return the same
+        entry. A document the ledger refuses is listed under `failed`, retried later with
+        backoff and parked with its reason code after five refusals (`retryParked` offers
+        parked documents again); it never holds up the documents behind it. A credit note
+        is held until its original has its entry and is parked with BIL-0206 while the
+        original is parked. A ledger failure without a verdict (502 BIL-0201) is recorded
+        on the document with a backoff but does not count toward parking, so one document that
+        always fails is skipped by the next call and an outage never parks it. At most 200
+        documents per call; `more` says that due documents remain. 503 BIL-0200 without
+        `LEDGER_URL`, 422 BIL-0202 for an entity with no profile, 422 BIL-0203 when the
+        profile's ledger belongs to another entity, 502 BIL-0201 when the ledger does not
+        answer (`errors.booked` lists the documents booked before the failure).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                retryParked: { type: boolean }
+      responses:
+        "200":
+          description: The entries booked by this call and the documents the ledger refused.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        documentId: { type: string, format: uuid }
+                        number: { type: string }
+                        kind: { type: string, enum: [invoice, credit_note] }
+                        currency: { type: string }
+                        postingDate: { type: string, format: date }
+                        amount: { type: string }
+                        journalEntryId: { type: string }
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        documentId: { type: string, format: uuid }
+                        number: { type: string }
+                        ledgerCode: { type: string }
+                        parked: { type: boolean }
+                  more: { type: boolean }
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "502":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
   /v1/billing/credit-notes:
     post:
       operationId: createCreditNote

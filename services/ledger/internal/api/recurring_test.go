@@ -106,6 +106,11 @@ func TestPutRecurring_Validation(t *testing.T) {
 		{"fixed over scale", `{` + head + line("fixed", "1.005") + `}`, "lines[0].amount.value"},
 		{"unknown kind", `{` + head + line("ratio", "1") + `}`, "lines[0].amountKind"},
 		{"no lines", `{` + head + `"lines":[]}`, "lines"},
+		{"quantity without unit", `{` + head + `"lines":[{"account":"6100","debitCredit":"D","amountKind":"fixed","amount":{"currency":"EUR","value":"0"},"quantity":"5"}]}`, "lines[0].unit"},
+		{"unit without quantity", `{` + head + `"lines":[{"account":"6100","debitCredit":"D","amountKind":"fixed","amount":{"currency":"EUR","value":"0"},"unit":"KG"}]}`, "lines[0].unit"},
+		{"negative quantity", `{` + head + `"lines":[{"account":"6100","debitCredit":"D","amountKind":"fixed","amount":{"currency":"EUR","value":"0"},"quantity":"-1","unit":"KG"}]}`, "lines[0].quantity"},
+		{"quantity decimals", `{` + head + `"lines":[{"account":"6100","debitCredit":"D","amountKind":"fixed","amount":{"currency":"EUR","value":"0"},"quantity":"1.0000001","unit":"KG"}]}`, "lines[0].quantity"},
+		{"lowercase unit", `{` + head + `"lines":[{"account":"6100","debitCredit":"D","amountKind":"fixed","amount":{"currency":"EUR","value":"0"},"quantity":"1","unit":"kg"}]}`, "lines[0].unit"},
 		{"bad base", `{` + head + `"baseAmount":"-5",` + line("fixed", "1") + `}`, "baseAmount"},
 	}
 	for _, tc := range tests {
@@ -188,5 +193,21 @@ func TestRecurring_PauseResumeGenerateAndReads(t *testing.T) {
 	}
 	if rec := call(h, http.MethodGet, "/v1/ledger/recurring-journals/nope", "", dutyRead, nil); rec.Code != http.StatusNotFound {
 		t.Fatalf("bad id %d", rec.Code)
+	}
+}
+
+func TestPutRecurring_PassesAStatisticalQuantityToTheStore(t *testing.T) {
+	fs := &fakeStore{}
+	body := `{"ledgerId":"` + testLedgerID + `","journalName":"GJ","name":"x","frequency":"monthly","dayOfMonth":5,"startDate":"2026-04-01",` +
+		`"lines":[{"account":"6100","debitCredit":"D","amountKind":"fixed","amount":{"currency":"EUR","value":"0"},"quantity":"12.5","unit":"KG"}]}`
+	rec := call(server(fs), http.MethodPut, "/v1/ledger/recurring-journals/"+testRecurring, body, dutyJournalWrite, nil)
+	if rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(fs.rec.put) != 1 {
+		t.Fatalf("writes %d", len(fs.rec.put))
+	}
+	if l := fs.rec.put[0].Lines[0]; l.Quantity != "12.500000" || l.Unit != "KG" {
+		t.Fatalf("line sent to the store: %+v", l)
 	}
 }

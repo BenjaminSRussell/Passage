@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -63,13 +62,8 @@ func (s *Postgres) DrillLines(ctx context.Context, runID, row, column string, q 
 		if err != nil {
 			return err
 		}
-		var body []byte
-		if err := tx.QueryRow(ctx, `select body from report_definition where code=$1 and version=$2`,
-			run.DefinitionCode, run.DefinitionVersion).Scan(&body); err != nil {
-			return fmt.Errorf("definition %s v%d of run %s: %w", run.DefinitionCode, run.DefinitionVersion, runID, err)
-		}
-		var def domain.Definition
-		if err := json.Unmarshal(body, &def); err != nil {
+		def, err := runDefinitionTx(ctx, tx, run)
+		if err != nil {
 			return err
 		}
 		cell, err := scanCell(tx.QueryRow(ctx, `select row_code, column_code, value::text, blank, computed, note, balance_keys::text

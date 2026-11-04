@@ -62,6 +62,14 @@ func (f *fakeStore) ReverseJournal(_ context.Context, id string, postingDate tim
 		PostingDate: postingDate, Currency: "USD"}, !f.reverseReplay, nil
 }
 
+func (f *fakeStore) CopyJournal(_ context.Context, sourceID string, postingDate time.Time, key string, mayOwnershipChange bool) (domain.Journal, bool, error) {
+	if f.err != nil {
+		return domain.Journal{}, false, f.err
+	}
+	f.copySource, f.copyDate, f.copyKey, f.copyConsignment = sourceID, postingDate, key, mayOwnershipChange
+	return domain.Journal{ID: ids.New(), Type: domain.JournalMovement, Status: domain.JournalDraft, Version: 1, PostingDate: postingDate, Currency: "USD"}, !f.copyReplay, nil
+}
+
 func (f *fakeStore) RebuildOnHand(_ context.Context, repair bool) (store.RebuildReport, error) {
 	f.repair = repair
 	return store.RebuildReport{Checked: 3, DiffCount: 1, Repaired: repair,
@@ -309,5 +317,44 @@ func TestRebuildNeedsAdminDutyAndReportsDiffs(t *testing.T) {
 	}
 	if body.Checked != 3 || body.DiffCount != 1 || !body.Repaired || len(body.Diffs) != 1 || body.Diffs[0].Fields[0] != "posted_value" || body.Diffs[0].LegalEntityID == "" {
 		t.Fatalf("body = %+v", body)
+	}
+}
+
+func TestCopyJournalNeedsKeyAndValidDateAndReplays(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(t, fs)
+	id := ids.New()
+	path := "/v1/inventory/journals/" + id + ":copy"
+	duties := []string{"inventory.journal.write"}
+	if rec := do(t, h, http.MethodPost, path, `{}`, []string{"inventory.read"}, map[string]string{"Idempotency-Key": "k1"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("read-only duty: status %d, want 403", rec.Code)
+	}
+	if rec := do(t, h, http.MethodPost, path, `{}`, duties, nil); rec.Code != http.StatusBadRequest || decodeProblem(t, rec).Errors["Idempotency-Key"] == "" {
+		t.Fatalf("no key: status %d, want 400 on Idempotency-Key", rec.Code)
+	}
+	if rec := do(t, h, http.MethodPost, path, `{"postingDate":"30-09-2026"}`, duties, map[string]string{"Idempotency-Key": "k1"}); rec.Code != http.StatusBadRequest || decodeProblem(t, rec).Errors["postingDate"] == "" {
+		t.Fatalf("bad date: status %d, want 400 on postingDate", rec.Code)
+	}
+	rec := do(t, h, http.MethodPost, path, `{"postingDate":"2026-10-05"}`, duties, map[string]string{"Idempotency-Key": "k1"})
+	if rec.Code != http.StatusCreated || fs.copySource != id || fs.copyKey != "k1" || fs.copyDate.Format("2006-01-02") != "2026-10-05" || fs.copyConsignment {
+		t.Fatalf("copy: status %d source %s key %s date %s consignment %v", rec.Code, fs.copySource, fs.copyKey, fs.copyDate, fs.copyConsignment)
+	}
+	// The consignment duty travels to the store, which needs it for an OWNERSHIP_CHANGE source.
+	rec = do(t, h, http.MethodPost, path, `{}`, []string{"inventory.journal.write", "inventory.consignment.write"}, map[string]string{"Idempotency-Key": "k4"})
+	if rec.Code != http.StatusCreated || !fs.copyConsignment {
+		t.Fatalf("copy with consignment duty: status %d consignment %v", rec.Code, fs.copyConsignment)
+	}
+	rec = do(t, h, http.MethodPost, path, `{}`, duties, map[string]string{"Idempotency-Key": "k2"})
+	if rec.Code != http.StatusCreated || !fs.copyDate.IsZero() {
+		t.Fatalf("no date keeps the source date: status %d date %s", rec.Code, fs.copyDate)
+	}
+	fs.copyReplay = true
+	rec = do(t, h, http.MethodPost, path, `{}`, duties, map[string]string{"Idempotency-Key": "k1"})
+	if rec.Code != http.StatusOK || rec.Header().Get("Idempotent-Replayed") != "true" {
+		t.Fatalf("replay: status %d headers %v", rec.Code, rec.Header())
+	}
+	fs.err = httpx.NewProblem(http.StatusConflict, domain.CodeJournalNotReady, "a reversal cannot be copied")
+	if rec := do(t, h, http.MethodPost, path, `{}`, duties, map[string]string{"Idempotency-Key": "k3"}); rec.Code != http.StatusConflict {
+		t.Fatalf("uncopyable source: status %d, want 409", rec.Code)
 	}
 }

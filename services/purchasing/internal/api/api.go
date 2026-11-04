@@ -123,9 +123,12 @@ type API struct {
 	catalogImportsStaged    atomic.Int64
 	catalogImportsCommitted atomic.Int64
 
-	categoryVendorsSaved atomic.Int64
-	chargeCodesSaved     atomic.Int64
-	autoChargesSaved     atomic.Int64
+	categoryVendorsSaved   atomic.Int64
+	chargeCodesSaved       atomic.Int64
+	serviceSpecsSaved      atomic.Int64
+	serviceLimitChecks     atomic.Int64
+	modelServiceSpecsSaved atomic.Int64
+	autoChargesSaved       atomic.Int64
 }
 
 // New returns the API over s using the default approval policy (FR-17.2) and
@@ -258,6 +261,8 @@ func (a *API) Register(r chi.Router) {
 		a.registerCategoryRoutes(r)
 		// Charge codes and auto charges (FR-17.9).
 		a.registerChargeRoutes(r)
+		// Service lines and model service specifications (FR-17.23).
+		a.registerServiceRoutes(r)
 		// Signing limits and their requests (FR-17.17).
 		a.registerSigningRoutes(r)
 	})
@@ -301,6 +306,9 @@ func (a *API) Metrics() http.Handler {
 			{"purchasing_catalog_imports_committed_total", "Vendor catalog imports committed to a catalog.", a.catalogImportsCommitted.Load()},
 			{"purchasing_category_vendor_assignments_saved_total", "Category vendor assignments created or changed.", a.categoryVendorsSaved.Load()},
 			{"purchasing_charge_codes_saved_total", "Charge codes created or changed.", a.chargeCodesSaved.Load()},
+			{"purchasing_service_specs_saved_total", "Service line specifications written by PUT.", a.serviceSpecsSaved.Load()},
+			{"purchasing_service_limit_checks_total", "Unplanned service limit checks answered (BR-17.19), allowed or refused.", a.serviceLimitChecks.Load()},
+			{"purchasing_model_service_specs_saved_total", "Model service specifications created or changed.", a.modelServiceSpecsSaved.Load()},
 			{"purchasing_auto_charges_saved_total", "Auto charges created or changed.", a.autoChargesSaved.Load()},
 		} {
 			fmt.Fprintf(w, "# HELP %[1]s %[2]s\n# TYPE %[1]s counter\n%[1]s %[3]d\n", c.name, c.help, c.value)

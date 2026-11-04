@@ -162,9 +162,10 @@ export function ProjectsPage() {
   );
 }
 
-const CRON_HINT = "Five fields, for example 0 2 * * *, at least 15 minutes apart. Stored for recurring incremental imports; nothing runs it yet.";
+const CRON_HINT = "Five fields, for example 0 2 * * *, at least 15 minutes apart. Read in the time zone below.";
+const ZONE_HINT = "IANA name such as Europe/Berlin or America/Chicago; empty is UTC. A time that does not exist on a daylight-saving day runs once.";
 
-const EMPTY_FORM: ProjectForm = { name: "", projectType: "copy", sourceSystem: "", sourceLegalEntityId: "", targetLegalEntityId: "", cutoverAt: "", scheduleCron: "" };
+const EMPTY_FORM: ProjectForm = { name: "", projectType: "copy", sourceSystem: "", sourceLegalEntityId: "", targetLegalEntityId: "", cutoverAt: "", scheduleCron: "", scheduleTimezone: "" };
 
 /** Create a project. Its type, source system and legal entities cannot be changed afterwards. */
 export function NewProjectPage() {
@@ -260,6 +261,9 @@ export function NewProjectPage() {
           </FormField>
           <FormField id="project-cron" label="Schedule (cron, optional)" error={errors.scheduleCron} hint={CRON_HINT}>
             {(control) => <Input {...control} value={form.scheduleCron} invalid={Boolean(errors.scheduleCron)} onChange={(event) => change("scheduleCron", event.target.value)} />}
+          </FormField>
+          <FormField id="project-timezone" label="Time zone of the cron (optional)" error={errors.scheduleTimezone} hint={ZONE_HINT}>
+            {(control) => <Input {...control} value={form.scheduleTimezone} invalid={Boolean(errors.scheduleTimezone)} onChange={(event) => change("scheduleTimezone", event.target.value)} />}
           </FormField>
           {failure ? (
             <div className={styles.formActions}>
@@ -418,7 +422,7 @@ function DetailsCard({ project, canEdit, onSaved }: { project: MigrationProject;
   const [busy, setBusy] = useState(false);
 
   function open() {
-    setForm({ name: project.name, cutoverAt: cutoverInput(project.cutoverAt), scheduleCron: project.scheduleCron ?? "" });
+    setForm({ name: project.name, cutoverAt: cutoverInput(project.cutoverAt), scheduleCron: project.scheduleCron ?? "", scheduleTimezone: project.scheduleTimezone ?? "" });
     setErrors({});
     setFailure(null);
   }
@@ -461,6 +465,9 @@ function DetailsCard({ project, canEdit, onSaved }: { project: MigrationProject;
           <FormField id="edit-cron" label="Schedule (cron, optional)" error={errors.scheduleCron} hint={CRON_HINT}>
             {(control) => <Input {...control} value={form.scheduleCron} invalid={Boolean(errors.scheduleCron)} onChange={(event) => set("scheduleCron", event.target.value)} />}
           </FormField>
+          <FormField id="edit-timezone" label="Time zone of the cron (optional)" error={errors.scheduleTimezone} hint={ZONE_HINT}>
+            {(control) => <Input {...control} value={form.scheduleTimezone} invalid={Boolean(errors.scheduleTimezone)} onChange={(event) => set("scheduleTimezone", event.target.value)} />}
+          </FormField>
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the details" live="alert">
@@ -490,7 +497,7 @@ function DetailsCard({ project, canEdit, onSaved }: { project: MigrationProject;
           </Entry>
         ) : null}
         <Entry term="Cutover">{project.cutoverAt ? formatDateTime(project.cutoverAt) : "Not set"}</Entry>
-        <Entry term="Schedule">{project.scheduleCron ? <span className={styles.mono}>{project.scheduleCron}</span> : "Not scheduled"}</Entry>
+        <Entry term="Schedule">{project.scheduleCron ? <><span className={styles.mono}>{project.scheduleCron}</span> in {project.scheduleTimezone || "UTC"}</> : "Not scheduled"}</Entry>
         <Entry term="Version">{project.version}</Entry>
       </dl>
     </Card>

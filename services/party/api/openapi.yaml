@@ -214,6 +214,52 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: PTY-PARTY-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/party/vendor-groups:
+    post:
+      operationId: createVendorGroup
+      summary: Register a vendor group with its short code
+      x-passage-duty: party.write
+      description: Registers a vendor group of the tenant. The code (uppercase A-Z, 0-9, dash, underscore, at most 10 characters) is unique per tenant and is posted as the VENDGRP ledger dimension value on the vendor-control credit; it cannot be changed afterwards. A replay with the same Idempotency-Key and body returns the original group and emits nothing; the same key with another body is 409 idempotency_key_reuse. 409 PTY-VENDOR-GROUP-EXISTS when the code (or the given id) is taken; 422 PTY-VENDOR-GROUP-INVALID for a bad field. Emits dev.passage.party.vendorgroup.created.v1. Vendor roles keep a plain vendorGroupId; a role whose group is not registered has no vendorGroupCode.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Makes a retry return the original group.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewVendorGroup' }
+      responses:
+        '201': { description: 'The vendor group, or the original on an idempotent replay.', content: { application/json: { schema: { $ref: '#/components/schemas/VendorGroup' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listVendorGroups
+      summary: List the tenant's vendor groups
+      x-passage-duty: party.read
+      description: Every vendor group of the tenant, ordered by code.
+      responses:
+        '200': { description: 'vendorGroups.', content: { application/json: { schema: { type: object, required: [vendorGroups], properties: { vendorGroups: { type: array, items: { $ref: '#/components/schemas/VendorGroup' } } } } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/party/vendor-groups/{id}:
+    parameters:
+      - { name: id, in: path, required: true, description: Vendor group id., schema: { type: string, format: uuid } }
+    get:
+      operationId: getVendorGroup
+      summary: Read one vendor group
+      x-passage-duty: party.read
+      description: The vendor group with its code.
+      responses:
+        '200': { description: The vendor group., content: { application/json: { schema: { $ref: '#/components/schemas/VendorGroup' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: 'PTY-VENDOR-GROUP-NOT-FOUND (unknown id or another tenant).', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/party/vendors/{id}:
     parameters:
       - { name: id, in: path, required: true, description: Vendor role id., schema: { type: string, format: uuid } }
@@ -425,6 +471,22 @@ paths:
               schema: { type: string }
 components:
   schemas:
+    NewVendorGroup:
+      type: object
+      additionalProperties: false
+      required: [code, name]
+      properties:
+        id: { type: string, format: uuid, description: "Optional. Registers the code for a vendor group id that vendor roles already carry (roles loaded before groups existed, or a backfill skipped by migration 0011); omitted, a new id is assigned. An id already registered is 409 PTY-VENDOR-GROUP-EXISTS." }
+        code: { type: string, pattern: '^[A-Z0-9_-]{1,10}$', description: "Unique per tenant; posted as the VENDGRP ledger dimension value." }
+        name: { type: string, maxLength: 100 }
+    VendorGroup:
+      type: object
+      required: [id, code, name, version]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, pattern: '^[A-Z0-9_-]{1,10}$' }
+        name: { type: string }
+        version: { type: integer }
     NewVendor:
       type: object
       additionalProperties: false
@@ -492,6 +554,7 @@ components:
         legalEntityId: { type: string, format: uuid }
         accountNumber: { type: string }
         vendorGroupId: { type: string, format: uuid }
+        vendorGroupCode: { type: string, description: "The short code of the vendor group; omitted when the group id is not a registered vendor group." }
         paymentTermId: { type: string, format: uuid }
         currencyCode: { type: string }
         blocked: { type: string, enum: [none, payment, all] }

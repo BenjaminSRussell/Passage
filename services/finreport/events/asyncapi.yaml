@@ -46,6 +46,8 @@ components:
   messages:
     StatementGenerated:
       name: dev.passage.reporting.statement.generated.v1
+      title: Statement generated
+      summary: A statement run completed and its cells and result hash were stored.
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -71,9 +73,12 @@ components:
                 size: {type: integer}
           parameters:
             type: object
+            description: Run parameters; always period, and hierarchy as CODE@version when the rows of the run are the nodes of a hierarchy
             additionalProperties: {type: string}
     DefinitionPublished:
       name: dev.passage.reporting.definition.published.v1
+      title: Definition published
+      summary: A report definition version was published.
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -85,6 +90,8 @@ components:
           diff_summary: {type: string}
     HierarchyUnassigned:
       name: dev.passage.reporting.hierarchy.unassigned.v1
+      title: Hierarchy member unassigned
+      summary: A published non-strict hierarchy left a member without a node.
       contentType: application/cloudevents+json
       payload:
         type: object

@@ -478,11 +478,25 @@ export interface Andon {
   id: string;
   resourceId: string;
   siteId: string | null;
-  kind: "downtime";
+  kind: AndonKind;
   severity: "info" | "warning" | "error";
   downtimeId: string | null;
+  /** The job whose failed check raised a quality-fail alert. */
+  jobId: string | null;
+  /** One line on what raised a scrap-rate or quality-fail alert. */
+  detail: string | null;
   startedAt: string;
 }
+
+/** One open alert per resource and kind (BR-25.10). */
+export type AndonKind = "downtime" | "scrap-rate" | "quality-fail";
+
+/**
+ * Clears a quality-fail alert with a reason: the shop floor supervisor's authority to override a
+ * failed check (FR-25.5). Enforced by the service; the andon sweep is the scheduler's job and has
+ * no page action.
+ */
+export const DUTY_CHECK_OVERRIDE = "shopfloor.check.override";
 
 export type OeeBucketSize = "5m" | "15m" | "60m";
 
@@ -529,6 +543,11 @@ export function listDowntimes(filter: { open?: boolean; resourceId?: string } = 
 /** Assigns a reason code; the andon for the downtime stays open until it clears. */
 export function codeDowntime(id: string, input: { reasonCode: string; category?: DowntimeCategory }, key: string = newKey()): Promise<Downtime> {
   return post<Downtime>(`/downtimes/${encodeURIComponent(id)}:code`, input, key);
+}
+
+/** Clears a quality-fail alert (SF-0162 unknown or cleared, SF-0163 another kind). Reuse one key per form. */
+export function clearAndon(id: string, reason: string, key: string = newKey()): Promise<Andon> {
+  return post<Andon>(`/andon/${encodeURIComponent(id)}:clear`, { reason }, key);
 }
 
 export function listAndon(filter: { siteId?: string } = {}, signal?: AbortSignal): Promise<Andon[]> {
@@ -719,7 +738,7 @@ export interface CurrentJob {
   jobId: string;
   bundleId: string | null;
   startedAt: string;
-  /** When production finished the job's operation while this start stays open (a bundled start); absent on a start the kiosk just made. */
+  /** When production finished the job's operation while this start stays open (a start dated before the finish but stored after it); absent on a start the kiosk just made. */
   productionFinishedAt?: string | null;
 }
 

@@ -4,6 +4,12 @@ import { ALL, describeProblem, listLegalEntities, type LegalEntity, type Problem
 const STORAGE_KEY = "passage.org.legalEntity";
 const ALL_SCOPE_DUTY = "org.switcher.all_scope";
 const REFERENCE_WRITE_DUTY = "org.reference.write";
+const LEGAL_ENTITY_WRITE_DUTY = "org.legal-entity.write";
+const FISCAL_CALENDAR_WRITE_DUTY = "org.fiscal-calendar.write";
+const OPERATING_UNIT_WRITE_DUTY = "org.operating-unit.write";
+// The org service refuses tenant-level writes (new legal entities, fiscal calendars and years, teams) unless the
+// caller also holds tenant.administer and carries no legal-entity claim (rejectScopedCaller in services/org).
+const TENANT_ADMIN_DUTY = "tenant.administer";
 const HIERARCHY_WRITE_DUTY = "org.hierarchy.write";
 const HIERARCHY_PUBLISH_DUTY = "org.hierarchy.publish";
 const HIERARCHY_BACKDATE_DUTY = "org.hierarchy.backdate";
@@ -14,6 +20,10 @@ export interface LegalEntityContextValue {
   setScope(scope: Scope): void;
   canAll: boolean;
   canWriteReference: boolean;
+  canWriteLegalEntity: boolean;
+  canWriteFiscalCalendar: boolean;
+  canWriteOperatingUnit: boolean;
+  canAdministerTenant: boolean;
   canWriteHierarchy: boolean;
   canPublishHierarchy: boolean;
   canBackdateHierarchy: boolean;
@@ -46,6 +56,10 @@ function writeStored(value: string | null): void {
 export function LegalEntityProvider({ duties, children }: { duties?: readonly string[]; children: ReactNode }) {
   const canAll = Array.isArray(duties) && duties.includes(ALL_SCOPE_DUTY);
   const canWriteReference = Array.isArray(duties) && duties.includes(REFERENCE_WRITE_DUTY);
+  const canWriteLegalEntity = Array.isArray(duties) && duties.includes(LEGAL_ENTITY_WRITE_DUTY);
+  const canWriteFiscalCalendar = Array.isArray(duties) && duties.includes(FISCAL_CALENDAR_WRITE_DUTY);
+  const canWriteOperatingUnit = Array.isArray(duties) && duties.includes(OPERATING_UNIT_WRITE_DUTY);
+  const canAdministerTenant = Array.isArray(duties) && duties.includes(TENANT_ADMIN_DUTY);
   const canWriteHierarchy = Array.isArray(duties) && duties.includes(HIERARCHY_WRITE_DUTY);
   const canPublishHierarchy = Array.isArray(duties) && duties.includes(HIERARCHY_PUBLISH_DUTY);
   const canBackdateHierarchy = Array.isArray(duties) && duties.includes(HIERARCHY_BACKDATE_DUTY);
@@ -93,8 +107,8 @@ export function LegalEntityProvider({ duties, children }: { duties?: readonly st
   );
 
   const value = useMemo(
-    () => ({ entities, scope, setScope, canAll, canWriteReference, canWriteHierarchy, canPublishHierarchy, canBackdateHierarchy, loading, error }),
-    [entities, scope, setScope, canAll, canWriteReference, canWriteHierarchy, canPublishHierarchy, canBackdateHierarchy, loading, error],
+    () => ({ entities, scope, setScope, canAll, canWriteReference, canWriteLegalEntity, canWriteFiscalCalendar, canWriteOperatingUnit, canAdministerTenant, canWriteHierarchy, canPublishHierarchy, canBackdateHierarchy, loading, error }),
+    [entities, scope, setScope, canAll, canWriteReference, canWriteLegalEntity, canWriteFiscalCalendar, canWriteOperatingUnit, canAdministerTenant, canWriteHierarchy, canPublishHierarchy, canBackdateHierarchy, loading, error],
   );
   return <LegalEntityContext.Provider value={value}>{children}</LegalEntityContext.Provider>;
 }

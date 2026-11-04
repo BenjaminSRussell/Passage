@@ -28,6 +28,9 @@ func (a *API) registerVendors(r chi.Router) {
 	r.With(authz.RequireAnyDuty(dutyWrite, dutyImport)).Post("/v1/party/parties/{id}/vendor", a.createVendor)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/parties/{id}/vendors", a.listPartyVendors)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/vendors/{id}", a.getVendor)
+	r.With(authz.RequireAnyDuty(dutyWrite, dutyImport)).Post("/v1/party/vendor-groups", a.createVendorGroup)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/vendor-groups", a.listVendorGroups)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/vendor-groups/{id}", a.getVendorGroup)
 	r.With(authz.RequireDuty(dutyBankWrite)).Post("/v1/party/vendors/{id}/bank-accounts", a.addBankAccount)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/vendors/{id}/bank-accounts", a.listBankAccounts(false))
 	r.With(auditReveal, authz.RequireDuty(dutyBankReveal)).Get("/v1/party/vendors/{id}/bank-accounts:reveal", a.listBankAccounts(true))
@@ -137,4 +140,54 @@ func (a *API) listBankAccounts(reveal bool) http.HandlerFunc {
 		}
 		httpx.JSON(w, http.StatusOK, map[string]any{"bankAccounts": accounts})
 	}
+}
+
+func (a *API) createVendorGroup(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	var req domain.NewVendorGroup
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	req = req.Clean()
+	if errs := req.Validate(); len(errs) > 0 {
+		p := httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeVendorGroupInvalid, "vendor group failed validation")
+		p.Errors = errs
+		httpx.Fail(w, r, p)
+		return
+	}
+	group, _, err := a.vendors.CreateVendorGroup(r.Context(), store.NewVendorGroupRequest{
+		In: req, Key: r.Header.Get(idempotencyKeyHeader), Hash: domain.RequestHash(req),
+	})
+	if err != nil {
+		failParty(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, group)
+}
+
+func (a *API) listVendorGroups(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	groups, err := a.vendors.ListVendorGroups(r.Context())
+	if err != nil {
+		failParty(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"vendorGroups": groups})
+}
+
+func (a *API) getVendorGroup(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	group, err := a.vendors.GetVendorGroup(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		failParty(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, group)
 }

@@ -92,22 +92,55 @@ func editOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, in OrderEdit, 
 		if err != nil {
 			return err
 		}
-		res, err := domain.ApplyOrderEdits(lines, ops, h.quantity, in.Edits, inUse)
-		if err != nil {
-			return domainProblem(err)
+		res := domain.EditResult{Lines: lines, Operations: ops}
+		if in.Edits.RouteCount() > 0 {
+			if res, err = domain.ApplyOrderEdits(lines, ops, h.quantity, in.Edits, inUse); err != nil {
+				return domainProblem(err)
+			}
+		}
+		var coAfter []domain.CoProduct
+		var coBefore []domain.CoProduct
+		if len(in.Edits.CoProducts) > 0 {
+			if h.rework() {
+				for _, c := range in.Edits.CoProducts {
+					if c.Op == domain.EditAdd {
+						return domainProblem(&domain.Error{Code: domain.CodeInvalidInput, Detail: "a rework order yields no co-products"})
+					}
+				}
+			}
+			if coBefore, err = loadCoProducts(ctx, tx, p.TenantID, in.OrderID); err != nil {
+				return err
+			}
+			journaled, err := journaledCoProducts(ctx, tx, p.TenantID, in.OrderID)
+			if err != nil {
+				return err
+			}
+			var audit []domain.EditAudit
+			if coAfter, audit, err = domain.ApplyCoProductEdits(coBefore, h.quantity, h.productID, in.Edits.CoProducts, journaled); err != nil {
+				return domainProblem(err)
+			}
+			res.Audit = append(res.Audit, audit...)
 		}
 		requested, err := requestedSubcontracts(ctx, tx, p.TenantID, in.OrderID)
 		if err != nil {
 			return err
 		}
-		if err := writeEditedLines(ctx, tx, p.TenantID, in.OrderID, lines, res.Lines); err != nil {
-			return err
+		if in.Edits.RouteCount() > 0 {
+			if err := writeEditedLines(ctx, tx, p.TenantID, in.OrderID, lines, res.Lines); err != nil {
+				return err
+			}
+			if err := writeEditedOperations(ctx, tx, p.TenantID, in.OrderID, ops, res.Operations); err != nil {
+				return err
+			}
 		}
-		if err := writeEditedOperations(ctx, tx, p.TenantID, in.OrderID, ops, res.Operations); err != nil {
-			return err
+		if len(in.Edits.CoProducts) > 0 {
+			if err := writeEditedCoProducts(ctx, tx, p.TenantID, in.OrderID, h.legalEntityID, coBefore, coAfter); err != nil {
+				return err
+			}
 		}
-		if h.status != domain.Created {
+		if h.status != domain.Created && in.Edits.RouteCount() > 0 {
 			// FR-21.18: planned cost is re-estimated after each edit (a Created order has no estimate yet).
+			// The estimate reads only the lines and operations, so co-product edits alone leave it as it is.
 			if err := replaceEstimate(ctx, tx, p.TenantID, in.OrderID); err != nil {
 				return err
 			}
@@ -148,8 +181,11 @@ func editOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, in OrderEdit, 
 			}
 		}
 		// The route changed under a dated order: its jobs and windows follow (slice 18).
-		if err := redateOrder(ctx, tx, p.TenantID, in.OrderID, in.Actor); err != nil {
-			return err
+		// Co-product edits alone leave the route, so the order keeps its dates.
+		if in.Edits.RouteCount() > 0 {
+			if err := redateOrder(ctx, tx, p.TenantID, in.OrderID, in.Actor); err != nil {
+				return err
+			}
 		}
 		if out, err = loadOrder(ctx, tx, p.TenantID, in.OrderID); err != nil {
 			return err
@@ -284,6 +320,13 @@ func auditImages(a domain.EditAudit) (before, after []byte, err error) {
 		}
 		if a.LineAfter != nil {
 			f = a.LineAfter
+		}
+	case domain.TargetCoProduct:
+		if a.CoBefore != nil {
+			b = a.CoBefore
+		}
+		if a.CoAfter != nil {
+			f = a.CoAfter
 		}
 	default:
 		if a.OperBefore != nil {

@@ -38,6 +38,11 @@ type fakeStore struct {
 	preview         *store.ActivationInput
 	positions       []inventory.Position
 	versionType     string
+	versionLE       string
+	versionStatus   string
+	roll            *store.RollInput
+	attempts        []store.Attempt
+	resolve         *store.ResolveInput
 }
 
 func (f *fakeStore) ListComponents(context.Context) ([]store.Component, error) {
@@ -74,7 +79,11 @@ func (f *fakeStore) GetVersion(_ context.Context, id string) (store.Version, err
 	if kind == "" {
 		kind = domain.VersionStandard
 	}
-	return store.Version{ID: id, Type: kind, Status: domain.VersionOpen, Version: 1, SiteIDs: []string{}}, f.err
+	status := f.versionStatus
+	if status == "" {
+		status = domain.VersionOpen
+	}
+	return store.Version{ID: id, LegalEntityID: f.versionLE, Type: kind, Status: status, Version: 1, SiteIDs: []string{}}, f.err
 }
 
 func (f *fakeStore) CreateVersion(_ context.Context, spec domain.VersionSpec, key string) (store.Version, bool, error) {
@@ -115,6 +124,12 @@ func (f *fakeStore) ActivationPositions(context.Context, string) ([]inventory.Po
 	return f.positions, f.err
 }
 
+func (f *fakeStore) StoreRoll(_ context.Context, in store.RollInput) (store.RollResult, bool, error) {
+	f.calls++
+	f.roll = &in
+	return store.RollResult{VersionID: in.VersionID, SiteID: in.SiteID, ItemCount: len(in.Roots), StoredCount: len(in.Roots)}, f.replayed, f.err
+}
+
 func (f *fakeStore) GetPostingAccounts(context.Context, string) (store.PostingAccounts, error) {
 	f.calls++
 	return f.accounts, f.accountsErr
@@ -124,6 +139,17 @@ func (f *fakeStore) SetPostingAccounts(_ context.Context, in store.PostingAccoun
 	f.calls++
 	f.accounts = in
 	return in, f.err
+}
+
+func (f *fakeStore) ListActivationAttempts(context.Context) ([]store.Attempt, error) {
+	f.calls++
+	return f.attempts, f.err
+}
+
+func (f *fakeStore) ResolveActivationAttempt(_ context.Context, in store.ResolveInput) (store.ResolveResult, bool, error) {
+	f.calls++
+	f.resolve = &in
+	return store.ResolveResult{Outcome: in.Outcome}, f.replayed, f.err
 }
 
 func storedRouter(f *fakeStore) http.Handler {
@@ -145,6 +171,7 @@ func (c call) do(h http.Handler) *httptest.ResponseRecorder {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(tenant.HeaderTenant, testkit.TenantID(1))
 	req.Header.Set(tenant.HeaderDuties, c.duties)
+	req.Header.Set(tenant.HeaderUser, "cost.roller")
 	if c.key != "" {
 		req.Header.Set("Idempotency-Key", c.key)
 	}
@@ -189,6 +216,7 @@ func TestStoredRoutes_WithoutStoreAnswer503(t *testing.T) {
 		{http.MethodGet, "/v1/product-costing/versions/" + someID, "", view, "", ""},
 		{http.MethodPost, "/v1/product-costing/versions/" + someID + "/transition", `{"action":"block","version":1}`, maintain, "", ""},
 		{http.MethodPost, "/v1/product-costing/versions/" + someID + "/activate", `{"version":1}`, activate, "", ""},
+		{http.MethodPost, "/v1/product-costing/versions/" + someID + "/roll", `{}`, "CostingCalculate", "k", ""},
 	} {
 		rec := c.do(h)
 		if code, _ := problemCode(t, rec); rec.Code != http.StatusServiceUnavailable || code != codeStoreUnavailable {

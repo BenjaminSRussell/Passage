@@ -206,6 +206,8 @@ describe("Andon board", () => {
     kind: "downtime",
     severity: "warning",
     downtimeId: DOWN,
+    jobId: null,
+    detail: null,
     startedAt: "2026-10-21T08:10:00Z",
   };
 

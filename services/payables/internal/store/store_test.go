@@ -321,6 +321,12 @@ func TestVendorGroup_StoredAggregatedAndBackfilledOnReplay(t *testing.T) {
 	mk := func(source, vendor, group, amt string) OpenItem {
 		in := invoice(leA, vendor, source, "2027-03-31")
 		in.VendorGroupID = group
+		switch group {
+		case groupA:
+			in.VendorGroupCode = "GRPA"
+		case groupB:
+			in.VendorGroupCode = "GRPB"
+		}
 		in.Amount = decimal.RequireFromString(amt)
 		o, _, err := s.CreateFromInvoice(ctx, in)
 		if err != nil {
@@ -341,10 +347,10 @@ func TestVendorGroup_StoredAggregatedAndBackfilledOnReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := map[string]string{}
-	for _, g := range domain.GroupBreakdown(rows) {
-		got[g.VendorGroupID] = g.SubledgerTotal.String()
+	for _, g := range domain.ReconcileGroups(rows, "USD", nil, "no ledger") {
+		got[g.VendorGroupCode] = g.SubledgerTotal.String()
 	}
-	if want := map[string]string{groupA: "300.3", groupB: "7.07", domain.UnassignedGroup: "50"}; fmt.Sprint(got) != fmt.Sprint(want) {
+	if want := map[string]string{"GRPA": "300.3", "GRPB": "7.07", domain.UnassignedGroup: "50"}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("breakdown = %v, want %v", got, want)
 	}
 
@@ -373,8 +379,47 @@ func TestVendorGroup_AggregationIsolatedByTenantAndEntity(t *testing.T) {
 		le  string
 	}{"other tenant": {ctxFor(2, leA), leA}, "scope excludes entity": {ctxFor(1, leB), leA}} {
 		rows, err := s.AgingRows(c.ctx, c.le, "2027-06-30")
-		if err != nil || len(domain.GroupBreakdown(rows)) != 0 {
+		if err != nil || len(rows) != 0 {
 			t.Fatalf("%s: rows=%v err=%v, want none", name, rows, err)
 		}
+	}
+}
+
+func TestVendorGroupCode_StoredFilledOnReplayAndReadForARun(t *testing.T) {
+	s := setup(t)
+	ctx := ctxFor(1, leA)
+	in := invoice(leA, vendor1, src1, "2027-03-31")
+	in.VendorGroupID, in.VendorGroupCode = groupA, "DOM"
+	created, _, err := s.CreateFromInvoice(ctx, in)
+	if err != nil || created.VendorGroupCode != "DOM" {
+		t.Fatalf("create = %+v, %v", created, err)
+	}
+	// An item consumed before the code existed: the group id is set, the code is not.
+	old := invoice(leA, vendor2, src2, "2027-03-31")
+	old.VendorGroupID = groupB
+	legacy, _, err := s.CreateFromInvoice(ctx, old)
+	if err != nil || legacy.VendorGroupCode != "" {
+		t.Fatalf("legacy = %+v, %v", legacy, err)
+	}
+	old.VendorGroupCode = "IMP"
+	filled, isNew, err := s.CreateFromInvoice(ctx, old)
+	if err != nil || isNew || filled.VendorGroupCode != "IMP" || filled.VendorGroupID != groupB {
+		t.Fatalf("a redelivery fills the missing code: %+v new=%v err=%v", filled, isNew, err)
+	}
+	old.VendorGroupCode = "OTHER"
+	kept, _, err := s.CreateFromInvoice(ctx, old)
+	if err != nil || kept.VendorGroupCode != "IMP" {
+		t.Fatalf("an assigned code must not be overwritten: %+v err=%v", kept, err)
+	}
+	rows, err := s.AgingRows(ctx, leA, "2027-06-30")
+	if err != nil {
+		t.Fatal(err)
+	}
+	codes := map[string]bool{}
+	for _, r := range rows {
+		codes[r.VendorGroupCode] = true
+	}
+	if !codes["DOM"] || !codes["IMP"] || len(codes) != 2 {
+		t.Fatalf("aging rows carry codes %v", codes)
 	}
 }

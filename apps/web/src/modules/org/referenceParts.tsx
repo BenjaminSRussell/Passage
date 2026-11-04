@@ -87,7 +87,7 @@ interface StatusActionProps {
   apply(next: ReferenceStatus): Promise<void>;
 }
 
-function StatusAction({ subject, status, apply }: StatusActionProps) {
+export function StatusAction({ subject, status, apply }: StatusActionProps) {
   const next: ReferenceStatus = status === "active" ? "inactive" : "active";
   const verb = next === "inactive" ? "Deactivate" : "Activate";
   const [confirming, setConfirming] = useState(false);

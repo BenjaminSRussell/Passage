@@ -59,6 +59,10 @@ func (f *fakeStore) CreateRun(_ context.Context, spec store.RunSpec) (store.Run,
 	return store.Run{ID: runUUID, Replayed: f.runReplayed}, f.runErr
 }
 
+func (f *fakeStore) RunDefinition(_ context.Context, id string) (domain.Definition, error) {
+	return domain.Definition{Code: "TB-STD", Name: "Trial balance by " + id}, nil
+}
+
 func (f *fakeStore) ListRuns(_ context.Context, def string, limit int) ([]store.Run, error) {
 	f.listDef, f.listLimit = def, limit
 	return []store.Run{{ID: runUUID, DefinitionCode: "BS-STD"}}, nil
@@ -172,6 +176,45 @@ func TestCreateRun(t *testing.T) {
 				t.Fatalf("spec passed to the store = %+v", f.runSpec)
 			}
 		})
+	}
+}
+
+func TestCreateRun_HierarchyOption(t *testing.T) {
+	key := map[string]string{"Idempotency-Key": "k1"}
+	f := &fakeStore{}
+	body := runBody(`hierarchy={"code":"ACCT-CAT","version":2,"normalBalance":"credit","accountFrom":"6000","accountTo":"6999"}`)
+	if w := call(router(f), http.MethodPost, "/v1/reporting/runs", body, key, DutyRun); w.Code != http.StatusCreated {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	want := store.HierarchyRun{Code: "ACCT-CAT", Version: 2, NormalBalance: "credit", AccountFrom: "6000", AccountTo: "6999"}
+	if f.runSpec.Hierarchy == nil || *f.runSpec.Hierarchy != want {
+		t.Fatalf("hierarchy passed to the store = %+v, want %+v", f.runSpec.Hierarchy, want)
+	}
+	for name, h := range map[string]string{
+		"no code":       `{"version":1}`,
+		"negative":      `{"code":"ACCT-CAT","version":-1}`,
+		"bad balance":   `{"code":"ACCT-CAT","normalBalance":"left"}`,
+		"unknown field": `{"code":"ACCT-CAT","asOf":"2026-01-01"}`,
+	} {
+		f := &fakeStore{}
+		w := call(router(f), http.MethodPost, "/v1/reporting/runs", runBody(`hierarchy=`+h), key, DutyRun)
+		if w.Code < 400 || w.Code >= 500 || f.runSpec != nil {
+			t.Errorf("%s: status %d, store reached %v; want a 4xx before the store", name, w.Code, f.runSpec != nil)
+		}
+	}
+}
+
+func TestRunDefinition(t *testing.T) {
+	r := router(&fakeStore{})
+	w := call(r, http.MethodGet, "/v1/reporting/runs/"+runUUID+"/definition", "", nil, DutyView)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Trial balance by "+runUUID) {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	if w := call(r, http.MethodGet, "/v1/reporting/runs/"+runUUID+"/definition", "", nil, DutyRun); w.Code != http.StatusForbidden {
+		t.Fatalf("without the view duty: status %d, want 403", w.Code)
+	}
+	if w := call(r, http.MethodGet, "/v1/reporting/runs/R1/definition", "", nil, DutyView); w.Code != http.StatusNotFound {
+		t.Fatalf("non-UUID id: status %d, want 404", w.Code)
 	}
 }
 

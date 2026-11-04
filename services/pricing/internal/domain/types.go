@@ -116,6 +116,8 @@ type Input struct {
 	// many resolves (NewRecordSet).
 	Set   *RecordSet
 	Steps []ConditionType
+	// Procedure, when it has steps, drives the resolution instead of Steps (FR-26.1).
+	Procedure *Procedure
 	// SmallOrderThreshold is the subtotal below which SURCHARGE applies. Zero disables it.
 	SmallOrderThreshold decimal.Decimal
 }

@@ -295,6 +295,14 @@ func (s *Postgres) ApplyStatusStep(ctx context.Context, in StatusStepInput) (Sta
 		if err := saveRow(ctx, tx, tp.TenantID, t.legalEntityID, r, 1); err != nil {
 			return err
 		}
+		r.seq++
+		// A receipt that stops being expected and becomes stock turns the reservations made
+		// against it into physical ones (FR-16.7).
+		if t.direction == domain.ReceiptDirection && domain.IsExpectedSupply(from) && !domain.IsExpectedSupply(to) {
+			if err := convertOrderedReservations(ctx, tx, tp.TenantID, t.legalEntityID, r, t.qty.Abs()); err != nil {
+				return err
+			}
+		}
 		if err := moveTransaction(ctx, tx, tp.TenantID, &t, from, to, date, posted); err != nil {
 			return err
 		}

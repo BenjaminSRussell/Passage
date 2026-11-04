@@ -1,0 +1,93 @@
+{{- define "hr.tenantJob" -}}
+{{- $root := .root -}}
+{{- $job := .job -}}
+{{- if $job.values.enabled }}
+{{- if not $job.values.tenantIds }}
+{{- fail (printf "%s.tenantIds must list at least one tenant UUID when %s.enabled is true" $job.key $job.key) }}
+{{- end }}
+{{- if and $job.signed (not $root.Values.serviceIdentity.signingKeySecret) }}
+{{- fail (printf "%s.enabled needs serviceIdentity.signingKeySecret: the legal hold check is a signed service call" $job.key) }}
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $root.Release.Name }}-passage-hr-{{ $job.command }}
+  labels:
+    app.kubernetes.io/name: passage-hr-{{ $job.command }}
+    app.kubernetes.io/instance: {{ $root.Release.Name }}
+spec:
+  schedule: {{ $job.values.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: passage-hr-{{ $job.command }}
+            app.kubernetes.io/instance: {{ $root.Release.Name }}
+        spec:
+          restartPolicy: Never
+          securityContext:
+            {{- toYaml $root.Values.podSecurityContext | nindent 12 }}
+          {{- if $job.signed }}
+          volumes:
+            - name: service-identity
+              secret:
+                secretName: {{ $root.Values.serviceIdentity.signingKeySecret }}
+                defaultMode: 0440
+          {{- end }}
+          containers:
+            - name: {{ $job.command }}
+              image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+              imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+              args:
+                - {{ $job.command }}
+                {{- range $job.values.tenantIds }}
+                - {{ . | quote }}
+                {{- end }}
+              securityContext:
+                {{- toYaml $root.Values.containerSecurityContext | nindent 16 }}
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $root.Values.secret.name }}
+                      key: {{ $root.Values.secret.databaseUrlKey }}
+                {{- if $job.signed }}
+                - name: COMPLIANCE_URL
+                  value: {{ $root.Values.complianceUrl | default (printf "http://compliance-compliance.%s.svc:8080" $root.Release.Namespace) | quote }}
+                - name: HR_RETENTION_PURGE_ENABLED
+                  value: {{ $root.Values.config.retentionPurgeEnabled | quote }}
+                - name: PASSAGE_SERVICE_NAME
+                  value: hr
+                - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
+                  value: /var/run/passage/service-identity/signing-key
+                {{- if $root.Values.serviceIdentity.keyId }}
+                - name: PASSAGE_SERVICE_KEY_ID
+                  value: {{ $root.Values.serviceIdentity.keyId | quote }}
+                {{- end }}
+                {{- end }}
+              {{- if $job.signed }}
+              volumeMounts:
+                - name: service-identity
+                  mountPath: /var/run/passage/service-identity
+                  readOnly: true
+              {{- end }}
+              resources:
+                {{- toYaml $root.Values.resources | nindent 16 }}
+{{- end }}
+{{- end -}}
+{{- include "hr.tenantJob" (dict "root" . "job" (dict "key" "accrue" "command" "accrue" "values" .Values.accrue "signed" false)) }}
+{{- if .Values.accrue.enabled }}
+---
+{{- end }}
+{{- include "hr.tenantJob" (dict "root" . "job" (dict "key" "carryoverExpiry" "command" "carryover-expiry" "values" .Values.carryoverExpiry "signed" false)) }}
+{{- if .Values.carryoverExpiry.enabled }}
+---
+{{- end }}
+{{- include "hr.tenantJob" (dict "root" . "job" (dict "key" "retentionPurge" "command" "retention-purge" "values" .Values.retentionPurge "signed" true)) }}

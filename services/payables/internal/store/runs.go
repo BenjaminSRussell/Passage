@@ -178,6 +178,29 @@ func (s *Postgres) InvoiceNumbers(ctx context.Context, proposalID string) (map[s
 	return out, err
 }
 
+// VendorGroupCodes maps the open item id of each proposal line to its vendor group code; items with no code are absent.
+func (s *Postgres) VendorGroupCodes(ctx context.Context, proposalID string) (map[string]string, error) {
+	out := map[string]string{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select l.open_item_id::text, i.vendor_group_code from ap_payment_proposal_line l
+			join ap_open_item i on i.tenant_id = l.tenant_id and i.id = l.open_item_id
+			where l.proposal_id = $1::uuid and i.vendor_group_code is not null`, proposalID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id, code string
+			if err := rows.Scan(&id, &code); err != nil {
+				return err
+			}
+			out[id] = code
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 type ProposalParties struct {
 	CreatedBy  string
 	ApprovedBy string

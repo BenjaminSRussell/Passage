@@ -27,6 +27,11 @@ channels:
     messages:
       orderHoldReleased:
         $ref: "#/components/messages/OrderHoldReleased"
+  orderHoldRejected:
+    address: passage.sales.orderhold
+    messages:
+      orderHoldRejected:
+        $ref: "#/components/messages/OrderHoldRejected"
   creditCheckEvaluated:
     address: passage.sales.creditcheck
     messages:
@@ -301,7 +306,7 @@ operations:
   publishOrderRemainderCancelled:
     action: send
     channel: {$ref: "#/channels/orderRemainderCancelled"}
-    summary: The undelivered remainder of a partly shipped order was closed; lines are CANCELLED or cut to what was delivered and the net total falls. Holds are not changed. Consumers - fulfillment (cancel the open shipment and pick quantity beyond kept_qty and release its reservation; a slip already posted for it is refused by sales with SLS-0058), billing, credit exposure, portal.
+    summary: The undelivered remainder of a partly shipped order, or of one of its lines (/lines/{lineNo}:cancel-remainder), was closed; the closed lines are CANCELLED or cut to what was delivered and the net total falls. After a one-line close the order stays PARTIALLY_SHIPPED while another line has quantity to deliver, and lines lists only the closed line. Holds are not changed. Consumers - fulfillment (cancel the open shipment and pick quantity beyond kept_qty and release its reservation; a slip already posted for it is refused by sales with SLS-0058), billing, credit exposure, portal.
     messages:
       - {$ref: "#/channels/orderRemainderCancelled/messages/orderRemainderCancelled"}
   publishOrderConfirmed:
@@ -324,6 +329,12 @@ operations:
     summary: A hold was released.
     messages:
       - {$ref: "#/channels/orderHoldReleased/messages/orderHoldReleased"}
+  publishOrderHoldRejected:
+    action: send
+    channel: {$ref: "#/channels/orderHoldRejected"}
+    summary: A credit manager rejected a CREDIT hold with a comment and the unconfirmed order was cancelled. Consumers - fulfillment's copy of the order's holds, collections, portal.
+    messages:
+      - {$ref: "#/channels/orderHoldRejected/messages/orderHoldRejected"}
   publishCreditCheckEvaluated:
     action: send
     channel: {$ref: "#/channels/creditCheckEvaluated"}
@@ -444,6 +455,15 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/OrderHoldData"
+    OrderHoldRejected:
+      name: dev.passage.sales.orderhold.rejected.v1
+      title: Order hold rejected
+      summary: A credit manager rejected a CREDIT hold with a comment; the unconfirmed order was cancelled in the same transaction.
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/OrderHoldRejectedData"
     CreditCheckEvaluated:
       name: dev.passage.sales.creditcheck.evaluated.v1
       title: Credit check evaluated
@@ -906,10 +926,10 @@ components:
         order_id: {type: string, format: uuid}
         legal_entity_id: {type: string, format: uuid}
         version: {type: integer}
-        status: {type: string, enum: [SHIPPED, INVOICED], description: the order status after the remainder was closed}
+        status: {type: string, enum: [PARTIALLY_SHIPPED, SHIPPED, INVOICED], description: the order status after the remainder was closed; PARTIALLY_SHIPPED after a one-line close while another line has quantity to deliver}
         lines:
           type: array
-          description: the lines that gave up quantity
+          description: the lines that gave up quantity (only the named line for a one-line close)
           items:
             type: object
             required: [line_id, line_no, product_id, cancelled_qty, kept_qty, line_status]
@@ -932,6 +952,17 @@ components:
         reason_code: {type: string}
         actor: {type: string}
         version: {type: integer}
+    OrderHoldRejectedData:
+      type: object
+      required: [order_id, hold_id, hold_type, reason_code, comment, actor, version]
+      properties:
+        order_id: {type: string, format: uuid}
+        hold_id: {type: string, format: uuid}
+        hold_type: {type: string, enum: [CREDIT]}
+        reason_code: {type: string}
+        comment: {type: string, maxLength: 500, description: the credit manager's reason for the rejection}
+        actor: {type: string}
+        version: {type: integer, description: the order version after the cancellation}
     AgreementReleasedData:
       type: object
       required: [agreement_id, agreement_number, customer_id, product_id, sales_order_id, quantity, released_qty, remaining_qty, status, version, actor]

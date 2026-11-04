@@ -21,6 +21,7 @@ const order: PlannedOrder = {
 };
 
 const message: Message = {
+  id: "00000000-0000-0000-0000-00000000f101", status: "open", version: 1,
   action: "delay",
   itemId: order.itemId,
   supplyRef: "PLN-000005",
@@ -38,6 +39,7 @@ describe("planning module", () => {
       "/planning/planned-orders",
       "/planning/planned-orders/:id",
       "/planning/messages",
+      "/planning/messages/:id",
       "/planning/net-requirements",
       "/planning/supply-schedule",
       "/planning/runs",

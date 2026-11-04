@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -43,6 +44,9 @@ const (
 type JournalLine struct {
 	Account string       `json:"account"`
 	Amount  money.Amount `json:"amount"`
+	// Dimensions are ledger dimension values of the line, for example the
+	// vendor group code on the vendor-control line.
+	Dimensions map[string]string `json:"dimensions,omitempty"`
 }
 
 type DocumentSource struct {
@@ -63,6 +67,10 @@ type JournalEntry struct {
 	Source         DocumentSource    `json:"source"`
 	RateType       string            `json:"rateType"`
 	Lines          []JournalLine     `json:"lines"`
+	// OptionalDimensions name the dimension attributes the ledger drops from
+	// the lines instead of refusing them when it does not define them (the
+	// vendor group dimension, so a ledger without VENDGRP keeps posting).
+	OptionalDimensions []string `json:"optionalDimensions,omitempty"`
 }
 
 type PostingProfile struct {
@@ -71,6 +79,32 @@ type PostingProfile struct {
 	GRIR          string
 	PPV           string
 	VendorControl string
+	// VendorGroupDimension names the ledger dimension that carries the vendor
+	// group code on the vendor-control line; empty posts no dimension.
+	VendorGroupDimension string
+}
+
+var vendorGroupCodeRe = regexp.MustCompile(`^[A-Z0-9_-]{1,10}$`)
+
+// ValidVendorGroupCode reports whether code is a vendor group code the party
+// master issues: 1 to 10 characters of A-Z, 0-9, dash or underscore.
+func ValidVendorGroupCode(code string) bool { return vendorGroupCodeRe.MatchString(code) }
+
+// DefaultVendorGroupDimension is the ledger dimension attribute for the
+// vendor group code; the ledger must define it (PATCH addDimensionAttributes).
+const DefaultVendorGroupDimension = "VENDGRP"
+
+// addVendorControlLine appends the vendor-control line of an entry, tagged
+// with the vendor group code when both the dimension and the code are known.
+// The dimension is optional for the ledger: a ledger that does not define it
+// drops it, so posting works before the ledger adds VENDGRP.
+func (p PostingProfile) addVendorControlLine(entry *JournalEntry, amount money.Amount, groupCode string) {
+	line := JournalLine{Account: p.VendorControl, Amount: amount}
+	if p.VendorGroupDimension != "" && groupCode != "" {
+		line.Dimensions = map[string]string{p.VendorGroupDimension: groupCode}
+		entry.OptionalDimensions = []string{p.VendorGroupDimension}
+	}
+	entry.Lines = append(entry.Lines, line)
 }
 
 type PeriodQuery struct {
@@ -164,23 +198,32 @@ func (f FakePurchaseOrders) Get(_ context.Context, _, id string) (PurchaseOrder,
 
 var ErrVendorNotFound = errors.New("vendor not found")
 
+// VendorGroupRef is the vendor group of a vendor in the party master: its id
+// and its short code, which is posted as the vendor-group ledger dimension.
+type VendorGroupRef struct {
+	ID   string
+	Code string
+}
+
 type VendorGroups interface {
-	VendorGroupID(ctx context.Context, legalEntityID, vendorID string) (string, error)
+	VendorGroup(ctx context.Context, legalEntityID, vendorID string) (VendorGroupRef, error)
 }
 
 type FakeVendorGroups struct {
 	Groups map[string]string
-	Err    error
+	// Codes maps a vendor id to the short code of its group.
+	Codes map[string]string
+	Err   error
 }
 
-func (f FakeVendorGroups) VendorGroupID(_ context.Context, _, vendorID string) (string, error) {
+func (f FakeVendorGroups) VendorGroup(_ context.Context, _, vendorID string) (VendorGroupRef, error) {
 	if f.Err != nil {
-		return "", f.Err
+		return VendorGroupRef{}, f.Err
 	}
 	if g, ok := f.Groups[vendorID]; ok {
-		return g, nil
+		return VendorGroupRef{ID: g, Code: f.Codes[vendorID]}, nil
 	}
-	return "", ErrVendorNotFound
+	return VendorGroupRef{}, ErrVendorNotFound
 }
 
 const FakeFiscalPeriodID = "99999999-9999-4999-8999-999999999999"

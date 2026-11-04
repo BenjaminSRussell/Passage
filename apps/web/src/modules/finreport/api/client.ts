@@ -27,6 +27,8 @@ export interface DefinitionRow {
   label: string;
   accountFrom?: string;
   accountTo?: string;
+  /** An explicit account list instead of a range; hierarchy runs write it. */
+  accounts?: string[];
   dimensionFilter?: Record<string, string[]>;
   references?: string[];
   expression?: string;
@@ -97,6 +99,8 @@ export interface RunSummary {
   durationMs?: number;
   /** Absent on runs stored before checks were recorded. */
   checks?: RunCheck[];
+  /** Set when the rows of the run are the nodes of a hierarchy version. */
+  hierarchy?: { code: string; version: number };
 }
 
 export interface CellSummary {
@@ -192,6 +196,18 @@ export interface RunRequest {
   period: CalendarPeriod;
   calendar: CalendarPeriod[];
   includeAdjustmentPeriods?: boolean;
+  /** Takes the rows from a published hierarchy; the definition supplies the columns. */
+  hierarchy?: HierarchyRunRequest;
+}
+
+export interface HierarchyRunRequest {
+  code: string;
+  /** Omitted means the latest published version. */
+  version?: number;
+  normalBalance?: "debit" | "credit";
+  /** Dimension hierarchies only: limit the rows to this account range. */
+  accountFrom?: string;
+  accountTo?: string;
 }
 
 /** A failed call: the problem code and the text the service wrote. */
@@ -302,6 +318,11 @@ export async function listRuns(definition: string, signal?: AbortSignal): Promis
 
 export function getRun(id: string, signal?: AbortSignal): Promise<RunSummary> {
   return get<RunSummary>(`/runs/${seg(id)}`, signal);
+}
+
+/** The definition a run was evaluated with: for a hierarchy run, one row per hierarchy node. */
+export function getRunDefinition(runId: string, signal?: AbortSignal): Promise<Definition> {
+  return get<Definition>(`/runs/${seg(runId)}/definition`, signal);
 }
 
 export async function listCells(runId: string, signal?: AbortSignal): Promise<CellSummary[]> {

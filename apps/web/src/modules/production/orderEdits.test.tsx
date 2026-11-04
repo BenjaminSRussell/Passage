@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import { canEditBOM, editOrderBOM, type OrderEditEntry } from "./api/client";
 import production from "./module";
-import { describeImage, emptyEdit, toEdits } from "./OrderEditPanel";
+import { describeImage, emptyEdit, offersKind, toEdits } from "./OrderEditPanel";
 import { json, order, orderId, problem } from "./testData";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -103,7 +103,33 @@ describe("order BOM and route editor (FR-21.18)", () => {
     expect(Object.keys(op.errors).sort()).toEqual(["operNumber", "resourceId"]);
   });
 
+  it("builds and checks co-product edits (FR-21.14)", () => {
+    expect(toEdits("add-coproduct", { ...emptyEdit, lineNo: "C2", itemId: uuid(7), qtyPer: "0.05", coType: "by-product" })).toEqual({
+      edits: { coProducts: [{ op: "add", lineNo: "C2", itemId: uuid(7), qtyPer: "0.05", type: "by-product" }] },
+      errors: {},
+    });
+    expect(toEdits("remove-coproduct", { ...emptyEdit, lineNo: "C1", qtyPer: "ignored" }).edits).toEqual({
+      coProducts: [{ op: "remove", lineNo: "C1" }],
+    });
+    expect(toEdits("change-coproduct", { ...emptyEdit, lineNo: "C1" }).errors.form).toBe("Fill in at least one value to change.");
+    const bad = toEdits("add-coproduct", { ...emptyEdit, itemId: "paint", qtyPer: "0" });
+    expect(Object.keys(bad.errors).sort()).toEqual(["lineNo", "itemId", "qtyPer"].sort());
+    expect(toEdits("add-coproduct", { ...emptyEdit, lineNo: "C2" }).errors.qtyPer).toBe("Enter the quantity per unit.");
+  });
+
+  it("offers co-product edits only where they can apply", () => {
+    const co = { lineNo: "C1", type: "co-product" as const, itemId: uuid(5), qtyPer: "0.2", qtyPlanned: "20", qtyReported: "0" };
+    expect(offersKind({ originType: "Rework" }, "add-coproduct")).toBe(false);
+    expect(offersKind({ originType: "Manual" }, "add-coproduct")).toBe(true);
+    expect(offersKind({ originType: "Manual" }, "change-coproduct")).toBe(false);
+    expect(offersKind({ originType: "Manual", coProducts: [co] }, "remove-coproduct")).toBe(true);
+    expect(offersKind({ originType: "Rework" }, "add-line")).toBe(true);
+  });
+
   it("describes audit images", () => {
+    expect(
+      describeImage({ lineNo: "C1", type: "by-product", itemId: "SCRAP", qtyPer: "0.05", qtyPlanned: "5", qtyReported: "0" }),
+    ).toBe("By-product SCRAP · 0.05 per unit · plans 5");
     expect(describeImage(null)).toBe("—");
     expect(describeImage(trailRow().after)).toBe("RM-STEEL · 4 per unit · requires 420");
   });
@@ -153,6 +179,26 @@ describe("order BOM and route editor (FR-21.18)", () => {
     await waitFor(() => expect(calls(fetchMock).some(([, init]) => init?.method === "PATCH")).toBe(true));
     const patch = calls(fetchMock).find(([, init]) => init?.method === "PATCH");
     expect(JSON.parse(String(patch?.[1]?.body))).toEqual({ operations: [{ op: "add", operNumber: 20, resourceId: uuid(9), runTimeHPer: "0.25" }] });
+  });
+
+  it("changes a declared co-product of the order", async () => {
+    const co = { lineNo: "C1", type: "co-product" as const, itemId: uuid(5), qtyPer: "0.2", qtyPlanned: "20", qtyReported: "0" };
+    const state = { order: order({ status: "Created", version: 1, coProducts: [co] }), trail: [] as OrderEditEntry[] };
+    const fetchMock = detailFetch(state, () => {
+      state.order = order({ status: "Created", version: 2, orderBomModified: true, coProducts: [{ ...co, qtyPer: "0.3", qtyPlanned: "30" }] });
+      state.trail = [trailRow({ target: "coproduct", key: "C1", before: co, after: { ...co, qtyPer: "0.3", qtyPlanned: "30" } })];
+      return json(state.order);
+    });
+    renderAt(`/production/${orderId}`);
+    const form = await screen.findByRole("form", { name: "Edit the BOM or route" });
+    await userEvent.selectOptions(within(form).getByLabelText("Change"), "change-coproduct");
+    await userEvent.selectOptions(within(form).getByLabelText("Co-product line"), "C1");
+    await userEvent.type(within(form).getByLabelText(/Quantity per unit/), "0.3");
+    await userEvent.click(within(form).getByRole("button", { name: "Save the edit" }));
+    expect(await screen.findByText(/saved\. The order is now version 2\./)).toBeInTheDocument();
+    const patch = calls(fetchMock).find(([, init]) => init?.method === "PATCH");
+    expect(JSON.parse(String(patch?.[1]?.body))).toEqual({ coProducts: [{ op: "change", lineNo: "C1", qtyPer: "0.3" }] });
+    await waitFor(() => expect(within(screen.getByRole("table", { name: "Edit history" })).getByText("Changed co-product C1")).toBeInTheDocument());
   });
 
   it("shows field errors without calling the service", async () => {

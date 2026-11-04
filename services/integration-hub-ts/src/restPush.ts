@@ -16,7 +16,7 @@ import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 
 import type { HubEvent, PendingDelivery, RestOutcome } from "./dispatcher.ts";
-import { CODE_XREF_EVENT_CONFLICT, cloudEventOf, type MigrationClient } from "./migrationClient.ts";
+import { CODE_XREF_EVENT_CONFLICT, cloudEventOf, elementRefs, type LookupUse, type MigrationClient } from "./migrationClient.ts";
 import { validateWebhookUrl, type GuardOptions, type PinnedTarget } from "./ssrf.ts";
 
 export const METHODS = ["POST", "PUT", "PATCH"] as const;
@@ -31,6 +31,14 @@ export interface RestConfig {
   method: RestMethod;
   /** JSONPath-lite to the legacy key in the response body ("$.data.id", "orders[0].id"); empty when the receiver returns none. */
   responseKeyPath: string;
+  /**
+   * Per-element key path for a push that carries a collection, with exactly one `[*]` ("lines[*].id", "$.result.lines[*].no"):
+   * the legacy key the ERP assigned to each element. Matched to the pushed elements by position, or by `lineCorrelation`.
+   * Empty when the receiver returns none (or the push has no collection). Needs `responseKeyPath` (the header's key).
+   */
+  lineKeyPath: string;
+  /** Matches response elements to pushed ones by a field instead of by position: both paths have one `[*]`. */
+  lineCorrelation?: { bodyPath: string; responsePath: string };
   /** What a 4xx other than 410 and 429 does: dead-letter at once (default) or follow the retry schedule. */
   onClientError: ClientErrorPolicy;
   auth: {
@@ -49,6 +57,13 @@ export interface RestCredentials {
   token?: string;
   value?: string;
   clientSecret?: string;
+}
+
+/** The legacy key of one element of a pushed collection. */
+export interface LineKey {
+  /** Position of the element in the pushed collection (from 0). */
+  index: number;
+  legacyKey: string;
 }
 
 export class RestConfigError extends Error {
@@ -105,6 +120,101 @@ export function readPath(value: unknown, path: string): unknown {
     }
   }
   return cur;
+}
+
+/** A path with exactly one `[*]`: the array's path and the path inside each element ("" for the element itself). */
+export interface ElementPath {
+  array: string;
+  element: string;
+}
+
+export function parseElementPath(path: string): ElementPath {
+  const parts = path.split("[*]");
+  if (parts.length !== 2) throw new RestConfigError(`path ${JSON.stringify(path)} needs exactly one [*] (for example lines[*].id)`);
+  const [array, element] = parts as [string, string];
+  if (element !== "" && !element.startsWith(".") && !element.startsWith("[")) throw new RestConfigError(`path ${JSON.stringify(path)} is not valid after [*] (use lines[*].id)`);
+  if (array !== "" && array !== "$") parsePath(array);
+  if (element !== "") parsePath("$" + element);
+  return { array, element };
+}
+
+/** The values at the element path of every element of the array, or undefined when the array is missing. */
+export function readElements(value: unknown, path: string): unknown[] | undefined {
+  const { array, element } = parseElementPath(path);
+  const arr = array === "" || array === "$" ? value : readPath(value, array);
+  if (!Array.isArray(arr)) return undefined;
+  return arr.map((e) => (element === "" ? e : readPath(e, "$" + element)));
+}
+
+const keyText = (v: unknown): string | undefined => (typeof v === "number" ? String(v) : typeof v === "string" && v !== "" ? v : undefined);
+
+export type LineKeyResult = { ok: true; keys: LineKey[] } | { ok: false; reason: string };
+
+/**
+ * The legacy keys of a pushed collection's elements from the receiver's answer. By position unless
+ * `config.lineCorrelation` names a field: the response element carrying the value the pushed element carried.
+ * `expected` is how many elements the render named refs for (null when it named none); a different count is a failure,
+ * because a key given to the wrong line would be worse than none.
+ */
+export function matchLineKeys(config: RestConfig, pushed: unknown, response: unknown, expected: number | null): LineKeyResult {
+  const raw = readElements(response, config.lineKeyPath);
+  if (raw === undefined) return { ok: false, reason: `no array at ${config.lineKeyPath}` };
+  const texts = raw.map(keyText);
+  const bad = texts.findIndex((t) => t === undefined);
+  if (bad >= 0) return { ok: false, reason: `no legacy key at ${config.lineKeyPath} for response element ${bad}` };
+  const keys = texts as string[];
+  const c = config.lineCorrelation;
+  if (c === undefined) {
+    if (expected !== null && keys.length !== expected) return { ok: false, reason: `${keys.length} line keys for ${expected} pushed elements` };
+    return { ok: true, keys: keys.map((legacyKey, index) => ({ index, legacyKey })) };
+  }
+  const bodyVals = readElements(pushed, c.bodyPath);
+  const respVals = readElements(response, c.responsePath);
+  if (bodyVals === undefined) return { ok: false, reason: `no array at ${c.bodyPath} in the pushed body` };
+  if (respVals === undefined || respVals.length !== keys.length) return { ok: false, reason: `the response has no ${c.responsePath} for each element at ${config.lineKeyPath}` };
+  if (expected !== null && bodyVals.length !== expected) return { ok: false, reason: `${bodyVals.length} pushed elements at ${c.bodyPath} for ${expected} refs` };
+  // Every pushed element needs its key, as by position: a line left without one would be created again by its next event.
+  if (keys.length !== bodyVals.length) return { ok: false, reason: `${keys.length} line keys for ${bodyVals.length} pushed elements at ${c.bodyPath}` };
+  const byValue = new Map<string, number>();
+  for (let i = 0; i < bodyVals.length; i++) {
+    const v = keyText(bodyVals[i]);
+    if (v === undefined || byValue.has(v)) return { ok: false, reason: `pushed element ${i} has no unique value at ${c.bodyPath}` };
+    byValue.set(v, i);
+  }
+  const used = new Set<number>();
+  const out: LineKey[] = [];
+  for (let j = 0; j < keys.length; j++) {
+    const v = keyText(respVals[j]);
+    const index = v === undefined ? undefined : byValue.get(v);
+    if (index === undefined || used.has(index)) return { ok: false, reason: `response element ${j} matches no pushed element by ${c.responsePath}` };
+    used.add(index);
+    out.push({ index, legacyKey: keys[j] as string });
+  }
+  return { ok: true, keys: out.sort((a, b) => a.index - b.index) };
+}
+
+/** The body array a lineCorrelation.bodyPath iterates, as the migration service names a collection (Lines, Header.Lines). */
+export function bodyArrayOf(config: RestConfig): string | undefined {
+  if (config.lineCorrelation === undefined) return undefined;
+  const array = parseElementPath(config.lineCorrelation.bodyPath).array;
+  return array.startsWith("$.") ? array.slice(2) : array.startsWith("$") ? array.slice(1) : array.startsWith(".") ? array.slice(1) : array;
+}
+
+/**
+ * The line keys of one accepted push: matched against the render's element refs of the collection they belong to.
+ * `collection` is undefined when the render named no element refs (the keys then stay on the delivery alone).
+ */
+export function lineKeysOf(
+  config: RestConfig,
+  pushed: unknown,
+  response: unknown,
+  refs: unknown,
+): { ok: true; keys: LineKey[]; collection?: string | null } | { ok: false; reason: string } {
+  const els = elementRefs(refs, bodyArrayOf(config));
+  if (els !== null && !els.ok) return els;
+  const m = matchLineKeys(config, pushed, response, els === null ? null : els.count);
+  if (!m.ok) return m;
+  return els === null ? m : { ...m, collection: els.collection };
 }
 
 // ---- URL template --------------------------------------------------------------------------------------------
@@ -176,12 +286,14 @@ export interface RestInput {
   outboundMappingId: string;
   method: RestMethod;
   responseKeyPath: string;
+  lineKeyPath: string;
+  lineCorrelation?: { bodyPath: string; responsePath: string };
   onClientError: ClientErrorPolicy;
   auth: RestConfig["auth"];
   credentials: RestCredentials;
 }
 
-export const REST_FIELDS = ["outboundMappingId", "method", "responseKeyPath", "onClientError", "auth"] as const;
+export const REST_FIELDS = ["outboundMappingId", "method", "responseKeyPath", "lineKeyPath", "lineCorrelation", "onClientError", "auth"] as const;
 
 /** Validates the rest-push fields of a create body (all required but responseKeyPath and onClientError). */
 export function parseRestInput(body: Record<string, unknown>, urlTemplate: string): RestInput {
@@ -192,10 +304,28 @@ export function parseRestInput(body: Record<string, unknown>, urlTemplate: strin
   if (!(METHODS as readonly string[]).includes(method)) throw new RestConfigError(`method must be one of ${METHODS.join(", ")}`);
   const responseKeyPath = body["responseKeyPath"] === undefined || body["responseKeyPath"] === "" ? "" : (str(body["responseKeyPath"], "responseKeyPath", 200) as string);
   if (responseKeyPath !== "") parsePath(responseKeyPath);
+  const lineKeyPath = body["lineKeyPath"] === undefined || body["lineKeyPath"] === "" ? "" : (str(body["lineKeyPath"], "lineKeyPath", 200) as string);
+  if (lineKeyPath !== "") {
+    parseElementPath(lineKeyPath);
+    if (responseKeyPath === "") throw new RestConfigError("lineKeyPath needs responseKeyPath: the header's legacy key is recorded with its lines'");
+  }
+  let lineCorrelation: { bodyPath: string; responsePath: string } | undefined;
+  const lc = body["lineCorrelation"];
+  if (lc !== undefined && lc !== null) {
+    if (lineKeyPath === "") throw new RestConfigError("lineCorrelation needs lineKeyPath");
+    if (typeof lc !== "object" || Array.isArray(lc)) throw new RestConfigError("lineCorrelation must be an object with bodyPath and responsePath");
+    const o = lc as Record<string, unknown>;
+    for (const k of Object.keys(o)) if (k !== "bodyPath" && k !== "responsePath") throw new RestConfigError(`lineCorrelation.${k} is not a setting`);
+    const bodyPath = str(o["bodyPath"], "lineCorrelation.bodyPath", 200) as string;
+    const responsePath = str(o["responsePath"], "lineCorrelation.responsePath", 200) as string;
+    parseElementPath(bodyPath);
+    if (parseElementPath(responsePath).array !== parseElementPath(lineKeyPath).array) throw new RestConfigError("lineCorrelation.responsePath must iterate the same array as lineKeyPath");
+    lineCorrelation = { bodyPath, responsePath };
+  }
   const onClientError = (body["onClientError"] ?? "dead_letter") as string;
   if (onClientError !== "dead_letter" && onClientError !== "retry") throw new RestConfigError("onClientError must be dead_letter or retry");
   const { auth, credentials } = parseAuth(body["auth"]);
-  return { outboundMappingId: mapping.toLowerCase(), method: method as RestMethod, responseKeyPath, onClientError, auth, credentials };
+  return { outboundMappingId: mapping.toLowerCase(), method: method as RestMethod, responseKeyPath, lineKeyPath, ...(lineCorrelation === undefined ? {} : { lineCorrelation }), onClientError, auth, credentials };
 }
 
 /** Validates a PATCH of a rest-push subscription against its current settings; credentials change only when `auth` is sent. */
@@ -212,6 +342,8 @@ export function parseRestPatch(
       outboundMappingId: body["outboundMappingId"] ?? old.outboundMappingId,
       method: body["method"] ?? old.method,
       responseKeyPath: body["responseKeyPath"] ?? old.responseKeyPath,
+      lineKeyPath: body["lineKeyPath"] ?? old.lineKeyPath ?? "",
+      lineCorrelation: body["lineCorrelation"] === undefined ? old.lineCorrelation : body["lineCorrelation"],
       onClientError: body["onClientError"] ?? old.onClientError,
       // Placeholder credentials stand in when `auth` is not being replaced; they are discarded below.
       auth: body["auth"] ?? { type: "bearer", token: "unchanged" },
@@ -413,6 +545,7 @@ interface Prepared {
   headers: Record<string, string>;
   body: string;
   refs: unknown;
+  lookups: LookupUse[];
   secrets: string[];
   oauthKey: string | null;
 }
@@ -495,7 +628,7 @@ export class RestPusher {
         break;
       }
     }
-    return { ok: true, prepared: { url, headers, body: JSON.stringify(rendered.rendered.body), refs: rendered.rendered.refs, secrets, oauthKey } };
+    return { ok: true, prepared: { url, headers, body: JSON.stringify(rendered.rendered.body), refs: rendered.rendered.refs, lookups: rendered.rendered.lookups, secrets, oauthKey } };
   }
 
   async #token(key: string, target: RestTarget, fresh: boolean): Promise<string | null> {
@@ -540,7 +673,12 @@ export class RestPusher {
     const event = delivery.event;
     const prep = await this.prepare(target, event);
     if (!prep.ok) return prep.outcome;
-    const p = prep.prepared;
+    const out = await this.#push(target, event, prep.prepared);
+    // The lookup table versions the render read stay with the push, whatever came of it.
+    return prep.prepared.lookups.length === 0 ? out : { ...out, lookups: prep.prepared.lookups };
+  }
+
+  async #push(target: RestTarget, event: HubEvent, p: Prepared): Promise<RestOutcome> {
     const res = await this.#send(target, event, p);
     if (res === null) return { kind: "retry", status: null, excerpt: "no response from the receiver" };
     const excerpt = excerptOf(res.body, p.secrets);
@@ -562,6 +700,19 @@ export class RestPusher {
         // (same Idempotency-Key) but would not help; an operator fixes the path and replays.
         return { kind: "dead", status: res.status, excerpt: excerptOf(`accepted, but no legacy key at ${target.config.responseKeyPath}: ${res.body}`, p.secrets) };
       }
+      let lineKeys: LineKey[] | undefined;
+      let linesCollection: string | null | undefined;
+      if ((target.config.lineKeyPath ?? "") !== "") {
+        const m = lineKeysOf(target.config, JSON.parse(p.body) as unknown, json, p.refs);
+        if (!m.ok) {
+          // The receiver accepted the push but the line keys cannot be told apart: nothing is recorded (a key on the
+          // wrong line is worse than none), and keys an earlier attempt read are cleared. Resending is safe (same
+          // Idempotency-Key); an operator fixes the paths and replays.
+          return { kind: "dead", status: res.status, excerpt: excerptOf(`accepted, but the line keys at ${target.config.lineKeyPath} cannot be matched: ${m.reason}`, p.secrets), legacyKey, lineKeys: [] };
+        }
+        lineKeys = m.keys;
+        linesCollection = m.collection;
+      }
       const xref = await this.#d.migration.recordXref({
         tenantId: target.tenantId,
         legalEntityId: event.legalEntityId ?? null,
@@ -569,6 +720,8 @@ export class RestPusher {
         refs: p.refs,
         legacyKey,
         eventId: event.eventId,
+        // Sent only when the render named element refs; otherwise the keys are kept on the delivery alone.
+        ...(lineKeys !== undefined && linesCollection !== undefined ? { lines: lineKeys, linesCollection } : {}),
       });
       if (!xref.ok) {
         const ex = excerptOf(`xref:record ${xref.status ?? "no answer"}${xref.code ? ` ${xref.code}` : ""}: ${xref.detail}`, p.secrets);
@@ -577,12 +730,14 @@ export class RestPusher {
           // mapping, and the migration service never changes that. Resending cannot fix it and would create one more
           // record in the legacy ERP unless it honours Idempotency-Key: HUB-0118 keeps the key it returned for the
           // operator to reconcile there, and the store refuses to replay it.
-          return { kind: "dead", code: "HUB-0118", status: xref.status, excerpt: excerptOf(`pushed (receiver ${res.status}); not resent. ${ex}`, p.secrets), legacyKey };
+          return { kind: "dead", code: "HUB-0118", status: xref.status, excerpt: excerptOf(`pushed (receiver ${res.status}); not resent. ${ex}`, p.secrets), legacyKey, ...(lineKeys === undefined ? {} : { lineKeys }) };
         }
-        return xref.retryable ? { kind: "retry", status: xref.status, excerpt: ex, legacyKey } : { kind: "dead", status: xref.status, excerpt: ex, legacyKey };
+        const kept = lineKeys === undefined ? {} : { lineKeys };
+        return xref.retryable ? { kind: "retry", status: xref.status, excerpt: ex, legacyKey, ...kept } : { kind: "dead", status: xref.status, excerpt: ex, legacyKey, ...kept };
       }
+      return { kind: "delivered", status: res.status, excerpt, legacyKey, ...(lineKeys === undefined ? {} : { lineKeys }) };
     }
-    return { kind: "delivered", status: res.status, excerpt, ...(legacyKey === undefined ? {} : { legacyKey }) };
+    return { kind: "delivered", status: res.status, excerpt };
   }
 
   /** Test send: render and build the request; with `send`, push it too. Nothing is recorded as delivered or in the xref. */
@@ -590,7 +745,7 @@ export class RestPusher {
     target: RestTarget,
     event: HubEvent,
     send: boolean,
-  ): Promise<{ stage: "render" | "url" | "token" | "built" | "sent"; url?: string; method: string; body?: unknown; status?: number | null; excerpt?: string; legacyKey?: string }> {
+  ): Promise<{ stage: "render" | "url" | "token" | "built" | "sent"; url?: string; method: string; body?: unknown; status?: number | null; excerpt?: string; legacyKey?: string; lineKeys?: LineKey[]; lineKeyError?: string; lookups?: LookupUse[] }> {
     // A test send is made for the operator who asked: their user id is the token's actor.
     const prep = await this.prepare(target, event, false, event.actor);
     if (!prep.ok) {
@@ -598,19 +753,30 @@ export class RestPusher {
       return { stage: o.excerpt?.startsWith("url template") ? "url" : o.excerpt?.startsWith("oauth2") ? "token" : "render", method: target.config.method, status: o.status, ...(o.excerpt === undefined ? {} : { excerpt: o.excerpt }) };
     }
     const p = prep.prepared;
-    const base = { url: p.url, method: target.config.method, body: JSON.parse(p.body) as unknown };
+    const base = { url: p.url, method: target.config.method, body: JSON.parse(p.body) as unknown, ...(p.lookups.length === 0 ? {} : { lookups: p.lookups }) };
     if (!send) return { stage: "built", ...base };
     const res = await this.#send(target, event, p, event.actor);
     if (res === null) return { stage: "sent", ...base, status: null, excerpt: "no response from the receiver" };
     let legacyKey: string | undefined;
+    let lineKeys: LineKey[] | undefined;
+    let lineKeyError: string | undefined;
     if (target.config.responseKeyPath !== "") {
       try {
-        const found = readPath(JSON.parse(res.body), target.config.responseKeyPath);
+        const json = JSON.parse(res.body) as unknown;
+        const found = readPath(json, target.config.responseKeyPath);
         if (typeof found === "string" || typeof found === "number") legacyKey = String(found);
+        if ((target.config.lineKeyPath ?? "") !== "") {
+          const m = lineKeysOf(target.config, base.body, json, p.refs);
+          if (m.ok) lineKeys = m.keys;
+          else lineKeyError = m.reason;
+        }
       } catch {
         /* no JSON, no key */
       }
     }
-    return { stage: "sent", ...base, status: res.status, excerpt: excerptOf(res.body, p.secrets), ...(legacyKey === undefined ? {} : { legacyKey }) };
+    return {
+      stage: "sent", ...base, status: res.status, excerpt: excerptOf(res.body, p.secrets),
+      ...(legacyKey === undefined ? {} : { legacyKey }), ...(lineKeys === undefined ? {} : { lineKeys }), ...(lineKeyError === undefined ? {} : { lineKeyError }),
+    };
   }
 }

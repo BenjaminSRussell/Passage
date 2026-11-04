@@ -83,6 +83,9 @@ type fakeStore struct {
 	// Charge codes and auto charges (FR-17.9).
 	charges chargeLog
 
+	// Service lines and model service specifications (FR-17.23).
+	svc svcLog
+
 	// Signing limits and their requests (FR-17.17).
 	signing signingLog
 

@@ -49,6 +49,7 @@ charts/billing/         Helm chart (deployment, service with admin port, Service
 | GET | `/v1/billing/invoices` | `billing.invoice.view` (InvoiceView) | headers only, newest first; `status`, `type`, `customerId`, `originalInvoiceId`, `limit` (1 to 200, default 100), `cursor` (the previous page's `nextCursor`) |
 | GET | `/v1/billing/invoices/{id}` | `billing.invoice.view` (InvoiceView) | invoice or credit note; returns `ETag` (version); a creditable invoice carries `credited` and per-line `creditedQty` |
 | POST | `/v1/billing/invoices/{id}:post` | `billing.invoice.post` (InvoicePost) | tax re-quote; idempotent by state; optional `If-Match`; refuses credit notes (409 `BIL-0101`) |
+| POST | `/v1/billing/gl-postings` | `billing.invoice.post` | `{legalEntityId, retryParked?}`; books the invoice journal (FR-29.3) of every posted invoice and credit note without one: Dr receivable billed gross, Cr revenue per line account and Cr 2400 as the revrec allocation of the order's contract splits the lines (invoice lines, receivable and tax keep the contractual price; a credit note books the mirror in its original's proportions), Cr charges, Cr tax; an invoice with a line on a deferred revenue account waits (`BIL-0207`, backoff) until revrec (`REVREC_URL`) answers with the contract, and is parked (`BIL-0208`) when the allocated amounts do not add up to the billed nets; ledger key `billing-invoice-<id>` / `billing-credit-note-<id>`, entry id in `invoice.journal_posting_id`; ledger, accounts and amounts come from `BILLING_GL_PROFILES`, the stored document and revrec; a ledger refusal is recorded (attempts, next attempt with backoff) and the document parked after 5 refusals, an outage without a verdict never parks; at most 200 per call, `more` when due documents remain |
 | POST | `/v1/billing/credit-notes` | `billing.invoice.maintain` (InvoiceMaintain) | `Idempotency-Key` required; whole remainder or `lines` by quantity; tax is the original's pro rata, never re-quoted |
 | POST | `/v1/billing/subscriptions` | `billing.invoice.maintain` | `Idempotency-Key` required; plan code and price per period, `periodMonths` 1, 3, 6 or 12, start date; 201, or 200 replay |
 | GET | `/v1/billing/subscriptions/{id}` | `billing.invoice.view` | plan terms, status, `billedThrough` (end of the last invoiced period); `ETag` = version |
@@ -123,6 +124,15 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-superuser role) and skips without i
 | `BIL-0104` | 409 | A packing slip line of the request is already on an invoice or proposal (BR-29.5); nothing of the request is stored |
 | `BIL-0105` | 422 | The subscription has no billable amount in the period (no zero invoice is issued) |
 | `BIL-0106` | 409 | The billing period overlaps one already invoiced |
+| `BIL-0200` | 503 | The general ledger is not configured (`LEDGER_URL`) |
+| `BIL-0201` | 502 | The general ledger did not answer a journal posting (`errors.booked` lists the documents booked before) |
+| `BIL-0202` | 422 | No GL posting profile for the legal entity |
+| `BIL-0203` | 422 | The profile's ledger belongs to another legal entity |
+| `BIL-0204` | n/a | A document whose lines, charges and tax do not add to its gross is parked, never posted |
+| `BIL-0205` | n/a | The ledger refused a journal without a code |
+| `BIL-0206` | n/a | A credit note is parked because its original invoice is parked; it books after the original does |
+| `BIL-0207` | n/a | An invoice with a deferred line is not booked: revrec has no unique contract for its order or did not answer; retried with backoff, never parked for it |
+| `BIL-0208` | n/a | A document is parked: the revrec allocation does not add up to the billed nets (no contract asset or liability account is named in the PRD) or does not cover a deferred line |
 | `BIL-0107` | 422 | A plan change or cancellation falls inside an invoiced period; correct it with a credit note |
 | `BIL-0108` | 422 | The subscription is cancelled (cancel again, or change plan) |
 | `BIL-0109` | 503 | Subscriptions are not available in this deployment |
@@ -150,6 +160,11 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-superuser role) and skips without i
   client exists; the invoice due date is the last installment's due date.
 - The PRD's `passage.billing.credit-note.posted.v1` is published as
   `dev.passage.billing.creditnote.posted.v1` (the platform type grammar has no hyphens).
-- The posting journal (`journal_posting_id`) is null until the ledger.Post
-  integration lands; `invoice.posted` carries `intercompany=false` until wave 40.
+- `journal_posting_id` holds the ledger entry of the document's invoice journal (FR-29.3)
+  once `POST /v1/billing/gl-postings` booked it; the event carries null because the journal
+  follows the post. `BILLING_GL_PROFILES` (a JSON array, one profile per entity: `legalEntityId`, `ledgerId`,
+  `receivableAccount`, `taxAccount`, `chargeAccount`, `deferredRevenueAccounts`; chart value
+  `glProfiles`) is required when `LEDGER_URL` is set; the deferred account is 2400. `REVREC_URL` (chart value `revrecUrl`) names the revrec service whose
+  contract allocation splits the invoice journal; the call is signed with the `revrec.allocation.read` grant. The
+  profile's ledger is checked against its entity at each call. `invoice.posted` carries `intercompany=false` until wave 40.
 - Dependencies: pgx, chi, shopspring/decimal, rapid (all in the platform module set).

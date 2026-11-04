@@ -10,6 +10,17 @@ release may change public APIs.
 
 ### Added
 
+- Per-vendor-group AP control comparison (#421): party vendor groups with a short `code`
+  (`POST/GET /v1/party/vendor-groups`, `vendorGroupCode` on the vendor, `vendorgroup.created.v1`), the
+  `VENDGRP` ledger dimension (`addDimensionAttributes` on `PATCH /v1/ledger/ledgers/{id}`), receiving
+  posting it on the vendor-control line and `vendor_group_code` on `invoice.posted`, payables storing it
+  and posting it on payment run control debits, and `aging:reconcile?group_by=vendorGroup` comparing the
+  subledger with the ledger balance per code. `aging:reconcile` vendor group lines now carry
+  `vendorGroupCode` instead of `vendorGroupId`. The ledger takes `optionalDimensions` on journal entry
+  posts: an optional attribute the ledger does not define is dropped instead of refused, and its values are
+  left out of the idempotency hash, so postings keep working on ledgers that have not added `VENDGRP`. A
+  vendor group can be registered with an existing group id. The `/vendor-groups` web screen lists and adds
+  vendor groups.
 - Wave 27 AC-27.4: a sales order line can carry a `configurationId` (validated against the product
   service), `POST /v1/sales/orders/{id}:plan-production` creates the `SalesOrderLine` production
   order that carries it through `POST /v1/production/sales-line-orders`, idempotent per line, with

@@ -30,6 +30,27 @@ import (
 // released (and refuses a packing slip while one is active, FUL-0001), and a
 // FRAUD or MANUAL hold may concern what was already delivered.
 func (s *Postgres) CancelRemainder(ctx context.Context, id string, version int, reason, actor string, now time.Time) (Order, error) {
+	return s.cancelRemainder(ctx, id, 0, version, reason, actor, now)
+}
+
+// CancelLineRemainder closes what one line of a partly shipped order has not
+// delivered (BR-27.5, /lines/{n}:cancel-remainder), by the same rules as
+// CancelRemainder for that line only. The other lines are not touched and the
+// order total, quota, agreement quantity and schedule lines follow the one line.
+// A line with nothing left to cancel (delivered in full, or cancelled) is
+// refused with SLS-0025; an unknown line number is SLS-0109.
+func (s *Postgres) CancelLineRemainder(ctx context.Context, id string, lineNo, version int, reason, actor string, now time.Time) (Order, error) {
+	if lineNo < 1 {
+		// 0 means "every line" to cancelRemainder; a caller naming a line
+		// must never reach the whole-order close.
+		return Order{}, problem(http.StatusNotFound, CodeLineNotFound, "order line not found")
+	}
+	return s.cancelRemainder(ctx, id, lineNo, version, reason, actor, now)
+}
+
+// cancelRemainder closes the remainder of every line, or of line lineNo when it
+// is not 0.
+func (s *Postgres) cancelRemainder(ctx context.Context, id string, lineNo, version int, reason, actor string, now time.Time) (Order, error) {
 	p, _ := tenant.FromContext(ctx)
 	if len(reason) > changeReasonMaxSize {
 		return Order{}, problem(http.StatusUnprocessableEntity, CodeInvalidChange, "reason is too long")
@@ -46,6 +67,15 @@ func (s *Postgres) CancelRemainder(ctx context.Context, id string, version int, 
 		if o.Status != domain.OrderPartiallyShipped {
 			return problem(http.StatusUnprocessableEntity, CodeNotCancellable, fmt.Sprintf("order is %s; only a partly shipped order has a remainder to cancel", o.Status))
 		}
+		if lineNo != 0 {
+			found := false
+			for _, l := range o.Lines {
+				found = found || l.LineNo == lineNo
+			}
+			if !found {
+				return problem(http.StatusNotFound, CodeLineNotFound, "order line not found")
+			}
+		}
 		var diff []domain.FieldChange
 		var closed []salesevents.RemainderLine
 		cancelled := map[int]bool{}
@@ -53,6 +83,9 @@ func (s *Postgres) CancelRemainder(ctx context.Context, id string, version int, 
 		var agreementCut decimal.Decimal
 		for i := range o.Lines {
 			l := &o.Lines[i]
+			if lineNo != 0 && l.LineNo != lineNo {
+				continue
+			}
 			before := domain.LineProgress{Status: l.LineStatus, Quantity: l.Quantity, Delivered: l.DeliveredQty, Invoiced: l.InvoicedQty}
 			after, gave, err := domain.CancelRemainder(before)
 			if err != nil {
@@ -93,6 +126,9 @@ func (s *Postgres) CancelRemainder(ctx context.Context, id string, version int, 
 			l.Quantity, l.LineNet, l.LineStatus = after.Quantity, net, after.Status
 		}
 		if len(closed) == 0 {
+			if lineNo != 0 {
+				return problem(http.StatusUnprocessableEntity, CodeNotCancellable, fmt.Sprintf("line %d is already delivered or cancelled; nothing is left to cancel", lineNo))
+			}
 			return problem(http.StatusUnprocessableEntity, CodeNotCancellable, "every line is already delivered or cancelled")
 		}
 		if len(cancelled) > 0 {

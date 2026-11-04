@@ -111,6 +111,20 @@ channels:
     messages:
       deliveryScheduleConfirmed:
         $ref: '#/components/messages/DeliveryScheduleConfirmed'
+  servicespec:
+    address: passage.procurement.servicespec
+    description: Service specifications of PO lines (FR-17.23); the Kafka key is the PO id.
+    messages:
+      serviceSpecChanged:
+        $ref: '#/components/messages/ServiceSpecChanged'
+  modelservicespec:
+    address: passage.procurement.modelservicespec
+    description: Model service specifications (FR-17.23); the Kafka key is the model id.
+    messages:
+      modelServiceSpecCreated:
+        $ref: '#/components/messages/ModelServiceSpecCreated'
+      modelServiceSpecChanged:
+        $ref: '#/components/messages/ModelServiceSpecChanged'
   sarelease:
     address: passage.procurement.sarelease
     description: Scheduling agreement releases (FR-17.15); the Kafka key is the scheduling agreement id so releases stay ordered.
@@ -118,6 +132,24 @@ channels:
       saReleaseCreated:
         $ref: '#/components/messages/SAReleaseCreated'
 operations:
+  publishServiceSpecChanged:
+    action: send
+    channel:
+      $ref: '#/channels/servicespec'
+    messages:
+      - $ref: '#/channels/servicespec/messages/serviceSpecChanged'
+  publishModelServiceSpecCreated:
+    action: send
+    channel:
+      $ref: '#/channels/modelservicespec'
+    messages:
+      - $ref: '#/channels/modelservicespec/messages/modelServiceSpecCreated'
+  publishModelServiceSpecChanged:
+    action: send
+    channel:
+      $ref: '#/channels/modelservicespec'
+    messages:
+      - $ref: '#/channels/modelservicespec/messages/modelServiceSpecChanged'
   publishDeliveryScheduleConfirmed:
     action: send
     channel:
@@ -264,6 +296,48 @@ operations:
       - $ref: '#/channels/catalogimport/messages/catalogImportCommitted'
 components:
   messages:
+    ServiceSpecChanged:
+      name: ServiceSpecChanged
+      title: servicespec.changed.v1
+      x-passage-type: dev.passage.procurement.servicespec.changed.v1
+      summary: The service specification of a PO line (outline, value limit, expected value, contract limit) was saved or removed (FR-17.23).
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.servicespec.changed.v1 }
+              subject: { type: string, format: uuid, description: PO id }
+              data: { $ref: '#/components/schemas/ServiceSpecData' }
+    ModelServiceSpecCreated:
+      name: ModelServiceSpecCreated
+      title: modelservicespec.created.v1
+      x-passage-type: dev.passage.procurement.modelservicespec.created.v1
+      summary: A model service specification was created (FR-17.23).
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.modelservicespec.created.v1 }
+              subject: { type: string, format: uuid, description: model id }
+              data: { $ref: '#/components/schemas/ModelServiceSpecData' }
+    ModelServiceSpecChanged:
+      name: ModelServiceSpecChanged
+      title: modelservicespec.changed.v1
+      x-passage-type: dev.passage.procurement.modelservicespec.changed.v1
+      summary: A model service specification was changed or deactivated (FR-17.23).
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.modelservicespec.changed.v1 }
+              subject: { type: string, format: uuid, description: model id }
+              data: { $ref: '#/components/schemas/ModelServiceSpecData' }
     DeliveryScheduleConfirmed:
       name: DeliveryScheduleConfirmed
       title: deliveryschedule.confirmed.v1
@@ -971,6 +1045,38 @@ components:
         legal_entity_id: { type: string, format: uuid }
         category: { type: string }
         worker_id: { type: string, format: uuid }
+        changed_by: { type: string, format: uuid }
+    ServiceSpecData:
+      type: object
+      required: [po_id, number, line_no, currency, value_limit, expected_value, planned_total, outline_items, removed]
+      additionalProperties: false
+      properties:
+        po_id: { type: string, format: uuid }
+        number: { type: string, example: PO-00000001 }
+        line_no: { type: integer, minimum: 1 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        value_limit: { type: string, description: Decimal string. The limit for unplanned services. }
+        expected_value: { type: string, description: Decimal string. The value of unplanned services expected. }
+        planned_total: { type: string, description: Decimal string. The sum of the top-level outline amounts. }
+        outline_items: { type: integer, minimum: 0, description: Number of outline nodes (levels and service items). }
+        contract_agreement_line_id: { type: string, format: uuid, description: The agreement line whose remaining value also bounds unplanned services. }
+        model_id: { type: string, format: uuid, description: The model service specification the outline was copied from. }
+        removed: { type: boolean, description: True when the specification was removed and the line is a plain line again. }
+        changed_by: { type: string, format: uuid }
+    ModelServiceSpecData:
+      type: object
+      required: [model_id, legal_entity_id, code, name, currency, status, planned_total, outline_items, version]
+      additionalProperties: false
+      properties:
+        model_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        status: { type: string, enum: [ACTIVE, INACTIVE] }
+        planned_total: { type: string, description: Decimal string. }
+        outline_items: { type: integer, minimum: 0 }
+        version: { type: integer, minimum: 1 }
         changed_by: { type: string, format: uuid }
     DeliveryScheduleConfirmedData:
       type: object

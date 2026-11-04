@@ -240,7 +240,7 @@ describe("bank_balances run detail", () => {
     expect(totals).toHaveTextContent("bank_balances.count");
     const quarantine = await findTable({ name: "Quarantined records" });
     expect(quarantine).toHaveTextContent("GONE");
-    expect(within(quarantine).queryByRole("button", { name: /Release/ })).not.toBeInTheDocument();
+    expect(within(quarantine).getByRole("button", { name: /^Release record/ })).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
   });
 });

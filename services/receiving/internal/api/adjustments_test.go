@@ -283,3 +283,41 @@ func assertDocumented(t *testing.T, evt events.Event) {
 		}
 	}
 }
+
+func TestVendorGroupDimension_RidesOnTheVendorControlLine(t *testing.T) {
+	const group = "00000000-0000-4000-8000-0000000000c1"
+	groups := domain.FakeVendorGroups{Groups: map[string]string{vendorID: group}, Codes: map[string]string{vendorID: "DOM"}}
+	rg := newRigWithGroups(memstore.New(), domain.PeriodOpen, groups)
+	_, inv := rg.invoiced(t, "PS-1", "INV-1", 40, "2.6", "")
+	control := func(e domain.JournalEntry) map[string]string {
+		for _, l := range e.Lines {
+			if l.Account == "2000" {
+				return l.Dimensions
+			}
+		}
+		t.Fatal("entry has no vendor-control line")
+		return nil
+	}
+	invoiceEntry := lastEntry(t, rg)
+	if got := control(invoiceEntry); got["VENDGRP"] != "DOM" || len(got) != 1 {
+		t.Fatalf("invoice vendor-control dimensions %v, want VENDGRP=DOM", got)
+	}
+	if len(invoiceEntry.OptionalDimensions) != 1 || invoiceEntry.OptionalDimensions[0] != "VENDGRP" {
+		t.Fatalf("invoice optional dimensions %v, want VENDGRP so a ledger without it drops it", invoiceEntry.OptionalDimensions)
+	}
+	for _, l := range invoiceEntry.Lines {
+		if l.Account != "2000" && len(l.Dimensions) != 0 {
+			t.Fatalf("line %s carries dimensions %v; only the vendor-control line is tagged", l.Account, l.Dimensions)
+		}
+	}
+	decode[adjustmentJSON](t, rg.call(http.MethodPost, adjustmentsPath, adjustmentBody(inv.ID, "DEBIT", "DN-1", adjLine(1, "3.50")), rg.apPosterFor(legalEntityID)), http.StatusCreated)
+	if adj := lastEntry(t, rg); control(adj)["VENDGRP"] != "DOM" || len(adj.OptionalDimensions) != 1 {
+		t.Fatalf("adjustment vendor-control dimensions %v (optional %v), want VENDGRP=DOM", control(adj), adj.OptionalDimensions)
+	}
+	evts := rg.st.Events()
+	for _, e := range evts {
+		if e.Type == "dev.passage.payables.invoice.posted.v1" && !strings.Contains(string(e.Data), `"vendor_group_code":"DOM"`) {
+			t.Fatalf("invoice.posted %s lacks vendor_group_code", e.Data)
+		}
+	}
+}

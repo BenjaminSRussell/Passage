@@ -126,6 +126,56 @@ export interface Agreement extends Omit<AgreementInput, "status"> {
   number: string;
   status: AgreementStatus;
   hoursConsumed: Decimal;
+  /** Visits recorded over all lines (FR-45.3). */
+  visitsConsumed: number;
+  /** Reason of the last suspension or cancellation. */
+  statusReason?: string | null;
+  /** If-Match / ETag version. */
+  version: number;
+}
+
+/** Statuses a caller may request for an agreement, mirrored from internal/domain: EXPIRED is set by the expiry pass only. */
+export type AgreementTarget = "ACTIVE" | "SUSPENDED" | "CANCELED";
+
+export const AGREEMENT_NEXT: Record<AgreementStatus, AgreementTarget[]> = {
+  DRAFT: ["ACTIVE", "CANCELED"],
+  ACTIVE: ["SUSPENDED", "CANCELED"],
+  SUSPENDED: ["ACTIVE", "CANCELED"],
+  EXPIRED: [],
+  CANCELED: [],
+};
+
+export const VISIT_KINDS = ["PREVENTIVE", "CORRECTIVE"] as const;
+export type VisitKind = (typeof VISIT_KINDS)[number];
+
+export interface AgreementVisit {
+  id: string;
+  agreementId: string;
+  lineIndex: number;
+  kind: VisitKind;
+  visitDate: string;
+  workOrderId: string | null;
+  note: string;
+  recordedBy: string;
+  createdAt: string;
+  /** Visits left on the line once this visit was recorded. */
+  visitsLeft: number;
+}
+
+export interface AgreementVisitInput {
+  lineIndex: number;
+  kind: VisitKind;
+  visitDate: string;
+  workOrderId?: string;
+  note?: string;
+}
+
+export interface AgreementChange {
+  from: AgreementStatus;
+  to: AgreementStatus;
+  reason: string;
+  actor: string;
+  at: string;
 }
 
 export interface OpenCaseInput {
@@ -376,6 +426,37 @@ export function getAgreement(agreementId: string, signal?: AbortSignal): Promise
 
 export function createAgreement(input: AgreementInput, key: string = newKey()): Promise<Agreement> {
   return json<Agreement>("/agreements", post(input, key));
+}
+
+/** Reads an agreement with the ETag that a status change must echo as If-Match. */
+export function readAgreement(agreementId: string, signal?: AbortSignal): Promise<Versioned<Agreement>> {
+  return versioned<Agreement>(`/agreements/${id(agreementId)}`, {}, signal);
+}
+
+/** Activates, suspends, resumes or cancels an agreement (FR-45.3); suspending and canceling need a reason. */
+export function transitionAgreement(agreementId: string, etag: string, to: AgreementTarget, reason: string, key: string = newKey()): Promise<Versioned<Agreement>> {
+  return versioned<Agreement>(`/agreements/${id(agreementId)}:transition`, {
+    method: "POST",
+    body: JSON.stringify(reason ? { to, reason } : { to }),
+    headers: { "If-Match": etag, "Idempotency-Key": key },
+  });
+}
+
+/** One expiry pass: ACTIVE and SUSPENDED agreements past their last day become EXPIRED. */
+export function expireAgreements(): Promise<{ scanned: number; expired: number }> {
+  return json<{ scanned: number; expired: number }>("/agreements:expire", { method: "POST" });
+}
+
+export async function listAgreementVisits(agreementId: string, signal?: AbortSignal): Promise<AgreementVisit[]> {
+  return (await json<{ items: AgreementVisit[] }>(`/agreements/${id(agreementId)}/visits`, {}, signal)).items;
+}
+
+export function recordAgreementVisit(agreementId: string, input: AgreementVisitInput, key: string = newKey()): Promise<AgreementVisit> {
+  return json<AgreementVisit>(`/agreements/${id(agreementId)}/visits`, post(input, key));
+}
+
+export async function listAgreementHistory(agreementId: string, signal?: AbortSignal): Promise<AgreementChange[]> {
+  return (await json<{ items: AgreementChange[] }>(`/agreements/${id(agreementId)}/history`, {}, signal)).items;
 }
 
 // --- Cases ---

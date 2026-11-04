@@ -219,7 +219,7 @@ func (a *API) createContract(w http.ResponseWriter, r *http.Request) {
 // nextCursor, when present, is passed back as `cursor` for the next page.
 func (a *API) listContracts(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	f := store.ContractFilter{LegalEntityID: q.Get("legalEntityId"), CustomerID: q.Get("customerId"), Status: q.Get("status"), Method: q.Get("method")}
+	f := store.ContractFilter{LegalEntityID: q.Get("legalEntityId"), CustomerID: q.Get("customerId"), OrderID: q.Get("orderId"), Status: q.Get("status"), Method: q.Get("method")}
 	fields := map[string]string{}
 	if f.Method != "" && !domain.ValidMethod(f.Method) {
 		fields["method"] = "must be POINT_IN_TIME, RATABLE, MILESTONE or USAGE"
@@ -234,6 +234,12 @@ func (a *API) listContracts(w http.ResponseWriter, r *http.Request) {
 	}
 	if f.CustomerID != "" && !ids.Valid(f.CustomerID) {
 		fields["customerId"] = "must be a UUID"
+	}
+	if f.OrderID != "" && !ids.Valid(f.OrderID) {
+		fields["orderId"] = "must be a UUID"
+	}
+	if f.OrderID == "" && allocationOnly(r) {
+		fields["orderId"] = "is required for a caller holding only " + dutyAllocationRead
 	}
 	if f.Status != "" && f.Status != domain.ContractOpen && f.Status != domain.ContractComplete && f.Status != domain.ContractCancelled {
 		fields["status"] = "must be OPEN, COMPLETE or CANCELLED"
@@ -291,7 +297,16 @@ func (a *API) getContract(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	if allocationOnly(r) && !strings.EqualFold(c.OrderID, r.URL.Query().Get("orderId")) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeNotFound, "contract not found"))
+		return
+	}
 	writeContract(w, http.StatusOK, c)
+}
+
+func allocationOnly(r *http.Request) bool {
+	p, _ := tenant.FromContext(r.Context())
+	return !p.HasDuty(dutyView)
 }
 
 // satisfyMilestone recognizes a MILESTONE obligation on the given date

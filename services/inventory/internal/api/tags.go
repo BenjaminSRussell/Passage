@@ -273,3 +273,50 @@ func (a *API) reverseJournal(w http.ResponseWriter, r *http.Request, id string) 
 	}
 	writeJournal(w, status, j)
 }
+
+// copyRequest is the body of journals/{id}:copy. An empty postingDate copies
+// the source's posting date.
+type copyRequest struct {
+	PostingDate string `json:"postingDate"`
+}
+
+// copyJournal creates a DRAFT journal with the header and lines of an existing
+// journal of any status. Idempotency-Key is required: a repeated request
+// answers 200 with the first copy and Idempotent-Replayed.
+func (a *API) copyJournal(w http.ResponseWriter, r *http.Request, id string) {
+	var req copyRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	var date time.Time
+	if d := strings.TrimSpace(req.PostingDate); d != "" {
+		var err error
+		if date, err = time.Parse(dateLayout, d); err != nil {
+			fields["postingDate"] = "must be a date (YYYY-MM-DD)"
+		}
+	}
+	key := strings.TrimSpace(r.Header.Get(idempotencyHeader))
+	if key == "" || len(key) > maxKeyLength {
+		fields[idempotencyHeader] = fmt.Sprintf("is required (1 to %d characters)", maxKeyLength)
+	}
+	if len(fields) > 0 {
+		fieldProblem(w, r, fields)
+		return
+	}
+	// A copy of an OWNERSHIP_CHANGE journal is a new one: it needs the
+	// consignment duty, as POST /journals does (mayKeyJournal).
+	p, _ := tenant.FromContext(r.Context())
+	j, inserted, err := a.store.CopyJournal(r.Context(), id, date, key, p.HasDuty(dutyConsignmentWrite))
+	if err != nil {
+		a.failed(w, r, "copy journal", err)
+		return
+	}
+	status := http.StatusCreated
+	if !inserted {
+		status = http.StatusOK
+		w.Header().Set("Idempotent-Replayed", "true")
+	}
+	writeJournal(w, status, j)
+}

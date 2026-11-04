@@ -91,6 +91,18 @@ func (a *API) listHierarchies(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
+	if p, _ := tenant.FromContext(r.Context()); !p.HasDuty(DutyMaintain) {
+		// A statement runner sees only what a run can use: codes with a
+		// published version, and not whether someone is editing a draft.
+		published := []store.HierarchySummary{}
+		for _, h := range items {
+			if h.LatestVersion > 0 {
+				h.HasDraft = false
+				published = append(published, h)
+			}
+		}
+		items = published
+	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
 }
 

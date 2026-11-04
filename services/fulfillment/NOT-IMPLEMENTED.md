@@ -301,8 +301,7 @@ are tenant-scoped and read only by order id inside release, drop-ship creation a
 behaviour. The consumer exits at start until its principal is seeded. No new route and no new entity with a screen, so
 no web change; the OpenAPI describes the new FUL-0001 case on the post and the AsyncAPI lists the three consumed
 events, both with zero FAIL lines on the doc gates. Not built: storing or using the per-line `atp_qty`, a hold check on
-pick, pack and auto-pack (the PRD's validation names post only; post is the goods issue, so a held order's packed
-shipment waits at PACKED), a hold check on drop-ship creation and vendor confirmation (a confirmation records a
+pick, pack and auto-pack (built in slice 20), a hold check on drop-ship creation and vendor confirmation (a confirmation records a
 shipment the vendor already made), and a hold or order type screen.
 
 Handoffs from slice 19:
@@ -313,6 +312,81 @@ Handoffs from slice 19:
 | Deploy: Kafka topics `passage.sales.order`, `passage.sales.orderhold` (already produced by sales' outbox relay) and the dead-letter topic `passage.sales.order.dlq` (create it); ACLs for the Kafka user `fulfillment-consumer` (secret named by `consumer.kafka.secret`): read on the two sales topics, consumer group `fulfillment-order`, write on the dead-letter topic. Then set `consumer.enabled`, `consumer.kafka.brokers` and `consumer.kafka.secret` in the environment values. | handoff to platform / deploy | Nothing is provisioned from this service. The migration is run by the PreSync job as for the API. |
 | Existing orders: only events consumed after the consumer starts are known, so orders confirmed or held earlier stay unknown (caller's type, no hold) until sales republishes them or a replay from the topic start is run (the inbox makes a replay safe). | deviation; handoff to deploy | Start the consumer group from the earliest offset when it is first enabled. |
 
+Slice 20 follows sales' `dev.passage.sales.order.remaindercancelled.v1` (sales slice 23) on the same consumer and topic
+(`passage.sales.order`, consumer `fulfillment-order`; no new topic, principal or duty), and adds hold checks on pick, pack
+and auto-pack. The consumer reads `order_id`, `legal_entity_id`, `version` and per line `line_id` (the order line) and
+`kept_qty`. Per line it stores the quantity the line keeps in `order_line_kept` (migration 0024, tenant and legal-entity
+RLS, SELECT, INSERT, UPDATE; an event with a lower sales order `version` than the stored one changes nothing for that
+line) and then plans the cut from the live shipments of the order line: allowed unshipped quantity is `kept - shipped`,
+and the unshipped planned quantity above it is cut, newest shipment first, but never below what is packed or shipped.
+A shipment line shrinks (`qty_planned` and `qty_picked` to the new plan, `qty_closed` grows, unposted batch and serial
+entries are dropped only when they cover more than stays picked, a line cut to nothing counts as pick-confirmed), the
+shipment moves on to PICKED or PACKED when the cut leaves every line confirmed or every picked unit packed, `shipment.closed` is published with the new `reason`
+`order_remainder_cancelled` (the closed quantity and `picked_unpacked` so inventory releases the reservation and puts
+picked stock back; sales must not cancel again), and a shipment left with nothing planned, nothing shipped and no
+container is cancelled with `shipment.cancelled` (the shipments of an order are locked in id order first, so a post or
+pick on one waits and then sees the cut). A partly shipped shipment whose remainder is gone becomes SHIPPED. The consumer
+principal has no legal entity, so the store sets the transaction's legal-entity scope to the event's `legal_entity_id`
+for the call (as production's intake does). A post that would ship more of an order line than the kept quantity is
+refused with FUL-0066 (`order_line_kept` plus the line's shipped quantity across shipments), so packed quantity that
+could not be cut cannot ship. The cases the service cannot fix alone go to a new supervisor list,
+`fulfillment_exception` (migration 0024, tenant and legal-entity RLS, SELECT, INSERT, UPDATE): `SLIP_POSTED_BEYOND_KEPT`
+(the race: a slip was posted for more than the kept quantity before the event arrived; nothing is retried or reversed, the
+exception names the latest posted slip and the surplus, and the remedy is a return through wave 30 or a new order) and
+`PACKED_BEYOND_KEPT` (packed, unposted quantity above the kept quantity; unpack and put the goods back: unpacking a
+container re-applies the kept quantity, so the unpacked quantity above it is cut with `shipment.closed` and the kept
+quantity can be repacked and posted). One open
+exception exists per kind, order line and shipment. `GET /exceptions` and `GET /exceptions/{id}` are under `WarehouseView`,
+`POST /exceptions/{id}:resolve` (If-Match version, Idempotency-Key, a note of 1 to 500 characters) under `WarehouseRelease`;
+`exception.raised.v1` and `exception.resolved.v1` are published through the outbox. Pick, pack, auto-pack and wave pick
+now refuse a held order with FUL-0001 (a wave pick of the rest skips a held order's shipment; a line of it named in the
+call fails the call); post already did. The web module gets the Exceptions list (open by default, status filter) and the
+exception detail with the advice per kind, links to the shipment and slip, and the resolve form (shown to `WarehouseRelease`
+only). The OpenAPI (60 operations) and the AsyncAPI (28 events) have zero FAIL lines on the doc gates.
+
+Handoffs and gaps from slice 20:
+
+| Item | Status | Reason |
+|---|---|---|
+| Authz seed: route rows in `policies/authz/data.json` for `/v1/fulfillment/exceptions` and `/v1/fulfillment/exceptions/*` (GET, `WarehouseView`) and `/v1/fulfillment/exceptions/*:resolve` (POST, `WarehouseRelease`). No new duty name and no new principal. | handoff for #313 (authz seed) | Both duties are already seeded; the web nav item is gated on `WarehouseView`. |
+| Inventory must consume `shipment.closed` with `reason` `order_remainder_cancelled` and `shipment.cancelled` as for a manual close or cancel (release the reservation of `qty`, put back `picked_unpacked`); sales must not cancel the order line again on that reason, and should show `exception.raised.v1` where it tracks order fulfilment problems. | handoff to inventory (wave 16) and sales (wave 27) | No consumer exists yet. |
+| Packed quantity beyond the kept quantity is not unpacked by the service | deviation | A container is a physical object with an SSCC; the supervisor unpacks it (`:unpack`), which cuts the unpacked quantity above the kept quantity. Until then the post is refused (FUL-0066). The exception is resolved by hand; it is not closed by the unpack. |
+| Unposted batch and serial entries of a cut line that cover more than stays picked are dropped as a whole | deviation | Capture is repeated for what stays picked; trimming entries by quantity would guess which serials stay. Entries that still fit are kept. |
+| Pick and pack of a line sales cut back are not blocked by the kept quantity; only the post is (FUL-0066) | deviation | The cut already shrinks the plan to what is packed or shipped, so a pick above the plan is refused as an over-pick (FUL-0004). |
+| A slip posted beyond the kept quantity is not reversed or returned by the service | handoff to receivables / returns (wave 30) | The exception tells the supervisor; return authorisation and credit are wave 30. |
+| A hold check on capture tracking and on drop-ship creation and vendor confirmation | deviation | Capture tracking is a recording step, and a vendor confirmation records a shipment the vendor already made. |
+| `tools/rlscheck` reports `fulfillment.service_token_replay` (migration 0019, from main) as `rls-not-enabled-and-forced`: the table is missing from `tools/rlscheck/allowlist.go`, where the other services' replay tables carry the permanent SECURITY DEFINER purge reason. The slice 20 tables pass. | handoff (repo tooling, outside this wave's paths) | Add `"fulfillment.service_token_replay:" + problemNotForced` with the same reason as the other services. |
+| `order_line_kept` is never pruned | deviation | One small row per cancelled order line; a retention job belongs with the data lifecycle work. |
+
+Slice 21 closes the two gaps slice 20 left. Drop-ship: on `order.remaindercancelled.v1` the same consumer now also reads the
+active drop-ship of each order line (`followDropShip`, in the consumer's transaction, after the shipment lines were cut). The
+vendor quantity not yet shipped above what the line keeps is closed with no booking, as `:close-remainder` does
+(`qty_closed` grows, an OPEN drop-ship stays OPEN with less open, a PARTIALLY_CONFIRMED one becomes CONFIRMED when none is
+left), and `dropship.closed.v1` is published; an OPEN drop-ship that keeps nothing is CANCELLED and `dropship.cancelled.v1` is
+published. Both events carry the new optional `reason` `order_remainder_cancelled` (additive, kept at v1) so sales does not
+cancel again. A vendor confirmation already booked above the kept quantity raises the new exception kind
+`DROPSHIP_CONFIRMED_BEYOND_KEPT` (migration 0025 widens the kind check on `fulfillment_exception`; no new table, so the grants
+of 0024 stand); nothing is reversed and the supervisor arranges a vendor return or a new order. Creating a drop-ship above the
+quantity sales kept, and a vendor confirmation that would take the confirmed total above it, are refused with FUL-0066.
+Release: a run reads `order_line_kept`: a line sales cut back is offered only for the kept quantity minus the planned quantity of
+its live shipments and the quantity of its active drop-ship (capped, and not flagged partial: nothing is left for a later run, so
+a repeat run skips it as `already_released`), and is skipped with the new reason `order_remainder_cancelled` when it has no live
+shipment and nothing is left to offer. The release OpenAPI skip reason enum, the exception kind enums, the
+AsyncAPI drop-ship `reason` and exception kinds, and the web labels (skip reason, exception kind, advice) are updated. No new
+route, duty, principal, topic or entity; the exception list and detail pages already show the new kind.
+
+Handoffs and gaps from slice 21:
+
+| Item | Status | Reason |
+|---|---|---|
+| Sales must treat `dropship.closed.v1` and `dropship.cancelled.v1` with `reason` `order_remainder_cancelled` as already known (no second cancel), and inventory has nothing to do (no stock moves for a drop-ship). | handoff to sales (wave 27) | No consumer exists yet. |
+| A drop-ship that keeps part of its quantity and has nothing confirmed stays OPEN with `qty_closed` above zero; the vendor's purchase order line is not reduced by fulfillment. | handoff to purchasing (wave 17) | Purchasing must lower the PO line quantity from `dropship.closed.v1` (`qty_closed`); fulfillment does not call purchasing. |
+| A vendor confirmation booked above the kept quantity is not reversed (the Dr 5000 / Cr 2110 stays) | deviation; handoff to purchasing (wave 17) and the ledger | The exception tells the supervisor; a vendor return and its reversal are not built (see "A confirmed drop-ship cannot be reversed"). |
+| A drop-ship created while the consumer applies the cancellation (the consumer does not see the uncommitted drop-ship, and the create does not see the uncommitted kept row) keeps its full quantity. | deviation | The vendor confirmation is held to the kept quantity (FUL-0066, `TestDropShip_ConfirmAboveKeptIsRefused`); the supervisor cancels the OPEN drop-ship and creates one for the kept quantity, or closes the remainder after a partial confirmation. Closing the window would need a lock on an order line that has no row yet. |
+| A vendor confirmation above the kept quantity is refused (FUL-0066) even when the vendor has already shipped (the purchase order line is not lowered by fulfillment, see above), so that shipment cannot be booked here. | deviation; decision for Ben | The ticket asks for the refusal; the alternative is to book it and raise `DROPSHIP_CONFIRMED_BEYOND_KEPT`, as the consumer does for a confirmation booked before the cancellation arrived. |
+| A second drop-ship of a line that already has an active one is refused with FUL-0066 rather than FUL-0061 when its quantity is also above the kept quantity. | deviation | The kept check runs before the insert that detects the active drop-ship; both are refusals. |
+| Authz seed: none. The new exception kind and skip reason use existing duties and routes. | none | |
+
 ## Important gaps (read first)
 
 | Item | Status | Reason |
@@ -322,7 +396,7 @@ Handoffs from slice 19:
 | Posting is a single local transaction, not a Temporal saga. There is no PENDING state, no compensation at step 3, and no 10-minute watchdog. | later slice of PSG-28 | The saga needs the Temporal worker, which is in the eventing-backbone scope. The store is written so that the ledger step can be added as a saga step. |
 | The `short_pick_action` setting is applied when a packing slip posts and leaves a remainder open (slice 13), not at pick time as the PRD parameter table places it (FR-28.2), and a pick below plan does not close or move anything by itself. Sales (wave 27) does not yet consume `shipment.closed` to cancel the order line remainder, nor read its `backorder_shipment_id` (and `shipment.released`'s `backorder_of`) to keep the order lines open instead of counting them as released twice. | deviation; handoff to sales (wave 27) | A post needs every picked unit packed, so the remainder at post is exactly what the picks fell short of and the outcome matches a pick-time action; closing needs something shipped (FUL-0021 otherwise), and the line keeps its pick progress until then. The only difference is timing: the reservation of the remainder is released by `pick.confirmed` (`backordered`) at pick time either way. Slice 7 delivers the manual close, slice 13 the setting and the backorder shipment (see above). |
 | A re-pick of a partially shipped shipment confirms the remainder in one call: the shipment goes to PICKED at once (its lines stay pick-confirmed), so a second confirm-pick before packing is refused (FUL-0001). Lines left out of the call keep their remainder for a later round. | later slice of PSG-28 | Per-line pick status for remainder rounds belongs with pick work per wave (wave 31 brings directed pick work). |
-| Post and release honour sales' order holds only after the consumer runs: until `service:fulfillment-order` is seeded and the consumer deployment is enabled, no hold is known and post does not check one (slice 19). Pick, pack and auto-pack do not check holds (the PRD names post only). | handoff (authz seed and deploy, see slice 19 below) | The check itself is built: post is refused with FUL-0001 while the order has an active hold, and release skips its lines as `held`.
+| Post, pick, pack, auto-pack, wave pick and release honour sales' order holds only after the consumer runs: until `service:fulfillment-order` is seeded and the consumer deployment is enabled, no hold is known and none is checked (slices 19 and 20). | handoff (authz seed and deploy, see slice 19 below) | The check itself is built: post, pick, pack and auto-pack are refused with FUL-0001 while the order has an active hold, a wave pick of the rest leaves a held order's shipment out, and release skips its lines as `held`.
 | The cost on each line comes from the caller (`costs[]`), not from wave 20 cost snapshots. | handoff to inventory costing (wave 20) | Cost snapshot ownership is outside this wave. The caller supplies `costSnapshotId` and `unitCost`. |
 | AC-28.4: a short pick leaves the remainder on the shipment (re-picked from `PARTIALLY_SHIPPED`), `pick.confirmed` carries the `backordered` quantity, and the short picks and backorders report shows the open remainder (slice 6). Releasing the unpicked reservation is not done here. | handoff to inventory reservations (wave 16) | Reservations are owned by wave 16; inventory consumes `pick.confirmed` (`backordered`), `shipment.cancelled` and `shipment.closed` (`qty` to unreserve, `picked_unpacked` to put back). No inventory consumer exists yet. |
 | The packaging fee is statistical only. The `packaging_fee_billable` SURCHARGE / FREIGHT line with its own tax code (BR-28.12) is not created here. | handoff to billing (wave 29) | Billing owns invoice lines. The fee lines are on the slip and in `packingslip.posted.v1` (`packaging_fees`), so wave 29 can bill them when `packaging_fee_billable` is set. The setting itself is not modelled here. |

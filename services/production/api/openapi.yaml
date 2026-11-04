@@ -854,23 +854,40 @@ components:
         queueBeforeH: { $ref: '#/components/schemas/Decimal' }
         queueAfterH: { $ref: '#/components/schemas/Decimal' }
         transitH: { $ref: '#/components/schemas/Decimal' }
+    CoProductEdit:
+      type: object
+      description: |
+        One co-product or by-product edit (FR-21.14). add needs itemId and qtyPer (type co-product by
+        default); change sets only the fields it carries; remove carries lineNo only. The planned
+        quantity follows the order quantity. A line with receipts or journals keeps its item and type,
+        cannot be removed and cannot plan below what was received. As at creation, a line never yields
+        the order's own product, an order declares at most 50 lines and a rework order takes none (422).
+      required: [op, lineNo]
+      additionalProperties: false
+      properties:
+        op: { $ref: '#/components/schemas/EditOp' }
+        lineNo: { type: string, maxLength: 20 }
+        type: { type: string, enum: [co-product, by-product] }
+        itemId: { type: string, format: uuid }
+        qtyPer: { $ref: '#/components/schemas/Decimal' }
     OrderEdits:
       type: object
-      description: Line edits apply first, in order, then operation edits; 1 to 200 edits in all.
+      description: Line edits apply first, in order, then operation edits, then co-product edits; 1 to 200 edits in all.
       additionalProperties: false
       properties:
         lines: { type: array, items: { $ref: '#/components/schemas/LineEdit' } }
         operations: { type: array, items: { $ref: '#/components/schemas/OperationEdit' } }
+        coProducts: { type: array, items: { $ref: '#/components/schemas/CoProductEdit' } }
     OrderEditEntry:
       type: object
       properties:
         orderVersion: { type: integer, description: The order version the edit produced. }
         seq: { type: integer, description: Position of the edit in its request. }
-        target: { type: string, enum: [line, operation] }
+        target: { type: string, enum: [line, operation, coproduct] }
         op: { $ref: '#/components/schemas/EditOp' }
         key: { type: string, description: The line number, or the operation number as text. }
-        before: { description: 'The line or operation before the edit; null for an add.', oneOf: [{ $ref: '#/components/schemas/OrderLine' }, { $ref: '#/components/schemas/Operation' }, { type: 'null' }] }
-        after: { description: 'The line or operation after the edit; null for a remove.', oneOf: [{ $ref: '#/components/schemas/OrderLine' }, { $ref: '#/components/schemas/Operation' }, { type: 'null' }] }
+        before: { description: 'The line, operation or co-product before the edit; null for an add.', oneOf: [{ $ref: '#/components/schemas/OrderLine' }, { $ref: '#/components/schemas/Operation' }, { $ref: '#/components/schemas/CoProduct' }, { type: 'null' }] }
+        after: { description: 'The line, operation or co-product after the edit; null for a remove.', oneOf: [{ $ref: '#/components/schemas/OrderLine' }, { $ref: '#/components/schemas/Operation' }, { $ref: '#/components/schemas/CoProduct' }, { type: 'null' }] }
         actor: { type: string }
         traceId: { type: string }
         occurredAt: { type: string, format: date-time }
@@ -1046,6 +1063,52 @@ components:
             qtyGood: { $ref: '#/components/schemas/Decimal' }
             qtyError: { $ref: '#/components/schemas/Decimal' }
         nextCursor: { type: string }
+    MaterialLine:
+      type: object
+      required: [orderId, orderNumber, orderStatus, legalEntityId, siteId, productId, dueDate, lineNumber, itemId, qtyRequired, qtyIssued, qtyOutstanding]
+      properties:
+        orderId: { type: string, format: uuid }
+        orderNumber: { type: string }
+        orderStatus: { $ref: '#/components/schemas/Status' }
+        legalEntityId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        dueDate: { type: string, format: date, nullable: true, description: The order's delivery date. }
+        lineNumber: { type: string }
+        itemId: { type: string, format: uuid }
+        qtyRequired: { $ref: '#/components/schemas/Decimal' }
+        qtyIssued: { $ref: '#/components/schemas/Decimal' }
+        qtyOutstanding: { $ref: '#/components/schemas/Decimal' }
+    MaterialRequirements:
+      type: object
+      required: [items, totals]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/MaterialLine' } }
+        totals:
+          type: object
+          description: Over the whole filter.
+          properties:
+            lines: { type: integer }
+            items: { type: integer, description: Distinct component items. }
+            orders: { type: integer }
+        nextCursor: { type: string }
+    MaterialItem:
+      type: object
+      required: [itemId, orders, lines, qtyRequired, qtyIssued, qtyOutstanding, earliestDue]
+      properties:
+        itemId: { type: string, format: uuid }
+        orders: { type: integer }
+        lines: { type: integer }
+        qtyRequired: { $ref: '#/components/schemas/Decimal' }
+        qtyIssued: { $ref: '#/components/schemas/Decimal' }
+        qtyOutstanding: { $ref: '#/components/schemas/Decimal' }
+        earliestDue: { type: string, format: date, nullable: true, description: The earliest delivery date of the orders that still wait for the item. }
+    MaterialItems:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/MaterialItem' } }
+        nextCursor: { type: string, format: uuid }
     OrderKpiGroup:
       type: object
       required: [ended, dated, onTime, onTimePct, avgCycleDays, qtyFinished, qtyError, scrapPct, open, overdue]
@@ -2183,6 +2246,9 @@ paths:
         from its schedule start with the changed route and emits
         dev.passage.production.order.scheduled.v1 with reason redate; operation queue and transit
         hours (queueBeforeH, queueAfterH, transitH) can be edited.
+        Co-products (slice 28, FR-21.14): coProducts adds, changes and removes the order's declared
+        co-products and by-products; their planned quantities follow the order quantity, and a line
+        with receipts or journals keeps its item and type and cannot be removed.
       x-passage-duty: production.order.write
       parameters:
         - { $ref: '#/components/parameters/OrderId' }
@@ -2523,6 +2589,65 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/OperationsOverview' }
+        '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/production/material-requirements:
+    get:
+      operationId: getProductionMaterialRequirements
+      summary: Material requirements of open orders by BOM line (4.21.14)
+      description: |
+        The component demand of open orders (the material shortage inquiry of PRD 4.21.14 without
+        on-hand, which comes with wave 16): per BOM line the quantity required, the quantity issued (the
+        line's booked consumption: posted picking lists, backflush included, net of reversals and of
+        the share a split moved to another order) and the quantity outstanding, ordered by order and
+        line. Only lines with something left to issue are listed unless all is true. Totals cover the
+        whole filter, not only the page.
+      x-passage-duty: production.order.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: siteId, in: query, schema: { type: string, format: uuid } }
+        - { name: itemId, in: query, description: The component item., schema: { type: string, format: uuid } }
+        - { name: orderId, in: query, schema: { type: string, format: uuid } }
+        - { name: orderStatus, in: query, description: Without it only open orders count (not Ended, not Cancelled)., schema: { $ref: '#/components/schemas/Status' } }
+        - { name: dueFrom, in: query, description: The order's delivery date from., schema: { type: string, format: date } }
+        - { name: dueTo, in: query, description: The order's delivery date to., schema: { type: string, format: date } }
+        - { name: all, in: query, description: 'true also lists lines and items that are fully issued.', schema: { type: boolean, default: false } }
+        - { name: cursor, in: query, description: 'The nextCursor of the previous page (order id:line sequence).', schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+      responses:
+        '200':
+          description: One page of lines and the totals.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MaterialRequirements' }
+        '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/production/material-requirements/by-item:
+    get:
+      operationId: getProductionMaterialRequirementsByItem
+      summary: Material requirements of open orders by component item (4.21.14)
+      description: |
+        The same demand rolled up per component item, ordered by item id: the orders and lines that
+        need it, the quantity required, issued and outstanding, and the earliest delivery date of the
+        orders still waiting for it. Fully issued lines do not count unless all is true.
+      x-passage-duty: production.order.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: siteId, in: query, schema: { type: string, format: uuid } }
+        - { name: itemId, in: query, description: The component item., schema: { type: string, format: uuid } }
+        - { name: orderId, in: query, schema: { type: string, format: uuid } }
+        - { name: orderStatus, in: query, description: Without it only open orders count (not Ended, not Cancelled)., schema: { $ref: '#/components/schemas/Status' } }
+        - { name: dueFrom, in: query, description: The order's delivery date from., schema: { type: string, format: date } }
+        - { name: dueTo, in: query, description: The order's delivery date to., schema: { type: string, format: date } }
+        - { name: all, in: query, description: 'true also lists lines and items that are fully issued.', schema: { type: boolean, default: false } }
+        - { name: cursor, in: query, description: The nextCursor of the previous page (an item id)., schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+      responses:
+        '200':
+          description: One page of items.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MaterialItems' }
         '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '403': { $ref: '#/components/responses/Problem' }
   /v1/production/jobs:

@@ -46,52 +46,90 @@ channels:
     messages:
       postingAccountsChanged:
         $ref: "#/components/messages/PostingAccountsChanged"
+  activationAttemptResolved:
+    address: passage.costing.activationattempt
+    messages:
+      activationAttemptResolved:
+        $ref: "#/components/messages/ActivationAttemptResolved"
 operations:
+  publishActivationAttemptResolved:
+    action: send
+    summary: An operator resolved a standard cost activation attempt past the ledger replay window
+    channel: { $ref: "#/channels/activationAttemptResolved" }
   publishPostingAccountsChanged:
     action: send
+    summary: Announce new posting accounts for a legal entity
     channel: { $ref: "#/channels/postingAccountsChanged" }
   publishStandardCostActivated:
     action: send
+    summary: Announce a recorded standard cost activation or reversal
     channel: { $ref: "#/channels/standardCostActivated" }
   publishCostComponentCreated:
     action: send
+    summary: Announce a new cost component
     channel: { $ref: "#/channels/costComponentCreated" }
   publishCostGroupCreated:
     action: send
+    summary: Announce a new cost group
     channel: { $ref: "#/channels/costGroupCreated" }
   publishVersionCreated:
     action: send
+    summary: Announce a new costing version
     channel: { $ref: "#/channels/versionCreated" }
   publishVersionTransitioned:
     action: send
+    summary: Announce a costing version status change
     channel: { $ref: "#/channels/versionTransitioned" }
 components:
   messages:
     CostComponentCreated:
       name: dev.passage.costing.costcomponent.created.v1
+      summary: A cost component (a bucket of the cost split) was created
       contentType: application/cloudevents+json
       payload: { $ref: "#/components/schemas/CostComponentCreatedData" }
     CostGroupCreated:
       name: dev.passage.costing.costgroup.created.v1
+      summary: A cost group was created and mapped to a cost component
       contentType: application/cloudevents+json
       payload: { $ref: "#/components/schemas/CostGroupCreatedData" }
     VersionCreated:
       name: dev.passage.costing.version.created.v1
+      summary: A costing version was created
       contentType: application/cloudevents+json
       payload: { $ref: "#/components/schemas/VersionCreatedData" }
     VersionTransitioned:
       name: dev.passage.costing.version.transitioned.v1
+      summary: A costing version changed status (blocked, unblocked, closed or activated)
       contentType: application/cloudevents+json
       payload: { $ref: "#/components/schemas/VersionTransitionedData" }
     StandardCostActivated:
       name: dev.passage.costing.standardcost.activated.v1
+      summary: A standard cost activation (or its reversal) was recorded, with the revaluation journal it posted
       contentType: application/cloudevents+json
       payload: { $ref: "#/components/schemas/StandardCostActivatedData" }
     PostingAccountsChanged:
       name: dev.passage.costing.postingaccounts.changed.v1
+      summary: The ledger accounts that activations of a legal entity post to changed
       contentType: application/cloudevents+json
       payload: { $ref: "#/components/schemas/PostingAccountsChangedData" }
+    ActivationAttemptResolved:
+      name: dev.passage.costing.activationattempt.resolved.v1
+      summary: An operator confirmed whether the ledger entry of an old activation attempt landed, and the attempt was recorded or discarded
+      contentType: application/cloudevents+json
+      payload: { $ref: "#/components/schemas/ActivationAttemptResolvedData" }
   schemas:
+    ActivationAttemptResolvedData:
+      type: object
+      required: [costingVersionId, legalEntityId, activationId, outcome, reason, actor]
+      properties:
+        costingVersionId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        activationId: { type: string, format: uuid }
+        reversesActivationId: { type: string, format: uuid }
+        outcome: { type: string, enum: [posted, not-posted], description: "posted - the operator confirmed the ledger entry exists and the activation was recorded; not-posted - the operator confirmed nothing landed and discarded the attempt" }
+        journalEntryId: { type: string, description: The ledger entry the operator confirmed; empty for not-posted }
+        reason: { type: string }
+        actor: { type: string }
     PostingAccountsChangedData:
       type: object
       required: [legalEntityId, inventoryAccount, costChangeAccount]

@@ -28,6 +28,8 @@ config:
   # Comma-separated tenant UUIDs the in-process due personnel-action sweep (#263) runs for; empty disables it.
   actionSweepTenantIds: ""
   actionSweepInterval: "15m"
+  # Kill switch for POST /v1/hr/candidates/purge and the retention-purge CronJob; "false" turns both off.
+  retentionPurgeEnabled: "true"
 
 # CronJob running `hr reseal-pii <tenant-id>...` (#335). Idempotent: a tenant with nothing legacy logs rewritten=0.
 # Tenants are listed because the app role cannot enumerate them. Off by default.
@@ -35,6 +37,25 @@ reseal:
   enabled: false
   schedule: "17 3 * * *"
   tenantIds: []
+
+# CronJobs running `hr accrue`, `hr carryover-expiry` and `hr retention-purge` for the listed tenants (#267, #266).
+# Tenants are listed because the app role cannot enumerate them. All are idempotent and off by default.
+# retentionPurge checks compliance legal holds per candidate and needs serviceIdentity.signingKeySecret.
+accrue:
+  enabled: false
+  schedule: "30 2 * * *"
+  tenantIds: []
+carryoverExpiry:
+  enabled: false
+  schedule: "45 2 * * *"
+  tenantIds: []
+retentionPurge:
+  enabled: false
+  schedule: "15 4 * * *"
+  tenantIds: []
+
+# Defaults to http://compliance-compliance.<namespace>.svc:8080.
+complianceUrl: ""
 
 # Requisitions without a requisitionNumber take the next number of the REQ sequence from numbering (#266).
 numberingUrl: ""

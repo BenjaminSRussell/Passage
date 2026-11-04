@@ -17,6 +17,13 @@ var (
 	SLAWarning      = events.Type(Context, "sla", "warning", 1)
 	SLABreached     = events.Type(Context, "sla", "breached", 1)
 
+	// AgreementChanged is dev.passage.service.agreement.changed.v1: an agreement
+	// moved between DRAFT, ACTIVE, SUSPENDED, CANCELED and EXPIRED (FR-45.3).
+	AgreementChanged = events.Type(Context, "agreement", "changed", 1)
+	// AgreementVisitRecorded is dev.passage.service.agreementvisit.recorded.v1: an
+	// included visit of an agreement line was consumed (FR-45.3).
+	AgreementVisitRecorded = events.Type(Context, "agreementvisit", "recorded", 1)
+
 	// ArticlePublished is dev.passage.knowledge.article.published.v1 (PRD 8.45.5):
 	// the knowledge base is its own context in the event catalog.
 	ArticlePublished = events.Type(KnowledgeContext, "article", "published", 1)
@@ -146,4 +153,36 @@ type SupplierClaimSettledData struct {
 	CreditNoteID    string `json:"creditNoteId"`
 	VendorReference string `json:"vendorReference"`
 	SettledAt       string `json:"settledAt"`
+}
+
+// AgreementChangedData is the payload of AgreementChanged. Reason is empty when
+// the caller gave none (an activation, or the expiry pass, which writes "validTo passed").
+type AgreementChangedData struct {
+	AgreementID     string  `json:"agreementId"`
+	Number          string  `json:"number"`
+	CustomerPartyID string  `json:"customerId"`
+	LegalEntityID   string  `json:"legalEntityId"`
+	BillingModel    string  `json:"billingModel"`
+	From            string  `json:"from"`
+	To              string  `json:"to"`
+	Reason          string  `json:"reason"`
+	ValidTo         *string `json:"validTo"`
+	At              string  `json:"at"`
+	Actor           string  `json:"actor"`
+}
+
+// AgreementVisitRecordedData is the payload of AgreementVisitRecorded. Wave 29
+// bills PER_VISIT agreements from it; VisitsLeft is what remains on the line.
+type AgreementVisitRecordedData struct {
+	VisitID         string  `json:"visitId"`
+	AgreementID     string  `json:"agreementId"`
+	Number          string  `json:"number"`
+	CustomerPartyID string  `json:"customerId"`
+	LegalEntityID   string  `json:"legalEntityId"`
+	BillingModel    string  `json:"billingModel"`
+	LineIndex       int     `json:"lineIndex"`
+	Kind            string  `json:"kind"`
+	VisitDate       string  `json:"visitDate"`
+	WorkOrderID     *string `json:"workOrderId"`
+	VisitsLeft      int     `json:"visitsLeft"`
 }

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -20,6 +21,7 @@ const (
 	RuleCopy   = "copy"
 	RuleConst  = "const"
 	RuleConcat = "concat"
+	RuleExpr   = "expr"
 
 	FnAxDatetime     = "ax_datetime"
 	FnAxNoYes        = "ax_noyes"
@@ -73,8 +75,18 @@ func (f FieldRule) check() *Error {
 		if len(f.Sources) < 2 || f.Source != "" || f.Value != nil || f.Type != TypeString {
 			return invalid("concat takes at least two sources and type string")
 		}
+	case RuleExpr:
+		if f.Source != "" || f.Value != nil || len(f.Sources) > 0 || f.Fn != "" || f.Format != "" || f.TimeSource != "" {
+			return invalid("expr takes an expression and no source, value, fn or format")
+		}
+		if _, err := ParseExpr(f.Expr); err != nil {
+			return invalid("expression: " + err.Error())
+		}
 	default:
 		return unknownFn(f.Rule)
+	}
+	if f.Expr != "" && f.Rule != RuleExpr {
+		return invalid("expr is only for the expr rule")
 	}
 	if e := f.checkFormat(); e != nil {
 		return e
@@ -171,6 +183,9 @@ func (f FieldRule) origin() string {
 	if f.Rule == RuleConcat {
 		return strings.Join(f.Sources, "+")
 	}
+	if f.Rule == RuleExpr {
+		return "expression"
+	}
 	return f.Source
 }
 
@@ -178,6 +193,8 @@ func (f FieldRule) text(row map[string]any) (string, bool, *Reject) {
 	switch f.Rule {
 	case RuleConst:
 		return *f.Value, true, nil
+	case RuleExpr:
+		return f.evalExpr(row)
 	case RuleConcat:
 		var parts []string
 		for _, s := range f.Sources {
@@ -300,3 +317,25 @@ func Lookup(v any, path string) any {
 }
 
 func lookup(row map[string]any, path string) any { return Lookup(row, path) }
+
+// evalExpr runs the field's expression over the source row. A null result leaves the target absent; a failure rejects
+// the row with MIG-MAP-COERCE and the reason.
+func (f FieldRule) evalExpr(row map[string]any) (string, bool, *Reject) {
+	prog := f.prog
+	if prog == nil {
+		var err error
+		if prog, err = ParseExpr(f.Expr); err != nil {
+			return "", false, &Reject{f.Target, CodeMapInvalid, "expression: " + err.Error()}
+		}
+	}
+	v, err := prog.Eval(func(path string) any { return lookup(row, path) })
+	if err != nil {
+		code := CodeMapCoerce
+		if errors.Is(err, errExprRange) {
+			code = CodeMapRange
+		}
+		return "", false, &Reject{f.Target, code, "expression: " + err.Error()}
+	}
+	text := strings.TrimSpace(v.text())
+	return text, text != "", nil
+}

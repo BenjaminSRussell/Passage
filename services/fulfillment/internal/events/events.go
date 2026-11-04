@@ -34,6 +34,9 @@ var (
 	DropShipConfirmed = events.Type(Context, "dropship", "confirmed", 1)
 	DropShipCancelled = events.Type(Context, "dropship", "cancelled", 1)
 	DropShipClosed    = events.Type(Context, "dropship", "closed", 1)
+
+	ExceptionRaised   = events.Type(Context, "exception", "raised", 1)
+	ExceptionResolved = events.Type(Context, "exception", "resolved", 1)
 )
 
 // All lists every event type this service publishes, for the registry check.
@@ -41,7 +44,7 @@ func All() []string {
 	return []string{
 		ShipmentReleased, PickConfirmed, PackingSlipPosted, PackingSlipCancelled,
 		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, ContainerNested, ContainerUnnested, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked, WarehouseSettingChanged, LegalEntitySettingChanged, WarehouseReleaseRuleChanged,
-		DropShipCreated, DropShipConfirmed, DropShipCancelled, DropShipClosed,
+		DropShipCreated, DropShipConfirmed, DropShipCancelled, DropShipClosed, ExceptionRaised, ExceptionResolved,
 	}
 }
 
@@ -100,6 +103,39 @@ type ShipmentClosedData struct {
 	// BackorderShipmentID is set when the remainder moved to a new shipment
 	// (short pick action REMAINDER_BACKORDER): sales keeps the order lines open.
 	BackorderShipmentID string `json:"backorder_shipment_id,omitempty"`
+	// Reason is set when the remainder was closed by something other than the
+	// warehouse: ReasonOrderRemainderCancelled when sales cancelled the remainder
+	// of the order. Sales already knows, so it must not cancel again.
+	Reason string `json:"reason,omitempty"`
+}
+
+// ReasonOrderRemainderCancelled is ShipmentClosedData.Reason for a shipment cut
+// back (or cancelled, in shipment.cancelled's case no reason is needed) by
+// sales' order.remaindercancelled.v1.
+const ReasonOrderRemainderCancelled = "order_remainder_cancelled"
+
+// ExceptionRaisedData is published when fulfillment records a case the
+// warehouse supervisor must handle (an exception).
+type ExceptionRaisedData struct {
+	ExceptionID   string  `json:"exception_id"`
+	Kind          string  `json:"kind"`
+	OrderID       string  `json:"order_id"`
+	OrderLineID   string  `json:"order_line_id"`
+	ShipmentID    *string `json:"shipment_id,omitempty"`
+	PackingSlipID *string `json:"packing_slip_id,omitempty"`
+	Qty           string  `json:"qty"`
+	KeptQty       string  `json:"kept_qty"`
+	Detail        string  `json:"detail"`
+}
+
+// ExceptionResolvedData is published when a supervisor closes an exception.
+type ExceptionResolvedData struct {
+	ExceptionID string `json:"exception_id"`
+	Kind        string `json:"kind"`
+	OrderID     string `json:"order_id"`
+	OrderLineID string `json:"order_line_id"`
+	Note        string `json:"note"`
+	ResolvedBy  string `json:"resolved_by"`
 }
 
 // WarehouseSettingChangedData is published when a warehouse's short pick action
@@ -379,4 +415,7 @@ type DropShipData struct {
 	ConfirmationSeq   int            `json:"confirmation_seq,omitempty"`
 	ConfirmedQty      string         `json:"confirmed_qty,omitempty"`
 	Journal           []JournalEntry `json:"journal"`
+	// Reason is set when the drop-ship was closed or cancelled because sales cancelled the
+	// remainder of the order (ReasonOrderRemainderCancelled): sales already knows.
+	Reason string `json:"reason,omitempty"`
 }

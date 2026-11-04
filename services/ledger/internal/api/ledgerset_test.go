@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -301,6 +303,8 @@ func TestPatchLedger_ValidatesAndPassesSettingsWithTheVersion(t *testing.T) {
 		"bad calendar":  `{"calendarCode":"fiscal year"}`,
 		"bad principle": `{"accountingPrinciple":"ifrs"}`,
 		"bad currency":  `{"reportingCurrency":"euro"}`,
+		"bad attribute": `{"addDimensionAttributes":["vendgrp"]}`,
+		"repeated":      `{"addDimensionAttributes":["VENDGRP","VENDGRP"]}`,
 	} {
 		if rec := call(h, http.MethodPatch, path, body, dutyLedgerWrite, nil); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d", name, rec.Code)
@@ -321,6 +325,13 @@ func TestPatchLedger_ValidatesAndPassesSettingsWithTheVersion(t *testing.T) {
 	}
 	if rec.Header().Get("ETag") != `"3"` {
 		t.Errorf("etag %q", rec.Header().Get("ETag"))
+	}
+	if rec := call(h, http.MethodPatch, path, `{"addDimensionAttributes":["VENDGRP"]}`, dutyLedgerWrite, nil); rec.Code != http.StatusOK || len(fs.settings) != 2 || len(fs.settings[1].in.AddDimensionAttributes) != 1 || fs.settings[1].in.AddDimensionAttributes[0] != "VENDGRP" {
+		t.Fatalf("append VENDGRP alone: status %d: %s %+v", rec.Code, rec.Body.String(), fs.settings)
+	}
+	if rec := call(h, http.MethodPatch, path, `{"allowReinstate":false}`, dutyLedgerWrite, nil); rec.Code != http.StatusOK ||
+		fs.settings[len(fs.settings)-1].in.AllowReinstate == nil || *fs.settings[len(fs.settings)-1].in.AllowReinstate {
+		t.Errorf("allowReinstate alone: status %d: %+v", rec.Code, fs.settings)
 	}
 }
 
@@ -347,5 +358,53 @@ func TestSetAndSinglePosts_RelayRateAndLedgerLineProblemsUnchanged(t *testing.T)
 	m := decode(t, rec)
 	if rec.Code != http.StatusUnprocessableEntity || m["code"] != store.CodeLedgerLinesOwnLedgerOnly || m["violations"].([]any)[0].(map[string]any)["field"] != "ledgerLines" {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPostEntry_PassesOptionalDimensionsAndValidatesThem(t *testing.T) {
+	fs := &fakeStore{}
+	h := server(fs)
+	with := func(list string) string {
+		return strings.Replace(entryBody, `"description":`, `"optionalDimensions":`+list+`,"description":`, 1)
+	}
+	rec := call(h, http.MethodPost, "/v1/ledger/journal-entries", with(`["VENDGRP"]`), dutyPost, map[string]string{"Idempotency-Key": "k1"})
+	if rec.Code != http.StatusCreated || len(fs.posted) != 1 || len(fs.posted[0].OptionalDimensions) != 1 || fs.posted[0].OptionalDimensions[0] != "VENDGRP" {
+		t.Fatalf("status %d %s, posted %+v", rec.Code, rec.Body.String(), fs.posted)
+	}
+	// The hash covers the request as decoded; an entry without optionalDimensions must hash as it did before
+	// the field existed, so retries of postings made before the upgrade still replay.
+	var req singleEntryRequest
+	if err := json.Unmarshal([]byte(entryBody), &req); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := json.Marshal(req); strings.Contains(string(raw), "optionalDimensions") {
+		t.Fatalf("an entry without optional dimensions hashes a new field: %s", raw)
+	}
+	if rec := call(h, http.MethodPost, "/v1/ledger/journal-entries", with(`["vendgrp"]`), dutyPost, map[string]string{"Idempotency-Key": "k3"}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "optionalDimensions") {
+		t.Fatalf("a malformed attribute: %d %s", rec.Code, rec.Body.String())
+	}
+	// A retry that tags the control line differently (the party lookup answered this time) hashes the same, so it
+	// replays the first entry instead of a 409; a non-optional dimension still counts.
+	untagged := call(h, http.MethodPost, "/v1/ledger/journal-entries", entryBody, dutyPost, map[string]string{"Idempotency-Key": "k4"})
+	taggedBody := strings.Replace(with(`["VENDGRP"]`), `{"account":"2100",`, `{"account":"2100","dimensions":{"VENDGRP":"DOM"},`, 1)
+	tagged := call(h, http.MethodPost, "/v1/ledger/journal-entries", taggedBody, dutyPost, map[string]string{"Idempotency-Key": "k4"})
+	if untagged.Code != http.StatusCreated || tagged.Code != http.StatusCreated {
+		t.Fatalf("untagged %d, tagged %d %s", untagged.Code, tagged.Code, tagged.Body.String())
+	}
+	n := len(fs.posted)
+	if !bytes.Equal(fs.posted[n-1].Hash, fs.posted[n-2].Hash) || fs.posted[n-1].Lines[1].Dimensions["VENDGRP"] != "DOM" {
+		t.Fatalf("an optional tag changed the idempotency hash or was lost: %+v", fs.posted[n-1].Lines)
+	}
+	otherDept := strings.Replace(entryBody, `"D100"`, `"D200"`, 1)
+	call(h, http.MethodPost, "/v1/ledger/journal-entries", strings.Replace(otherDept, `"description":`, `"optionalDimensions":["VENDGRP"],"description":`, 1), dutyPost, map[string]string{"Idempotency-Key": "k5"})
+	if bytes.Equal(fs.posted[len(fs.posted)-1].Hash, fs.posted[n-1].Hash) {
+		t.Fatal("a change of a dimension that is not optional must change the hash")
+	}
+	set := strings.Replace(setEntryBody, `"source":`, `"optionalDimensions":["VENDGRP"],"source":`, 1)
+	if rec := call(h, http.MethodPost, "/v1/ledger/ledger-sets/"+testSet+"/journal-entries", set, dutyPost, map[string]string{"Idempotency-Key": "k6"}); rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+		t.Fatalf("set post with optionalDimensions: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := fs.setPosts[len(fs.setPosts)-1].in.OptionalDimensions; len(got) != 1 || got[0] != "VENDGRP" {
+		t.Fatalf("set post optional dimensions %v", got)
 	}
 }

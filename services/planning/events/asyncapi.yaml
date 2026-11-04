@@ -14,6 +14,10 @@ channels:
         $ref: '#/components/messages/PlanCompletedV1'
       messageRaisedV1:
         $ref: '#/components/messages/MessageRaisedV1'
+      messageAppliedV1:
+        $ref: '#/components/messages/MessageAppliedV1'
+      messageDismissedV1:
+        $ref: '#/components/messages/MessageDismissedV1'
   plannedOrderFirmed:
     address: passage.planning.plannedorder
     messages:
@@ -52,7 +56,21 @@ operations:
       $ref: '#/channels/plan'
     messages:
       - $ref: '#/channels/plan/messages/messageRaisedV1'
-    summary: A run created an action or delay message (FR-22.7). One event per message, in the run's transaction, keyed by the plan.
+    summary: A run created an action or delay message (FR-22.7). One event per message, in the run's transaction, keyed by the plan. A message that carries a planner's applied or dismissed decision from the version the run replaced (the same message raised again unchanged) is not raised again.
+  publishMessageApplied:
+    action: send
+    channel:
+      $ref: '#/channels/plan'
+    messages:
+      - $ref: '#/channels/plan/messages/messageAppliedV1'
+    summary: A planner applied an action message about existing supply (FR-22.7). Written in the deciding transaction, keyed by the plan. The context that owns the source order named by supply_ref (purchasing for a purchase order, production for a production or transfer order) makes the change the action describes; planning changes no order of another context.
+  publishMessageDismissed:
+    action: send
+    channel:
+      $ref: '#/channels/plan'
+    messages:
+      - $ref: '#/channels/plan/messages/messageDismissedV1'
+    summary: A planner dismissed an action message (FR-22.7). Written in the deciding transaction, keyed by the plan. Consumers that mirrored the message as a task can close it.
   publishPlannedOrderFirmed:
     action: send
     channel:
@@ -95,6 +113,20 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/MessageRaisedData'
+    MessageAppliedV1:
+      name: dev.passage.planning.message.applied.v1
+      title: A planner applied an action message
+      summary: A planner applied an action message (CloudEvent dev.passage.planning.message.applied.v1).
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/MessageDecidedData'
+    MessageDismissedV1:
+      name: dev.passage.planning.message.dismissed.v1
+      title: A planner dismissed an action message
+      summary: A planner dismissed an action message (CloudEvent dev.passage.planning.message.dismissed.v1).
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/MessageDecidedData'
     PlanCompletedV1:
       name: dev.passage.planning.plan.completed.v1
       title: A plan version became the current version
@@ -187,6 +219,31 @@ components:
         suggested_date: {type: string, format: date}
         delay_days: {type: integer}
         qty: {type: string, description: Decimal string in the inventory unit}
+    MessageDecidedData:
+      type: object
+      description: Data of message.applied.v1 and message.dismissed.v1; the message fields are those of message.raised.v1
+      required: [message_id, plan_id, plan_code, version_id, site_id, legal_entity_id, action, item_id, warehouse_id, supply_ref, demand_ref, suggested_date, delay_days, qty, version, decided_by, note]
+      properties:
+        message_id: {type: string, format: uuid}
+        plan_id: {type: string, format: uuid}
+        plan_code: {type: string}
+        version_id: {type: string, format: uuid}
+        site_id: {type: string, format: uuid}
+        legal_entity_id: {type: [string, 'null'], format: uuid, description: Legal entity of the plan; null for a plan with none}
+        action:
+          type: string
+          enum: [postpone, advance, cancel, decrease, increase, delay, shortage, red-zone, sales-on-top, no-vendor]
+          description: 'Only postpone, advance, cancel, decrease and increase can be applied; every action can be dismissed. A consumer must ignore an action it does not know'
+        item_id: {type: string, format: uuid}
+        warehouse_id: {type: [string, 'null'], format: uuid, description: The warehouse planning scope the message is about; null for the site scope}
+        supply_ref: {type: string, description: Number or ref of the supply the message is about; empty for a shortage}
+        demand_ref: {type: string}
+        suggested_date: {type: string, format: date}
+        delay_days: {type: integer}
+        qty: {type: string, description: Decimal string in the inventory unit}
+        version: {type: integer, description: The message's ETag after the decision}
+        decided_by: {type: string, description: User who decided}
+        note: {type: string, description: The planner's reason; empty when none}
     PlanCompletedData:
       type: object
       required: [plan_id, plan_code, version_id, version_number, items_planned, planned_orders, messages, duration_ms, plan_hash]

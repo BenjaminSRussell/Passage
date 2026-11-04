@@ -491,3 +491,55 @@ func TestOutbound_RenderDoesNotResolveAnotherLegalEntitysRecord(t *testing.T) {
 		t.Fatalf("recorded row = %+v, want legal entity %s", e, hubLegalEnt)
 	}
 }
+
+// xref:record takes the header and one ref per line, each with the key the legacy ERP assigned it, in one atomic call;
+// the single-ref form (top-level legacyKey) still works, and a conflicting line leaves nothing recorded.
+func TestOutbound_RecordXrefSeveralRefs(t *testing.T) {
+	s := store.NewMem()
+	r := obRouter(s, hubPrincipal(1))
+	withLines := strings.Replace(obDefinition, `"mapping": {`, `"collections": [{"name": "Lines", "path": "data.lines", "subject": {"entity": "salesOrderLine", "idPath": "id"}, "fields": [{"source": "sku", "target": "ItemNo", "type": "string"}]}], "mapping": {`, 1)
+	rec := do(r, http.MethodPost, obPath, `{"name":"Lines","sourceSystem":"custom_acme","definition":`+withLines+`}`, obWrite, true)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d %s", rec.Code, rec.Body)
+	}
+	var m obBody
+	_ = json.Unmarshal(rec.Body.Bytes(), &m)
+	order, l1, l2 := ids.New(), ids.New(), ids.New()
+	call := func(event, refs, top string) *httptest.ResponseRecorder {
+		return hubCall(r, "/v1/integration/xref:record", `{"outboundMappingId":"`+m.ID+`","refs":`+refs+top+`,"eventId":"`+event+`"}`)
+	}
+	refs := `[{"entity":"salesOrder","id":"` + order + `","legacyKey":"SO-1"},{"entity":"salesOrderLine","id":"` + l1 + `","legacyKey":"SO-1/10","collection":"Lines","index":0},{"entity":"salesOrderLine","id":"` + l2 + `","legacyKey":"SO-1/20","collection":"Lines","index":1}]`
+	if rec := call("evt-1", refs, ``); rec.Code != http.StatusNoContent {
+		t.Fatalf("record = %d %s", rec.Code, rec.Body)
+	}
+	if rec := call("evt-1", refs, ``); rec.Code != http.StatusNoContent {
+		t.Fatalf("replay = %d %s", rec.Code, rec.Body)
+	}
+	if got, _ := s.LegacyKeys(principalCtx(), "custom_acme", "salesOrderLine", []string{l1, l2}); got[l1] != "SO-1/10" || got[l2] != "SO-1/20" {
+		t.Fatalf("line keys = %+v", got)
+	}
+	// The header may keep the top-level key beside lines that carry their own.
+	mixed := `[{"entity":"salesOrder","id":"` + order + `"},{"entity":"salesOrderLine","id":"` + l1 + `","legacyKey":"SO-1/10"}]`
+	if rec := call("evt-2", mixed, `,"legacyKey":"SO-1"`); rec.Code != http.StatusNoContent {
+		t.Fatalf("mixed = %d %s", rec.Code, rec.Body)
+	}
+	clash := `[{"entity":"salesOrder","id":"` + ids.New() + `","legacyKey":"SO-2"},{"entity":"salesOrderLine","id":"` + ids.New() + `","legacyKey":"SO-1/10"}]`
+	if rec := call("evt-3", clash, ``); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), store.CodeXrefConflict) {
+		t.Fatalf("clash = %d %s", rec.Code, rec.Body)
+	}
+	for name, c := range map[string]struct{ refs, top string }{
+		"two refs without keys": {`[{"entity":"salesOrder","id":"` + ids.New() + `"},{"entity":"salesOrderLine","id":"` + ids.New() + `"}]`, `,"legacyKey":"K"`},
+		"no key at all":         {`[{"entity":"salesOrder","id":"` + ids.New() + `"}]`, ``},
+		"blank line key":        {`[{"entity":"salesOrder","id":"` + ids.New() + `","legacyKey":" "}]`, ``},
+		"top key left over":     {`[{"entity":"salesOrder","id":"` + ids.New() + `","legacyKey":"A"}]`, `,"legacyKey":"B"`},
+		"line id not a uuid":    {`[{"entity":"salesOrder","id":"nope","legacyKey":"A"}]`, ``},
+	} {
+		if rec := call("evt-"+name, c.refs, c.top); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s = %d %s", name, rec.Code, rec.Body)
+		}
+	}
+	foreign := `[{"entity":"salesOrder","id":"` + ids.New() + `","legacyKey":"SO-3"},{"entity":"customer","id":"` + ids.New() + `","legacyKey":"C-3"}]`
+	if rec := call("evt-4", foreign, ``); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), store.CodeXrefRefMismatch) {
+		t.Fatalf("foreign entity = %d %s", rec.Code, rec.Body)
+	}
+}

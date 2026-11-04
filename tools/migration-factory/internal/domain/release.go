@@ -22,6 +22,11 @@ type Correction struct {
 	Account string
 }
 
+// IsZero reports whether the correction changes nothing (blank or whitespace-only fields).
+func (c Correction) IsZero() bool {
+	return strings.TrimSpace(c.Party) == "" && strings.TrimSpace(c.Account) == ""
+}
+
 // Apply returns the record with the correction applied.
 func (c Correction) Apply(r Record) Record {
 	if p := strings.TrimSpace(c.Party); p != "" {
@@ -57,50 +62,23 @@ func ReleaseOpenItem(r *PackRun, original Record, fix Correction, parties map[st
 	}
 	rec := accepted[0]
 	company := r.SourceCompany
-	add := func(name string, key map[string]string, source, target decimal.Decimal) error {
-		for i := range r.Totals {
-			t := &r.Totals[i]
-			if t.Name != name || !sameKey(t.Key, key) {
-				continue
-			}
-			next, err := NewControlTotal(t.Name, t.Key, t.Source.Add(source), t.Target.Add(target), t.Tolerance)
-			if err != nil {
-				return err
-			}
-			*t = next
-			return nil
-		}
-		t, err := NewControlTotal(name, key, source, target, Tolerance{})
-		if err != nil {
-			return err
-		}
-		r.Totals = append(r.Totals, t)
-		return nil
-	}
-	type move struct {
-		name           string
-		key            map[string]string
-		source, target decimal.Decimal
-	}
 	amt := rec.Amount
 	byAccount := func(acct string) map[string]string {
 		return map[string]string{"company": company, "account": acct, "currency": rec.Currency}
 	}
-	steps := []move{
+	steps := []totalMove{
 		{"open_items.amount", map[string]string{"company": company, "currency": rec.Currency}, decimal.Zero, amt},
 		{"open_items.count", map[string]string{"company": company}, decimal.Zero, decimal.NewFromInt(1)},
 	}
 	if rec.Account != original.Account {
 		steps = append(steps,
-			move{"open_items.amount_by_account", byAccount(original.Account), amt.Neg(), decimal.Zero},
-			move{"open_items.amount_by_account", byAccount(rec.Account), amt, amt})
+			totalMove{"open_items.amount_by_account", byAccount(original.Account), amt.Neg(), decimal.Zero},
+			totalMove{"open_items.amount_by_account", byAccount(rec.Account), amt, amt})
 	} else {
-		steps = append(steps, move{"open_items.amount_by_account", byAccount(rec.Account), decimal.Zero, amt})
+		steps = append(steps, totalMove{"open_items.amount_by_account", byAccount(rec.Account), decimal.Zero, amt})
 	}
-	for _, s := range steps {
-		if err := add(s.name, s.key, s.source, s.target); err != nil {
-			return Record{}, err
-		}
+	if err := applyMoves(r, steps); err != nil {
+		return Record{}, err
 	}
 	r.RecordsLoaded++
 	r.RecordsQuarantined--
@@ -122,4 +100,45 @@ func sameKey(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// totalMove adds to the legacy (source) and Passage (target) sides of one control total, creating
+// the total when the run has none for the key.
+type totalMove struct {
+	name           string
+	key            map[string]string
+	source, target decimal.Decimal
+}
+
+// applyMoves books the moves into the run's totals. A move of zero on both sides is skipped, so a
+// correction that changes nothing for a total does not create it.
+func applyMoves(r *PackRun, moves []totalMove) error {
+	for _, m := range moves {
+		if m.source.IsZero() && m.target.IsZero() {
+			continue
+		}
+		found := false
+		for i := range r.Totals {
+			t := &r.Totals[i]
+			if t.Name != m.name || !sameKey(t.Key, m.key) {
+				continue
+			}
+			next, err := NewControlTotal(t.Name, t.Key, t.Source.Add(m.source), t.Target.Add(m.target), t.Tolerance)
+			if err != nil {
+				return err
+			}
+			*t = next
+			found = true
+			break
+		}
+		if found {
+			continue
+		}
+		t, err := NewControlTotal(m.name, m.key, m.source, m.target, Tolerance{})
+		if err != nil {
+			return err
+		}
+		r.Totals = append(r.Totals, t)
+	}
+	return nil
 }

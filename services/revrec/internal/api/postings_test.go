@@ -66,6 +66,22 @@ func (g *ledgerRig) post(t *testing.T, want int) []postingOut {
 	return out.Items
 }
 
+func (g *ledgerRig) bill(t *testing.T, deferred, date string) {
+	t.Helper()
+	n := decimal.RequireFromString(deferred)
+	g.billInvoice(t, n.Add(decimal.NewFromInt(7200)), n, date)
+}
+
+func (g *ledgerRig) revenueEntries() []ledgerclient.Stored {
+	var out []ledgerclient.Stored
+	for _, e := range g.ledger.Entries() {
+		if e.SourceType == journalSourceType {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 func (g *ledgerRig) reconcile(t *testing.T, period string) glReconciliationOut {
 	t.Helper()
 	path := "/v1/revrec/gl-reconciliation?legalEntityId=" + entityID + "&currency=USD&period=" + period
@@ -82,6 +98,7 @@ func (g *ledgerRig) reconcile(t *testing.T, period string) glReconciliationOut {
 
 func TestJournalPostings_BookRecognizedRevenueAndReconcileGL2400(t *testing.T) {
 	g := newLedgerRig(t)
+	g.bill(t, "3600.00", "2027-03-10")
 	created := decodeContract(t, call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey}))
 	milestone := created.Obligations[1].ID
 	if rec := call(t, g.handler, http.MethodPost, "/v1/revrec/milestones/"+milestone+":satisfy", `{"satisfiedOn":"2027-03-25"}`, nil); rec.Code != http.StatusOK {
@@ -97,7 +114,7 @@ func TestJournalPostings_BookRecognizedRevenueAndReconcileGL2400(t *testing.T) {
 	if len(items) != 1 || items[0].Currency != "USD" || items[0].PostingDate != "2027-03-31" || items[0].JournalEntryID == "" {
 		t.Fatalf("postings %+v, want one USD entry dated 2027-03-31", items)
 	}
-	entries := g.ledger.Entries()
+	entries := g.revenueEntries()
 	if len(entries) != 1 {
 		t.Fatalf("%d ledger entries, want 1", len(entries))
 	}
@@ -111,33 +128,141 @@ func TestJournalPostings_BookRecognizedRevenueAndReconcileGL2400(t *testing.T) {
 		t.Errorf("after posting %+v, want reconciled at %s", rec, items[0].Amount)
 	}
 
-	if again := g.post(t, http.StatusOK); len(again) != 0 || len(g.ledger.Entries()) != 1 {
-		t.Errorf("second post returned %d items and the ledger holds %d entries, want nothing new", len(again), len(g.ledger.Entries()))
+	if again := g.post(t, http.StatusOK); len(again) != 0 || len(g.revenueEntries()) != 1 {
+		t.Errorf("second post returned %d items and the ledger holds %d entries, want nothing new", len(again), len(g.revenueEntries()))
 	}
 	if g.api.journalPostings.Load() != 1 {
 		t.Errorf("journal postings counter %d, want 1", g.api.journalPostings.Load())
 	}
 }
 
+func TestGLReconciliation_ClosingBalanceTiesInvoiceDeferralsToRecognition(t *testing.T) {
+	g := newLedgerRig(t)
+	g.bill(t, "2000.00", "2027-03-10")
+	g.bill(t, "1600.00", "2027-03-10")
+	call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey})
+	g.run(t, "2027-03-31")
+	g.post(t, http.StatusOK)
+
+	rec := g.reconcile(t, "2027-03")
+	recognized, deferred := decimal.RequireFromString(rec.Recognized), decimal.RequireFromString(rec.Deferred)
+	if rec.GLCredit != "3600.00" || rec.GLDebit != rec.Recognized || !deferred.Equal(decimal.RequireFromString("3600.00").Sub(recognized)) ||
+		rec.GLClosing != rec.Deferred || rec.ClosingDiff != "0.00" || !rec.Reconciled {
+		t.Fatalf("March %+v, want credits 3600.00 less debits %s tying to the deferred balance", rec, rec.Recognized)
+	}
+
+	*g.clock = time.Date(2027, 5, 2, 9, 0, 0, 0, time.UTC)
+	g.run(t, "2027-04-30")
+	g.post(t, http.StatusOK)
+	april := g.reconcile(t, "2027-04")
+	if !april.Reconciled || april.GLCredit != "3600.00" || april.GLClosing != april.Deferred || decimal.RequireFromString(april.Deferred).GreaterThanOrEqual(deferred) {
+		t.Errorf("April %+v, want the closing balance tied and below March's %s", april, rec.Deferred)
+	}
+}
+
+func billedBundle(t *testing.T) (gross, deferred decimal.Decimal) {
+	t.Helper()
+	hundred := decimal.NewFromInt(100)
+	for _, l := range testkit.BundleInvoiceLines {
+		net := decimal.RequireFromString(l.UnitPrice).Mul(decimal.RequireFromString(l.Qty)).Mul(hundred.Sub(decimal.RequireFromString(l.DiscountPct))).Div(hundred)
+		gross = gross.Add(net)
+		if l.Method != "POINT_IN_TIME" {
+			deferred = deferred.Add(decimal.RequireFromString(l.Allocated))
+		}
+	}
+	if gross.StringFixed(2) != testkit.BundleInvoiceGross || deferred.StringFixed(2) != testkit.BundleInvoiceDeferred {
+		t.Fatalf("bundle invoice bills %s and its allocation defers %s, want %s and %s", gross, deferred, testkit.BundleInvoiceGross, testkit.BundleInvoiceDeferred)
+	}
+	return gross, deferred
+}
+
+func (g *ledgerRig) billInvoice(t *testing.T, gross, deferred decimal.Decimal, date string) {
+	t.Helper()
+	invoiceID := ids.New()
+	if _, err := g.ledger.Post(context.Background(), ledgerclient.Entry{
+		LegalEntityID: entityID, LedgerID: g.ledgerID, DocumentID: invoiceID, PostingDate: date, Currency: "USD",
+		IdempotencyKey: "billing-invoice-" + invoiceID, SourceType: "billing_invoice",
+		Lines: []ledgerclient.Line{
+			{Account: "1200", Amount: gross},
+			{Account: "4000", Credit: true, Amount: gross.Sub(deferred)},
+			{Account: store.DeferredAccount, Credit: true, Amount: deferred},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGLReconciliation_BundleInvoiceBookedAtAllocationTiesAndEndsTheTermAtZero(t *testing.T) {
+	g := newLedgerRig(t)
+	gross, deferred := billedBundle(t)
+	g.billInvoice(t, gross, deferred, "2027-03-10")
+	created := decodeContract(t, call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey}))
+	if rec := call(t, g.handler, http.MethodPost, "/v1/revrec/milestones/"+created.Obligations[1].ID+":satisfy", `{"satisfiedOn":"2027-03-25"}`, nil); rec.Code != http.StatusOK {
+		t.Fatalf("satisfy: %d %s", rec.Code, rec.Body)
+	}
+	g.run(t, "2027-03-31")
+	g.post(t, http.StatusOK)
+	march := g.reconcile(t, "2027-03")
+	if !march.Reconciled || march.ClosingDiff != "0.00" || march.GLCredit != "3600.00" ||
+		march.Deferred != fixed(deferred.Sub(decimal.RequireFromString(march.Recognized)), "USD") {
+		t.Fatalf("March %+v, want the closing balance tied to the allocated 3600.00 less recognition", march)
+	}
+
+	*g.clock = time.Date(2028, 4, 2, 9, 0, 0, 0, time.UTC)
+	g.run(t, "2028-03-31")
+	g.post(t, http.StatusOK)
+	last := g.reconcile(t, "2028-03")
+	if !last.Reconciled || last.Recognized != "3600.00" || last.Deferred != "0.00" || last.GLClosing != "0.00" || last.ClosingDiff != "0.00" {
+		t.Errorf("after the full term %+v, want 3600.00 recognized and 2400 closing at 0.00 on both sides", last)
+	}
+}
+
+func TestGLReconciliation_InvoiceBilledAboveTheAllocationBreaksTheClosingBalance(t *testing.T) {
+	g := newLedgerRig(t)
+	g.billInvoice(t, decimal.RequireFromString("10800.00"), decimal.RequireFromString("2800.00"), "2027-03-10")
+	call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey})
+	g.run(t, "2027-03-31")
+	g.post(t, http.StatusOK)
+
+	rec := g.reconcile(t, "2027-03")
+	if rec.Difference != "0.00" || rec.ClosingDiff != "800.00" || rec.Reconciled {
+		t.Errorf("deferred share 2800.00 against 3600.00 allocated: %+v, want a closing difference of 800.00 and not reconciled", rec)
+	}
+}
+
+func TestGLReconciliation_MissingInvoiceDeferralBreaksTheClosingBalanceOnly(t *testing.T) {
+	g := newLedgerRig(t)
+	g.bill(t, "2000.00", "2027-03-10")
+	call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey})
+	g.run(t, "2027-03-31")
+	g.post(t, http.StatusOK)
+
+	rec := g.reconcile(t, "2027-03")
+	if rec.Difference != "0.00" || rec.ClosingDiff != "1600.00" || rec.Reconciled {
+		t.Errorf("one invoice of 1600.00 not booked: %+v, want debits tied, closing difference 1600.00 and not reconciled", rec)
+	}
+}
+
 func TestJournalPostings_LedgerFailureRetriesWithoutDoublePosting(t *testing.T) {
 	g := newLedgerRig(t)
+	g.bill(t, "3600.00", "2027-03-10")
 	call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey})
 	g.run(t, "2027-03-31")
 	g.ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusConflict, Code: ledgerclient.CodePeriodClosed})
 	rec := call(t, g.handler, http.MethodPost, "/v1/revrec/journal-postings", `{"legalEntityId":"`+entityID+`"}`, nil)
-	if p := decodeProblem(t, rec); rec.Code != http.StatusBadGateway || p.Code != CodeLedgerRefused || len(g.ledger.Entries()) != 0 {
-		t.Fatalf("failed post %d %s with %d entries, want 502 %s and none", rec.Code, p.Code, len(g.ledger.Entries()), CodeLedgerRefused)
+	if p := decodeProblem(t, rec); rec.Code != http.StatusBadGateway || p.Code != CodeLedgerRefused || len(g.revenueEntries()) != 0 {
+		t.Fatalf("failed post %d %s with %d entries, want 502 %s and none", rec.Code, p.Code, len(g.revenueEntries()), CodeLedgerRefused)
 	}
-	if rec := g.reconcile(t, "2027-03"); rec.Reconciled {
-		t.Errorf("reconciled %+v after a refused post, want a difference", rec)
+	if rec := g.reconcile(t, "2027-03"); rec.Reconciled || rec.Difference == "0.00" {
+		t.Errorf("%+v after a refused post, want the unposted revenue as the difference", rec)
 	}
 
 	g.ledger.FailPosts(nil)
 	*g.clock = time.Date(2027, 5, 2, 9, 0, 0, 0, time.UTC)
 	g.run(t, "2027-04-30")
 	items := g.post(t, http.StatusOK)
-	if len(items) != 2 || items[0].PostingDate != "2027-03-31" || items[1].PostingDate != "2027-04-30" || len(g.ledger.Entries()) != 2 {
-		t.Fatalf("retry posted %+v with %d entries, want the pending March posting and April", items, len(g.ledger.Entries()))
+	if len(items) != 2 || items[0].PostingDate != "2027-03-31" || items[1].PostingDate != "2027-04-30" || len(g.revenueEntries()) != 2 {
+		t.Fatalf("retry posted %+v with %d entries, want the pending March posting and April", items, len(g.revenueEntries()))
 	}
 	if rec := g.reconcile(t, "2027-04"); !rec.Reconciled {
 		t.Errorf("after retry %+v, want reconciled", rec)

@@ -108,12 +108,16 @@ export interface Hold {
   id: string;
   holdType: HoldType;
   reasonCode: string;
-  status: "ACTIVE" | "RELEASED" | "CLEARED";
+  status: "ACTIVE" | "RELEASED" | "CLEARED" | "REJECTED";
   orderAmount: Decimal;
   appliedBy: string;
   releasedBy?: string;
   releasedUntil?: string;
   appliedAt: string;
+  /** Set when a credit manager rejected the hold (the order was cancelled with it). */
+  rejectedBy?: string;
+  rejectedAt?: string;
+  rejectionComment?: string;
 }
 
 export interface CreditRule {
@@ -298,7 +302,10 @@ export interface ReleaseOrderResult {
 export interface Exposure {
   openAr?: Decimal;
   unapplied?: Decimal;
+  /** Computed by the service from each line's delivered less invoiced quantity in the profile currency; a value sent is ignored. */
   deliveredNotInvoiced?: Decimal;
+  /** Read-only: delivered, not invoiced goods in other currencies, not counted for want of an FX rate. */
+  deliveredNotInvoicedOtherCurrencies?: { currency: string; amount: Decimal }[];
   /** Computed by the service from the confirmed orders in the profile currency; a value sent is ignored. */
   openOrders?: Decimal;
   /** Read-only: open orders in other currencies, not counted for want of an FX rate. */
@@ -575,6 +582,15 @@ export function releaseHold(orderId: string, holdId: string, etag: string): Prom
   });
 }
 
+/** Rejects an ACTIVE CREDIT hold of an unconfirmed order with a comment; the order is cancelled with it. */
+export function rejectHold(orderId: string, holdId: string, etag: string, comment: string): Promise<Versioned<Order>> {
+  return versioned<Order>(`/orders/${encodeURIComponent(orderId)}/holds/${encodeURIComponent(holdId)}:reject`, {
+    method: "POST",
+    body: JSON.stringify({ comment }),
+    headers: { "If-Match": etag },
+  });
+}
+
 /** reviewDueBy (YYYY-MM-DD) lists only profiles whose review date is on or before it, oldest first. */
 export async function listCreditProfiles(legalEntityId = "", signal?: AbortSignal, reviewDueBy = ""): Promise<CreditProfile[]> {
   const body = await json<{ items?: CreditProfile[] }>(`/credit-profiles${query({ legalEntityId, reviewDueBy, limit: 200 })}`, {}, signal);
@@ -650,9 +666,10 @@ export function cancelOrder(id: string, etag: string, reason: string): Promise<V
   return versioned<Order>(`/orders/${encodeURIComponent(id)}:cancel`, { method: "POST", body: JSON.stringify({ reason }), headers: { "If-Match": etag } });
 }
 
-/** Closes what a partly shipped order has not delivered (BR-27.5); the order becomes shipped. */
-export function cancelOrderRemainder(id: string, etag: string, reason: string): Promise<Versioned<Order>> {
-  return versioned<Order>(`/orders/${encodeURIComponent(id)}:cancel-remainder`, { method: "POST", body: JSON.stringify({ reason }), headers: { "If-Match": etag } });
+/** Closes what a partly shipped order, or one of its lines when lineNo is given, has not delivered (BR-27.5). */
+export function cancelOrderRemainder(id: string, etag: string, reason: string, lineNo?: number): Promise<Versioned<Order>> {
+  const path = lineNo ? `/orders/${encodeURIComponent(id)}/lines/${lineNo}:cancel-remainder` : `/orders/${encodeURIComponent(id)}:cancel-remainder`;
+  return versioned<Order>(path, { method: "POST", body: JSON.stringify({ reason }), headers: { "If-Match": etag } });
 }
 
 /** The order's change history, newest first. */
@@ -876,6 +893,8 @@ export interface HoldQueueItem {
   orderNumber: string;
   /** The order's version; its ETag is what the release call must echo. */
   orderVersion: number;
+  /** The order's status: only a CREDIT hold of a DRAFT or OPEN order can be rejected. */
+  orderStatus: string;
   customerId: string;
   holdType: HoldType;
   reasonCode: string;

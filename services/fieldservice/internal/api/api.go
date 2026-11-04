@@ -86,6 +86,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyWorkOrder)).Post("/v1/service/work-orders/{id}:transition", a.transitionWorkOrder)
 	r.With(authz.RequireDuty(dutyBilling)).Post("/v1/service/work-orders/{id}:post", a.postWorkOrder)
 	r.With(authz.RequireDuty(dutyWorkOrder)).Post("/v1/service/work-orders/{id}:follow-up", a.followUpWorkOrder)
+	a.registerAgreements(r)
 	a.registerObjects(r)
 	a.registerActivities(r)
 	a.registerKnowledge(r)
@@ -257,6 +258,7 @@ func (a *API) createAgreement(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, "create agreement", err)
 		return
 	}
+	setETag(w, created.Version)
 	a.respond(w, replayed, http.StatusCreated, created)
 }
 
@@ -273,6 +275,7 @@ func (a *API) getAgreement(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, "get agreement", err)
 		return
 	}
+	setETag(w, agr.Version)
 	httpx.JSON(w, http.StatusOK, agr)
 }
 
