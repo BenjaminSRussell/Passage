@@ -113,6 +113,11 @@ export function EditPartyCard({ party, onSaved }: { party: Party; onSaved(): voi
     clearFailure();
   }, [party.version]);
 
+  // A warning stays only while saving would still replace the other user's value.
+  const warnings = Object.fromEntries(
+    Object.entries(clashes).filter(([key]) => form.values[key as keyof NameValues].trim() !== original[key as keyof NameValues]),
+  );
+
   return (
     <Card title="Edit party">
       <form ref={form.formRef} className={styles.form} onSubmit={(event) => void form.submit(event)} noValidate aria-label="Edit party">
@@ -121,7 +126,7 @@ export function EditPartyCard({ party, onSaved }: { party: Party; onSaved(): voi
           idPrefix="edit-party"
           values={form.values}
           errors={form.errors}
-          warnings={clashes}
+          warnings={warnings}
           onChange={form.set}
         />
         {form.errors.form ? (

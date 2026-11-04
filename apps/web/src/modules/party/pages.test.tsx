@@ -1,5 +1,8 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { describe, expect, it } from "vitest";
+import { PrincipalProvider } from "../../shell/principal";
+import party from "./module";
 import { findTable } from "../../test-utils";
 import type { Party, PendingChange, Vendor } from "./api/client";
 import { json, pageViolations, problem, renderAt, useFakeApi } from "./testServer";
@@ -393,5 +396,39 @@ describe("credit limit approvals", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm approval" }));
     expect(await screen.findByText(text)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+  });
+
+  it("does not carry a decision outcome or reason to the next change", async () => {
+    const NEXT = "0195f0a0-0000-7000-8000-0000000000d2";
+    api.handler = (call) => {
+      if (call.method === "POST") return json(200, change({ status: "approved" }));
+      return call.url.pathname.endsWith(NEXT) ? json(200, change({ id: NEXT, requestedValue: "30000.00" })) : json(200, change());
+    };
+    function Jump() {
+      const navigate = useNavigate();
+      return <button onClick={() => navigate(`/party/pending-changes/${NEXT}`)}>Go next</button>;
+    }
+    render(
+      <PrincipalProvider duties={["party.read", "party.approve"]}>
+        <MemoryRouter initialEntries={[`/party/pending-changes/${CHANGE}`]}>
+          <Routes>
+            {party.routes.map((route) => (
+              <Route key={route.path} path={route.path} element={route.element} />
+            ))}
+          </Routes>
+          <Jump />
+        </MemoryRouter>
+      </PrincipalProvider>,
+    );
+    await screen.findByText("25000.00");
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm approval" }));
+    expect(await screen.findByText(/^Approved\./)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Reason")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "draft for the first change" } });
+    fireEvent.click(screen.getByRole("button", { name: "Go next" }));
+    expect(await screen.findByText("30000.00")).toBeInTheDocument();
+    expect(screen.queryByText(/^Approved\./)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Reason")).toHaveValue("");
   });
 });

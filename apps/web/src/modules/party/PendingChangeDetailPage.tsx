@@ -29,6 +29,11 @@ function facts(change: PendingChange): [string, string][] {
 /** One credit-limit pending change: view, then approve or reject with party.approve. */
 export function PendingChangeDetailPage() {
   const { id = "" } = useParams();
+  // Keyed on the id so an outcome, reason or open dialog never carries over to another change.
+  return <PendingChangeDetail key={id} id={id} />;
+}
+
+function PendingChangeDetail({ id }: { id: string }) {
   const canDecide = holdsDuty(usePrincipalDuties(), DUTY_APPROVE);
   const state = useLoad((signal) => getPendingChange(id, signal), id);
   const [reason, setReason] = useState("");

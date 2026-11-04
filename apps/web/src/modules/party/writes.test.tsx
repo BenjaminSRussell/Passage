@@ -457,4 +457,25 @@ describe("same-field edit conflict", () => {
     await waitFor(() => expect(api.calls.filter((c) => c.method === "PATCH")).toHaveLength(2));
     expect(api.calls.filter((c) => c.method === "PATCH")[1]?.body).toEqual({ legalName: "Northwind GmbH" });
   });
+
+  it("drops the warning once the user takes the other value", async () => {
+    let server = org();
+    api.handler = (call) => {
+      if (call.url.pathname.endsWith("/vendors")) return json(200, { vendors: [] });
+      if (call.method === "PATCH") return problem(409, "PTY-VERSION-CONFLICT", "stale");
+      return json(200, server);
+    };
+    renderAt(`/party/${PARTY}`);
+    await screen.findByRole("heading", { name: "Northwind" });
+    type("Legal name", "Northwind GmbH");
+    click("Save changes");
+    await screen.findByText(/Someone changed this party after you opened it/);
+    server = org({ version: 4, legalName: "Northwind AG" });
+    click("Try again");
+    expect(await screen.findByText(/Changed by someone else to/)).toBeInTheDocument();
+    type("Legal name", "Northwind AG");
+    expect(screen.queryByText(/Changed by someone else to/)).not.toBeInTheDocument();
+    type("Legal name", "Northwind SE");
+    expect(screen.getByText(/Changed by someone else to \u201cNorthwind AG\u201d/)).toBeInTheDocument();
+  });
 });
