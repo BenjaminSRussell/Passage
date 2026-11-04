@@ -428,7 +428,9 @@
       {"resource": "/v1/procurement/purchase-orders/*/lines/*/delivery-schedule", "methods": ["PUT", "DELETE"]},
       {"resource": "/v1/procurement/purchase-orders/*/lines/*/delivery-schedule/rows/*/confirmation", "methods": ["PUT"]},
       {"resource": "/v1/procurement/purchase-orders/*/lines/*/service", "methods": ["PUT", "DELETE"]},
-      {"resource": "/v1/procurement/inbound-changes/*", "methods": ["POST"]}
+      {"resource": "/v1/procurement/inbound-changes/*:retry", "methods": ["POST"]},
+      {"resource": "/v1/procurement/inbound-changes/*:acknowledge", "methods": ["POST"]},
+      {"resource": "/v1/procurement/requisition-lines/*:split", "methods": ["POST"]}
     ]},
     "procurement.invoicing-plan.settle": {"service_only": true, "permissions": [
       {"resource": "/v1/procurement/purchase-orders/*/lines/*/invoicing-plan/rows/*/settlement", "methods": ["PUT"]}

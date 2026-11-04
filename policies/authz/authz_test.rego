@@ -1325,3 +1325,10 @@ test_pricing_cache_principal_holds_only_its_flag if {
 	data.service_principals["pricing-cache"] == ["pricing.cache.invalidate"]
 	not principal_allowed("pricing-cache", "GET", "/v1/pricing/parameters")
 }
+
+test_purchasing_action_routes_match_their_colon_suffix if {
+	allowed("PurchaseOrderMaintain", "POST", "/v1/procurement/inbound-changes/c1:retry")
+	allowed("PurchaseOrderMaintain", "POST", "/v1/procurement/inbound-changes/c1:acknowledge")
+	allowed("PurchaseOrderMaintain", "POST", "/v1/procurement/requisition-lines/l1:split")
+	not allowed("PurchaseOrderMaintain", "POST", "/v1/procurement/inbound-changes/c1:apply")
+}
