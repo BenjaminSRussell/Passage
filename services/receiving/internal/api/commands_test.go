@@ -28,6 +28,14 @@ const (
 	periodID     = "99999999-9999-4999-8999-999999999999"
 )
 
+var (
+	testTax     = domain.FakeTaxCalculator{Result: domain.TaxResult{Code: "VAT0"}}
+	testParties = domain.FakeSelfBillParties{Parties: domain.SelfBillParties{
+		Supplier: domain.SelfBillParty{Name: "Acme Supplies GmbH", Address: "Hauptstr 1, 10115 Berlin", Country: "DE", RegistrationNumber: "HRB 123"},
+		Customer: domain.SelfBillParty{Name: "Passage Werke AG", Address: "Ring 5, 80331 Muenchen", Country: "DE", RegistrationNumber: "HRB 999"},
+	}}
+)
+
 type rig struct {
 	h      http.Handler
 	api    *api.API
@@ -36,6 +44,7 @@ type rig struct {
 	keys   int
 
 	confirmErsPrice string
+	orders          map[string]domain.PurchaseOrder
 }
 
 func newRig(periods domain.PeriodStatus) *rig { return newRigOn(memstore.New(), periods) }
@@ -48,8 +57,9 @@ func newRigWithGroups(st *memstore.Store, periods domain.PeriodStatus, groups do
 	rg := &rig{st: st, ledger: &domain.FakeLedger{}}
 	a := api.New(rg.st, api.Ports{
 		Periods: domain.FakePeriods{Status: periods}, Ledger: rg.ledger, VendorGroups: groups,
-		Profile:       domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000", VendorGroupDimension: domain.DefaultVendorGroupDimension},
+		Profile:       domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000", Expense: "6000", InputTax: "1570", VendorGroupDimension: domain.DefaultVendorGroupDimension},
 		ResolveMinAge: time.Nanosecond,
+		Tax:           testTax, SelfBillParties: testParties,
 	})
 	router := httpx.NewRouter()
 	a.Register(router)

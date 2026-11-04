@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
@@ -217,10 +219,18 @@ func TestErs_SettlesAPostedReceiptAtThePurchaseOrderPriceExactlyOnce(t *testing.
 	if rg.ledger.Balance("2100").String() != "0" || rg.ledger.Balance("2000").String() != "-10.4" {
 		t.Fatalf("GR/IR %s vendor control %s", rg.ledger.Balance("2100"), rg.ledger.Balance("2000"))
 	}
-	evts := rg.st.Events()
-	last := evts[len(evts)-1]
-	if last.Type != "dev.passage.payables.invoice.posted.v1" || !strings.Contains(string(last.Data), `"source":"ERS"`) || !strings.Contains(string(last.Data), `"invoice_number":"`+s.InvoiceNumber+`"`) {
-		t.Fatalf("last event %s %s", last.Type, last.Data)
+	postedEvt := lastOfType(t, rg, "dev.passage.payables.invoice.posted.v1")
+	if !strings.Contains(string(postedEvt.Data), `"source":"ERS"`) || !strings.Contains(string(postedEvt.Data), `"invoice_number":"`+s.InvoiceNumber+`"`) {
+		t.Fatalf("posted event %s", postedEvt.Data)
+	}
+	bill := lastOfType(t, rg, "dev.passage.receiving.ersselfbill.issued.v1")
+	assertDocumented(t, bill)
+	doc := rg.call(http.MethodGet, "/v1/receiving/ers-self-bills/"+s.InvoiceID, "", duty("APInquire", "", "X-Passage-User", "alice"))
+	if doc.Code != http.StatusOK || !bytes.Contains(doc.Body.Bytes(), []byte("%PDF-1.4")) || !bytes.Contains(doc.Body.Bytes(), []byte(s.InvoiceNumber)) {
+		t.Fatalf("self-bill %d %s", doc.Code, doc.Body.String())
+	}
+	if rec := rg.call(http.MethodGet, "/v1/receiving/ers-self-bills/"+s.InvoiceID, "", duty("VendorInvoicePost", "", "X-Passage-User", "alice")); rec.Code != http.StatusForbidden {
+		t.Fatalf("wrong duty read the self-bill: %d", rec.Code)
 	}
 	if grirStatus(t, rg) != "CLEARED" {
 		t.Fatal("the GR/IR item is not cleared")
@@ -1088,14 +1098,21 @@ func (c countingGroups) VendorGroup(context.Context, string, string) (domain.Ven
 	return domain.VendorGroupRef{ID: c.group}, nil
 }
 
-func lastPostedData(t *testing.T, rg *rig) string {
+func lastOfType(t *testing.T, rg *rig, typ string) events.Event {
 	t.Helper()
 	evts := rg.st.Events()
-	last := evts[len(evts)-1]
-	if last.Type != "dev.passage.payables.invoice.posted.v1" {
-		t.Fatalf("last event %s", last.Type)
+	for i := len(evts) - 1; i >= 0; i-- {
+		if evts[i].Type == typ {
+			return evts[i]
+		}
 	}
-	return string(last.Data)
+	t.Fatalf("no %s in %+v", typ, evts)
+	return events.Event{}
+}
+
+func lastPostedData(t *testing.T, rg *rig) string {
+	t.Helper()
+	return string(lastOfType(t, rg, "dev.passage.payables.invoice.posted.v1").Data)
 }
 
 func TestAuditRelease_PostedEventCarriesVendorGroup(t *testing.T) {

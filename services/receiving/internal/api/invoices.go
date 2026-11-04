@@ -202,6 +202,24 @@ func (a *API) postVendorInvoice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) submitInvoice(ctx context.Context, memo groupMemo, p tenant.Principal, in store.Invoice) (store.Invoice, error) {
+	var parties domain.SelfBillParties
+	if in.Source == domain.InvoiceSourceERS {
+		// No tax service means no self-billing document can carry tax: skip
+		// before the party lookup, which is not configured without TAX_URL.
+		if a.ports.Tax == nil {
+			return store.Invoice{}, domain.ErrTaxNotDetermined
+		}
+		var err error
+		if parties, err = a.selfBillParties(ctx, in); err != nil {
+			return store.Invoice{}, err
+		}
+		if in.SupplyDate, err = a.latestReceiptDate(ctx, in); err != nil {
+			return store.Invoice{}, err
+		}
+		if err := a.applyERSTax(ctx, &in, parties); err != nil {
+			return store.Invoice{}, err
+		}
+	}
 	in.PostedBy = p.UserID
 	policy, err := a.store.AuditPolicy(ctx, in.LegalEntityID)
 	if err != nil {
@@ -226,7 +244,7 @@ func (a *API) submitInvoice(ctx context.Context, memo groupMemo, p tenant.Princi
 		}
 		doc := domain.VendorInvoice{
 			ID: in.ID, LegalEntityID: in.LegalEntityID, LedgerID: in.LedgerID, FiscalPeriodID: in.FiscalPeriodID,
-			PostingDate: in.PostingDate, InvoiceDate: in.InvoiceDate, Currency: in.Currency, Lines: lines, VendorGroupCode: group.Code,
+			PostingDate: in.PostingDate, InvoiceDate: in.InvoiceDate, Currency: in.Currency, TaxAmount: in.TaxAmount, TaxCode: in.TaxCode, Lines: lines, VendorGroupCode: group.Code,
 		}
 		if blocked {
 			entry, err := domain.HoldInvoice(ctx, doc, a.ports.Periods, a.ports.Profile)
@@ -243,7 +261,11 @@ func (a *API) submitInvoice(ctx context.Context, memo groupMemo, p tenant.Princi
 		}
 		total := entry.Lines[len(entry.Lines)-1].Amount.Value.Neg()
 		evt, err := invoicePostedEvent(p.TenantID, in, group, entry.LedgerEntryID, total, entry.GrirCleared)
-		return store.InvoiceOutcome{LedgerEntryID: entry.LedgerEntryID, Total: total, Clearings: entry.GrirCleared, Event: evt}, err
+		outcome := store.InvoiceOutcome{LedgerEntryID: entry.LedgerEntryID, Total: total, Clearings: entry.GrirCleared, Event: evt}
+		if in.Source == domain.InvoiceSourceERS {
+			outcome.SelfBill = a.selfBillBuild(p.TenantID, in, parties)
+		}
+		return outcome, err
 	})
 	if err != nil {
 		return store.Invoice{}, err

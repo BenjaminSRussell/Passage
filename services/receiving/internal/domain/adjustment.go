@@ -21,8 +21,11 @@ type InvoiceLineState struct {
 	LineNo       int
 	Amount       decimal.Decimal
 	StandardCost bool
-	Credited     decimal.Decimal
-	Debited      decimal.Decimal
+	// Service marks a line that cleared a service entry sheet's GR/IR item; its
+	// adjustments go to the expense account, never to inventory.
+	Service  bool
+	Credited decimal.Decimal
+	Debited  decimal.Decimal
 }
 
 type AdjustmentLine struct {
@@ -86,7 +89,10 @@ func PostInvoiceAdjustment(ctx context.Context, in InvoiceAdjustment, periods Pe
 			}
 		}
 		account := profile.Inventory
-		if orig.StandardCost {
+		switch {
+		case orig.Service:
+			account = profile.Expense
+		case orig.StandardCost:
 			account = profile.PPV
 		}
 		entry.Lines = append(entry.Lines, JournalLine{Account: account, Amount: money.Amount{Value: l.Amount.Mul(sign), Currency: in.Currency}})

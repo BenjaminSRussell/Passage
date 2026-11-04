@@ -16,6 +16,7 @@ import (
 const (
 	defaultConsumerGroup = "receiving-ers"
 	erasureConsumerGroup = "receiving-erasure"
+	ersTaxConsumerGroup  = "receiving-ers-tax"
 	deadLetterSuffix     = ".dlq"
 )
 
@@ -26,6 +27,12 @@ func kafkaConfig(getenv func(string) string) (kafka.Config, error) {
 func erasureKafkaConfig(getenv func(string) string) (kafka.Config, error) {
 	cfg, err := kafka.ConfigFromEnv(getenv, erasureConsumerGroup, erasureConsumerGroup, []string{api.ErasureRequestedTopic})
 	cfg.Group = erasureConsumerGroup
+	return cfg, err
+}
+
+func ersTaxKafkaConfig(getenv func(string) string) (kafka.Config, error) {
+	cfg, err := kafka.ConfigFromEnv(getenv, ersTaxConsumerGroup, ersTaxConsumerGroup, []string{api.ErsSelfBillTopic})
+	cfg.Group = ersTaxConsumerGroup
 	return cfg, err
 }
 
@@ -59,6 +66,10 @@ func runConsumer(ctx context.Context, getenv func(string) string, a *api.API, po
 	if err != nil {
 		return err
 	}
+	ersTaxCfg, err := ersTaxKafkaConfig(getenv)
+	if err != nil {
+		return err
+	}
 	ers, err := startConsumer(ersCfg, pool, api.ErsConsumerName, api.ReceiptPostedTopic, a.ErsConsumerHandlers())
 	if err != nil {
 		return err
@@ -69,7 +80,12 @@ func runConsumer(ctx context.Context, getenv func(string) string, a *api.API, po
 		return err
 	}
 	defer erasure.client.Close()
-	running := []runningConsumer{ers, erasure}
+	ersTax, err := startConsumer(ersTaxCfg, pool, ersTaxConsumerGroup, api.ErsSelfBillTopic, a.ErsTaxConsumerHandlers())
+	if err != nil {
+		return err
+	}
+	defer ersTax.client.Close()
+	running := []runningConsumer{ers, erasure, ersTax}
 
 	admin := http.NewServeMux()
 	admin.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
