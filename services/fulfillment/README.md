@@ -250,6 +250,23 @@ with a stable `code`.
 | POST | `/v1/fulfillment/drop-ships/{id}:confirm` | PurchaseOrderConfirm | Idempotency-Key, If-Match; body `shippedOn`, optional `vendorShipmentRef`, `postingDate`; books Dr 5000 / Cr 2110 at the PO cost with no inventory transaction; a confirmed total above what the line keeps after sales cancelled the remainder is refused (FUL-0066); `dropship.confirmed` carries the journal; final |
 | POST | `/v1/fulfillment/drop-ships/{id}:cancel` | WarehouseRelease | Idempotency-Key, If-Match; only an OPEN drop-ship (a CONFIRMED one is refused with FUL-0001); `dropship.cancelled` |
 
+## Endpoints (carrier-gateway, #482)
+
+These call `services/carrier-gateway-ts` with a service token for the shipment's legal entity
+(`CARRIER_GATEWAY_URL` and the service signing key; unset answers 503 FUL-0070). The body carries
+`shipFrom`, `shipTo` and `parcels` (`weightKg`, `lengthCm`, `widthCm`, `heightCm` as decimal strings),
+because a shipment stores no addresses or dimensions.
+
+| Method | Path | Duty | Notes |
+|---|---|---|---|
+| POST | `/v1/fulfillment/shipments/{id}:carrier-rates` | WarehouseShip | Optional `carriers`, `services`; rates cheapest first and per-carrier `failures` |
+| POST | `/v1/fulfillment/shipments/{id}:carrier-label` | WarehouseShip | Idempotency-Key (1 to 64 visible ASCII); `service`, optional `carrier` (default: the shipment's) and `reference` (default: the shipment number). A retry returns the same label (200). The label is recorded as a LABELLED tracking event |
+| POST | `/v1/fulfillment/shipments/{id}:carrier-track` | WarehouseShip | Optional `carrier`, `trackingNumber` (default: the newest tracked one); records each new carrier event once (`recorded`) |
+
+Carrier errors: FUL-0071 means carrier-gateway refused (its code is in the detail; 404 or 422, and a 400 passes its
+field errors through). FUL-0072 means it refused the call (502) or is unavailable (503, retry). FUL-0073 means the
+shipment is cancelled, or there is no tracking number yet (409).
+
 The `short_pick_action` default is REMAINDER_BACKORDER (migration 0016); KEEP_OPEN and
 CANCEL_REMAINDER stay allowed.
 

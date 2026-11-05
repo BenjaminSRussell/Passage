@@ -22,6 +22,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/carrier"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/store"
 )
@@ -49,6 +50,8 @@ var (
 type Options struct {
 	ReleaseHorizonDays int
 	RequireFullATP     bool
+	// Carrier is the carrier-gateway client (CARRIER_GATEWAY_URL); nil answers the carrier routes 503 FUL-0070.
+	Carrier carrier.Gateway
 }
 
 // API holds the store and the release parameters.
@@ -81,6 +84,7 @@ func (a *API) Routes(r chi.Router) {
 	r.With(authz.RequireDuty("PackingSlipPost")).Post("/v1/fulfillment/packing-slips/{id}:cancel", a.cancelPackingSlip)
 	a.routesPacking(r)
 	a.routesWorkbench(r)
+	a.routesCarrier(r)
 	a.routesReleaseRule(r)
 	a.routesDeliveryTolerance(r)
 	a.routesInquiry(r)

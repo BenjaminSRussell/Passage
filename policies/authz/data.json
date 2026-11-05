@@ -1704,6 +1704,12 @@
       {"resource": "/v1/transport/tenders:expire", "methods": ["POST"]}
     ]},
     "TMS_TRACK_INGEST": {"service_only": true, "permissions": [{"resource": "/v1/transport/tracking-events", "methods": ["POST"]}]},
+    "carrier.rate.quote": {"service_only": true, "permissions": [
+      {"resource": "/v1/carrier/rates", "methods": ["POST"]},
+      {"resource": "/v1/carrier/carriers", "methods": ["GET"]}
+    ]},
+    "carrier.label.create": {"service_only": true, "permissions": [{"resource": "/v1/carrier/labels", "methods": ["POST"]}]},
+    "carrier.tracking.read": {"service_only": true, "permissions": [{"resource": "/v1/carrier/tracking/*/*", "methods": ["GET"]}]},
     "TMS_VIEW": {"permissions": [
       {"resource": "/v1/transport/freight-bills", "methods": ["GET"]},
       {"resource": "/v1/transport/freight-bills/*", "methods": ["GET"]},
@@ -1773,7 +1779,12 @@
       {"resource": "/v1/fulfillment/release-rules/*", "methods": ["PUT"]},
       {"resource": "/v1/fulfillment/exceptions/*:resolve", "methods": ["POST"]}
     ]},
-    "WarehouseShip": {"permissions": [{"resource": "/v1/fulfillment/shipments/*/tracking", "methods": ["POST"]}]},
+    "WarehouseShip": {"permissions": [
+      {"resource": "/v1/fulfillment/shipments/*/tracking", "methods": ["POST"]},
+      {"resource": "/v1/fulfillment/shipments/*:carrier-rates", "methods": ["POST"]},
+      {"resource": "/v1/fulfillment/shipments/*:carrier-label", "methods": ["POST"]},
+      {"resource": "/v1/fulfillment/shipments/*:carrier-track", "methods": ["POST"]}
+    ]},
     "WarehouseView": {"permissions": [
       {"resource": "/v1/fulfillment/backorders", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/container-types", "methods": ["GET"]},
@@ -3246,7 +3257,11 @@
     },
     "fulfillment": {
       "sales": ["sales.order.record-delivery"],
-      "inventory": ["inventory.issue.claim"]
+      "inventory": ["inventory.issue.claim"],
+      "carrier-gateway": ["carrier.rate.quote", "carrier.label.create", "carrier.tracking.read"]
+    },
+    "transport": {
+      "carrier-gateway": ["carrier.rate.quote", "carrier.tracking.read"]
     },
     "batch": {
       "product": ["product.variants.explode", "product.released.read", "product.jobs.write"]

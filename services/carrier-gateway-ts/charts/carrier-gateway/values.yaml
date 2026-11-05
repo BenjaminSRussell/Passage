@@ -1,0 +1,19 @@
+image: { repository: ghcr.io/benjaminsrussell/passage-carrier-gateway, digest: "", tag: "", pullPolicy: IfNotPresent }
+# One replica: labels and the service-token replay cache are kept in memory (NOT-IMPLEMENTED.md). A second replica
+# would accept a replayed token the first one saw and would not know the other's labels by idempotency key.
+replicaCount: 1
+# CARRIER_ADAPTERS: comma separated; only "sandbox" (deterministic, no credentials, no egress) is built.
+adapters: sandbox
+# PASSAGE_SERVICE_PUBLIC_KEYS: callers' Ed25519 public keys, "name[:kid]=base64" comma separated
+# (fulfillment and transport). Empty: every /v1 request is refused with 401.
+servicePublicKeys: ""
+resources:
+  requests: { cpu: 25m, memory: 64Mi }
+  limits: { cpu: 250m, memory: 256Mi }
+networkPolicy:
+  enabled: true
+  dnsNamespace: kube-system
+  # Namespaces of the services that call the gateway.
+  callers:
+    - { namespace: fulfillment }
+    - { namespace: transport }

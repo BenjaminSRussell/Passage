@@ -61,9 +61,14 @@ var serviceGrants = map[string]map[string][]string{
 		"revrec": {"revrec.allocation.read"},
 		"sales":  {"sales.order.record-invoice", "sales.order.record-delivery"},
 	},
+	// fulfillment and transport reach carriers only through carrier-gateway (#482); transport buys no labels.
 	"fulfillment": {
-		"sales":     {"sales.order.record-delivery"},
-		"inventory": {"inventory.issue.claim"},
+		"sales":           {"sales.order.record-delivery"},
+		"inventory":       {"inventory.issue.claim"},
+		"carrier-gateway": {"carrier.rate.quote", "carrier.label.create", "carrier.tracking.read"},
+	},
+	"transport": {
+		"carrier-gateway": {"carrier.rate.quote", "carrier.tracking.read"},
 	},
 	"batch": {
 		"product": {"product.variants.explode", "product.released.read", "product.jobs.write"},

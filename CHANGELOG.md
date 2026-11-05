@@ -10,6 +10,12 @@ release may change public APIs.
 
 ### Added
 
+- carrier-gateway TypeScript service (#482, wave 28 AC4) in `services/carrier-gateway-ts`. It has a carrier adapter
+  interface, a deterministic sandbox carrier with no credentials, rate shopping, idempotent labels and tracking. Its
+  `/v1/carrier` API takes signed service tokens. The adapter contract is replayed against a recorded fixture. There
+  is also a chart. fulfillment calls it through `:carrier-rates`, `:carrier-label` and `:carrier-track` on a
+  shipment (`CARRIER_GATEWAY_URL`). New service-only duties: `carrier.rate.quote`, `carrier.label.create` and
+  `carrier.tracking.read`. They are granted to fulfillment (all three) and transport (rates and tracking).
 - Production orders against the real ledger (#478, W21 AC4): `internal/ledgertest` builds and runs the ledger service
   on a throwaway schema and production books and reconciles WIP through the real `ledgerclient` with signed service
   tokens (skipped without `PASSAGE_TEST_DATABASE_URL` or under `-short`). A demo-plant seed (`go run ./cmd/demoplant`

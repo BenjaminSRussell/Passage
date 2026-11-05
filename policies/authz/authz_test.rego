@@ -1469,3 +1469,22 @@ test_expense_reimbursement_liability_and_employee_vendor_register if {
 	not allowed("vendor-block.manage", "PUT", "/v1/payables/employee-vendors/w1")
 	not allowed("payment-proposal.write", "PUT", "/v1/payables/employee-vendors/w1")
 }
+
+test_carrier_gateway_duties_are_service_only_and_open_only_their_routes if {
+	every duty in ["carrier.rate.quote", "carrier.label.create", "carrier.tracking.read"] {
+		data.duties[duty].service_only
+	}
+	data.service_grants.fulfillment["carrier-gateway"] == ["carrier.rate.quote", "carrier.label.create", "carrier.tracking.read"]
+	data.service_grants.transport["carrier-gateway"] == ["carrier.rate.quote", "carrier.tracking.read"]
+	allowed("carrier.rate.quote", "POST", "/v1/carrier/rates")
+	allowed("carrier.rate.quote", "GET", "/v1/carrier/carriers")
+	allowed("carrier.label.create", "POST", "/v1/carrier/labels")
+	allowed("carrier.tracking.read", "GET", "/v1/carrier/tracking/sandbox/SBX1")
+	not allowed("carrier.tracking.read", "GET", "/v1/carrier/tracking/sandbox")
+	not allowed("carrier.rate.quote", "POST", "/v1/carrier/labels")
+	not allowed("carrier.label.create", "GET", "/v1/carrier/tracking/sandbox/SBX1")
+	allowed("WarehouseShip", "POST", "/v1/fulfillment/shipments/s-1:carrier-rates")
+	allowed("WarehouseShip", "POST", "/v1/fulfillment/shipments/s-1:carrier-label")
+	allowed("WarehouseShip", "POST", "/v1/fulfillment/shipments/s-1:carrier-track")
+	not allowed("WarehouseView", "POST", "/v1/fulfillment/shipments/s-1:carrier-label")
+}

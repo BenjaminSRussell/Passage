@@ -34,7 +34,7 @@ owner's work, or a change outside this wave's paths).
 | D3 | EDI 214 codes beyond X3, AF, X1 and D1 (for example AG estimated delivery, X6 en route, SD delays) | later slice of PSG-34 | Ingest rejects other codes rather than guessing their stop status |
 | D3 | Expected vs actual per stop and late-delivery alerts when ETA > window end (FR-34.6) | later slice of PSG-34 | Needs the planned stops and time windows of the load and route (D1); the timeline shows actuals only |
 | D3 | Proof of delivery upload (signature, photo) | later slice of PSG-34 | No file storage in this service yet |
-| D3 | Carrier API adapters and EDI 214 parsing | handoff (wave 35 EDI, carrier integrations) | They post the parsed status to `POST /v1/transport/tracking-events` |
+| D3 | Carrier API adapters and EDI 214 parsing | handoff (wave 35 EDI, carrier integrations) | They post the parsed status to `POST /v1/transport/tracking-events`. Parcel carriers sit behind `services/carrier-gateway-ts` (#482). transport's grant there (`carrier.rate.quote`, `carrier.tracking.read`) is seeded, but transport has no client yet. |
 | D3 | POD and delivered timestamp on the sales shipment (AC-34.7 second half, wave-29 invoicing holds) | handoff (wave 28/29 sales) | `dev.passage.tms.tracking.event.v1` carries the D1; the sales side consumes it |
 | D3 | `tracking_event` monthly partitions and Kafka buffering (§6.34.19) | later slice of PSG-34 | One table with a `(tenant_id, load_id, occurred_at)` index |
 | D4 | Freight bill created at ship confirmation (FR-34.7) | later slice of PSG-34 | Slice 1 creates bills by API; the ship-confirmation trigger needs the shipment event from wave 28 |

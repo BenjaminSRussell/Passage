@@ -534,6 +534,56 @@ components:
         groupBy: { type: string, enum: [CUSTOMER, CARRIER, ZONE, PRODUCT], default: CUSTOMER }
         maxLines: { type: integer, minimum: 1, maximum: 2000, default: 200, description: WAVE_MAX_LINES }
         maxOrders: { type: integer, minimum: 1, maximum: 500, default: 50, description: WAVE_MAX_ORDERS }
+    CarrierAddress:
+      type: object
+      required: [street1, city, postalCode, country]
+      properties:
+        name: { type: string, maxLength: 60 }
+        street1: { type: string, maxLength: 100 }
+        city: { type: string, maxLength: 60 }
+        postalCode: { type: string, maxLength: 16 }
+        state: { type: string, maxLength: 3 }
+        country: { type: string, pattern: '^[A-Z]{2}$' }
+    CarrierShipment:
+      type: object
+      required: [shipFrom, shipTo, parcels]
+      properties:
+        shipFrom: { $ref: "#/components/schemas/CarrierAddress" }
+        shipTo: { $ref: "#/components/schemas/CarrierAddress" }
+        parcels:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            required: [weightKg, lengthCm, widthCm, heightCm]
+            properties:
+              weightKg: { type: string, description: "decimal, at most 3 places, above 0, at most 1000" }
+              lengthCm: { type: string, description: "decimal, at most 1 place, above 0, at most 300" }
+              widthCm: { type: string }
+              heightCm: { type: string }
+    CarrierRate:
+      type: object
+      properties:
+        carrier: { type: string }
+        service: { type: string }
+        amount: { type: string }
+        currency: { type: string }
+        transitDays: { type: integer }
+        billableWeightKg: { type: string }
+    CarrierLabel:
+      type: object
+      properties:
+        carrier: { type: string }
+        service: { type: string }
+        trackingNumber: { type: string }
+        amount: { type: string }
+        currency: { type: string }
+        format: { type: string, enum: [ZPL] }
+        document: { type: string, format: byte, description: the label, base64 }
+        createdAt: { type: string, format: date-time }
+        created: { type: boolean }
+        trackingEvent: { $ref: "#/components/schemas/TrackingEvent" }
     TrackingEvent:
       type: object
       required: [provider, eventKey, trackingNumber, status, description, eventTime]
@@ -2406,6 +2456,133 @@ paths:
         "400": { description: "FUL-0050 validation, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: FUL-0020, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/shipments/{id}:carrier-rates:
+    post:
+      operationId: carrierRates
+      summary: Rate-shop the shipment's parcels through carrier-gateway (wave 28 D3, #482)
+      description: >
+        Calls carrier-gateway POST /v1/carrier/rates with a service token (duty
+        carrier.rate.quote) for the shipment's legal entity. Rates are cheapest
+        first; a carrier that failed is listed in failures. Read-only.
+      x-passage-duty: WarehouseShip
+      parameters:
+        - { $ref: "#/components/parameters/ShipmentId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: "#/components/schemas/CarrierShipment" }
+                - type: object
+                  properties:
+                    carriers: { type: array, maxItems: 20, items: { type: string } }
+                    services: { type: array, maxItems: 20, items: { type: string } }
+      responses:
+        "200":
+          description: Rates and per-carrier failures
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, failures]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/CarrierRate" } }
+                  failures:
+                    type: array
+                    items: { type: object, properties: { carrier: { type: string }, code: { type: string }, message: { type: string } } }
+        "400": { description: "FUL-0050 validation (carrier-gateway's field errors), COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: FUL-0020, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: FUL-0073 the shipment is cancelled, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: FUL-0071 carrier-gateway refused (unknown carrier or service, destination not served), content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "502": { description: FUL-0072 carrier-gateway refused the service token or the call, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "503": { description: FUL-0070 carrier-gateway is not configured, FUL-0072 it is unavailable (retry), content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/shipments/{id}:carrier-label:
+    post:
+      operationId: carrierLabel
+      summary: Buy the shipment's carrier label through carrier-gateway and record it as LABELLED (#482)
+      description: >
+        The Idempotency-Key names the label (carrier-gateway receives the shipment
+        id, a colon and the key): a retry returns the same label with 200 and
+        buys nothing. The carrier defaults to the shipment's carrier code and the
+        reference to its shipment number. The label is recorded as a LABELLED
+        tracking event (event key "label:" + tracking number), which publishes
+        tracking.updated once.
+      x-passage-duty: WarehouseShip
+      parameters:
+        - { $ref: "#/components/parameters/ShipmentId" }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, pattern: '^[\x21-\x7e]{1,64}$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: "#/components/schemas/CarrierShipment" }
+                - type: object
+                  required: [service]
+                  properties:
+                    carrier: { type: string, pattern: '^[a-z0-9-]{2,32}$' }
+                    service: { type: string, maxLength: 32 }
+                    reference: { type: string, maxLength: 60 }
+      responses:
+        "201":
+          description: Label bought and recorded
+          content: { application/json: { schema: { $ref: "#/components/schemas/CarrierLabel" } } }
+        "200":
+          description: The label this key already bought
+          content: { application/json: { schema: { $ref: "#/components/schemas/CarrierLabel" } } }
+        "400": { description: "FUL-0050 validation, FUL-0051 Idempotency-Key missing, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: FUL-0020, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: FUL-0073 the shipment is cancelled, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0071 carrier-gateway refused (CGW-0422: the key was used for a different label)", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "502": { description: FUL-0072, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "503": { description: FUL-0070, FUL-0072, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/shipments/{id}:carrier-track:
+    post:
+      operationId: carrierTrack
+      summary: Pull the carrier's tracking through carrier-gateway and record new events (#482)
+      description: >
+        Without a tracking number the shipment's newest tracked number (of the
+        named carrier, if given) is used. Each carrier event is recorded once per
+        provider event key (recorded counts the new ones); DELIVERED moves a
+        SHIPPED shipment to DELIVERED. Events with a status fulfillment does not
+        know are skipped.
+      x-passage-duty: WarehouseShip
+      parameters:
+        - { $ref: "#/components/parameters/ShipmentId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                carrier: { type: string, pattern: '^[a-z0-9-]{2,32}$' }
+                trackingNumber: { type: string, maxLength: 64 }
+      responses:
+        "200":
+          description: The carrier's tracking, as recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [carrier, trackingNumber, status, recorded, events]
+                properties:
+                  carrier: { type: string }
+                  trackingNumber: { type: string }
+                  status: { type: string }
+                  recorded: { type: integer, minimum: 0 }
+                  events: { type: array, items: { $ref: "#/components/schemas/TrackingEvent" } }
+        "400": { description: "FUL-0050 validation, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0020, or FUL-0071 the carrier does not know the tracking number", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: FUL-0073 cancelled, or no tracking number yet, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "502": { description: FUL-0072, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "503": { description: FUL-0070, FUL-0072, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/shipments/{id}/containers/{cid}/label:
     get:
       operationId: containerLabel
